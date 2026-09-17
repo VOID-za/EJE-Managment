@@ -45,7 +45,7 @@ const FIELDS: readonly {
     key: 'generalNotes',
     label: 'General notes',
     placeholder: 'Anything else worth recording.',
-    hint: '',
+    hint: 'Anything else that belongs in the formal completion record.',
     required: false,
   },
 ];
@@ -93,7 +93,7 @@ export const CompletionReportPanel = ({
     <Card>
       <CardHeader
         title="Completion write-up"
-        description="This text is printed on the customer job card. Write it for the customer, not for the office."
+        description="The formal technical record of what was done, printed on the customer job card. Running commentary and customer conversations belong on the Notes tab instead."
         action={
           dirty ? (
             <Badge tone="amber" size="sm" dot>

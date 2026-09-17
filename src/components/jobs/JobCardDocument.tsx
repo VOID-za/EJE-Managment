@@ -1,6 +1,7 @@
 import {
   calculateJobTotals,
   contactFullName,
+  customerFacingNotes,
   evaluateChecklist,
   getJobTypeDefinition,
   jobStatusLabel,
@@ -27,6 +28,15 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
   const { job, customer, site, contact, machine, settings, checklistTemplate } = view;
   const totals = calculateJobTotals(job, settings);
   const definition = getJobTypeDefinition(job.jobType);
+
+  // Internal notes are EJE-only and must never reach this document. The rule
+  // lives in the domain so every surface applies the same one.
+  const visibleNotes = customerFacingNotes(job.notes);
+
+  const authorName = (authorId: string): string => {
+    const author = view.users.find((candidate) => candidate.id === authorId);
+    return author === undefined ? 'EJE' : userFullName(author);
+  };
 
   const responses = new Map<string, ChecklistResponse>(
     (job.checklist?.responses ?? []).map((response) => [response.itemId, response]),
@@ -148,6 +158,22 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
           <Block label="General notes" value={job.completionReport.generalNotes} />
         )}
       </section>
+
+      {visibleNotes.length > 0 && (
+        <section className="mt-6">
+          <SectionTitle>Job notes</SectionTitle>
+          <ul className="space-y-2">
+            {visibleNotes.map((note) => (
+              <li key={note.id} className="border-b border-steel-100 pb-2 last:border-b-0">
+                <p className="whitespace-pre-line text-steel-700">{note.body}</p>
+                <p className="mt-0.5 text-[11px] text-steel-500">
+                  {authorName(note.authorId)} · {formatDateTime(note.createdAt)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {(job.labour.length > 0 ||
         job.travel.length > 0 ||

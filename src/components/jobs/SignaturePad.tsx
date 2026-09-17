@@ -3,6 +3,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { Button, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import {
+  isSignatureEmpty,
+  strokesToPath,
+  type SignaturePoint,
+  type SignatureStroke,
+} from './signature-path';
 
 /**
  * Touch and pointer signature capture.
@@ -11,23 +17,14 @@ import { cn } from '@/lib/cn';
  * the signature is stored as data rather than a bitmap. The production system
  * stores the same representation, which keeps signed job cards reproducible at
  * any resolution.
+ *
+ * Note on state: the strokes are held in BOTH a ref and React state. The ref is
+ * the source of truth for the geometry, so the parent can be notified from the
+ * pointer-up handler with the current value; the state exists only to trigger a
+ * re-render so the path is drawn. Reading the ref avoids notifying the parent
+ * from inside a state updater, which React treats as updating one component
+ * while rendering another.
  */
-
-interface Point {
-  readonly x: number;
-  readonly y: number;
-}
-
-const toPath = (strokes: readonly (readonly Point[])[]): string =>
-  strokes
-    .filter((stroke) => stroke.length > 0)
-    .map((stroke) =>
-      stroke
-        .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(3)},${point.y.toFixed(3)}`)
-        .join(' '),
-    )
-    .join(' ');
-
 export interface SignaturePadProps {
   readonly disabled?: boolean;
   readonly onChange: (pathData: string) => void;
@@ -35,10 +32,17 @@ export interface SignaturePadProps {
 
 export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) => {
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const [strokes, setStrokes] = useState<Point[][]>([]);
+  const strokesRef = useRef<SignatureStroke[]>([]);
+  const [strokes, setStrokes] = useState<readonly SignatureStroke[]>([]);
   const [drawing, setDrawing] = useState(false);
 
-  const pointFrom = useCallback((event: React.PointerEvent): Point | null => {
+  /** Single place that keeps the ref and the rendered state in step. */
+  const commit = useCallback((next: SignatureStroke[]) => {
+    strokesRef.current = next;
+    setStrokes(next);
+  }, []);
+
+  const pointFrom = useCallback((event: React.PointerEvent): SignaturePoint | null => {
     const bounds = surfaceRef.current?.getBoundingClientRect();
     if (bounds === undefined || bounds.width === 0 || bounds.height === 0) return null;
     return {
@@ -51,39 +55,38 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
     if (disabled) return;
     const point = pointFrom(event);
     if (point === null) return;
+
     event.currentTarget.setPointerCapture(event.pointerId);
     setDrawing(true);
-    setStrokes((current) => [...current, [point]]);
+    commit([...strokesRef.current, [point]]);
   };
 
   const extend = (event: React.PointerEvent) => {
     if (!drawing || disabled) return;
     const point = pointFrom(event);
     if (point === null) return;
-    setStrokes((current) => {
-      if (current.length === 0) return current;
-      const next = current.map((stroke, index) =>
-        index === current.length - 1 ? [...stroke, point] : stroke,
-      );
-      return next;
-    });
+
+    const current = strokesRef.current;
+    const last = current[current.length - 1];
+    if (last === undefined) return;
+
+    commit([...current.slice(0, -1), [...last, point]]);
   };
 
   const end = () => {
     if (!drawing) return;
     setDrawing(false);
-    setStrokes((current) => {
-      onChange(toPath(current));
-      return current;
-    });
+    // Read the ref, not state: this runs in an event handler, so the parent is
+    // notified after this component's own state has already been committed.
+    onChange(strokesToPath(strokesRef.current));
   };
 
   const clear = () => {
-    setStrokes([]);
+    commit([]);
     onChange('');
   };
 
-  const isEmpty = strokes.every((stroke) => stroke.length < 2);
+  const empty = isSignatureEmpty(strokes);
 
   return (
     <div>
@@ -96,7 +99,9 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
         onPointerCancel={end}
         className={cn(
           'relative h-52 w-full touch-none overflow-hidden rounded-[var(--radius-control)] border-2 border-dashed bg-surface select-none',
-          disabled ? 'cursor-not-allowed border-steel-200 bg-steel-50' : 'cursor-crosshair border-steel-300',
+          disabled
+            ? 'cursor-not-allowed border-steel-200 bg-steel-50'
+            : 'cursor-crosshair border-steel-300',
         )}
       >
         <svg
@@ -106,10 +111,9 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
           aria-hidden="true"
         >
           <path
-            d={toPath(strokes)}
+            d={strokesToPath(strokes)}
             fill="none"
             stroke="var(--color-steel-900)"
-            strokeWidth="0.005"
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
@@ -122,7 +126,7 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
           aria-hidden="true"
         />
 
-        {isEmpty && (
+        {empty && (
           <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-steel-400">
             <Icon name="signature" className="size-8" />
             <span className="text-sm font-medium">Sign here</span>
@@ -132,7 +136,7 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
 
       <div className="mt-2 flex items-center justify-between">
         <p className="text-xs text-steel-500">Sign with a finger, stylus or mouse.</p>
-        <Button variant="ghost" size="sm" onClick={clear} disabled={disabled || isEmpty}>
+        <Button variant="ghost" size="sm" onClick={clear} disabled={disabled || empty}>
           Clear
         </Button>
       </div>

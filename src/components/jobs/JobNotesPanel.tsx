@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { can, userFullName, type Job, type User } from '@/domain';
+import { userFullName, type Job, type User } from '@/domain';
 import { addNote } from '@/application/job-operations';
 import { Avatar, Badge, Button, Card, EmptyState, Icon, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
-import { useCurrentUser } from '@/providers/AppProvider';
 import { formatRelative } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -20,13 +19,13 @@ export const JobNotesPanel = ({
   readonly editable: boolean;
   readonly onChanged: () => void;
 }) => {
-  const user = useCurrentUser();
   const operation = useOperation();
   const [body, setBody] = useState('');
   const [internal, setInternal] = useState(false);
 
-  const canSeeInternal = can(user.role, 'jobs.viewAll');
-  const visible = job.notes.filter((note) => !note.internal || canSeeInternal);
+  // Internal notes are visible to all EJE staff — this is an internal system.
+  // What "internal" controls is whether the note reaches the CUSTOMER document.
+  const visible = job.notes;
 
   const submit = async () => {
     if (body.trim().length === 0) return;
@@ -40,6 +39,13 @@ export const JobNotesPanel = ({
 
   return (
     <div className="space-y-4">
+      <div className="rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 px-4 py-3 text-sm text-eje-800">
+        <span className="font-semibold">Notes are the job&rsquo;s running record</span> — calls,
+        access problems, customer requests, anything that happened along the way. The formal
+        technical write-up (fault findings, diagnosis, work performed, recommendations) belongs on
+        the <span className="font-semibold">Completion</span> tab.
+      </div>
+
       {editable && (
         <Card>
           <TextAreaField
@@ -47,24 +53,51 @@ export const JobNotesPanel = ({
             rows={3}
             value={body}
             onChange={(event) => setBody(event.target.value)}
-            placeholder="What should the next person to open this job know?"
+            placeholder="e.g. Spoke to the customer about machine availability — return visit agreed for Friday."
+            hint="A running record of what happened on this job. The formal technical write-up belongs on the Completion tab."
           />
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            {canSeeInternal ? (
-              <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm text-steel-700">
-                <input
-                  type="checkbox"
-                  checked={internal}
-                  onChange={(event) => setInternal(event.target.checked)}
-                  className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-                />
-                Internal note — never appears on the customer job card
-              </label>
-            ) : (
-              <span className="text-xs text-steel-500">
-                Notes are visible to the office and appear on the job card.
-              </span>
-            )}
+            <fieldset className="flex flex-wrap items-center gap-2">
+              <legend className="sr-only">Who can see this note</legend>
+              {(
+                [
+                  {
+                    value: false,
+                    label: 'Customer-facing',
+                    hint: 'Appears on the customer job card',
+                  },
+                  {
+                    value: true,
+                    label: 'Internal only',
+                    hint: 'Never leaves EJE',
+                  },
+                ] as const
+              ).map((option) => (
+                <label
+                  key={option.label}
+                  className={cn(
+                    'flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border px-3 text-sm font-medium transition-colors',
+                    internal === option.value
+                      ? 'border-eje-500 bg-eje-50 text-eje-800'
+                      : 'border-steel-300 text-steel-600 hover:border-steel-400',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="note-visibility"
+                    checked={internal === option.value}
+                    onChange={() => setInternal(option.value)}
+                    className="size-4 border-steel-300 text-eje-600 focus:ring-eje-500"
+                  />
+                  <span>
+                    {option.label}
+                    <span className="ml-1.5 text-xs font-normal text-steel-500">
+                      {option.hint}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             <Button
               onClick={submit}
               loading={operation.running}
@@ -110,11 +143,9 @@ export const JobNotesPanel = ({
                           <span className="text-xs text-steel-400">
                             {formatRelative(note.createdAt)}
                           </span>
-                          {note.internal && (
-                            <Badge tone="amber" size="sm">
-                              Internal
-                            </Badge>
-                          )}
+                          <Badge tone={note.internal ? 'amber' : 'green'} size="sm">
+                            {note.internal ? 'Internal only' : 'On the job card'}
+                          </Badge>
                         </div>
                         <p className="mt-1.5 text-sm leading-relaxed whitespace-pre-line text-steel-700">
                           {note.body}

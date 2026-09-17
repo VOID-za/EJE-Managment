@@ -26,6 +26,8 @@ export interface JobView {
   readonly primaryTechnician: User | null;
   readonly additionalTechnicians: readonly User[];
   readonly settings: SystemSettings;
+  /** Everyone who could be named on this job, for resolving note and entry authors. */
+  readonly users: readonly User[];
   /**
    * The checklist template this job is rendered against.
    *
@@ -94,6 +96,7 @@ export const loadJobView = async (
       job.additionalTechnicianIds.includes(candidate.id),
     ),
     settings,
+    users,
     checklistTemplate,
     checklistVersionMissing,
   };

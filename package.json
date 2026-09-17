@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "dev-check": "node scripts/dev-console-check.mjs"
   },
   "dependencies": {
     "next": "16.3.5",
