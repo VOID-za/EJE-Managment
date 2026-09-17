@@ -86,6 +86,12 @@ export interface PositionedEntry {
  *
  * A multi-day entry is clipped to the row and marked as continuing, which is how
  * a service spanning a week boundary reads correctly on both rows.
+ *
+ * Work takes the upper lanes and availability the lower ones. A planner scans a
+ * month grid for jobs first, and on a busy day it is the availability rows that
+ * should fall below the fold rather than pushing a job out of sight. Within
+ * each group the incoming order is preserved, which is longest-first, so
+ * multi-day bars still sit above short ones.
  */
 export const packWeek = (
   entries: readonly CalendarEntry[],
@@ -95,7 +101,12 @@ export const packWeek = (
   const lanes: IsoDate[] = [];
   const positioned: PositionedEntry[] = [];
 
-  for (const entry of entries) {
+  const ordered = [
+    ...entries.filter((entry) => entry.kind === 'job'),
+    ...entries.filter((entry) => entry.kind !== 'job'),
+  ];
+
+  for (const entry of ordered) {
     if (entry.start > weekEnd || entry.end < weekStart) continue;
 
     const visibleStart = entry.start < weekStart ? weekStart : entry.start;
@@ -170,4 +181,54 @@ export const viewLabel = (view: CalendarView, anchor: IsoDate): string => {
     case 'year':
       return String(parsed.getFullYear());
   }
+};
+
+/**
+ * How many bars a month cell shows before collapsing the rest behind
+ * "+N more". Three keeps a week row scannable and every row the same height.
+ */
+export const MONTH_MAX_LANES = 3;
+
+export interface MonthRowDensity {
+  /** Bars actually drawn in this row, capped at `MONTH_MAX_LANES` lanes. */
+  readonly visible: readonly PositionedEntry[];
+  /** Lanes the row occupies, so its height can be reserved. */
+  readonly lanes: number;
+  /** Entries hidden on each day, keyed by date. Only days with any. */
+  readonly hiddenByDay: Readonly<Record<string, number>>;
+  /** True when at least one day needs a "+N more" affordance. */
+  readonly hasHidden: boolean;
+}
+
+/**
+ * Decides what a month week-row shows and what it defers.
+ *
+ * Extracted from the view so the density rule is testable on its own: nothing
+ * is dropped, it is moved behind "+N more", and the count per day has to be
+ * right or the affordance lies about what it is hiding.
+ */
+export const monthRowDensity = (
+  entries: readonly CalendarEntry[],
+  weekStart: IsoDate,
+  maxLanes: number = MONTH_MAX_LANES,
+): MonthRowDensity => {
+  const packed = packWeek(entries, weekStart);
+  const visible = packed.filter((placed) => placed.lane < maxLanes);
+  const lanes = Math.min(maxLanes, Math.max(...packed.map((placed) => placed.lane + 1), 0));
+
+  const hiddenByDay: Record<string, number> = {};
+  for (const day of rangeOfDays(weekStart, addDays(weekStart, 6))) {
+    const onDay = entries.filter((entry) => entry.start <= day && entry.end >= day).length;
+    const shown = visible.filter(
+      (placed) => placed.entry.start <= day && placed.entry.end >= day,
+    ).length;
+    if (onDay - shown > 0) hiddenByDay[day] = onDay - shown;
+  }
+
+  return {
+    visible,
+    lanes,
+    hiddenByDay,
+    hasHidden: Object.keys(hiddenByDay).length > 0,
+  };
 };

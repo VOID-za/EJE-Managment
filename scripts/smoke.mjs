@@ -223,6 +223,62 @@ await step('job card preview renders real data', async () => {
   await page.screenshot({ path: `${shots}/04-jobcard.png`, fullPage: false });
 });
 
+await step('the captured signature is rendered in solid black', async () => {
+  const graphic = page.locator('svg[aria-label="Customer signature"]');
+  await graphic.waitFor({ timeout: 8000 });
+
+  const stroke = await graphic.locator('path').evaluate(
+    (node) => getComputedStyle(node).stroke,
+  );
+  if (stroke !== 'rgb(0, 0, 0)') {
+    throw new Error(`the signature is drawn in ${stroke}, not black`);
+  }
+
+  // Not just the declared colour: the drawn pixels have to be black too, since
+  // an opacity or a filter anywhere above it would fade them. Painted onto a
+  // canvas in the page and read back, because that is what the eye gets.
+  const darkest = await page.evaluate(async () => {
+    const svg = document.querySelector('svg[aria-label="Customer signature"]');
+    if (svg === null) return null;
+    const serialised = new XMLSerializer().serializeToString(svg);
+    const box = svg.getBoundingClientRect();
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(box.width);
+    canvas.height = Math.ceil(box.height);
+    const context = canvas.getContext('2d');
+    if (context === null) return null;
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(null);
+      };
+      image.onerror = reject;
+      image.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(serialised)))}`;
+    });
+
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let min = 255;
+    let black = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const value = Math.max(data[i], data[i + 1], data[i + 2]);
+      if (value < min) min = value;
+      if (data[i] < 20 && data[i + 1] < 20 && data[i + 2] < 20) black += 1;
+    }
+    return { min, black };
+  });
+
+  if (darkest === null) throw new Error('could not sample the signature');
+  if (darkest.min > 5 || darkest.black < 20) {
+    throw new Error(
+      `the rendered signature is not black: darkest channel ${darkest.min}, ${darkest.black} black pixels`,
+    );
+  }
+});
+
 await step('technician hands over for Master review, WITHOUT emailing', async () => {
   await page.getByRole('button', { name: 'Submit for Master Review' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
@@ -934,6 +990,197 @@ await step('calendar shows technician leave and sick leave', async () => {
   const sickChips = await page.getByText('Sick', { exact: true }).count();
   if (leaveChips === 0) throw new Error('no annual leave on the calendar');
   if (sickChips === 0) throw new Error('no sick leave on the calendar');
+});
+
+await step('the month grid is compact — job numbers, not job details', async () => {
+  const bar = page.locator('a[href="/jobs/EJE-1048"]').first();
+  await bar.waitFor({ timeout: 8000 });
+  const text = (await bar.innerText()).trim();
+
+  // The month cell carries the number and the colour. Customer, site, machine
+  // and technician are one tap away, not crammed into the grid.
+  if (!text.includes('EJE-1048')) throw new Error(`month bar lost its job number: "${text}"`);
+  for (const secondary of ['ABC Engineering', 'Leadwell', 'Johannesburg']) {
+    if (text.includes(secondary)) {
+      throw new Error(`month bar still carries "${secondary}"`);
+    }
+  }
+});
+
+await step('availability bars are slimmer than job bars', async () => {
+  const jobBar = await page.locator('a[href^="/jobs/EJE-"] > span').first().boundingBox();
+  const absenceBar = await page
+    .locator('button[aria-label*="Leave"] > span, button[aria-label*="Sick"] > span')
+    .first()
+    .boundingBox();
+
+  if (jobBar === null || absenceBar === null) throw new Error('bars not rendered');
+  if (absenceBar.height >= jobBar.height) {
+    throw new Error(
+      `absence (${absenceBar.height}px) does not read as secondary to work (${jobBar.height}px)`,
+    );
+  }
+});
+
+await step('every calendar bar stays a usable tap target on a tablet', async () => {
+  const targets = await page
+    .locator('a[href^="/jobs/EJE-"], button[aria-label*="Leave"], button[aria-label*="Sick"]')
+    .all();
+
+  for (const target of targets.slice(0, 12)) {
+    const box = await target.boundingBox();
+    if (box !== null && box.height < 20) {
+      throw new Error(`a calendar bar is only ${box.height}px tall — too small to tap`);
+    }
+  }
+});
+
+await step('a busy day collapses behind "+N more" rather than stretching', async () => {
+  const more = page.getByText(/^\+ \d+ more$/).first();
+  await more.waitFor({ timeout: 8000 });
+
+  // Every week row is a comparable height, because the cap holds.
+  const rows = await page.locator('div.relative.border-b').all();
+  const heights = [];
+  for (const row of rows) {
+    const box = await row.boundingBox();
+    if (box !== null) heights.push(box.height);
+  }
+  const tallest = Math.max(...heights);
+  if (tallest > 200) {
+    throw new Error(`a week row grew to ${tallest}px — the density cap is not holding`);
+  }
+});
+
+await step('"+N more" reveals the whole day, losing nothing', async () => {
+  const more = page.getByText(/^\+ \d+ more$/).first();
+  const label = (await more.innerText()).trim();
+  const hidden = Number(label.replace(/[^0-9]/g, ''));
+  await more.click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+
+  // The dialog lists the day in full — the bars that were drawn AND the ones
+  // deferred, so nothing was removed to tidy the grid.
+  const listed = await dialog.getByRole('listitem').count();
+  if (listed <= hidden) {
+    throw new Error(`"${label}" opened a list of only ${listed} — entries were lost`);
+  }
+  await page.screenshot({ path: `${shots}/18-calendar-day-more.png`, fullPage: false });
+});
+
+await step('selecting an entry there opens its details', async () => {
+  await page.getByRole('dialog').getByRole('listitem').first().getByRole('button').click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+  const text = await dialog.innerText();
+
+  // Progressive disclosure: the detail carries what the grid deliberately left
+  // out. It is a job or an absence, so accept either shape.
+  const isJob = text.includes('Open job card');
+  const needed = isJob
+    ? ['CUSTOMER', 'SITE', 'MACHINE', 'SCHEDULED', 'TECHNICIAN']
+    : ['TECHNICIAN', 'TYPE', 'TIME', 'DATES'];
+  for (const field of needed) {
+    if (!text.toUpperCase().includes(field)) {
+      throw new Error(`entry detail is missing ${field}`);
+    }
+  }
+  await page.keyboard.press('Escape');
+});
+
+await step('an availability bar opens its own detail, which a job page cannot show', async () => {
+  await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await page
+    .locator('button[aria-label*="Leave"], button[aria-label*="Sick"], button[aria-label*="Appointment"]')
+    .first()
+    .click({ timeout: 10000 });
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+  await dialog.getByText('Unavailable').first().waitFor({ timeout: 5000 });
+  await dialog.getByRole('button', { name: 'Open technician' }).waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+});
+
+await step('a job bar still goes straight to its job card', async () => {
+  await page.locator('a[href="/jobs/EJE-1048"]').first().click();
+  await page.waitForURL('**/jobs/EJE-1048', { timeout: 10000 });
+  await page.getByRole('heading', { name: 'EJE-1048' }).first().waitFor({ timeout: 8000 });
+});
+
+await step('the calendar filters answer a planner\'s three questions', async () => {
+  await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });
+
+  // "Who is available?" — availability only, no job bars at all.
+  await page.getByRole('button', { name: 'Availability', exact: true }).click();
+  await page.waitForTimeout(500);
+  if ((await page.locator('a[href^="/jobs/EJE-"]').count()) !== 0) {
+    throw new Error('the Availability filter still shows jobs');
+  }
+
+  // "What jobs are happening?" — jobs only.
+  await page.getByRole('button', { name: 'Jobs', exact: true }).click();
+  await page.waitForTimeout(500);
+  if ((await page.locator('button[aria-label*="Leave"]').count()) !== 0) {
+    throw new Error('the Jobs filter still shows availability');
+  }
+  if ((await page.locator('a[href^="/jobs/EJE-"]').count()) === 0) {
+    throw new Error('the Jobs filter shows no jobs');
+  }
+
+  // Narrowed to one job type.
+  await page.getByLabel('Job type').selectOption('service');
+  await page.waitForTimeout(500);
+  if ((await page.locator('a[href="/jobs/EJE-1048"]').count()) !== 0) {
+    throw new Error('a breakdown survived the Service job-type filter');
+  }
+  if ((await page.locator('a[href="/jobs/EJE-1049"]').count()) === 0) {
+    throw new Error('the Service filter hid a service job');
+  }
+
+  await page.getByRole('button', { name: 'All', exact: true }).click();
+  await page.getByLabel('Job type').selectOption('all');
+});
+
+await step('the legend survives the declutter', async () => {
+  // Scoped to the legend: the new Job type filter has options with the same
+  // names, and a hidden <option> is not what this is checking.
+  const legend = page.locator('div').filter({ hasText: /^Key:/ }).last();
+  await legend.waitFor({ timeout: 8000 });
+  const text = await legend.innerText();
+
+  for (const label of [
+    'Breakdown',
+    'Installation',
+    'Service',
+    'Test & Repair',
+    'Parts',
+    'Unavailable',
+    'Sick leave',
+  ]) {
+    if (!text.includes(label)) throw new Error(`the legend lost "${label}"`);
+  }
+});
+
+await step('week view carries more than month view does', async () => {
+  await page.getByRole('tab', { name: 'Week' }).click();
+  await page.waitForTimeout(700);
+
+  const bars = await page.locator('a[href^="/jobs/EJE-"]').all();
+  let sawCustomer = false;
+  for (const bar of bars) {
+    if ((await bar.innerText()).includes('Engineering') || (await bar.innerText()).includes('(Pty)')) {
+      sawCustomer = true;
+      break;
+    }
+  }
+  if (!sawCustomer) {
+    throw new Error('week view is as sparse as month view — it has room for the customer');
+  }
+  await page.getByRole('tab', { name: 'Month' }).click();
 });
 
 await step('calendar has day, week, month and year views', async () => {

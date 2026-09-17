@@ -5,6 +5,8 @@ import { Button, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import {
   isSignatureEmpty,
+  SIGNATURE_INK,
+  SIGNATURE_STROKE_WIDTH,
   strokesToPath,
   type SignaturePoint,
   type SignatureStroke,
@@ -97,8 +99,12 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
         onPointerUp={end}
         onPointerLeave={end}
         onPointerCancel={end}
+        // Pinned to the light palette, like the job card preview: the customer
+        // signs in black ink on white, which is what the document will show.
+        // Black on the dark theme's surface would be invisible.
+        data-theme="light"
         className={cn(
-          'relative h-52 w-full touch-none overflow-hidden rounded-[var(--radius-control)] border-2 border-dashed bg-surface select-none',
+          'relative h-52 w-full touch-none overflow-hidden rounded-[var(--radius-control)] border-2 border-dashed bg-white select-none',
           disabled
             ? 'cursor-not-allowed border-steel-200 bg-steel-50'
             : 'cursor-crosshair border-steel-300',
@@ -113,11 +119,11 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
           <path
             d={strokesToPath(strokes)}
             fill="none"
-            stroke="var(--color-steel-900)"
+            stroke={SIGNATURE_INK}
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
-            style={{ strokeWidth: 2 }}
+            style={{ strokeWidth: SIGNATURE_STROKE_WIDTH }}
           />
         </svg>
 
@@ -144,7 +150,13 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
   );
 };
 
-/** Renders a previously captured signature path. */
+/**
+ * Renders a previously captured signature.
+ *
+ * This is the rendering layer the job card, the parts collection note and the
+ * on-screen preview all share, so the ink is black in every one of them rather
+ * than being corrected per-surface.
+ */
 export const SignatureDisplay = ({
   pathData,
   className,
@@ -164,8 +176,9 @@ export const SignatureDisplay = ({
         )}
       >
         <span
-          className="text-2xl text-steel-700 italic"
-          style={{ fontFamily: 'Segoe Script, Brush Script MT, cursive' }}
+          className="text-2xl italic"
+          // Black for the same reason as a real signature: it stands in for ink.
+          style={{ color: SIGNATURE_INK, fontFamily: 'Segoe Script, Brush Script MT, cursive' }}
         >
           {pathData.replace(/^demo-signature-/, '').replace(/-/g, ' ')}
         </span>
@@ -184,11 +197,11 @@ export const SignatureDisplay = ({
       <path
         d={pathData}
         fill="none"
-        stroke="var(--color-steel-900)"
+        stroke={SIGNATURE_INK}
         strokeLinecap="round"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
-        style={{ strokeWidth: 2 }}
+        style={{ strokeWidth: SIGNATURE_STROKE_WIDTH }}
       />
     </svg>
   );

@@ -189,6 +189,43 @@ await step('Master moves through every calendar view', async () => {
     await page.getByRole('tab', { name: view }).click();
     await page.waitForTimeout(350);
   }
+  await page.getByRole('tab', { name: 'Month' }).click();
+  await page.waitForTimeout(350);
+});
+
+await step('Master works the calendar filters', async () => {
+  for (const filter of ['Availability', 'Jobs', 'All']) {
+    await page.getByRole('button', { name: filter, exact: true }).click();
+    await page.waitForTimeout(300);
+  }
+  await page.getByLabel('Job type').selectOption('service');
+  await page.waitForTimeout(300);
+  await page.getByLabel('Job type').selectOption('all');
+  await page.waitForTimeout(300);
+});
+
+await step('Master opens "+N more" and an entry detail from it', async () => {
+  const more = page.getByText(/^\+ \d+ more$/).first();
+  await more.waitFor({ timeout: 20000 });
+  await more.click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+
+  // Dialog-to-dialog: closing one and opening another in the same click is the
+  // path most likely to update a component while another renders.
+  await page.getByRole('dialog').getByRole('listitem').first().getByRole('button').click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+});
+
+await step('Master opens an availability detail from the grid', async () => {
+  await page
+    .locator('button[aria-label*="Leave"], button[aria-label*="Sick"], button[aria-label*="Appointment"]')
+    .first()
+    .click({ timeout: 20000 });
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
 });
 
 await step('Master opens the assign dialog and hits an availability clash', async () => {

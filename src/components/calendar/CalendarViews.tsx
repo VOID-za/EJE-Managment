@@ -18,27 +18,48 @@ import {
   fromIso,
   isWeekend,
   MONTH_NAMES,
+  monthRowDensity,
   packWeek,
   rangeOfDays,
   startOfWeek,
   WEEKDAY_NAMES,
 } from './calendar-grid';
 
-const LANE_HEIGHT = 20;
-const MAX_LANES = 4;
+/**
+ * Lane pitch in the month grid.
+ *
+ * The bar inside a lane is drawn shorter than this, but the tappable wrapper
+ * fills it — so a bar stays visually light while still being a target a gloved
+ * finger can hit on a rugged tablet.
+ */
+const LANE_HEIGHT = 23;
+
+/** Height reserved under the bars for the "+N more" affordance. */
+const MORE_ROW_HEIGHT = 20;
 
 interface ViewProps {
   readonly entries: readonly CalendarEntry[];
   readonly anchor: IsoDate;
   readonly today: IsoDate;
   readonly onSelectDay: (date: IsoDate) => void;
+  /** Opens one entry's details. Month and week views both offer this. */
+  readonly onSelectEntry?: (entry: CalendarEntry) => void;
+  /** Opens the full list for a day, from "+N more". */
+  readonly onSelectDayEntries?: (date: IsoDate) => void;
 }
 
 /* -------------------------------------------------------------------------- */
 /* Month                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) => {
+export const MonthView = ({
+  entries,
+  anchor,
+  today,
+  onSelectDay,
+  onSelectEntry,
+  onSelectDayEntries,
+}: ViewProps) => {
   const month = anchor.slice(0, 7);
   const firstRow = startOfWeek(`${month}-01`);
   const rows = Array.from({ length: 6 }, (_, index) => addDays(firstRow, index * 7)).filter(
@@ -59,8 +80,9 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
       </div>
 
       {rows.map((weekStart) => {
-        const packed = packWeek(entries, weekStart);
-        const lanes = Math.min(MAX_LANES, Math.max(...packed.map((p) => p.lane + 1), 0));
+        // The density rule lives in calendar-grid so it can be tested on its
+        // own: nothing is dropped, only deferred behind "+N more".
+        const { visible, lanes, hiddenByDay, hasHidden } = monthRowDensity(entries, weekStart);
         const days = rangeOfDays(weekStart, addDays(weekStart, 6));
 
         return (
@@ -69,21 +91,19 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
               {days.map((day) => {
                 const outsideMonth = day.slice(0, 7) !== month;
                 const isToday = day === today;
-                const hidden = packed.filter(
-                  (placed) =>
-                    placed.lane >= MAX_LANES &&
-                    placed.entry.start <= day &&
-                    placed.entry.end >= day,
-                ).length;
 
                 return (
                   <button
                     key={day}
                     type="button"
                     onClick={() => onSelectDay(day)}
-                    style={{ minHeight: `${44 + lanes * LANE_HEIGHT}px` }}
+                    style={{
+                      minHeight: `${36 + lanes * LANE_HEIGHT + (hasHidden ? MORE_ROW_HEIGHT : 6)}px`,
+                    }}
                     className={cn(
-                      'border-r border-steel-100 p-1.5 text-left align-top transition-colors last:border-r-0 hover:bg-eje-50/40',
+                      // `items-start` matters: a button centres its content, which
+                      // would drop the date pill onto the first lane of bars.
+                      'flex items-start border-r border-steel-100 p-1.5 text-left transition-colors last:border-r-0 hover:bg-eje-50/40',
                       outsideMonth && 'bg-steel-50/60',
                       isWeekend(day) && !outsideMonth && 'bg-steel-50/40',
                     )}
@@ -100,11 +120,6 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
                     >
                       {fromIso(day).getDate()}
                     </span>
-                    {hidden > 0 && (
-                      <span className="ml-1 text-[10px] font-medium text-steel-500">
-                        +{hidden}
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -112,18 +127,16 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
 
             {/* Bars are absolutely positioned over the day cells so a multi-day
                 entry is one continuous element rather than seven fragments. */}
-            <div className="pointer-events-none absolute inset-x-0 top-9 px-1.5">
-              {packed
-                .filter((placed) => placed.lane < MAX_LANES)
-                .map((placed) => (
+            <div className="pointer-events-none absolute inset-x-0 top-[34px] px-1.5">
+              {visible.map((placed) => (
                   <div
                     key={`${placed.entry.id}-${weekStart}`}
-                    className="pointer-events-auto absolute"
+                    className="pointer-events-auto absolute flex items-center"
                     style={{
                       left: `calc(${(placed.offset / 7) * 100}% + 3px)`,
                       width: `calc(${(placed.span / 7) * 100}% - 6px)`,
                       top: `${placed.lane * LANE_HEIGHT}px`,
-                      height: `${LANE_HEIGHT - 3}px`,
+                      height: `${LANE_HEIGHT - 2}px`,
                     }}
                   >
                     <CalendarEntryChip
@@ -131,9 +144,35 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
                       continuesBefore={placed.continuesBefore}
                       continuesAfter={placed.continuesAfter}
                       compact
+                      onSelect={onSelectEntry}
                     />
                   </div>
-                ))}
+              ))}
+
+              {/* "+N more" per day, below the bars. It keeps every week row the
+                  same height, and nothing is lost — the dialog it opens lists
+                  the whole day. Sized as a real tap target for a tablet. */}
+              {days.map((day, column) => {
+                const hidden = hiddenByDay[day] ?? 0;
+                if (hidden <= 0) return null;
+
+                return (
+                  <button
+                    key={`more-${day}`}
+                    type="button"
+                    onClick={() => (onSelectDayEntries ?? onSelectDay)(day)}
+                    className="pointer-events-auto absolute flex min-h-[18px] items-center justify-start rounded px-1 text-[10px] font-semibold text-steel-500 transition-colors hover:bg-steel-100 hover:text-steel-800"
+                    style={{
+                      left: `calc(${(column / 7) * 100}% + 3px)`,
+                      width: `calc(${(1 / 7) * 100}% - 6px)`,
+                      top: `${lanes * LANE_HEIGHT}px`,
+                    }}
+                    aria-label={`Show all ${entriesOn(entries, day).length} entries on ${day}`}
+                  >
+                    + {hidden} more
+                  </button>
+                );
+              })}
             </div>
           </div>
         );
@@ -146,7 +185,13 @@ export const MonthView = ({ entries, anchor, today, onSelectDay }: ViewProps) =>
 /* Week                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export const WeekView = ({ entries, anchor, today, onSelectDay }: ViewProps) => {
+export const WeekView = ({
+  entries,
+  anchor,
+  today,
+  onSelectDay,
+  onSelectEntry,
+}: ViewProps) => {
   const weekStart = startOfWeek(anchor);
   const days = rangeOfDays(weekStart, addDays(weekStart, 6));
   const packed = packWeek(entries, weekStart);
@@ -197,7 +242,7 @@ export const WeekView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
           {packed.map((placed) => (
             <div
               key={placed.entry.id}
-              className="absolute"
+              className="absolute flex items-center"
               style={{
                 left: `calc(${(placed.offset / 7) * 100}% + 4px)`,
                 width: `calc(${(placed.span / 7) * 100}% - 8px)`,
@@ -209,6 +254,7 @@ export const WeekView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
                 entry={placed.entry}
                 continuesBefore={placed.continuesBefore}
                 continuesAfter={placed.continuesAfter}
+                onSelect={onSelectEntry}
               />
             </div>
           ))}

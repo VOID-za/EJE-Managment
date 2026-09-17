@@ -3,6 +3,7 @@ import {
   addDays,
   addMonths,
   endOfMonth,
+  monthRowDensity,
   packWeek,
   rangeOfDays,
   startOfMonth,
@@ -152,5 +153,140 @@ describe('viewLabel', () => {
     expect(viewLabel('week', '2026-09-17')).toBe('14 Sep – 20 Sep 2026');
     expect(viewLabel('month', '2026-09-17')).toBe('September 2026');
     expect(viewLabel('year', '2026-09-17')).toBe('2026');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Month density                                                              */
+/* -------------------------------------------------------------------------- */
+
+const job = (id: string, start: string, end: string): CalendarEntry => ({
+  kind: 'job',
+  id,
+  start,
+  end,
+  days: rangeOfDays(start, end).length,
+  title: id,
+  subtitle: '',
+  jobNumber: id,
+  jobType: 'breakdown',
+  status: 'open',
+  priority: 'normal',
+  customerName: 'Test Customer',
+  siteName: 'Test Site',
+  machineLabel: 'Test Machine',
+  technicianIds: ['u1'],
+  technicianNames: ['Tester'],
+  technicianInitials: ['TT'],
+});
+
+describe('monthRowDensity', () => {
+  const weekStart = '2026-09-14'; // Monday
+  const busyDay = '2026-09-16';
+
+  it('shows everything on a quiet day and offers no "+N more"', () => {
+    const density = monthRowDensity(
+      [job('EJE-1001', busyDay, busyDay), job('EJE-1002', busyDay, busyDay)],
+      weekStart,
+    );
+    expect(density.visible).toHaveLength(2);
+    expect(density.hasHidden).toBe(false);
+    expect(density.hiddenByDay).toEqual({});
+  });
+
+  it('caps a busy day at three bars and defers the rest', () => {
+    const density = monthRowDensity(
+      Array.from({ length: 7 }, (_, index) => job(`EJE-10${index}`, busyDay, busyDay)),
+      weekStart,
+    );
+
+    expect(density.visible).toHaveLength(3);
+    expect(density.lanes).toBe(3);
+    // Nothing is dropped: the four not drawn are counted for the affordance.
+    expect(density.hiddenByDay[busyDay]).toBe(4);
+    expect(density.hasHidden).toBe(true);
+  });
+
+  it('counts hidden entries per day, not per row', () => {
+    const density = monthRowDensity(
+      [
+        ...Array.from({ length: 5 }, (_, index) => job(`EJE-a${index}`, busyDay, busyDay)),
+        job('EJE-b0', '2026-09-18', '2026-09-18'),
+      ],
+      weekStart,
+    );
+
+    expect(density.hiddenByDay[busyDay]).toBe(2);
+    // The quiet day's single entry is in a free lane, so nothing is hidden.
+    expect(density.hiddenByDay['2026-09-18']).toBeUndefined();
+  });
+
+  it('keeps a multi-day bar whole rather than counting it per day', () => {
+    const density = monthRowDensity([job('EJE-1053', '2026-09-15', '2026-09-18')], weekStart);
+    const [placed] = density.visible;
+
+    expect(density.visible).toHaveLength(1);
+    expect(placed?.span).toBe(4);
+    expect(density.hasHidden).toBe(false);
+  });
+
+  it('counts a multi-day bar as hidden on every day it covers', () => {
+    const density = monthRowDensity(
+      [
+        job('EJE-a', '2026-09-14', '2026-09-20'),
+        job('EJE-b', '2026-09-14', '2026-09-20'),
+        job('EJE-c', '2026-09-14', '2026-09-20'),
+        // Overlaps the whole row, so it lands in a fourth lane and is deferred.
+        job('EJE-d', '2026-09-15', '2026-09-17'),
+      ],
+      weekStart,
+    );
+
+    expect(density.visible).toHaveLength(3);
+    expect(density.hiddenByDay['2026-09-15']).toBe(1);
+    expect(density.hiddenByDay['2026-09-17']).toBe(1);
+    expect(density.hiddenByDay['2026-09-18']).toBeUndefined();
+  });
+
+  it('gives work the upper lanes and availability the lower ones', () => {
+    const density = monthRowDensity(
+      [
+        entry('leave-1', busyDay, busyDay),
+        job('EJE-1001', busyDay, busyDay),
+        entry('leave-2', busyDay, busyDay),
+        job('EJE-1002', busyDay, busyDay),
+      ],
+      weekStart,
+    );
+
+    // A planner scans a month grid for jobs first, so on a busy day it is the
+    // absence rows that fall behind "+N more" rather than a job.
+    expect(density.visible.map((placed) => placed.entry.kind)).toEqual([
+      'job',
+      'job',
+      'availability',
+    ]);
+    expect(density.hiddenByDay[busyDay]).toBe(1);
+  });
+
+  it('never hides a job in favour of an absence', () => {
+    const density = monthRowDensity(
+      [
+        ...Array.from({ length: 3 }, (_, index) => entry(`leave-${index}`, busyDay, busyDay)),
+        job('EJE-1001', busyDay, busyDay),
+      ],
+      weekStart,
+    );
+
+    expect(density.visible[0]?.entry.kind).toBe('job');
+    expect(density.visible.filter((placed) => placed.entry.kind === 'job')).toHaveLength(1);
+  });
+
+  it('honours a different lane cap, so the rule is not hard-coded to the view', () => {
+    const entries = Array.from({ length: 6 }, (_, index) =>
+      job(`EJE-10${index}`, busyDay, busyDay),
+    );
+    expect(monthRowDensity(entries, weekStart, 5).visible).toHaveLength(5);
+    expect(monthRowDensity(entries, weekStart, 5).hiddenByDay[busyDay]).toBe(1);
   });
 });

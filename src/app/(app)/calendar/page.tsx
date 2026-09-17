@@ -1,8 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { userFullName } from '@/domain';
-import { findConflicts, loadCalendar } from '@/application/calendar';
+import {
+  JOB_TYPE_CODES,
+  jobTypeLabel,
+  userFullName,
+  type IsoDate,
+  type JobTypeCode,
+} from '@/domain';
+import { entriesOn, findConflicts, loadCalendar, type CalendarEntry } from '@/application/calendar';
 import {
   Badge,
   Button,
@@ -20,6 +26,8 @@ import {
   WeekView,
   YearView,
 } from '@/components/calendar/CalendarViews';
+import { CalendarEntryDetail } from '@/components/calendar/CalendarEntryDetail';
+import { DayEntriesDialog } from '@/components/calendar/DayEntriesDialog';
 import {
   addDays,
   addMonths,
@@ -40,6 +48,20 @@ const VIEWS: readonly { id: CalendarView; label: string }[] = [
 ];
 
 /**
+ * What the calendar is showing.
+ *
+ * Three states rather than a checkbox, because the two questions a planner
+ * actually asks are different ones: "what work is on?" and "who is out?".
+ */
+type ShowFilter = 'all' | 'jobs' | 'availability';
+
+const SHOW_FILTERS: readonly { id: ShowFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'availability', label: 'Availability' },
+];
+
+/**
  * The job schedule.
  *
  * Shows scheduled work and technician availability on one surface, because a
@@ -51,7 +73,10 @@ const CalendarPage = () => {
   const [view, setView] = useState<CalendarView>('month');
   const [anchor, setAnchor] = useState(today);
   const [technicianFilter, setTechnicianFilter] = useState('all');
-  const [showLeave, setShowLeave] = useState(true);
+  const [show, setShow] = useState<ShowFilter>('all');
+  const [jobTypeFilter, setJobTypeFilter] = useState<JobTypeCode | 'all'>('all');
+  const [detail, setDetail] = useState<CalendarEntry | null>(null);
+  const [dayList, setDayList] = useState<IsoDate | null>(null);
 
   const range = viewRange(view, anchor);
 
@@ -62,14 +87,20 @@ const CalendarPage = () => {
   const entries = useMemo(() => {
     const all = query.data?.entries ?? [];
     return all
-      .filter((entry) => showLeave || entry.kind === 'job')
+      .filter((entry) => show === 'all' || (show === 'jobs') === (entry.kind === 'job'))
+      // A job-type filter narrows the work without hiding who is out, which is
+      // what you want when checking cover for one kind of job.
+      .filter(
+        (entry) =>
+          jobTypeFilter === 'all' || entry.kind !== 'job' || entry.jobType === jobTypeFilter,
+      )
       .filter((entry) => {
         if (technicianFilter === 'all') return true;
         return entry.kind === 'job'
           ? entry.technicianIds.includes(technicianFilter)
           : entry.userId === technicianFilter;
       });
-  }, [query.data, technicianFilter, showLeave]);
+  }, [query.data, technicianFilter, show, jobTypeFilter]);
 
   const conflicts = useMemo(
     () => findConflicts(entries, rangeOfDays(range.from, range.to)),
@@ -163,8 +194,49 @@ const CalendarPage = () => {
 
         <div className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t border-steel-100 pt-4">
           <div className="flex flex-wrap items-end gap-4">
+            {/* Three lightweight controls, no panel: what to show, which kind of
+                work, and whose. Enough to answer a planner's questions without
+                becoming a screen of its own. */}
+            <div>
+              <span className="mb-1.5 block text-sm font-semibold text-steel-700">Show</span>
+              <div
+                role="group"
+                aria-label="Show on calendar"
+                className="flex gap-0.5 rounded-[var(--radius-control)] bg-steel-100 p-0.5"
+              >
+                {SHOW_FILTERS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={show === option.id}
+                    onClick={() => setShow(option.id)}
+                    className={cn(
+                      'min-h-9 rounded-[0.45rem] px-3 text-sm font-semibold transition-colors',
+                      show === option.id
+                        ? 'bg-surface text-steel-900 shadow-sm'
+                        : 'text-steel-600 hover:text-steel-900',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <SelectField
-              containerClassName="w-60"
+              containerClassName="w-44"
+              label="Job type"
+              value={jobTypeFilter}
+              onChange={(event) => setJobTypeFilter(event.target.value as JobTypeCode | 'all')}
+              disabled={show === 'availability'}
+              options={[
+                { value: 'all', label: 'All types' },
+                ...JOB_TYPE_CODES.map((code) => ({ value: code, label: jobTypeLabel(code) })),
+              ]}
+            />
+
+            <SelectField
+              containerClassName="w-52"
               label="Technician"
               value={technicianFilter}
               onChange={(event) => setTechnicianFilter(event.target.value)}
@@ -176,20 +248,11 @@ const CalendarPage = () => {
                 })),
               ]}
             />
-            <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
-              <input
-                type="checkbox"
-                checked={showLeave}
-                onChange={(event) => setShowLeave(event.target.checked)}
-                className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-              />
-              Show leave &amp; availability
-            </label>
           </div>
 
           <p className="tabular pb-3 text-sm text-steel-500">
             {jobCount} {jobCount === 1 ? 'job' : 'jobs'}
-            {showLeave && ` · ${absenceCount} leave`}
+            {show !== 'jobs' && ` · ${absenceCount} unavailable`}
           </p>
         </div>
       </Card>
@@ -234,6 +297,8 @@ const CalendarPage = () => {
                 setAnchor(date);
                 setView('day');
               }}
+              onSelectEntry={setDetail}
+              onSelectDayEntries={setDayList}
             />
           )}
           {view === 'week' && (
@@ -245,6 +310,7 @@ const CalendarPage = () => {
                 setAnchor(date);
                 setView('day');
               }}
+              onSelectEntry={setDetail}
             />
           )}
           {view === 'day' && (
@@ -274,6 +340,29 @@ const CalendarPage = () => {
             </Badge>
           </div>
         </>
+      )}
+
+      {/* Progressive disclosure: the grid stays an overview, and the detail
+          lives one tap away rather than inside each cell. */}
+      {dayList !== null && (
+        <DayEntriesDialog
+          date={dayList}
+          entries={entriesOn(entries, dayList)}
+          onSelect={(entry) => {
+            setDayList(null);
+            setDetail(entry);
+          }}
+          onOpenDay={() => {
+            setAnchor(dayList);
+            setView('day');
+            setDayList(null);
+          }}
+          onClose={() => setDayList(null)}
+        />
+      )}
+
+      {detail !== null && (
+        <CalendarEntryDetail entry={detail} onClose={() => setDetail(null)} />
       )}
     </>
   );
