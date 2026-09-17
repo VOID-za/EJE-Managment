@@ -16,7 +16,12 @@ export interface ChecklistItemIssue {
   readonly itemId: string;
   readonly sectionId: string;
   readonly itemText: string;
-  readonly reason: 'unanswered' | 'photo_required' | 'measurement_missing' | 'text_missing';
+  readonly reason:
+    | 'unanswered'
+    | 'photo_required'
+    | 'measurement_missing'
+    | 'text_missing'
+    | 'note_required';
   readonly message: string;
 }
 
@@ -42,6 +47,18 @@ const isAnswered = (item: ChecklistItem, response: ChecklistResponse | undefined
       return response.text.trim().length > 0;
   }
 };
+
+/**
+ * Whether this item demands a written explanation.
+ *
+ * A failure is a finding the customer will read, so it must say what was found.
+ * A pass or an N/A needs nothing, and demanding one would train technicians to
+ * type filler.
+ */
+export const requiresNote = (
+  item: ChecklistItem,
+  response: ChecklistResponse | undefined,
+): boolean => isFailedResponse(item, response) || isMeasurementOutOfRange(item, response);
 
 /** A `fail` or `no` answer is a finding the technician should explain. */
 export const isFailedResponse = (
@@ -104,6 +121,18 @@ export const evaluateChecklist = (
 
       if (isFailedResponse(item, response)) {
         failedItems += 1;
+      }
+
+      // A failure or an out-of-range reading must be explained before the
+      // checklist can be completed.
+      if (requiresNote(item, response) && (response?.notes ?? '').trim().length === 0) {
+        issues.push({
+          itemId: item.id,
+          sectionId: section.id,
+          itemText: item.text,
+          reason: 'note_required',
+          message: `"${item.text}" was not passed and needs a note explaining what was found.`,
+        });
       }
 
       if (item.photoRequired && (response === undefined || response.photos.length === 0)) {

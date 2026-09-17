@@ -365,6 +365,126 @@ export const addPart = async (
   return saved;
 };
 
+/**
+ * Amends an existing labour line.
+ *
+ * The line keeps its id and its original `capturedAt`, so the audit trail and
+ * the pricing snapshot are untouched: an amended line is still priced at the
+ * rates frozen when the customer signed.
+ */
+export const updateLabour = async (
+  context: OperationContext,
+  job: Job,
+  lineId: string,
+  input: LabourInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+
+  const existing = job.labour.find((entry) => entry.id === lineId);
+  if (existing === undefined) {
+    throw new WorkflowError('That labour line no longer exists on this job.');
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    labour: job.labour.map((entry) =>
+      entry.id === lineId
+        ? {
+            ...entry,
+            date: input.date,
+            rateType: input.rateType,
+            hours: input.hours,
+            description: input.description,
+          }
+        : entry,
+    ),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'labour_added',
+    summary: `Labour amended: ${formatHours(input.hours)} ${labourRateLabel(input.rateType).toLowerCase()}`,
+    detail: `Was ${formatHours(existing.hours)} ${labourRateLabel(existing.rateType).toLowerCase()}.`,
+  });
+  await recordPostSignatureChange(context, saved, 'A labour line was amended.');
+  return saved;
+};
+
+export const updateTravel = async (
+  context: OperationContext,
+  job: Job,
+  lineId: string,
+  input: TravelInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+
+  const existing = job.travel.find((entry) => entry.id === lineId);
+  if (existing === undefined) {
+    throw new WorkflowError('That travel line no longer exists on this job.');
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    travel: job.travel.map((entry) =>
+      entry.id === lineId
+        ? {
+            ...entry,
+            date: input.date,
+            kilometres: input.kilometres,
+            description: input.description,
+          }
+        : entry,
+    ),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'travel_added',
+    summary: `Travel amended: ${formatKilometres(input.kilometres)}`,
+    detail: `Was ${formatKilometres(existing.kilometres)}.`,
+  });
+  await recordPostSignatureChange(context, saved, 'A travel line was amended.');
+  return saved;
+};
+
+export const updatePart = async (
+  context: OperationContext,
+  job: Job,
+  lineId: string,
+  input: PartInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+
+  const existing = job.parts.find((entry) => entry.id === lineId);
+  if (existing === undefined) {
+    throw new WorkflowError('That part line no longer exists on this job.');
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    parts: job.parts.map((entry) =>
+      entry.id === lineId
+        ? {
+            ...entry,
+            partNumber: input.partNumber,
+            description: input.description,
+            quantity: input.quantity,
+            unitPrice: input.unitPrice,
+          }
+        : entry,
+    ),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'part_added',
+    summary: `Part amended: ${input.partNumber}`,
+    detail: `Was ${existing.partNumber} x${existing.quantity}, now x${input.quantity}.`,
+  });
+  await recordPostSignatureChange(context, saved, 'A parts line was amended.');
+  return saved;
+};
+
 export type LineItemKind = 'labour' | 'travel' | 'part';
 
 /** Line removal is always confirmed by the caller before reaching this point. */

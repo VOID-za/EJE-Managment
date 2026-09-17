@@ -304,6 +304,32 @@ await step('checklist runner works', async () => {
   await page.screenshot({ path: `${shots}/06-checklist.png`, fullPage: false });
 });
 
+await step('a failed checklist item demands a note before completion', async () => {
+  // Fail the second item; the note field must become required and block progress.
+  await page.getByRole('button', { name: 'Fail', exact: true }).nth(1).click();
+  await page.getByText('Required — explain the finding').first().waitFor({ timeout: 8000 });
+  await page
+    .getByText('This item was not passed, so a note is required', { exact: false })
+    .first()
+    .waitFor({ timeout: 8000 });
+
+  const outstanding = await page.getByText('needs a note explaining what was found').count();
+  if (outstanding === 0) throw new Error('outstanding list did not name the item needing a note');
+
+  // Passing items must NOT demand one.
+  const optionalLabels = await page.getByText('Optional', { exact: true }).count();
+  if (optionalLabels === 0) throw new Error('note fields are not optional on passed items');
+});
+
+await step('supplying the note clears the block', async () => {
+  const noteBoxes = page.locator('textarea[aria-invalid="true"]');
+  await noteBoxes.first().fill('Station 2 emergency stop does not latch — replacement ordered.');
+  await noteBoxes.first().blur();
+  await page.getByText('Required — explain the finding').first().waitFor({ timeout: 8000 });
+  const stillInvalid = await page.locator('textarea[aria-invalid="true"]').count();
+  if (stillInvalid !== 0) throw new Error('note was recorded but the item is still flagged');
+});
+
 await step('master dashboard and admin', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();

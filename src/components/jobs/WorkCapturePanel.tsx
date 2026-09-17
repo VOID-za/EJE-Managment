@@ -6,7 +6,10 @@ import {
   labourRateFor,
   labourRateLabel,
   type Job,
+  type LabourEntry,
   type LabourRateType,
+  type PartEntry,
+  type TravelEntry,
   type PricingInputs,
   type SystemSettings,
   type User,
@@ -17,6 +20,9 @@ import {
   addTravel,
   removeLineItem,
   setCalloutApplied,
+  updateLabour,
+  updatePart,
+  updateTravel,
   type LineItemKind,
 } from '@/application/job-operations';
 import {
@@ -65,10 +71,17 @@ export const WorkCapturePanel = ({
 }: WorkCapturePanelProps) => {
   const totals = calculateJobTotals(job, settings);
   const [dialog, setDialog] = useState<'labour' | 'travel' | 'part' | null>(null);
+  // When set, the dialog is amending this line rather than adding a new one.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<
     { kind: LineItemKind; id: string; label: string } | null
   >(null);
   const operation = useOperation();
+
+  const closeDialog = () => {
+    setDialog(null);
+    setEditingId(null);
+  };
 
   const technicianName = (id: string): string => {
     const user = users.find((candidate) => candidate.id === id);
@@ -103,7 +116,10 @@ export const WorkCapturePanel = ({
               size="sm"
               variant="secondary"
               leadingIcon={<Icon name="plus" className="size-4" />}
-              onClick={() => setDialog('labour')}
+              onClick={() => {
+                setEditingId(null);
+                setDialog('labour');
+              }}
             >
               Add labour
             </Button>
@@ -151,8 +167,12 @@ export const WorkCapturePanel = ({
                   {formatCurrency(totals.labourLines[index]?.total ?? 0)}
                 </span>
                 {editable && (
-                  <RemoveButton
-                    onClick={() =>
+                  <LineActions
+                    onEdit={() => {
+                      setEditingId(entry.id);
+                      setDialog('labour');
+                    }}
+                    onRemove={() =>
                       setPendingRemoval({
                         kind: 'labour',
                         id: entry.id,
@@ -210,7 +230,10 @@ export const WorkCapturePanel = ({
               size="sm"
               variant="secondary"
               leadingIcon={<Icon name="plus" className="size-4" />}
-              onClick={() => setDialog('travel')}
+              onClick={() => {
+                setEditingId(null);
+                setDialog('travel');
+              }}
             >
               Add travel
             </Button>
@@ -246,8 +269,12 @@ export const WorkCapturePanel = ({
                   {formatCurrency(totals.travelLines[index]?.total ?? 0)}
                 </span>
                 {editable && (
-                  <RemoveButton
-                    onClick={() =>
+                  <LineActions
+                    onEdit={() => {
+                      setEditingId(entry.id);
+                      setDialog('travel');
+                    }}
+                    onRemove={() =>
                       setPendingRemoval({
                         kind: 'travel',
                         id: entry.id,
@@ -273,7 +300,10 @@ export const WorkCapturePanel = ({
               size="sm"
               variant="secondary"
               leadingIcon={<Icon name="plus" className="size-4" />}
-              onClick={() => setDialog('part')}
+              onClick={() => {
+                setEditingId(null);
+                setDialog('part');
+              }}
             >
               Add part
             </Button>
@@ -318,8 +348,12 @@ export const WorkCapturePanel = ({
                     </td>
                     {editable && (
                       <td className="pr-3">
-                        <RemoveButton
-                          onClick={() =>
+                        <LineActions
+                          onEdit={() => {
+                            setEditingId(entry.id);
+                            setDialog('part');
+                          }}
+                          onRemove={() =>
                             setPendingRemoval({
                               kind: 'part',
                               id: entry.id,
@@ -337,13 +371,24 @@ export const WorkCapturePanel = ({
         )}
       </Card>
 
+      {/*
+        One dialog per kind, used for BOTH adding and amending. `editingId`
+        decides which, so the technician always sees the same form and an
+        amendment cannot drift away from the shape of the original entry.
+      */}
       <LabourDialog
+        key={`labour-${editingId ?? 'new'}`}
         open={dialog === 'labour'}
-        onClose={() => setDialog(null)}
+        existing={job.labour.find((entry) => entry.id === editingId) ?? null}
+        onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) => addLabour(context, job, values));
+          const ok = await operation.run((context) =>
+            editingId === null
+              ? addLabour(context, job, values)
+              : updateLabour(context, job, editingId, values),
+          );
           if (ok) {
-            setDialog(null);
+            closeDialog();
             onChanged();
           }
         }}
@@ -352,12 +397,18 @@ export const WorkCapturePanel = ({
       />
 
       <TravelDialog
+        key={`travel-${editingId ?? 'new'}`}
         open={dialog === 'travel'}
-        onClose={() => setDialog(null)}
+        existing={job.travel.find((entry) => entry.id === editingId) ?? null}
+        onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) => addTravel(context, job, values));
+          const ok = await operation.run((context) =>
+            editingId === null
+              ? addTravel(context, job, values)
+              : updateTravel(context, job, editingId, values),
+          );
           if (ok) {
-            setDialog(null);
+            closeDialog();
             onChanged();
           }
         }}
@@ -366,12 +417,18 @@ export const WorkCapturePanel = ({
       />
 
       <PartDialog
+        key={`part-${editingId ?? 'new'}`}
         open={dialog === 'part'}
-        onClose={() => setDialog(null)}
+        existing={job.parts.find((entry) => entry.id === editingId) ?? null}
+        onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) => addPart(context, job, values));
+          const ok = await operation.run((context) =>
+            editingId === null
+              ? addPart(context, job, values)
+              : updatePart(context, job, editingId, values),
+          );
           if (ok) {
-            setDialog(null);
+            closeDialog();
             onChanged();
           }
         }}
@@ -402,15 +459,33 @@ export const WorkCapturePanel = ({
   );
 };
 
-const RemoveButton = ({ onClick }: { readonly onClick: () => void }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    aria-label="Remove line"
-    className="rounded-[var(--radius-control)] p-2 text-steel-400 transition-colors hover:bg-signal-50 hover:text-signal-600"
-  >
-    <Icon name="trash" className="size-4" />
-  </button>
+const LineActions = ({
+  onEdit,
+  onRemove,
+}: {
+  readonly onEdit: () => void;
+  readonly onRemove: () => void;
+}) => (
+  <span className="flex items-center gap-0.5">
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label="Edit line"
+      title="Edit line"
+      className="rounded-[var(--radius-control)] p-2 text-steel-400 transition-colors hover:bg-eje-50 hover:text-eje-700"
+    >
+      <Icon name="wrench" className="size-4" />
+    </button>
+    <button
+      type="button"
+      onClick={onRemove}
+      aria-label="Remove line"
+      title="Remove line"
+      className="rounded-[var(--radius-control)] p-2 text-steel-400 transition-colors hover:bg-signal-50 hover:text-signal-600"
+    >
+      <Icon name="trash" className="size-4" />
+    </button>
+  </span>
 );
 
 const RATE_OPTIONS: readonly { value: LabourRateType; label: string }[] = [
@@ -428,6 +503,7 @@ const LabourDialog = ({
   onSubmit,
   busy,
   pricing,
+  existing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -439,11 +515,12 @@ const LabourDialog = ({
   }) => void;
   readonly busy: boolean;
   readonly pricing: PricingInputs;
+  readonly existing: LabourEntry | null;
 }) => {
-  const [date, setDate] = useState(todayIso());
-  const [rateType, setRateType] = useState<LabourRateType>('normal');
-  const [hours, setHours] = useState('1');
-  const [description, setDescription] = useState('');
+  const [date, setDate] = useState(existing?.date ?? todayIso());
+  const [rateType, setRateType] = useState<LabourRateType>(existing?.rateType ?? 'normal');
+  const [hours, setHours] = useState(existing === null ? '1' : String(existing.hours));
+  const [description, setDescription] = useState(existing?.description ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
 
   const parsedHours = Number.parseFloat(hours);
@@ -461,8 +538,8 @@ const LabourDialog = ({
   return (
     <Modal
       open={open}
-      title="Add labour"
-      description="Hours are charged at the configured rate for the selected labour type."
+      title={existing === null ? 'Add labour' : 'Edit labour'}
+      description="Hours are charged at the rate that applies to this job."
       onClose={onClose}
       footer={
         <>
@@ -470,7 +547,7 @@ const LabourDialog = ({
             Cancel
           </Button>
           <Button onClick={submit} loading={busy}>
-            Add labour
+            {existing === null ? 'Add labour' : 'Save changes'}
           </Button>
         </>
       }
@@ -554,6 +631,7 @@ const TravelDialog = ({
   onSubmit,
   busy,
   pricing,
+  existing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -564,10 +642,13 @@ const TravelDialog = ({
   }) => void;
   readonly busy: boolean;
   readonly pricing: PricingInputs;
+  readonly existing: TravelEntry | null;
 }) => {
-  const [date, setDate] = useState(todayIso());
-  const [kilometres, setKilometres] = useState('');
-  const [description, setDescription] = useState('');
+  const [date, setDate] = useState(existing?.date ?? todayIso());
+  const [kilometres, setKilometres] = useState(
+    existing === null ? '' : String(existing.kilometres),
+  );
+  const [description, setDescription] = useState(existing?.description ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
 
   const parsed = Number.parseFloat(kilometres);
@@ -584,7 +665,7 @@ const TravelDialog = ({
   return (
     <Modal
       open={open}
-      title="Add travel"
+      title={existing === null ? 'Add travel' : 'Edit travel'}
       description="Travel is charged per kilometre only."
       onClose={onClose}
       footer={
@@ -593,7 +674,7 @@ const TravelDialog = ({
             Cancel
           </Button>
           <Button onClick={submit} loading={busy}>
-            Add travel
+            {existing === null ? 'Add travel' : 'Save changes'}
           </Button>
         </>
       }
@@ -646,6 +727,7 @@ const PartDialog = ({
   onClose,
   onSubmit,
   busy,
+  existing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -656,11 +738,14 @@ const PartDialog = ({
     unitPrice: number;
   }) => void;
   readonly busy: boolean;
+  readonly existing: PartEntry | null;
 }) => {
-  const [partNumber, setPartNumber] = useState('');
-  const [description, setDescription] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [unitPrice, setUnitPrice] = useState('');
+  const [partNumber, setPartNumber] = useState(existing?.partNumber ?? '');
+  const [description, setDescription] = useState(existing?.description ?? '');
+  const [quantity, setQuantity] = useState(existing === null ? '1' : String(existing.quantity));
+  const [unitPrice, setUnitPrice] = useState(
+    existing === null ? '' : (existing.unitPrice / 100).toFixed(2),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const parsedQuantity = Number.parseInt(quantity, 10);
@@ -688,7 +773,7 @@ const PartDialog = ({
   return (
     <Modal
       open={open}
-      title="Add part"
+      title={existing === null ? 'Add part' : 'Edit part'}
       description="Parts fitted on this job. Prices are entered excluding VAT."
       onClose={onClose}
       footer={
@@ -697,7 +782,7 @@ const PartDialog = ({
             Cancel
           </Button>
           <Button onClick={submit} loading={busy}>
-            Add part
+            {existing === null ? 'Add part' : 'Save changes'}
           </Button>
         </>
       }

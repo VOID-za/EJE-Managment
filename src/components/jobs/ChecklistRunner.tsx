@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import {
   evaluateChecklist,
   isMeasurementOutOfRange,
+  requiresNote,
   type ChecklistItem,
   type ChecklistResponse,
   type ChecklistTemplate,
@@ -282,6 +283,8 @@ const ChecklistItemRow = ({
     (item.responseType === 'yes_no' && response?.yesNo === false);
   const outOfRange = isMeasurementOutOfRange(item, response);
   const photoMissing = item.photoRequired && (response?.photos.length ?? 0) === 0;
+  const noteRequired = requiresNote(item, response);
+  const noteMissing = noteRequired && (response?.notes ?? '').trim().length === 0;
 
   return (
     <li className={cn('px-5 py-4', failed && 'bg-signal-50/40')}>
@@ -374,22 +377,42 @@ const ChecklistItemRow = ({
         )}
       </div>
 
-      {(failed || outOfRange || (response?.notes.length ?? 0) > 0) && (
-        <div className="mt-3">
-          <label className="mb-1.5 block text-xs font-semibold text-steel-600">
-            {failed || outOfRange ? 'Explain the finding (required)' : 'Notes'}
-          </label>
-          <textarea
-            rows={2}
-            value={notes}
-            disabled={!editable || busy}
-            onChange={(event) => setNotes(event.target.value)}
-            onBlur={() => onAnswer({ notes })}
-            placeholder="What was found, and what is recommended?"
-            className="w-full rounded-[var(--radius-control)] border border-steel-300 px-3 py-2.5 text-sm focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none disabled:bg-steel-50"
-          />
-        </div>
-      )}
+      {/* A note field on EVERY item. Only a finding makes it compulsory. */}
+      <div className="mt-3">
+        <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-steel-600">
+          Note
+          {noteRequired ? (
+            <span className="font-bold text-signal-600">Required — explain the finding</span>
+          ) : (
+            <span className="font-normal text-steel-400">Optional</span>
+          )}
+        </label>
+        <textarea
+          rows={2}
+          value={notes}
+          disabled={!editable || busy}
+          onChange={(event) => setNotes(event.target.value)}
+          onBlur={() => onAnswer({ notes })}
+          placeholder={
+            noteRequired
+              ? 'What was found, and what is recommended?'
+              : 'Anything worth recording (optional)'
+          }
+          aria-invalid={noteMissing}
+          className={cn(
+            'w-full rounded-[var(--radius-control)] border px-3 py-2.5 text-sm focus:ring-2 focus:outline-none disabled:bg-steel-50',
+            noteMissing
+              ? 'border-signal-400 bg-signal-50 focus:border-signal-500 focus:ring-signal-100'
+              : 'border-steel-300 focus:border-eje-500 focus:ring-eje-100',
+          )}
+        />
+        {noteMissing && (
+          <p className="mt-1 text-xs font-medium text-signal-600">
+            This item was not passed, so a note is required before the checklist can be
+            completed.
+          </p>
+        )}
+      </div>
 
       {item.photoRequired && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
