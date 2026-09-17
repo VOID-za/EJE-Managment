@@ -684,6 +684,136 @@ export const seedJobs: readonly Job[] = [
     createdBy: asUserId('user-master-elmarie'),
   }),
 
+  // Ready to DELETE: a duplicate raised by mistake, never accepted. Deleting is
+  // the honest action because no work was ever done against it.
+  job('EJE-1065', {
+    jobType: 'breakdown',
+    priority: 'normal',
+    status: 'open',
+    customerId: asCustomerId('cust-midrand'),
+    siteId: asSiteId('site-midrand-main'),
+    contactId: asContactId('contact-midrand-main'),
+    machineId: asMachineId('machine-midrand-press'),
+    scheduledDate: dateOffset(1),
+    orderNumber: 'PO-44988',
+    referenceNumber: 'MAG-BRK-091-DUP',
+    faultDescription:
+      'Press brake safety light curtain intermittently faulting. (Raised twice — this duplicates EJE-1058.)',
+    primaryTechnicianId: null,
+    createdAt: timeOffset(-2, 6, 35),
+    createdBy: asUserId('user-master-denise'),
+  }),
+
+  // Ready to CANCEL: a real request the customer then resolved themselves.
+  job('EJE-1066', {
+    jobType: 'breakdown',
+    priority: 'normal',
+    status: 'open',
+    customerId: asCustomerId('cust-highveld'),
+    siteId: asSiteId('site-highveld-centurion'),
+    contactId: asContactId('contact-highveld-main'),
+    machineId: asMachineId('machine-highveld-grinder'),
+    scheduledDate: dateOffset(2),
+    orderNumber: '',
+    referenceNumber: 'HAC-BRK-114',
+    faultDescription:
+      'Grinder tripping its main breaker on start-up. Customer asked for a technician this week.',
+    primaryTechnicianId: null,
+    createdAt: timeOffset(-1, 10, 15),
+    createdBy: asUserId('user-master-elmarie'),
+  }),
+
+  // Already cancelled: shows the CANCELLED state without having to perform it.
+  job('EJE-1045', {
+    jobType: 'breakdown',
+    priority: 'high',
+    status: 'cancelled',
+    customerId: asCustomerId('cust-kruger'),
+    siteId: asSiteId('site-kruger-main'),
+    contactId: asContactId('contact-kruger-main'),
+    machineId: asMachineId('machine-kruger-vf2'),
+    scheduledDate: dateOffset(-30),
+    orderNumber: '',
+    referenceNumber: 'KRU-BRK-019',
+    faultDescription: 'Tool changer alarming intermittently on the DMG MORI.',
+    primaryTechnicianId: null,
+    createdAt: timeOffset(-32, 14),
+    createdBy: asUserId('user-master-johan'),
+    cancellation: {
+      reason: 'customer_resolved',
+      description:
+        'Customer found a loose connector on the tool-changer proximity switch and resolved it before dispatch.',
+      cancelledBy: asUserId('user-master-johan'),
+      cancelledAt: timeOffset(-31, 9, 20),
+    },
+  }),
+
+  // Ready to TRANSFER: accepted by Sipho with real work already captured, so a
+  // hand-over visibly carries the work with it rather than starting again.
+  job('EJE-1067', {
+    jobType: 'test_and_repair',
+    priority: 'high',
+    status: 'in_progress',
+    customerId: asCustomerId('cust-vaal'),
+    siteId: asSiteId('site-vaal-main'),
+    contactId: asContactId('contact-vaal-main'),
+    machineId: asMachineId('machine-vaal-tl2'),
+    scheduledDate: dateOffset(0),
+    orderNumber: 'PO-30288',
+    referenceNumber: 'VTS-TR-058',
+    faultDescription: 'Spindle drive fault on the Takisawa. Intermittent overcurrent trip.',
+    primaryTechnicianId: asUserId('user-tech-sipho'),
+    createdAt: timeOffset(-1, 8),
+    acceptedAt: timeOffset(0, 7, 20),
+    labour: [
+      {
+        id: asLineItemId('lab-1067-1'),
+        technicianId: asUserId('user-tech-sipho'),
+        date: dateOffset(0),
+        rateType: 'normal',
+        hours: 2,
+        description: 'Fault-finding on the spindle drive',
+        capturedAt: timeOffset(0, 9, 30),
+      },
+    ],
+    travel: [
+      {
+        id: asLineItemId('trv-1067-1'),
+        technicianId: asUserId('user-tech-sipho'),
+        date: dateOffset(0),
+        kilometres: 62,
+        description: 'Isando to Vereeniging',
+        capturedAt: timeOffset(0, 7, 40),
+      },
+    ],
+    parts: [
+      {
+        id: asLineItemId('prt-1067-1'),
+        partNumber: 'FUS-HRC-32',
+        description: 'HRC fuse, 32 A',
+        quantity: 3,
+        unitPrice: 18_500,
+        capturedAt: timeOffset(0, 10),
+      },
+    ],
+    notes: [
+      {
+        id: asLineItemId('note-1067-1'),
+        body: 'Customer needs the machine back before the weekend shift.',
+        internal: false,
+        authorId: asUserId('user-tech-sipho'),
+        createdAt: timeOffset(0, 9, 45),
+      },
+    ],
+    completionReport: {
+      faultFindings: 'Drive trips on overcurrent under load. Fuses intact.',
+      diagnosis: '',
+      workPerformed: '',
+      recommendations: '',
+      generalNotes: '',
+    },
+  }),
+
   // Parts — waiting to be collected. Gives the walkthrough a live parts job to
   // accept, capture and have signed for at the counter.
   job('EJE-1064', {

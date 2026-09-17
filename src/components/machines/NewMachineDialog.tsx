@@ -63,6 +63,9 @@ export const NewMachineDialog = ({
   const [installationDate, setInstallationDate] = useState(todayIso());
   const [controlSystem, setControlSystem] = useState('');
   const [notes, setNotes] = useState('');
+  const [photos, setPhotos] = useState<readonly { fileName: string; caption: string }[]>([]);
+  const [photoName, setPhotoName] = useState('');
+  const [photoCaption, setPhotoCaption] = useState('');
 
   const close = (): void => {
     operation.clearError();
@@ -83,6 +86,7 @@ export const NewMachineDialog = ({
         installationDate,
         controlSystem,
         notes,
+        photos: photos.map((photo) => ({ ...photo, sizeBytes: 1_840_000 })),
       });
       createdId = machine.id;
     });
@@ -194,6 +198,87 @@ export const NewMachineDialog = ({
             containerClassName="sm:col-span-2"
           />
         </div>
+
+        <div className="border-t border-steel-100 pt-4">
+          <p className="text-sm font-semibold text-steel-700">Photographs</p>
+          <p className="mt-0.5 text-xs text-steel-500">
+            The machine as found — rating plate, control cabinet, anything that identifies it.{' '}
+            <span className="font-medium">
+              Demo mode: no file is transferred. The record is created exactly as the production
+              uploader will create it.
+            </span>
+          </p>
+
+          {photos.length > 0 && (
+            <ul className="mt-3 divide-y divide-steel-100 rounded-[var(--radius-control)] border border-steel-200">
+              {photos.map((photo, index) => (
+                <li
+                  key={`${photo.fileName}-${index}`}
+                  className="flex items-center justify-between gap-3 px-3 py-2"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-xs text-steel-800">
+                      {photo.fileName}
+                    </span>
+                    {photo.caption.length > 0 && (
+                      <span className="block truncate text-xs text-steel-500">
+                        {photo.caption}
+                      </span>
+                    )}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      setPhotos((current) =>
+                        current.filter((_, position) => position !== index),
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <TextField
+              label="File name"
+              value={photoName}
+              onChange={(event) => setPhotoName(event.target.value)}
+              placeholder="mazak-qt200-rating-plate.jpg"
+              containerClassName="min-w-[14rem] flex-1"
+            />
+            <TextField
+              label="Caption"
+              value={photoCaption}
+              onChange={(event) => setPhotoCaption(event.target.value)}
+              placeholder="Rating plate"
+              containerClassName="min-w-[10rem] flex-1"
+            />
+            <Button
+              variant="secondary"
+              disabled={photoName.trim().length === 0}
+              onClick={() => {
+                setPhotos((current) => [
+                  ...current,
+                  { fileName: photoName.trim(), caption: photoCaption.trim() },
+                ]);
+                setPhotoName('');
+                setPhotoCaption('');
+              }}
+            >
+              Add photograph
+            </Button>
+          </div>
+        </div>
+
+        <p className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2.5 text-xs text-steel-600">
+          Technical documentation is not attached here. Manuals and diagrams go through the
+          Technical Library, where they are versioned and approved — a machine links to them by
+          manufacturer and model.
+        </p>
       </div>
     </Modal>
   );

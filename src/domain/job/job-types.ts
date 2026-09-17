@@ -27,6 +27,12 @@ export interface JobTypeDefinition {
    * EJE counter instead, so there is no site address worth sending them.
    */
   readonly visitsSite: boolean;
+  /**
+   * A customer order number must be recorded. Required on a parts collection,
+   * where the order number is what ties the goods to what the customer ordered
+   * and is how the collection note is reconciled against their purchase order.
+   */
+  readonly requiresOrderNumber: boolean;
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
   readonly accent: 'red' | 'blue' | 'green' | 'violet' | 'amber';
@@ -42,6 +48,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
     visitsSite: true,
+    requiresOrderNumber: false,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -54,6 +61,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
     visitsSite: true,
+    requiresOrderNumber: false,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -66,6 +74,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     schedulesDateRange: true,
     capturesLabourAndTravel: true,
     visitsSite: true,
+    requiresOrderNumber: false,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -80,6 +89,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     // No site visit, so nothing to charge for hours or distance.
     capturesLabourAndTravel: false,
     visitsSite: false,
+    requiresOrderNumber: true,
     defaultPriority: 'normal',
     accent: 'amber',
   },
@@ -93,6 +103,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
     visitsSite: true,
+    requiresOrderNumber: false,
     defaultPriority: 'normal',
     accent: 'violet',
   },

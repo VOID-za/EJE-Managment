@@ -20,6 +20,7 @@ import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system'
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
 import {
+  asLineItemId,
   PARTS_COLLECTION_DECLARATION,
   buildPartsDocument,
   checkReadyForSignature,
@@ -85,6 +86,7 @@ describe('the Parts job type', () => {
       jobType: 'parts' as const,
       parts: [],
       labour: [],
+      orderNumber: 'PO-88410',
       completionReport: {
         faultFindings: '',
         diagnosis: '',
@@ -103,6 +105,46 @@ describe('the Parts job type', () => {
     expect(readiness.violations.map((violation) => violation.code)).not.toContain(
       'labour_required',
     );
+  });
+
+  it('requires an order number before the collector signs', () => {
+    const withoutOrder = {
+      ...({} as Job),
+      jobType: 'parts' as const,
+      orderNumber: '   ',
+      parts: [
+        {
+          id: asLineItemId('p1'),
+          partNumber: 'FAN-24V-80',
+          description: 'Fan',
+          quantity: 1,
+          unitPrice: 48500,
+          capturedAt: '2026-09-17T10:00:00.000Z',
+        },
+      ],
+      labour: [],
+      completionReport: {
+        faultFindings: '',
+        diagnosis: '',
+        workPerformed: '',
+        recommendations: '',
+        generalNotes: '',
+      },
+      checklist: null,
+      photos: [],
+    } as unknown as Job;
+
+    const readiness = checkReadyForSignature(withoutOrder);
+    expect(readiness.allowed).toBe(false);
+    expect(readiness.violations.map((violation) => violation.code)).toContain(
+      'order_number_required',
+    );
+  });
+
+  it('requires an order number on parts jobs only', () => {
+    expect(getJobTypeDefinition('parts').requiresOrderNumber).toBe(true);
+    expect(getJobTypeDefinition('breakdown').requiresOrderNumber).toBe(false);
+    expect(getJobTypeDefinition('service').requiresOrderNumber).toBe(false);
   });
 });
 
@@ -192,5 +234,49 @@ describe('the courier collection document', () => {
     expect(issued.job.status).toBe('closed');
     expect(issued.emailedTo).toBe('buyer@kruger-demo.co.za');
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(1);
+  });
+});
+
+describe('the parts delivery note document', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = build();
+  });
+
+  it('issues a collection note rather than a job card', async () => {
+    const collected = await loadJob(harness, 'EJE-1062');
+    // EJE-1062 is closed, so re-open it to Master review to exercise issuing.
+    const inReview = await harness.repos.jobs.save({ ...collected, status: 'submitted' });
+
+    const issued = await submitJobCard(
+      harness.master,
+      inReview,
+      'buyer@abc-demo.co.za',
+      'ABC Engineering',
+    );
+    expect(issued.documentFileName).toContain('Parts-Collection-Note');
+    expect(issued.documentFileName).not.toContain('Job-Card');
+  });
+
+  it('titles a courier document a delivery note', async () => {
+    const courier = await loadJob(harness, 'EJE-1063');
+    const handed = await submitForMasterReview(harness.tech, courier);
+    const issued = await submitJobCard(
+      harness.master,
+      handed,
+      'buyer@kruger-demo.co.za',
+      'Kruger Engineering',
+    );
+    expect(issued.documentFileName).toContain('Delivery-Note');
+  });
+
+  it('emails the customer about a collection note, not a job card', async () => {
+    const courier = await loadJob(harness, 'EJE-1063');
+    const handed = await submitForMasterReview(harness.tech, courier);
+    await submitJobCard(harness.master, handed, 'buyer@kruger-demo.co.za', 'Kruger Engineering');
+
+    const email = harness.outbox.listSync().find((entry) => entry.channel === 'email');
+    expect(email?.subject).toContain('Delivery Note');
+    expect(email?.body).toContain('collection note');
   });
 });

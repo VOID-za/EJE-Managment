@@ -139,6 +139,11 @@ const NewJobPage = () => {
     if (faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
+    // On a parts collection the order number is what ties the goods to what the
+    // customer ordered, so it is not optional the way it is on a site visit.
+    if (definition.requiresOrderNumber && orderNumber.trim().length === 0) {
+      next.orderNumber = 'An order number is required for a parts collection.';
+    }
 
     // Service work is booked across a range, so the dates have to make sense.
     const scheduleViolations = checkSchedule(
@@ -429,9 +434,16 @@ const NewJobPage = () => {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TextField
                   label="Customer order number"
+                  required={definition.requiresOrderNumber}
                   value={orderNumber}
                   onChange={(event) => setOrderNumber(event.target.value)}
+                  error={errors.orderNumber}
                   placeholder="e.g. PO-88123"
+                  hint={
+                    definition.requiresOrderNumber
+                      ? 'Printed on the collection note and used to reconcile against the customer’s order.'
+                      : undefined
+                  }
                 />
                 <TextField
                   label="Reference number"

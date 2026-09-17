@@ -22,4 +22,20 @@ export class SimulatedPdfService implements PdfService {
       simulated: true,
     });
   }
+
+  generatePartsNote(job: Job): Promise<GeneratedPdf> {
+    // A courier's copy is titled a delivery note and carries no prices; the
+    // customer's own collection note does. The file name says which, so the
+    // wrong one cannot be sent without somebody noticing.
+    const kind = job.courierCollection ? 'Delivery-Note' : 'Parts-Collection-Note';
+    return Promise.resolve({
+      storageKey: `partsnotes/${job.jobNumber}.pdf`,
+      fileName: `${job.jobNumber}-${kind}.pdf`,
+      // One page: a parts note is a list of goods and a signature, never a
+      // checklist or a write-up.
+      pageCount: 1,
+      generatedAt: this.clock.now(),
+      simulated: true,
+    });
+  }
 }

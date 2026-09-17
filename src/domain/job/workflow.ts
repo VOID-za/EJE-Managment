@@ -246,6 +246,13 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
         message: 'At least one part line is required before the collector signs.',
       });
     }
+    if (definition.requiresOrderNumber && job.orderNumber.trim().length === 0) {
+      violations.push({
+        code: 'order_number_required',
+        message:
+          'An order number is required: it is what ties these goods to the customer’s order.',
+      });
+    }
     return violations.length === 0 ? ok : blocked(violations);
   }
 

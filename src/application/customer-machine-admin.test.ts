@@ -228,6 +228,27 @@ describe('duplicate serial protection', () => {
     expect(saved.notes).toBe('Under warranty.');
   });
 
+  it('attaches photographs captured with the machine', async () => {
+    const machine = await createMachine(harness.as(sipho), {
+      ...NEW_MACHINE,
+      photos: [
+        { fileName: 'mazak-qt200-plate.jpg', caption: 'Rating plate', sizeBytes: 1_840_000 },
+        { fileName: 'mazak-qt200-cabinet.jpg', caption: 'Control cabinet', sizeBytes: 1_640_000 },
+      ],
+    });
+
+    expect(machine.photos).toHaveLength(2);
+    expect(machine.photos[0]?.caption).toBe('Rating plate');
+    expect(machine.photos[0]?.kind).toBe('photo');
+    // The storage key is the shape the production uploader will produce, so the
+    // model does not change when real uploads arrive.
+    expect(machine.photos[0]?.storageKey.length).toBeGreaterThan(0);
+    expect(machine.photos[0]?.uploadedBy).toBe(sipho.id);
+
+    const stored = await harness.repos.machines.findById(machine.id);
+    expect(stored?.photos).toHaveLength(2);
+  });
+
   it('refuses a machine with no serial number', async () => {
     await expect(
       createMachine(harness.as(elmarie), { ...NEW_MACHINE, serialNumber: '' }),

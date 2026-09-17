@@ -69,6 +69,16 @@ export interface PdfService {
    * renders the same model server-side into a real PDF.
    */
   generateJobCard(job: Job): Promise<GeneratedPdf>;
+  /**
+   * Produces the parts collection note / courier delivery note.
+   *
+   * A separate method rather than a flag, because it is a different document:
+   * different layout, different declaration, and — for a courier — different
+   * content, since prices are withheld. Production will render it from the same
+   * `buildPartsDocument` model the preview uses, so the courier's copy cannot
+   * disagree with what was shown on screen.
+   */
+  generatePartsNote(job: Job): Promise<GeneratedPdf>;
 }
 
 export interface StoredFile {

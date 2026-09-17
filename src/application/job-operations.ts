@@ -902,8 +902,21 @@ export const startSignature = async (context: OperationContext, job: Job): Promi
   return context.repos.jobs.save({ ...job, status: 'customer_signature' });
 };
 
+/**
+ * The customer-facing document for this job type.
+ *
+ * A parts collection produces a collection note, not a job card — a different
+ * document with a different layout and, for a courier, different content. The
+ * choice is made from the job type in one place so no caller can generate the
+ * wrong one.
+ */
+const generateCustomerDocument = (context: OperationContext, job: Job) =>
+  job.jobType === 'parts'
+    ? context.services.pdf.generatePartsNote(job)
+    : context.services.pdf.generateJobCard(job);
+
 export const generateJobCardDocument = async (context: OperationContext, job: Job) => {
-  const generated = await context.services.pdf.generateJobCard(job);
+  const generated = await generateCustomerDocument(context, job);
   await audit(context, {
     jobId: job.id,
     type: 'pdf_generated',
@@ -1039,7 +1052,7 @@ export const submitJobCard = async (
   const finalJob: Job = { ...job, pricingSnapshot: snapshot };
 
   // The final document is generated here, from the job as the Master approved it.
-  const document = await context.services.pdf.generateJobCard(finalJob);
+  const document = await generateCustomerDocument(context, finalJob);
 
   const closed = await context.repos.jobs.save({
     ...finalJob,
@@ -1058,10 +1071,15 @@ export const submitJobCard = async (
 
   await context.services.email.send({
     to: [customerEmail],
-    subject: `${job.jobNumber} — Signed Job Card — ${getJobTypeDefinition(job.jobType).label}`,
+    subject:
+      job.jobType === 'parts'
+        ? `${job.jobNumber} — ${job.courierCollection ? 'Delivery Note' : 'Parts Collection Note'}`
+        : `${job.jobNumber} — Signed Job Card — ${getJobTypeDefinition(job.jobType).label}`,
     body:
       `Good day ${customerDisplayName},\n\n` +
-      `Please find attached the signed job card for ${job.jobNumber}.\n\n` +
+      (job.jobType === 'parts'
+        ? `Please find attached the signed collection note for ${job.jobNumber}.\n\n`
+        : `Please find attached the signed job card for ${job.jobNumber}.\n\n`) +
       `Kind regards\nEJE Industrial Electronics`,
     attachments: [{ fileName: document.fileName, storageKey: document.storageKey }],
   });

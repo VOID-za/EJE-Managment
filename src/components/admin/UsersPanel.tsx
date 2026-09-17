@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   activeUsers,
@@ -79,13 +80,13 @@ export const UsersPanel = ({
       key: 'name',
       header: 'User',
       render: (row) => (
-        <div className="flex items-center gap-3">
+        <Link href={`/technicians/${row.id}`} className="flex items-center gap-3 hover:underline">
           <Avatar initials={row.initials} size="md" />
           <div className="min-w-0">
             <p className="truncate font-semibold text-steel-900">{userFullName(row)}</p>
             <p className="truncate text-xs text-steel-500">{row.jobTitle}</p>
           </div>
-        </div>
+        </Link>
       ),
     },
     {
@@ -117,6 +118,13 @@ export const UsersPanel = ({
         }
         return (
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {row.role !== 'master' && (
+              <Link href={`/technicians/${row.id}`}>
+                <Button size="sm" variant="ghost">
+                  Availability
+                </Button>
+              </Link>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -146,7 +154,7 @@ export const UsersPanel = ({
     <div className="space-y-4">
       <AdminNotice
         title="User management"
-        body="Masters add users, set roles, disable leavers and reactivate returners. A Master cannot edit another Master — those accounts show no controls. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work."
+        body="Masters add users, set roles, disable leavers and reactivate returners. A Master cannot edit another Master — those accounts show no controls. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work. Open a technician to record their availability."
       />
 
       {operation.error !== null && (

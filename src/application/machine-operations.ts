@@ -1,10 +1,12 @@
 import {
   approvalForNewMachine,
+  asAttachmentId,
   asMachineId,
   can,
   findSerialClash,
   machineDisplayName,
   userFullName,
+  type Attachment,
   type CustomerId,
   type Machine,
   type MachineType,
@@ -34,6 +36,21 @@ export interface NewMachineInput {
   readonly installationDate: string;
   readonly controlSystem: string;
   readonly notes: string;
+  /**
+   * Photographs of the machine as found.
+   *
+   * Demo note: no file is transferred. Each entry becomes an attachment record
+   * with the storage key the production uploader will produce, which is what
+   * the machine screen renders, so the model does not change when real uploads
+   * arrive.
+   */
+  readonly photos?: readonly MachinePhotoInput[];
+}
+
+export interface MachinePhotoInput {
+  readonly fileName: string;
+  readonly caption: string;
+  readonly sizeBytes: number;
 }
 
 const required = (value: string, code: string, message: string): string => {
@@ -73,6 +90,21 @@ export const createMachine = async (
   const approval = approvalForNewMachine(context.actor.role);
   const now = context.services.clock.now();
 
+  const photos: Attachment[] = [];
+  for (const photo of input.photos ?? []) {
+    const stored = await context.services.storage.put(photo.fileName, 'image/jpeg', null);
+    photos.push({
+      id: asAttachmentId(context.services.ids.next('att')),
+      kind: 'photo',
+      fileName: photo.fileName,
+      caption: photo.caption,
+      storageKey: stored.storageKey,
+      uploadedAt: context.services.clock.now(),
+      uploadedBy: context.actor.id,
+      sizeBytes: photo.sizeBytes,
+    });
+  }
+
   const machine: Machine = {
     id: asMachineId(context.services.ids.next('machine')),
     customerId: input.customerId,
@@ -85,7 +117,7 @@ export const createMachine = async (
     installationDate: input.installationDate,
     controlSystem: input.controlSystem.trim(),
     notes: input.notes.trim(),
-    photos: [],
+    photos,
     active: true,
     approval,
     createdBy: context.actor.id,
@@ -102,6 +134,9 @@ export const createMachine = async (
     summary: `Machine added: ${machineDisplayName(saved)}`,
     detail:
       `Serial ${saved.serialNumber}. ` +
+      (saved.photos.length > 0
+        ? `${saved.photos.length} ${saved.photos.length === 1 ? 'photograph' : 'photographs'} attached. `
+        : '') +
       (approval === 'approved'
         ? 'Added directly to the official register by the office.'
         : 'Added on site and awaiting Master approval.'),
