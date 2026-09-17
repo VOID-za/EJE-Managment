@@ -72,7 +72,16 @@ const createRuntime = (): Runtime => {
       email: new SimulatedEmailService(simulatedOutbox, clock, ids),
       whatsapp: new SimulatedWhatsAppService(simulatedOutbox, clock, ids),
       pdf: new SimulatedPdfService(clock),
-      storage: new SimulatedStorageService(),
+      // The demo's disk: a closed job's final document is kept in the persisted
+      // snapshot, so a download hands back the file that was issued.
+      storage: new SimulatedStorageService({
+        get: (storageKey) => store.read().files[storageKey],
+        set: (storageKey, record) => {
+          store.commit((draft) => {
+            draft.files[storageKey] = record;
+          });
+        },
+      }),
     },
   };
 };

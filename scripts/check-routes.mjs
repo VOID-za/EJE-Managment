@@ -36,7 +36,7 @@ const MATRIX = [
   { url: '/jobs/EJE-1053/sign', role: 'Technician', status: 'completion', purpose: 'Customer signature, checklist gate' },
   { url: '/jobs/EJE-1055/review', role: 'Master', status: 'submitted', purpose: 'Master Review' },
   { url: '/jobs/EJE-1056/review', role: 'Master', status: 'closed', purpose: 'Final job card, read-only' },
-  { url: '/jobs/EJE-1044/review?print=1', role: 'Master', status: 'closed', purpose: 'Download Final PDF' },
+  { url: '/jobs/EJE-1044/review', role: 'Master', status: 'closed', purpose: 'View Final PDF' },
   { url: '/messages', role: 'Master / Technician', status: 'any', purpose: 'Two-way chat' },
   { url: '/notifications', role: 'Master / Technician', status: 'any', purpose: 'Notification centre' },
   { url: '/notifications?tab=outbox', role: 'Master / Technician', status: 'any', purpose: 'Simulated Outbox' },

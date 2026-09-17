@@ -1,9 +1,14 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useCallback, useState } from 'react';
 import { getJobTypeDefinition, userFullName, type Job, type User } from '@/domain';
+import { loadFinalDocumentFile } from '@/application/final-document';
 import { Badge, Button, Card, CardHeader, DefinitionGrid, Icon } from '@/components/ui';
+import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { downloadBytes } from '@/lib/download';
 import { formatDateTime } from '@/lib/format';
+import { useOperation } from '@/hooks/useOperation';
 
 /**
  * The official final job card on a closed job.
@@ -15,10 +20,12 @@ import { formatDateTime } from '@/lib/format';
  * job card — a later rate change, part price or checklist revision cannot reach
  * it.
  *
- * Demo note, stated on the card itself: no file is rendered server-side.
- * "Download" prints the same document component the production renderer will
- * consume, so the output is a real PDF with the stored filename rather than a
- * placeholder.
+ * View and Download are deliberately DIFFERENT actions:
+ *
+ * - View opens the document on screen, in the review page's viewer.
+ * - Download retrieves the stored file and writes it to the device. It does not
+ *   print, does not open a print dialog and does not render a new document: it
+ *   reads back the bytes written when the Master issued the job card.
  */
 export const FinalDocumentCard = ({
   job,
@@ -28,8 +35,25 @@ export const FinalDocumentCard = ({
   readonly users: readonly User[];
 }) => {
   const router = useRouter();
+  const operation = useOperation();
+  const [downloaded, setDownloaded] = useState(false);
   const document = job.finalDocument;
   const label = getJobTypeDefinition(job.jobType).label;
+
+  /**
+   * Download: storage -> device. No print dialog, no re-render.
+   *
+   * Resolved by job number through the application layer, so the only file this
+   * can ever fetch is the one recorded on this job.
+   */
+  const download = useCallback(async () => {
+    setDownloaded(false);
+    const ok = await operation.run(async (context) => {
+      const file = await loadFinalDocumentFile(context, job.jobNumber);
+      downloadBytes(file.bytes, file.fileName, file.contentType);
+    });
+    if (ok) setDownloaded(true);
+  }, [operation, job.jobNumber]);
 
   const issuedBy =
     document === null
@@ -82,30 +106,48 @@ export const FinalDocumentCard = ({
         ]}
       />
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-verdant-200 pt-4">
+      {operation.error !== null && (
+        <div className="mt-4">
+          <RuleViolationNotice
+            title="The final job card could not be opened"
+            message={operation.error}
+            violations={operation.violations}
+          />
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-verdant-200 pt-4">
+        {/* View: show it on screen. */}
         <Button
           leadingIcon={<Icon name="document" className="size-5" />}
           onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
         >
           View Final PDF
         </Button>
+        {/* Download: write the stored file to the device. Never prints. */}
         <Button
           variant="secondary"
           leadingIcon={<Icon name="download" className="size-5" />}
-          // Straight to the document with print open, so Download and View show
-          // the same thing and the saved file carries the stored filename.
-          onClick={() => router.push(`/jobs/${job.jobNumber}/review?print=1`)}
+          onClick={download}
+          loading={operation.running}
         >
           Download Final PDF
         </Button>
+        {downloaded && (
+          <span className="text-xs font-medium text-verdant-700">
+            <Icon name="check" className="mr-1 inline size-3.5" />
+            {document.fileName} downloaded
+          </span>
+        )}
       </div>
 
       {document.simulated && (
         <p className="mt-3 text-xs text-amber-eje-700">
-          Demonstration build: no file is rendered on a server. Download prints the document below
-          to PDF through the browser, using the stored filename{' '}
-          <span className="font-mono">{document.fileName}</span>. Production renders the same
-          model server-side.
+          Demonstration build: the PDF is rendered by this application rather than by a server, and
+          was written to storage once, when the job card was issued. Download returns that stored
+          file as <span className="font-mono">{document.fileName}</span> — it does not build a new
+          one. In production the same document is rendered server-side and served from object
+          storage.
         </p>
       )}
     </Card>

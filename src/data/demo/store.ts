@@ -60,8 +60,23 @@ export interface DemoDatabase {
   conversations: Conversation[];
   chatMessages: ChatMessage[];
   settings: SystemSettings;
+  /**
+   * Stored files, keyed by storage key — the demo's disk.
+   *
+   * Holds the bytes of a closed job's final document so a download returns the
+   * exact file that was issued rather than rendering a new one. Base64 because
+   * the snapshot is JSON in `localStorage`; Phase 2 replaces this with VPS disk
+   * and then object storage, behind the same `StorageService` port.
+   */
+  files: Record<string, StoredFileRecord>;
   favouriteDocuments: Record<string, string[]>;
   recentDocuments: Record<string, string[]>;
+}
+
+export interface StoredFileRecord {
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly base64: string;
 }
 
 export const STORAGE_KEY = 'eje.demo.database.v1';
@@ -79,8 +94,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * added technician messages, and gave jobs cancellation and soft deletion.
  * v6 turned one-way technician messages into two-way conversations, gave
  * notifications an explicit link, and stored the final document on a closed job.
+ * v7 added `files`: the stored BYTES of a final document, so downloading a
+ * closed job's job card returns the issued file instead of rendering one.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -99,6 +116,10 @@ export const createSeededDatabase = (): DemoDatabase => ({
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
   availability: seedAvailability.map((record) => ({ ...record })),
+  // Empty: seeded closed jobs have their file written on first access, since a
+  // seed cannot ship binary content. Jobs closed in a session get theirs at
+  // the moment the Master issues them.
+  files: {},
   conversations: seedConversations.map((conversation) => ({ ...conversation })),
   chatMessages: seedChatMessages.map((message) => ({ ...message })),
   settings: { ...seedSettings },

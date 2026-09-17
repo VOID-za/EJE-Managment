@@ -95,13 +95,23 @@ same way: the job stores what it was judged against, and the read path uses it.
   silent fallback would be worse than an honest gap.
 - A `FinalDocument` is written onto the job at the one moment a Master issues it
   (`submitJobCard`), recording the file name, page count, who issued it, when,
-  and the address it went to. Every read path — the closed-job screen and the
-  review screen — *derives* from that record. Nothing regenerates a closed job's
-  document: regenerating would imply it could change, and would append a
-  `pdf_generated` audit entry every time somebody merely looked at old
-  paperwork. The final copy is produced with `PdfVariant: 'final'`, which gives
-  it its own storage key and a file name that says it is final, so a working
-  preview can never overwrite what the customer received.
+  and the address it went to — and the PDF **bytes are rendered once, there, and
+  written to storage** under that record's key. Every read path — the closed-job
+  screen, the review screen, and `Download Final PDF` — reads that record or
+  those bytes. Nothing regenerates a closed job's document: regenerating would
+  imply it could change, and would append a `pdf_generated` audit entry every
+  time somebody merely looked at old paperwork. The final copy is produced with
+  `PdfVariant: 'final'`, which gives it its own storage key and a file name that
+  says it is final, so a working preview can never overwrite what the customer
+  received.
+
+  `loadFinalDocumentFile` is the one way to obtain the file. It takes a **job
+  number**, never a storage key, so a caller can only ever be handed the
+  document recorded on that job; it applies the same access rule as seeing the
+  job itself; and it writes no audit event, because reading is not an event. The
+  PDF is produced by the first-party writer in `src/lib/pdf`, from the same
+  domain functions the on-screen job card uses, so the figures on the file a
+  customer keeps cannot disagree with the figures they were shown.
 
 Together these three mean a closed job card is fixed: a later rate change, part
 price or checklist revision cannot reach it. `src/application/closed-jobs.test.ts`
@@ -224,8 +234,9 @@ change there and nowhere else.
 | Auth | User picker | Session auth, hashed credentials |
 | Email | `SimulatedEmailService` | Microsoft 365 Graph |
 | WhatsApp | `SimulatedWhatsAppService` | WhatsApp Business Platform |
-| PDF | Descriptor + live preview | Server-side renderer, same model |
-| Storage | Placeholder keys | VPS disk, then S3-compatible |
+| PDF | First-party renderer in the browser | Same renderer, same model, server-side |
+| Storage | Bytes in the persisted snapshot | VPS disk, then S3-compatible |
+| Document download | Stored bytes → `Blob` + `download` | `GET` with `Content-Disposition: attachment` |
 | Offline | Browser storage | IndexedDB + service worker + sync engine |
 | Job types, checklists, rates | Seeded constants | Master-editable tables |
 | Theme | `data-theme` + localStorage | Unchanged; optionally stored per user |

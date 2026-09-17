@@ -55,6 +55,7 @@ const jobPhoto = (
  */
 const finalJobCard = (
   jobNumber: string,
+  /** The real page count of the rendered file, measured, not estimated. */
   pageCount: number,
   generatedAt: IsoDateTime,
   issuedTo: string,
@@ -586,7 +587,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-21, 12, 20),
     closedAt: timeOffset(-21, 12, 20),
     pricingSnapshot: ratesAt(timeOffset(-21, 12, 10), 84000, 74000),
-    finalDocument: finalJobCard('EJE-1056', 2, timeOffset(-21, 12, 20), 'pieter.nel@abc-engineering-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1056', 1, timeOffset(-21, 12, 20), 'pieter.nel@abc-engineering-demo.co.za'),
     travel: [
       {
         id: asLineItemId('trv-1056-1'),
@@ -654,7 +655,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-38, 13, 15),
     closedAt: timeOffset(-38, 13, 15),
     pricingSnapshot: ratesAt(timeOffset(-38, 13, 5), 83000, 73000),
-    finalDocument: finalJobCard('EJE-1057', 2, timeOffset(-38, 13, 15), 'hennie@krugerprecision-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1057', 1, timeOffset(-38, 13, 15), 'hennie@krugerprecision-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1057-1'),
@@ -1062,7 +1063,7 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-180, 12, 30),
     submittedAt: timeOffset(-180, 12, 45),
     closedAt: timeOffset(-180, 12, 45),
-    finalDocument: finalJobCard('EJE-1044', 3, timeOffset(-180, 12, 45), 'pieter.nel@abc-engineering-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1044', 2, timeOffset(-180, 12, 45), 'pieter.nel@abc-engineering-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1044-1'),
@@ -1186,7 +1187,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-140, 16, 30),
     closedAt: timeOffset(-140, 16, 30),
     pricingSnapshot: ratesAt(timeOffset(-140, 16, 10), 80000, 70000),
-    finalDocument: finalJobCard('EJE-1039', 3, timeOffset(-140, 16, 30), 'gerhard.smit@midrandautomation-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1039', 1, timeOffset(-140, 16, 30), 'gerhard.smit@midrandautomation-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1039-1'),

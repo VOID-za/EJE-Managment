@@ -18,14 +18,17 @@
  *   npm run e2e
  *   EJE_E2E_URL=http://localhost:3000 npm run e2e
  */
+import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = process.env.EJE_E2E_URL ?? 'http://localhost:3000';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
 
 const failures = [];
+/** The first downloaded final document, so later steps can compare against it. */
+let downloadedBytes = null;
 const browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
 
 const pageErrors = [];
 page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -300,13 +303,110 @@ await step('View Final PDF loads the stored document, not a 404', async () => {
   await page.getByText('Issued and closed').waitFor({ timeout: 10000 });
 });
 
-await step('Download Final PDF reaches the same document without a 404', async () => {
-  // The print dialog is suppressed; what matters is that the route resolves.
-  await page.addInitScript(() => {
-    window.print = () => undefined;
+await step('Download Final PDF downloads a real PDF, and never opens a print dialog', async () => {
+  await visit('/jobs/EJE-1065');
+  await page.getByText('Final signed job card').waitFor({ timeout: 15000 });
+
+  // If the handler called window.print() the browser would raise a print
+  // dialog, which Playwright cannot dismiss — so it is recorded and asserted
+  // against instead of being stubbed away.
+  await page.evaluate(() => {
+    window.__ejePrintCalls = 0;
+    const original = window.print;
+    window.print = () => {
+      window.__ejePrintCalls += 1;
+      return original === undefined ? undefined : undefined;
+    };
   });
-  await visit('/jobs/EJE-1065/review?print=1');
-  await page.getByText('EJE-1065-Final-Job-Card.pdf').first().waitFor({ timeout: 15000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 20000 }),
+    page.getByRole('button', { name: 'Download Final PDF' }).click(),
+  ]);
+
+  // The exact name stored on the job's FinalDocument.
+  if (download.suggestedFilename() !== 'EJE-1065-Final-Job-Card.pdf') {
+    throw new Error(`downloaded as ${download.suggestedFilename()}`);
+  }
+
+  const path = await download.path();
+  if (path === null) throw new Error('the download produced no file');
+  const bytes = readFileSync(path);
+  const head = bytes.subarray(0, 5).toString('latin1');
+  if (head !== '%PDF-') throw new Error(`the downloaded file starts with ${JSON.stringify(head)}`);
+  if (!bytes.subarray(-32).toString('latin1').includes('%%EOF')) {
+    throw new Error('the downloaded PDF has no EOF marker');
+  }
+  if (bytes.length < 1000) throw new Error(`the downloaded PDF is only ${bytes.length} bytes`);
+  // Not an HTML page wearing a .pdf name.
+  const text = bytes.toString('latin1');
+  if (text.includes('<html') || text.includes('<!DOCTYPE')) {
+    throw new Error('the download is HTML, not a PDF');
+  }
+  if (!text.includes('EJE-1065') || !text.includes('EJE INDUSTRIAL ELECTRONICS')) {
+    throw new Error('the downloaded PDF does not carry this job card');
+  }
+
+  const printCalls = await page.evaluate(() => window.__ejePrintCalls);
+  if (printCalls !== 0) throw new Error(`Download called window.print() ${printCalls} time(s)`);
+
+  downloadedBytes = bytes;
+});
+
+await step('downloading again returns the identical file, not a new one', async () => {
+  const [again] = await Promise.all([
+    page.waitForEvent('download', { timeout: 20000 }),
+    page.getByRole('button', { name: 'Download Final PDF' }).click(),
+  ]);
+  const path = await again.path();
+  const bytes = readFileSync(path);
+
+  if (again.suggestedFilename() !== 'EJE-1065-Final-Job-Card.pdf') {
+    throw new Error(`the second download was named ${again.suggestedFilename()}`);
+  }
+  if (!bytes.equals(downloadedBytes)) {
+    throw new Error('a second download produced different bytes');
+  }
+});
+
+await step('a rate change does not alter the downloaded document', async () => {
+  await visit('/admin');
+  await page.getByRole('tab', { name: 'Rates & VAT' }).click();
+  const normal = page.getByLabel('Normal Time');
+  await normal.waitFor({ timeout: 15000 });
+  await normal.fill('2500.00');
+  await page.getByRole('button', { name: 'Save rates' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Update rates' }).click();
+  await page.getByText('Saved', { exact: true }).first().waitFor({ timeout: 15000 });
+
+  await visit('/jobs/EJE-1065');
+  await page.getByText('Final signed job card').waitFor({ timeout: 15000 });
+  const [after] = await Promise.all([
+    page.waitForEvent('download', { timeout: 20000 }),
+    page.getByRole('button', { name: 'Download Final PDF' }).click(),
+  ]);
+  const bytes = readFileSync(await after.path());
+  if (!bytes.equals(downloadedBytes)) {
+    throw new Error('a rate change altered the issued document');
+  }
+
+  // Put the demo rates back.
+  await visit('/admin');
+  await page.getByRole('tab', { name: 'Rates & VAT' }).click();
+  await page.getByLabel('Normal Time').fill('950.00');
+  await page.getByRole('button', { name: 'Save rates' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Update rates' }).click();
+  await page.getByText('Saved', { exact: true }).first().waitFor({ timeout: 15000 });
+});
+
+await step('downloading did not email the customer again', async () => {
+  await visit('/notifications?tab=outbox');
+  const emails = await page.getByText('EJE-1065-Final-Job-Card.pdf').count();
+  if (emails !== 1) {
+    throw new Error(`the final job card has been emailed ${emails} times, expected 1`);
+  }
 });
 
 await step('the closed job is read-only, and its signature survived', async () => {

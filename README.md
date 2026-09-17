@@ -377,13 +377,23 @@ blocks the Phase 2 architecture; each is a contained change.
   filters in the application layer and caps its result at 50 rows, telling you
   how many matched in total rather than implying the rest does not exist;
   `loadClosedJobs` becomes one API call in Phase 2 without the screen changing.
-- **No file is produced for a final PDF.** A closed job stores the real
-  descriptor of its final document — file name, page count, storage key, who
-  issued it, when, and where it was emailed — and that record is never
-  regenerated, so the same document comes back every time. But nothing is
-  rendered server-side in the demo: *Download Final PDF* prints the same
-  `JobCardDocument` component the production renderer will consume, through the
-  browser, under the stored file name. The card says so on screen.
+- **The final PDF is rendered in the browser, not on a server.** A closed job's
+  job card is a real PDF: rendered once, when the Master issues it, by the
+  first-party writer in `src/lib/pdf`, and written to storage under the key on
+  `job.finalDocument`. *Download Final PDF* reads those exact bytes back, so
+  every download of a given job is byte-identical and a later rate, price or
+  checklist change cannot reach it. What is *not* production-shaped is the
+  delivery: the demo persists its data in the browser, so there is no server
+  that holds the file and therefore no HTTP `Content-Disposition: attachment`
+  response — the download is made from the stored bytes in the page. In
+  production `StorageService.getDocument` becomes a disk or object-store read
+  behind a download route, and no calling code changes.
+- **Seeded closed jobs have their file written on first access.** A seed cannot
+  ship binary content, so the five jobs closed before the demonstration began
+  have no bytes until someone first opens their document. That render is a
+  one-time backfill from the job's own frozen record — snapshot pricing, the
+  checklist version recorded on the job, the captured signature — and is written
+  to storage, so every download after it returns the same file.
 - **Conversations are one-to-one or office-wide, with no attachments.** A
   technician writes to "the office" (every active Master) or a Master writes to
   one technician; there is no arbitrary group thread, no photo or file on a

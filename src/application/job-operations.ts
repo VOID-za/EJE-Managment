@@ -41,6 +41,8 @@ import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
 import { audit, notify, notifyMasters } from './audit';
+import { storeFinalDocument } from './final-document';
+import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
 
 /**
@@ -1071,10 +1073,31 @@ export const submitJobCard = async (
 
   const finalJob: Job = { ...job, pricingSnapshot: snapshot };
 
-  // The final document is generated here, from the job as the Master approved
-  // it, and STORED on the job. A closed job must always produce the same
-  // official job card, so this is written once and never recomputed.
+  // The final document is produced here, from the job as the Master approved
+  // it. This is the ONE moment it is rendered: the bytes go to storage under
+  // the key recorded on the job, and every later view or download reads them
+  // back. A closed job must always hand over the same official job card.
   const document = await generateCustomerDocument(context, finalJob, 'final');
+
+  const view = await loadJobView(context.repos, job.jobNumber);
+  if (view === null) {
+    throw new WorkflowError(`${job.jobNumber} could not be read for issue.`, []);
+  }
+  const pageCount = await storeFinalDocument(
+    context,
+    finalJob,
+    { storageKey: document.storageKey, fileName: document.fileName },
+    {
+      job: finalJob,
+      customer: view.customer,
+      site: view.site,
+      contact: view.contact,
+      machine: view.machine,
+      settings: view.settings,
+      checklistTemplate: view.checklistTemplate,
+      users: view.users,
+    },
+  );
 
   const closed = await context.repos.jobs.save({
     ...finalJob,
@@ -1085,7 +1108,9 @@ export const submitJobCard = async (
     finalDocument: {
       fileName: document.fileName,
       storageKey: document.storageKey,
-      pageCount: document.pageCount,
+      // The page count of the file that actually exists, from the renderer —
+      // not an estimate, since the card shows this number next to the file.
+      pageCount,
       generatedAt: document.generatedAt,
       generatedBy: context.actor.id,
       simulated: document.simulated,
@@ -1097,7 +1122,7 @@ export const submitJobCard = async (
     jobId: job.id,
     type: 'pdf_generated',
     summary: 'Final job card document generated',
-    detail: `${document.fileName} (${document.pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
+    detail: `${document.fileName} (${pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
   });
 
   await context.services.email.send({

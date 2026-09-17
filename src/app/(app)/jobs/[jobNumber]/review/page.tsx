@@ -1,13 +1,14 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
-import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { use, useCallback, useEffect, useState } from 'react';
 import { contactFullName } from '@/domain';
 import {
   generateJobCardDocument,
   submitForMasterReview,
   submitJobCard,
 } from '@/application/job-operations';
+import { loadFinalDocumentFile } from '@/application/final-document';
 import { loadJobView } from '@/application/job-view';
 import type { GeneratedPdf } from '@/services/ports';
 import {
@@ -23,6 +24,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/cn';
+import { downloadBytes } from '@/lib/download';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
 import { PartsCollectionNote } from '@/components/jobs/PartsCollectionNote';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
@@ -43,7 +45,6 @@ const ReviewJobPage = ({
   readonly params: Promise<{ readonly jobNumber: string }>;
 }) => {
   const { jobNumber } = use(params);
-  const searchParams = useSearchParams();
   const router = useRouter();
   const operation = useOperation();
   const { operationContext } = useApp();
@@ -94,35 +95,18 @@ const ReviewJobPage = ({
   /**
    * Download the final job card.
    *
-   * The demo renders no file on a server, so this prints the document below —
-   * the same component the production renderer consumes — and names the output
-   * after the stored file name, so repeated downloads give the same filename
-   * rather than a new one each time.
+   * Retrieves the STORED file — the bytes written when the Master issued it —
+   * and writes it to the device under its recorded name. Deliberately not
+   * `window.print()`: a print dialog is not a download, it depends on the
+   * viewer choosing "Save as PDF", and what it produces is a fresh rendering of
+   * the current page rather than the document that was issued.
    */
-  const downloadFinal = useCallback(() => {
-    // The stored name is the authority. The fallback only ever applies to a job
-    // that has not been issued yet, and still has to name the right document.
-    const fallback =
-      view?.job.jobType === 'parts'
-        ? `${jobNumber}-Parts-Collection-Note.pdf`
-        : `${jobNumber}-Job-Card.pdf`;
-    const fileName = storedFinal?.fileName ?? fallback;
-    const previousTitle = window.document.title;
-    window.document.title = fileName.replace(/\.pdf$/i, '');
-    window.print();
-    window.document.title = previousTitle;
-  }, [storedFinal, jobNumber, view]);
-
-  // Arriving from "Download Final PDF" opens the print dialog once the document
-  // has rendered, so View and Download land on the same page.
-  const printRequested = searchParams.get('print') === '1';
-  const printedRef = useRef(false);
-  useEffect(() => {
-    if (!printRequested || view === null || printedRef.current) return;
-    printedRef.current = true;
-    const timer = window.setTimeout(downloadFinal, 400);
-    return () => window.clearTimeout(timer);
-  }, [printRequested, view, downloadFinal]);
+  const downloadFinal = useCallback(async () => {
+    await operation.run(async (context) => {
+      const file = await loadFinalDocumentFile(context, jobNumber);
+      downloadBytes(file.bytes, file.fileName, file.contentType);
+    });
+  }, [operation, jobNumber]);
 
   if (viewQuery.error !== null) {
     return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;
@@ -311,6 +295,7 @@ const ReviewJobPage = ({
             <Button
               leadingIcon={<Icon name="download" className="size-5" />}
               onClick={downloadFinal}
+              loading={operation.running}
             >
               Download Final PDF
             </Button>
