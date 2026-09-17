@@ -1,0 +1,159 @@
+@import 'tailwindcss';
+
+/*
+ * ===========================================================================
+ * EJE DESIGN SYSTEM — DESIGN TOKENS
+ * ===========================================================================
+ *
+ * Every colour, radius and shadow used by the application is declared here as
+ * a token. Components reference tokens, never raw hex values, so the system can
+ * be re-skinned (or given a dark field mode) from this one file.
+ *
+ * The palette is deliberately industrial: a graphite/steel neutral ramp, a
+ * single confident blue for interactive intent, and an unambiguous status set
+ * where amber always means "waiting" and red always means "urgent or failed".
+ */
+
+@theme {
+  /* --- Neutral ramp: graphite & steel ----------------------------------- */
+  --color-steel-25: oklch(0.99 0.002 250);
+  --color-steel-50: oklch(0.975 0.004 250);
+  --color-steel-100: oklch(0.955 0.006 250);
+  --color-steel-200: oklch(0.91 0.008 250);
+  --color-steel-300: oklch(0.85 0.01 250);
+  --color-steel-400: oklch(0.7 0.014 250);
+  --color-steel-500: oklch(0.58 0.016 250);
+  --color-steel-600: oklch(0.47 0.018 252);
+  --color-steel-700: oklch(0.38 0.02 254);
+  --color-steel-800: oklch(0.29 0.022 256);
+  --color-steel-900: oklch(0.22 0.024 258);
+  --color-steel-950: oklch(0.16 0.024 260);
+
+  /* --- Brand blue: interactive intent ----------------------------------- */
+  --color-eje-50: oklch(0.96 0.022 252);
+  --color-eje-100: oklch(0.92 0.045 252);
+  --color-eje-200: oklch(0.85 0.082 252);
+  --color-eje-300: oklch(0.76 0.12 252);
+  --color-eje-400: oklch(0.66 0.16 252);
+  --color-eje-500: oklch(0.575 0.19 252);
+  --color-eje-600: oklch(0.505 0.196 254);
+  --color-eje-700: oklch(0.435 0.175 254);
+  --color-eje-800: oklch(0.36 0.14 256);
+  --color-eje-900: oklch(0.29 0.105 258);
+
+  /* --- Status: urgent / failure ----------------------------------------- */
+  --color-signal-50: oklch(0.96 0.02 25);
+  --color-signal-100: oklch(0.92 0.045 25);
+  --color-signal-200: oklch(0.85 0.09 25);
+  --color-signal-500: oklch(0.585 0.215 27);
+  --color-signal-600: oklch(0.52 0.21 27);
+  --color-signal-700: oklch(0.45 0.18 27);
+
+  /* --- Status: waiting / caution ---------------------------------------- */
+  --color-amber-eje-50: oklch(0.97 0.032 85);
+  --color-amber-eje-100: oklch(0.94 0.07 85);
+  --color-amber-eje-200: oklch(0.88 0.11 82);
+  --color-amber-eje-500: oklch(0.73 0.16 72);
+  --color-amber-eje-600: oklch(0.63 0.15 65);
+  --color-amber-eje-700: oklch(0.52 0.13 60);
+
+  /* --- Status: pass / complete ------------------------------------------ */
+  --color-verdant-50: oklch(0.96 0.026 160);
+  --color-verdant-100: oklch(0.92 0.055 160);
+  --color-verdant-200: oklch(0.86 0.09 160);
+  --color-verdant-500: oklch(0.62 0.135 160);
+  --color-verdant-600: oklch(0.53 0.12 160);
+  --color-verdant-700: oklch(0.44 0.1 160);
+
+  /* --- Status: in-progress / informational ------------------------------ */
+  --color-violet-eje-50: oklch(0.96 0.022 295);
+  --color-violet-eje-100: oklch(0.92 0.05 295);
+  --color-violet-eje-500: oklch(0.58 0.18 295);
+  --color-violet-eje-700: oklch(0.44 0.15 295);
+
+  /* --- Typography -------------------------------------------------------- */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:
+    var(--font-jetbrains), ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+
+  /* --- Radii ------------------------------------------------------------- */
+  --radius-card: 0.875rem;
+  --radius-control: 0.625rem;
+
+  /* --- Elevation --------------------------------------------------------- */
+  --shadow-card: 0 1px 2px oklch(0.22 0.024 258 / 0.06), 0 1px 3px oklch(0.22 0.024 258 / 0.05);
+  --shadow-raised:
+    0 2px 4px oklch(0.22 0.024 258 / 0.05), 0 8px 24px oklch(0.22 0.024 258 / 0.08);
+  --shadow-overlay: 0 24px 64px oklch(0.16 0.024 260 / 0.28);
+}
+
+@layer base {
+  :root {
+    /* Minimum touch target for rugged field tablets. */
+    --touch-target: 2.75rem;
+    color-scheme: light;
+  }
+
+  * {
+    border-color: var(--color-steel-200);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-steel-100);
+    color: var(--color-steel-900);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv05', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A single, consistent focus treatment across every interactive element. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-eje-500);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  /* Numeric columns line up in tables and totals. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Subtle engineered texture for the application chrome. */
+  .eje-grid-texture {
+    background-image:
+      linear-gradient(to right, oklch(1 0 0 / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .eje-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-steel-300) transparent;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+  }
+}

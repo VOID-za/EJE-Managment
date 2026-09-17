@@ -1,0 +1,682 @@
+import {
+  asActivityId,
+  asAttachmentId,
+  asJobId,
+  asLineItemId,
+  canTransition,
+  checkReadyForSignature,
+  checkReadyForSubmission,
+  emptyChecklistResponse,
+  getJobTypeDefinition,
+  isJobEditable,
+  labourRateLabel,
+  SIGNATURE_DECLARATION,
+  userFullName,
+  type ActivityEvent,
+  type Attachment,
+  type ChecklistResponse,
+  type ChecklistTemplate,
+  type Job,
+  type JobCompletionReport,
+  type JobStatus,
+  type LabourRateType,
+  type PassFailNa,
+  type UserId,
+} from '@/domain';
+import { formatHours, formatKilometres } from '@/lib/format';
+import type { AuditInput, OperationContext } from './context';
+import { WorkflowError } from './errors';
+
+/**
+ * Application operations for the job lifecycle.
+ *
+ * Each operation:
+ *   1. asks the domain whether the change is permitted,
+ *   2. produces the next immutable Job value,
+ *   3. persists it through the repository, and
+ *   4. records an audit event (and any simulated outbound message).
+ *
+ * The UI never performs steps 1-4 itself.
+ */
+
+const audit = async (context: OperationContext, input: AuditInput): Promise<ActivityEvent> => {
+  const event: ActivityEvent = {
+    id: asActivityId(context.services.ids.next('act')),
+    jobId: input.jobId === null ? null : asJobId(input.jobId),
+    type: input.type,
+    summary: input.summary,
+    detail: input.detail,
+    actorId: context.actor.id,
+    occurredAt: context.services.clock.now(),
+  };
+  return context.repos.activity.append(event);
+};
+
+const assertEditable = (job: Job): void => {
+  if (!isJobEditable(job.status)) {
+    throw new WorkflowError(
+      `${job.jobNumber} has been submitted and can no longer be changed.`,
+      [{ code: 'job_locked', message: 'Submitted and closed jobs are read-only.' }],
+    );
+  }
+};
+
+const transition = (job: Job, to: JobStatus): void => {
+  if (!canTransition(job.status, to)) {
+    throw new WorkflowError(
+      `${job.jobNumber} cannot move from ${job.status} to ${to}.`,
+      [{ code: 'illegal_transition', message: 'That step is not available from the current status.' }],
+    );
+  }
+};
+
+/**
+ * Technician acceptance. Acceptance is what starts the job — there is no
+ * separate Start action. The caller is responsible for confirming with the user
+ * before calling this.
+ */
+export const acceptJob = async (context: OperationContext, job: Job): Promise<Job> => {
+  transition(job, 'in_progress');
+
+  const now = context.services.clock.now();
+  const next: Job = {
+    ...job,
+    status: 'in_progress',
+    acceptedAt: now,
+    primaryTechnicianId: job.primaryTechnicianId ?? context.actor.id,
+  };
+
+  const saved = await context.repos.jobs.save(next);
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_accepted',
+    summary: 'Job accepted',
+    detail: `Accepted by ${userFullName(context.actor)}. Acceptance moved the job to In Progress.`,
+  });
+  return saved;
+};
+
+export const assignPrimaryTechnician = async (
+  context: OperationContext,
+  job: Job,
+  technicianId: UserId,
+  technicianName: string,
+): Promise<Job> => {
+  assertEditable(job);
+  const saved = await context.repos.jobs.save({ ...job, primaryTechnicianId: technicianId });
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_assigned',
+    summary: `Job assigned to ${technicianName}`,
+    detail: 'Assigned as primary technician.',
+  });
+  return saved;
+};
+
+export const addAdditionalTechnician = async (
+  context: OperationContext,
+  job: Job,
+  technicianId: UserId,
+  technicianName: string,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.additionalTechnicianIds.includes(technicianId)) return job;
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    additionalTechnicianIds: [...job.additionalTechnicianIds, technicianId],
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'technician_added',
+    summary: `${technicianName} added to the job`,
+    detail: 'Added as an additional technician.',
+  });
+  return saved;
+};
+
+export const removeAdditionalTechnician = async (
+  context: OperationContext,
+  job: Job,
+  technicianId: UserId,
+  technicianName: string,
+): Promise<Job> => {
+  assertEditable(job);
+  const saved = await context.repos.jobs.save({
+    ...job,
+    additionalTechnicianIds: job.additionalTechnicianIds.filter((id) => id !== technicianId),
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'technician_removed',
+    summary: `${technicianName} removed from the job`,
+    detail: 'Removed as an additional technician.',
+  });
+  return saved;
+};
+
+export interface LabourInput {
+  readonly date: string;
+  readonly rateType: LabourRateType;
+  readonly hours: number;
+  readonly description: string;
+}
+
+export const addLabour = async (
+  context: OperationContext,
+  job: Job,
+  input: LabourInput,
+): Promise<Job> => {
+  assertEditable(job);
+  const entry = {
+    id: asLineItemId(context.services.ids.next('lab')),
+    technicianId: context.actor.id,
+    date: input.date,
+    rateType: input.rateType,
+    hours: input.hours,
+    description: input.description,
+    capturedAt: context.services.clock.now(),
+  };
+
+  const saved = await context.repos.jobs.save({ ...job, labour: [...job.labour, entry] });
+  await audit(context, {
+    jobId: job.id,
+    type: 'labour_added',
+    summary: `Labour captured: ${formatHours(input.hours)} ${labourRateLabel(input.rateType).toLowerCase()}`,
+    detail: input.description.length > 0 ? input.description : 'No description supplied.',
+  });
+  return saved;
+};
+
+export interface TravelInput {
+  readonly date: string;
+  readonly kilometres: number;
+  readonly description: string;
+}
+
+export const addTravel = async (
+  context: OperationContext,
+  job: Job,
+  input: TravelInput,
+): Promise<Job> => {
+  assertEditable(job);
+  const entry = {
+    id: asLineItemId(context.services.ids.next('trv')),
+    technicianId: context.actor.id,
+    date: input.date,
+    kilometres: input.kilometres,
+    description: input.description,
+    capturedAt: context.services.clock.now(),
+  };
+
+  const saved = await context.repos.jobs.save({ ...job, travel: [...job.travel, entry] });
+  await audit(context, {
+    jobId: job.id,
+    type: 'travel_added',
+    summary: `Travel captured: ${formatKilometres(input.kilometres)}`,
+    detail: input.description.length > 0 ? input.description : 'No description supplied.',
+  });
+  return saved;
+};
+
+export interface PartInput {
+  readonly partNumber: string;
+  readonly description: string;
+  readonly quantity: number;
+  /** Unit price in cents. */
+  readonly unitPrice: number;
+}
+
+export const addPart = async (
+  context: OperationContext,
+  job: Job,
+  input: PartInput,
+): Promise<Job> => {
+  assertEditable(job);
+  const entry = {
+    id: asLineItemId(context.services.ids.next('prt')),
+    partNumber: input.partNumber,
+    description: input.description,
+    quantity: input.quantity,
+    unitPrice: input.unitPrice,
+    capturedAt: context.services.clock.now(),
+  };
+
+  const saved = await context.repos.jobs.save({ ...job, parts: [...job.parts, entry] });
+  await audit(context, {
+    jobId: job.id,
+    type: 'part_added',
+    summary: `Part captured: ${input.partNumber}`,
+    detail: `${input.description}, quantity ${input.quantity}.`,
+  });
+  return saved;
+};
+
+export type LineItemKind = 'labour' | 'travel' | 'part';
+
+/** Line removal is always confirmed by the caller before reaching this point. */
+export const removeLineItem = async (
+  context: OperationContext,
+  job: Job,
+  kind: LineItemKind,
+  lineId: string,
+): Promise<Job> => {
+  assertEditable(job);
+  const next: Job =
+    kind === 'labour'
+      ? { ...job, labour: job.labour.filter((entry) => entry.id !== lineId) }
+      : kind === 'travel'
+        ? { ...job, travel: job.travel.filter((entry) => entry.id !== lineId) }
+        : { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) };
+
+  return context.repos.jobs.save(next);
+};
+
+export const addNote = async (
+  context: OperationContext,
+  job: Job,
+  body: string,
+  internal: boolean,
+): Promise<Job> => {
+  assertEditable(job);
+  const note = {
+    id: context.services.ids.next('note'),
+    body,
+    authorId: context.actor.id,
+    createdAt: context.services.clock.now(),
+    internal,
+  };
+
+  const saved = await context.repos.jobs.save({ ...job, notes: [...job.notes, note] });
+  await audit(context, {
+    jobId: job.id,
+    type: 'note_added',
+    summary: internal ? 'Internal note added' : 'Note added',
+    detail: body,
+  });
+  return saved;
+};
+
+export interface MediaInput {
+  readonly kind: 'photo' | 'video';
+  readonly fileName: string;
+  readonly caption: string;
+  readonly sizeBytes: number;
+}
+
+/**
+ * Attaches media to a job.
+ *
+ * DEMO BEHAVIOUR: no file is uploaded. The storage service allocates a key and
+ * the UI renders a placeholder tile. The production adapter uploads to object
+ * storage and returns the same `Attachment` shape.
+ */
+export const addMedia = async (
+  context: OperationContext,
+  job: Job,
+  input: MediaInput,
+): Promise<Job> => {
+  assertEditable(job);
+  const stored = await context.services.storage.put(input.fileName, 'image/jpeg', null);
+
+  const attachment: Attachment = {
+    id: asAttachmentId(context.services.ids.next('att')),
+    kind: input.kind,
+    fileName: input.fileName,
+    caption: input.caption,
+    storageKey: stored.storageKey,
+    uploadedAt: context.services.clock.now(),
+    uploadedBy: context.actor.id,
+    sizeBytes: input.sizeBytes,
+  };
+
+  const next: Job =
+    input.kind === 'photo'
+      ? { ...job, photos: [...job.photos, attachment] }
+      : { ...job, videos: [...job.videos, attachment] };
+
+  const saved = await context.repos.jobs.save(next);
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_uploaded',
+    summary: input.kind === 'photo' ? 'Photo uploaded' : 'Video uploaded',
+    detail: input.caption.length > 0 ? input.caption : input.fileName,
+  });
+  return saved;
+};
+
+export const moveToAwaitingSpares = async (
+  context: OperationContext,
+  job: Job,
+  reason: string,
+): Promise<Job> => {
+  transition(job, 'awaiting_spares');
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'awaiting_spares',
+    awaitingSparesReason: reason,
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'moved_to_awaiting_spares',
+    summary: 'Job moved to Awaiting Spares',
+    detail: reason,
+  });
+  return saved;
+};
+
+export const returnToInProgress = async (context: OperationContext, job: Job): Promise<Job> => {
+  transition(job, 'in_progress');
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'in_progress',
+    awaitingSparesReason: '',
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'returned_to_in_progress',
+    summary: 'Job returned to In Progress',
+    detail: 'Spares received or the job resumed on site.',
+  });
+  return saved;
+};
+
+export const startCompletion = async (context: OperationContext, job: Job): Promise<Job> => {
+  transition(job, 'completion');
+
+  const saved = await context.repos.jobs.save({ ...job, status: 'completion' });
+  await audit(context, {
+    jobId: job.id,
+    type: 'completion_started',
+    summary: 'Job moved to Completion',
+    detail: 'Technician started the completion write-up.',
+  });
+  return saved;
+};
+
+export const saveCompletionReport = async (
+  context: OperationContext,
+  job: Job,
+  report: JobCompletionReport,
+): Promise<Job> => {
+  assertEditable(job);
+  return context.repos.jobs.save({ ...job, completionReport: report });
+};
+
+/** Creates an empty checklist instance bound to the current template version. */
+export const startChecklist = async (
+  context: OperationContext,
+  job: Job,
+  template: ChecklistTemplate,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.checklist !== null) return job;
+
+  const responses = template.sections.flatMap((section) =>
+    section.items.map((item) => emptyChecklistResponse(item.id)),
+  );
+
+  return context.repos.jobs.save({
+    ...job,
+    checklist: {
+      templateId: template.id,
+      templateVersion: template.version,
+      responses,
+      completedAt: null,
+      completedBy: null,
+    },
+  });
+};
+
+export interface ChecklistAnswer {
+  readonly choice?: PassFailNa | null;
+  readonly yesNo?: boolean | null;
+  readonly measurement?: number | null;
+  readonly text?: string;
+  readonly notes?: string;
+  readonly photos?: readonly Attachment[];
+}
+
+export const answerChecklistItem = async (
+  context: OperationContext,
+  job: Job,
+  itemId: string,
+  answer: ChecklistAnswer,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.checklist === null) {
+    throw new WorkflowError('The checklist has not been started for this job.');
+  }
+
+  const now = context.services.clock.now();
+  const existing = job.checklist.responses.find((response) => response.itemId === itemId);
+  const base: ChecklistResponse = existing ?? emptyChecklistResponse(itemId);
+
+  const updated: ChecklistResponse = {
+    ...base,
+    choice: answer.choice !== undefined ? answer.choice : base.choice,
+    yesNo: answer.yesNo !== undefined ? answer.yesNo : base.yesNo,
+    measurement: answer.measurement !== undefined ? answer.measurement : base.measurement,
+    text: answer.text !== undefined ? answer.text : base.text,
+    notes: answer.notes !== undefined ? answer.notes : base.notes,
+    photos: answer.photos !== undefined ? answer.photos : base.photos,
+    answeredAt: now,
+    answeredBy: context.actor.id,
+  };
+
+  const responses =
+    existing === undefined
+      ? [...job.checklist.responses, updated]
+      : job.checklist.responses.map((response) =>
+          response.itemId === itemId ? updated : response,
+        );
+
+  return context.repos.jobs.save({
+    ...job,
+    checklist: { ...job.checklist, responses, completedAt: null, completedBy: null },
+  });
+};
+
+export const addChecklistPhoto = async (
+  context: OperationContext,
+  job: Job,
+  itemId: string,
+  fileName: string,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.checklist === null) {
+    throw new WorkflowError('The checklist has not been started for this job.');
+  }
+
+  const stored = await context.services.storage.put(fileName, 'image/jpeg', null);
+  const attachment: Attachment = {
+    id: asAttachmentId(context.services.ids.next('att')),
+    kind: 'photo',
+    fileName,
+    caption: 'Checklist evidence',
+    storageKey: stored.storageKey,
+    uploadedAt: context.services.clock.now(),
+    uploadedBy: context.actor.id,
+    sizeBytes: 1_650_000,
+  };
+
+  const existing = job.checklist.responses.find((response) => response.itemId === itemId);
+  const base = existing ?? emptyChecklistResponse(itemId);
+  const updated: ChecklistResponse = { ...base, photos: [...base.photos, attachment] };
+
+  const responses =
+    existing === undefined
+      ? [...job.checklist.responses, updated]
+      : job.checklist.responses.map((response) =>
+          response.itemId === itemId ? updated : response,
+        );
+
+  return context.repos.jobs.save({
+    ...job,
+    checklist: { ...job.checklist, responses },
+  });
+};
+
+export const completeChecklist = async (
+  context: OperationContext,
+  job: Job,
+  template: ChecklistTemplate,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.checklist === null) {
+    throw new WorkflowError('The checklist has not been started for this job.');
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    checklist: {
+      ...job.checklist,
+      completedAt: context.services.clock.now(),
+      completedBy: context.actor.id,
+    },
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'checklist_completed',
+    summary: 'Checklist completed',
+    detail: `${template.name} (${template.version}) completed by ${userFullName(context.actor)}.`,
+  });
+  return saved;
+};
+
+export interface SignatureInput {
+  readonly customerName: string;
+  readonly customerSurname: string;
+  readonly strokeData: string;
+}
+
+export const captureSignature = async (
+  context: OperationContext,
+  job: Job,
+  input: SignatureInput,
+): Promise<Job> => {
+  const readiness = checkReadyForSignature(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} is not ready for customer signature.`,
+      readiness.violations,
+    );
+  }
+  if (job.status !== 'customer_signature') {
+    transition(job, 'customer_signature');
+  }
+
+  const now = context.services.clock.now();
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'review',
+    completedAt: job.completedAt ?? now,
+    signature: {
+      customerName: input.customerName,
+      customerSurname: input.customerSurname,
+      strokeData: input.strokeData,
+      signedAt: now,
+      declaration: SIGNATURE_DECLARATION,
+    },
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'customer_signed',
+    summary: 'Customer signed the job card',
+    detail: `Signed by ${input.customerName} ${input.customerSurname}.`,
+  });
+  return saved;
+};
+
+/** Moves a job from Completion into the signature step. */
+export const startSignature = async (context: OperationContext, job: Job): Promise<Job> => {
+  const readiness = checkReadyForSignature(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} is not ready for customer signature.`,
+      readiness.violations,
+    );
+  }
+  transition(job, 'customer_signature');
+  return context.repos.jobs.save({ ...job, status: 'customer_signature' });
+};
+
+export const generateJobCardDocument = async (context: OperationContext, job: Job) => {
+  const generated = await context.services.pdf.generateJobCard(job);
+  await audit(context, {
+    jobId: job.id,
+    type: 'pdf_generated',
+    summary: 'Job card document generated',
+    detail: `${generated.fileName} (${generated.pageCount} pages)${generated.simulated ? ' — simulated in demo mode.' : '.'}`,
+  });
+  return generated;
+};
+
+export interface SubmitResult {
+  readonly job: Job;
+  readonly documentFileName: string;
+  readonly emailedTo: string;
+}
+
+/**
+ * Submits and closes the job.
+ *
+ * DEMO BEHAVIOUR: the customer email is recorded in the simulated outbox. No
+ * message is transmitted.
+ */
+export const submitJob = async (
+  context: OperationContext,
+  job: Job,
+  customerEmail: string,
+  customerDisplayName: string,
+): Promise<SubmitResult> => {
+  const readiness = checkReadyForSubmission(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(`${job.jobNumber} cannot be submitted yet.`, readiness.violations);
+  }
+  transition(job, 'submitted');
+
+  const document = await context.services.pdf.generateJobCard(job);
+  const now = context.services.clock.now();
+
+  const submitted = await context.repos.jobs.save({
+    ...job,
+    status: 'closed',
+    submittedAt: now,
+    closedAt: now,
+    completedAt: job.completedAt ?? now,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_submitted',
+    summary: 'Job submitted',
+    detail: `Signed job card submitted by ${userFullName(context.actor)}.`,
+  });
+
+  await context.services.email.send({
+    to: [customerEmail],
+    subject: `${job.jobNumber} — Signed Job Card — ${getJobTypeDefinition(job.jobType).label}`,
+    body:
+      `Good day ${customerDisplayName},\n\n` +
+      `Please find attached the signed job card for ${job.jobNumber}.\n\n` +
+      `Kind regards\nEJE Industrial Electronics`,
+    attachments: [{ fileName: document.fileName, storageKey: document.storageKey }],
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_closed',
+    summary: 'Job closed',
+    detail: 'Signed job card queued for delivery to the customer.',
+  });
+
+  return {
+    job: submitted,
+    documentFileName: document.fileName,
+    emailedTo: customerEmail,
+  };
+};

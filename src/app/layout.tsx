@@ -1,0 +1,44 @@
+import type { Metadata, Viewport } from 'next';
+import { Inter, JetBrains_Mono } from 'next/font/google';
+import { AppProvider } from '@/providers/AppProvider';
+import './globals.css';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains',
+  display: 'swap',
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: 'EJE Job Card Management',
+    template: '%s · EJE Job Card Management',
+  },
+  description:
+    'Job card management for EJE Industrial Electronics — jobs, customers, machines, checklists and technical documentation.',
+  applicationName: 'EJE Job Card Management',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  // Rugged tablets are the primary field device; the layout is built for them.
+  maximumScale: 5,
+  themeColor: '#1b2434',
+};
+
+const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
+  <html lang="en-ZA" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <body className="min-h-dvh antialiased">
+      <AppProvider>{children}</AppProvider>
+    </body>
+  </html>
+);
+
+export default RootLayout;
