@@ -29,8 +29,31 @@ export type ActivityEventType =
   | 'master_amended_after_signature'
   | 'job_closed'
   | 'document_viewed'
+  // Record administration. These carry no job id: they describe changes to the
+  // customer, machine, user, library and checklist registers.
+  | 'customer_created'
   | 'customer_updated'
-  | 'machine_updated';
+  | 'site_created'
+  | 'site_updated'
+  | 'contact_created'
+  | 'contact_updated'
+  | 'machine_created'
+  | 'machine_approved'
+  | 'machine_updated'
+  | 'user_created'
+  | 'user_updated'
+  | 'user_disabled'
+  | 'user_reactivated'
+  | 'password_reset_sent'
+  | 'document_added'
+  | 'document_updated'
+  | 'document_versioned'
+  | 'document_approved'
+  | 'document_archived'
+  | 'checklist_template_created'
+  | 'checklist_template_updated'
+  | 'checklist_template_versioned'
+  | 'checklist_template_archived';
 
 export interface ActivityEvent {
   readonly id: ActivityId;

@@ -4,8 +4,10 @@ import type {
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
+  ContactId,
   Customer,
   CustomerId,
+  DocumentId,
   Job,
   JobId,
   LeaveRecord,
@@ -13,6 +15,7 @@ import type {
   MachineId,
   NotificationId,
   Site,
+  SiteId,
   SystemSettings,
   TechnicalDocument,
   User,
@@ -46,7 +49,11 @@ export interface CustomerRepository {
   findById(id: CustomerId): Promise<Customer | null>;
   listSites(customerId?: CustomerId): Promise<readonly Site[]>;
   listContacts(customerId?: CustomerId): Promise<readonly Contact[]>;
+  findSiteById(id: SiteId): Promise<Site | null>;
+  findContactById(id: ContactId): Promise<Contact | null>;
   save(customer: Customer): Promise<Customer>;
+  saveSite(site: Site): Promise<Site>;
+  saveContact(contact: Contact): Promise<Contact>;
 }
 
 export interface MachineRepository {
@@ -56,12 +63,20 @@ export interface MachineRepository {
 }
 
 export interface UserRepository {
+  /**
+   * Every user, disabled ones included. Callers that want only the people
+   * currently working at EJE filter with `activeUsers`; a disabled user is
+   * never removed, so historical jobs keep naming the technician who did them.
+   */
   list(): Promise<readonly User[]>;
   findById(id: UserId): Promise<User | null>;
+  save(user: User): Promise<User>;
 }
 
 export interface DocumentRepository {
   list(): Promise<readonly TechnicalDocument[]>;
+  findById(id: DocumentId): Promise<TechnicalDocument | null>;
+  save(document: TechnicalDocument): Promise<TechnicalDocument>;
   listFavourites(userId: UserId): Promise<readonly string[]>;
   toggleFavourite(userId: UserId, documentId: string): Promise<readonly string[]>;
   listRecentlyViewed(userId: UserId): Promise<readonly string[]>;
@@ -84,6 +99,14 @@ export interface ChecklistTemplateRepository {
     templateId: ChecklistTemplateId,
     version: string,
   ): Promise<ChecklistTemplate | null>;
+  /**
+   * Adds or replaces a template version.
+   *
+   * Callers must never rewrite a version a job has already completed against —
+   * `checklist-admin` enforces that, and the demo store keeps every version so a
+   * historical job card still renders the wording the customer actually saw.
+   */
+  save(template: ChecklistTemplate): Promise<ChecklistTemplate>;
 }
 
 export interface ActivityRepository {
@@ -93,6 +116,7 @@ export interface ActivityRepository {
 
 export interface NotificationRepository {
   list(recipientId: UserId): Promise<readonly AppNotification[]>;
+  create(notification: AppNotification): Promise<AppNotification>;
   markRead(id: NotificationId): Promise<void>;
   markAllRead(recipientId: UserId): Promise<void>;
   markHandled(id: NotificationId): Promise<void>;

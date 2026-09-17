@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   AppNotification,
+  ChecklistTemplate,
   Customer,
   Contact,
   Job,
@@ -8,17 +9,22 @@ import type {
   Site,
   LeaveRecord,
   SystemSettings,
+  TechnicalDocument,
+  User,
 } from '@/domain';
 import {
   seedActivity,
+  seedChecklistTemplates,
   seedContacts,
   seedCustomers,
+  seedDocuments,
   seedJobs,
   seedMachines,
   seedLeave,
   seedNotifications,
   seedSettings,
   seedSites,
+  seedUsers,
 } from '../seed';
 
 /**
@@ -38,6 +44,12 @@ export interface DemoDatabase {
   sites: Site[];
   contacts: Contact[];
   machines: Machine[];
+  // Users, documents and checklist templates are administered by Masters, so
+  // they live in the mutable dataset rather than being read from the seed
+  // constants. Phase 2 replaces this object with database tables.
+  users: User[];
+  documents: TechnicalDocument[];
+  checklistTemplates: ChecklistTemplate[];
   activity: ActivityEvent[];
   notifications: AppNotification[];
   leave: LeaveRecord[];
@@ -55,8 +67,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * already run the demo keeps its old snapshot and silently misses new fields.
  * v2 added technician leave and the service end date.
  * v3 added the Parts job type: a nullable machine and the courier flag.
+ * v4 moved users, technical documents and checklist templates into the store so
+ * Masters can administer them.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -69,6 +83,9 @@ export const createSeededDatabase = (): DemoDatabase => ({
   sites: seedSites.map((site) => ({ ...site })),
   contacts: seedContacts.map((contact) => ({ ...contact })),
   machines: seedMachines.map((machine) => ({ ...machine })),
+  users: seedUsers.map((user) => ({ ...user })),
+  documents: seedDocuments.map((document) => ({ ...document })),
+  checklistTemplates: seedChecklistTemplates.map((template) => ({ ...template })),
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
   leave: seedLeave.map((record) => ({ ...record })),

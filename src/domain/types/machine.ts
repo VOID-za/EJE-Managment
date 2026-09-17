@@ -1,4 +1,12 @@
-import type { Attachment, CustomerId, IsoDate, IsoDateTime, MachineId, SiteId } from './common';
+import type {
+  Attachment,
+  CustomerId,
+  IsoDate,
+  IsoDateTime,
+  MachineId,
+  SiteId,
+  UserId,
+} from './common';
 
 /**
  * Machine types are a closed union in the demo. Phase 2 moves them to a
@@ -12,6 +20,15 @@ export type MachineType =
   | 'Surface Grinder'
   | 'Press Brake'
   | 'Other';
+
+/**
+ * Whether the machine is part of the official customer record.
+ *
+ * A technician on site can add a machine they find, but the official register is
+ * the office's: until a Master approves it the machine is visible and usable,
+ * marked as unconfirmed, so nobody is blocked from capturing work against it.
+ */
+export type MachineApproval = 'approved' | 'pending_approval';
 
 export interface Machine {
   readonly id: MachineId;
@@ -27,8 +44,15 @@ export interface Machine {
   readonly notes: string;
   readonly photos: readonly Attachment[];
   readonly active: boolean;
+  readonly approval: MachineApproval;
+  readonly createdBy: UserId;
+  readonly approvedBy: UserId | null;
+  readonly approvedAt: IsoDateTime | null;
   readonly createdAt: IsoDateTime;
 }
+
+export const isMachineConfirmed = (machine: Pick<Machine, 'approval'>): boolean =>
+  machine.approval === 'approved';
 
 export const machineDisplayName = (machine: Pick<Machine, 'manufacturer' | 'model'>): string =>
   `${machine.manufacturer} ${machine.model}`;

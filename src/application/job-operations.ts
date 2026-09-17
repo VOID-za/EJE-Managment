@@ -1,7 +1,5 @@
 import {
-  asActivityId,
   asAttachmentId,
-  asJobId,
   asLineItemId,
   canTransition,
   checkReadyForSignature,
@@ -16,7 +14,6 @@ import {
   pricingInputsFrom,
   signatureDeclarationFor,
   userFullName,
-  type ActivityEvent,
   type Attachment,
   type ChecklistResponse,
   type ChecklistTemplate,
@@ -31,7 +28,8 @@ import {
   type UserId,
 } from '@/domain';
 import { formatHours, formatKilometres } from '@/lib/format';
-import type { AuditInput, OperationContext } from './context';
+import type { OperationContext } from './context';
+import { audit } from './audit';
 import { WorkflowError } from './errors';
 
 /**
@@ -45,19 +43,6 @@ import { WorkflowError } from './errors';
  *
  * The UI never performs steps 1-4 itself.
  */
-
-const audit = async (context: OperationContext, input: AuditInput): Promise<ActivityEvent> => {
-  const event: ActivityEvent = {
-    id: asActivityId(context.services.ids.next('act')),
-    jobId: input.jobId === null ? null : asJobId(input.jobId),
-    type: input.type,
-    summary: input.summary,
-    detail: input.detail,
-    actorId: context.actor.id,
-    occurredAt: context.services.clock.now(),
-  };
-  return context.repos.activity.append(event);
-};
 
 const assertEditable = (context: OperationContext, job: Job): void => {
   if (canEditJob(context.actor.role, job.status)) return;

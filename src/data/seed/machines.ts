@@ -22,6 +22,11 @@ const photo = (id: string, fileName: string, caption: string, days: number): Att
   sizeBytes: 1_842_000,
 });
 
+/**
+ * Every machine below is on the official register: added by the office and
+ * therefore already approved. `seedPendingMachine` adds the one awaiting a
+ * Master's confirmation, so the approval queue has something in it.
+ */
 export const seedMachines: readonly Machine[] = [
   {
     id: asMachineId('machine-abc-lv40'),
@@ -40,6 +45,10 @@ export const seedMachines: readonly Machine[] = [
       photo('att-m1-2', 'leadwell-v40-cabinet.jpg', 'Electrical cabinet, drive section', -300),
     ],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-980, 8),
   },
   {
@@ -56,6 +65,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Fitted with bar feeder. Chuck pressure switch is a known weak point.',
     photos: [photo('att-m2-1', 'haas-st20-front.jpg', 'Machine with bar feeder', -240)],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-800, 8),
   },
   {
@@ -72,6 +85,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Oldest unit on site. Scheduled for control retrofit assessment.',
     photos: [photo('att-m3-1', 'leadwell-mcv760.jpg', 'Machining centre, operator side', -150)],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-1050, 8),
   },
   {
@@ -88,6 +105,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Second-hand import. Documentation incomplete.',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-860, 8),
   },
   {
@@ -104,6 +125,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Five-axis. Only certified technicians may work on the rotary table.',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-700, 8),
   },
   {
@@ -120,6 +145,10 @@ export const seedMachines: readonly Machine[] = [
     notes: '',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-640, 8),
   },
   {
@@ -136,6 +165,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Used for low-volume repair work.',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-420, 8),
   },
   {
@@ -152,6 +185,10 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Safety light curtain was replaced in the last service.',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-190, 8),
   },
   {
@@ -168,6 +205,34 @@ export const seedMachines: readonly Machine[] = [
     notes: 'Still within the manufacturer warranty period.',
     photos: [],
     active: true,
+    approval: 'approved',
+    createdBy: asUserId('user-master-elmarie'),
+    approvedBy: asUserId('user-master-elmarie'),
+    approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-140, 8),
+  },
+
+  // Found on site by a technician and added from the job screen. It is usable
+  // immediately — work is never blocked waiting for the office — but it stays
+  // marked unconfirmed until a Master approves it onto the official register.
+  {
+    id: asMachineId('machine-vaal-bandsaw'),
+    customerId: asCustomerId('cust-vaal'),
+    siteId: asSiteId('site-vaal-main'),
+    manufacturer: 'Bomar',
+    model: 'Individual 620.460 DGH',
+    serialNumber: 'BM-IND620-44127',
+    machineType: 'Other',
+    year: 2020,
+    installationDate: '2020-08-19',
+    controlSystem: 'Manual / semi-automatic',
+    notes: 'Found in the cut-off bay during a breakdown call. Not previously on the register.',
+    photos: [],
+    active: true,
+    approval: 'pending_approval',
+    createdBy: asUserId('user-tech-riaan'),
+    approvedBy: null,
+    approvedAt: null,
+    createdAt: timeOffset(-2, 11, 20),
   },
 ];

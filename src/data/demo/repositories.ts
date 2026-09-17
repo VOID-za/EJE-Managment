@@ -4,8 +4,10 @@ import type {
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
+  ContactId,
   Customer,
   CustomerId,
+  DocumentId,
   Job,
   JobId,
   LeaveRecord,
@@ -13,12 +15,12 @@ import type {
   MachineId,
   NotificationId,
   Site,
+  SiteId,
   SystemSettings,
   TechnicalDocument,
   User,
   UserId,
 } from '@/domain';
-import { seedChecklistTemplates, seedDocuments, seedUsers } from '../seed';
 import type {
   ActivityRepository,
   ChecklistTemplateRepository,
@@ -131,13 +133,51 @@ class DemoCustomerRepository implements CustomerRepository {
     );
   }
 
+  findSiteById(id: SiteId): Promise<Site | null> {
+    return Promise.resolve(this.context.read().sites.find((site) => site.id === id) ?? null);
+  }
+
+  findContactById(id: ContactId): Promise<Contact | null> {
+    return Promise.resolve(
+      this.context.read().contacts.find((contact) => contact.id === id) ?? null,
+    );
+  }
+
   save(customer: Customer): Promise<Customer> {
     this.context.commit((draft) => {
-      draft.customers = draft.customers.map((candidate) =>
-        candidate.id === customer.id ? customer : candidate,
-      );
+      const index = draft.customers.findIndex((candidate) => candidate.id === customer.id);
+      draft.customers =
+        index === -1
+          ? [...draft.customers, customer]
+          : draft.customers.map((candidate) =>
+              candidate.id === customer.id ? customer : candidate,
+            );
     });
     return Promise.resolve(customer);
+  }
+
+  saveSite(site: Site): Promise<Site> {
+    this.context.commit((draft) => {
+      const index = draft.sites.findIndex((candidate) => candidate.id === site.id);
+      draft.sites =
+        index === -1
+          ? [...draft.sites, site]
+          : draft.sites.map((candidate) => (candidate.id === site.id ? site : candidate));
+    });
+    return Promise.resolve(site);
+  }
+
+  saveContact(contact: Contact): Promise<Contact> {
+    this.context.commit((draft) => {
+      const index = draft.contacts.findIndex((candidate) => candidate.id === contact.id);
+      draft.contacts =
+        index === -1
+          ? [...draft.contacts, contact]
+          : draft.contacts.map((candidate) =>
+              candidate.id === contact.id ? contact : candidate,
+            );
+    });
+    return Promise.resolve(contact);
   }
 }
 
@@ -156,21 +196,38 @@ class DemoMachineRepository implements MachineRepository {
 
   save(machine: Machine): Promise<Machine> {
     this.context.commit((draft) => {
-      draft.machines = draft.machines.map((candidate) =>
-        candidate.id === machine.id ? machine : candidate,
-      );
+      const index = draft.machines.findIndex((candidate) => candidate.id === machine.id);
+      draft.machines =
+        index === -1
+          ? [...draft.machines, machine]
+          : draft.machines.map((candidate) => (candidate.id === machine.id ? machine : candidate));
     });
     return Promise.resolve(machine);
   }
 }
 
 class DemoUserRepository implements UserRepository {
+  constructor(private readonly context: DemoContext) {}
+
   list(): Promise<readonly User[]> {
-    return Promise.resolve(seedUsers);
+    return Promise.resolve(this.context.read().users);
   }
 
   findById(id: UserId): Promise<User | null> {
-    return Promise.resolve(seedUsers.find((user) => user.id === id) ?? null);
+    return Promise.resolve(this.context.read().users.find((user) => user.id === id) ?? null);
+  }
+
+  save(user: User): Promise<User> {
+    this.context.commit((draft) => {
+      const index = draft.users.findIndex((candidate) => candidate.id === user.id);
+      // Disabling is an update, never a delete: historical jobs and the audit
+      // trail keep naming the person who did the work.
+      draft.users =
+        index === -1
+          ? [...draft.users, user]
+          : draft.users.map((candidate) => (candidate.id === user.id ? user : candidate));
+    });
+    return Promise.resolve(user);
   }
 }
 
@@ -178,7 +235,26 @@ class DemoDocumentRepository implements DocumentRepository {
   constructor(private readonly context: DemoContext) {}
 
   list(): Promise<readonly TechnicalDocument[]> {
-    return Promise.resolve(seedDocuments);
+    return Promise.resolve(this.context.read().documents);
+  }
+
+  findById(id: DocumentId): Promise<TechnicalDocument | null> {
+    return Promise.resolve(
+      this.context.read().documents.find((document) => document.id === id) ?? null,
+    );
+  }
+
+  save(document: TechnicalDocument): Promise<TechnicalDocument> {
+    this.context.commit((draft) => {
+      const index = draft.documents.findIndex((candidate) => candidate.id === document.id);
+      draft.documents =
+        index === -1
+          ? [document, ...draft.documents]
+          : draft.documents.map((candidate) =>
+              candidate.id === document.id ? document : candidate,
+            );
+    });
+    return Promise.resolve(document);
   }
 
   listFavourites(userId: UserId): Promise<readonly string[]> {
@@ -215,14 +291,18 @@ class DemoDocumentRepository implements DocumentRepository {
 }
 
 class DemoChecklistTemplateRepository implements ChecklistTemplateRepository {
+  constructor(private readonly context: DemoContext) {}
+
   list(): Promise<readonly ChecklistTemplate[]> {
-    return Promise.resolve(seedChecklistTemplates);
+    return Promise.resolve(this.context.read().checklistTemplates);
   }
 
   findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null> {
-    const match = seedChecklistTemplates.find(
-      (template) => template.jobTypeCode === jobTypeCode && template.status === 'current',
-    );
+    const match = this.context
+      .read()
+      .checklistTemplates.find(
+        (template) => template.jobTypeCode === jobTypeCode && template.status === 'current',
+      );
     return Promise.resolve(match ?? null);
   }
 
@@ -230,10 +310,29 @@ class DemoChecklistTemplateRepository implements ChecklistTemplateRepository {
     templateId: ChecklistTemplateId,
     version: string,
   ): Promise<ChecklistTemplate | null> {
-    const match = seedChecklistTemplates.find(
-      (template) => template.id === templateId && template.version === version,
-    );
+    // Resolves by stored version, so a job completed against v1.0 keeps
+    // rendering v1.0 even after v2.0 becomes current.
+    const match = this.context
+      .read()
+      .checklistTemplates.find(
+        (template) => template.id === templateId && template.version === version,
+      );
     return Promise.resolve(match ?? null);
+  }
+
+  save(template: ChecklistTemplate): Promise<ChecklistTemplate> {
+    this.context.commit((draft) => {
+      const index = draft.checklistTemplates.findIndex(
+        (candidate) => candidate.id === template.id && candidate.version === template.version,
+      );
+      draft.checklistTemplates =
+        index === -1
+          ? [...draft.checklistTemplates, template]
+          : draft.checklistTemplates.map((candidate, position) =>
+              position === index ? template : candidate,
+            );
+    });
+    return Promise.resolve(template);
   }
 }
 
@@ -266,6 +365,13 @@ class DemoNotificationRepository implements NotificationRepository {
     return Promise.resolve(
       [...notifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     );
+  }
+
+  create(notification: AppNotification): Promise<AppNotification> {
+    this.context.commit((draft) => {
+      draft.notifications = [notification, ...draft.notifications];
+    });
+    return Promise.resolve(notification);
   }
 
   markRead(id: NotificationId): Promise<void> {
@@ -366,9 +472,9 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   jobs: new DemoJobRepository(context),
   customers: new DemoCustomerRepository(context),
   machines: new DemoMachineRepository(context),
-  users: new DemoUserRepository(),
+  users: new DemoUserRepository(context),
   documents: new DemoDocumentRepository(context),
-  checklistTemplates: new DemoChecklistTemplateRepository(),
+  checklistTemplates: new DemoChecklistTemplateRepository(context),
   activity: new DemoActivityRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
