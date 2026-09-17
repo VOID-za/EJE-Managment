@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSignatureEmpty, strokesToPath, type SignatureStroke } from './signature-path';
+import { isSignatureEmpty, strokesToPath, type SignatureStroke } from './signature';
 
 /**
  * Signature geometry is extracted from the component precisely so it can be

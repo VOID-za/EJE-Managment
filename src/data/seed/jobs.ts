@@ -587,7 +587,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-21, 12, 20),
     closedAt: timeOffset(-21, 12, 20),
     pricingSnapshot: ratesAt(timeOffset(-21, 12, 10), 84000, 74000),
-    finalDocument: finalJobCard('EJE-1056', 1, timeOffset(-21, 12, 20), 'pieter.nel@abc-engineering-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1056', 2, timeOffset(-21, 12, 20), 'pieter.nel@abc-engineering-demo.co.za'),
     travel: [
       {
         id: asLineItemId('trv-1056-1'),
@@ -1187,7 +1187,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-140, 16, 30),
     closedAt: timeOffset(-140, 16, 30),
     pricingSnapshot: ratesAt(timeOffset(-140, 16, 10), 80000, 70000),
-    finalDocument: finalJobCard('EJE-1039', 1, timeOffset(-140, 16, 30), 'gerhard.smit@midrandautomation-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1039', 2, timeOffset(-140, 16, 30), 'gerhard.smit@midrandautomation-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1039-1'),

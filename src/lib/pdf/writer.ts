@@ -16,45 +16,54 @@
  */
 
 /** A4 in PostScript points, the page size every EJE document uses. */
+import { charWidth, SUBSTITUTION_ALLOWANCE } from './metrics';
+
 export const A4_WIDTH = 595.28;
 export const A4_HEIGHT = 841.89;
 
-export type PdfFont = 'regular' | 'bold' | 'italic';
+/**
+ * `script` is Times-Italic — a base-14 font, so nothing is embedded.
+ *
+ * It stands in for the cursive face the on-screen card uses when a stored
+ * signature is a seeded label rather than captured geometry. Captured
+ * signatures are drawn as paths and use no font at all.
+ */
+export type PdfFont = 'regular' | 'bold' | 'italic' | 'script';
 
 const FONT_RESOURCE: Record<PdfFont, string> = {
   regular: 'F1',
   bold: 'F2',
   italic: 'F3',
+  script: 'F4',
 };
 
 const FONT_BASE: Record<PdfFont, string> = {
   regular: 'Helvetica',
   bold: 'Helvetica-Bold',
   italic: 'Helvetica-Oblique',
+  script: 'Times-Italic',
 };
 
 /**
- * Approximate Helvetica advance widths, in 1/1000 em.
+ * How wide a string will be on the page, for laying out and for alignment.
  *
- * Enough to wrap text and right-align a currency column without embedding a
- * font metrics table. Overestimating slightly is the safe direction: a line
- * breaks a word early rather than running into the margin.
+ * Includes `SUBSTITUTION_ALLOWANCE`, because the number that matters is the
+ * width in the viewer the customer opens the file in, not the width in the
+ * metrics table. Being slightly conservative costs a little whitespace; being
+ * exact costs collisions.
  */
-const AVERAGE_WIDTH = 520;
-const NARROW = new Set(' iljtfrI.,:;\'`|!/()[]-'.split(''));
-const WIDE = new Set('mwMW@%'.split(''));
-
-export const textWidth = (text: string, size: number, font: PdfFont = 'regular'): number => {
+export const textWidth = (
+  text: string,
+  size: number,
+  font: PdfFont = 'regular',
+  tracking = 0,
+): number => {
   let thousandths = 0;
-  for (const character of text) {
-    if (NARROW.has(character)) thousandths += 290;
-    else if (WIDE.has(character)) thousandths += 830;
-    else if (character >= 'A' && character <= 'Z') thousandths += 680;
-    else thousandths += AVERAGE_WIDTH;
-  }
-  // Bold Helvetica is a little wider than regular at the same size.
-  const weight = font === 'bold' ? 1.06 : 1;
-  return (thousandths / 1000) * size * weight;
+  for (const character of text) thousandths += charWidth(character, font);
+  // Tracking adds one gap after every character, exactly as `Tc` does.
+  return (
+    ((thousandths / 1000) * size + tracking * [...text].length) * SUBSTITUTION_ALLOWANCE
+  );
 };
 
 /**
@@ -134,6 +143,13 @@ export interface TextOptions {
   readonly size?: number;
   /** 0..1 grey, or a hex colour. Defaults to black. */
   readonly colour?: string;
+  /**
+   * Letter-spacing in points, as CSS `letter-spacing`.
+   *
+   * Emitted as the PDF `Tc` operator rather than by padding the string with
+   * spaces, so the text stays one searchable, extractable word.
+   */
+  readonly tracking?: number;
 }
 
 const colourOperands = (colour: string | undefined): string => {
@@ -188,8 +204,10 @@ export class PdfBuilder {
     const font = options.font ?? 'regular';
     const size = options.size ?? 10;
     this.usedFonts.add(font);
+    const tracking = options.tracking ?? 0;
     this.page().operations.push(
       `BT ${colourOperands(options.colour)} rg /${FONT_RESOURCE[font]} ${round(size)} Tf ` +
+        (tracking === 0 ? '' : `${round(tracking)} Tc `) +
         `1 0 0 1 ${round(x)} ${round(y)} Tm (${escapeLiteral(value)}) Tj ET`,
     );
   }
@@ -252,10 +270,27 @@ export class PdfBuilder {
         const candidate = line.length === 0 ? word : `${line} ${word}`;
         if (textWidth(candidate, size, font) <= maxWidth) {
           line = candidate;
-        } else {
-          if (line.length > 0) lines.push(line);
-          line = word;
+          continue;
         }
+        if (line.length > 0) lines.push(line);
+
+        // A single word wider than the line — an email address, a long serial —
+        // is broken by character rather than allowed to run past the margin.
+        // The browser does the same thing with `overflow-wrap`.
+        if (textWidth(word, size, font) <= maxWidth) {
+          line = word;
+          continue;
+        }
+        let piece = '';
+        for (const character of word) {
+          if (textWidth(piece + character, size, font) > maxWidth && piece.length > 0) {
+            lines.push(piece);
+            piece = character;
+          } else {
+            piece += character;
+          }
+        }
+        line = piece;
       }
       lines.push(line);
     }
@@ -268,9 +303,9 @@ export class PdfBuilder {
   toBytes(): Uint8Array {
     if (this.pages.length === 0) this.addPage();
 
-    const fonts: PdfFont[] = ['regular', 'bold', 'italic'].filter((font) =>
-      this.usedFonts.has(font as PdfFont),
-    ) as PdfFont[];
+    const fonts: PdfFont[] = (['regular', 'bold', 'italic', 'script'] as PdfFont[]).filter((font) =>
+      this.usedFonts.has(font),
+    );
     // A page with no text still needs a font resource dictionary to be valid.
     if (fonts.length === 0) fonts.push('regular');
 

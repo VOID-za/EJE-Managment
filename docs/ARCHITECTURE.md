@@ -105,6 +105,24 @@ same way: the job stores what it was judged against, and the read path uses it.
   says it is final, so a working preview can never overwrite what the customer
   received.
 
+  **One document, two renderers.** `buildJobCardModel` in
+  `src/lib/job-card/model.ts` is the single definition of the job card: its
+  sections, their order, every label and every already-formatted value. The
+  on-screen `JobCardDocument` and the PDF writer both consume it and decide only
+  how to draw it, because HTML and PDF genuinely differ on typography and page
+  breaks and should differ on nothing else. They were allowed to diverge once —
+  the PDF grew its own section order and left the signature box empty — and
+  `final-document-layout.test.ts` now asserts that every label and value in the
+  model reaches the PDF, in the same order.
+
+  The signature is part of that model as its stored data, and
+  `signatureFacsimile` in `src/lib/signature.ts` decides how to draw it, once,
+  for both renderers: a signature captured in the application is a normalised
+  path and is stroked into the PDF as that geometry in `#000000`; a seeded
+  demonstration job stores a descriptive label instead, and both renderers draw
+  the name in a cursive face. Splitting that decision between the two renderers
+  is exactly what produced an empty box on paper.
+
   `loadFinalDocumentFile` is the one way to obtain the file. It takes a **job
   number**, never a storage key, so a caller can only ever be handed the
   document recorded on that job; it applies the same access rule as seeing the
@@ -156,6 +174,22 @@ that TypeScript cannot check:
   prove the process answering the port is serving it. It also reports the build
   commit stamped into the served HTML, which is how a stale server is told apart
   from missing code.
+
+### Proving a PDF is readable
+
+Extracting a PDF's text shows it contains the right words and nothing about
+whether they can be read. `src/lib/pdf/inspect.ts` parses the rendered document
+back and measures every text run with the same metrics the renderer used, so a
+test can assert what a reader would see: nothing past a margin, nothing printed
+over anything else, text on every page, and a signature physically present.
+`final-document-layout.test.ts` runs it over every closed job in `npm run
+verify`, and `npm run pdf-check` downloads the real file from a running
+application and renders each page to an image for a person to look at.
+
+The base-14 fonts are named rather than embedded, which keeps the file small but
+means the viewer substitutes a metrically similar font — usually a wider one.
+Laying out to exact Helvetica widths therefore still overflowed, so both the
+renderer and the inspector reserve `SUBSTITUTION_ALLOWANCE` of headroom.
 
 A path that does not match any route reaches `src/app/not-found.tsx`, which
 names the path and says that a stale build is the usual cause. Next's default

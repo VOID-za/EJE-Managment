@@ -1086,7 +1086,11 @@ export const submitJobCard = async (
   const pageCount = await storeFinalDocument(
     context,
     finalJob,
-    { storageKey: document.storageKey, fileName: document.fileName },
+    {
+      storageKey: document.storageKey,
+      fileName: document.fileName,
+      generatedAt: document.generatedAt,
+    },
     {
       job: finalJob,
       customer: view.customer,

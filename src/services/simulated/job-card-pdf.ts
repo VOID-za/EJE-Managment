@@ -1,480 +1,624 @@
-import {
-  buildPartsDocument,
-  calculateJobTotals,
-  contactFullName,
-  customerFacingNotes,
-  getJobTypeDefinition,
-  jobScheduleWindow,
-  jobStatusLabel,
-  machineDisplayName,
-  userFullName,
-  PARTS_COLLECTION_DECLARATION,
-  type ChecklistResponse,
-  type CostLine,
-} from '@/domain';
-import { formatCurrency, formatDate, formatDateTime, formatHours } from '@/lib/format';
-import { A4_HEIGHT, A4_WIDTH, PdfBuilder, textWidth } from '@/lib/pdf/writer';
-import { SIGNATURE_INK } from '@/components/jobs/signature-path';
+import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
+import { buildJobCardModel, type ChargeRow, type JobCardModel, type LabelValue } from '@/lib/job-card/model';
+import { A4_HEIGHT, A4_WIDTH, PdfBuilder, textWidth, type PdfFont } from '@/lib/pdf/writer';
 import type { FinalDocumentSource, RenderedPdf } from '../ports';
 
 /**
- * Renders the EJE job card and parts collection note to PDF bytes.
+ * The EJE job card, rendered to PDF.
  *
- * Fed from the same values the on-screen `JobCardDocument` renders and through
- * the same domain functions — `calculateJobTotals`, `customerFacingNotes`,
- * `buildPartsDocument` — so the figures on the file a customer keeps cannot
- * disagree with the figures they were shown. In particular the totals come from
- * `calculateJobTotals`, which prefers the job's frozen pricing snapshot, so a
- * later rate change cannot reach a document that has already been issued.
+ * Consumes `buildJobCardModel` — the same definition the on-screen job card
+ * renders — so the two cannot carry different content, labels or section order.
+ * What this file owns is only how that model is drawn on paper.
  *
- * This is the demo's renderer. Production renders the same `FinalDocumentSource`
- * server-side; the bytes are written to storage once either way.
+ * The scale mirrors the on-screen document: it is 820px wide with 40px padding,
+ * so 740px of content become 515pt here, a factor of about 0.7. Every size and
+ * gap below is the screen's Tailwind value at that scale, which is what keeps
+ * the printed document recognisably the same document rather than a denser
+ * relative of it.
  */
 
 const MARGIN = 40;
 const CONTENT_WIDTH = A4_WIDTH - MARGIN * 2;
 const RIGHT = A4_WIDTH - MARGIN;
+const FOOTER_SPACE = 44;
 
-const INK = '#000000';
-const MUTED = '#5b6472';
-const RULE = '#b9c0ca';
-const BAND = '#eef1f5';
+/** Type scale, from the screen's px values at 0.7. */
+const SIZE = {
+  companyName: 12.5, // text-lg
+  jobNumber: 17, // text-2xl
+  small: 7.5, // text-xs
+  body: 9, // 13px base
+  tiny: 7, // text-[11px]
+  total: 11, // text-base
+  signature: 17,
+} as const;
 
-/** Vertical layout over the writer: a cursor, and page breaks when it runs out. */
+/** Vertical rhythm, from the screen's spacing utilities at 0.7. */
+const GAP = {
+  section: 17, // mt-6
+  sectionLarge: 22, // mt-8
+  line: 12,
+  tight: 10,
+} as const;
+
+/**
+ * The screen's letter-spaced section headings.
+ *
+ * `tracking-[0.12em]` at 7.5pt is 0.9pt; the wider `tracking-[0.18em]` on the
+ * document title is 1.35pt. Applied through the PDF `Tc` operator, so the text
+ * stays one searchable word rather than being padded with spaces.
+ */
+const TRACK_HEADING = 0.9;
+const TRACK_TITLE = 1.35;
+
+const INK = '#1b2434'; // steel-900
+const BODY = '#39414f'; // steel-700/800
+const MUTED = '#6b7481'; // steel-500
+const FAINT = '#9aa2ad'; // steel-400
+const RULE = '#dfe3e8'; // steel-200
+const RULE_SOFT = '#eef0f3'; // steel-100
+const BAND = '#f6f7f9'; // steel-50
+
+/** Column geometry for the charges table, mirroring the screen's widths. */
+const COL_QTY = RIGHT - 190;
+const COL_RATE = RIGHT - 120;
+const COL_AMOUNT = RIGHT;
+
 class Sheet {
   readonly pdf = new PdfBuilder();
   private y = 0;
 
   constructor() {
-    this.newPage();
+    this.break();
   }
 
-  private newPage(): void {
+  private break(): void {
     this.pdf.addPage();
     this.y = A4_HEIGHT - MARGIN;
-  }
-
-  /** Reserves vertical space, breaking to a new page if it will not fit. */
-  need(height: number): void {
-    if (this.y - height < MARGIN + 28) this.newPage();
-  }
-
-  move(by: number): void {
-    this.y -= by;
   }
 
   get cursor(): number {
     return this.y;
   }
 
-  rule(): void {
-    this.need(8);
-    this.y -= 4;
-    this.pdf.line(MARGIN, this.y, RIGHT, this.y, 0.6, RULE);
-    this.y -= 6;
+  move(by: number): void {
+    this.y -= by;
   }
 
-  sectionHeading(label: string): void {
-    this.need(26);
-    this.y -= 14;
-    this.pdf.text(MARGIN, this.y, label.toUpperCase(), { font: 'bold', size: 9, colour: MUTED });
-    this.y -= 4;
-    this.pdf.line(MARGIN, this.y, RIGHT, this.y, 0.8, RULE);
-    this.y -= 10;
+  /**
+   * Places the cursor at an absolute position.
+   *
+   * Two-column blocks need it: each column is laid out from the same top, and
+   * the block continues below whichever ran longer. Nudging a relative cursor
+   * backwards instead is how the customer's contact details came to be printed
+   * over the job details beside them.
+   */
+  setCursor(y: number): void {
+    this.y = y;
   }
 
-  /** A label above its value, wrapped. Returns nothing when the value is empty. */
-  block(label: string, value: string): void {
-    if (value.trim().length === 0) return;
-    const lines = PdfBuilder.wrap(value, CONTENT_WIDTH, 9.5);
-    this.need(14 + lines.length * 12);
-    this.pdf.text(MARGIN, this.y, label, { font: 'bold', size: 8.5, colour: MUTED });
-    this.y -= 12;
-    for (const line of lines) {
-      this.pdf.text(MARGIN, this.y, line, { size: 9.5, colour: INK });
-      this.y -= 12;
-    }
-    this.y -= 3;
+  /** True if `height` will not fit on the current page. */
+  wouldOverflow(height: number): boolean {
+    return this.y - height < MARGIN + FOOTER_SPACE;
   }
 
-  /** Label/value pairs in two columns, as the printed job card sets them. */
-  pairs(entries: readonly (readonly [string, string])[]): void {
-    const columnWidth = CONTENT_WIDTH / 2;
-    const rows = Math.ceil(entries.length / 2);
-    this.need(rows * 13 + 6);
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < 2; column += 1) {
-        const entry = entries[row * 2 + column];
-        if (entry === undefined) continue;
-        const x = MARGIN + column * columnWidth;
-        this.pdf.text(x, this.y, entry[0], { font: 'bold', size: 8.5, colour: MUTED });
-        this.pdf.text(x + 92, this.y, entry[1], { size: 9, colour: INK });
-      }
-      this.y -= 13;
-    }
-    this.y -= 2;
+  /** Breaks to a new page when `height` will not fit. */
+  need(height: number): void {
+    if (this.wouldOverflow(height)) this.break();
   }
 
-  /** A costed table. `money` false renders a quantity-only table, for a courier. */
-  table(headers: readonly string[], rows: readonly (readonly string[])[], numeric: number): void {
-    if (rows.length === 0) return;
-    const columns = headers.length;
-    const firstWidth = CONTENT_WIDTH - (columns - 1) * 78;
-
-    const columnX = (index: number): number =>
-      index === 0 ? MARGIN : MARGIN + firstWidth + (index - 1) * 78;
-
-    const draw = (values: readonly string[], bold: boolean): void => {
-      values.forEach((value, index) => {
-        const isNumeric = index >= columns - numeric;
-        const x = isNumeric
-          ? columnX(index) + 72 - textWidth(value, 8.5, bold ? 'bold' : 'regular')
-          : columnX(index);
-        this.pdf.text(x, this.y, value, {
-          size: 8.5,
-          font: bold ? 'bold' : 'regular',
-          colour: bold ? MUTED : INK,
-        });
-      });
-    };
-
-    this.need(24 + rows.length * 12);
-    draw(headers, true);
-    this.y -= 4;
-    this.pdf.line(MARGIN, this.y, RIGHT, this.y, 0.5, RULE);
-    this.y -= 10;
-
-    for (const row of rows) {
-      this.need(14);
-      draw(row, false);
-      this.y -= 12;
-    }
-    this.y -= 2;
+  text(x: number, value: string, options: { font?: PdfFont; size?: number; colour?: string } = {}): void {
+    this.pdf.text(x, this.y, value, options);
   }
 
-  /** A right-aligned totals row; `strong` for the payable figure. */
-  totalRow(label: string, value: string, strong = false): void {
-    this.need(16);
-    const size = strong ? 11 : 9.5;
-    const font = strong ? 'bold' : 'regular';
-    if (strong) {
-      this.y -= 2;
-      this.pdf.line(RIGHT - 220, this.y + 12, RIGHT, this.y + 12, 0.8, INK);
-    }
-    this.pdf.text(RIGHT - 220, this.y, label, { size, font, colour: strong ? INK : MUTED });
-    this.pdf.text(RIGHT - textWidth(value, size, font), this.y, value, {
-      size,
-      font,
-      colour: INK,
+  /** Right-aligned at `x`. */
+  textRight(x: number, value: string, options: { font?: PdfFont; size?: number; colour?: string } = {}): void {
+    const size = options.size ?? SIZE.body;
+    this.pdf.text(x - textWidth(value, size, options.font ?? 'regular'), this.y, value, options);
+  }
+
+  rule(colour = RULE, width = 0.6, from = MARGIN, to = RIGHT): void {
+    this.pdf.line(from, this.y, to, this.y, width, colour);
+  }
+
+  /** The screen's uppercase, letter-spaced section heading. */
+  sectionTitle(label: string): void {
+    this.need(GAP.line + 14);
+    this.pdf.text(MARGIN, this.y, label.toUpperCase(), {
+      font: 'bold',
+      size: SIZE.small,
+      colour: MUTED,
+      tracking: TRACK_HEADING,
     });
-    this.y -= strong ? 18 : 14;
+    this.move(GAP.line);
+  }
+
+  paragraph(
+    value: string,
+    options: { font?: PdfFont; size?: number; colour?: string; width?: number; x?: number; leading?: number } = {},
+  ): void {
+    const size = options.size ?? SIZE.body;
+    const width = options.width ?? CONTENT_WIDTH;
+    const leading = options.leading ?? size * 1.45;
+    for (const line of PdfBuilder.wrap(value, width, size, options.font ?? 'regular')) {
+      this.need(leading);
+      this.pdf.text(options.x ?? MARGIN, this.y, line, {
+        font: options.font,
+        size,
+        colour: options.colour ?? BODY,
+      });
+      this.move(leading);
+    }
   }
 }
 
-const dash = (value: string): string => (value.trim().length > 0 ? value : '—');
 
-const costRows = (lines: readonly CostLine[]): readonly (readonly string[])[] =>
-  lines.map((line) => [
-    `${line.label}${line.detail.length > 0 ? ` — ${line.detail}` : ''}`,
-    `${line.quantity} ${line.unit}`.trim(),
-    formatCurrency(line.unitPrice),
-    formatCurrency(line.total),
-  ]);
+const labelValueRows = (
+  sheet: Sheet,
+  rows: readonly LabelValue[],
+  x: number,
+  width: number,
+): void => {
+  const labelWidth = 78;
+  for (const row of rows) {
+    sheet.need(GAP.line);
+    sheet.pdf.text(x, sheet.cursor, row.label, { size: SIZE.body, colour: MUTED });
+    for (const [index, line] of PdfBuilder.wrap(
+      row.value,
+      width - labelWidth,
+      SIZE.body,
+      row.mono === true ? 'regular' : 'regular',
+    ).entries()) {
+      if (index > 0) sheet.move(GAP.line);
+      sheet.pdf.text(x + labelWidth, sheet.cursor, line, { size: SIZE.body, colour: BODY });
+    }
+    sheet.move(GAP.line);
+  }
+};
 
-const header = (sheet: Sheet, source: FinalDocumentSource, title: string): void => {
-  const { job } = source;
+const header = (sheet: Sheet, model: JobCardModel): void => {
   const top = sheet.cursor;
 
-  sheet.pdf.rect(MARGIN, top - 30, 34, 34, '#1b2434');
-  sheet.pdf.text(MARGIN + 5, top - 21, 'EJE', { font: 'bold', size: 13, colour: '#ffffff' });
+  // The dark EJE tile, at the screen's size-11 (44px -> 31pt).
+  sheet.pdf.rect(MARGIN, top - 24, 31, 31, INK);
+  sheet.pdf.text(MARGIN + 6, top - 14, 'EJE', { font: 'bold', size: 9, colour: '#ffffff' });
 
-  sheet.pdf.text(MARGIN + 44, top - 8, 'EJE INDUSTRIAL ELECTRONICS', {
+  sheet.pdf.text(MARGIN + 39, top - 6, model.company.name, {
     font: 'bold',
-    size: 13,
+    size: SIZE.companyName,
     colour: INK,
   });
-  sheet.pdf.text(MARGIN + 44, top - 22, title.toUpperCase(), { size: 9, colour: MUTED });
+  sheet.pdf.text(MARGIN + 39, top - 17, model.company.address, {
+    size: SIZE.small,
+    colour: MUTED,
+  });
 
-  const number = job.jobNumber;
-  sheet.pdf.text(RIGHT - textWidth(number, 17, 'bold'), top - 10, number, {
+  sheet.pdf.text(MARGIN, top - 40, model.company.contactLine, { size: SIZE.small, colour: MUTED });
+  sheet.pdf.text(MARGIN, top - 50, model.company.registrationLine, {
+    size: SIZE.small,
+    colour: MUTED,
+  });
+
+  const title = model.documentTitle.toUpperCase();
+  sheet.pdf.text(
+    RIGHT - textWidth(title, SIZE.small, 'bold', TRACK_TITLE),
+    top - 6,
+    title,
+    { font: 'bold', size: SIZE.small, colour: MUTED, tracking: TRACK_TITLE },
+  );
+  sheet.pdf.text(
+    RIGHT - textWidth(model.jobNumber, SIZE.jobNumber, 'bold'),
+    top - 24,
+    model.jobNumber,
+    { font: 'bold', size: SIZE.jobNumber, colour: INK },
+  );
+  sheet.pdf.text(RIGHT - textWidth(model.jobMeta, SIZE.small), top - 36, model.jobMeta, {
+    size: SIZE.small,
+    colour: MUTED,
+  });
+  sheet.pdf.text(RIGHT - textWidth(model.statusLine, SIZE.small), top - 46, model.statusLine, {
+    size: SIZE.small,
+    colour: MUTED,
+  });
+
+  sheet.move(58);
+  sheet.rule(INK, 1.4);
+  sheet.move(GAP.section);
+};
+
+const parties = (sheet: Sheet, model: JobCardModel): void => {
+  const columnWidth = (CONTENT_WIDTH - 24) / 2;
+  const rightX = MARGIN + columnWidth + 24;
+  const top = sheet.cursor;
+
+  // Left column: the customer, their site address and the site contact.
+  sheet.sectionTitle('Customer');
+  sheet.paragraph(model.customer.name, { font: 'bold', colour: INK, width: columnWidth });
+  for (const line of model.customer.addressLines) {
+    sheet.paragraph(line, { colour: MUTED, width: columnWidth, leading: GAP.line });
+  }
+  if (model.customer.contact !== null) {
+    sheet.move(5);
+    sheet.paragraph(model.customer.contact.name, {
+      font: 'bold',
+      colour: BODY,
+      width: columnWidth,
+      leading: GAP.line,
+    });
+    sheet.paragraph(model.customer.contact.position, {
+      colour: MUTED,
+      width: columnWidth,
+      leading: GAP.line,
+    });
+    sheet.paragraph(model.customer.contact.contactLine, {
+      colour: MUTED,
+      width: columnWidth,
+      leading: GAP.line,
+    });
+  }
+  const leftBottom = sheet.cursor;
+
+  // Right column: the machine, then the job's own details. Laid out from the
+  // same top as the left column, not from where the left column ended.
+  sheet.setCursor(top);
+  if (model.machine !== null) {
+    sheet.pdf.text(rightX, sheet.cursor, 'MACHINE', {
+      font: 'bold',
+      size: SIZE.small,
+      colour: MUTED,
+      tracking: TRACK_HEADING,
+    });
+    sheet.move(GAP.line);
+    sheet.paragraph(model.machine.title, {
+      font: 'bold',
+      colour: INK,
+      width: columnWidth,
+      x: rightX,
+      leading: GAP.line,
+    });
+    labelValueRows(sheet, model.machine.rows, rightX, columnWidth);
+    sheet.move(6);
+  }
+
+  sheet.pdf.text(rightX, sheet.cursor, 'JOB DETAILS', {
     font: 'bold',
-    size: 17,
+    size: SIZE.small,
+    colour: MUTED,
+    tracking: TRACK_HEADING,
+  });
+  sheet.move(GAP.line);
+  labelValueRows(sheet, model.jobDetails, rightX, columnWidth);
+  const rightBottom = sheet.cursor;
+
+  // Continue below whichever column ran longer.
+  sheet.setCursor(Math.min(leftBottom, rightBottom));
+  sheet.move(GAP.section);
+};
+
+const fault = (sheet: Sheet, model: JobCardModel): void => {
+  sheet.sectionTitle('Reported fault');
+  const lines = PdfBuilder.wrap(model.faultDescription, CONTENT_WIDTH - 18, SIZE.body);
+  const boxHeight = lines.length * GAP.line + 12;
+  sheet.need(boxHeight + 6);
+
+  // The screen's bordered, tinted box.
+  sheet.pdf.rect(MARGIN, sheet.cursor - boxHeight + GAP.line, CONTENT_WIDTH, boxHeight, BAND);
+  sheet.move(3);
+  for (const line of lines) {
+    sheet.pdf.text(MARGIN + 9, sheet.cursor, line, { size: SIZE.body, colour: BODY });
+    sheet.move(GAP.line);
+  }
+  sheet.move(GAP.section - 3);
+};
+
+const work = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.workBlocks.length === 0) return;
+  sheet.sectionTitle('Work carried out');
+  for (const block of model.workBlocks) {
+    sheet.need(GAP.line * 2);
+    sheet.pdf.text(MARGIN, sheet.cursor, block.label.toUpperCase(), {
+      font: 'bold',
+      size: SIZE.small,
+      colour: BODY,
+      tracking: 0.45,
+    });
+    sheet.move(GAP.line);
+    sheet.paragraph(block.value, {
+      colour: block.value === 'Not recorded' ? FAINT : BODY,
+      font: block.value === 'Not recorded' ? 'italic' : 'regular',
+    });
+    sheet.move(7);
+  }
+  sheet.move(GAP.section - 7);
+};
+
+const notes = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.notes.length === 0) return;
+  sheet.sectionTitle('Job notes');
+  for (const note of model.notes) {
+    sheet.paragraph(note.body, { colour: BODY });
+    sheet.paragraph(note.byline, { size: SIZE.tiny, colour: MUTED, leading: GAP.tight });
+    sheet.move(5);
+  }
+  sheet.move(GAP.section - 5);
+};
+
+const chargeLine = (sheet: Sheet, row: ChargeRow): void => {
+  const descriptionWidth = COL_QTY - MARGIN - 14;
+  const description =
+    row.detail.length > 0 ? `${row.description} — ${row.detail}` : row.description;
+  const lines = PdfBuilder.wrap(description, descriptionWidth, SIZE.body);
+
+  sheet.need(lines.length * GAP.line + 8);
+  const rowTop = sheet.cursor;
+
+  lines.forEach((line, index) => {
+    sheet.pdf.text(MARGIN, sheet.cursor, line, {
+      size: SIZE.body,
+      colour: index === 0 ? BODY : MUTED,
+    });
+    if (index < lines.length - 1) sheet.move(GAP.line);
+  });
+
+  // Figures align to the first line of a wrapped description.
+  sheet.pdf.text(COL_QTY - textWidth(row.quantity, SIZE.body), rowTop, row.quantity, {
+    size: SIZE.body,
+    colour: BODY,
+  });
+  sheet.pdf.text(COL_RATE - textWidth(row.rate, SIZE.body), rowTop, row.rate, {
+    size: SIZE.body,
+    colour: BODY,
+  });
+  sheet.pdf.text(COL_AMOUNT - textWidth(row.amount, SIZE.body, 'bold'), rowTop, row.amount, {
+    size: SIZE.body,
+    font: 'bold',
     colour: INK,
   });
-  const status = `${getJobTypeDefinition(job.jobType).label} · ${jobStatusLabel(job.status)}`;
-  sheet.pdf.text(RIGHT - textWidth(status, 8.5), top - 24, status, { size: 8.5, colour: MUTED });
 
-  sheet.move(38);
-  sheet.pdf.line(MARGIN, sheet.cursor, RIGHT, sheet.cursor, 1.4, INK);
-  sheet.move(8);
+  sheet.move(7);
+  sheet.rule(RULE_SOFT, 0.5);
+  sheet.move(GAP.line - 2);
 };
 
-const partiesAndMachine = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job, customer, site, contact, machine, users } = source;
-  const technician =
-    users.find((user) => user.id === job.primaryTechnicianId) ?? null;
-  const schedule = jobScheduleWindow(job);
+const charges = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.charges === null) return;
+  sheet.sectionTitle('Labour, travel and parts');
 
-  sheet.sectionHeading('Customer and equipment');
-  sheet.pairs([
-    ['Customer', customer.name],
-    ['Machine', machine === null ? 'Not against a machine' : machineDisplayName(machine)],
-    ['Site', site.name],
-    ['Serial number', machine === null ? '—' : machine.serialNumber],
-    ['Contact', contact === null ? '—' : contactFullName(contact)],
-    ['Machine type', machine === null ? '—' : machine.machineType],
-    ['Address', dash(site.addressLine1)],
-    ['Control', machine === null ? '—' : machine.controlSystem],
-    ['Order number', dash(job.orderNumber)],
-    ['Reference', dash(job.referenceNumber)],
-    ['Technician', technician === null ? 'Unassigned' : userFullName(technician)],
-    [
-      'Scheduled',
-      schedule === null
-        ? 'Not scheduled'
-        : schedule.days === 1
-          ? formatDate(schedule.start)
-          : `${formatDate(schedule.start)} — ${formatDate(schedule.end)} (${schedule.days} days)`,
-    ],
-    ['Completed', job.completedAt === null ? '—' : formatDate(job.completedAt)],
-    ['Issued', job.closedAt === null ? '—' : formatDate(job.closedAt)],
-  ]);
-};
-
-const workPerformed = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job, users } = source;
-
-  if (job.faultDescription.trim().length > 0) {
-    sheet.sectionHeading('Reported fault');
-    sheet.block('As reported by the customer', job.faultDescription);
+  // Header band, as on screen.
+  sheet.need(30);
+  sheet.pdf.rect(MARGIN, sheet.cursor - 5, CONTENT_WIDTH, 16, BAND);
+  sheet.rule(RULE, 0.6);
+  sheet.move(-1);
+  sheet.pdf.text(MARGIN, sheet.cursor, 'Description', { font: 'bold', size: SIZE.small, colour: BODY });
+  for (const [x, label] of [
+    [COL_QTY, 'Qty'],
+    [COL_RATE, 'Rate'],
+    [COL_AMOUNT, 'Amount'],
+  ] as const) {
+    sheet.pdf.text(x - textWidth(label, SIZE.small, 'bold'), sheet.cursor, label, {
+      font: 'bold',
+      size: SIZE.small,
+      colour: BODY,
+    });
   }
+  sheet.move(11);
+  sheet.rule(RULE, 0.6);
+  sheet.move(GAP.line);
 
-  const report = job.completionReport;
-  const hasReport = [
-    report.faultFindings,
-    report.diagnosis,
-    report.workPerformed,
-    report.recommendations,
-  ].some((value) => value.trim().length > 0);
+  for (const row of model.charges.rows) chargeLine(sheet, row);
 
-  if (hasReport) {
-    sheet.sectionHeading('Work carried out');
-    sheet.block('Fault findings', report.faultFindings);
-    sheet.block('Diagnosis', report.diagnosis);
-    sheet.block('Work performed', report.workPerformed);
-    sheet.block('Recommendations', report.recommendations);
-    sheet.block('General notes', report.generalNotes);
-  }
-
-  // Internal notes are EJE-only. The domain decides which are customer-facing,
-  // so this document cannot leak one the preview would have hidden.
-  const notes = customerFacingNotes(job.notes);
-  if (notes.length > 0) {
-    sheet.sectionHeading('Notes');
-    for (const note of notes) {
-      const author = users.find((user) => user.id === note.authorId);
-      sheet.block(
-        `${author === undefined ? 'EJE' : userFullName(author)} · ${formatDateTime(note.createdAt)}`,
-        note.body,
-      );
-    }
-  }
-};
-
-const costs = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job, settings } = source;
-  const totals = calculateJobTotals(job, settings);
-
-  const anything =
-    totals.labourLines.length + totals.calloutLines.length + totals.travelLines.length + totals.partLines.length;
-  if (anything === 0) return;
-
-  sheet.sectionHeading('Charges');
-
-  if (totals.labourLines.length > 0) {
-    sheet.table(['Labour', 'Quantity', 'Rate', 'Amount'], costRows(totals.labourLines), 3);
-  }
-  if (totals.calloutLines.length > 0) {
-    sheet.table(['Call-out', 'Quantity', 'Rate', 'Amount'], costRows(totals.calloutLines), 3);
-  }
-  if (totals.travelLines.length > 0) {
-    sheet.table(['Travel', 'Quantity', 'Rate', 'Amount'], costRows(totals.travelLines), 3);
-  }
-  if (totals.partLines.length > 0) {
-    sheet.table(['Parts and materials', 'Quantity', 'Unit', 'Amount'], costRows(totals.partLines), 3);
-  }
-
-  sheet.totalRow('Subtotal', formatCurrency(totals.subtotal));
-  sheet.totalRow(`VAT @ ${totals.pricing.vatPercentage}%`, formatCurrency(totals.vat));
-  sheet.totalRow('TOTAL', formatCurrency(totals.total), true);
-
-  if (totals.totalHours > 0 || totals.totalKilometres > 0) {
-    sheet.pdf.text(
-      MARGIN,
-      sheet.cursor,
-      `Total time on site: ${formatHours(totals.totalHours)} · Distance: ${totals.totalKilometres} km`,
-      { size: 8.5, colour: MUTED },
-    );
-    sheet.move(14);
-  }
-};
-
-const checklist = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job, checklistTemplate } = source;
-  if (checklistTemplate === null || job.checklist === null) return;
-
-  const responses = new Map<string, ChecklistResponse>(
-    job.checklist.responses.map((response) => [response.itemId, response]),
-  );
-
-  // The template resolved by the version RECORDED ON THE JOB, so a revised
-  // checklist cannot rewrite paperwork the customer has already signed.
-  sheet.sectionHeading(
-    `${checklistTemplate.name} — version ${job.checklist.templateVersion}`,
-  );
-
-  for (const section of checklistTemplate.sections) {
-    sheet.need(20);
-    sheet.pdf.text(MARGIN, sheet.cursor, section.title, { font: 'bold', size: 9, colour: INK });
-    sheet.move(13);
-
-    for (const item of section.items) {
-      const response = responses.get(item.id);
-      const answer =
-        response === undefined
-          ? '—'
-          : response.choice !== null
-            ? response.choice.toUpperCase()
-            : response.yesNo !== null
-              ? response.yesNo
-                ? 'YES'
-                : 'NO'
-              : response.measurement !== null
-                ? `${response.measurement}${item.unit === null ? '' : ` ${item.unit}`}`
-                : dash(response.text);
-
-      const lines = PdfBuilder.wrap(item.text, CONTENT_WIDTH - 90, 8.5);
-      sheet.need(lines.length * 11 + 4);
-      lines.forEach((line, index) => {
-        sheet.pdf.text(MARGIN + 8, sheet.cursor, line, { size: 8.5, colour: INK });
-        if (index === 0) {
-          sheet.pdf.text(RIGHT - textWidth(answer, 8.5, 'bold'), sheet.cursor, answer, {
-            size: 8.5,
-            font: 'bold',
-            colour: INK,
-          });
-        }
-        sheet.move(11);
-      });
-
-      if (response !== undefined && response.notes.trim().length > 0) {
-        for (const line of PdfBuilder.wrap(`Note: ${response.notes}`, CONTENT_WIDTH - 100, 8)) {
-          sheet.need(11);
-          sheet.pdf.text(MARGIN + 18, sheet.cursor, line, { size: 8, colour: MUTED });
-          sheet.move(10);
-        }
-      }
-    }
-    sheet.move(4);
-  }
-};
-
-const partsNote = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job } = source;
-  const document = buildPartsDocument(job);
-
-  sheet.sectionHeading(job.courierCollection ? 'Goods for delivery' : 'Parts collected');
-
-  const headers = document.showsPrices
-    ? ['Part', 'Description', 'Qty', 'Amount']
-    : ['Part', 'Description', 'Qty'];
-  const rows = document.lines.map((line) =>
-    document.showsPrices
-      ? [line.partNumber, line.description, String(line.quantity), formatCurrency(line.lineTotal ?? 0)]
-      : [line.partNumber, line.description, String(line.quantity)],
-  );
-  sheet.table(headers, rows, document.showsPrices ? 2 : 1);
-
-  sheet.totalRow('Total items', String(document.totalQuantity));
-  if (document.subtotal !== null) {
-    sheet.totalRow('TOTAL', formatCurrency(document.subtotal), true);
-  } else {
-    // A courier's copy carries no prices at all, and says so rather than
-    // leaving a blank the reader has to interpret.
-    sheet.pdf.text(MARGIN, sheet.cursor, 'Prices are not shown on a courier delivery note.', {
-      size: 8.5,
-      font: 'italic',
+  sheet.move(4);
+  for (const [label, value] of [
+    ['Subtotal', model.charges.subtotal],
+    [model.charges.vatLabel, model.charges.vat],
+  ] as const) {
+    sheet.need(GAP.line);
+    sheet.pdf.text(COL_RATE - textWidth(label, SIZE.body), sheet.cursor, label, {
+      size: SIZE.body,
       colour: MUTED,
     });
-    sheet.move(14);
+    sheet.pdf.text(COL_AMOUNT - textWidth(value, SIZE.body), sheet.cursor, value, {
+      size: SIZE.body,
+      colour: BODY,
+    });
+    sheet.move(GAP.line + 2);
   }
+
+  sheet.need(24);
+  sheet.rule(INK, 1.2, COL_QTY - 40, RIGHT);
+  sheet.move(GAP.line + 2);
+  sheet.pdf.text(COL_RATE - textWidth('Total', SIZE.total, 'bold'), sheet.cursor, 'Total', {
+    font: 'bold',
+    size: SIZE.total,
+    colour: INK,
+  });
+  sheet.pdf.text(
+    COL_AMOUNT - textWidth(model.charges.total, SIZE.total, 'bold'),
+    sheet.cursor,
+    model.charges.total,
+    { font: 'bold', size: SIZE.total, colour: INK },
+  );
+  sheet.move(GAP.section + 4);
 };
 
-const signature = (sheet: Sheet, source: FinalDocumentSource): void => {
-  const { job } = source;
-  const captured = job.signature;
+const checklist = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.checklist === null) return;
 
-  sheet.need(150);
-  sheet.sectionHeading('Acceptance');
+  sheet.sectionTitle(model.checklist.title);
+  sheet.paragraph(model.checklist.summary, { size: SIZE.small, colour: MUTED, leading: GAP.line });
+  sheet.move(5);
 
-  const declaration =
-    captured?.declaration ??
-    (job.jobType === 'parts' ? PARTS_COLLECTION_DECLARATION : '');
+  for (const section of model.checklist.sections) {
+    // A section heading alone at the foot of a page helps nobody.
+    sheet.need(GAP.line * 3);
+    sheet.pdf.text(MARGIN, sheet.cursor, section.title.toUpperCase(), {
+      font: 'bold',
+      size: SIZE.small,
+      colour: BODY,
+      tracking: 0.45,
+    });
+    sheet.move(6);
+    sheet.rule(RULE, 0.6);
+    sheet.move(GAP.line);
 
-  if (declaration.length > 0) {
-    sheet.pdf.rect(MARGIN, sheet.cursor - 20, CONTENT_WIDTH, 26, BAND);
-    for (const line of PdfBuilder.wrap(declaration, CONTENT_WIDTH - 16, 9.5, 'bold')) {
-      sheet.pdf.text(MARGIN + 8, sheet.cursor, line, { font: 'bold', size: 9.5, colour: INK });
-      sheet.move(12);
+    for (const item of section.items) {
+      const answerWidth = textWidth(item.answer, SIZE.body, 'bold');
+      // A long text answer gets its own line rather than colliding with the
+      // question, which is what made the on-screen and PDF versions differ.
+      const inline = answerWidth < 150;
+      const questionWidth = inline ? CONTENT_WIDTH - answerWidth - 18 : CONTENT_WIDTH;
+      const lines = PdfBuilder.wrap(item.text, questionWidth, SIZE.body);
+      const noteLines =
+        item.note.length > 0
+          ? PdfBuilder.wrap(`Note: ${item.note}`, CONTENT_WIDTH - 12, SIZE.tiny)
+          : [];
+
+      sheet.need((lines.length + noteLines.length + (inline ? 0 : 1)) * GAP.line + 8);
+      const rowTop = sheet.cursor;
+
+      lines.forEach((line, index) => {
+        sheet.pdf.text(MARGIN, sheet.cursor, line, { size: SIZE.body, colour: BODY });
+        if (index < lines.length - 1) sheet.move(GAP.line);
+      });
+
+      if (inline) {
+        sheet.pdf.text(RIGHT - answerWidth, rowTop, item.answer, {
+          font: 'bold',
+          size: SIZE.body,
+          colour: INK,
+        });
+      } else {
+        sheet.move(GAP.line);
+        for (const line of PdfBuilder.wrap(item.answer, CONTENT_WIDTH - 12, SIZE.body, 'bold')) {
+          sheet.pdf.text(MARGIN + 12, sheet.cursor, line, {
+            font: 'bold',
+            size: SIZE.body,
+            colour: INK,
+          });
+          sheet.move(GAP.line);
+        }
+        sheet.move(-GAP.line);
+      }
+
+      for (const line of noteLines) {
+        sheet.move(GAP.tight);
+        sheet.pdf.text(MARGIN + 12, sheet.cursor, line, { size: SIZE.tiny, colour: MUTED });
+      }
+
+      sheet.move(6);
+      sheet.rule(RULE_SOFT, 0.5);
+      sheet.move(GAP.line - 2);
     }
-    sheet.move(12);
+    sheet.move(6);
   }
+  sheet.move(GAP.section - 6);
+};
 
-  if (captured === null) {
-    sheet.pdf.text(MARGIN, sheet.cursor, 'Not signed.', { size: 9.5, font: 'italic', colour: MUTED });
-    sheet.move(14);
+const photographs = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.photos.length === 0) return;
+  sheet.sectionTitle('Photographs');
+  for (const photo of model.photos) {
+    sheet.paragraph(`· ${photo.caption}`, { size: SIZE.small, colour: MUTED, leading: GAP.line });
+  }
+  sheet.move(GAP.section);
+};
+
+const acceptance = (sheet: Sheet, model: JobCardModel): void => {
+  const columnWidth = (CONTENT_WIDTH - 24) / 2;
+  const rightX = MARGIN + columnWidth + 24;
+  const boxHeight = 62;
+
+  // The whole acceptance block stays together: a signature on a different page
+  // from the declaration it belongs to is not an acceptance.
+  sheet.need(boxHeight + 92);
+
+  sheet.move(GAP.sectionLarge);
+  sheet.rule(INK, 1.4);
+  sheet.move(GAP.section);
+  sheet.sectionTitle(
+    model.acceptance === null
+      ? 'Customer acceptance'
+      : `${model.acceptance.caption.replace(' signature', '')} acceptance`,
+  );
+
+  if (model.acceptance === null) {
+    sheet.paragraph('Not yet signed.', { font: 'italic', colour: MUTED });
+    sheet.move(GAP.section);
     return;
   }
 
-  const boxTop = sheet.cursor;
-  const boxHeight = 58;
-  sheet.pdf.line(MARGIN, boxTop - boxHeight, MARGIN + 240, boxTop - boxHeight, 0.8, INK);
+  const top = sheet.cursor;
 
-  // The signature's own geometry, drawn in the same pure black the pad and the
-  // on-screen job card use. Not a typeset name: this is the mark that was made.
-  sheet.pdf.normalisedPath(
-    captured.strokeData,
-    { x: MARGIN + 6, y: boxTop - boxHeight + 3, width: 228, height: boxHeight - 8 },
-    { colour: SIGNATURE_INK, width: 1.6 },
-  );
+  // Left column: the declaration, then who signed and when.
+  sheet.paragraph(model.acceptance.declaration, { colour: BODY, width: columnWidth });
+  sheet.move(5);
+  labelValueRows(sheet, model.acceptance.rows, MARGIN, columnWidth);
+  const leftBottom = sheet.cursor;
 
-  sheet.pdf.text(MARGIN, boxTop - boxHeight - 12, `${captured.customerName} ${captured.customerSurname}`, {
-    font: 'bold',
-    size: 9.5,
-    colour: INK,
-  });
-  sheet.pdf.text(MARGIN, boxTop - boxHeight - 24, `Signed ${formatDateTime(captured.signedAt)}`, {
-    size: 8.5,
+  // Right column: the signature itself, in the screen's bordered, tinted box.
+  const boxTop = top + 10;
+  const boxBottom = boxTop - boxHeight;
+  sheet.pdf.rect(rightX, boxBottom, columnWidth, boxHeight, BAND);
+  sheet.pdf.line(rightX, boxTop, rightX + columnWidth, boxTop, 0.6, RULE);
+  sheet.pdf.line(rightX, boxBottom, rightX + columnWidth, boxBottom, 0.6, RULE);
+  sheet.pdf.line(rightX, boxTop, rightX, boxBottom, 0.6, RULE);
+  sheet.pdf.line(rightX + columnWidth, boxTop, rightX + columnWidth, boxBottom, 0.6, RULE);
+
+  const mark = signatureFacsimile(model.acceptance.signatureData);
+  if (mark.kind === 'path') {
+    // The customer's own geometry, in the same pure black the signature pad and
+    // the on-screen job card use.
+    sheet.pdf.normalisedPath(
+      mark.path,
+      { x: rightX + 10, y: boxBottom + 7, width: columnWidth - 20, height: boxHeight - 14 },
+      { colour: SIGNATURE_INK, width: 1.5 },
+    );
+  } else {
+    // A seeded job stores a label rather than captured geometry, and the
+    // on-screen card draws the name in a cursive face. Matched here, or the two
+    // documents would show different things in the same box.
+    const centred =
+      rightX + columnWidth / 2 - textWidth(mark.text, SIZE.signature, 'script') / 2;
+    sheet.pdf.text(centred, boxBottom + boxHeight / 2 - 5, mark.text, {
+      font: 'script',
+      size: SIZE.signature,
+      colour: SIGNATURE_INK,
+    });
+  }
+
+  sheet.pdf.text(rightX, boxBottom - 11, model.acceptance.caption, {
+    size: SIZE.tiny,
     colour: MUTED,
   });
-  sheet.move(boxHeight + 30);
+
+  sheet.setCursor(Math.min(leftBottom, boxBottom - 11));
+  sheet.move(GAP.section);
 };
 
-const footers = (sheet: Sheet, fileName: string, simulated: boolean): void => {
+const footers = (sheet: Sheet, model: JobCardModel, fileName: string): void => {
   const total = sheet.pdf.pageCount;
   for (let index = 0; index < total; index += 1) {
     sheet.pdf.selectPage(index);
-    sheet.pdf.line(MARGIN, MARGIN + 18, RIGHT, MARGIN + 18, 0.5, RULE);
-    sheet.pdf.text(MARGIN, MARGIN + 6, fileName, { size: 7.5, colour: MUTED });
-    const page = `Page ${index + 1} of ${total}`;
-    sheet.pdf.text(RIGHT - textWidth(page, 7.5), MARGIN + 6, page, { size: 7.5, colour: MUTED });
-    if (simulated) {
-      const note = 'Demonstration build — fictional data';
-      sheet.pdf.text(A4_WIDTH / 2 - textWidth(note, 7.5) / 2, MARGIN + 6, note, {
-        size: 7.5,
-        colour: MUTED,
+    sheet.pdf.line(MARGIN, MARGIN + 26, RIGHT, MARGIN + 26, 0.5, RULE);
+
+    model.footerLines.forEach((line, lineIndex) => {
+      sheet.pdf.text(MARGIN, MARGIN + 16 - lineIndex * 9, line, {
+        size: SIZE.tiny,
+        colour: FAINT,
       });
-    }
+    });
+
+    const page = `Page ${index + 1} of ${total}`;
+    sheet.pdf.text(RIGHT - textWidth(page, SIZE.tiny), MARGIN + 16, page, {
+      size: SIZE.tiny,
+      colour: FAINT,
+    });
+    sheet.pdf.text(
+      RIGHT - textWidth(fileName, SIZE.tiny),
+      MARGIN + 7,
+      fileName,
+      { size: SIZE.tiny, colour: FAINT },
+    );
   }
 };
 
@@ -482,32 +626,21 @@ const footers = (sheet: Sheet, fileName: string, simulated: boolean): void => {
 export const renderJobCardPdf = (
   source: FinalDocumentSource,
   fileName: string,
-  simulated: boolean,
+  generatedAt: string,
 ): RenderedPdf => {
-  const isParts = source.job.jobType === 'parts';
+  const model = buildJobCardModel({ ...source, generatedAt });
   const sheet = new Sheet();
 
-  header(
-    sheet,
-    source,
-    isParts
-      ? source.job.courierCollection
-        ? 'Delivery note'
-        : 'Parts collection note'
-      : 'Job card',
-  );
-  partiesAndMachine(sheet, source);
-
-  if (isParts) {
-    partsNote(sheet, source);
-  } else {
-    workPerformed(sheet, source);
-    costs(sheet, source);
-    checklist(sheet, source);
-  }
-
-  signature(sheet, source);
-  footers(sheet, fileName, simulated);
+  header(sheet, model);
+  parties(sheet, model);
+  fault(sheet, model);
+  work(sheet, model);
+  notes(sheet, model);
+  charges(sheet, model);
+  checklist(sheet, model);
+  photographs(sheet, model);
+  acceptance(sheet, model);
+  footers(sheet, model, fileName);
 
   return { bytes: sheet.pdf.toBytes(), pageCount: sheet.pdf.pageCount };
 };

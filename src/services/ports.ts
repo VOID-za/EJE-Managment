@@ -133,7 +133,12 @@ export interface PdfService {
    * written to storage ONCE, at issue, and every later download returns those
    * same bytes rather than rendering again.
    */
-  render(source: FinalDocumentSource, variant?: PdfVariant): Promise<RenderedPdf>;
+  render(
+    source: FinalDocumentSource,
+    variant: PdfVariant,
+    /** Stamped on the document, so a stored file renders identically every time. */
+    generatedAt: IsoDateTime,
+  ): Promise<RenderedPdf>;
 }
 
 export interface StoredFile {

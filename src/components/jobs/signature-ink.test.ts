@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { SIGNATURE_INK, SIGNATURE_STROKE_WIDTH, strokesToPath } from './signature-path';
+import { SIGNATURE_INK, SIGNATURE_STROKE_WIDTH, strokesToPath } from '@/lib/signature';
 
 /**
  * Signature ink.

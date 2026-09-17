@@ -343,8 +343,18 @@ await step('Download Final PDF downloads a real PDF, and never opens a print dia
   if (text.includes('<html') || text.includes('<!DOCTYPE')) {
     throw new Error('the download is HTML, not a PDF');
   }
-  if (!text.includes('EJE-1065') || !text.includes('EJE INDUSTRIAL ELECTRONICS')) {
+  // The company name comes from the system settings, as it does on screen.
+  if (!text.includes('EJE-1065') || !text.includes('EJE Industrial Electronics')) {
     throw new Error('the downloaded PDF does not carry this job card');
+  }
+  // A signature captured in the application is drawn as its own geometry, so
+  // the document carries stroke operators rather than a typeset name.
+  const strokes = [...text.matchAll(/[\d.-]+ [\d.-]+ l/g)].length;
+  if (strokes < 2) {
+    throw new Error(`the downloaded PDF carries no drawn signature (${strokes} segments)`);
+  }
+  if (text.includes('/Times-Italic')) {
+    throw new Error('a captured signature was rendered as text instead of its geometry');
   }
 
   const printCalls = await page.evaluate(() => window.__ejePrintCalls);

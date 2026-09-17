@@ -1,5 +1,6 @@
 import type { Job } from '@/domain';
 import { renderJobCardPdf } from './job-card-pdf';
+import type { IsoDateTime } from '@/domain';
 import type {
   Clock,
   FinalDocumentSource,
@@ -65,12 +66,16 @@ export class SimulatedPdfService implements PdfService {
    * caller writes these bytes to storage once; nothing re-renders them to serve
    * a download.
    */
-  render(source: FinalDocumentSource, variant: PdfVariant = 'final'): Promise<RenderedPdf> {
+  render(
+    source: FinalDocumentSource,
+    variant: PdfVariant,
+    generatedAt: IsoDateTime,
+  ): Promise<RenderedPdf> {
     const descriptor =
       source.job.jobType === 'parts'
         ? this.partsDescriptor(source.job, variant)
         : this.jobCardDescriptor(source.job, variant);
-    return Promise.resolve(renderJobCardPdf(source, descriptor.fileName, true));
+    return Promise.resolve(renderJobCardPdf(source, descriptor.fileName, generatedAt));
   }
 
   generatePartsNote(job: Job, variant: PdfVariant = 'preview'): Promise<GeneratedPdf> {

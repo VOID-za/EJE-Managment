@@ -1,4 +1,4 @@
-import { can, type Job } from '@/domain';
+import { can, type IsoDateTime, type Job } from '@/domain';
 import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
@@ -73,10 +73,16 @@ export const canReadFinalDocument = (job: Job, context: OperationContext): boole
 export const storeFinalDocument = async (
   context: OperationContext,
   job: Job,
-  descriptor: { readonly storageKey: string; readonly fileName: string },
+  descriptor: {
+    readonly storageKey: string;
+    readonly fileName: string;
+    readonly generatedAt: IsoDateTime;
+  },
   source: FinalDocumentSource,
 ): Promise<number> => {
-  const rendered = await context.services.pdf.render(source, 'final');
+  // Stamped with the descriptor's own timestamp, so the file and the record
+  // recorded on the job agree to the millisecond.
+  const rendered = await context.services.pdf.render(source, 'final', descriptor.generatedAt);
   await context.services.storage.putDocument({
     storageKey: descriptor.storageKey,
     fileName: descriptor.fileName,
@@ -130,7 +136,9 @@ export const loadFinalDocumentFile = async (
    * the same bytes. The job itself is not touched, and no audit event is
    * written: this is a read.
    */
-  const rendered = await context.services.pdf.render(source, 'final');
+  // Stamped with the timestamp already recorded on the job, so this renders
+  // byte-identically however many times it is called.
+  const rendered = await context.services.pdf.render(source, 'final', descriptor.generatedAt);
   const document: StoredDocument = {
     storageKey: descriptor.storageKey,
     fileName: descriptor.fileName,

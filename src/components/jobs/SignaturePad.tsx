@@ -10,7 +10,7 @@ import {
   strokesToPath,
   type SignaturePoint,
   type SignatureStroke,
-} from './signature-path';
+} from '@/lib/signature';
 
 /**
  * Touch and pointer signature capture.

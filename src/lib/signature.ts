@@ -43,3 +43,23 @@ export const SIGNATURE_INK = '#000000';
 
 /** Stroke width of a rendered signature, in CSS pixels. */
 export const SIGNATURE_STROKE_WIDTH = 2;
+
+/**
+ * How a stored signature should be drawn.
+ *
+ * Seeded demonstration jobs carry a descriptive label (`demo-signature-pieter-nel`)
+ * rather than captured geometry, because a seed cannot ship a real person's
+ * signature. A signature captured in the application carries the real path.
+ *
+ * The decision lives here, once, so the on-screen job card and the PDF renderer
+ * cannot disagree about what to put in the signature box — which is exactly how
+ * the PDF came to have an empty one.
+ */
+export type SignatureFacsimile =
+  | { readonly kind: 'path'; readonly path: string }
+  | { readonly kind: 'name'; readonly text: string };
+
+export const signatureFacsimile = (strokeData: string): SignatureFacsimile =>
+  strokeData.startsWith('M')
+    ? { kind: 'path', path: strokeData }
+    : { kind: 'name', text: strokeData.replace(/^demo-signature-/, '').replace(/-/g, ' ') };

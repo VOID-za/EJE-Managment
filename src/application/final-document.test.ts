@@ -17,6 +17,7 @@ import {
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
 import { buildHarness, seedUser, type Harness } from './test-harness';
+import { pdfPlainText } from '@/lib/pdf/inspect';
 import type { Job } from '@/domain';
 
 /**
@@ -123,17 +124,21 @@ describe('a closed job has a downloadable final document', () => {
     const file = await loadFinalDocumentFile(harness.as(master), 'EJE-1048');
     const text = asText(file.bytes);
 
+    // Extracted the way a reader sees it: PDF escapes brackets inside string
+    // literals, so a raw byte search misses "ABC Engineering (Pty) Ltd".
+    const plain = pdfPlainText((await loadFinalDocumentFile(harness.as(master), 'EJE-1048')).bytes);
     for (const value of [
       'EJE-1048',
-      'EJE INDUSTRIAL ELECTRONICS',
-      'ABC Engineering',
+      'EJE Industrial Electronics',
+      'ABC Engineering (Pty) Ltd',
       'Johannesburg',
       'LW-V40-70214',
       'Replaced the spindle drive cooling fan.',
-      'Pieter',
+      'Pieter Nel',
     ]) {
-      expect(text, `the PDF does not carry ${value}`).toContain(value);
+      expect(plain, `the PDF does not carry ${value}`).toContain(value);
     }
+    expect(text.startsWith('%PDF-')).toBe(true);
   });
 
   it('draws the captured signature geometry, not a typeset name', async () => {

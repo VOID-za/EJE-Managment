@@ -172,6 +172,16 @@ npm run e2e
 `npm run dev-check` drives the same screens against `next dev` and fails on any
 React warning, which a production build strips.
 
+To look at the issued PDF rather than trust a description of it, `npm run
+pdf-check` downloads the real final document from the running application,
+checks it is a PDF that carries a signature, and renders every page to an image
+under `.pdf-check/`:
+
+```bash
+npm run pdf-check                    # EJE-1044, the regression fixture
+npm run pdf-check -- EJE-1062        # the parts collection note
+```
+
 ## What to look at
 
 | Area | Route |
@@ -377,6 +387,13 @@ blocks the Phase 2 architecture; each is a contained change.
   filters in the application layer and caps its result at 50 rows, telling you
   how many matched in total rather than implying the rest does not exist;
   `loadClosedJobs` becomes one API call in Phase 2 without the screen changing.
+- **The PDF and the screen render one document, but not pixel for pixel.**
+  Both consume `buildJobCardModel`, so their content, section order and labels
+  cannot differ, and the PDF mirrors the screen's type scale and spacing. What
+  it cannot mirror exactly is the typeface: PDF's standard fonts are Helvetica
+  and Times, not the Inter and JetBrains Mono the application loads, and
+  embedding a font would mean shipping a subsetter. So the document reads as the
+  same job card, set in a different face.
 - **The final PDF is rendered in the browser, not on a server.** A closed job's
   job card is a real PDF: rendered once, when the Master issues it, by the
   first-party writer in `src/lib/pdf`, and written to storage under the key on
