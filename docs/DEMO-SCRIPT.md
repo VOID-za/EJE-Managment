@@ -231,6 +231,31 @@ tablet.
 default; the choice is remembered. Note that the job card preview stays white —
 it represents the document the customer receives.
 
+**"What if a technician cannot make a job?"** → On their own job, **Transfer
+job**. Back to Open Jobs for whoever can take it, or straight to a named
+colleague. Either way the labour, travel, parts, photos, notes and checklist
+progress stay on the job — open EJE-1067 after a transfer and it is all still
+there. A transfer to someone who is unavailable that day is refused.
+
+**"How do they tell us they'll be late?"** → Notifications → **Message the
+office**. It reaches every Master, and it says plainly on the technician's
+screen that sending it does not mark them unavailable. A Master then records
+the period from the message, and the thread shows what was recorded.
+
+**"Can we stop someone being booked when they're out?"** → Yes, and not just
+on the calendar. Mark a technician unavailable from their profile, then try to
+assign them to a job that day: it is refused, with the window and the reason.
+Recording an absence over work already booked never moves those jobs — it
+lists them for you to deal with.
+
+**"What if a job was raised by mistake?"** → Two different actions, and the
+difference matters. **Delete** for a job that should never have existed —
+EJE-1065 is a duplicate. **Cancel** for a real job that will not happen, like
+EJE-1066, with a required reason. Neither destroys anything: both keep the
+record and the audit trail, both leave the active lists and the calendar, and
+both stay findable in search, labelled so they can never read as live work.
+Once a technician has accepted a job, Delete is no longer offered at all.
+
 **"How long to production?"** → `docs/ARCHITECTURE.md` §6 lists exactly what
 changes and what does not. The business rules, the workflow and every screen stay
 as they are.

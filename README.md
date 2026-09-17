@@ -272,8 +272,6 @@ blocks the Phase 2 architecture; each is a contained change.
 
 - **No draft release path.** `EJE-1060` is seeded as a draft and the state
   machine allows `draft → open`, but no UI action performs it.
-- **No job transfer.** Reassigning a job to a different technician has no
-  operation or screen yet.
 - **Two roles only.** `UserRole` is `master | technician`, so "assign a
   non-Master role" currently means technician. A third role is a change to
   `src/domain/access.ts` and nowhere else.
@@ -283,6 +281,20 @@ blocks the Phase 2 architecture; each is a contained change.
 - **Files are records, not files.** Adding a document or a machine photo creates
   the record with the storage key the production uploader will produce; no file
   is transferred and previews are marked simulated.
+- **Jobs are scheduled by date, not time.** An availability window therefore
+  blocks the whole day it falls on — the safe direction, since nothing in the
+  job record says a 10:00 call would have finished before an 11:00 return. The
+  refusal carries the exact window so a Master can judge. When job start times
+  arrive, `findAvailabilityConflicts` is the one function that changes.
+- **Accepting a job keeps an existing assignee.** A technician who accepts a
+  job the office assigned to somebody else does not become its primary
+  technician, so they cannot then transfer it. Deliberate in the
+  assign-then-accept flow, wrong when a technician picks up a colleague's
+  unstarted job; `acceptJob` is the single place to change it.
+- **Cancellation is for jobs not yet started.** A job with work captured
+  against it cannot be cancelled from the UI, because doing so would strand
+  that work. §37 of the review anticipates this and asks for stronger
+  confirmation if it is ever added.
 - **Repository reads are unpaginated** and `JobRepository.save` writes the whole
   job aggregate. Both are fine at EJE's scale but will want refining against a
   real API — see `docs/ARCHITECTURE.md` §6.
