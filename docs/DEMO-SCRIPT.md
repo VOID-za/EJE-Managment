@@ -1,10 +1,13 @@
-# Management walkthrough — 15 minutes
+# Management walkthrough — 18 minutes
 
 Before they arrive: **Administration → System → Reset demonstration data**, then
 sign out. Have the system open on the sign-in screen.
 
 The spine of this walkthrough is a single job, **EJE-1048**, run from dispatch to
 signed job card without switching records. Everything else hangs off it.
+
+To fit 15 minutes, drop §9 (Parts) and keep §10 short — everything in them also
+answers a question in **If they ask** at the end.
 
 ---
 
@@ -149,10 +152,44 @@ EJE / WD Hearn checklists exactly.*
 the trail. A job can go in and out of Awaiting Spares as many times as the parts
 situation demands.
 
-## 9. What Masters control (1 min) — sign back in as a Master
+## 9. Parts, and who may see the price (1½ min)
+
+Open **EJE-1064**, a parts collection. The Parts tab carries no labour, no
+travel and no call-out fee — a collection is goods over a counter, not a site
+visit, so those cards are not hidden, they do not exist for this job type. Take
+it through to signature: the person signing is the **collector**, and what they
+confirm is that they received the parts, not that work was completed.
+
+Then put the two seeded examples side by side:
+
+- **EJE-1062** — customer collection. The collection note shows unit prices and
+  a total.
+- **EJE-1063** — courier collection. The same document is titled **Delivery
+  Note** and carries no prices at all. A driver has no business seeing what the
+  customer paid.
+
+Now open EJE-1063's **Parts** tab: the prices are still there. They are withheld
+from the customer-facing document, never deleted from the job — EJE still costs
+the work.
+
+## 10. What Masters control (2 min) — sign back in as a Master
 
 **Administration**: users, job types and their requirements, labour rates, the
-kilometre rate, VAT, checklist versions, document approval.
+kilometre rate, VAT, checklists, document approval.
+
+**Users** — active and disabled are separate lists, so a leaver does not clutter
+the day-to-day one. Disable someone and show they move lists rather than
+disappear: their past jobs still name them. Then find **Denise**, another
+Master: there are no controls at all on that row, only the reason why. A Master
+does not quietly edit a peer's account.
+
+**Checklists** — the service checklist v1.0 shows as locked, with the reason: a
+job has been completed against it, and that job card renders from this exact
+version. The offer is **New version**, which copies the wording forward and
+leaves the original untouched.
+
+**Technical Library** — a technician's upload is sitting in the approval queue.
+Approve it, and only then does it become official reference material.
 
 Change a labour rate and show open work re-pricing — then open the job just
 signed and show that its total has **not** moved. Every job freezes the rates it
@@ -178,6 +215,14 @@ followed by accident.
 
 **"What about the customer record?"** → Customers → ABC Engineering: three sites,
 site-specific contacts, machines, full job history.
+
+**"Can we add a new customer or machine ourselves?"** → Customers → **Add
+customer** creates the company with its first site and contact in one step; it
+is immediately selectable on New Job. Machines are added from the customer's
+**Machines** tab. A technician can add one too — it is usable on site
+immediately but shows **Awaiting approval** until a Master confirms it onto the
+register. Vaal Toolroom Services has one waiting. Try entering a serial number
+that already exists: it is refused, in any casing.
 
 **"Does it work on a tablet?"** → It was built for one. Resize, or hand them the
 tablet.

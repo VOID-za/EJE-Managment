@@ -272,8 +272,17 @@ blocks the Phase 2 architecture; each is a contained change.
 
 - **No draft release path.** `EJE-1060` is seeded as a draft and the state
   machine allows `draft → open`, but no UI action performs it.
-- **No job transfer, and no customer/machine/user editing.** The repositories
-  support writes; the operations and screens do not exist yet.
+- **No job transfer.** Reassigning a job to a different technician has no
+  operation or screen yet.
+- **Two roles only.** `UserRole` is `master | technician`, so "assign a
+  non-Master role" currently means technician. A third role is a change to
+  `src/domain/access.ts` and nowhere else.
+- **No password store.** Sign-in is a demo user picker. "Reset password" queues
+  the email production would send and records it on the audit trail, but no
+  credential exists to reset.
+- **Files are records, not files.** Adding a document or a machine photo creates
+  the record with the storage key the production uploader will produce; no file
+  is transferred and previews are marked simulated.
 - **Repository reads are unpaginated** and `JobRepository.save` writes the whole
   job aggregate. Both are fine at EJE's scale but will want refining against a
   real API — see `docs/ARCHITECTURE.md` §6.
