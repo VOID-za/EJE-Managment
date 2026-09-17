@@ -186,7 +186,9 @@ await step('checklist runner works', async () => {
   await page.getByRole('button', { name: 'Start checklist' }).click();
   await page.getByText('Safety Systems').waitFor({ timeout: 8000 });
   await page.getByRole('button', { name: 'Pass', exact: true }).first().click();
-  await page.getByText(/1 of 15 answered/).waitFor({ timeout: 8000 });
+  await page.getByText(/1 of \d+ answered/).waitFor({ timeout: 8000 });
+  // A new service job must pick up the CURRENT checklist revision.
+  await page.getByText('Version 2.0-DEMO').waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/06-checklist.png`, fullPage: false });
 });
 

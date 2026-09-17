@@ -1,11 +1,15 @@
 import { calculateJobTotals, type Job, type SystemSettings } from '@/domain';
-import { formatCurrency, formatHours, formatKilometres } from '@/lib/format';
+import { Badge, Icon } from '@/components/ui';
+import { formatCurrency, formatDate, formatHours, formatKilometres } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 /**
- * Job costing summary. Every figure comes from `calculateJobTotals`, which is
- * the same function the invoice will use, so the demo cannot drift from the
- * real arithmetic.
+ * Job costing summary.
+ *
+ * Every figure comes from `calculateJobTotals`, which is the same function the
+ * invoice will use. Once a job is signed the figures come from its pricing
+ * snapshot, and the panel says so — a signed total must never look like a live
+ * one that could still move.
  */
 export const JobCostSummary = ({
   job,
@@ -20,6 +24,9 @@ export const JobCostSummary = ({
 
   const rows = [
     { label: 'Labour', detail: formatHours(totals.totalHours), value: totals.labourTotal },
+    ...(job.calloutApplied
+      ? [{ label: 'Call-out', detail: 'Fixed fee', value: totals.calloutTotal }]
+      : []),
     { label: 'Travel', detail: formatKilometres(totals.totalKilometres), value: totals.travelTotal },
     {
       label: 'Parts',
@@ -48,7 +55,7 @@ export const JobCostSummary = ({
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-3 text-sm">
-          <dt className="text-steel-600">VAT @ {settings.vatPercentage}%</dt>
+          <dt className="text-steel-600">VAT @ {totals.pricing.vatPercentage}%</dt>
           <dd className="tabular text-steel-800">{formatCurrency(totals.vat)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-3 border-t border-steel-300 pt-2.5">
@@ -58,6 +65,29 @@ export const JobCostSummary = ({
           </dd>
         </div>
       </dl>
+
+      {totals.priceFrozen ? (
+        <p className="mt-3 flex items-start gap-1.5 border-t border-steel-200 pt-3 text-xs text-steel-500">
+          <Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-verdant-600" />
+          <span>
+            Priced at the rates in force when the customer signed on{' '}
+            {formatDate(job.pricingSnapshot?.capturedAt ?? null)}. Later rate changes do not affect
+            this job.
+          </span>
+        </p>
+      ) : (
+        <p className="mt-3 border-t border-steel-200 pt-3 text-xs text-steel-500">
+          Priced at current rates. These figures are fixed when the customer signs.
+        </p>
+      )}
     </div>
   );
 };
+
+/** Compact marker for lists and headers. */
+export const PricingFrozenBadge = ({ job }: { readonly job: Job }) =>
+  job.pricingSnapshot === null ? null : (
+    <Badge tone="neutral" size="sm">
+      Rates fixed at signature
+    </Badge>
+  );

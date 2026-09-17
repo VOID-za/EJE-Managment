@@ -2,6 +2,7 @@ import type {
   ActivityEvent,
   AppNotification,
   ChecklistTemplate,
+  ChecklistTemplateId,
   Contact,
   Customer,
   CustomerId,
@@ -219,6 +220,16 @@ class DemoChecklistTemplateRepository implements ChecklistTemplateRepository {
   findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null> {
     const match = seedChecklistTemplates.find(
       (template) => template.jobTypeCode === jobTypeCode && template.status === 'current',
+    );
+    return Promise.resolve(match ?? null);
+  }
+
+  findByVersion(
+    templateId: ChecklistTemplateId,
+    version: string,
+  ): Promise<ChecklistTemplate | null> {
+    const match = seedChecklistTemplates.find(
+      (template) => template.id === templateId && template.version === version,
     );
     return Promise.resolve(match ?? null);
   }

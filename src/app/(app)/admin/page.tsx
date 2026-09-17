@@ -262,6 +262,7 @@ const RatesPanel = ({
     normal: (settings.labourRates.normal / 100).toFixed(2),
     overtime: (settings.labourRates.overtime / 100).toFixed(2),
     double: (settings.labourRates.double / 100).toFixed(2),
+    callout: (settings.calloutRate / 100).toFixed(2),
     kilometre: (settings.kilometreRate / 100).toFixed(2),
     vat: String(settings.vatPercentage),
   }));
@@ -271,7 +272,7 @@ const RatesPanel = ({
 
   const toCents = (value: string): number => Math.round(Number.parseFloat(value) * 100);
   const valid =
-    ['normal', 'overtime', 'double', 'kilometre'].every((key) =>
+    ['normal', 'overtime', 'double', 'callout', 'kilometre'].every((key) =>
       Number.isFinite(Number.parseFloat(draft[key as keyof typeof draft])),
     ) && Number.isFinite(Number.parseFloat(draft.vat));
 
@@ -284,6 +285,7 @@ const RatesPanel = ({
         overtime: toCents(draft.overtime),
         double: toCents(draft.double),
       },
+      calloutRate: toCents(draft.callout),
       kilometreRate: toCents(draft.kilometre),
       vatPercentage: Number.parseFloat(draft.vat),
     });
@@ -297,7 +299,7 @@ const RatesPanel = ({
     <div className="space-y-5">
       <AdminNotice
         title="Changing rates affects every open job"
-        body="Job values are calculated from captured hours and kilometres at whatever the rate is when the job card is viewed. In this demonstration that includes jobs that have already been signed and closed, because a job does not yet store the rates that applied when it was signed. Pinning rates at submission is the first item on the Phase 2 list."
+        body="A rate change re-prices open work immediately. It cannot reach a job the customer has already signed: every job freezes a full copy of the rates at signature and is priced from that copy for the rest of its life."
       />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -324,8 +326,21 @@ const RatesPanel = ({
         </Card>
 
         <Card>
-          <CardHeader title="Travel and VAT" />
+          <CardHeader title="Call-out, travel and VAT" />
           <div className="mt-4 space-y-4">
+            <TextField
+              label="Call-out fee"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={draft.callout}
+              onChange={(event) => {
+                setSaved(false);
+                setDraft((current) => ({ ...current, callout: event.target.value }));
+              }}
+              hint={`Currently ${formatCurrency(settings.calloutRate)}. Charged once, on jobs where the office applies it.`}
+            />
             <TextField
               label="Kilometre rate"
               type="number"
@@ -371,7 +386,7 @@ const RatesPanel = ({
       <ConfirmDialog
         open={confirmOpen}
         title="Update charge-out rates?"
-        message="Every job will be re-priced at the new rates, including jobs that have already been signed and closed. Jobs do not yet store the rates that applied at signature; that is a known Phase 2 change."
+        message="Open jobs will be re-priced at the new rates. Jobs the customer has already signed keep the rates that were frozen onto them at signature, so signed job cards and their totals do not move."
         confirmLabel="Update rates"
         busy={saving}
         onConfirm={save}
@@ -390,7 +405,7 @@ const ChecklistsPanel = ({
     <AdminNotice
       tone="amber"
       title="Demonstration checklist content"
-      body="The checklists below are representative content written for this demonstration. The production system will preserve the exact wording of the approved EJE / WD Hearn source documents. Replacing them is a data change: transcribe the approved wording, bump the version and archive the previous template. Each completed checklist records the template version it was answered against; rendering an old job card against that stored version rather than the current one is a known Phase 2 change."
+      body="The checklists below are representative content written for this demonstration. The production system will preserve the exact wording of the approved EJE / WD Hearn source documents. Replacing them is a data change: transcribe the approved wording, bump the version and archive the previous template. A completed checklist records the version it was answered against, and the job card is rendered from that stored version — so revising a checklist never rewrites a job card the customer already signed."
     />
 
     {templates.map((template) => (

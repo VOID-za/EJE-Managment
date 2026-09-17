@@ -11,6 +11,7 @@ const settings: SystemSettings = {
   companyEmail: 'service@eje-demo.co.za',
   companyAddress: '14 Anvil Road, Isando, Kempton Park, 1600',
   labourRates: { normal: 95000, overtime: 142500, double: 190000 },
+  calloutRate: 85000,
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',
@@ -23,7 +24,7 @@ const technicianId = asUserId('user-tech-1');
 
 describe('calculateJobTotals', () => {
   it('returns zeroes for a job with no captured work', () => {
-    const totals = calculateJobTotals({ labour: [], travel: [], parts: [] }, settings);
+    const totals = calculateJobTotals({ labour: [], travel: [], parts: [], calloutApplied: false, pricingSnapshot: null }, settings);
     expect(totals.subtotal).toBe(0);
     expect(totals.vat).toBe(0);
     expect(totals.total).toBe(0);
@@ -54,6 +55,8 @@ describe('calculateJobTotals', () => {
         ],
         travel: [],
         parts: [],
+        calloutApplied: false,
+        pricingSnapshot: null,
       },
       settings,
     );
@@ -87,6 +90,8 @@ describe('calculateJobTotals', () => {
             capturedAt: '2026-09-15T10:00:00.000Z',
           },
         ],
+        calloutApplied: false,
+        pricingSnapshot: null,
       },
       settings,
     );
@@ -114,6 +119,8 @@ describe('calculateJobTotals', () => {
         ],
         travel: [],
         parts: [],
+        calloutApplied: false,
+        pricingSnapshot: null,
       },
       settings,
     );

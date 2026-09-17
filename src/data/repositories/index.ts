@@ -2,6 +2,7 @@ import type {
   ActivityEvent,
   AppNotification,
   ChecklistTemplate,
+  ChecklistTemplateId,
   Contact,
   Customer,
   CustomerId,
@@ -68,7 +69,20 @@ export interface DocumentRepository {
 
 export interface ChecklistTemplateRepository {
   list(): Promise<readonly ChecklistTemplate[]>;
+  /** The template a NEW job of this type must complete: the current version. */
   findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null>;
+  /**
+   * The exact version recorded against a completed checklist.
+   *
+   * A historical job card must render the wording the customer actually saw, so
+   * the read path resolves by stored version rather than by job type. Returns
+   * null when that version is no longer held, which callers must handle rather
+   * than silently falling back to the current wording.
+   */
+  findByVersion(
+    templateId: ChecklistTemplateId,
+    version: string,
+  ): Promise<ChecklistTemplate | null>;
 }
 
 export interface ActivityRepository {

@@ -1,5 +1,6 @@
 import {
   asAttachmentId,
+  asChecklistTemplateId,
   asContactId,
   asCustomerId,
   asJobId,
@@ -7,6 +8,7 @@ import {
   asMachineId,
   asSiteId,
   asUserId,
+  emptyChecklistResponse,
   emptyCompletionReport,
   SIGNATURE_DECLARATION,
   type Attachment,
@@ -66,6 +68,8 @@ const baseJob = (jobNumber: string): Job => ({
   checklist: null,
   signature: null,
   awaitingSparesReason: '',
+  calloutApplied: false,
+  pricingSnapshot: null,
   createdAt: timeOffset(-10, 8),
   createdBy: asUserId('user-master-elmarie'),
   acceptedAt: null,
@@ -698,6 +702,81 @@ export const seedJobs: readonly Job[] = [
         capturedAt: timeOffset(-180, 12, 30),
       },
     ],
+    checklist: {
+      templateId: asChecklistTemplateId('chk-service'),
+      // Answered against the wording in force six months ago, not today's 2.0.
+      templateVersion: '1.0-DEMO',
+      responses: [
+        ...(
+          [
+            'svc-1',
+            'svc-2',
+            'svc-3',
+            'svc-4',
+            'svc-6',
+            'svc-8',
+            'svc-11',
+            'svc-13',
+            'svc-14',
+          ] as const
+        ).map((itemId) => ({
+          ...emptyChecklistResponse(itemId),
+          choice: 'pass' as const,
+          answeredAt: timeOffset(-180, 11),
+          answeredBy: asUserId('user-tech-riaan'),
+        })),
+        {
+          ...emptyChecklistResponse('svc-5'),
+          measurement: 38,
+          notes: 'Within the 10-40 °C range permitted by revision 1.0 of this checklist.',
+          answeredAt: timeOffset(-180, 11, 10),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+        {
+          ...emptyChecklistResponse('svc-7'),
+          measurement: 3.1,
+          answeredAt: timeOffset(-180, 11, 15),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+        {
+          ...emptyChecklistResponse('svc-9'),
+          measurement: 7,
+          answeredAt: timeOffset(-180, 11, 20),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+        {
+          ...emptyChecklistResponse('svc-10'),
+          measurement: 6.2,
+          answeredAt: timeOffset(-180, 11, 25),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+        {
+          ...emptyChecklistResponse('svc-12'),
+          yesNo: true,
+          notes: 'Spindle drive cooling fan noticeably noisier than at the last service.',
+          answeredAt: timeOffset(-180, 11, 30),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+        {
+          ...emptyChecklistResponse('svc-15'),
+          text: 'Spindle drive cooling fan to be replaced before the next service.',
+          answeredAt: timeOffset(-180, 12),
+          answeredBy: asUserId('user-tech-riaan'),
+        },
+      ],
+      completedAt: timeOffset(-180, 12, 10),
+      completedBy: asUserId('user-tech-riaan'),
+    },
+    // Priced at the rates that applied six months ago, not today's.
+    pricingSnapshot: {
+      labourRates: { normal: 82000, overtime: 123000, double: 164000 },
+      calloutRate: 72000,
+      kilometreRate: 1550,
+      vatPercentage: 15,
+      capturedAt: timeOffset(-180, 12, 35),
+      reason: 'customer_signature',
+    },
+    calloutApplied: true,
     completionReport: {
       faultFindings: 'Spindle drive fan noisy at the previous service, noise now increased.',
       diagnosis: 'Spindle drive cooling fan bearing wear.',

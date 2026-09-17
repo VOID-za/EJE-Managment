@@ -10,6 +10,7 @@ import {
   getJobTypeDefinition,
   isJobEditable,
   labourRateLabel,
+  pricingInputsFrom,
   SIGNATURE_DECLARATION,
   userFullName,
   type ActivityEvent,
@@ -21,6 +22,7 @@ import {
   type JobStatus,
   type LabourRateType,
   type PassFailNa,
+  type PricingSnapshot,
   type UserId,
 } from '@/domain';
 import { formatHours, formatKilometres } from '@/lib/format';
@@ -270,6 +272,21 @@ export const removeLineItem = async (
         : { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) };
 
   return context.repos.jobs.save(next);
+};
+
+/**
+ * Applies or removes the fixed call-out fee on a job. Whether a call-out is
+ * charged is a commercial decision per job, so it is explicit rather than
+ * inferred from the job type.
+ */
+export const setCalloutApplied = async (
+  context: OperationContext,
+  job: Job,
+  applied: boolean,
+): Promise<Job> => {
+  assertEditable(job);
+  if (job.calloutApplied === applied) return job;
+  return context.repos.jobs.save({ ...job, calloutApplied: applied });
 };
 
 export const addNote = async (
@@ -569,10 +586,22 @@ export const captureSignature = async (
   }
 
   const now = context.services.clock.now();
+
+  // The customer is signing for a figure, so that figure is frozen here. From
+  // this point the job prices at its snapshot and a later rate change cannot
+  // reach it. An existing snapshot is never overwritten.
+  const settings = await context.repos.settings.get();
+  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
+    ...pricingInputsFrom(settings),
+    capturedAt: now,
+    reason: 'customer_signature',
+  };
+
   const saved = await context.repos.jobs.save({
     ...job,
     status: 'review',
     completedAt: job.completedAt ?? now,
+    pricingSnapshot: snapshot,
     signature: {
       customerName: input.customerName,
       customerSurname: input.customerSurname,
@@ -586,7 +615,7 @@ export const captureSignature = async (
     jobId: job.id,
     type: 'customer_signed',
     summary: 'Customer signed the job card',
-    detail: `Signed by ${input.customerName} ${input.customerSurname}.`,
+    detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.`,
   });
   return saved;
 };
@@ -639,11 +668,22 @@ export const submitJob = async (
   }
   transition(job, 'submitted');
 
-  const document = await context.services.pdf.generateJobCard(job);
   const now = context.services.clock.now();
 
+  // Normally frozen already at signature. This is the backstop: a job must never
+  // be closed without the rates it was priced at.
+  const settings = await context.repos.settings.get();
+  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
+    ...pricingInputsFrom(settings),
+    capturedAt: now,
+    reason: 'submission',
+  };
+
+  const frozen: Job = { ...job, pricingSnapshot: snapshot };
+  const document = await context.services.pdf.generateJobCard(frozen);
+
   const submitted = await context.repos.jobs.save({
-    ...job,
+    ...frozen,
     status: 'closed',
     submittedAt: now,
     closedAt: now,

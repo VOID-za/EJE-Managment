@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import {
   calculateJobTotals,
+  labourRateFor,
   labourRateLabel,
   type Job,
   type LabourRateType,
+  type PricingInputs,
   type SystemSettings,
   type User,
 } from '@/domain';
@@ -14,6 +16,7 @@ import {
   addPart,
   addTravel,
   removeLineItem,
+  setCalloutApplied,
   type LineItemKind,
 } from '@/application/job-operations';
 import {
@@ -164,11 +167,43 @@ export const WorkCapturePanel = ({
         )}
       </Card>
 
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <CardHeader
+            title="Call-out fee"
+            description={
+              job.calloutApplied
+                ? `Applied — ${formatCurrency(totals.pricing.calloutRate)}`
+                : 'Not applied to this job'
+            }
+          />
+          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
+            <input
+              type="checkbox"
+              checked={job.calloutApplied}
+              disabled={!editable || operation.running}
+              onChange={async (event) => {
+                const ok = await operation.run((context) =>
+                  setCalloutApplied(context, job, event.target.checked),
+                );
+                if (ok) onChanged();
+              }}
+              className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+            />
+            Charge the call-out fee
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-steel-500">
+          Whether a call-out is charged is a commercial decision per job, so it is set here rather
+          than assumed from the job type.
+        </p>
+      </Card>
+
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-steel-100 px-5 py-4">
           <CardHeader
             title="Travel"
-            description={`${totals.totalKilometres.toFixed(1)} km · ${formatCurrency(totals.travelTotal)} at ${formatCurrency(settings.kilometreRate)}/km`}
+            description={`${totals.totalKilometres.toFixed(1)} km · ${formatCurrency(totals.travelTotal)} at ${formatCurrency(totals.pricing.kilometreRate)}/km`}
           />
           {editable && (
             <Button
@@ -313,7 +348,7 @@ export const WorkCapturePanel = ({
           }
         }}
         busy={operation.running}
-        settings={settings}
+        pricing={totals.pricing}
       />
 
       <TravelDialog
@@ -327,7 +362,7 @@ export const WorkCapturePanel = ({
           }
         }}
         busy={operation.running}
-        settings={settings}
+        pricing={totals.pricing}
       />
 
       <PartDialog
@@ -392,7 +427,7 @@ const LabourDialog = ({
   onClose,
   onSubmit,
   busy,
-  settings,
+  pricing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -403,7 +438,7 @@ const LabourDialog = ({
     description: string;
   }) => void;
   readonly busy: boolean;
-  readonly settings: SystemSettings;
+  readonly pricing: PricingInputs;
 }) => {
   const [date, setDate] = useState(todayIso());
   const [rateType, setRateType] = useState<LabourRateType>('normal');
@@ -412,12 +447,7 @@ const LabourDialog = ({
   const [error, setError] = useState<string | undefined>(undefined);
 
   const parsedHours = Number.parseFloat(hours);
-  const rate =
-    rateType === 'normal'
-      ? settings.labourRates.normal
-      : rateType === 'overtime'
-        ? settings.labourRates.overtime
-        : settings.labourRates.double;
+  const rate = labourRateFor(pricing, rateType);
 
   const submit = () => {
     if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
@@ -523,7 +553,7 @@ const TravelDialog = ({
   onClose,
   onSubmit,
   busy,
-  settings,
+  pricing,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -533,7 +563,7 @@ const TravelDialog = ({
     description: string;
   }) => void;
   readonly busy: boolean;
-  readonly settings: SystemSettings;
+  readonly pricing: PricingInputs;
 }) => {
   const [date, setDate] = useState(todayIso());
   const [kilometres, setKilometres] = useState('');
@@ -585,7 +615,7 @@ const TravelDialog = ({
             value={kilometres}
             onChange={(event) => setKilometres(event.target.value)}
             error={error}
-            hint={`${formatCurrency(settings.kilometreRate)} per km`}
+            hint={`${formatCurrency(pricing.kilometreRate)} per km`}
             placeholder="e.g. 48"
           />
         </div>
@@ -602,7 +632,7 @@ const TravelDialog = ({
           <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-600">
             Line total:{' '}
             <span className="tabular font-semibold text-steel-900">
-              {formatCurrency(Math.round(parsed * settings.kilometreRate))}
+              {formatCurrency(Math.round(parsed * pricing.kilometreRate))}
             </span>
           </p>
         )}

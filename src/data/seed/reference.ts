@@ -49,6 +49,7 @@ export const seedSettings: SystemSettings = {
     overtime: 142500,
     double: 190000,
   },
+  calloutRate: 85000,
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',

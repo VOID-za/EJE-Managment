@@ -12,6 +12,17 @@ import type {
   UserId,
 } from './common';
 import type { ChecklistInstance } from './checklist';
+import type { PricingInputs } from './settings';
+
+/**
+ * The pricing that was in force when a job became a financial commitment, with
+ * the moment it was frozen.
+ */
+export interface PricingSnapshot extends PricingInputs {
+  readonly capturedAt: IsoDateTime;
+  /** Why the snapshot was taken, for the audit trail. */
+  readonly reason: 'customer_signature' | 'submission';
+}
 
 /**
  * Job types are a closed union for the demo. The `JobTypeDefinition` records in
@@ -139,6 +150,18 @@ export interface Job {
 
   /** Reason recorded when the job was last moved to `awaiting_spares`. */
   readonly awaitingSparesReason: string;
+
+  /** True when the fixed call-out fee applies to this job. */
+  readonly calloutApplied: boolean;
+
+  /**
+   * The rates this job is priced at, frozen when the customer signed.
+   *
+   * Null while the job is still being worked, in which case current system
+   * settings apply. Once set it is never recalculated, so changing a rate can
+   * never alter a job card the customer has already signed.
+   */
+  readonly pricingSnapshot: PricingSnapshot | null;
 
   readonly createdAt: IsoDateTime;
   readonly createdBy: UserId;

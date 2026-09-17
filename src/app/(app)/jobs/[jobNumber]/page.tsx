@@ -84,6 +84,8 @@ const JobDetailPage = ({
   const definition = getJobTypeDefinition(job.jobType);
   const refresh = () => viewQuery.refetch();
 
+  const checklistTabVisible = definition.checklistRequired || job.checklist !== null;
+
   const tabs = [
     { id: 'overview', label: 'Overview' },
     {
@@ -97,7 +99,7 @@ const JobDetailPage = ({
         ) : undefined,
     },
     { id: 'completion', label: 'Completion' },
-    ...(definition.checklistRequired
+    ...(checklistTabVisible
       ? [
           {
             id: 'checklist',
@@ -196,14 +198,20 @@ const JobDetailPage = ({
         <CompletionReportPanel job={job} editable={editable} onChanged={refresh} />
       )}
 
-      {tab === 'checklist' && view.checklistTemplate !== null && (
-        <ChecklistRunner
-          job={job}
-          template={view.checklistTemplate}
-          editable={editable}
-          onChanged={refresh}
-        />
-      )}
+      {tab === 'checklist' &&
+        (view.checklistVersionMissing ? (
+          <ErrorState
+            title="Checklist version unavailable"
+            message={`This job was completed against checklist version ${job.checklist?.templateVersion ?? 'unknown'}, which is no longer held. The answers are preserved on the job, but the wording cannot be shown. It is deliberately not rendered against the current version.`}
+          />
+        ) : view.checklistTemplate !== null ? (
+          <ChecklistRunner
+            job={job}
+            template={view.checklistTemplate}
+            editable={editable}
+            onChanged={refresh}
+          />
+        ) : null)}
 
       {tab === 'media' && (
         <JobMediaPanel job={job} users={users} editable={editable} onChanged={refresh} />

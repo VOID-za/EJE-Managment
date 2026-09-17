@@ -26,8 +26,20 @@ export interface JobView {
   readonly primaryTechnician: User | null;
   readonly additionalTechnicians: readonly User[];
   readonly settings: SystemSettings;
-  /** The checklist template for this job type, when one is mandated. */
+  /**
+   * The checklist template this job is rendered against.
+   *
+   * For a job that already carries a completed or in-progress checklist this is
+   * the exact version recorded on the instance, NOT the current template — a
+   * historical job card must show the wording the customer saw. For a job with
+   * no checklist yet it is the current template for the job type.
+   */
   readonly checklistTemplate: ChecklistTemplate | null;
+  /**
+   * Set when the job records a checklist version that is no longer held. The UI
+   * must say so rather than quietly rendering today's wording.
+   */
+  readonly checklistVersionMissing: boolean;
 }
 
 export const loadJobView = async (
@@ -50,9 +62,25 @@ export const loadJobView = async (
   if (customer === null || machine === null || site === undefined) return null;
 
   const definition = getJobTypeDefinition(job.jobType);
-  const checklistTemplate = definition.checklistRequired
-    ? await repos.checklistTemplates.findForJobType(job.jobType)
-    : null;
+
+  // Resolve by the version stored on the instance when the job has one, so that
+  // an old job card is never re-rendered against a newer revision of the wording.
+  const historical =
+    job.checklist === null
+      ? null
+      : await repos.checklistTemplates.findByVersion(
+          job.checklist.templateId,
+          job.checklist.templateVersion,
+        );
+
+  const checklistTemplate =
+    job.checklist !== null
+      ? historical
+      : definition.checklistRequired
+        ? await repos.checklistTemplates.findForJobType(job.jobType)
+        : null;
+
+  const checklistVersionMissing = job.checklist !== null && historical === null;
 
   return {
     job,
@@ -67,6 +95,7 @@ export const loadJobView = async (
     ),
     settings,
     checklistTemplate,
+    checklistVersionMissing,
   };
 };
 

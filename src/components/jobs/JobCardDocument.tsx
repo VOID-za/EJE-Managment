@@ -144,7 +144,10 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         )}
       </section>
 
-      {(job.labour.length > 0 || job.travel.length > 0 || job.parts.length > 0) && (
+      {(job.labour.length > 0 ||
+        job.travel.length > 0 ||
+        job.parts.length > 0 ||
+        job.calloutApplied) && (
         <section className="mt-6">
           <SectionTitle>Labour, travel and parts</SectionTitle>
           <table className="w-full border-collapse text-xs">
@@ -174,6 +177,20 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
                   </td>
                 </tr>
               ))}
+              {job.calloutApplied && (
+                <tr className="border-b border-steel-100">
+                  <td className="py-2 pr-2">
+                    Call-out<span className="text-steel-500"> — fixed call-out fee</span>
+                  </td>
+                  <td className="tabular py-2 text-right">1</td>
+                  <td className="tabular py-2 text-right">
+                    {formatCurrency(totals.pricing.calloutRate)}
+                  </td>
+                  <td className="tabular py-2 text-right font-medium">
+                    {formatCurrency(totals.calloutTotal)}
+                  </td>
+                </tr>
+              )}
               {job.travel.map((entry, index) => (
                 <tr key={entry.id} className="border-b border-steel-100">
                   <td className="py-2 pr-2">
@@ -184,7 +201,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
                   </td>
                   <td className="tabular py-2 text-right">{entry.kilometres.toFixed(1)} km</td>
                   <td className="tabular py-2 text-right">
-                    {formatCurrency(settings.kilometreRate)}
+                    {formatCurrency(totals.pricing.kilometreRate)}
                   </td>
                   <td className="tabular py-2 text-right font-medium">
                     {formatCurrency(totals.travelLines[index]?.total ?? 0)}
@@ -216,7 +233,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
               <tr>
                 <td colSpan={2} />
                 <td className="py-1.5 text-right text-steel-600">
-                  VAT @ {settings.vatPercentage}%
+                  VAT @ {totals.pricing.vatPercentage}%
                 </td>
                 <td className="tabular py-1.5 text-right">{formatCurrency(totals.vat)}</td>
               </tr>
@@ -235,7 +252,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
       {checklistTemplate !== null && job.checklist !== null && (
         <section className="mt-6">
           <SectionTitle>
-            {checklistTemplate.name} ({job.checklist.templateVersion})
+            {checklistTemplate.name} (version {job.checklist.templateVersion} — as completed)
           </SectionTitle>
           {(() => {
             const progress = evaluateChecklist(checklistTemplate, job.checklist);
@@ -317,6 +334,13 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
       <footer className="mt-8 border-t border-steel-200 pt-3 text-[11px] text-steel-400">
         {settings.companyName} · {job.jobNumber} · Generated{' '}
         {formatDateTime(new Date().toISOString())} · Demonstration document, fictional data
+        {job.pricingSnapshot !== null && (
+          <>
+            <br />
+            Priced at the rates in force on{' '}
+            {formatDateTime(job.pricingSnapshot.capturedAt)}, when the customer signed.
+          </>
+        )}
       </footer>
     </article>
   );

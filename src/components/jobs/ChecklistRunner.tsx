@@ -104,8 +104,8 @@ export const ChecklistRunner = ({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-semibold text-steel-900">{template.name}</h3>
-              <Badge tone="neutral" size="sm">
-                {template.version}
+              <Badge tone={template.status === 'archived' ? 'amber' : 'neutral'} size="sm">
+                Version {template.version}
               </Badge>
               {completed && (
                 <Badge tone="green" size="sm" dot>
@@ -127,6 +127,16 @@ export const ChecklistRunner = ({
             {progress.percentComplete}%
           </div>
         </div>
+        {template.status === 'archived' && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-eje-700">
+            <Icon name="warning" className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              This job was completed against version {template.version}, which has since been
+              superseded. It is shown here exactly as the customer saw it. New jobs use the current
+              version.
+            </span>
+          </p>
+        )}
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-steel-100">
           <div
             className={cn(

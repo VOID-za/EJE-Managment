@@ -170,6 +170,9 @@ const NewJobPage = () => {
         checklist: null,
         signature: null,
         awaitingSparesReason: '',
+        // A call-out fee is a per-job commercial decision, applied on the job card.
+        calloutApplied: false,
+        pricingSnapshot: null,
         createdAt: now,
         createdBy: user.id,
         acceptedAt: null,
