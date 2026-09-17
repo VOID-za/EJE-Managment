@@ -8,7 +8,7 @@ import {
   type AvailabilityRecord,
   type AvailabilityType,
   type Job,
-  type TechnicianMessage,
+  type ChatMessage,
   type User,
 } from '@/domain';
 import {
@@ -16,7 +16,7 @@ import {
   updateAvailability,
   type AvailabilityInput,
 } from '@/application/availability-operations';
-import { attachAvailabilityToMessage } from '@/application/message-operations';
+import { attachAvailabilityToMessage } from '@/application/chat-operations';
 import { Badge, Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
@@ -47,7 +47,7 @@ export const AvailabilityDialog = ({
 }: {
   readonly technician: User;
   readonly existing?: AvailabilityRecord | null;
-  readonly fromMessage?: TechnicianMessage | null;
+  readonly fromMessage?: ChatMessage | null;
   readonly onClose: () => void;
   readonly onSaved: () => void;
 }) => {

@@ -18,7 +18,8 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
-  TechnicianMessage,
+  ChatMessage,
+  Conversation,
   User,
   UserId,
 } from '@/domain';
@@ -143,12 +144,22 @@ export interface AvailabilityRepository {
   save(record: AvailabilityRecord): Promise<AvailabilityRecord>;
 }
 
-export interface MessageRepository {
-  /** Newest first. */
-  list(): Promise<readonly TechnicianMessage[]>;
-  listForSender(senderId: UserId): Promise<readonly TechnicianMessage[]>;
-  findById(id: string): Promise<TechnicianMessage | null>;
-  save(message: TechnicianMessage): Promise<TechnicianMessage>;
+export interface ChatRepository {
+  /** Conversations this user participates in, most recent activity first. */
+  listConversations(userId: UserId): Promise<readonly Conversation[]>;
+  findConversation(id: string): Promise<Conversation | null>;
+  saveConversation(conversation: Conversation): Promise<Conversation>;
+  /** Messages in one thread, oldest first — a conversation reads downwards. */
+  listMessages(conversationId: string): Promise<readonly ChatMessage[]>;
+  /**
+   * Every message in every thread this user participates in.
+   *
+   * Backs the unread count, which has to span conversations. Unpaginated, like
+   * the rest of the demo repositories; Phase 2 serves the count from the API.
+   */
+  listMessagesFor(userId: UserId): Promise<readonly ChatMessage[]>;
+  findMessage(id: string): Promise<ChatMessage | null>;
+  saveMessage(message: ChatMessage): Promise<ChatMessage>;
 }
 
 export interface SettingsRepository {
@@ -168,5 +179,5 @@ export interface RepositoryBundle {
   readonly notifications: NotificationRepository;
   readonly settings: SettingsRepository;
   readonly availability: AvailabilityRepository;
-  readonly messages: MessageRepository;
+  readonly chat: ChatRepository;
 }

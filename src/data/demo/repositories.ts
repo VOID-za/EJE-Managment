@@ -18,7 +18,8 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
-  TechnicianMessage,
+  ChatMessage,
+  Conversation,
   User,
   UserId,
 } from '@/domain';
@@ -30,7 +31,7 @@ import type {
   JobFilter,
   JobRepository,
   AvailabilityRepository,
-  MessageRepository,
+  ChatRepository,
   MachineRepository,
   NotificationRepository,
   RepositoryBundle,
@@ -466,36 +467,74 @@ class DemoAvailabilityRepository implements AvailabilityRepository {
   }
 }
 
-class DemoMessageRepository implements MessageRepository {
+class DemoChatRepository implements ChatRepository {
   constructor(private readonly context: DemoContext) {}
 
-  list(): Promise<readonly TechnicianMessage[]> {
+  listConversations(userId: UserId): Promise<readonly Conversation[]> {
+    const mine = this.context
+      .read()
+      .conversations.filter((conversation) => conversation.participantIds.includes(userId));
     return Promise.resolve(
-      [...this.context.read().messages].sort((a, b) => b.sentAt.localeCompare(a.sentAt)),
+      [...mine].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
     );
   }
 
-  listForSender(senderId: UserId): Promise<readonly TechnicianMessage[]> {
+  findConversation(id: string): Promise<Conversation | null> {
     return Promise.resolve(
-      [...this.context.read().messages.filter((message) => message.senderId === senderId)].sort(
-        (a, b) => b.sentAt.localeCompare(a.sentAt),
-      ),
+      this.context.read().conversations.find((conversation) => conversation.id === id) ?? null,
     );
   }
 
-  findById(id: string): Promise<TechnicianMessage | null> {
-    return Promise.resolve(
-      this.context.read().messages.find((message) => message.id === id) ?? null,
-    );
-  }
-
-  save(message: TechnicianMessage): Promise<TechnicianMessage> {
+  saveConversation(conversation: Conversation): Promise<Conversation> {
     this.context.commit((draft) => {
-      const index = draft.messages.findIndex((candidate) => candidate.id === message.id);
-      draft.messages =
+      const index = draft.conversations.findIndex(
+        (candidate) => candidate.id === conversation.id,
+      );
+      draft.conversations =
         index === -1
-          ? [message, ...draft.messages]
-          : draft.messages.map((candidate) => (candidate.id === message.id ? message : candidate));
+          ? [conversation, ...draft.conversations]
+          : draft.conversations.map((candidate) =>
+              candidate.id === conversation.id ? conversation : candidate,
+            );
+    });
+    return Promise.resolve(conversation);
+  }
+
+  listMessages(conversationId: string): Promise<readonly ChatMessage[]> {
+    const messages = this.context
+      .read()
+      .chatMessages.filter((message) => message.conversationId === conversationId);
+    // Oldest first: a conversation reads downwards.
+    return Promise.resolve([...messages].sort((a, b) => a.sentAt.localeCompare(b.sentAt)));
+  }
+
+  listMessagesFor(userId: UserId): Promise<readonly ChatMessage[]> {
+    const database = this.context.read();
+    const mine = new Set(
+      database.conversations
+        .filter((conversation) => conversation.participantIds.includes(userId))
+        .map((conversation) => conversation.id),
+    );
+    return Promise.resolve(
+      database.chatMessages.filter((message) => mine.has(message.conversationId)),
+    );
+  }
+
+  findMessage(id: string): Promise<ChatMessage | null> {
+    return Promise.resolve(
+      this.context.read().chatMessages.find((message) => message.id === id) ?? null,
+    );
+  }
+
+  saveMessage(message: ChatMessage): Promise<ChatMessage> {
+    this.context.commit((draft) => {
+      const index = draft.chatMessages.findIndex((candidate) => candidate.id === message.id);
+      draft.chatMessages =
+        index === -1
+          ? [...draft.chatMessages, message]
+          : draft.chatMessages.map((candidate) =>
+              candidate.id === message.id ? message : candidate,
+            );
     });
     return Promise.resolve(message);
   }
@@ -527,5 +566,5 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),
-  messages: new DemoMessageRepository(context),
+  chat: new DemoChatRepository(context),
 });

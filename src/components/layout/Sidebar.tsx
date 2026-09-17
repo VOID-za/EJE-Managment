@@ -16,9 +16,11 @@ const GROUP_ORDER: readonly NavigationItem['group'][] = ['work', 'records', 'sys
 export const Sidebar = ({
   onNavigate,
   unreadCount,
+  unreadMessages,
 }: {
   readonly onNavigate?: () => void;
   readonly unreadCount: number;
+  readonly unreadMessages: number;
 }) => {
   const pathname = usePathname();
   const { currentUser, signOut } = useApp();
@@ -66,6 +68,11 @@ export const Sidebar = ({
                       >
                         <Icon name={item.icon as IconName} className="size-[18px]" />
                         <span className="flex-1 truncate">{item.label}</span>
+                        {item.href === '/messages' && unreadMessages > 0 && (
+                          <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-action px-1.5 py-0.5 text-[11px] font-bold text-white">
+                            {unreadMessages}
+                          </span>
+                        )}
                         {item.href === '/notifications' && unreadCount > 0 && (
                           <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-signal-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
                             {unreadCount}

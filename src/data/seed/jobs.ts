@@ -13,7 +13,10 @@ import {
   PARTS_COLLECTION_DECLARATION,
   SIGNATURE_DECLARATION,
   type Attachment,
+  type FinalDocument,
+  type IsoDateTime,
   type Job,
+  type PricingSnapshot,
 } from '@/domain';
 import { dateOffset, nextMonday, timeOffset } from './reference';
 
@@ -40,6 +43,59 @@ const jobPhoto = (
   uploadedAt: timeOffset(days, hours),
   uploadedBy: asUserId(uploadedBy),
   sizeBytes: 2_140_000,
+});
+
+/**
+ * The final document held on a closed job.
+ *
+ * Seeded rather than produced on demand, because that is how a closed job
+ * really behaves: the copy the customer received was rendered once, when the
+ * Master issued it, and opening the record months later must hand back that
+ * same document instead of making a new one.
+ */
+const finalJobCard = (
+  jobNumber: string,
+  pageCount: number,
+  generatedAt: IsoDateTime,
+  issuedTo: string,
+): FinalDocument => ({
+  fileName: `${jobNumber}-Final-Job-Card.pdf`,
+  storageKey: `jobcards/final/${jobNumber}.pdf`,
+  pageCount,
+  generatedAt,
+  generatedBy: asUserId('user-master-elmarie'),
+  simulated: true,
+  issuedTo,
+});
+
+const finalPartsNote = (
+  jobNumber: string,
+  generatedAt: IsoDateTime,
+  issuedTo: string,
+): FinalDocument => ({
+  fileName: `${jobNumber}-Final-Parts-Collection-Note.pdf`,
+  storageKey: `partsnotes/final/${jobNumber}.pdf`,
+  pageCount: 1,
+  generatedAt,
+  generatedBy: asUserId('user-master-elmarie'),
+  simulated: true,
+  issuedTo,
+});
+
+/**
+ * The rates that applied when the job was signed.
+ *
+ * Every closed job carries one. Without it a historical job card would be
+ * re-priced at today's rates, which would change an invoice that has already
+ * been issued.
+ */
+const ratesAt = (capturedAt: IsoDateTime, normal: number, callout: number): PricingSnapshot => ({
+  labourRates: { normal, overtime: Math.round(normal * 1.5), double: normal * 2 },
+  calloutRate: callout,
+  kilometreRate: 1550,
+  vatPercentage: 15,
+  capturedAt,
+  reason: 'customer_signature',
 });
 
 const baseJob = (jobNumber: string): Job => ({
@@ -73,6 +129,7 @@ const baseJob = (jobNumber: string): Job => ({
   calloutApplied: false,
   courierCollection: false,
   pricingSnapshot: null,
+  finalDocument: null,
   cancellation: null,
   deletedAt: null,
   deletedBy: null,
@@ -528,6 +585,8 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-21, 12),
     submittedAt: timeOffset(-21, 12, 20),
     closedAt: timeOffset(-21, 12, 20),
+    pricingSnapshot: ratesAt(timeOffset(-21, 12, 10), 84000, 74000),
+    finalDocument: finalJobCard('EJE-1056', 2, timeOffset(-21, 12, 20), 'pieter.nel@abc-engineering-demo.co.za'),
     travel: [
       {
         id: asLineItemId('trv-1056-1'),
@@ -594,6 +653,8 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-38, 13),
     submittedAt: timeOffset(-38, 13, 15),
     closedAt: timeOffset(-38, 13, 15),
+    pricingSnapshot: ratesAt(timeOffset(-38, 13, 5), 83000, 73000),
+    finalDocument: finalJobCard('EJE-1057', 2, timeOffset(-38, 13, 15), 'hennie@krugerprecision-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1057-1'),
@@ -875,6 +936,7 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-2, 10, 40),
     submittedAt: timeOffset(-2, 11),
     closedAt: timeOffset(-2, 11, 5),
+    finalDocument: finalPartsNote('EJE-1062', timeOffset(-2, 11, 5), 'pieter.nel@abc-engineering-demo.co.za'),
     parts: [
       {
         id: asLineItemId('prt-1062-1'),
@@ -1000,6 +1062,7 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-180, 12, 30),
     submittedAt: timeOffset(-180, 12, 45),
     closedAt: timeOffset(-180, 12, 45),
+    finalDocument: finalJobCard('EJE-1044', 3, timeOffset(-180, 12, 45), 'pieter.nel@abc-engineering-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1044-1'),
@@ -1122,6 +1185,8 @@ export const seedJobs: readonly Job[] = [
     completedAt: timeOffset(-140, 16),
     submittedAt: timeOffset(-140, 16, 30),
     closedAt: timeOffset(-140, 16, 30),
+    pricingSnapshot: ratesAt(timeOffset(-140, 16, 10), 80000, 70000),
+    finalDocument: finalJobCard('EJE-1039', 3, timeOffset(-140, 16, 30), 'gerhard.smit@midrandautomation-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1039-1'),

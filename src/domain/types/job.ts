@@ -108,6 +108,27 @@ export const cancellationReasonLabel = (reason: CancellationReason): string => {
   }
 };
 
+/**
+ * The official document a closed job was finalised with.
+ *
+ * Stored on the job rather than regenerated, so "the final signed job card" is
+ * one fixed artefact with one filename. Changing a labour rate, a part price or
+ * a checklist template afterwards cannot reach it: the rates are frozen in
+ * `pricingSnapshot`, the checklist resolves by its stored version, and this
+ * records exactly which document was issued and when.
+ */
+export interface FinalDocument {
+  readonly fileName: string;
+  readonly storageKey: string;
+  readonly pageCount: number;
+  readonly generatedAt: IsoDateTime;
+  readonly generatedBy: UserId;
+  /** True in the demo, where no file is rendered server-side. */
+  readonly simulated: boolean;
+  /** Where the signed copy was emailed, recorded with the document. */
+  readonly issuedTo: string;
+}
+
 export interface JobCancellation {
   readonly reason: CancellationReason;
   readonly description: string;
@@ -287,6 +308,13 @@ export interface Job {
    * never alter a job card the customer has already signed.
    */
   readonly pricingSnapshot: PricingSnapshot | null;
+
+  /**
+   * Set once, when a Master finalises the job. Never regenerated.
+   *
+   * Its presence is what makes a closed job's paperwork answerable years later.
+   */
+  readonly finalDocument: FinalDocument | null;
 
   /** Set when the job was cancelled. Never cleared. */
   readonly cancellation: JobCancellation | null;

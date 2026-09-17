@@ -26,6 +26,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { ChecklistRunner } from '@/components/jobs/ChecklistRunner';
 import { CompletionReportPanel } from '@/components/jobs/CompletionReportPanel';
+import { FinalDocumentCard } from '@/components/jobs/FinalDocumentCard';
 import { JobActionBar } from '@/components/jobs/JobActionBar';
 import { JobMediaPanel } from '@/components/jobs/JobMediaPanel';
 import { JobNotesPanel } from '@/components/jobs/JobNotesPanel';
@@ -193,6 +194,12 @@ const JobDetailPage = ({
             record and its history are retained.
           </p>
         </Card>
+      )}
+
+      {/* A closed job's first business is its official job card, so the
+          document and its actions come before the record itself. */}
+      {job.status === 'closed' && job.deletedAt === null && (
+        <FinalDocumentCard job={job} users={users} />
       )}
 
       {job.status === 'cancelled' && job.cancellation !== null && (

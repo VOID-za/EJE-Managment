@@ -22,6 +22,7 @@ import { Button, Card, ErrorState, Icon, LoadingPanel, SelectField } from '@/com
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { cn } from '@/lib/cn';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { isOverdue } from '@/lib/format';
@@ -34,6 +35,22 @@ const STATUS_OPTIONS: readonly { value: StatusFilter; label: string }[] = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'awaiting_completion', label: 'Awaiting completion' },
   ...JOB_STATUS_ORDER.map((status) => ({ value: status, label: jobStatusLabel(status) })),
+];
+
+/**
+ * The five lists the office actually asks for by name.
+ *
+ * They set the same status filter the dropdown does, rather than being a
+ * parallel mechanism — except Closed, which leaves for the archive, because a
+ * closed job is a historical record with its own search, not a row in the
+ * working list.
+ */
+const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: string }[] = [
+  { value: 'open-work', label: 'Open work' },
+  { value: 'open', label: 'Open' },
+  { value: 'awaiting_spares', label: 'Awaiting spares' },
+  { value: 'submitted', label: 'Master Review' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
 
 const matchesStatus = (status: JobStatus, filter: StatusFilter, scheduled: string | null) => {
@@ -106,6 +123,16 @@ const JobsPageContent = () => {
       });
   }, [query.data, status, jobType, priority, mineOnly, term, user.id, isMaster]);
 
+  // Counted over everything this user may see, so a quick filter can say how
+  // many are behind it before it is pressed.
+  const visible = useMemo(
+    () => (query.data ?? []).filter((row) => isMaster || row.job.status !== 'cancelled'),
+    [query.data, isMaster],
+  );
+  const quickCount = (filter: StatusFilter): number =>
+    visible.filter((row) => matchesStatus(row.job.status, filter, row.job.scheduledDate)).length;
+  const closedCount = visible.filter((row) => row.job.status === 'closed').length;
+
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
   }
@@ -122,6 +149,50 @@ const JobsPageContent = () => {
           </Link>
         }
       />
+
+      <div className="eje-scrollbar mb-4 flex flex-wrap items-center gap-2">
+        {QUICK_FILTERS.filter((filter) => isMaster || filter.value !== 'cancelled').map(
+          (filter) => (
+            <button
+              key={filter.value}
+              type="button"
+              onClick={() => setStatus(filter.value)}
+              aria-pressed={status === filter.value}
+              className={cn(
+                'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+                status === filter.value
+                  ? 'border-eje-500 bg-eje-600 text-white'
+                  : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
+              )}
+            >
+              {filter.label}
+              <span
+                className={cn(
+                  'tabular rounded-full px-1.5 text-xs',
+                  status === filter.value ? 'bg-white/20' : 'bg-steel-100 text-steel-600',
+                )}
+              >
+                {query.loading ? '—' : quickCount(filter.value)}
+              </span>
+            </button>
+          ),
+        )}
+
+        {/* Closed work leaves for the archive: it is a historical record with
+            its own search, not another row in the working list. */}
+        {isMaster && (
+          <Link
+            href="/jobs/closed"
+            className="inline-flex min-h-9 items-center gap-2 rounded-full border border-steel-300 bg-surface px-3.5 text-sm font-medium text-steel-700 transition-colors hover:border-steel-400"
+          >
+            <Icon name="document" className="size-4 text-steel-400" />
+            Closed Jobs
+            <span className="tabular rounded-full bg-steel-100 px-1.5 text-xs text-steel-600">
+              {query.loading ? '—' : closedCount}
+            </span>
+          </Link>
+        )}
+      </div>
 
       <Card className="mb-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">

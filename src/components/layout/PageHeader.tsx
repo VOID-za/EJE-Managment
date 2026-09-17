@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/cn';
 import { Icon } from '@/components/ui';
 
 export interface Breadcrumb {
@@ -13,6 +14,7 @@ export interface PageHeaderProps {
   readonly breadcrumbs?: readonly Breadcrumb[];
   readonly actions?: ReactNode;
   readonly meta?: ReactNode;
+  readonly className?: string;
 }
 
 export const PageHeader = ({
@@ -21,8 +23,9 @@ export const PageHeader = ({
   breadcrumbs,
   actions,
   meta,
+  className,
 }: PageHeaderProps) => (
-  <div className="mb-6">
+  <div className={cn('mb-6', className)}>
     {breadcrumbs !== undefined && breadcrumbs.length > 0 && (
       <nav aria-label="Breadcrumb" className="mb-2">
         <ol className="flex flex-wrap items-center gap-1 text-xs text-steel-500">

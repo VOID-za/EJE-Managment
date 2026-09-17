@@ -62,13 +62,22 @@ export interface GeneratedPdf {
   readonly simulated: boolean;
 }
 
+/**
+ * Which copy of a customer document is being produced.
+ *
+ * `final` is the one copy a Master issues: it is emailed to the customer and
+ * kept on the closed job for good, so its file name has to say that it is the
+ * official final document rather than a working preview.
+ */
+export type PdfVariant = 'preview' | 'final';
+
 export interface PdfService {
   /**
    * Produces the signed job card document. The demo returns a descriptor that
    * the on-screen job-card preview renders from live job data; production
    * renders the same model server-side into a real PDF.
    */
-  generateJobCard(job: Job): Promise<GeneratedPdf>;
+  generateJobCard(job: Job, variant?: PdfVariant): Promise<GeneratedPdf>;
   /**
    * Produces the parts collection note / courier delivery note.
    *
@@ -78,7 +87,7 @@ export interface PdfService {
    * `buildPartsDocument` model the preview uses, so the courier's copy cannot
    * disagree with what was shown on screen.
    */
-  generatePartsNote(job: Job): Promise<GeneratedPdf>;
+  generatePartsNote(job: Job, variant?: PdfVariant): Promise<GeneratedPdf>;
 }
 
 export interface StoredFile {

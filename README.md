@@ -152,7 +152,11 @@ npm run smoke
 | Machine record and service history | `/machines/machine-abc-lv40` |
 | Technical Library | `/library` |
 | Global search | `/search?q=LW-V40-70214` |
-| Notifications and the Simulated Outbox | `/notifications` |
+| Notifications — system alerts, each linking to its own destination | `/notifications` |
+| Messages — two-way Master ↔ technician chat | `/messages` |
+| Closed Jobs archive, with the final signed document on each | `/jobs/closed` as a Master |
+| A closed job's historical record | `/jobs/EJE-1044` |
+| The Simulated Outbox | `/notifications?tab=outbox` |
 | Audit trail | `/activity` |
 | Administration | `/admin` |
 
@@ -208,6 +212,17 @@ enforced rather than documented:
   signed. `EJE-1044` is seeded completed against service checklist `1.0-DEMO`
   while new service jobs get `2.0-DEMO`, so the difference is visible in the
   demonstration.
+- **The final document.** When a Master issues a job card, the document's
+  descriptor is written onto the job and never produced again. Opening a closed
+  job — from Closed Jobs, from the customer's history or from the machine's —
+  reads that stored record, so *View Final PDF* and *Download Final PDF* always
+  hand back the same official job card under the same file name
+  (`EJE-1044-Final-Job-Card.pdf`). A parts collection keeps a collection note,
+  not a job card.
+
+`src/application/closed-jobs.test.ts` proves all three: it raises the rates and
+publishes a new checklist version, then re-reads a closed job and asserts that
+its totals, its checklist wording and its final document have not moved.
 
 ## Two-step submission
 
@@ -226,6 +241,32 @@ Rates stay frozen at signature, so a Master correcting a job card prices it at
 exactly what the customer saw. The line TOTAL can still move if a Master adds or
 removes work, which is a real commercial event and is written to the audit trail
 rather than happening quietly. The customer signature itself cannot be replaced.
+
+## Notifications, messages and the closed-job archive
+
+Three separate things, kept separate on purpose.
+
+**Notifications** (`/notifications`) are the system reporting an event. Each one
+carries an explicit destination rather than a derived one, so a submitted job
+card opens the job in Master Review and a new message opens its conversation —
+nothing is funnelled at the job screen. Handing a job card to the office notifies
+**every active Master exactly once**; a disabled Master is not notified, because
+a notification nobody can sign in to read is not a notification.
+
+**Messages** (`/messages`) are people. A technician writes to "the office" and it
+reaches every Master on duty; a Master writes to a technician. Both reply in the
+same thread, unread counts show on the sidebar and clear when the thread is
+opened, and a conversation can optionally be linked to a job. A message changes
+nothing by itself: when a technician mentions being unavailable, a Master presses
+**Mark unavailable** on that message, and the resulting availability record is
+linked back to it.
+
+**Closed Jobs** (`/jobs/closed`, Masters) is the archive. Search across job
+number, customer, site, machine, serial number, order number and reference;
+filter by customer, site, job type, technician and the date the job was closed.
+Opening a record shows the complete historical job, read-only, with the final
+signed document on file. It is the same record the customer, site and machine
+histories link to — there is no second archived copy.
 
 ## Site location on acceptance
 
@@ -297,7 +338,27 @@ blocks the Phase 2 architecture; each is a contained change.
   confirmation if it is ever added.
 - **Repository reads are unpaginated** and `JobRepository.save` writes the whole
   job aggregate. Both are fine at EJE's scale but will want refining against a
-  real API — see `docs/ARCHITECTURE.md` §6.
+  real API — see `docs/ARCHITECTURE.md` §6. The Closed Jobs archive therefore
+  filters in the application layer and caps its result at 50 rows, telling you
+  how many matched in total rather than implying the rest does not exist;
+  `loadClosedJobs` becomes one API call in Phase 2 without the screen changing.
+- **No file is produced for a final PDF.** A closed job stores the real
+  descriptor of its final document — file name, page count, storage key, who
+  issued it, when, and where it was emailed — and that record is never
+  regenerated, so the same document comes back every time. But nothing is
+  rendered server-side in the demo: *Download Final PDF* prints the same
+  `JobCardDocument` component the production renderer will consume, through the
+  browser, under the stored file name. The card says so on screen.
+- **Conversations are one-to-one or office-wide, with no attachments.** A
+  technician writes to "the office" (every active Master) or a Master writes to
+  one technician; there is no arbitrary group thread, no photo or file on a
+  message, and no typing or delivery indicator. `Conversation.participantIds` is
+  already a list, so a group thread is a UI change rather than a data one.
+- **Message notifications are in-app only.** A `chat_message` notification is
+  raised for every other participant and links straight to the conversation, but
+  the demo does not also queue a WhatsApp or email nudge for it — deliberately,
+  since every WhatsApp message costs money and the rule from the site-location
+  work applies here too.
 
 ## Known configuration points
 

@@ -237,10 +237,18 @@ colleague. Either way the labour, travel, parts, photos, notes and checklist
 progress stay on the job — open EJE-1067 after a transfer and it is all still
 there. A transfer to someone who is unavailable that day is refused.
 
-**"How do they tell us they'll be late?"** → Notifications → **Message the
-office**. It reaches every Master, and it says plainly on the technician's
-screen that sending it does not mark them unavailable. A Master then records
-the period from the message, and the thread shows what was recorded.
+**"How do they tell us they'll be late?"** → **Messages** → **New message**. A
+technician writes to "the office" and it reaches every Master on duty, so nobody
+has to guess who is at a desk. A Master replies in the same thread, so the
+technician is actually answered. It says plainly on the screen that sending a
+message does not mark anyone unavailable — a Master then records the period from
+the message itself, and the thread shows what was recorded against it.
+
+**"Where do system alerts go, then?"** → **Notifications**, which is a separate
+place on purpose. A notification is the system telling you something happened; a
+message is a person asking you something. Each notification opens where it
+belongs: a submitted job card opens the job in Master Review, a message opens
+its conversation. Nothing is funnelled to one screen.
 
 **"Can we stop someone being booked when they're out?"** → Yes, and not just
 on the calendar. Mark a technician unavailable from their profile, then try to
@@ -255,6 +263,23 @@ EJE-1066, with a required reason. Neither destroys anything: both keep the
 record and the audit trail, both leave the active lists and the calendar, and
 both stay findable in search, labelled so they can never read as live work.
 Once a technician has accepted a job, Delete is no longer offered at all.
+
+**"Where do closed jobs go?"** → **Closed Jobs** in the sidebar, or the *Closed
+Jobs* link on the Jobs screen. Every issued job card, searchable by job number,
+customer, site, machine, serial number, order number or reference, and
+filterable by customer, site, job type, technician and the date it was closed.
+Open EJE-1044: the complete record as it was issued, read-only, with the final
+signed document on file — file name, page count, who issued it and the address
+it went to. **View Final PDF** shows that document; **Download Final PDF** saves
+it under the same name every time. Then change the charge-out rate on
+Administration → Rates & VAT and come back: the total has not moved, because the
+rates were frozen onto the job at signature. The same applies to the checklist:
+EJE-1044 still renders version 1.0-DEMO while new service jobs use 2.0-DEMO.
+
+**"Is it the same record as in the customer's history?"** → Yes, one record. Open
+EJE-1044 from Closed Jobs, from ABC Engineering → Job History, or from the
+machine's own page: all three land on the same job. There is no second archived
+copy that could drift out of step.
 
 **"How long to production?"** → `docs/ARCHITECTURE.md` §6 lists exactly what
 changes and what does not. The business rules, the workflow and every screen stay

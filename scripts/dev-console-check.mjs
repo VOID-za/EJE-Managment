@@ -92,12 +92,31 @@ await step('draw on the signature pad', async () => {
   await page.waitForTimeout(500);
 });
 
-await step('technician messages the office', async () => {
-  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: /Message the office/ }).click();
-  await page.getByLabel('Message').fill('Running late — traffic on the R21.');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await page.getByText('A Master will pick it up', { exact: false }).waitFor({ timeout: 20000 });
+await step('technician messages the office and replies in the thread', async () => {
+  // Opening a thread marks its messages read, which writes to the demo store.
+  // Doing that during render is exactly the warning this script exists for.
+  await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Messages', exact: true }).waitFor({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'New message' }).click();
+  const compose = page.getByRole('dialog');
+  await compose.waitFor({ timeout: 10000 });
+  await compose.getByLabel('Message').fill('Running late — traffic on the R21.');
+  await compose.getByRole('button', { name: 'Send message' }).click();
+  await page.getByText('traffic on the R21', { exact: false }).first().waitFor({ timeout: 20000 });
+
+  await page.getByLabel('Message').fill('Should be on site by 10:30.');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByText('on site by 10:30', { exact: false }).first().waitFor({ timeout: 20000 });
+});
+
+await step('technician moves between conversations', async () => {
+  const threads = page.getByRole('button', { name: /R21|Edenvale|EJE-/ });
+  const count = await threads.count();
+  for (let index = 0; index < Math.min(count, 3); index += 1) {
+    await threads.nth(index).click();
+    await page.waitForTimeout(400);
+  }
 });
 
 await step('technician reads their own availability', async () => {
@@ -151,9 +170,17 @@ await step('sign in as a Master', async () => {
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 20000 });
 });
 
-await step('Master opens the availability dialog from a message', async () => {
+await step('Master opens a chat notification, which lands on the conversation', async () => {
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: /^Messages/ }).click();
+  const open = page.getByRole('link', { name: 'Open conversation' }).first();
+  await open.waitFor({ timeout: 20000 });
+  await open.click();
+  await page.getByRole('heading', { name: 'Messages', exact: true }).waitFor({ timeout: 20000 });
+  await page.waitForTimeout(600);
+});
+
+await step('Master opens the availability dialog from a message', async () => {
+  await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Mark unavailable' }).first().click({ timeout: 20000 });
 
   const dialog = page.getByRole('dialog');
@@ -241,6 +268,36 @@ await step('Master opens the assign dialog and hits an availability clash', asyn
   await dialog.getByText('Technician unavailable').waitFor({ timeout: 20000 });
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await page.waitForTimeout(400);
+});
+
+await step('Master works the Closed Jobs archive', async () => {
+  await page.goto(`${BASE}/jobs/closed`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 20000 });
+  await page.getByRole('table').waitFor({ timeout: 20000 });
+
+  // Every filter is a controlled input driving an async re-query.
+  await page.getByLabel('Search the archive').fill('EJE-1044');
+  await page.waitForTimeout(500);
+  await page.getByLabel('Search the archive').fill('');
+  await page.getByLabel('Customer').selectOption('cust-abc');
+  await page.waitForTimeout(400);
+  await page.getByLabel('Job type').selectOption('service');
+  await page.waitForTimeout(400);
+  await page.getByLabel('Closed from').fill('2026-01-01');
+  await page.waitForTimeout(400);
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.waitForTimeout(400);
+});
+
+await step('Master opens a closed job and its final document', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });
+  await page.getByText('Final signed job card').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'View Final PDF' }).click();
+  await page.getByRole('heading', { name: 'Review job card' }).waitFor({ timeout: 20000 });
+  await page.getByText('Issued and closed').waitFor({ timeout: 20000 });
+  // The stored descriptor is derived, not written from an effect; a regression
+  // here shows up as a setState-during-effect warning.
+  await page.waitForTimeout(800);
 });
 
 await browser.close();

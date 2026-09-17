@@ -10,7 +10,8 @@ import type {
   AvailabilityRecord,
   SystemSettings,
   TechnicalDocument,
-  TechnicianMessage,
+  ChatMessage,
+  Conversation,
   User,
 } from '@/domain';
 import {
@@ -22,7 +23,8 @@ import {
   seedJobs,
   seedMachines,
   seedAvailability,
-  seedMessages,
+  seedConversations,
+  seedChatMessages,
   seedNotifications,
   seedSettings,
   seedSites,
@@ -55,7 +57,8 @@ export interface DemoDatabase {
   activity: ActivityEvent[];
   notifications: AppNotification[];
   availability: AvailabilityRecord[];
-  messages: TechnicianMessage[];
+  conversations: Conversation[];
+  chatMessages: ChatMessage[];
   settings: SystemSettings;
   favouriteDocuments: Record<string, string[]>;
   recentDocuments: Record<string, string[]>;
@@ -74,8 +77,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * Masters can administer them.
  * v5 replaced leave with availability records that carry times and authorship,
  * added technician messages, and gave jobs cancellation and soft deletion.
+ * v6 turned one-way technician messages into two-way conversations, gave
+ * notifications an explicit link, and stored the final document on a closed job.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -94,7 +99,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
   availability: seedAvailability.map((record) => ({ ...record })),
-  messages: seedMessages.map((message) => ({ ...message })),
+  conversations: seedConversations.map((conversation) => ({ ...conversation })),
+  chatMessages: seedChatMessages.map((message) => ({ ...message })),
   settings: { ...seedSettings },
   favouriteDocuments: {
     'user-tech-sipho': ['doc-lw-v40-electrical', 'doc-fanuc-alarms'],

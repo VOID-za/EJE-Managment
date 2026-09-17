@@ -124,6 +124,86 @@ describe('technician submission', () => {
     expect(entry?.detail).toContain('not been emailed');
   });
 
+  it('notifies EVERY active Master, exactly once each', async () => {
+    const signed = await workAndSign(harness);
+    await submitForMasterReview(harness.tech, signed);
+
+    const users = await harness.repos.users.list();
+    const activeMasters = users.filter((user) => user.role === 'master' && user.active);
+    expect(activeMasters.length).toBeGreaterThan(1);
+
+    for (const master of activeMasters) {
+      const mine = (await harness.repos.notifications.list(master.id)).filter(
+        (notification) =>
+          notification.type === 'job_submitted' && notification.body.includes('EJE-1048'),
+      );
+      // Exactly one: a signed job card must be announced, and only once.
+      expect(mine).toHaveLength(1);
+      expect(mine[0]?.title).toBe('Job EJE-1048 submitted for review');
+      expect(mine[0]?.body).toContain('Sipho Mahlangu');
+      expect(mine[0]?.body).toContain('Master Review');
+      expect(mine[0]?.readAt).toBeNull();
+    }
+  });
+
+  it('does NOT notify a disabled Master', async () => {
+    // A notification nobody can sign in to read is not a notification.
+    const users = await harness.repos.users.list();
+    const johan = users.find((user) => user.id === 'user-master-johan')!;
+    await harness.repos.users.save({ ...johan, active: false });
+
+    const signed = await workAndSign(harness);
+    await submitForMasterReview(harness.tech, signed);
+
+    const forJohan = (await harness.repos.notifications.list(johan.id)).filter(
+      (notification) => notification.link === '/jobs/EJE-1048',
+    );
+    expect(forJohan).toHaveLength(0);
+  });
+
+  it('links the notification straight at the job', async () => {
+    const signed = await workAndSign(harness);
+    const handed = await submitForMasterReview(harness.tech, signed);
+
+    const notifications = await harness.repos.notifications.list(master.id);
+    const submitted = notifications.find(
+      (notification) => notification.type === 'job_submitted',
+    );
+
+    expect(submitted?.link).toBe('/jobs/EJE-1048');
+    expect(submitted?.jobId).toBe(handed.id);
+  });
+
+  it('cannot be submitted twice, so the notification cannot be duplicated', async () => {
+    const signed = await workAndSign(harness);
+    const handed = await submitForMasterReview(harness.tech, signed);
+
+    // The state machine refuses submitted -> submitted. Re-rendering, reloading
+    // or reopening the job cannot reach this path at all, and a second explicit
+    // attempt is refused rather than notifying everyone again.
+    await expect(
+      submitForMasterReview(harness.tech, handed),
+    ).rejects.toBeInstanceOf(WorkflowError);
+
+    // Scoped to this job: the seed already contains an unrelated job_submitted
+    // notification, which is exactly the kind of thing a loose filter hides.
+    const mine = (await harness.repos.notifications.list(master.id)).filter(
+      (notification) =>
+        notification.type === 'job_submitted' && notification.link === '/jobs/EJE-1048',
+    );
+    expect(mine).toHaveLength(1);
+  });
+
+  it('does not notify the submitter about their own submission', async () => {
+    const signed = await workAndSign(harness);
+    await submitForMasterReview(harness.tech, signed);
+
+    const mine = (await harness.repos.notifications.list(technician.id)).filter(
+      (notification) => notification.link === '/jobs/EJE-1048',
+    );
+    expect(mine).toHaveLength(0);
+  });
+
   it('does not generate the final customer document', async () => {
     const signed = await workAndSign(harness);
     const handed = await submitForMasterReview(harness.tech, signed);

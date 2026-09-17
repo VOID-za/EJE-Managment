@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { can, type AppNotification, type NotificationChannel, type NotificationType } from '@/domain';
+import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
 import {
   Badge,
   Button,
@@ -17,9 +17,6 @@ import {
   type IconName,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { MasterInbox } from '@/components/messages/MasterInbox';
-import { MessageMastersCard } from '@/components/messages/MessageMastersCard';
-import { MyMessagesCard } from '@/components/messages/MyMessagesCard';
 import { useQuery } from '@/hooks/useQuery';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatRelative } from '@/lib/format';
@@ -32,7 +29,7 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   machine_approval_request: 'machines',
   document_approval_request: 'library',
   job_submitted: 'document',
-  technician_message: 'note',
+  chat_message: 'note',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -42,7 +39,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   machine_approval_request: 'Machine approval request',
   document_approval_request: 'Document approval request',
   job_submitted: 'Job submitted',
-  technician_message: 'Message from a technician',
+  chat_message: 'New message',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {
@@ -57,7 +54,7 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
   'document_approval_request',
 ];
 
-type TabId = 'inbox' | 'messages' | 'handled' | 'outbox';
+type TabId = 'inbox' | 'handled' | 'outbox';
 
 const NotificationsPageContent = () => {
   const user = useCurrentUser();
@@ -66,19 +63,8 @@ const NotificationsPageContent = () => {
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId | null) ?? 'inbox');
 
   const query = useQuery(`notifications:${user.id}`, (repos) => repos.notifications.list(user.id));
-
-  // Messages are a separate stream from notifications: a notification says
-  // something happened, a message is a person asking the office for something.
-  const messagesQuery = useQuery('notifications:messages', async (repos) => {
-    const [messages, users, availability] = await Promise.all([
-      repos.messages.list(),
-      repos.users.list(),
-      repos.availability.list(),
-    ]);
-    return { messages, users, availability };
-  });
   const jobsQuery = useQuery('notifications:jobNumbers', async (repos) => {
-    const jobs = await repos.jobs.list();
+    const jobs = await repos.jobs.list({ includeDeleted: true });
     return new Map(jobs.map((job) => [job.id as string, job.jobNumber]));
   });
 
@@ -92,12 +78,6 @@ const NotificationsPageContent = () => {
   const unread = notifications.filter((notification) => notification.readAt === null);
 
   const visible = tab === 'inbox' ? inbox : handled;
-  const isMaster = can(user.role, 'admin.access');
-  const messageData = messagesQuery.data;
-  const openMessages =
-    messageData === null || messageData === undefined
-      ? []
-      : messageData.messages.filter((message) => message.status !== 'actioned');
 
   return (
     <>
@@ -132,16 +112,6 @@ const NotificationsPageContent = () => {
                 </Badge>
               ) : undefined,
           },
-          {
-            id: 'messages',
-            label: isMaster ? 'Messages' : 'Message the office',
-            badge:
-              isMaster && openMessages.length > 0 ? (
-                <Badge tone="amber" size="sm">
-                  {openMessages.length}
-                </Badge>
-              ) : undefined,
-          },
           { id: 'handled', label: 'Handled' },
           {
             id: 'outbox',
@@ -158,30 +128,7 @@ const NotificationsPageContent = () => {
         className="mb-5"
       />
 
-      {tab === 'messages' ? (
-        isMaster ? (
-          messagesQuery.loading || messageData === null || messageData === undefined ? (
-            <LoadingPanel rows={3} label="Loading messages" />
-          ) : (
-            <MasterInbox
-              messages={messageData.messages}
-              users={messageData.users}
-              availability={messageData.availability}
-              onChanged={messagesQuery.refetch}
-            />
-          )
-        ) : (
-          <div className="space-y-4">
-            <MessageMastersCard onSent={messagesQuery.refetch} />
-            <MyMessagesCard
-              messages={(messageData?.messages ?? []).filter(
-                (message) => message.senderId === user.id,
-              )}
-              availability={messageData?.availability ?? []}
-            />
-          </div>
-        )
-      ) : tab === 'outbox' ? (
+      {tab === 'outbox' ? (
         <OutboxPanel />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Loading notifications" />
@@ -235,6 +182,18 @@ const NotificationRow = ({
   readonly onHandled: () => void;
 }) => {
   const unread = notification.readAt === null;
+
+  // An explicit link wins; otherwise fall back to the job, which is how every
+  // notification that predates the link field still behaves.
+  const destination =
+    notification.link !== null
+      ? {
+          href: notification.link,
+          label: notification.type === 'chat_message' ? 'Open conversation' : 'Open',
+        }
+      : jobNumber !== null
+        ? { href: `/jobs/${jobNumber}`, label: `Open ${jobNumber}` }
+        : null;
   const actionable = REQUIRES_ACTION.includes(notification.type);
 
   return (
@@ -294,10 +253,13 @@ const NotificationRow = ({
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {jobNumber !== null && (
-              <Link href={`/jobs/${jobNumber}`}>
+            {/* Each notification goes where it belongs: a job event to the job,
+                a message to its conversation. Sending everything to the job
+                screen would strand the ones that are not about a job. */}
+            {destination !== null && (
+              <Link href={destination.href}>
                 <Button size="sm" variant="secondary">
-                  Open {jobNumber}
+                  {destination.label}
                 </Button>
               </Link>
             )}

@@ -28,7 +28,7 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
     <article
       // Pinned to the light palette: this represents the printed document.
       data-theme="light"
-      className="mx-auto max-w-[820px] bg-white p-8 text-[13px] leading-relaxed text-steel-800 shadow-[var(--shadow-card)] sm:p-10"
+      className="eje-document mx-auto max-w-[820px] bg-white p-8 text-[13px] leading-relaxed text-steel-800 shadow-[var(--shadow-card)] sm:p-10"
     >
       <header className="flex flex-wrap items-start justify-between gap-6 border-b-2 border-steel-900 pb-5">
         <div>

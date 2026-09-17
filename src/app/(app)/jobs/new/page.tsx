@@ -199,6 +199,7 @@ const NewJobPage = () => {
         calloutApplied: false,
         courierCollection: jobType === 'parts' ? courierCollection : false,
         pricingSnapshot: null,
+        finalDocument: null,
         cancellation: null,
         deletedAt: null,
         deletedBy: null,

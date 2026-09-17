@@ -290,7 +290,7 @@ await step('technician hands over for Master review, WITHOUT emailing', async ()
 
 await step('no customer email has been sent at technician hand-over', async () => {
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
-  const jobCardEmails = await page.getByText('EJE-1048-Job-Card.pdf').count();
+  const jobCardEmails = await page.getByText('EJE-1048-Final-Job-Card.pdf').count();
   if (jobCardEmails !== 0) throw new Error('technician hand-over emailed the customer');
 });
 
@@ -332,7 +332,7 @@ await step('Master submits, which emails the customer and closes the job', async
 await step('the customer email appears only after Master submission', async () => {
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
   await page.getByText('Nothing in this list was sent').waitFor({ timeout: 8000 });
-  await page.getByText('EJE-1048-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.getByText('EJE-1048-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
 });
 
 await step('closed job is read-only', async () => {
@@ -489,16 +489,41 @@ await step('a technician can message the office', async () => {
   await page.getByRole('button', { name: /Lerato/ }).click();
   await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 10000 });
 
-  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: /Message the office/ }).click();
-  await page.getByText('does not mark you unavailable', { exact: false })
+  await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Messages', exact: true }).waitFor({ timeout: 10000 });
+  // Messages are a separate place from Notifications, deliberately.
+  await page.getByText('System alerts live under Notifications', { exact: false })
     .waitFor({ timeout: 8000 });
 
-  await page.getByLabel('Message').fill(
+  await page.getByRole('button', { name: 'New message' }).click();
+  const compose = page.getByRole('dialog');
+  await compose.waitFor({ timeout: 5000 });
+  // A technician does not have to guess which Master is on duty.
+  await compose.getByText('Reaches every Master on duty', { exact: false })
+    .waitFor({ timeout: 5000 });
+  await compose.getByLabel('Message').fill(
     'Hi Christene. I have a doctor appointment tomorrow at 14:00. Back by 16:00.',
   );
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await page.getByText('A Master will pick it up', { exact: false }).waitFor({ timeout: 10000 });
+  await compose.getByRole('button', { name: 'Send message' }).click();
+
+  // The message lands in a thread the technician can see and reply in.
+  await page.getByText('doctor appointment tomorrow', { exact: false })
+    .first()
+    .waitFor({ timeout: 10000 });
+  await page.getByText('It does not change the job or anyone', { exact: false })
+    .waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/16-messages-technician.png`, fullPage: false });
+});
+
+await step('the technician can carry on the same conversation, not start a new one', async () => {
+  await page.getByLabel('Message').fill('The appointment is at the clinic in Edenvale.');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByText('clinic in Edenvale', { exact: false }).first().waitFor({ timeout: 10000 });
+
+  // Both messages sit in one thread, so one conversation is listed, not two.
+  const threads = await page.getByRole('button', { name: /doctor appointment|clinic in Edenvale/ })
+    .count();
+  if (threads > 1) throw new Error('replying started a second conversation');
 });
 
 await step('the message alone does NOT make the technician unavailable', async () => {
@@ -511,7 +536,7 @@ await step('the message alone does NOT make the technician unavailable', async (
   }
 });
 
-await step('a Master sees the message and it says it changed nothing', async () => {
+await step('the Master is notified of the message, and the notification opens the chat', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByRole('tab', { name: 'Master' }).click();
@@ -519,14 +544,40 @@ await step('a Master sees the message and it says it changed nothing', async () 
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: /^Messages/ }).click();
-  await page.getByText('doctor appointment tomorrow', { exact: false }).waitFor({ timeout: 10000 });
-  await page.getByText('has not changed anyone', { exact: false }).first()
+  const row = page
+    .locator('li')
+    .filter({ hasText: 'New message from Lerato' })
+    .first();
+  await row.waitFor({ timeout: 10000 });
+  // A message notification opens the conversation, NOT the job page.
+  const link = row.getByRole('link', { name: 'Open conversation' });
+  await link.waitFor({ timeout: 8000 });
+  const href = await link.getAttribute('href');
+  if (href === null || !href.startsWith('/messages?conversation=')) {
+    throw new Error(`a chat notification pointed at ${href} instead of the conversation`);
+  }
+  await link.click();
+  await page.getByText('doctor appointment tomorrow', { exact: false }).first()
+    .waitFor({ timeout: 10000 });
+});
+
+await step('a Master sees the message and it says it changed nothing', async () => {
+  await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+  await page.getByText('doctor appointment tomorrow', { exact: false }).first()
+    .waitFor({ timeout: 10000 });
+  await page.getByText('It does not change the job or anyone', { exact: false })
     .waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/16-messages-master.png`, fullPage: false });
+});
+
+await step('the Master can reply, so the technician is answered', async () => {
+  await page.getByLabel('Message').fill('Noted Lerato, I have recorded it. Thanks.');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByText('I have recorded it', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
 await step('the Master records the availability from the message', async () => {
-  // The newest message is first in the inbox; take its own Mark unavailable.
+  // Explicitly, from the technician's own message — never automatically.
   await page.getByRole('button', { name: 'Mark unavailable' }).first().click();
 
   const dialog = page.getByRole('dialog');
@@ -936,6 +987,269 @@ await step('a historical job card still renders the version it was answered agai
   // v2.0-DEMO is the version issued to new jobs today.
   await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
   await page.getByText('1.0-DEMO', { exact: false }).first().waitFor({ timeout: 10000 });
+});
+
+await step('the Jobs screen offers the lists the office asks for by name', async () => {
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor({ timeout: 10000 });
+
+  const chips = page.locator('main button[aria-pressed]');
+  await chips.first().waitFor({ timeout: 10000 });
+  // Each chip carries its own count, which is not part of its name.
+  const labels = (await chips.allInnerTexts()).map((name) =>
+    name.replace(/[\s\u00a0]*(\d+|—)\s*$/, '').replace(/\s+/g, ' ').trim(),
+  );
+  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Master Review', 'Cancelled']) {
+    if (!labels.includes(label)) {
+      throw new Error(`the Jobs screen has no "${label}" quick filter (found ${labels.join(', ')})`);
+    }
+  }
+
+  // A quick filter drives the same status filter the dropdown does.
+  await page.getByRole('button', { name: /^Master Review/ }).first().click();
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1055'),
+    { timeout: 10000 },
+  );
+  const selected = await page.getByLabel('Status').inputValue();
+  if (selected !== 'submitted') {
+    throw new Error(`the Master Review quick filter left the Status filter on ${selected}`);
+  }
+
+  // Closed work leaves for the archive rather than filling the working list.
+  const closed = page.getByRole('link', { name: /^Closed Jobs/ }).first();
+  await closed.waitFor({ timeout: 8000 });
+  await closed.click();
+  await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/18-jobs-quick-filters.png`, fullPage: false });
+});
+
+await step('Closed Jobs is its own place in the navigation', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const link = page.getByRole('link', { name: 'Closed Jobs' }).first();
+  await link.waitFor({ timeout: 10000 });
+  await link.click();
+  await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
+  await page.getByText('Historical records', { exact: false }).waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/18-closed-jobs.png`, fullPage: false });
+});
+
+await step('the archive lists closed jobs, and only closed jobs', async () => {
+  const table = page.getByRole('table');
+  await table.waitFor({ timeout: 10000 });
+  const text = await table.innerText();
+
+  // Seeded closed work.
+  for (const number of ['EJE-1056', 'EJE-1057', 'EJE-1062', 'EJE-1044', 'EJE-1039']) {
+    if (!text.includes(number)) throw new Error(`${number} is closed but missing from the archive`);
+  }
+  // EJE-1055 is in Master Review, EJE-1045 was cancelled, EJE-1049 is open,
+  // and EJE-1065 was deleted earlier in this run. None of them were issued.
+  for (const number of ['EJE-1055', 'EJE-1045', 'EJE-1049', 'EJE-1065']) {
+    if (text.includes(number)) throw new Error(`${number} is not a closed job but is in the archive`);
+  }
+});
+
+await step('the archive shows the columns the office searches by', async () => {
+  // Headers are upper-cased by the stylesheet, so compare case-insensitively.
+  const header = (await page.getByRole('table').locator('thead').innerText()).toLowerCase();
+  for (const column of ['job', 'customer / site', 'machine', 'type', 'technician', 'closed', 'order / ref']) {
+    if (!header.includes(column)) throw new Error(`the archive has no ${column} column`);
+  }
+  const row = page.getByRole('row').filter({ hasText: 'EJE-1044' }).first();
+  const cells = await row.innerText();
+  for (const value of ['ABC Engineering', 'Johannesburg', 'LW-V40-70214', 'PO-86112', 'ABC-SVC-JHB-06']) {
+    if (!cells.includes(value)) throw new Error(`the EJE-1044 row does not show ${value}`);
+  }
+});
+
+await step('the archive can be searched by serial number, not just job number', async () => {
+  const search = page.getByLabel('Search the archive');
+  await search.fill('LW-V40-70214');
+  await page.waitForFunction(
+    () => !(document.querySelector('table')?.innerText ?? '').includes('EJE-1057'),
+    { timeout: 10000 },
+  );
+  const text = await page.getByRole('table').innerText();
+  if (!text.includes('EJE-1044') || !text.includes('EJE-1056')) {
+    throw new Error('searching by serial number lost the jobs on that machine');
+  }
+});
+
+await step('the archive can be searched by customer order number', async () => {
+  const search = page.getByLabel('Search the archive');
+  await search.fill('PO-86112');
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1044')
+      && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1056'),
+    { timeout: 10000 },
+  );
+});
+
+await step('a search that matches nothing says so, rather than showing everything', async () => {
+  await page.getByLabel('Search the archive').fill('ZZ-NOTHING-MATCHES');
+  await page.getByText('No closed jobs match').waitFor({ timeout: 10000 });
+  await page.getByText('0 closed jobs').waitFor({ timeout: 8000 });
+});
+
+await step('the archive filters by customer, job type and technician', async () => {
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByRole('table').waitFor({ timeout: 10000 });
+
+  await page.getByLabel('Job type').selectOption('installation');
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1039')
+      && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1044'),
+    { timeout: 10000 },
+  );
+
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByLabel('Technician').selectOption('user-tech-deon');
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1057')
+      && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1039'),
+    { timeout: 10000 },
+  );
+
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByLabel('Customer').selectOption('cust-abc');
+  await page.waitForFunction(
+    () => !(document.querySelector('table')?.innerText ?? '').includes('EJE-1039'),
+    { timeout: 10000 },
+  );
+  // Choosing the customer narrows the site list to that customer's own sites.
+  const siteOptions = await page.getByLabel('Site').innerText();
+  if (siteOptions.includes('Benoni Workshop')) {
+    throw new Error("the Site filter offered another customer's site");
+  }
+});
+
+await step('the archive filters by the date the job was closed', async () => {
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByLabel('Closed to').fill('2026-04-01');
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1044')
+      && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1062'),
+    { timeout: 10000 },
+  );
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+});
+
+await step('opening a closed job shows the complete historical record', async () => {
+  await page.getByRole('row').filter({ hasText: 'EJE-1044' }).first().click();
+  await page.getByRole('heading', { name: 'EJE-1044' }).waitFor({ timeout: 10000 });
+
+  const body = await page.locator('main').innerText();
+  for (const value of [
+    'ABC Engineering',
+    'Johannesburg',
+    'LW-V40-70214',
+    'Riaan',
+    'PO-86112',
+    'ABC-SVC-JHB-06',
+  ]) {
+    if (!body.includes(value)) throw new Error(`the closed job record does not show ${value}`);
+  }
+  // Read-only, and it says why.
+  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/18-closed-job-record.png`, fullPage: true });
+});
+
+await step('a closed job carries its final signed document', async () => {
+  await page.getByText('Final signed job card').waitFor({ timeout: 10000 });
+  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.getByText('pieter.nel@abc-engineering-demo.co.za', { exact: false }).first()
+    .waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'View Final PDF' }).waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Download Final PDF' }).waitFor({ timeout: 8000 });
+});
+
+await step('"View Final PDF" opens the stored document, and does not re-make it', async () => {
+  await page.getByRole('button', { name: 'View Final PDF' }).click();
+  await page.getByRole('heading', { name: 'Review job card' }).waitFor({ timeout: 10000 });
+  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.getByText('Issued and closed').waitFor({ timeout: 8000 });
+  await page.getByText('Final document on file').waitFor({ timeout: 8000 });
+
+  // Merely looking at an old job card must not append a new document event.
+  await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Activity/ }).click();
+  const before = await page.getByText('document generated', { exact: false }).count();
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Activity/ }).click();
+  await page.getByText('Activity', { exact: false }).first().waitFor({ timeout: 8000 });
+  const after = await page.getByText('document generated', { exact: false }).count();
+  if (after !== before) {
+    throw new Error(`viewing a closed job card regenerated its document (${before} -> ${after})`);
+  }
+});
+
+await step('a closed parts collection keeps a collection note, not a job card', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1062`, { waitUntil: 'networkidle' });
+  await page.getByText('EJE-1062-Final-Parts-Collection-Note.pdf').first()
+    .waitFor({ timeout: 10000 });
+});
+
+/** The charge-out rate the office is currently using, from the Rates screen. */
+const setNormalRate = async (rands) => {
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Rates & VAT' }).click();
+  const normal = page.getByLabel('Normal Time');
+  await normal.waitFor({ timeout: 10000 });
+  await normal.fill(rands);
+  await page.getByRole('button', { name: 'Save rates' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Update rates' }).click();
+  await page.getByText('Saved', { exact: true }).first().waitFor({ timeout: 10000 });
+};
+
+const documentTotals = async (jobNumber) => {
+  await page.goto(`${BASE}/jobs/${jobNumber}/review`, { waitUntil: 'networkidle' });
+  const frame = page.locator('.eje-document').first();
+  await frame.waitFor({ timeout: 10000 });
+  const text = await frame.innerText();
+  const line = text.split('\n').find((candidate) => /TOTAL/i.test(candidate)) ?? '';
+  if (line.length === 0) throw new Error(`${jobNumber} renders no total`);
+  return line;
+};
+
+await step('a closed job keeps its own prices when the Master changes the rates', async () => {
+  const before = await documentTotals('EJE-1044');
+
+  // A rate rise the office applies today must not reach an invoice already
+  // issued six months ago.
+  await setNormalRate('2500.00');
+  const after = await documentTotals('EJE-1044');
+  if (after !== before) {
+    throw new Error(`a rate change altered a closed job card: ${before} -> ${after}`);
+  }
+
+  // Put the demo rates back, so the rest of this run sees the seeded prices.
+  await setNormalRate('950.00');
+});
+
+await step('the same closed job is reached from the customer and the machine history', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Job History' }).click();
+  const fromCustomer = page.getByRole('row').filter({ hasText: 'EJE-1044' });
+  await fromCustomer.first().waitFor({ timeout: 10000 });
+  if (await fromCustomer.count() !== 1) {
+    throw new Error('the customer history holds no single EJE-1044 row');
+  }
+  await fromCustomer.first().click();
+  await page.getByRole('heading', { name: 'EJE-1044' }).waitFor({ timeout: 10000 });
+  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+
+  await page.goto(`${BASE}/machines/machine-abc-lv40`, { waitUntil: 'networkidle' });
+  const fromMachine = page.getByRole('row').filter({ hasText: 'EJE-1044' });
+  if (await fromMachine.count() !== 1) {
+    throw new Error('the machine history holds no single EJE-1044 row');
+  }
+  await fromMachine.first().click();
+  await page.getByRole('heading', { name: 'EJE-1044' }).waitFor({ timeout: 10000 });
+  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
 });
 
 await step('global search finds by serial number', async () => {

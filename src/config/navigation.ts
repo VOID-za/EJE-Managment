@@ -22,6 +22,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'work' },
   { href: '/jobs', label: 'Jobs', icon: 'jobs', group: 'work' },
   { href: '/calendar', label: 'Calendar', icon: 'calendar', group: 'work' },
+  /**
+   * The job card archive. A Master's obvious answer to "where do I find a
+   * closed job?", which a status filter buried inside Jobs was not.
+   *
+   * Master-only: a technician still reaches historical jobs through the
+   * customer, site and machine history they already have access to.
+   */
+  {
+    href: '/jobs/closed',
+    label: 'Closed Jobs',
+    icon: 'document',
+    capability: 'jobs.viewAll',
+    group: 'work',
+  },
   {
     href: '/customers',
     label: 'Customers',
@@ -31,6 +45,8 @@ export const NAVIGATION: readonly NavigationItem[] = [
   },
   { href: '/library', label: 'Technical Library', icon: 'library', capability: 'library.view', group: 'records' },
   { href: '/activity', label: 'Activity', icon: 'activity', group: 'system' },
+  /** Chat. Separate from Notifications on purpose — see `types/message.ts`. */
+  { href: '/messages', label: 'Messages', icon: 'note', group: 'system' },
   { href: '/notifications', label: 'Notifications', icon: 'bell', group: 'system' },
   { href: '/admin', label: 'Administration', icon: 'settings', capability: 'admin.access', group: 'system' },
 ];

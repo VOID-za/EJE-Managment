@@ -7,8 +7,8 @@ export type NotificationType =
   | 'machine_approval_request'
   | 'document_approval_request'
   | 'job_submitted'
-  /** A technician telling the office about their availability. */
-  | 'technician_message';
+  /** A chat message from another user. Links to the conversation, not a job. */
+  | 'chat_message';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 
@@ -19,6 +19,14 @@ export interface AppNotification {
   readonly title: string;
   readonly body: string;
   readonly jobId: JobId | null;
+  /**
+   * Where clicking this notification should go.
+   *
+   * Set explicitly rather than derived, because not every notification is about
+   * a job: a chat message opens its conversation. Null falls back to the job,
+   * which keeps every existing notification behaving as it did.
+   */
+  readonly link: string | null;
   readonly createdAt: IsoDateTime;
   readonly readAt: IsoDateTime | null;
   /** Set when a Master has actioned an approval-style notification. */

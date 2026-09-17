@@ -38,8 +38,9 @@ import {
   type UserId,
 } from '@/domain';
 import { formatHours, formatKilometres } from '@/lib/format';
+import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
-import { audit, notify } from './audit';
+import { audit, notify, notifyMasters } from './audit';
 import { WorkflowError } from './errors';
 
 /**
@@ -910,10 +911,14 @@ export const startSignature = async (context: OperationContext, job: Job): Promi
  * choice is made from the job type in one place so no caller can generate the
  * wrong one.
  */
-const generateCustomerDocument = (context: OperationContext, job: Job) =>
+const generateCustomerDocument = (
+  context: OperationContext,
+  job: Job,
+  variant: PdfVariant = 'preview',
+) =>
   job.jobType === 'parts'
-    ? context.services.pdf.generatePartsNote(job)
-    : context.services.pdf.generateJobCard(job);
+    ? context.services.pdf.generatePartsNote(job, variant)
+    : context.services.pdf.generateJobCard(job, variant);
 
 export const generateJobCardDocument = async (context: OperationContext, job: Job) => {
   const generated = await generateCustomerDocument(context, job);
@@ -975,6 +980,18 @@ export const submitForMasterReview = async (
     type: 'job_submitted',
     summary: 'Submitted for Master review',
     detail: `${userFullName(context.actor)} handed the signed job card to the office. The customer has not been emailed.`,
+  });
+
+  // The office has to be told, or a signed job card sits in Master Review until
+  // somebody happens to look. One notification per active Master, linking
+  // straight at the job. Duplicates are impossible because the transition above
+  // refuses a second call: `submitted` cannot move to `submitted`.
+  await notifyMasters(context, {
+    type: 'job_submitted',
+    title: `Job ${job.jobNumber} submitted for review`,
+    body: `${userFullName(context.actor)} submitted ${job.jobNumber} for Master Review.`,
+    jobId: job.id,
+    link: `/jobs/${job.jobNumber}`,
   });
 
   return saved;
@@ -1051,8 +1068,10 @@ export const submitJobCard = async (
 
   const finalJob: Job = { ...job, pricingSnapshot: snapshot };
 
-  // The final document is generated here, from the job as the Master approved it.
-  const document = await generateCustomerDocument(context, finalJob);
+  // The final document is generated here, from the job as the Master approved
+  // it, and STORED on the job. A closed job must always produce the same
+  // official job card, so this is written once and never recomputed.
+  const document = await generateCustomerDocument(context, finalJob, 'final');
 
   const closed = await context.repos.jobs.save({
     ...finalJob,
@@ -1060,6 +1079,15 @@ export const submitJobCard = async (
     closedAt: now,
     submittedAt: job.submittedAt ?? now,
     completedAt: job.completedAt ?? now,
+    finalDocument: {
+      fileName: document.fileName,
+      storageKey: document.storageKey,
+      pageCount: document.pageCount,
+      generatedAt: document.generatedAt,
+      generatedBy: context.actor.id,
+      simulated: document.simulated,
+      issuedTo: customerEmail,
+    },
   });
 
   await audit(context, {

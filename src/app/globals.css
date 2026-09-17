@@ -362,4 +362,30 @@
   body {
     background: white;
   }
+
+  /*
+   * Printing a job card should produce the job card, not a screenshot of the
+   * application around it. Everything outside the document is dropped, and the
+   * document itself is unwrapped from the app's page chrome so it starts at the
+   * top of the sheet.
+   *
+   * `.eje-document` is set on the printable document container; the app shell,
+   * sidebar, top bar and action cards carry `print:hidden`.
+   */
+  .eje-document-frame {
+    background: white !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .eje-document {
+    box-shadow: none !important;
+    margin: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  @page {
+    margin: 12mm;
+  }
 }

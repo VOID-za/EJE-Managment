@@ -8,4 +8,4 @@ export * from './jobs';
 export * from './activity';
 export * from './notifications';
 export * from './availability';
-export * from './messages';
+export * from './chat';

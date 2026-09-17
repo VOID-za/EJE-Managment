@@ -1,38 +1,81 @@
-import type { IsoDateTime, UserId } from './common';
+import type { IsoDateTime, JobId, UserId } from './common';
 
 /**
- * Technician → Master messages.
+ * Internal chat between Masters and Technicians.
  *
- * Deliberately not a chat application. It exists for one job: a technician
- * telling the office something about their availability — an appointment, a
- * late arrival, a day off sick — without being able to put it on the calendar
- * themselves.
+ * This grew out of the one-way "technician tells the office about their
+ * availability" feature, and it deliberately keeps that behaviour rather than
+ * running alongside a second messaging system: an availability request is now
+ * simply a message in a conversation with the office, and the record a Master
+ * creates in response is still linked back to the exact message that prompted
+ * it.
  *
- * That separation is the point. A message is a REQUEST for the office's
- * attention; the official availability record is the office's decision. Sending
- * a message never makes anyone unavailable. When a Master acts on one, the
- * resulting record is linked back here so the thread shows what was done.
+ * What it is NOT: a job note, a notification, or anything that can change a
+ * job. A message is people talking. Sending one raises a notification for the
+ * recipient and nothing else — no status change, no availability record, no
+ * entry on the job. Those remain deliberate acts by someone with the authority
+ * to perform them.
  */
-export type MessageStatus = 'unread' | 'read' | 'actioned';
-
-export interface TechnicianMessage {
+export interface Conversation {
   readonly id: string;
-  readonly senderId: UserId;
   /**
-   * Null means "the Masters" collectively, which is how a technician sends it:
-   * they are telling the office, not one person.
+   * Everyone in the thread.
+   *
+   * Two people for a direct chat. A technician writing to "the office" gets a
+   * thread with every active Master in it, which is how that request reaches
+   * whoever is at a desk rather than one named person.
    */
-  readonly recipientId: UserId | null;
+  readonly participantIds: readonly UserId[];
+  /** Optional job the conversation is about, so it can be opened from here. */
+  readonly jobId: JobId | null;
+  readonly jobNumber: string | null;
+  readonly createdBy: UserId;
+  readonly createdAt: IsoDateTime;
+  /** Sort key for the conversation list. */
+  readonly lastMessageAt: IsoDateTime;
+}
+
+export interface ChatMessage {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly senderId: UserId;
   readonly body: string;
   readonly sentAt: IsoDateTime;
-  readonly status: MessageStatus;
-  readonly readBy: UserId | null;
-  readonly readAt: IsoDateTime | null;
-  /** The availability record a Master created in response, when they did. */
+  /**
+   * Who has read it. A list rather than a flag because a thread with the office
+   * has several recipients, and "read" is per person.
+   */
+  readonly readBy: readonly UserId[];
+  /**
+   * The availability record a Master created in response to this message.
+   *
+   * Carried on the message, not the conversation: it records that one specific
+   * request was actioned, which is what the technician and the audit trail both
+   * need to be able to see.
+   */
   readonly availabilityRecordId: string | null;
   readonly actionedBy: UserId | null;
   readonly actionedAt: IsoDateTime | null;
 }
 
-export const isMessageHandled = (message: TechnicianMessage): boolean =>
-  message.status === 'actioned';
+export const isMessageRead = (message: ChatMessage, userId: UserId): boolean =>
+  message.senderId === userId || message.readBy.includes(userId);
+
+/** A message a Master has turned into an availability record. */
+export const isMessageActioned = (message: ChatMessage): boolean =>
+  message.availabilityRecordId !== null;
+
+/** Messages in this thread the given user has not read. */
+export const unreadIn = (
+  messages: readonly ChatMessage[],
+  userId: UserId,
+): readonly ChatMessage[] => messages.filter((message) => !isMessageRead(message, userId));
+
+export const conversationParticipants = (
+  conversation: Conversation,
+  userId: UserId,
+): readonly UserId[] => conversation.participantIds.filter((id) => id !== userId);
+
+/** Whether this user may read the thread at all. */
+export const canReadConversation = (conversation: Conversation, userId: UserId): boolean =>
+  conversation.participantIds.includes(userId);

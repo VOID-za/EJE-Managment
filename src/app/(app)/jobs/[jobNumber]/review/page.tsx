@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { use, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { contactFullName } from '@/domain';
 import {
   generateJobCardDocument,
@@ -43,32 +43,86 @@ const ReviewJobPage = ({
   readonly params: Promise<{ readonly jobNumber: string }>;
 }) => {
   const { jobNumber } = use(params);
+  const searchParams = useSearchParams();
   const router = useRouter();
   const operation = useOperation();
   const { operationContext } = useApp();
   const currentUser = useCurrentUser();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [document, setDocument] = useState<GeneratedPdf | null>(null);
+  const [generated, setGenerated] = useState<GeneratedPdf | null>(null);
   const [submitted, setSubmitted] = useState<{ fileName: string; to: string } | null>(null);
 
   const viewQuery = useQuery(`job:${jobNumber}:review`, (repos) => loadJobView(repos, jobNumber));
   const view = viewQuery.data ?? null;
   const jobId = view?.job.id ?? null;
 
-  // Generate the document descriptor once the job has loaded, so the preview
-  // header can show the real file name and page count.
+  const storedFinal = view?.job.finalDocument ?? null;
+
+  /**
+   * The document descriptor for the header.
+   *
+   * A closed job's is DERIVED from what was stored when the Master finalised
+   * it — no effect, no state, and nothing regenerated. Regenerating would both
+   * imply the document could change and append a `pdf_generated` audit entry
+   * every time somebody merely looked at an old job card.
+   */
+  const document: GeneratedPdf | null =
+    storedFinal !== null
+      ? {
+          storageKey: storedFinal.storageKey,
+          fileName: storedFinal.fileName,
+          pageCount: storedFinal.pageCount,
+          generatedAt: storedFinal.generatedAt,
+          simulated: storedFinal.simulated,
+        }
+      : generated;
+
+  // Only a job still in the workflow needs a descriptor produced for it.
   useEffect(() => {
-    if (view === null || document !== null) return;
+    if (view === null || storedFinal !== null || generated !== null) return;
     let cancelled = false;
-    void generateJobCardDocument(operationContext(), view.job).then((generated) => {
-      if (!cancelled) setDocument(generated);
+    void generateJobCardDocument(operationContext(), view.job).then((descriptor) => {
+      if (!cancelled) setGenerated(descriptor);
     });
     return () => {
       cancelled = true;
     };
     // The descriptor depends only on the job identity.
-  }, [jobId, view, document, operationContext]);
+  }, [jobId, view, generated, storedFinal, operationContext]);
+
+  /**
+   * Download the final job card.
+   *
+   * The demo renders no file on a server, so this prints the document below —
+   * the same component the production renderer consumes — and names the output
+   * after the stored file name, so repeated downloads give the same filename
+   * rather than a new one each time.
+   */
+  const downloadFinal = useCallback(() => {
+    // The stored name is the authority. The fallback only ever applies to a job
+    // that has not been issued yet, and still has to name the right document.
+    const fallback =
+      view?.job.jobType === 'parts'
+        ? `${jobNumber}-Parts-Collection-Note.pdf`
+        : `${jobNumber}-Job-Card.pdf`;
+    const fileName = storedFinal?.fileName ?? fallback;
+    const previousTitle = window.document.title;
+    window.document.title = fileName.replace(/\.pdf$/i, '');
+    window.print();
+    window.document.title = previousTitle;
+  }, [storedFinal, jobNumber, view]);
+
+  // Arriving from "Download Final PDF" opens the print dialog once the document
+  // has rendered, so View and Download land on the same page.
+  const printRequested = searchParams.get('print') === '1';
+  const printedRef = useRef(false);
+  useEffect(() => {
+    if (!printRequested || view === null || printedRef.current) return;
+    printedRef.current = true;
+    const timer = window.setTimeout(downloadFinal, 400);
+    return () => window.clearTimeout(timer);
+  }, [printRequested, view, downloadFinal]);
 
   if (viewQuery.error !== null) {
     return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;
@@ -240,15 +294,36 @@ const ReviewJobPage = ({
       )}
 
       {closed && submitted === null && (
-        <Card className="mb-5 border-steel-200">
+        <Card className="mb-5 border-steel-200 print:hidden">
           <CardHeader
             title="Issued and closed"
-            description={`This job card was issued to the customer and closed. It is read-only.`}
+            description="This is the final job card as it was issued to the customer. Read-only, and unaffected by later rate, price or checklist changes."
+            action={
+              view.job.finalDocument === null ? undefined : (
+                <Badge tone="green" size="sm" dot>
+                  Final document on file
+                </Badge>
+              )
+            }
           />
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button
+              leadingIcon={<Icon name="download" className="size-5" />}
+              onClick={downloadFinal}
+            >
+              Download Final PDF
+            </Button>
+            {view.job.finalDocument !== null && (
+              <span className="font-mono text-xs text-steel-500">
+                {view.job.finalDocument.fileName}
+              </span>
+            )}
+          </div>
         </Card>
       )}
 
-      <div className="eje-scrollbar overflow-x-auto rounded-[var(--radius-card)] bg-steel-200/60 p-4 sm:p-8">
+      <div className="eje-document-frame eje-scrollbar overflow-x-auto rounded-[var(--radius-card)] bg-steel-200/60 p-4 sm:p-8">
         {view.job.jobType === 'parts' ? (
           <PartsCollectionNote view={view} />
         ) : (

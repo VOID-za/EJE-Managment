@@ -39,6 +39,8 @@ export interface NotifyInput {
   readonly title: string;
   readonly body: string;
   readonly jobId?: string | null;
+  /** Explicit destination. Omitted for a job notification, which uses the job. */
+  readonly link?: string | null;
   readonly channels?: readonly NotificationChannel[];
 }
 
@@ -53,6 +55,7 @@ export const notify = async (
     title: input.title,
     body: input.body,
     jobId: input.jobId === undefined || input.jobId === null ? null : asJobId(input.jobId),
+    link: input.link ?? null,
     createdAt: context.services.clock.now(),
     readAt: null,
     handledAt: null,
@@ -61,12 +64,21 @@ export const notify = async (
   return context.repos.notifications.create(notification);
 };
 
-/** Every Master, for approval requests that any of them can action. */
+/**
+ * Every active Master, for anything the office collectively has to action.
+ *
+ * Disabled accounts are skipped — a notification nobody can sign in to read is
+ * not a notification. The acting user is skipped too: being told about
+ * something you just did yourself is noise, and it keeps the unread count
+ * meaningful.
+ */
 export const notifyMasters = async (
   context: OperationContext,
   input: Omit<NotifyInput, 'recipientId'>,
 ): Promise<readonly AppNotification[]> => {
   const users = await context.repos.users.list();
-  const masters = users.filter((user) => user.role === 'master' && user.active);
+  const masters = users.filter(
+    (user) => user.role === 'master' && user.active && user.id !== context.actor.id,
+  );
   return Promise.all(masters.map((master) => notify(context, { ...input, recipientId: master.id })));
 };

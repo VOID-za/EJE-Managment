@@ -70,6 +70,17 @@ write.
 through a confirmation dialog; the completion write-up saves explicitly and warns
 before unsaved text is lost.
 
+**Notifications and messages are separate things, and stay separate.** An
+`AppNotification` is the system reporting that something happened; a
+`ChatMessage` in a `Conversation` is one person asking another something. They
+have different types, different repositories and different screens
+(`/notifications` and `/messages`), because merging them buries the item that
+needs a reply among the ones that do not. They meet at exactly one point: a new
+message raises a `chat_message` notification carrying an explicit
+`link` to its conversation. That `link` is set per notification rather than
+derived, so every notification navigates to its own destination instead of
+everything being funnelled at the job screen.
+
 ## 2a. Historical accuracy
 
 Two kinds of record must not change after the fact, and both are handled the
@@ -82,6 +93,19 @@ same way: the job stores what it was judged against, and the read path uses it.
   `loadJobView` resolves the template with `findByVersion`. When a version is no
   longer held the UI says so rather than falling back to current wording — a
   silent fallback would be worse than an honest gap.
+- A `FinalDocument` is written onto the job at the one moment a Master issues it
+  (`submitJobCard`), recording the file name, page count, who issued it, when,
+  and the address it went to. Every read path — the closed-job screen and the
+  review screen — *derives* from that record. Nothing regenerates a closed job's
+  document: regenerating would imply it could change, and would append a
+  `pdf_generated` audit entry every time somebody merely looked at old
+  paperwork. The final copy is produced with `PdfVariant: 'final'`, which gives
+  it its own storage key and a file name that says it is final, so a working
+  preview can never overwrite what the customer received.
+
+Together these three mean a closed job card is fixed: a later rate change, part
+price or checklist revision cannot reach it. `src/application/closed-jobs.test.ts`
+asserts exactly that, driving the real operations and repositories.
 
 ## 3. Data access
 

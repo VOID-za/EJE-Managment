@@ -75,7 +75,14 @@ const TechnicianProfilePage = ({
     const [records, jobs, messages, users] = await Promise.all([
       repos.availability.listForUser(id),
       repos.jobs.list({ technicianId: id }),
-      repos.messages.listForSender(id),
+      // Their side of the chat: the requests they have sent the office, and
+      // what was recorded as a result.
+      repos.chat.listConversations(id).then(async (conversations) => {
+        const threads = await Promise.all(
+          conversations.map((conversation) => repos.chat.listMessages(conversation.id)),
+        );
+        return threads.flat().filter((message) => message.senderId === id);
+      }),
       repos.users.list(),
     ]);
 
@@ -295,8 +302,8 @@ const TechnicianProfilePage = ({
                       {formatDateTime(message.sentAt)}
                     </p>
                     {linked === undefined ? (
-                      <Badge tone="amber" size="sm" className="mt-2">
-                        Not yet actioned
+                      <Badge tone="neutral" size="sm" className="mt-2">
+                        No availability recorded
                       </Badge>
                     ) : (
                       <p className="mt-2 text-xs text-verdant-700">
