@@ -436,6 +436,155 @@ await step('master dashboard and admin', async () => {
   await page.screenshot({ path: `${shots}/07-master-dashboard.png`, fullPage: false });
 });
 
+await step('a Master can add a customer, with its first site', async () => {
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Add customer' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+
+  await dialog.getByLabel('Company name').fill('Zenith Precision Works');
+  await dialog.getByLabel('Account number').fill('ZEN001');
+  await dialog.getByLabel('Industry').fill('Precision machining');
+  await dialog.getByLabel('Site name').fill('Zenith Germiston');
+  await dialog.getByLabel('City / town').fill('Germiston');
+  await dialog.getByLabel('Street address').fill('22 Anvil Street');
+  await dialog.getByLabel('First name').fill('Marlize');
+  await dialog.getByLabel('Surname').fill('Botha');
+
+  await dialog.getByRole('button', { name: 'Create customer' }).click();
+  await page.waitForURL('**/customers/**', { timeout: 10000 });
+  await page.getByRole('heading', { name: 'Zenith Precision Works' }).first()
+    .waitFor({ timeout: 10000 });
+});
+
+await step('the new customer is selectable when raising a job', async () => {
+  await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
+  const options = await page.locator('select').first().locator('option').allTextContents();
+  if (!options.some((option) => option.includes('Zenith Precision Works'))) {
+    throw new Error('a newly created customer was not offered on the new job screen');
+  }
+});
+
+await step('a Master can add a machine, which lands on the register confirmed', async () => {
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByText('ABC Engineering (Pty) Ltd').first().click();
+  await page.getByRole('tab', { name: /Machines/ }).click();
+  await page.getByRole('button', { name: 'Add machine' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Manufacturer').fill('Mazak');
+  await dialog.getByLabel('Model').fill('QT-200');
+  await dialog.getByLabel('Serial number').fill('MZ-QT200-11902');
+  await dialog.getByRole('button', { name: 'Add machine' }).click();
+
+  await page.getByText('MZ-QT200-11902').first().waitFor({ timeout: 10000 });
+});
+
+await step('a duplicate serial number is refused', async () => {
+  await page.getByRole('button', { name: 'Add machine' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Manufacturer').fill('Mazak');
+  await dialog.getByLabel('Model').fill('QT-250');
+  // The serial already on the register, in a different case.
+  await dialog.getByLabel('Serial number').fill('mz-qt200-11902');
+  await dialog.getByRole('button', { name: 'Add machine' }).click();
+
+  await dialog.getByText('is already on the register', { exact: false })
+    .waitFor({ timeout: 8000 });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('a technician-added machine is waiting for the Master to confirm', async () => {
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByText('Vaal Toolroom Services').first().click();
+  await page.getByRole('tab', { name: /Machines/ }).click();
+  await page.getByText('Awaiting approval').first().waitFor({ timeout: 8000 });
+  await page.getByRole('heading', { name: 'Awaiting your approval' }).waitFor({ timeout: 8000 });
+
+  await page.getByRole('button', { name: 'Confirm on register' }).first().click();
+  await page.waitForFunction(
+    () => !document.body.innerText.includes('Awaiting your approval'),
+    { timeout: 10000 },
+  );
+});
+
+await step('disabled users are kept out of the default user list', async () => {
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Active users/ }).waitFor({ timeout: 10000 });
+
+  const active = await page.locator('table').first().innerText();
+  if (active.includes('Yusuf Patel')) {
+    throw new Error('a disabled user appeared in the active list');
+  }
+
+  await page.getByRole('tab', { name: /Disabled users/ }).click();
+  await page.getByText('Yusuf Patel').first().waitFor({ timeout: 8000 });
+});
+
+await step('a Master cannot edit another Master', async () => {
+  await page.getByRole('tab', { name: /Active users/ }).click();
+  const denise = page.getByRole('row').filter({ hasText: 'Denise' }).first();
+  await denise.waitFor({ timeout: 8000 });
+  await denise.getByText('Master accounts cannot be edited by another Master')
+    .waitFor({ timeout: 8000 });
+  if (await denise.getByRole('button', { name: 'Disable' }).count() > 0) {
+    throw new Error('a Master was offered a control to disable another Master');
+  }
+});
+
+await step('a Master can add and then disable a technician', async () => {
+  await page.getByRole('button', { name: 'Add user' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('First name').fill('Nomvula');
+  await dialog.getByLabel('Surname').fill('Khumalo');
+  await dialog.getByLabel('Email').fill('nomvula.khumalo@eje-demo.co.za');
+  await dialog.getByRole('button', { name: 'Create user' }).click();
+
+  const row = page.getByRole('row').filter({ hasText: 'Nomvula Khumalo' }).first();
+  await row.waitFor({ timeout: 10000 });
+
+  await row.getByRole('button', { name: 'Disable' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Disable user' }).click();
+
+  await page.waitForFunction(
+    () => !document.querySelector('table')?.innerText.includes('Nomvula Khumalo'),
+    { timeout: 10000 },
+  );
+  await page.getByRole('tab', { name: /Disabled users/ }).click();
+  await page.getByText('Nomvula Khumalo').first().waitFor({ timeout: 8000 });
+});
+
+await step('a Master can approve a technician document upload', async () => {
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Technical Library' }).click();
+  await page.getByText('waiting for approval', { exact: false }).waitFor({ timeout: 10000 });
+
+  const pending = page.getByRole('row').filter({ hasText: 'Amada HFE-1303' }).first();
+  await pending.getByRole('button', { name: 'Approve' }).click();
+  await page.waitForFunction(
+    () => !document.body.innerText.includes('waiting for approval'),
+    { timeout: 10000 },
+  );
+});
+
+await step('a used checklist version cannot be edited, only re-versioned', async () => {
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Checklists' }).click();
+  await page.getByText('has been completed on a job', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/16-checklist-admin.png`, fullPage: false });
+});
+
+await step('a historical job card still renders the version it was answered against', async () => {
+  // EJE-1044 was serviced six months ago against checklist v1.0-DEMO, while
+  // v2.0-DEMO is the version issued to new jobs today.
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByText('1.0-DEMO', { exact: false }).first().waitFor({ timeout: 10000 });
+});
+
 await step('global search finds by serial number', async () => {
   await page.goto(`${BASE}/search?q=LW-V40-70214`, { waitUntil: 'networkidle' });
   await page.getByText('Machines').first().waitFor({ timeout: 8000 });
