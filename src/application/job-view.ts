@@ -22,7 +22,8 @@ export interface JobView {
   readonly customer: Customer;
   readonly site: Site;
   readonly contact: Contact | null;
-  readonly machine: Machine;
+  /** Null for a parts collection, which is not against a machine. */
+  readonly machine: Machine | null;
   readonly primaryTechnician: User | null;
   readonly additionalTechnicians: readonly User[];
   readonly settings: SystemSettings;
@@ -53,7 +54,7 @@ export const loadJobView = async (
 
   const [customer, machine, settings, sites, contacts, users] = await Promise.all([
     repos.customers.findById(job.customerId),
-    repos.machines.findById(job.machineId),
+    job.machineId === null ? Promise.resolve(null) : repos.machines.findById(job.machineId),
     repos.settings.get(),
     repos.customers.listSites(job.customerId),
     repos.customers.listContacts(job.customerId),
@@ -61,7 +62,9 @@ export const loadJobView = async (
   ]);
 
   const site = sites.find((candidate) => candidate.id === job.siteId);
-  if (customer === null || machine === null || site === undefined) return null;
+  // A missing machine is only a failure when the job is supposed to have one.
+  if (customer === null || site === undefined) return null;
+  if (job.machineId !== null && machine === null) return null;
 
   const definition = getJobTypeDefinition(job.jobType);
 
@@ -125,7 +128,10 @@ export const loadJobRows = async (
   ]);
 
   return jobs.map((job) => {
-    const machine = machines.find((candidate) => candidate.id === job.machineId);
+    const machine =
+      job.machineId === null
+        ? undefined
+        : machines.find((candidate) => candidate.id === job.machineId);
     const technician = users.find((candidate) => candidate.id === job.primaryTechnicianId);
 
     return {

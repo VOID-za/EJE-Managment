@@ -14,7 +14,7 @@ import {
   siteAddressLine,
   siteNavigationUrl,
   pricingInputsFrom,
-  SIGNATURE_DECLARATION,
+  signatureDeclarationFor,
   userFullName,
   type ActivityEvent,
   type Attachment,
@@ -115,7 +115,8 @@ export const acceptJob = async (context: OperationContext, job: Job): Promise<Jo
 
 export interface SiteLocationInput {
   readonly site: Site;
-  readonly machine: Machine;
+  /** Null for a job with no machine, such as a parts collection. */
+  readonly machine: Machine | null;
   readonly customerName: string;
   /** Where to send it. Defaults to the acting technician's mobile number. */
   readonly recipientMobile?: string;
@@ -138,10 +139,12 @@ export interface SiteLocationResult {
 export const buildSiteLocationMessage = (input: SiteLocationInput, jobNumber: string): string =>
   [
     `${jobNumber} — ${input.customerName}`,
-    `${input.machine.manufacturer} ${input.machine.model}`,
+    input.machine === null ? null : `${input.machine.manufacturer} ${input.machine.model}`,
     `${input.site.name}: ${siteAddressLine(input.site)}`,
     siteNavigationUrl(input.site),
-  ].join('\n');
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
 
 /**
  * Sends the site location to the technician, on request.
@@ -165,7 +168,9 @@ export const sendSiteLocation = async (
       parameters: [
         job.jobNumber,
         input.customerName,
-        `${input.machine.manufacturer} ${input.machine.model}`,
+        input.machine === null
+          ? input.site.name
+          : `${input.machine.manufacturer} ${input.machine.model}`,
         input.site.name,
         navigationUrl,
       ],
@@ -838,14 +843,19 @@ export const captureSignature = async (
       customerSurname: input.customerSurname,
       strokeData: input.strokeData,
       signedAt: now,
-      declaration: SIGNATURE_DECLARATION,
+      // Wording comes from the job type: a parts collection acknowledges
+      // receipt of goods, not that work was completed.
+      declaration: signatureDeclarationFor(job.jobType),
     },
   });
 
   await audit(context, {
     jobId: job.id,
     type: 'customer_signed',
-    summary: 'Customer signed the job card',
+    summary:
+      job.jobType === 'parts'
+        ? 'Collector signed for the parts'
+        : 'Customer signed the job card',
     detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.`,
   });
   return saved;

@@ -67,6 +67,7 @@ const NewJobPage = () => {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [faultDescription, setFaultDescription] = useState('');
   const [technicianId, setTechnicianId] = useState('');
+  const [courierCollection, setCourierCollection] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -131,7 +132,10 @@ const NewJobPage = () => {
     if (customerId.length === 0) next.customerId = 'Select a customer.';
     if (siteId.length === 0) next.siteId = 'Select a site.';
     if (contactId.length === 0) next.contactId = 'Select a site contact.';
-    if (machineId.length === 0) next.machineId = 'Select the machine this job is for.';
+    // A parts collection is a receipt for goods, not work on a machine.
+    if (definition.capturesLabourAndTravel && machineId.length === 0) {
+      next.machineId = 'Select the machine this job is for.';
+    }
     if (faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
@@ -163,7 +167,7 @@ const NewJobPage = () => {
         customerId: asCustomerId(customerId),
         siteId: asSiteId(siteId),
         contactId: asContactId(contactId),
-        machineId: asMachineId(machineId),
+        machineId: machineId.length > 0 ? asMachineId(machineId) : null,
         jobType,
         priority,
         status: 'open',
@@ -188,6 +192,7 @@ const NewJobPage = () => {
         awaitingSparesReason: '',
         // A call-out fee is a per-job commercial decision, applied on the job card.
         calloutApplied: false,
+        courierCollection: jobType === 'parts' ? courierCollection : false,
         pricingSnapshot: null,
         createdAt: now,
         createdBy: user.id,
@@ -293,8 +298,8 @@ const NewJobPage = () => {
                 }))}
               />
               <SelectField
-                label="Machine"
-                required
+                label={definition.capturesLabourAndTravel ? 'Machine' : 'Machine (optional)'}
+                required={definition.capturesLabourAndTravel}
                 value={machineId}
                 error={errors.machineId}
                 placeholder={siteId.length === 0 ? 'Select a site first' : 'Select a machine'}
@@ -375,15 +380,46 @@ const NewJobPage = () => {
                 </div>
               )}
 
+              {jobType === 'parts' && (
+                <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-semibold text-amber-eje-700">
+                    <input
+                      type="checkbox"
+                      checked={courierCollection}
+                      onChange={(event) => setCourierCollection(event.target.checked)}
+                      className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+                    />
+                    Courier Collection
+                  </label>
+                  <p className="mt-1.5 text-sm text-steel-700">
+                    {courierCollection
+                      ? 'Prices will be hidden from the collection document. The courier has no reason to see them; the prices stay on the job for EJE costing.'
+                      : 'The customer is collecting the parts themselves, so prices may be shown on the collection document.'}
+                  </p>
+                </div>
+              )}
+
               <TextAreaField
-                label="Fault description / work requested"
+                label={
+                  jobType === 'parts'
+                    ? 'Collection details'
+                    : 'Fault description / work requested'
+                }
                 required
                 rows={4}
                 value={faultDescription}
                 error={errors.faultDescription}
                 onChange={(event) => setFaultDescription(event.target.value)}
-                placeholder="e.g. Machine stopped during operation. Spindle fault reported."
-                hint="Record what the customer reported, in their words where possible."
+                placeholder={
+                  jobType === 'parts'
+                    ? 'e.g. Spindle drive spares for collection against PO-88212.'
+                    : 'e.g. Machine stopped during operation. Spindle fault reported.'
+                }
+                hint={
+                  jobType === 'parts'
+                    ? 'What is being collected, and anything the office should know.'
+                    : 'Record what the customer reported, in their words where possible.'
+                }
               />
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

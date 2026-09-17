@@ -16,6 +16,7 @@ const JOB_TONES: Record<string, string> = {
   blue: 'bg-eje-50 text-eje-800 ring-eje-200 hover:bg-eje-100',
   green: 'bg-verdant-50 text-verdant-700 ring-verdant-200 hover:bg-verdant-100',
   violet: 'bg-violet-eje-50 text-violet-eje-700 ring-violet-eje-100 hover:bg-violet-eje-100',
+  amber: 'bg-amber-eje-50 text-amber-eje-700 ring-amber-eje-200 hover:bg-amber-eje-100',
 };
 
 export const entryClasses = (entry: CalendarEntry): string => {

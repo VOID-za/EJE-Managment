@@ -49,6 +49,7 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   signature: null,
   awaitingSparesReason: '',
   calloutApplied: false,
+  courierCollection: false,
   pricingSnapshot: null,
   createdAt: '2026-09-15T06:00:00.000Z',
   createdBy: asUserId('user-master-1'),

@@ -182,40 +182,46 @@ export const JobOverviewPanel = ({
             </div>
           </Card>
 
-          <Card>
-            <CardHeader
-              title="Machine"
-              action={
-                <Link href={`/machines/${machine.id}`}>
-                  <Button variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>
-                    Open
-                  </Button>
-                </Link>
-              }
-            />
-            <p className="mt-4 text-sm font-semibold text-steel-900">
-              {machineDisplayName(machine)}
-            </p>
-            <DefinitionGrid
-              className="mt-3"
-              columns={1}
-              items={[
-                {
-                  label: 'Serial number',
-                  value: <span className="font-mono">{machine.serialNumber}</span>,
-                },
-                { label: 'Machine type', value: machine.machineType },
-                { label: 'Control system', value: machine.controlSystem },
-                { label: 'Year', value: String(machine.year) },
-                { label: 'Installed', value: formatDate(machine.installationDate) },
-              ]}
-            />
-            {machine.notes.length > 0 && (
-              <p className="mt-3 rounded-[var(--radius-control)] bg-steel-50 px-3 py-2 text-xs text-steel-600">
-                {machine.notes}
+          {machine !== null && (
+            <Card>
+              <CardHeader
+                title="Machine"
+                action={
+                  <Link href={`/machines/${machine.id}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      trailingIcon={<Icon name="chevronRight" className="size-4" />}
+                    >
+                      Open
+                    </Button>
+                  </Link>
+                }
+              />
+              <p className="mt-4 text-sm font-semibold text-steel-900">
+                {machineDisplayName(machine)}
               </p>
-            )}
-          </Card>
+              <DefinitionGrid
+                className="mt-3"
+                columns={1}
+                items={[
+                  {
+                    label: 'Serial number',
+                    value: <span className="font-mono">{machine.serialNumber}</span>,
+                  },
+                  { label: 'Machine type', value: machine.machineType },
+                  { label: 'Control system', value: machine.controlSystem },
+                  { label: 'Year', value: String(machine.year) },
+                  { label: 'Installed', value: formatDate(machine.installationDate) },
+                ]}
+              />
+              {machine.notes.length > 0 && (
+                <p className="mt-3 rounded-[var(--radius-control)] bg-steel-50 px-3 py-2 text-xs text-steel-600">
+                  {machine.notes}
+                </p>
+              )}
+            </Card>
+          )}
         </div>
       </div>
 

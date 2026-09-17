@@ -54,8 +54,9 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * Bump this whenever the stored shape changes, otherwise a browser that has
  * already run the demo keeps its old snapshot and silently misses new fields.
  * v2 added technician leave and the service end date.
+ * v3 added the Parts job type: a nullable machine and the courier flag.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 interface PersistedEnvelope {
   readonly version: number;

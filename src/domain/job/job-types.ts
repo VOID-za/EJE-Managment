@@ -22,9 +22,14 @@ export interface JobTypeDefinition {
   readonly schedulesDateRange: boolean;
   /** Labour and travel do not apply to this job type. */
   readonly capturesLabourAndTravel: boolean;
+  /**
+   * The technician travels to the customer's site. Parts are collected from the
+   * EJE counter instead, so there is no site address worth sending them.
+   */
+  readonly visitsSite: boolean;
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
-  readonly accent: 'red' | 'blue' | 'green' | 'violet';
+  readonly accent: 'red' | 'blue' | 'green' | 'violet' | 'amber';
 }
 
 const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
@@ -36,6 +41,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     photosRequired: false,
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
+    visitsSite: true,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -47,6 +53,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     photosRequired: true,
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
+    visitsSite: true,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -58,9 +65,25 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     photosRequired: false,
     schedulesDateRange: true,
     capturesLabourAndTravel: true,
+    visitsSite: true,
     defaultPriority: 'normal',
     accent: 'green',
   },
+  parts: {
+    code: 'parts',
+    label: 'Parts',
+    description:
+      'Parts collection or delivery note. The customer or a courier collects parts from the office.',
+    checklistRequired: false,
+    photosRequired: false,
+    schedulesDateRange: false,
+    // No site visit, so nothing to charge for hours or distance.
+    capturesLabourAndTravel: false,
+    visitsSite: false,
+    defaultPriority: 'normal',
+    accent: 'amber',
+  },
+
   test_and_repair: {
     code: 'test_and_repair',
     label: 'Test & Repair',
@@ -69,6 +92,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     photosRequired: false,
     schedulesDateRange: false,
     capturesLabourAndTravel: true,
+    visitsSite: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },
@@ -79,6 +103,7 @@ export const JOB_TYPE_CODES: readonly JobTypeCode[] = [
   'installation',
   'service',
   'test_and_repair',
+  'parts',
 ];
 
 export const getJobTypeDefinition = (code: JobTypeCode): JobTypeDefinition => DEFINITIONS[code];

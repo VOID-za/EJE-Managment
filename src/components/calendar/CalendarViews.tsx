@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import {
+  JOB_TYPE_CODES,
   getJobTypeDefinition,
   leaveTypeLabel,
   type IsoDate,
@@ -434,7 +435,7 @@ export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
 export const CalendarLegend = () => (
   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-steel-600">
     <span className="font-semibold text-steel-500">Key:</span>
-    {(['breakdown', 'installation', 'service', 'test_and_repair'] as const).map((code) => {
+    {JOB_TYPE_CODES.map((code) => {
       const definition = getJobTypeDefinition(code);
       return (
         <span key={code} className="flex items-center gap-1.5">
@@ -447,7 +448,9 @@ export const CalendarLegend = () => (
                   ? 'bg-eje-50 ring-eje-200'
                   : definition.accent === 'green'
                     ? 'bg-verdant-50 ring-verdant-200'
-                    : 'bg-violet-eje-50 ring-violet-eje-100',
+                    : definition.accent === 'amber'
+                      ? 'bg-amber-eje-50 ring-amber-eje-200'
+                      : 'bg-violet-eje-50 ring-violet-eje-100',
             )}
           />
           {definition.label}

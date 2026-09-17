@@ -30,7 +30,17 @@ export interface PricingSnapshot extends PricingInputs {
  * required), so Phase 2 can load those definitions from a `job_types` table
  * without changing any calling code.
  */
-export type JobTypeCode = 'breakdown' | 'installation' | 'service' | 'test_and_repair';
+export type JobTypeCode =
+  | 'breakdown'
+  | 'installation'
+  | 'service'
+  | 'test_and_repair'
+  /**
+   * A parts collection / delivery note, not a service visit. The customer or a
+   * courier collects parts from the EJE office, so there is no labour and no
+   * travel — only parts lines and a collector's signature.
+   */
+  | 'parts';
 
 export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -124,7 +134,13 @@ export interface Job {
   readonly customerId: CustomerId;
   readonly siteId: SiteId;
   readonly contactId: ContactId;
-  readonly machineId: MachineId;
+  /**
+   * The machine the job is against.
+   *
+   * Null for a parts collection, which is a receipt for goods rather than work
+   * on a machine. Every other job type has one.
+   */
+  readonly machineId: MachineId | null;
   readonly jobType: JobTypeCode;
   readonly priority: JobPriority;
   readonly status: JobStatus;
@@ -164,6 +180,15 @@ export interface Job {
   readonly calloutApplied: boolean;
 
   /**
+   * Parts jobs only: a courier is collecting rather than the customer.
+   *
+   * A courier has no reason to see what the customer paid, so prices are
+   * withheld from the collection document. The prices remain on the job for EJE
+   * costing — nothing is deleted.
+   */
+  readonly courierCollection: boolean;
+
+  /**
    * The rates this job is priced at, frozen when the customer signed.
    *
    * Null while the job is still being worked, in which case current system
@@ -182,3 +207,7 @@ export interface Job {
 
 export const SIGNATURE_DECLARATION =
   'I confirm that the work described above has been completed.';
+
+/** Parts collection is an acknowledgement of receipt, not of work done. */
+export const PARTS_COLLECTION_DECLARATION =
+  'I confirm that I have collected the parts listed above.';

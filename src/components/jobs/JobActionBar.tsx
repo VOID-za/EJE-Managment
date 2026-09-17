@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { canAcceptJob, checkReadyForSignature } from '@/domain';
+import { canAcceptJob, checkReadyForSignature, getJobTypeDefinition } from '@/domain';
 import {
   acceptJob,
   buildSiteLocationMessage,
@@ -239,9 +239,13 @@ export const JobActionBar = ({
           if (!ok) return;
 
           onChanged();
-          // Offer the site location only once the job is safely accepted.
-          setLocationOutcome(null);
-          setLocationPrompt(accepted);
+          // Offer the site location only once the job is safely accepted, and
+          // only where there is a site to travel to: parts are collected from
+          // the EJE counter, so a site pin would send the technician nowhere.
+          if (getJobTypeDefinition(job.jobType).visitsSite) {
+            setLocationOutcome(null);
+            setLocationPrompt(accepted);
+          }
         }}
         onCancel={() => setConfirmAccept(false)}
       />

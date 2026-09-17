@@ -92,7 +92,7 @@ const JobDetailPage = ({
     { id: 'overview', label: 'Overview' },
     {
       id: 'work',
-      label: 'Labour & Parts',
+      label: definition.capturesLabourAndTravel ? 'Labour & Parts' : 'Parts',
       badge:
         job.labour.length + job.travel.length + job.parts.length > 0 ? (
           <Badge tone="neutral" size="sm">
@@ -147,7 +147,7 @@ const JobDetailPage = ({
       <PageHeader
         title={job.jobNumber}
         breadcrumbs={[{ label: 'Jobs', href: '/jobs' }, { label: job.jobNumber }]}
-        description={`${view.customer.name} · ${view.site.name} · ${view.machine.manufacturer} ${view.machine.model}`}
+        description={[view.customer.name, view.site.name, view.machine === null ? null : `${view.machine.manufacturer} ${view.machine.model}`].filter((part) => part !== null).join(' · ')}
         meta={
           <div className="flex flex-wrap items-center gap-2">
             <JobStatusBadge status={job.status} />

@@ -24,6 +24,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/cn';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
+import { PartsCollectionNote } from '@/components/jobs/PartsCollectionNote';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
@@ -101,7 +102,7 @@ const ReviewJobPage = ({
   return (
     <>
       <PageHeader
-        title="Review job card"
+        title={view?.job.jobType === "parts" ? "Review collection note" : "Review job card"}
         breadcrumbs={[
           { label: 'Jobs', href: '/jobs' },
           { label: job.jobNumber, href: `/jobs/${job.jobNumber}` },
@@ -248,7 +249,11 @@ const ReviewJobPage = ({
       )}
 
       <div className="eje-scrollbar overflow-x-auto rounded-[var(--radius-card)] bg-steel-200/60 p-4 sm:p-8">
-        <JobCardDocument view={view} />
+        {view.job.jobType === 'parts' ? (
+          <PartsCollectionNote view={view} />
+        ) : (
+          <JobCardDocument view={view} />
+        )}
       </div>
 
       <ConfirmDialog

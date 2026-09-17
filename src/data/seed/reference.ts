@@ -67,7 +67,7 @@ export const seedSettings: SystemSettings = {
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',
-  nextJobSequence: 1060,
+  nextJobSequence: 1065,
   quietHoursStart: '18:00',
   quietHoursEnd: '07:00',
 };

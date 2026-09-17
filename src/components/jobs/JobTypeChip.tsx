@@ -6,6 +6,7 @@ const ACCENT_TO_TONE: Record<string, BadgeTone> = {
   blue: 'blue',
   green: 'green',
   violet: 'violet',
+  amber: 'amber',
 };
 
 export const JobTypeChip = ({

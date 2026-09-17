@@ -147,6 +147,17 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
   const definition = getJobTypeDefinition(job.jobType);
   const violations: RuleViolation[] = [];
 
+  // A parts collection records no work and no hours: it is a receipt for goods.
+  if (!definition.capturesLabourAndTravel) {
+    if (job.parts.length === 0) {
+      violations.push({
+        code: 'parts_required',
+        message: 'At least one part line is required before the collector signs.',
+      });
+    }
+    return violations.length === 0 ? ok : blocked(violations);
+  }
+
   if (job.completionReport.workPerformed.trim().length === 0) {
     violations.push({
       code: 'work_performed_required',

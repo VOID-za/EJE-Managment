@@ -4,6 +4,8 @@ export * from './site/navigation';
 export * from './job/notes';
 export * from './job/job-types';
 export * from './job/scheduling';
+export * from './job/parts-document';
+export * from './job/signatory';
 export * from './job/workflow';
 export * from './pricing/totals';
 export * from './checklist/validation';

@@ -112,14 +112,18 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         </div>
 
         <div>
-          <SectionTitle>Machine</SectionTitle>
-          <p className="font-semibold text-steel-900">{machineDisplayName(machine)}</p>
-          <dl className="mt-1 space-y-0.5 text-steel-600">
-            <Row label="Serial number" value={machine.serialNumber} mono />
-            <Row label="Machine type" value={machine.machineType} />
-            <Row label="Control" value={machine.controlSystem} />
-            <Row label="Year" value={String(machine.year)} />
-          </dl>
+          {machine !== null && (
+            <>
+              <SectionTitle>Machine</SectionTitle>
+              <p className="font-semibold text-steel-900">{machineDisplayName(machine)}</p>
+              <dl className="mt-1 space-y-0.5 text-steel-600">
+                <Row label="Serial number" value={machine.serialNumber} mono />
+                <Row label="Machine type" value={machine.machineType} />
+                <Row label="Control" value={machine.controlSystem} />
+                <Row label="Year" value={String(machine.year)} />
+              </dl>
+            </>
+          )}
 
           <div className="mt-4">
             <SectionTitle>Job details</SectionTitle>

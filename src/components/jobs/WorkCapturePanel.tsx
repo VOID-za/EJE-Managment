@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import {
   calculateJobTotals,
+  getJobTypeDefinition,
   labourRateFor,
   labourRateLabel,
   type Job,
@@ -70,6 +71,9 @@ export const WorkCapturePanel = ({
   onChanged,
 }: WorkCapturePanelProps) => {
   const totals = calculateJobTotals(job, settings);
+  // A parts collection has no site visit, so hours, distance and a call-out fee
+  // do not apply. Driven by the job type definition rather than a code check.
+  const capturesLabourAndTravel = getJobTypeDefinition(job.jobType).capturesLabourAndTravel;
   const [dialog, setDialog] = useState<'labour' | 'travel' | 'part' | null>(null);
   // When set, the dialog is amending this line rather than adding a new one.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,6 +109,15 @@ export const WorkCapturePanel = ({
         </p>
       )}
 
+      {!capturesLabourAndTravel && (
+        <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-3 text-sm text-amber-eje-700">
+          A parts collection records goods handed over, so it carries no labour, travel or
+          call-out fee — only the parts below.
+        </div>
+      )}
+
+      {capturesLabourAndTravel && (
+      <>
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-steel-100 px-5 py-4">
           <CardHeader
@@ -288,6 +301,8 @@ export const WorkCapturePanel = ({
           </ul>
         )}
       </Card>
+      </>
+      )}
 
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-steel-100 px-5 py-4">

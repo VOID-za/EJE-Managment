@@ -330,6 +330,102 @@ await step('supplying the note clears the block', async () => {
   if (stillInvalid !== 0) throw new Error('note was recorded but the item is still flagged');
 });
 
+await step('a Parts job offers no labour, travel or call-out capture', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1064`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1064' }).first().waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: /^Parts/ }).click();
+  await page.getByText('carries no labour, travel or call-out fee', { exact: false })
+    .waitFor({ timeout: 8000 });
+  if (await page.getByRole('button', { name: 'Add labour' }).count() > 0) {
+    throw new Error('a parts collection offered labour capture');
+  }
+  if (await page.getByRole('button', { name: 'Add travel' }).count() > 0) {
+    throw new Error('a parts collection offered travel capture');
+  }
+  if (await page.getByText('Charge the call-out fee').count() > 0) {
+    throw new Error('a parts collection offered a call-out fee');
+  }
+});
+
+await step('accepting a Parts job does NOT offer the site location', async () => {
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
+  // Parts leave the EJE counter, so there is no site to send anyone to.
+  if (await page.getByText('Send Site Location?').count() > 0) {
+    throw new Error('a parts collection offered to send a site location');
+  }
+});
+
+await step('the collector, not the customer, signs for parts', async () => {
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByRole('button', { name: /signature/i }).first().click();
+  await page.waitForURL('**/sign', { timeout: 10000 });
+  await page.getByRole('heading', { name: 'Collector signature' }).waitFor({ timeout: 8000 });
+  await page.getByText('I confirm that I have collected the parts listed above.').waitFor();
+  await page.getByLabel('Collector name').waitFor();
+  await page.getByLabel('Collector surname').waitFor();
+  // Nothing about completed work: a collection acknowledges receipt of goods.
+  if (await page.getByText('I confirm that the work described above has been completed.').count() > 0) {
+    throw new Error('the parts collector was shown the work-completed declaration');
+  }
+  await page.screenshot({ path: `${shots}/13-collector-signature.png`, fullPage: false });
+});
+
+await step('capturing the collector signature produces a collection note', async () => {
+  await page.getByLabel('Collector name').fill('Thabo');
+  await page.getByLabel('Collector surname').fill('Dlamini');
+
+  const pad = page.locator('div.touch-none').first();
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 60, box.y + 110);
+  await page.mouse.down();
+  for (let i = 0; i < 20; i += 1) {
+    await page.mouse.move(box.x + 60 + i * 14, box.y + 110 - Math.sin(i / 2) * 35);
+  }
+  await page.mouse.up();
+
+  await page.getByRole('button', { name: 'Confirm collection' }).click();
+  await page.waitForURL('**/review', { timeout: 10000 });
+  await page.getByText('Parts Collection Note').first().waitFor({ timeout: 8000 });
+  await page.getByText('OKA-WW-320').first().waitFor({ timeout: 8000 });
+  await page.getByText('Thabo').first().waitFor({ timeout: 8000 });
+});
+
+await step('a customer collection note SHOWS prices', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1062/review`, { waitUntil: 'networkidle' });
+  await page.getByText('Parts Collection Note').first().waitFor({ timeout: 10000 });
+  await page.getByText('LW-CLT-220').first().waitFor({ timeout: 8000 });
+  // R 485,00 x 2 plus R 1 320,00 = R 2 290,00
+  await page.getByText('R\u00a02\u00a0290,00').first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/14-parts-customer.png`, fullPage: false });
+});
+
+await step('a COURIER collection note carries no prices at all', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1063/review`, { waitUntil: 'networkidle' });
+  await page.getByText('Delivery Note').first().waitFor({ timeout: 10000 });
+  await page.getByText('SIE-6SL3-0.75').first().waitFor({ timeout: 8000 });
+  await page.getByText('Prices are not shown on a courier collection note.').waitFor();
+
+  const note = await page.locator('article').first().innerText();
+  if (/R\u00a0\d/.test(note)) {
+    throw new Error(`a price leaked onto the courier note: ${note.match(/R\u00a0[\d\u00a0,]+/)?.[0]}`);
+  }
+  if (note.includes('Unit price')) {
+    throw new Error('the courier note kept its unit price column');
+  }
+  await page.screenshot({ path: `${shots}/15-parts-courier.png`, fullPage: false });
+});
+
+await step('the courier job still holds its prices internally', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1063`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Parts/ }).click();
+  // Withheld from the customer-facing document, never deleted from the job.
+  await page.getByText('SIE-6SL3-0.75').first().waitFor({ timeout: 8000 });
+  await page.getByText('R\u00a012\u00a0400,00').first().waitFor({ timeout: 8000 });
+});
+
 await step('master dashboard and admin', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();

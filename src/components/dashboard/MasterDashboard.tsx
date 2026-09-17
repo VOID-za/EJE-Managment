@@ -91,7 +91,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
         description="Live view of every open job, where each one stands and what needs attention today."
         actions={
           <>
-            <Link href="/schedule">
+            <Link href="/calendar">
               <Button variant="secondary" leadingIcon={<Icon name="calendar" className="size-4" />}>
                 Schedule
               </Button>
@@ -187,7 +187,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
               title="Today and upcoming"
               description="Scheduled work across all technicians."
               action={
-                <Link href="/schedule">
+                <Link href="/calendar">
                   <Button variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>
                     Full schedule
                   </Button>
