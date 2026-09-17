@@ -12,23 +12,93 @@ All data in this demonstration is fictional. No real customer information is use
 
 ---
 
+## Setting up a new machine
+
+You need exactly two things: **Node.js 20.9 or newer** (22 LTS recommended) and
+**Git**. Everything else is installed by `npm ci`. There is no database, no
+Docker and no service to configure — the demonstration runs entirely in the
+browser.
+
+### Windows
+
+Open PowerShell and use the built-in package manager:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Git.Git
+```
+
+Close and reopen PowerShell so the new `PATH` takes effect, then check both:
+
+```powershell
+node -v    # v22.x.x  (must be >= v20.9)
+git --version
+```
+
+If `winget` is unavailable, download the installers directly:
+<https://nodejs.org/en/download> and <https://git-scm.com/download/win>. Accept
+the defaults in both.
+
+### macOS
+
+With [Homebrew](https://brew.sh):
+
+```bash
+brew install node git
+node -v
+```
+
+### Linux (Debian / Ubuntu)
+
+The version in the default apt repositories is usually too old, so use NodeSource:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+node -v
+```
+
 ## Running it
 
 ```bash
-npm install
-npm run dev          # http://localhost:3000
+git clone https://github.com/VOID-za/EJE-Managment
+cd EJE-Managment
+git checkout claude/eje-job-card-demo-k2klb4
+npm ci
+npm run dev
 ```
 
-Production build:
+Then open <http://localhost:3000>.
+
+`npm ci` installs the exact versions in `package-lock.json` — prefer it to
+`npm install` on a fresh machine. It takes about 25 seconds and roughly 700 MB
+of disk.
+
+**For the actual management demonstration, use the production build instead.**
+It starts in under a second and is noticeably more responsive than the dev
+server, which matters when somebody is watching:
 
 ```bash
-npm run build
+npm run build     # about 15 seconds
 npm start
 ```
 
-Sign-in has no password: pick a Master or a Technician to see the system as that
-role sees it. Start as **Elmarie Coetzee** (Master) or **Sipho Mahlangu**
-(Technician).
+Sign in as **Elmarie Coetzee** (Master) or **Sipho Mahlangu** (Technician).
+There is no password — see [Demonstration mode](#demonstration-mode).
+
+### If something goes wrong
+
+- **`node` or `npm` not recognised** — the terminal was open before Node was
+  installed. Close it and open a new one.
+- **Port 3000 already in use** — run on another port: `npm run dev -- -p 3001`.
+- **The demo shows stale data** — it persists to browser storage between
+  sessions. Reset it under Administration → System → Reset demonstration data.
+- **`npm ci` fails on a lockfile mismatch** — you are on the wrong branch. Run
+  `git checkout claude/eje-job-card-demo-k2klb4` and try again.
+
+Running the browser smoke test (`npm run smoke`) additionally needs a Chromium
+build, which is *not* downloaded by `npm ci`. Install it once with
+`npx playwright install chromium`. Nothing else in the project needs it.
 
 ## Verifying it
 
