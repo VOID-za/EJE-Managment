@@ -3,7 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 import { contactFullName } from '@/domain';
-import { generateJobCardDocument, submitJob } from '@/application/job-operations';
+import {
+  generateJobCardDocument,
+  submitForMasterReview,
+  submitJobCard,
+} from '@/application/job-operations';
 import { loadJobView } from '@/application/job-view';
 import type { GeneratedPdf } from '@/services/ports';
 import {
@@ -18,11 +22,12 @@ import {
   LoadingPanel,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { cn } from '@/lib/cn';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Review and submit.
@@ -40,6 +45,7 @@ const ReviewJobPage = ({
   const router = useRouter();
   const operation = useOperation();
   const { operationContext } = useApp();
+  const currentUser = useCurrentUser();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [document, setDocument] = useState<GeneratedPdf | null>(null);
@@ -81,7 +87,16 @@ const ReviewJobPage = ({
   const { job, customer, contact } = view;
   const customerEmail = contact?.email ?? customer.email;
   const customerDisplayName = contact === null ? customer.name : contactFullName(contact);
-  const alreadyClosed = job.status === 'closed' || job.status === 'submitted';
+
+  const isMaster = currentUser.role === 'master';
+  const awaitingHandOver = job.status === 'review';
+  const inMasterReview = job.status === 'submitted';
+  const closed = job.status === 'closed';
+
+  // Two distinct submissions. The technician hands the job to the office; only a
+  // Master issues it to the customer.
+  const canHandOver = awaitingHandOver;
+  const canIssue = inMasterReview && isMaster;
 
   return (
     <>
@@ -166,23 +181,69 @@ const ReviewJobPage = ({
         </div>
       )}
 
-      {!alreadyClosed && submitted === null && (
+      {canHandOver && submitted === null && (
         <Card className="mb-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardHeader
-                title="Ready to submit"
-                description={`The signed job card will be emailed to ${customerDisplayName} at ${customerEmail}.`}
-              />
-            </div>
+            <CardHeader
+              title="Ready to hand over"
+              description="The office reviews and approves this job card before the customer receives it. Nothing is emailed at this step."
+            />
             <Button
               size="lg"
               onClick={() => setConfirmOpen(true)}
-              leadingIcon={<Icon name="mail" className="size-5" />}
+              leadingIcon={<Icon name="check" className="size-5" />}
             >
-              Submit Job Card
+              Submit for Master Review
             </Button>
           </div>
+        </Card>
+      )}
+
+      {inMasterReview && submitted === null && (
+        <Card
+          className={cn(
+            'mb-5',
+            canIssue ? 'border-eje-200 bg-eje-50/50' : 'border-amber-eje-200 bg-amber-eje-50',
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardHeader
+              title={canIssue ? 'Master review' : 'With the office for review'}
+              description={
+                canIssue
+                  ? `Correct anything that needs it on the job, then issue it. The job card will be emailed to ${customerDisplayName} at ${customerEmail} and the job closed.`
+                  : 'A Master is reviewing this job card. The customer has not been emailed yet.'
+              }
+            />
+            {canIssue && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  onClick={() => router.push(`/jobs/${job.jobNumber}`)}
+                  leadingIcon={<Icon name="wrench" className="size-5" />}
+                >
+                  Edit job
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setConfirmOpen(true)}
+                  leadingIcon={<Icon name="mail" className="size-5" />}
+                >
+                  Submit Job Card
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {closed && submitted === null && (
+        <Card className="mb-5 border-steel-200">
+          <CardHeader
+            title="Issued and closed"
+            description={`This job card was issued to the customer and closed. It is read-only.`}
+          />
         </Card>
       )}
 
@@ -192,26 +253,43 @@ const ReviewJobPage = ({
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Submit Job Card?"
+        title={canIssue ? 'Submit Job Card?' : 'Submit for Master Review?'}
         message={
-          <>
-            <p>
-              Once submitted, this job will be closed and the signed job card will be emailed to
-              the customer.
-            </p>
-            <p className="mt-3 rounded-[var(--radius-control)] bg-amber-eje-50 px-3 py-2.5 text-xs text-amber-eje-700">
-              Demonstration mode: no email is actually sent. The message is recorded in the
-              Simulated Outbox so you can see exactly what production would transmit.
-            </p>
-          </>
+          canIssue ? (
+            <>
+              <p>
+                Once submitted, this job will be closed and the signed job card will be emailed to
+                the customer.
+              </p>
+              <p className="mt-3 rounded-[var(--radius-control)] bg-amber-eje-50 px-3 py-2.5 text-xs text-amber-eje-700">
+                Demonstration mode: no email is actually sent. The message is recorded in the
+                Simulated Outbox so you can see exactly what production would transmit.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                {job.jobNumber} will be handed to the office for review. The customer is{' '}
+                <span className="font-semibold">not</span> emailed at this step.
+              </p>
+              <p className="mt-2 text-steel-500">
+                A Master checks and corrects the job card, then issues it to the customer.
+              </p>
+            </>
+          )
         }
-        confirmLabel="Submit"
+        confirmLabel={canIssue ? 'Submit' : 'Submit for review'}
         cancelLabel="Cancel"
         busy={operation.running}
         onConfirm={async () => {
           const ok = await operation.run(async (context) => {
-            const result = await submitJob(context, job, customerEmail, customerDisplayName);
-            setSubmitted({ fileName: result.documentFileName, to: result.emailedTo });
+            if (canIssue) {
+              const result = await submitJobCard(context, job, customerEmail, customerDisplayName);
+              setSubmitted({ fileName: result.documentFileName, to: result.emailedTo });
+            } else {
+              await submitForMasterReview(context, job);
+              setSubmitted(null);
+            }
           });
           setConfirmOpen(false);
           if (ok) viewQuery.refetch();

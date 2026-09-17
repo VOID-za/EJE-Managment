@@ -8,7 +8,8 @@ import {
   checkReadyForSubmission,
   emptyChecklistResponse,
   getJobTypeDefinition,
-  isJobEditable,
+  isAfterSignature,
+  canEditJob,
   labourRateLabel,
   siteAddressLine,
   siteNavigationUrl,
@@ -58,13 +59,23 @@ const audit = async (context: OperationContext, input: AuditInput): Promise<Acti
   return context.repos.activity.append(event);
 };
 
-const assertEditable = (job: Job): void => {
-  if (!isJobEditable(job.status)) {
-    throw new WorkflowError(
-      `${job.jobNumber} has been submitted and can no longer be changed.`,
-      [{ code: 'job_locked', message: 'Submitted and closed jobs are read-only.' }],
-    );
-  }
+const assertEditable = (context: OperationContext, job: Job): void => {
+  if (canEditJob(context.actor.role, job.status)) return;
+
+  throw new WorkflowError(
+    job.status === 'closed'
+      ? `${job.jobNumber} is closed and can no longer be changed.`
+      : `${job.jobNumber} is in Master review and can only be changed by a Master.`,
+    [
+      {
+        code: 'job_locked',
+        message:
+          job.status === 'closed'
+            ? 'Closed jobs are read-only.'
+            : 'Only a Master can amend a job that is awaiting review.',
+      },
+    ],
+  );
 };
 
 const transition = (job: Job, to: JobStatus): void => {
@@ -204,7 +215,7 @@ export const assignPrimaryTechnician = async (
   technicianId: UserId,
   technicianName: string,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const saved = await context.repos.jobs.save({ ...job, primaryTechnicianId: technicianId });
   await audit(context, {
     jobId: job.id,
@@ -221,7 +232,7 @@ export const addAdditionalTechnician = async (
   technicianId: UserId,
   technicianName: string,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.additionalTechnicianIds.includes(technicianId)) return job;
 
   const saved = await context.repos.jobs.save({
@@ -243,7 +254,7 @@ export const removeAdditionalTechnician = async (
   technicianId: UserId,
   technicianName: string,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const saved = await context.repos.jobs.save({
     ...job,
     additionalTechnicianIds: job.additionalTechnicianIds.filter((id) => id !== technicianId),
@@ -269,7 +280,7 @@ export const addLabour = async (
   job: Job,
   input: LabourInput,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('lab')),
     technicianId: context.actor.id,
@@ -301,7 +312,7 @@ export const addTravel = async (
   job: Job,
   input: TravelInput,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('trv')),
     technicianId: context.actor.id,
@@ -334,7 +345,7 @@ export const addPart = async (
   job: Job,
   input: PartInput,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('prt')),
     partNumber: input.partNumber,
@@ -363,7 +374,7 @@ export const removeLineItem = async (
   kind: LineItemKind,
   lineId: string,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const next: Job =
     kind === 'labour'
       ? { ...job, labour: job.labour.filter((entry) => entry.id !== lineId) }
@@ -384,7 +395,7 @@ export const setCalloutApplied = async (
   job: Job,
   applied: boolean,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.calloutApplied === applied) return job;
   return context.repos.jobs.save({ ...job, calloutApplied: applied });
 };
@@ -395,7 +406,7 @@ export const addNote = async (
   body: string,
   internal: boolean,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const note = {
     id: context.services.ids.next('note'),
     body,
@@ -433,7 +444,7 @@ export const addMedia = async (
   job: Job,
   input: MediaInput,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   const stored = await context.services.storage.put(input.fileName, 'image/jpeg', null);
 
   const attachment: Attachment = {
@@ -518,7 +529,7 @@ export const saveCompletionReport = async (
   job: Job,
   report: JobCompletionReport,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   return context.repos.jobs.save({ ...job, completionReport: report });
 };
 
@@ -528,7 +539,7 @@ export const startChecklist = async (
   job: Job,
   template: ChecklistTemplate,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.checklist !== null) return job;
 
   const responses = template.sections.flatMap((section) =>
@@ -562,7 +573,7 @@ export const answerChecklistItem = async (
   itemId: string,
   answer: ChecklistAnswer,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -602,7 +613,7 @@ export const addChecklistPhoto = async (
   itemId: string,
   fileName: string,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -641,7 +652,7 @@ export const completeChecklist = async (
   job: Job,
   template: ChecklistTemplate,
 ): Promise<Job> => {
-  assertEditable(job);
+  assertEditable(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -744,34 +755,35 @@ export const generateJobCardDocument = async (context: OperationContext, job: Jo
   return generated;
 };
 
-export interface SubmitResult {
-  readonly job: Job;
-  readonly documentFileName: string;
-  readonly emailedTo: string;
-}
-
 /**
  * Submits and closes the job.
  *
  * DEMO BEHAVIOUR: the customer email is recorded in the simulated outbox. No
  * message is transmitted.
  */
-export const submitJob = async (
+/**
+ * Technician hand-over: submit the signed job card for Master review.
+ *
+ * Deliberately does NOT email the customer and does NOT finalise the customer
+ * document. The office reviews and corrects the job card first; the customer
+ * only ever sees what a Master has approved.
+ */
+export const submitForMasterReview = async (
   context: OperationContext,
   job: Job,
-  customerEmail: string,
-  customerDisplayName: string,
-): Promise<SubmitResult> => {
+): Promise<Job> => {
   const readiness = checkReadyForSubmission(job);
   if (!readiness.allowed) {
-    throw new WorkflowError(`${job.jobNumber} cannot be submitted yet.`, readiness.violations);
+    throw new WorkflowError(
+      `${job.jobNumber} cannot be submitted for review yet.`,
+      readiness.violations,
+    );
   }
   transition(job, 'submitted');
 
   const now = context.services.clock.now();
 
-  // Normally frozen already at signature. This is the backstop: a job must never
-  // be closed without the rates it was priced at.
+  // Backstop only: signature should already have frozen the rates.
   const settings = await context.repos.settings.get();
   const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
     ...pricingInputsFrom(settings),
@@ -779,22 +791,111 @@ export const submitJob = async (
     reason: 'submission',
   };
 
-  const frozen: Job = { ...job, pricingSnapshot: snapshot };
-  const document = await context.services.pdf.generateJobCard(frozen);
-
-  const submitted = await context.repos.jobs.save({
-    ...frozen,
-    status: 'closed',
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'submitted',
+    pricingSnapshot: snapshot,
     submittedAt: now,
-    closedAt: now,
     completedAt: job.completedAt ?? now,
   });
 
   await audit(context, {
     jobId: job.id,
     type: 'job_submitted',
-    summary: 'Job submitted',
-    detail: `Signed job card submitted by ${userFullName(context.actor)}.`,
+    summary: 'Submitted for Master review',
+    detail: `${userFullName(context.actor)} handed the signed job card to the office. The customer has not been emailed.`,
+  });
+
+  return saved;
+};
+
+/**
+ * Records that a Master changed the job after the customer signed.
+ *
+ * The rates are frozen by the pricing snapshot, so a correction is priced at
+ * exactly what the customer saw — but the TOTAL can still move if a Master adds
+ * or removes work. That is a real commercial event, so it is written to the
+ * trail rather than happening quietly.
+ */
+export const recordPostSignatureChange = async (
+  context: OperationContext,
+  job: Job,
+  description: string,
+): Promise<void> => {
+  if (!isAfterSignature(job.status)) return;
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'master_amended_after_signature',
+    summary: 'Job amended after customer signature',
+    detail: `${description} Changed by ${userFullName(context.actor)} during Master review. Rates remain those frozen at signature.`,
+  });
+};
+
+export interface SubmitResult {
+  readonly job: Job;
+  readonly documentFileName: string;
+  readonly emailedTo: string;
+}
+
+/**
+ * Master submission: finalise, issue and close.
+ *
+ * This is the ONLY point at which the customer is emailed and the final job card
+ * document is produced. Everything before it is internal.
+ *
+ * DEMO BEHAVIOUR: the email is recorded in the simulated outbox, never sent.
+ */
+export const submitJobCard = async (
+  context: OperationContext,
+  job: Job,
+  customerEmail: string,
+  customerDisplayName: string,
+): Promise<SubmitResult> => {
+  if (job.status !== 'submitted') {
+    throw new WorkflowError(
+      `${job.jobNumber} must be in Master review before it can be issued to the customer.`,
+      [
+        {
+          code: 'not_in_master_review',
+          message: 'Only a job submitted by a technician can be issued.',
+        },
+      ],
+    );
+  }
+
+  const readiness = checkReadyForSubmission(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(`${job.jobNumber} cannot be issued yet.`, readiness.violations);
+  }
+  transition(job, 'closed');
+
+  const now = context.services.clock.now();
+  const settings = await context.repos.settings.get();
+  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
+    ...pricingInputsFrom(settings),
+    capturedAt: now,
+    reason: 'submission',
+  };
+
+  const finalJob: Job = { ...job, pricingSnapshot: snapshot };
+
+  // The final document is generated here, from the job as the Master approved it.
+  const document = await context.services.pdf.generateJobCard(finalJob);
+
+  const closed = await context.repos.jobs.save({
+    ...finalJob,
+    status: 'closed',
+    closedAt: now,
+    submittedAt: job.submittedAt ?? now,
+    completedAt: job.completedAt ?? now,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'pdf_generated',
+    summary: 'Final job card document generated',
+    detail: `${document.fileName} (${document.pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
   });
 
   await context.services.email.send({
@@ -810,12 +911,12 @@ export const submitJob = async (
   await audit(context, {
     jobId: job.id,
     type: 'job_closed',
-    summary: 'Job closed',
-    detail: 'Signed job card queued for delivery to the customer.',
+    summary: 'Job card issued and closed',
+    detail: `Approved by ${userFullName(context.actor)} and queued for delivery to ${customerEmail}.`,
   });
 
   return {
-    job: submitted,
+    job: closed,
     documentFileName: document.fileName,
     emailedTo: customerEmail,
   };

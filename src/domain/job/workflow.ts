@@ -1,4 +1,5 @@
 import type { Job, JobStatus } from '../types/job';
+import type { UserRole } from '../types/user';
 import { getJobTypeDefinition } from './job-types';
 
 /**
@@ -63,7 +64,9 @@ export const jobStatusLabel = (status: JobStatus): string => {
     case 'review':
       return 'Review';
     case 'submitted':
-      return 'Submitted';
+      // Submitted BY THE TECHNICIAN, and now waiting on a Master. The customer
+      // has not been emailed at this point.
+      return 'Master Review';
     case 'closed':
       return 'Closed';
   }
@@ -74,13 +77,42 @@ export const canTransition = (from: JobStatus, to: JobStatus): boolean =>
 
 export const allowedTransitions = (from: JobStatus): readonly JobStatus[] => TRANSITIONS[from];
 
-/** A job is finished once submitted; nothing further may be captured against it. */
-export const isJobEditable = (status: JobStatus): boolean =>
-  status !== 'submitted' && status !== 'closed';
+/**
+ * Whether anyone at all may still change this job.
+ *
+ * Only a closed job is final. A job in Master Review has been submitted by the
+ * technician but not yet issued to the customer, so a Master can still correct
+ * it — see `canEditJob`, which is the check screens should use.
+ */
+export const isJobEditable = (status: JobStatus): boolean => status !== 'closed';
 
-/** Statuses where a technician may capture labour, travel, parts and media. */
-export const isJobWorkable = (status: JobStatus): boolean =>
-  status === 'in_progress' || status === 'awaiting_spares' || status === 'completion';
+/**
+ * Whether THIS ROLE may edit a job in this state.
+ *
+ * Technicians work a job up to the point they hand it over. Masters keep editing
+ * through Master Review, which is the whole purpose of that stage: the office
+ * corrects and completes the job card before the customer ever sees it.
+ */
+export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
+  if (status === 'closed') return false;
+  if (status === 'submitted') return role === 'master';
+  return true;
+};
+
+/**
+ * Statuses where labour, travel, parts and media may be captured.
+ *
+ * Includes Master Review, because a Master correcting a job card routinely needs
+ * to add a part that was fitted but not captured, or fix an hours entry.
+ */
+export const isJobWorkable = (role: UserRole, status: JobStatus): boolean => {
+  if (status === 'submitted') return role === 'master';
+  return status === 'in_progress' || status === 'awaiting_spares' || status === 'completion';
+};
+
+/** The job has been signed, so the customer has committed to what it says. */
+export const isAfterSignature = (status: JobStatus): boolean =>
+  status === 'review' || status === 'submitted' || status === 'closed';
 
 export const isJobOpenWork = (status: JobStatus): boolean =>
   status === 'open' ||

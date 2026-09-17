@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import {
   getJobTypeDefinition,
-  isJobEditable,
+  canEditJob,
   isJobWorkable,
   type ActivityEvent,
   type User,
@@ -32,6 +32,7 @@ import { JobProgressRail } from '@/components/jobs/JobProgressRail';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate } from '@/lib/format';
 
 type TabId = 'overview' | 'work' | 'completion' | 'checklist' | 'media' | 'notes' | 'activity';
@@ -42,6 +43,7 @@ const JobDetailPage = ({
   readonly params: Promise<{ readonly jobNumber: string }>;
 }) => {
   const { jobNumber } = use(params);
+  const currentUser = useCurrentUser();
   const [tab, setTab] = useState<TabId>('overview');
 
   const viewQuery = useQuery(`job:${jobNumber}`, (repos) => loadJobView(repos, jobNumber));
@@ -79,8 +81,8 @@ const JobDetailPage = ({
     (event) => event.jobId === job.id,
   );
 
-  const editable = isJobEditable(job.status);
-  const workable = isJobWorkable(job.status) && editable;
+  const editable = canEditJob(currentUser.role, job.status);
+  const workable = isJobWorkable(currentUser.role, job.status);
   const definition = getJobTypeDefinition(job.jobType);
   const refresh = () => viewQuery.refetch();
 
@@ -159,7 +161,9 @@ const JobDetailPage = ({
             )}
             {!editable && (
               <Badge tone="neutral" size="sm">
-                Read-only — this job has been submitted
+                {job.status === 'closed'
+                  ? 'Read-only — this job is closed'
+                  : 'Read-only — awaiting Master review'}
               </Badge>
             )}
           </div>

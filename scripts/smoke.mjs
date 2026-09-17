@@ -223,7 +223,48 @@ await step('job card preview renders real data', async () => {
   await page.screenshot({ path: `${shots}/04-jobcard.png`, fullPage: false });
 });
 
-await step('submit job card with confirmation', async () => {
+await step('technician hands over for Master review, WITHOUT emailing', async () => {
+  await page.getByRole('button', { name: 'Submit for Master Review' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByText('is not emailed at this step', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Submit for review' }).click();
+  await page.getByText('With the office for review').first().waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/05-master-review.png`, fullPage: false });
+});
+
+await step('no customer email has been sent at technician hand-over', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  const jobCardEmails = await page.getByText('EJE-1048-Job-Card.pdf').count();
+  if (jobCardEmails !== 0) throw new Error('technician hand-over emailed the customer');
+});
+
+await step('the job is read-only for the technician while in Master review', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByText('awaiting Master review', { exact: false }).first().waitFor({
+    timeout: 8000,
+  });
+});
+
+await step('a Master can edit the job during review', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Master' }).click();
+  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByRole('button', { name: 'Add part' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  const partDialog = page.getByRole('dialog');
+  await partDialog.getByLabel('Part number').fill('FAN-24V-80');
+  await partDialog.getByLabel('Description').fill('Spindle drive cooling fan');
+  await partDialog.getByLabel(/Unit price/).fill('485');
+  await page.getByRole('button', { name: 'Add part' }).last().click();
+  await page.getByText('FAN-24V-80').first().waitFor({ timeout: 8000 });
+});
+
+await step('Master submits, which emails the customer and closes the job', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Submit Job Card' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByText('Once submitted, this job will be closed', { exact: false }).waitFor();
@@ -232,7 +273,7 @@ await step('submit job card with confirmation', async () => {
   await page.screenshot({ path: `${shots}/05-submitted.png`, fullPage: false });
 });
 
-await step('simulated outbox records the email, nothing sent (after full reload)', async () => {
+await step('the customer email appears only after Master submission', async () => {
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
   await page.getByText('Nothing in this list was sent').waitFor({ timeout: 8000 });
   await page.getByText('EJE-1048-Job-Card.pdf').first().waitFor({ timeout: 8000 });
@@ -240,7 +281,7 @@ await step('simulated outbox records the email, nothing sent (after full reload)
 
 await step('closed job is read-only', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByText('Read-only', { exact: false }).first().waitFor({ timeout: 8000 });
+  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 8000 });
 });
 
 await step('checklist blocks signature until complete (EJE-1053 service job)', async () => {

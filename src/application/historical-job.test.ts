@@ -8,7 +8,8 @@ import {
   setCalloutApplied,
   startCompletion,
   startSignature,
-  submitJob,
+  submitForMasterReview,
+  submitJobCard,
 } from './job-operations';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
@@ -33,6 +34,19 @@ import type { RepositoryBundle } from '@/data/repositories';
  */
 
 const actor: User = seedUsers.find((user) => user.role === 'technician' && user.active)!;
+const master: User = seedUsers.find((user) => user.role === 'master' && user.active)!;
+
+/** Technician hands over, then a Master issues it — the full two-step close. */
+const handOverAndIssue = async (
+  context: OperationContext,
+  job: Job,
+  email = 'customer@example-demo.co.za',
+  name = 'Pieter Nel',
+) => {
+  const reviewed = await submitForMasterReview(context, job);
+  const masterContext: OperationContext = { ...context, actor: master };
+  return submitJobCard(masterContext, reviewed, email, name);
+};
 
 const buildContext = (): { context: OperationContext; repos: RepositoryBundle } => {
   const store = new DemoStore();
@@ -110,7 +124,7 @@ describe('a signed job keeps the rates it was signed at', () => {
     const totalsAtSignature = calculateJobTotals(signed, rateA);
 
     // Submit and close the job.
-    const result = await submitJob(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
+    const result = await handOverAndIssue(context, signed);
     expect(result.job.status).toBe('closed');
     expect(result.job.pricingSnapshot).toEqual(signed.pricingSnapshot);
 
@@ -142,7 +156,7 @@ describe('a signed job keeps the rates it was signed at', () => {
   it('prices a different, unsigned job at the new rates', async () => {
     const rateA = await repos.settings.get();
     const signed = await workAndSign(context, 'EJE-1048');
-    await submitJob(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
+    await handOverAndIssue(context, signed);
 
     await repos.settings.save({
       ...rateA,
@@ -175,7 +189,7 @@ describe('a signed job keeps the rates it was signed at', () => {
       labourRates: { normal: 999999, overtime: 999999, double: 999999 },
     });
 
-    const result = await submitJob(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
+    const result = await handOverAndIssue(context, signed);
     expect(result.job.pricingSnapshot).toEqual(original);
   });
 });

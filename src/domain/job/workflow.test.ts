@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canEditJob,
+  isJobWorkable,
   canTransition,
   checkReadyForSignature,
   checkReadyForSubmission,
@@ -90,10 +92,26 @@ describe('job workflow transitions', () => {
     expect(canTransition('awaiting_spares', 'in_progress')).toBe(true);
   });
 
-  it('treats submitted and closed jobs as read-only', () => {
-    expect(isJobEditable('submitted')).toBe(false);
+  it('treats only a closed job as final', () => {
     expect(isJobEditable('closed')).toBe(false);
+    // Master Review is deliberately still editable — that is its purpose.
+    expect(isJobEditable('submitted')).toBe(true);
     expect(isJobEditable('in_progress')).toBe(true);
+  });
+
+  it('restricts Master Review to Masters', () => {
+    expect(canEditJob('master', 'submitted')).toBe(true);
+    expect(canEditJob('technician', 'submitted')).toBe(false);
+    expect(canEditJob('master', 'closed')).toBe(false);
+    expect(canEditJob('technician', 'closed')).toBe(false);
+    expect(canEditJob('technician', 'completion')).toBe(true);
+  });
+
+  it('lets a Master capture work during Master Review, but not a technician', () => {
+    expect(isJobWorkable('master', 'submitted')).toBe(true);
+    expect(isJobWorkable('technician', 'submitted')).toBe(false);
+    expect(isJobWorkable('technician', 'in_progress')).toBe(true);
+    expect(isJobWorkable('master', 'closed')).toBe(false);
   });
 });
 

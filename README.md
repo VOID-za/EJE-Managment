@@ -209,6 +209,24 @@ enforced rather than documented:
   while new service jobs get `2.0-DEMO`, so the difference is visible in the
   demonstration.
 
+## Two-step submission
+
+A technician never emails the customer. The job card goes to the office first:
+
+    technician completes -> customer signs -> technician SUBMITS FOR MASTER REVIEW
+      -> (no email, no final document)
+      -> Master reviews and corrects
+      -> Master SUBMITS JOB CARD -> final document generated -> customer emailed -> closed
+
+`Master Review` is the `submitted` status: submitted by the technician, awaiting
+the office. A Master can edit a job in that state — that is the entire point of
+the stage — while a technician cannot. Only `closed` is final, for everyone.
+
+Rates stay frozen at signature, so a Master correcting a job card prices it at
+exactly what the customer saw. The line TOTAL can still move if a Master adds or
+removes work, which is a real commercial event and is written to the audit trail
+rather than happening quietly. The customer signature itself cannot be replaced.
+
 ## Site location on acceptance
 
 Accepting a job **never** sends a WhatsApp message on its own. Acceptance

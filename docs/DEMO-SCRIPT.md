@@ -111,7 +111,16 @@ completed."* Enter a name, sign with a finger.
 **Review job card** — this is the customer's document, rendered from the live job
 record, not a picture.
 
-**Submit Job Card.** The confirmation is unambiguous:
+**Submit for Master Review.** Say what this does and does not do: the job card
+goes to the office, and the customer is *not* emailed. A technician on site never
+issues a document to a customer.
+
+Now sign out and back in as **Elmarie Coetzee** (Master). Open the job: it is in
+**Master Review**, and this time it is editable. Add the part the technician
+forgot to capture, and point out that it is priced at the rates frozen when the
+customer signed — the office cannot accidentally re-price a signed job.
+
+**Submit Job Card.** Now the confirmation is unambiguous:
 
 > Once submitted, this job will be closed and the signed job card will be emailed
 > to the customer.

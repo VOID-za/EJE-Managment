@@ -26,6 +26,7 @@ export type ActivityEventType =
   | 'customer_signed'
   | 'pdf_generated'
   | 'job_submitted'
+  | 'master_amended_after_signature'
   | 'job_closed'
   | 'document_viewed'
   | 'customer_updated'

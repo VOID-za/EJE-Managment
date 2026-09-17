@@ -18,7 +18,7 @@ import type { JobView } from '@/application/job-view';
 import type { Job } from '@/domain';
 import { Badge, Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
-import { useApp } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
 /**
@@ -37,6 +37,7 @@ export const JobActionBar = ({
   const router = useRouter();
   const operation = useOperation();
   const { operationContext } = useApp();
+  const currentUser = useCurrentUser();
   const [confirmAccept, setConfirmAccept] = useState(false);
   const [sparesOpen, setSparesOpen] = useState(false);
   const [sparesReason, setSparesReason] = useState('');
@@ -149,7 +150,23 @@ export const JobActionBar = ({
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
         leadingIcon={<Icon name="document" className="size-5" />}
       >
-        Review job card
+        Review &amp; hand over
+      </Button>,
+    );
+  }
+
+  // Master review: the office corrects the job card, then issues it.
+  if (job.status === 'submitted') {
+    actions.push(
+      <Button
+        key="master-review"
+        size="lg"
+        variant={currentUser.role === 'master' ? 'primary' : 'secondary'}
+        disabled={currentUser.role !== 'master'}
+        onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
+        leadingIcon={<Icon name="document" className="size-5" />}
+      >
+        {currentUser.role === 'master' ? 'Review & submit job card' : 'With the office for review'}
       </Button>,
     );
   }
