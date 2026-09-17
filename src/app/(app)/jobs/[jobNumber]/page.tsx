@@ -4,7 +4,9 @@ import { use, useState } from 'react';
 import {
   getJobTypeDefinition,
   canEditJob,
+  cancellationReasonLabel,
   isJobWorkable,
+  userFullName,
   type ActivityEvent,
   type User,
 } from '@/domain';
@@ -33,9 +35,16 @@ import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatDateTime } from '@/lib/format';
 
 type TabId = 'overview' | 'work' | 'completion' | 'checklist' | 'media' | 'notes' | 'activity';
+
+/** Names the person behind an id, so a banner never reads "cancelled by null". */
+const userName = (users: readonly User[], id: string | null): string => {
+  if (id === null) return 'the office';
+  const user = users.find((candidate) => candidate.id === id);
+  return user === undefined ? 'the office' : userFullName(user);
+};
 
 const JobDetailPage = ({
   params,
@@ -163,12 +172,44 @@ const JobDetailPage = ({
               <Badge tone="neutral" size="sm">
                 {job.status === 'closed'
                   ? 'Read-only — this job is closed'
-                  : 'Read-only — awaiting Master review'}
+                  : job.status === 'cancelled'
+                    ? 'Read-only — this job was cancelled'
+                    : 'Read-only — awaiting Master review'}
               </Badge>
             )}
           </div>
         }
       />
+
+      {/* A job that has left the workflow must never look like live work, so
+          this states what happened, why, and who did it — before anything else
+          on the page. */}
+      {job.deletedAt !== null && (
+        <Card className="mb-5 border-signal-300 bg-signal-50">
+          <p className="text-sm font-bold tracking-wide text-signal-700 uppercase">Deleted</p>
+          <p className="mt-1 text-sm text-signal-800">{job.deletionReason}</p>
+          <p className="mt-1 text-xs text-signal-700">
+            Deleted by {userName(users, job.deletedBy)} on {formatDateTime(job.deletedAt)}. The
+            record and its history are retained.
+          </p>
+        </Card>
+      )}
+
+      {job.status === 'cancelled' && job.cancellation !== null && (
+        <Card className="mb-5 border-signal-300 bg-signal-50">
+          <p className="text-sm font-bold tracking-wide text-signal-700 uppercase">Cancelled</p>
+          <p className="mt-1 text-sm font-semibold text-signal-800">
+            {cancellationReasonLabel(job.cancellation.reason)}
+          </p>
+          {job.cancellation.description.length > 0 && (
+            <p className="mt-1 text-sm text-signal-800">{job.cancellation.description}</p>
+          )}
+          <p className="mt-1 text-xs text-signal-700">
+            Cancelled by {userName(users, job.cancellation.cancelledBy)} on{' '}
+            {formatDateTime(job.cancellation.cancelledAt)}.
+          </p>
+        </Card>
+      )}
 
       <Card className="mb-5">
         <JobProgressRail status={job.status} />

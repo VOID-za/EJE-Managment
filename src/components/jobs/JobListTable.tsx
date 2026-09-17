@@ -2,8 +2,16 @@
 
 import { useRouter } from 'next/navigation';
 import type { JobListRow } from '@/application/job-view';
-import { Avatar, DataTable, Icon, JobStatusBadge, PriorityBadge, type Column } from '@/components/ui';
-import { jobScheduleWindow } from '@/domain';
+import {
+  Avatar,
+  Button,
+  DataTable,
+  Icon,
+  JobStatusBadge,
+  PriorityBadge,
+  type Column,
+} from '@/components/ui';
+import { canAcceptJob, jobScheduleWindow } from '@/domain';
 import { formatDate, isOverdue } from '@/lib/format';
 import { JobTypeChip } from './JobTypeChip';
 import { cn } from '@/lib/cn';
@@ -13,6 +21,14 @@ export interface JobListTableProps {
   readonly emptyTitle?: string;
   readonly emptyDescription?: string;
   readonly showTechnician?: boolean;
+  /**
+   * Offers Accept in the row for jobs the viewer may take.
+   *
+   * Acceptance from the list goes through the same `AcceptJobFlow` as the job
+   * screen, so the site-location offer appears exactly once and behaves the
+   * same either way.
+   */
+  readonly onAccept?: (row: JobListRow) => void;
 }
 
 export const JobListTable = ({
@@ -20,6 +36,7 @@ export const JobListTable = ({
   emptyTitle,
   emptyDescription,
   showTechnician = true,
+  onAccept,
 }: JobListTableProps) => {
   const router = useRouter();
 
@@ -113,6 +130,30 @@ export const JobListTable = ({
                 )}
               </div>
             ),
+          } satisfies Column<JobListRow>,
+        ]
+      : []),
+    ...(onAccept !== undefined
+      ? [
+          {
+            key: 'accept',
+            header: '',
+            align: 'right' as const,
+            width: '120px',
+            render: (row: JobListRow) =>
+              canAcceptJob(row.job) ? (
+                <Button
+                  size="sm"
+                  onClick={(event) => {
+                    // The row itself navigates, so accepting must not also open
+                    // the job underneath the dialog.
+                    event.stopPropagation();
+                    onAccept(row);
+                  }}
+                >
+                  Accept
+                </Button>
+              ) : null,
           } satisfies Column<JobListRow>,
         ]
       : []),

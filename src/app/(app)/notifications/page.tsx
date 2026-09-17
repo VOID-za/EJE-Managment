@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
+import { can, type AppNotification, type NotificationChannel, type NotificationType } from '@/domain';
 import {
   Badge,
   Button,
@@ -17,6 +17,9 @@ import {
   type IconName,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { MasterInbox } from '@/components/messages/MasterInbox';
+import { MessageMastersCard } from '@/components/messages/MessageMastersCard';
+import { MyMessagesCard } from '@/components/messages/MyMessagesCard';
 import { useQuery } from '@/hooks/useQuery';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatRelative } from '@/lib/format';
@@ -54,7 +57,7 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
   'document_approval_request',
 ];
 
-type TabId = 'inbox' | 'handled' | 'outbox';
+type TabId = 'inbox' | 'messages' | 'handled' | 'outbox';
 
 const NotificationsPageContent = () => {
   const user = useCurrentUser();
@@ -63,6 +66,17 @@ const NotificationsPageContent = () => {
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId | null) ?? 'inbox');
 
   const query = useQuery(`notifications:${user.id}`, (repos) => repos.notifications.list(user.id));
+
+  // Messages are a separate stream from notifications: a notification says
+  // something happened, a message is a person asking the office for something.
+  const messagesQuery = useQuery('notifications:messages', async (repos) => {
+    const [messages, users, availability] = await Promise.all([
+      repos.messages.list(),
+      repos.users.list(),
+      repos.availability.list(),
+    ]);
+    return { messages, users, availability };
+  });
   const jobsQuery = useQuery('notifications:jobNumbers', async (repos) => {
     const jobs = await repos.jobs.list();
     return new Map(jobs.map((job) => [job.id as string, job.jobNumber]));
@@ -78,6 +92,12 @@ const NotificationsPageContent = () => {
   const unread = notifications.filter((notification) => notification.readAt === null);
 
   const visible = tab === 'inbox' ? inbox : handled;
+  const isMaster = can(user.role, 'admin.access');
+  const messageData = messagesQuery.data;
+  const openMessages =
+    messageData === null || messageData === undefined
+      ? []
+      : messageData.messages.filter((message) => message.status !== 'actioned');
 
   return (
     <>
@@ -112,6 +132,16 @@ const NotificationsPageContent = () => {
                 </Badge>
               ) : undefined,
           },
+          {
+            id: 'messages',
+            label: isMaster ? 'Messages' : 'Message the office',
+            badge:
+              isMaster && openMessages.length > 0 ? (
+                <Badge tone="amber" size="sm">
+                  {openMessages.length}
+                </Badge>
+              ) : undefined,
+          },
           { id: 'handled', label: 'Handled' },
           {
             id: 'outbox',
@@ -128,7 +158,30 @@ const NotificationsPageContent = () => {
         className="mb-5"
       />
 
-      {tab === 'outbox' ? (
+      {tab === 'messages' ? (
+        isMaster ? (
+          messagesQuery.loading || messageData === null || messageData === undefined ? (
+            <LoadingPanel rows={3} label="Loading messages" />
+          ) : (
+            <MasterInbox
+              messages={messageData.messages}
+              users={messageData.users}
+              availability={messageData.availability}
+              onChanged={messagesQuery.refetch}
+            />
+          )
+        ) : (
+          <div className="space-y-4">
+            <MessageMastersCard onSent={messagesQuery.refetch} />
+            <MyMessagesCard
+              messages={(messageData?.messages ?? []).filter(
+                (message) => message.senderId === user.id,
+              )}
+              availability={messageData?.availability ?? []}
+            />
+          </div>
+        )
+      ) : tab === 'outbox' ? (
         <OutboxPanel />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Loading notifications" />

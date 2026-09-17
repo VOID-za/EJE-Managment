@@ -2,24 +2,27 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { canAcceptJob, checkReadyForSignature, getJobTypeDefinition } from '@/domain';
 import {
-  acceptJob,
-  buildSiteLocationMessage,
-  declineSiteLocation,
-  sendSiteLocation,
+  canAcceptJob,
+  canCancelJob,
+  canDeleteJob,
+  canTransferJob,
+  checkReadyForSignature,
+} from '@/domain';
+import {
   moveToAwaitingSpares,
   returnToInProgress,
   startCompletion,
   startSignature,
-  type SiteLocationInput,
 } from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
-import type { Job } from '@/domain';
-import { Badge, Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
+import { Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from './RuleViolationNotice';
+import { AcceptJobFlow } from './AcceptJobFlow';
+import { CancelJobDialog } from './CancelJobDialog';
+import { TransferJobDialog } from './TransferJobDialog';
 
 /**
  * The single place that decides which workflow action is available on a job.
@@ -36,24 +39,13 @@ export const JobActionBar = ({
   const { job } = view;
   const router = useRouter();
   const operation = useOperation();
-  const { operationContext } = useApp();
   const currentUser = useCurrentUser();
   const [confirmAccept, setConfirmAccept] = useState(false);
   const [sparesOpen, setSparesOpen] = useState(false);
   const [sparesReason, setSparesReason] = useState('');
   const [confirmResume, setConfirmResume] = useState(false);
-
-  // Shown only after acceptance has already succeeded, so answering it — either
-  // way — cannot affect whether the job is accepted.
-  const [locationPrompt, setLocationPrompt] = useState<Job | null>(null);
-  const [locationBusy, setLocationBusy] = useState(false);
-  const [locationOutcome, setLocationOutcome] = useState<string | null>(null);
-
-  const siteLocationInput: SiteLocationInput = {
-    site: view.site,
-    machine: view.machine,
-    customerName: view.customer.name,
-  };
+  const [transferring, setTransferring] = useState(false);
+  const [ending, setEnding] = useState<'cancel' | 'delete' | null>(null);
 
   const signatureReadiness = checkReadyForSignature(job);
 
@@ -171,12 +163,53 @@ export const JobActionBar = ({
     );
   }
 
-  if (
-    actions.length === 0 &&
-    operation.error === null &&
-    locationOutcome === null &&
-    locationPrompt === null
-  ) {
+  // Handing a job on is a secondary action: available whenever the job is
+  // transferable, and never competing with the primary step for attention.
+  if (canTransferJob(currentUser, job)) {
+    actions.push(
+      <Button
+        key="transfer"
+        size="lg"
+        variant="secondary"
+        onClick={() => setTransferring(true)}
+        leadingIcon={<Icon name="user" className="size-5" />}
+      >
+        Transfer job
+      </Button>,
+    );
+  }
+
+  // Cancel and delete are Master-only and deliberately separate: a real job
+  // that will not happen versus one that should never have existed.
+  if (canCancelJob(currentUser.role, job.status)) {
+    actions.push(
+      <Button
+        key="cancel"
+        size="lg"
+        variant="ghost"
+        onClick={() => setEnding('cancel')}
+        leadingIcon={<Icon name="close" className="size-5" />}
+      >
+        Cancel job
+      </Button>,
+    );
+  }
+
+  if (canDeleteJob(currentUser.role, job)) {
+    actions.push(
+      <Button
+        key="delete"
+        size="lg"
+        variant="ghost"
+        onClick={() => setEnding('delete')}
+        leadingIcon={<Icon name="trash" className="size-5" />}
+      >
+        Delete job
+      </Button>,
+    );
+  }
+
+  if (actions.length === 0 && operation.error === null && !confirmAccept) {
     return null;
   }
 
@@ -199,55 +232,15 @@ export const JobActionBar = ({
 
       {actions.length > 0 && <div className="flex flex-wrap gap-2">{actions}</div>}
 
-      {locationOutcome !== null && (
-        <div className="flex items-start gap-2 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2.5 text-sm text-steel-700">
-          <Icon name="whatsapp" className="mt-0.5 size-4 shrink-0 text-verdant-600" />
-          <span className="flex-1">{locationOutcome}</span>
-          <button
-            type="button"
-            onClick={() => setLocationOutcome(null)}
-            aria-label="Dismiss"
-            className="text-steel-400 hover:text-steel-700"
-          >
-            <Icon name="close" className="size-4" />
-          </button>
-        </div>
-      )}
-
-      <ConfirmDialog
+      {/* Acceptance and the site-location offer live in one component used by
+          every acceptance action, so the prompt appears exactly once and
+          behaves the same wherever it started. */}
+      <AcceptJobFlow
+        jobNumber={job.jobNumber}
+        view={view}
         open={confirmAccept}
-        title="Accept this job?"
-        message={
-          <>
-            <p>
-              Accepting <span className="font-semibold">{job.jobNumber}</span> assigns it to you and
-              moves it straight to <span className="font-semibold">In Progress</span>.
-            </p>
-            <p className="mt-2 text-steel-500">
-              There is no separate start step — the job is live from the moment you accept it.
-            </p>
-          </>
-        }
-        confirmLabel="Accept and start"
-        busy={operation.running}
-        onConfirm={async () => {
-          let accepted: Job | null = null;
-          const ok = await operation.run(async (context) => {
-            accepted = await acceptJob(context, job);
-          });
-          setConfirmAccept(false);
-          if (!ok) return;
-
-          onChanged();
-          // Offer the site location only once the job is safely accepted, and
-          // only where there is a site to travel to: parts are collected from
-          // the EJE counter, so a site pin would send the technician nowhere.
-          if (getJobTypeDefinition(job.jobType).visitsSite) {
-            setLocationOutcome(null);
-            setLocationPrompt(accepted);
-          }
-        }}
-        onCancel={() => setConfirmAccept(false)}
+        onClose={() => setConfirmAccept(false)}
+        onAccepted={onChanged}
       />
 
       <ConfirmDialog
@@ -264,89 +257,6 @@ export const JobActionBar = ({
         onCancel={() => setConfirmResume(false)}
       />
 
-
-      <Modal
-        open={locationPrompt !== null}
-        title="Send Site Location?"
-        onClose={() => setLocationPrompt(null)}
-        size="sm"
-        footer={
-          <>
-            <Button
-              variant="secondary"
-              disabled={locationBusy}
-              onClick={async () => {
-                const accepted = locationPrompt;
-                setLocationPrompt(null);
-                if (accepted === null) return;
-                // Recorded, but nothing is sent.
-                setLocationBusy(true);
-                try {
-                  await declineSiteLocation(operationContext(), accepted);
-                } catch {
-                  // Recording the choice is best-effort and must never surface
-                  // as a failure on an accepted job.
-                } finally {
-                  setLocationBusy(false);
-                  onChanged();
-                }
-              }}
-            >
-              No, Thanks
-            </Button>
-            <Button
-              loading={locationBusy}
-              leadingIcon={<Icon name="whatsapp" className="size-4" />}
-              onClick={async () => {
-                const accepted = locationPrompt;
-                if (accepted === null) return;
-                setLocationBusy(true);
-                // sendSiteLocation never throws: a WhatsApp failure is reported
-                // here and recorded on the trail, and the job stays accepted.
-                const result = await sendSiteLocation(
-                  operationContext(),
-                  accepted,
-                  siteLocationInput,
-                );
-                setLocationBusy(false);
-                setLocationPrompt(null);
-                setLocationOutcome(
-                  result.sent
-                    ? `Site location queued to ${view.primaryTechnician?.mobile ?? 'the technician'}.`
-                    : `The site location could not be sent: ${result.failureReason ?? 'unknown error'}. ${job.jobNumber} is still accepted and in progress.`,
-                );
-                onChanged();
-              }}
-            >
-              Send Location
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4 text-sm text-steel-700">
-          <p>Would you like to send the site location to the technician via WhatsApp?</p>
-
-          <div className="rounded-[var(--radius-control)] bg-steel-50 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
-                Message preview
-              </span>
-              <Badge tone="amber" size="sm">
-                Simulated
-              </Badge>
-            </div>
-            <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-steel-700">
-              {buildSiteLocationMessage(siteLocationInput, job.jobNumber)}
-            </pre>
-          </div>
-
-          <p className="text-xs text-steel-500">
-            The link opens turn-by-turn navigation to the saved site location. This is optional —
-            {' '}
-            {job.jobNumber} is already accepted and in progress either way.
-          </p>
-        </div>
-      </Modal>
 
       <Modal
         open={sparesOpen}
@@ -387,6 +297,33 @@ export const JobActionBar = ({
           hint="A job may move in and out of Awaiting Spares as many times as needed."
         />
       </Modal>
+
+      {transferring && (
+        <TransferJobDialog
+          job={job}
+          technicians={view.users.filter((candidate) => candidate.role === 'technician')}
+          onClose={() => setTransferring(false)}
+          onTransferred={() => {
+            setTransferring(false);
+            onChanged();
+          }}
+        />
+      )}
+
+      {ending !== null && (
+        <CancelJobDialog
+          job={job}
+          mode={ending}
+          onClose={() => setEnding(null)}
+          onDone={() => {
+            setEnding(null);
+            // A deleted job no longer belongs on its own page; a cancelled one
+            // still does, with its CANCELLED banner.
+            if (ending === 'delete') router.push('/jobs');
+            else onChanged();
+          }}
+        />
+      )}
     </div>
   );
 };

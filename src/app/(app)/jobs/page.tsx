@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
 import {
+  can,
   isJobOpenWork,
   JOB_STATUS_ORDER,
   jobStatusLabel,
@@ -16,9 +17,10 @@ import {
   type JobStatus,
   type JobTypeCode,
 } from '@/domain';
-import { loadJobRows } from '@/application/job-view';
+import { loadJobRows, type JobListRow } from '@/application/job-view';
 import { Button, Card, ErrorState, Icon, LoadingPanel, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -60,6 +62,8 @@ const JobsPageContent = () => {
   const [priority, setPriority] = useState<JobPriority | 'all'>('all');
   const [mineOnly, setMineOnly] = useState(params.get('mine') === '1');
   const [term, setTerm] = useState('');
+  const [accepting, setAccepting] = useState<JobListRow | null>(null);
+  const isMaster = can(user.role, 'jobs.viewAll');
 
   const query = useQuery('jobs:list', async (repos) => {
     const jobs = await repos.jobs.list();
@@ -71,6 +75,9 @@ const JobsPageContent = () => {
     const needle = term.trim().toLowerCase();
 
     return all
+      // A technician never sees cancelled work: it is history for the office,
+      // and clutter on a tablet. Masters can still filter to it.
+      .filter((row) => isMaster || row.job.status !== 'cancelled')
       .filter((row) => matchesStatus(row.job.status, status, row.job.scheduledDate))
       .filter((row) => jobType === 'all' || row.job.jobType === jobType)
       .filter((row) => priority === 'all' || row.job.priority === priority)
@@ -97,7 +104,7 @@ const JobsPageContent = () => {
         if (rank !== 0) return rank;
         return (a.job.scheduledDate ?? '9999').localeCompare(b.job.scheduledDate ?? '9999');
       });
-  }, [query.data, status, jobType, priority, mineOnly, term, user.id]);
+  }, [query.data, status, jobType, priority, mineOnly, term, user.id, isMaster]);
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
@@ -186,7 +193,22 @@ const JobsPageContent = () => {
         </div>
       </Card>
 
-      {query.loading ? <LoadingPanel rows={6} label="Loading jobs" /> : <JobListTable rows={rows} />}
+      {query.loading ? (
+        <LoadingPanel rows={6} label="Loading jobs" />
+      ) : (
+        <JobListTable rows={rows} onAccept={setAccepting} />
+      )}
+
+      {/* Accepting from the list uses the same flow as the job screen, so the
+          site-location offer appears once and looks identical. */}
+      {accepting !== null && (
+        <AcceptJobFlow
+          jobNumber={accepting.job.jobNumber}
+          open
+          onClose={() => setAccepting(null)}
+          onAccepted={query.refetch}
+        />
+      )}
     </>
   );
 };
