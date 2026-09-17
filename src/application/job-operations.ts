@@ -983,15 +983,18 @@ export const submitForMasterReview = async (
   });
 
   // The office has to be told, or a signed job card sits in Master Review until
-  // somebody happens to look. One notification per active Master, linking
-  // straight at the job. Duplicates are impossible because the transition above
-  // refuses a second call: `submitted` cannot move to `submitted`.
+  // somebody happens to look. One notification per active Master, linking at
+  // the REVIEW screen rather than the job: the Master's next action is to check
+  // the job card and issue it, and that screen carries both that action and an
+  // "Edit job" button back to the job. Duplicates are impossible because the
+  // transition above refuses a second call: `submitted` cannot move to
+  // `submitted`.
   await notifyMasters(context, {
     type: 'job_submitted',
     title: `Job ${job.jobNumber} submitted for review`,
     body: `${userFullName(context.actor)} submitted ${job.jobNumber} for Master Review.`,
     jobId: job.id,
-    link: `/jobs/${job.jobNumber}`,
+    link: `/jobs/${job.jobNumber}/review`,
   });
 
   return saved;

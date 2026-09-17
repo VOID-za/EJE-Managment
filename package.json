@@ -13,7 +13,11 @@
     "test:watch": "vitest",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "smoke": "node scripts/smoke.mjs",
-    "dev-check": "node scripts/dev-console-check.mjs"
+    "dev-check": "node scripts/dev-console-check.mjs",
+    "check-routes": "node scripts/check-routes.mjs",
+    "redeploy": "npm run clean && npm run build && npm run start",
+    "clean": "node scripts/clean.mjs",
+    "e2e": "node scripts/workflow-e2e.mjs"
   },
   "dependencies": {
     "next": "16.3.5",

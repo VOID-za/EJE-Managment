@@ -107,6 +107,51 @@ Together these three mean a closed job card is fixed: a later rate change, part
 price or checklist revision cannot reach it. `src/application/closed-jobs.test.ts`
 asserts exactly that, driving the real operations and repositories.
 
+## 2b. Routing
+
+There is one canonical route per screen. Job workflow stages are routes under
+the job, not modals or query flags, so a Master can be sent a link to the exact
+stage and a browser back button behaves.
+
+| Route | Role | Job status | Purpose |
+|---|---|---|---|
+| `/dashboard` | Master / Technician | any | Role-specific dashboard |
+| `/jobs` | Master / Technician | any | Job list. **Open Jobs is `/jobs?status=open`** — a filter, not a route |
+| `/jobs/new` | Master | — | Raise a job |
+| `/jobs/closed` | Master | `closed` | Closed-job archive |
+| `/jobs/[jobNumber]` | assigned user / Master | any | Job detail and capture |
+| `/jobs/[jobNumber]/sign` | Technician | `customer_signature` | Customer signature |
+| `/jobs/[jobNumber]/review` | Technician / Master | `review`, `submitted`, `closed` | Job card preview, hand-over, Master Review, final document |
+| `/messages` | Master / Technician | any | Two-way chat |
+| `/notifications` | Master / Technician | any | Notification centre, `?tab=outbox` for the Simulated Outbox |
+| `/customers`, `/customers/[customerId]` | Master | any | Customers and job history |
+| `/machines`, `/machines/[machineId]` | Master | any | Machine register and history |
+| `/technicians/[userId]` | Master / self | any | Technician record |
+| `/calendar`, `/activity`, `/library`, `/search`, `/admin` | see `navigation.ts` | any | Supporting screens |
+| `/schedule` | any | any | Superseded — redirects to `/calendar` |
+
+`/jobs/[jobNumber]/review` deliberately serves three stages rather than three
+routes, because it renders one thing — the job card as the customer will receive
+it — and only the action beneath it changes with status. Splitting it would mean
+three screens that must agree on the document.
+
+Two rules keep this honest, because every link is built from a template string
+that TypeScript cannot check:
+
+- `src/app/routes.test.ts` derives the real route tree from the filesystem and
+  asserts that **every** internal link written anywhere in `src/` resolves to
+  one of those routes. A renamed route fails there, naming the file and link.
+- `npm run check-routes` asks the **running server** for every route in the
+  matrix and fails if any serves a 404 — because a route file existing does not
+  prove the process answering the port is serving it. It also reports the build
+  commit stamped into the served HTML, which is how a stale server is told apart
+  from missing code.
+
+A path that does not match any route reaches `src/app/not-found.tsx`, which
+names the path and says that a stale build is the usual cause. Next's default
+404 says only "This page could not be found", which is indistinguishable from a
+broken deployment.
+
 ## 3. Data access
 
 `src/data/repositories/index.ts` declares the interfaces. Every method is

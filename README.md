@@ -121,6 +121,28 @@ Running the browser smoke test (`npm run smoke`) additionally needs a Chromium
 build, which is *not* downloaded by `npm ci`. Install it once with
 `npx playwright install chromium`. Nothing else in the project needs it.
 
+## If a route 404s
+
+The routes are asserted two ways, because a route file existing does not prove
+the server answering the port is serving it:
+
+```
+npm run check-routes     # asks the RUNNING app for every route in the matrix
+```
+
+It prints the build commit the server is serving, which is also shown on
+**Administration → System → This build**. If that commit is not the one you have
+checked out, the server is stale — which looks exactly like missing code in a
+browser. Fix it with:
+
+```
+npm run clean            # removes .next, warns if the port is still held
+npm run redeploy         # clean + build + start
+```
+
+`npm run clean` does not kill anything: it names the port and how to free it, so
+nothing you started is terminated without you asking.
+
 ## Verifying it
 
 ```bash
@@ -136,6 +158,19 @@ library and the tablet layout:
 npm run build && npm start -- -p 3210
 npm run smoke
 ```
+
+And a workflow walk-through that uses the address bar and the notification the
+way a person does, asserting that no step lands on a 404 — signature capture,
+hand-over, the Master's notification, Master Review, issue, close, and the final
+document on the closed job:
+
+```bash
+npm run build && npm start        # port 3000
+npm run e2e
+```
+
+`npm run dev-check` drives the same screens against `next dev` and fails on any
+React warning, which a production build strips.
 
 ## What to look at
 

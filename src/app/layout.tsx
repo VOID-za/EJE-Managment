@@ -44,6 +44,11 @@ const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
     suppressHydrationWarning
   >
     <head>
+      {/* Which build this is, in the served HTML itself. A stale server
+          answering on the port renders exactly like missing code; this is what
+          `npm run check-routes` reads to tell the two apart. */}
+      <meta name="eje-build-commit" content={process.env.EJE_BUILD_COMMIT ?? 'unknown'} />
+      <meta name="eje-build-time" content={process.env.EJE_BUILD_TIME ?? 'unknown'} />
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
     </head>
     <body className="min-h-dvh antialiased">

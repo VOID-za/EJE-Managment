@@ -418,6 +418,29 @@ const SystemPanel = ({
         </Card>
       </div>
 
+      {/* Which build is actually being served. A stale server answering on the
+          port looks exactly like missing code; this is how you tell. */}
+      <Card>
+        <CardHeader
+          title="This build"
+          description="What the browser is currently being served. If a route 404s that should work, check this first — a previously started server, or a .next directory from an older commit, is the usual cause."
+        />
+        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+          {[
+            ['Commit', process.env.EJE_BUILD_COMMIT ?? 'unknown'],
+            ['Built', process.env.EJE_BUILD_TIME ?? 'unknown'],
+            ['Mode', process.env.NODE_ENV],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-[var(--radius-control)] border border-steel-200 p-3">
+              <dt className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                {label}
+              </dt>
+              <dd className="mt-1 font-mono text-xs break-all text-steel-800">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </Card>
+
       <Card>
         <CardHeader
           title="Integrations"

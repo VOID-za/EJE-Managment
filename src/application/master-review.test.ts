@@ -156,12 +156,12 @@ describe('technician submission', () => {
     await submitForMasterReview(harness.tech, signed);
 
     const forJohan = (await harness.repos.notifications.list(johan.id)).filter(
-      (notification) => notification.link === '/jobs/EJE-1048',
+      (notification) => notification.link === '/jobs/EJE-1048/review',
     );
     expect(forJohan).toHaveLength(0);
   });
 
-  it('links the notification straight at the job', async () => {
+  it('links the notification at the Master Review screen for that job', async () => {
     const signed = await workAndSign(harness);
     const handed = await submitForMasterReview(harness.tech, signed);
 
@@ -170,7 +170,7 @@ describe('technician submission', () => {
       (notification) => notification.type === 'job_submitted',
     );
 
-    expect(submitted?.link).toBe('/jobs/EJE-1048');
+    expect(submitted?.link).toBe('/jobs/EJE-1048/review');
     expect(submitted?.jobId).toBe(handed.id);
   });
 
@@ -189,7 +189,7 @@ describe('technician submission', () => {
     // notification, which is exactly the kind of thing a loose filter hides.
     const mine = (await harness.repos.notifications.list(master.id)).filter(
       (notification) =>
-        notification.type === 'job_submitted' && notification.link === '/jobs/EJE-1048',
+        notification.type === 'job_submitted' && notification.link === '/jobs/EJE-1048/review',
     );
     expect(mine).toHaveLength(1);
   });
@@ -199,7 +199,7 @@ describe('technician submission', () => {
     await submitForMasterReview(harness.tech, signed);
 
     const mine = (await harness.repos.notifications.list(technician.id)).filter(
-      (notification) => notification.link === '/jobs/EJE-1048',
+      (notification) => notification.link === '/jobs/EJE-1048/review',
     );
     expect(mine).toHaveLength(0);
   });
