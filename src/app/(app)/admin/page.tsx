@@ -8,32 +8,32 @@ import {
   listJobTypeDefinitions,
   PRIORITY_ORDER,
   priorityLabel,
-  userFullName,
   type LabourRateType,
   type SystemSettings,
 } from '@/domain';
 import {
-  Avatar,
   Badge,
   Button,
   Card,
   CardHeader,
   ConfirmDialog,
-  DataTable,
   EmptyState,
   ErrorState,
   Icon,
   LoadingPanel,
   Tabs,
   TextField,
-  type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { AdminNotice } from '@/components/admin/AdminNotice';
+import { ChecklistAdminPanel } from '@/components/admin/ChecklistAdminPanel';
+import { LibraryAdminPanel } from '@/components/admin/LibraryAdminPanel';
+import { UsersPanel } from '@/components/admin/UsersPanel';
 import { SIMULATED_CAPABILITIES } from '@/config/demo';
 import { useQuery } from '@/hooks/useQuery';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
-import { formatCurrency, formatDate } from '@/lib/format';
-import type { ChecklistTemplate, TechnicalDocument, User } from '@/domain';
+import { formatCurrency } from '@/lib/format';
+import type { TemplateUsage } from '@/domain';
 
 type TabId =
   | 'users'
@@ -57,15 +57,25 @@ const AdminPage = () => {
   const [tab, setTab] = useState<TabId>('users');
 
   const query = useQuery('admin:data', async (repos) => {
-    const [users, settings, templates, documents, customers, machines] = await Promise.all([
+    const [users, settings, templates, documents, customers, machines, jobs] = await Promise.all([
       repos.users.list(),
       repos.settings.get(),
       repos.checklistTemplates.list(),
       repos.documents.list(),
       repos.customers.list(),
       repos.machines.list(),
+      repos.jobs.list(),
     ]);
-    return { users, settings, templates, documents, customers, machines };
+    // Which template versions jobs have actually completed against. This is what
+    // makes a version immutable, so it is read here rather than guessed at.
+    const usage: TemplateUsage[] = jobs
+      .map((job) => job.checklist)
+      .filter((checklist) => checklist !== null)
+      .map((checklist) => ({
+        templateId: checklist.templateId,
+        templateVersion: checklist.templateVersion,
+      }));
+    return { users, settings, templates, documents, customers, machines, usage };
   });
 
   if (!can(user.role, 'admin.access')) {
@@ -110,11 +120,19 @@ const AdminPage = () => {
         <LoadingPanel rows={5} label="Loading administration" />
       ) : (
         <>
-          {tab === 'users' && <UsersPanel users={data.users} />}
+          {tab === 'users' && <UsersPanel users={data.users} onChanged={query.refetch} />}
           {tab === 'jobTypes' && <JobTypesPanel />}
           {tab === 'rates' && <RatesPanel settings={data.settings} onSaved={query.refetch} />}
-          {tab === 'checklists' && <ChecklistsPanel templates={data.templates} />}
-          {tab === 'library' && <LibraryAdminPanel documents={data.documents} />}
+          {tab === 'checklists' && (
+            <ChecklistAdminPanel
+              templates={data.templates}
+              usage={data.usage}
+              onChanged={query.refetch}
+            />
+          )}
+          {tab === 'library' && (
+            <LibraryAdminPanel documents={data.documents} onChanged={query.refetch} />
+          )}
           {tab === 'system' && (
             <SystemPanel
               settings={data.settings}
@@ -128,54 +146,6 @@ const AdminPage = () => {
         </>
       )}
     </>
-  );
-};
-
-const UsersPanel = ({ users }: { readonly users: readonly User[] }) => {
-  const columns: Column<User>[] = [
-    {
-      key: 'name',
-      header: 'User',
-      render: (row) => (
-        <div className="flex items-center gap-3">
-          <Avatar initials={row.initials} size="md" />
-          <div className="min-w-0">
-            <p className="truncate font-semibold text-steel-900">{userFullName(row)}</p>
-            <p className="truncate text-xs text-steel-500">{row.jobTitle}</p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'role',
-      header: 'Role',
-      render: (row) => (
-        <Badge tone={row.role === 'master' ? 'blue' : 'neutral'} size="sm">
-          {row.role === 'master' ? 'Master' : 'Technician'}
-        </Badge>
-      ),
-    },
-    { key: 'email', header: 'Email', secondary: true, render: (row) => row.email },
-    { key: 'mobile', header: 'Mobile', secondary: true, render: (row) => row.mobile },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (row) => (
-        <Badge tone={row.active ? 'green' : 'neutral'} size="sm" dot>
-          {row.active ? 'Active' : 'Disabled'}
-        </Badge>
-      ),
-    },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <AdminNotice
-        title="User management"
-        body="Masters will add users, set roles and disable leavers here. Roles drive what each user can see and do throughout the system, through the capability rules in the domain layer."
-      />
-      <DataTable columns={columns} rows={users} rowKey={(row) => row.id} />
-    </div>
   );
 };
 
@@ -396,130 +366,6 @@ const RatesPanel = ({
   );
 };
 
-const ChecklistsPanel = ({
-  templates,
-}: {
-  readonly templates: readonly ChecklistTemplate[];
-}) => (
-  <div className="space-y-5">
-    <AdminNotice
-      tone="amber"
-      title="Demonstration checklist content"
-      body="The checklists below are representative content written for this demonstration. The production system will preserve the exact wording of the approved EJE / WD Hearn source documents. Replacing them is a data change: transcribe the approved wording, bump the version and archive the previous template. A completed checklist records the version it was answered against, and the job card is rendered from that stored version — so revising a checklist never rewrites a job card the customer already signed."
-    />
-
-    {templates.map((template) => (
-      <Card key={template.id}>
-        <CardHeader
-          title={template.name}
-          description={template.description}
-          action={
-            <div className="flex items-center gap-2">
-              <Badge tone="outline" size="sm">
-                {template.version}
-              </Badge>
-              <Badge tone={template.status === 'current' ? 'green' : 'neutral'} size="sm" dot>
-                {template.status === 'current' ? 'Current' : 'Archived'}
-              </Badge>
-            </div>
-          }
-        />
-
-        <ul className="mt-4 divide-y divide-steel-100">
-          {template.sections.map((section, index) => (
-            <li key={section.id} className="flex items-center gap-3 py-2.5">
-              <span className="tabular flex size-6 items-center justify-center rounded-full bg-steel-100 text-xs font-bold text-steel-600">
-                {index + 1}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm text-steel-800">
-                {section.title}
-              </span>
-              <span className="tabular text-xs text-steel-400">
-                {section.items.length} items
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-steel-100 pt-3 text-xs text-steel-500">
-          <span>
-            Mandatory for: <span className="font-semibold text-steel-700">{template.jobTypeCode}</span>
-          </span>
-          <span>Last updated {formatDate(template.updatedAt)}</span>
-        </div>
-        <p className="mt-2 text-xs text-amber-eje-700">Source: {template.sourceDocument}</p>
-      </Card>
-    ))}
-  </div>
-);
-
-const LibraryAdminPanel = ({
-  documents,
-}: {
-  readonly documents: readonly TechnicalDocument[];
-}) => {
-  const pending = documents.filter((document) => document.status === 'pending_approval');
-
-  const columns: Column<TechnicalDocument>[] = [
-    {
-      key: 'name',
-      header: 'Document',
-      render: (row) => (
-        <div className="min-w-0">
-          <p className="truncate font-medium text-steel-900">{row.name}</p>
-          <p className="truncate text-xs text-steel-500">
-            {row.manufacturer} · {row.machineModel}
-          </p>
-        </div>
-      ),
-    },
-    { key: 'version', header: 'Version', render: (row) => row.version },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (row) => (
-        <Badge
-          tone={
-            row.status === 'current' ? 'green' : row.status === 'archived' ? 'neutral' : 'amber'
-          }
-          size="sm"
-          dot
-        >
-          {row.status === 'current'
-            ? 'Current'
-            : row.status === 'archived'
-              ? 'Archived'
-              : 'Pending approval'}
-        </Badge>
-      ),
-    },
-    {
-      key: 'uploaded',
-      header: 'Uploaded',
-      secondary: true,
-      render: (row) => <span className="tabular">{formatDate(row.uploadedAt)}</span>,
-    },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <AdminNotice
-        title="Document control"
-        body="Masters approve new documents and archive superseded versions. Technicians only ever see current documents, so a superseded manual cannot be followed by accident."
-      />
-      {pending.length > 0 && (
-        <Card className="border-amber-eje-200 bg-amber-eje-50">
-          <p className="text-sm font-semibold text-amber-eje-700">
-            {pending.length} {pending.length === 1 ? 'document is' : 'documents are'} waiting for
-            approval
-          </p>
-        </Card>
-      )}
-      <DataTable columns={columns} rows={documents} rowKey={(row) => row.id} />
-    </div>
-  );
-};
-
 const SystemPanel = ({
   settings,
   counts,
@@ -634,35 +480,5 @@ const SystemPanel = ({
     </div>
   );
 };
-
-const AdminNotice = ({
-  title,
-  body,
-  tone = 'blue',
-}: {
-  readonly title: string;
-  readonly body: string;
-  readonly tone?: 'blue' | 'amber';
-}) => (
-  <div
-    className={
-      tone === 'amber'
-        ? 'rounded-[var(--radius-card)] border border-amber-eje-200 bg-amber-eje-50 p-4'
-        : 'rounded-[var(--radius-card)] border border-eje-200 bg-eje-50 p-4'
-    }
-  >
-    <p
-      className={
-        tone === 'amber'
-          ? 'flex items-center gap-2 text-sm font-semibold text-amber-eje-700'
-          : 'flex items-center gap-2 text-sm font-semibold text-eje-800'
-      }
-    >
-      <Icon name={tone === 'amber' ? 'warning' : 'settings'} className="size-4" />
-      {title}
-    </p>
-    <p className="mt-1.5 text-sm leading-relaxed text-steel-700">{body}</p>
-  </div>
-);
 
 export default AdminPage;

@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from 'react';
 import type { User, UserId } from '@/domain';
-import { seedUsers } from '@/data/seed';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore, SessionStore } from '@/data/demo/demo-store';
 import type { RepositoryBundle } from '@/data/repositories';
@@ -101,9 +100,18 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     runtime.simulatedOutbox.listServer,
   );
 
+  // Users are administered, so they come from the store rather than the seed
+  // constants: a user a Master adds can sign in, and a rename shows up at once.
+  const users = useMemo(() => {
+    // `version` is the store's write counter. Reading it here is what makes this
+    // re-run after a write — the lint rule cannot see that through `store.read`.
+    void version;
+    return runtime.store.read().users;
+  }, [runtime.store, version]);
+
   const currentUser = useMemo(
-    () => seedUsers.find((user) => user.id === currentUserId) ?? null,
-    [currentUserId],
+    () => users.find((user) => user.id === currentUserId) ?? null,
+    [users, currentUserId],
   );
 
   const signIn = useCallback(
@@ -128,7 +136,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       repositories: runtime.repositories,
       services: runtime.services,
       currentUser,
-      users: seedUsers,
+      users,
       version,
       outbox,
       signIn,
@@ -140,6 +148,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       runtime.repositories,
       runtime.services,
       currentUser,
+      users,
       version,
       outbox,
       signIn,

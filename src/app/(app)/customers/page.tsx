@@ -2,9 +2,10 @@
 
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { isJobOpenWork } from '@/domain';
+import { can, isJobOpenWork } from '@/domain';
 import {
   Badge,
+  Button,
   Card,
   DataTable,
   ErrorState,
@@ -13,7 +14,9 @@ import {
   type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { NewCustomerDialog } from '@/components/customers/NewCustomerDialog';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 interface CustomerRow {
   readonly id: string;
@@ -28,7 +31,11 @@ interface CustomerRow {
 
 const CustomersPage = () => {
   const router = useRouter();
+  const currentUser = useCurrentUser();
   const [term, setTerm] = useState('');
+  const [adding, setAdding] = useState(false);
+  // The official customer record belongs to the office, so only a Master adds one.
+  const canManage = can(currentUser.role, 'customers.manage');
 
   const query = useQuery('customers:list', async (repos) => {
     const [customers, sites, machines, jobs] = await Promise.all([
@@ -128,6 +135,16 @@ const CustomersPage = () => {
         title="Customers"
         breadcrumbs={[{ label: 'Customers' }]}
         description="Every EJE customer, their sites, machines and open work."
+        actions={
+          canManage ? (
+            <Button
+              leadingIcon={<Icon name="plus" className="size-4" />}
+              onClick={() => setAdding(true)}
+            >
+              Add customer
+            </Button>
+          ) : undefined
+        }
       />
 
       <Card className="mb-5">
@@ -160,6 +177,18 @@ const CustomersPage = () => {
           onRowClick={(row) => router.push(`/customers/${row.id}`)}
           emptyTitle="No customers found"
           emptyDescription="No customer matches that search."
+        />
+      )}
+
+      {canManage && (
+        <NewCustomerDialog
+          open={adding}
+          onClose={() => setAdding(false)}
+          onCreated={(customerId) => {
+            setAdding(false);
+            query.refetch();
+            router.push(`/customers/${customerId}`);
+          }}
         />
       )}
     </>

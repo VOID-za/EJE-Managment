@@ -2,11 +2,20 @@
 
 import Link from 'next/link';
 import { use, useState } from 'react';
-import { asCustomerId, contactFullName, machineDisplayName, userFullName } from '@/domain';
+import {
+  asCustomerId,
+  can,
+  contactFullName,
+  isMachineConfirmed,
+  machineDisplayName,
+  userFullName,
+} from '@/domain';
+import { approveMachine } from '@/application/machine-operations';
 import { loadJobRows } from '@/application/job-view';
 import {
   Avatar,
   Badge,
+  Button,
   Card,
   CardHeader,
   DefinitionGrid,
@@ -18,7 +27,10 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { NewMachineDialog } from '@/components/machines/NewMachineDialog';
+import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatRelative } from '@/lib/format';
 
 type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes';
@@ -29,7 +41,10 @@ const CustomerDetailPage = ({
   readonly params: Promise<{ readonly customerId: string }>;
 }) => {
   const { customerId } = use(params);
+  const currentUser = useCurrentUser();
+  const operation = useOperation();
   const [tab, setTab] = useState<TabId>('overview');
+  const [addingMachine, setAddingMachine] = useState(false);
 
   const query = useQuery(`customer:${customerId}`, async (repos) => {
     const id = asCustomerId(customerId);
@@ -78,6 +93,8 @@ const CustomerDetailPage = ({
   }
 
   const { customer, sites, contacts, machines, jobRows, users } = data;
+  const canApproveMachines = can(currentUser.role, 'machines.manage');
+  const unconfirmed = machines.filter((machine) => !isMachineConfirmed(machine));
   const openJobs = jobRows.filter(
     (row) => row.job.status !== 'closed' && row.job.status !== 'submitted',
   );
@@ -273,6 +290,27 @@ const CustomerDetailPage = ({
       )}
 
       {tab === 'machines' && (
+        <>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-steel-500">
+            Machines are reached through the customer and their sites. Every job and its history
+            hangs off the machine.
+          </p>
+          <Button
+            variant="secondary"
+            leadingIcon={<Icon name="plus" className="size-4" />}
+            onClick={() => setAddingMachine(true)}
+          >
+            Add machine
+          </Button>
+        </div>
+
+        {operation.error !== null && (
+          <p role="alert" className="mb-4 text-sm font-medium text-signal-600">
+            {operation.error}
+          </p>
+        )}
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {machines.length === 0 ? (
             <div className="md:col-span-2 xl:col-span-3">
@@ -298,9 +336,16 @@ const CustomerDetailPage = ({
                           {machine.serialNumber}
                         </p>
                       </div>
-                      <Badge tone="outline" size="sm">
-                        {machine.year}
-                      </Badge>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge tone="outline" size="sm">
+                          {machine.year}
+                        </Badge>
+                        {!isMachineConfirmed(machine) && (
+                          <Badge tone="amber" size="sm" dot>
+                            Awaiting approval
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     <DefinitionGrid
                       className="mt-4"
@@ -321,6 +366,63 @@ const CustomerDetailPage = ({
             })
           )}
         </div>
+
+        {/* Approval sits outside the card links so the button is not a nested anchor. */}
+        {canApproveMachines && unconfirmed.length > 0 && (
+          <Card className="mt-4">
+            <CardHeader
+              title="Awaiting your approval"
+              description="Added on site by a technician. Confirm each one onto the official register."
+            />
+            <ul className="mt-3 divide-y divide-steel-100">
+              {unconfirmed.map((machine) => (
+                <li
+                  key={machine.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-steel-900">{machineDisplayName(machine)}</p>
+                    <p className="font-mono text-xs text-steel-500">{machine.serialNumber}</p>
+                    <p className="mt-0.5 text-xs text-steel-500">
+                      Added by{' '}
+                      {(() => {
+                        const author = users.find(
+                          (candidate) => candidate.id === machine.createdBy,
+                        );
+                        return author === undefined ? 'a technician' : userFullName(author);
+                      })()}{' '}
+                      · {formatRelative(machine.createdAt)}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    loading={operation.running}
+                    onClick={async () => {
+                      const ok = await operation.run((context) =>
+                        approveMachine(context, machine),
+                      );
+                      if (ok) query.refetch();
+                    }}
+                  >
+                    Confirm on register
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        <NewMachineDialog
+          open={addingMachine}
+          customerId={customer.id}
+          sites={sites}
+          onClose={() => setAddingMachine(false)}
+          onCreated={() => {
+            setAddingMachine(false);
+            query.refetch();
+          }}
+        />
+        </>
       )}
 
       {tab === 'jobs' && (

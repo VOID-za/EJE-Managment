@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { TechnicalDocument, TechnicalDocumentType } from '@/domain';
+import { can, type TechnicalDocument, type TechnicalDocumentType } from '@/domain';
 import {
   Badge,
   Button,
@@ -17,6 +17,7 @@ import {
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { UploadDocumentDialog } from '@/components/library/UploadDocumentDialog';
 import { useQuery } from '@/hooks/useQuery';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatFileSize } from '@/lib/format';
@@ -43,6 +44,10 @@ const LibraryPage = () => {
   const [manufacturer, setManufacturer] = useState('all');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [preview, setPreview] = useState<TechnicalDocument | null>(null);
+  const [uploading, setUploading] = useState(false);
+  // A Master reviews pending uploads in Administration; a technician must not
+  // see them here, or an unapproved document could be followed on site.
+  const seesPending = can(user.role, 'library.manage');
 
   const query = useQuery(`library:${user.id}`, async (repos) => {
     const [documents, favourites, recent] = await Promise.all([
@@ -74,6 +79,7 @@ const LibraryPage = () => {
           : documents;
 
     return base
+      .filter((document) => seesPending || document.status !== 'pending_approval')
       .filter((document) => includeArchived || document.status !== 'archived')
       .filter((document) => type === 'all' || document.documentType === type)
       .filter((document) => manufacturer === 'all' || document.manufacturer === manufacturer)
@@ -86,7 +92,7 @@ const LibraryPage = () => {
           document.manufacturer.toLowerCase().includes(needle) ||
           document.tags.some((tag) => tag.toLowerCase().includes(needle)),
       );
-  }, [documents, favourites, recent, tab, term, type, manufacturer, includeArchived]);
+  }, [documents, favourites, recent, seesPending, tab, term, type, manufacturer, includeArchived]);
 
   const openDocument = async (document: TechnicalDocument) => {
     setPreview(document);
@@ -108,6 +114,24 @@ const LibraryPage = () => {
         title="Technical Library"
         breadcrumbs={[{ label: 'Technical Library' }]}
         description="Manuals, diagrams and procedures, available on site. Only current documents are shown by default."
+        actions={
+          <Button
+            variant="secondary"
+            leadingIcon={<Icon name="plus" className="size-4" />}
+            onClick={() => setUploading(true)}
+          >
+            Upload document
+          </Button>
+        }
+      />
+
+      <UploadDocumentDialog
+        open={uploading}
+        onClose={() => setUploading(false)}
+        onUploaded={() => {
+          setUploading(false);
+          query.refetch();
+        }}
       />
 
       <Card className="mb-5">
