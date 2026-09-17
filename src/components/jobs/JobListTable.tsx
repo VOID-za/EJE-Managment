@@ -29,7 +29,7 @@ export const JobListTable = ({
       width: '190px',
       render: (row) => (
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-steel-900">
+          <span className="font-mono text-sm font-semibold whitespace-nowrap text-steel-900">
             {row.job.jobNumber}
           </span>
           {row.job.priority === 'urgent' && <PriorityBadge priority="urgent" size="sm" />}

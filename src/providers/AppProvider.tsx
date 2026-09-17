@@ -5,20 +5,14 @@ import {
   useCallback,
   useContext,
   useMemo,
-  useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import type { User, UserId } from '@/domain';
 import { seedUsers } from '@/data/seed';
-import { createDemoRepositories, type DemoContext } from '@/data/demo/repositories';
-import {
-  clearPersistedDatabase,
-  createSeededDatabase,
-  loadDatabase,
-  persistDatabase,
-  type DemoDatabase,
-} from '@/data/demo/store';
+import { createDemoRepositories } from '@/data/demo/repositories';
+import { DemoStore, SessionStore } from '@/data/demo/demo-store';
 import type { RepositoryBundle } from '@/data/repositories';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
@@ -32,19 +26,16 @@ import type { OutboxEntry } from '@/services/ports';
 /**
  * Application composition root.
  *
- * This is the only module that knows which concrete adapters are in use. Swapping
- * the demo adapters for production HTTP clients and real integrations is a change
- * here and nowhere else.
+ * This is the only module that knows which concrete adapters are in use.
+ * Swapping the demo adapters for production HTTP clients and real integrations
+ * is a change here and nowhere else.
  */
-
-const SESSION_KEY = 'eje.demo.session.v1';
-
 interface AppContextValue {
   readonly repositories: RepositoryBundle;
   readonly services: AppServices;
   readonly currentUser: User | null;
   readonly users: readonly User[];
-  /** Increments on every write so queries re-run. Replaced by cache invalidation in Phase 2. */
+  /** Changes on every write so queries re-run. Becomes cache invalidation in Phase 2. */
   readonly version: number;
   readonly outbox: readonly OutboxEntry[];
   signIn(userId: UserId): void;
@@ -56,105 +47,86 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-const readStoredSession = (): User | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
-    if (raw === null) return null;
-    return seedUsers.find((user) => user.id === raw) ?? null;
-  } catch {
-    return null;
-  }
-};
+interface Runtime {
+  readonly store: DemoStore;
+  readonly session: SessionStore;
+  readonly repositories: RepositoryBundle;
+  readonly services: AppServices;
+  readonly simulatedOutbox: SimulatedOutbox;
+}
 
-export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
-  const databaseRef = useRef<DemoDatabase | null>(null);
-  const [version, setVersion] = useState(0);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [hydrated, setHydrated] = useState(false);
-  const [outbox, setOutbox] = useState<readonly OutboxEntry[]>([]);
+const createRuntime = (): Runtime => {
+  const store = new DemoStore();
+  const session = new SessionStore();
+  const clock = new SystemClock();
+  const ids = new SequentialIdGenerator();
+  const simulatedOutbox = new SimulatedOutbox();
 
-  // Hydration happens on the client only: the seeded snapshot must match on the
-  // server render, then any persisted demo state is applied.
-  if (!hydrated && typeof window !== 'undefined') {
-    databaseRef.current = loadDatabase();
-    setCurrentUser(readStoredSession());
-    setHydrated(true);
-  }
-  if (databaseRef.current === null) {
-    databaseRef.current = createSeededDatabase();
-  }
-
-  const demoContext = useMemo<DemoContext>(
-    () => ({
-      read: () => databaseRef.current ?? createSeededDatabase(),
-      commit: (mutate) => {
-        const draft = databaseRef.current ?? createSeededDatabase();
-        mutate(draft);
-        databaseRef.current = draft;
-        persistDatabase(draft);
-        setVersion((current) => current + 1);
-      },
-    }),
-    [],
-  );
-
-  const repositories = useMemo(() => createDemoRepositories(demoContext), [demoContext]);
-
-  const services = useMemo<AppServices & { outbox: SimulatedOutbox }>(() => {
-    const clock = new SystemClock();
-    const ids = new SequentialIdGenerator();
-    const simulatedOutbox = new SimulatedOutbox();
-    simulatedOutbox.subscribe(() => setOutbox(simulatedOutbox.listSync()));
-
-    return {
+  return {
+    store,
+    session,
+    simulatedOutbox,
+    repositories: createDemoRepositories({ read: store.read, commit: store.commit }),
+    services: {
       clock,
       ids,
-      outbox: simulatedOutbox,
       email: new SimulatedEmailService(simulatedOutbox, clock, ids),
       whatsapp: new SimulatedWhatsAppService(simulatedOutbox, clock, ids),
       pdf: new SimulatedPdfService(clock),
       storage: new SimulatedStorageService(),
-    };
-  }, []);
+    },
+  };
+};
 
-  const signIn = useCallback((userId: UserId) => {
-    const user = seedUsers.find((candidate) => candidate.id === userId) ?? null;
-    setCurrentUser(user);
-    try {
-      if (user !== null) window.localStorage.setItem(SESSION_KEY, user.id);
-    } catch {
-      // Session persistence is a convenience only.
-    }
-  }, []);
+export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
+  // Created once per mount. The runtime owns all mutable state; React only
+  // subscribes to it.
+  const [runtime] = useState(createRuntime);
 
-  const signOut = useCallback(() => {
-    setCurrentUser(null);
-    try {
-      window.localStorage.removeItem(SESSION_KEY);
-    } catch {
-      // Nothing to do.
-    }
-  }, []);
+  const version = useSyncExternalStore(
+    runtime.store.subscribe,
+    runtime.store.getVersion,
+    runtime.store.getServerVersion,
+  );
 
+  const currentUserId = useSyncExternalStore(
+    runtime.session.subscribe,
+    runtime.session.getSnapshot,
+    runtime.session.getServerSnapshot,
+  );
+
+  const outbox = useSyncExternalStore(
+    runtime.simulatedOutbox.subscribe,
+    runtime.simulatedOutbox.listSync,
+    runtime.simulatedOutbox.listServer,
+  );
+
+  const currentUser = useMemo(
+    () => seedUsers.find((user) => user.id === currentUserId) ?? null,
+    [currentUserId],
+  );
+
+  const signIn = useCallback(
+    (userId: UserId) => runtime.session.signIn(userId),
+    [runtime.session],
+  );
+  const signOut = useCallback(() => runtime.session.signOut(), [runtime.session]);
   const resetDemoData = useCallback(() => {
-    clearPersistedDatabase();
-    databaseRef.current = createSeededDatabase();
-    persistDatabase(databaseRef.current);
-    setVersion((current) => current + 1);
-  }, []);
+    runtime.store.reset();
+    runtime.simulatedOutbox.clear();
+  }, [runtime.store, runtime.simulatedOutbox]);
 
   const operationContext = useCallback((): OperationContext => {
     if (currentUser === null) {
       throw new Error('No user is signed in. Operations require an actor.');
     }
-    return { repos: repositories, services, actor: currentUser };
-  }, [currentUser, repositories, services]);
+    return { repos: runtime.repositories, services: runtime.services, actor: currentUser };
+  }, [currentUser, runtime.repositories, runtime.services]);
 
   const value = useMemo<AppContextValue>(
     () => ({
-      repositories,
-      services,
+      repositories: runtime.repositories,
+      services: runtime.services,
       currentUser,
       users: seedUsers,
       version,
@@ -165,8 +137,8 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       operationContext,
     }),
     [
-      repositories,
-      services,
+      runtime.repositories,
+      runtime.services,
       currentUser,
       version,
       outbox,

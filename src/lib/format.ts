@@ -1,20 +1,70 @@
 import type { Cents, IsoDate, IsoDateTime } from '@/domain';
 
-/** Presentation formatting. Locale is fixed to en-ZA for the South African market. */
+/**
+ * Presentation formatting.
+ *
+ * These functions are deliberately implemented without `Intl`. The ICU data
+ * bundled with Node and with the browser disagree on `en-ZA` — Node renders
+ * R 3 800,00 while Chromium renders R 3,800.00 — which would make a server
+ * render and a client render of the same job card disagree, and would make the
+ * printed document depend on whichever runtime happened to produce it.
+ *
+ * Money appears on a signed customer document, so the format is pinned here and
+ * is identical everywhere. The separators below are the single place to change
+ * if EJE prefers a different convention.
+ */
 
-const LOCALE = 'en-ZA';
+/** South African convention: space as thousands separator, comma as decimal. */
+const THOUSANDS_SEPARATOR = ' '; // non-breaking space, so amounts never wrap
+const DECIMAL_SEPARATOR = ',';
+const CURRENCY_SYMBOL = 'R';
 
-const currencyFormatter = new Intl.NumberFormat(LOCALE, {
-  style: 'currency',
-  currency: 'ZAR',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
 
-export const formatCurrency = (cents: Cents): string => currencyFormatter.format(cents / 100);
+const groupDigits = (digits: string): string => {
+  let result = '';
+  for (let index = digits.length; index > 0; index -= 3) {
+    const start = Math.max(0, index - 3);
+    result = digits.slice(start, index) + (result.length > 0 ? THOUSANDS_SEPARATOR + result : '');
+  }
+  return result.length > 0 ? result : '0';
+};
 
-export const formatNumber = (value: number, maximumFractionDigits = 2): string =>
-  new Intl.NumberFormat(LOCALE, { maximumFractionDigits }).format(value);
+export const formatCurrency = (cents: Cents): string => {
+  const negative = cents < 0;
+  const absolute = Math.abs(Math.round(cents));
+  const whole = Math.floor(absolute / 100);
+  const fraction = `${absolute % 100}`.padStart(2, '0');
+  const body = `${CURRENCY_SYMBOL}${THOUSANDS_SEPARATOR}${groupDigits(`${whole}`)}${DECIMAL_SEPARATOR}${fraction}`;
+  return negative ? `-${body}` : body;
+};
+
+export const formatNumber = (value: number, maximumFractionDigits = 2): string => {
+  if (!Number.isFinite(value)) return '—';
+  const negative = value < 0;
+  const absolute = Math.abs(value);
+  const rounded = absolute.toFixed(maximumFractionDigits);
+  const [wholePart = '0', fractionPart] = rounded.split('.');
+
+  // Trailing zeroes are noise on quantities such as hours and kilometres.
+  const trimmed = fractionPart === undefined ? '' : fractionPart.replace(/0+$/, '');
+  const body =
+    groupDigits(wholePart) + (trimmed.length > 0 ? DECIMAL_SEPARATOR + trimmed : '');
+  return negative ? `-${body}` : body;
+};
 
 export const formatHours = (hours: number): string => `${formatNumber(hours, 2)} hrs`;
 
@@ -23,42 +73,37 @@ export const formatKilometres = (km: number): string => `${formatNumber(km, 1)} 
 const parse = (value: IsoDate | IsoDateTime): Date =>
   value.length === 10 ? new Date(`${value}T00:00:00`) : new Date(value);
 
+const pad = (value: number): string => `${value}`.padStart(2, '0');
+
 export const formatDate = (value: IsoDate | IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  return new Intl.DateTimeFormat(LOCALE, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(parse(value));
-};
-
-export const formatDateTime = (value: IsoDateTime | null): string => {
-  if (value === null || value.length === 0) return '—';
-  return new Intl.DateTimeFormat(LOCALE, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(parse(value));
+  const date = parse(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${pad(date.getDate())} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 };
 
 export const formatTime = (value: IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  return new Intl.DateTimeFormat(LOCALE, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(parse(value));
+  const date = parse(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+export const formatDateTime = (value: IsoDateTime | null): string => {
+  if (value === null || value.length === 0) return '—';
+  const date = parse(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${formatDate(value)} ${formatTime(value)}`;
 };
 
 /** "3 hours ago", "Yesterday", "12 Mar 2026" — whichever reads best. */
 export const formatRelative = (value: IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
   const then = parse(value).getTime();
-  const diffMinutes = Math.round((Date.now() - then) / 60000);
+  if (Number.isNaN(then)) return '—';
 
+  const diffMinutes = Math.round((Date.now() - then) / 60000);
+  if (diffMinutes < 0) return formatDateTime(value);
   if (diffMinutes < 1) return 'Just now';
   if (diffMinutes < 60) return `${diffMinutes} min ago`;
 
@@ -78,16 +123,17 @@ export const formatFileSize = (bytes: number): string => {
   return `${formatNumber(bytes / (1024 * 1024), 1)} MB`;
 };
 
+const startOfToday = (): number => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+};
+
 export const isOverdue = (scheduledDate: IsoDate | null): boolean => {
   if (scheduledDate === null) return false;
-  const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return parse(scheduledDate).getTime() < startOfToday.getTime();
+  return parse(scheduledDate).getTime() < startOfToday();
 };
 
 export const isToday = (scheduledDate: IsoDate | null): boolean => {
   if (scheduledDate === null) return false;
-  const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return parse(scheduledDate).getTime() === startOfToday.getTime();
+  return parse(scheduledDate).getTime() === startOfToday();
 };

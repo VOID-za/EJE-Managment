@@ -297,7 +297,7 @@ const ChecklistItemRow = ({
         {item.responseType === 'pass_fail_na' && (
           <ChoiceButtons
             value={response?.choice ?? null}
-            disabled={!editable || busy}
+            disabled={!editable}
             onChange={(choice) => onAnswer({ choice })}
           />
         )}
@@ -305,7 +305,7 @@ const ChecklistItemRow = ({
         {item.responseType === 'yes_no' && (
           <YesNoButtons
             value={response?.yesNo ?? null}
-            disabled={!editable || busy}
+            disabled={!editable}
             onChange={(yesNo) => onAnswer({ yesNo })}
           />
         )}

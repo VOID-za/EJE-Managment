@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { userFullName, type User } from '@/domain';
-import type { JobListRow } from '@/application/job-view';
 import { loadJobRows } from '@/application/job-view';
 import {
   Avatar,
