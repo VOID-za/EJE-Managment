@@ -47,6 +47,14 @@ export const AcceptJobFlow = ({
   const [locationPrompt, setLocationPrompt] = useState<Job | null>(null);
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationOutcome, setLocationOutcome] = useState<string | null>(null);
+  /**
+   * Latched once the job is accepted.
+   *
+   * The caller's `open` stays true while the outcome banner is on screen, so
+   * without this the confirmation would reappear behind it and ask the
+   * technician to accept a job they have already accepted.
+   */
+  const [accepted, setAccepted] = useState(false);
 
   // The caller may already hold the view (the job screen does); the Open Jobs
   // list does not, so it is loaded here rather than by every row.
@@ -68,6 +76,7 @@ export const AcceptJobFlow = ({
 
   const dismissOutcome = (): void => {
     setLocationOutcome(null);
+    setAccepted(false);
     onClose();
   };
 
@@ -97,7 +106,7 @@ export const AcceptJobFlow = ({
       )}
 
       <ConfirmDialog
-        open={open && locationPrompt === null}
+        open={open && !accepted}
         title="Accept this job?"
         message={
           <>
@@ -113,23 +122,26 @@ export const AcceptJobFlow = ({
         confirmLabel="Accept and start"
         busy={operation.running}
         onConfirm={async () => {
-          let accepted: Job | null = null;
+          let acceptedJob: Job | null = null;
           const ok = await operation.run(async (context) => {
-            accepted = await acceptJob(context, job);
+            acceptedJob = await acceptJob(context, job);
           });
           if (!ok) {
+            setAccepted(false);
             onClose();
             return;
           }
 
+          setAccepted(true);
           onAccepted();
           // Offered only once the job is safely accepted, and only where there
           // is a site to travel to: parts are collected from the EJE counter,
           // so a site pin would send the technician nowhere.
           if (getJobTypeDefinition(job.jobType).visitsSite) {
             setLocationOutcome(null);
-            setLocationPrompt(accepted);
+            setLocationPrompt(acceptedJob);
           } else {
+            setAccepted(false);
             onClose();
           }
         }}
@@ -141,6 +153,7 @@ export const AcceptJobFlow = ({
         title="Send Site Location?"
         onClose={() => {
           setLocationPrompt(null);
+          setAccepted(false);
           onClose();
         }}
         size="sm"
@@ -163,6 +176,7 @@ export const AcceptJobFlow = ({
                   // as a failure on a job that is already accepted.
                 } finally {
                   setLocationBusy(false);
+                  setAccepted(false);
                   onAccepted();
                   onClose();
                 }

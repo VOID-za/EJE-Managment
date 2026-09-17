@@ -426,6 +426,303 @@ await step('the courier job still holds its prices internally', async () => {
   await page.getByText('R\u00a012\u00a0400,00').first().waitFor({ timeout: 8000 });
 });
 
+await step('a technician can message the office', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Lerato/ }).click();
+  await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Message the office/ }).click();
+  await page.getByText('does not mark you unavailable', { exact: false })
+    .waitFor({ timeout: 8000 });
+
+  await page.getByLabel('Message').fill(
+    'Hi Christene. I have a doctor appointment tomorrow at 14:00. Back by 16:00.',
+  );
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.getByText('A Master will pick it up', { exact: false }).waitFor({ timeout: 10000 });
+});
+
+await step('the message alone does NOT make the technician unavailable', async () => {
+  await page.goto(`${BASE}/technicians/user-tech-lerato`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: /Lerato/ }).first().waitFor({ timeout: 10000 });
+  // A technician sees their own record but cannot change it.
+  await page.getByText('send the office a message', { exact: false }).waitFor({ timeout: 8000 });
+  if (await page.getByRole('button', { name: 'Mark unavailable' }).count() > 0) {
+    throw new Error('a technician was offered the Master-only availability control');
+  }
+});
+
+await step('a Master sees the message and it says it changed nothing', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Master' }).click();
+  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Messages/ }).click();
+  await page.getByText('doctor appointment tomorrow', { exact: false }).waitFor({ timeout: 10000 });
+  await page.getByText('has not changed anyone', { exact: false }).first()
+    .waitFor({ timeout: 8000 });
+});
+
+await step('the Master records the availability from the message', async () => {
+  // The newest message is first in the inbox; take its own Mark unavailable.
+  await page.getByRole('button', { name: 'Mark unavailable' }).first().click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByText('doctor appointment tomorrow', { exact: false })
+    .waitFor({ timeout: 5000 });
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const iso = `${tomorrow.getFullYear()}-${`${tomorrow.getMonth() + 1}`.padStart(2, '0')}-${`${tomorrow.getDate()}`.padStart(2, '0')}`;
+  await dialog.getByLabel('Start date').fill(iso);
+  await dialog.getByLabel('End date').fill(iso);
+  await dialog.getByLabel('From').fill('14:00');
+  await dialog.getByLabel('To').fill('16:00');
+  await dialog.getByRole('button', { name: 'Record availability' }).click();
+
+  await page.getByText('Availability recorded', { exact: false }).first()
+    .waitFor({ timeout: 10000 });
+});
+
+await step('a full-day and a multi-day period can both be recorded', async () => {
+  await page.goto(`${BASE}/technicians/user-tech-naledi`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Mark unavailable' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  const start = new Date();
+  start.setDate(start.getDate() + 40);
+  const end = new Date();
+  end.setDate(end.getDate() + 44);
+  const iso = (date) =>
+    `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+
+  await dialog.getByLabel('Start date').fill(iso(start));
+  await dialog.getByLabel('End date').fill(iso(end));
+  // A multi-day period forces all-day: a time window across days is meaningless.
+  await dialog.getByText('always all-day', { exact: false }).waitFor({ timeout: 5000 });
+  await dialog.getByRole('button', { name: 'Record availability' }).click();
+
+  await page.getByText('Upcoming').first().waitFor({ timeout: 10000 });
+  await page.getByText('All day').first().waitFor({ timeout: 8000 });
+});
+
+await step('an "Other" period demands a description', async () => {
+  await page.getByRole('button', { name: 'Mark unavailable' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Type').selectOption('other');
+  await dialog.getByRole('button', { name: 'Record availability' }).click();
+  await dialog.getByText('description is required', { exact: false }).waitFor({ timeout: 8000 });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('availability appears on the calendar with its time window', async () => {
+  await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });
+
+  // The seeded part-day appointment is today, 09:00–11:00, and clashes with a
+  // job — so the conflict panel must name the window, not just "unavailable".
+  await page.getByText('Appointment · 09:00–11:00', { exact: false }).first()
+    .waitFor({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: 'Day' }).click();
+  await page.getByRole('heading', { name: /Technician availability/ }).waitFor({ timeout: 8000 });
+  await page.getByText('09:00–11:00').first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/17-calendar-availability.png`, fullPage: false });
+});
+
+await step('an unavailable technician cannot be assigned to a clashing job', async () => {
+  // EJE-1067 is scheduled today. Thabo is on sick leave covering today, so
+  // assigning him must be refused by the domain, not merely discouraged.
+  await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1067' }).first().waitFor({ timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Assign', exact: true }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Role on this job').selectOption('primary');
+  await dialog.getByLabel('Technician').selectOption({ label: 'Thabo Nkosi — Field Technician' });
+  await dialog.getByRole('button', { name: 'Assign' }).click();
+
+  await dialog.getByText('Technician unavailable').waitFor({ timeout: 10000 });
+  await dialog.getByText('Thabo Nkosi is unavailable', { exact: false })
+    .waitFor({ timeout: 8000 });
+  await dialog.getByText('sick leave', { exact: false }).waitFor({ timeout: 8000 });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('an available technician can still be assigned', async () => {
+  await page.getByRole('button', { name: 'Assign', exact: true }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Role on this job').selectOption('primary');
+  await dialog.getByLabel('Technician').selectOption({ label: 'Deon Botha — Workshop Technician' });
+  await dialog.getByRole('button', { name: 'Assign' }).click();
+
+  await page.getByText('Deon Botha').first().waitFor({ timeout: 10000 });
+});
+
+await step('a Master can cancel an Open job, with a reason', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1066`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Cancel job' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Reason').selectOption('customer_resolved');
+  await dialog.getByLabel('Description').fill('Customer resolved the fault before dispatch.');
+  await dialog.getByRole('button', { name: 'Cancel job' }).click();
+
+  await page.getByText('Cancelled', { exact: false }).first().waitFor({ timeout: 10000 });
+  await page.getByText('Customer resolved issue').first().waitFor({ timeout: 8000 });
+  await page.getByText('before dispatch', { exact: false }).first().waitFor({ timeout: 8000 });
+});
+
+await step('the cancelled job leaves the active lists but stays searchable', async () => {
+  await page.goto(`${BASE}/jobs?status=open-work`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  if ((await page.locator('table').innerText()).includes('EJE-1066')) {
+    throw new Error('a cancelled job is still in open work');
+  }
+
+  await page.goto(`${BASE}/search?q=EJE-1066`, { waitUntil: 'networkidle' });
+  await page.getByText('EJE-1066 — Cancelled').first().waitFor({ timeout: 10000 });
+});
+
+await step('a cancelled job is no longer an active bar on the calendar', async () => {
+  await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });
+  await page.waitForTimeout(700);
+  if ((await page.locator('main').innerText()).includes('EJE-1066')) {
+    throw new Error('a cancelled job is still shown as scheduled work');
+  }
+});
+
+await step('a Master can delete a duplicate Open job', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1065`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Delete job' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Why should this job not exist?').fill('Duplicate of EJE-1058.');
+  await dialog.getByRole('button', { name: 'Delete job' }).click();
+
+  await page.waitForURL('**/jobs', { timeout: 10000 });
+  await page.waitForTimeout(600);
+  if ((await page.locator('table').innerText()).includes('EJE-1065')) {
+    throw new Error('a deleted job is still in the job list');
+  }
+});
+
+await step('the deleted job keeps its record and audit trail', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1065`, { waitUntil: 'networkidle' });
+  await page.getByText('Deleted', { exact: false }).first().waitFor({ timeout: 10000 });
+  await page.getByText('Duplicate of EJE-1058.').first().waitFor({ timeout: 8000 });
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('deleted', { exact: false }).first().waitFor({ timeout: 8000 });
+});
+
+await step('an accepted job can no longer be deleted, only cancelled', async () => {
+  // EJE-1067 is in progress with work already captured.
+  await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1067' }).first().waitFor({ timeout: 10000 });
+  if (await page.getByRole('button', { name: 'Delete job' }).count() > 0) {
+    throw new Error('a job with work captured against it was offered deletion');
+  }
+});
+
+await step('a technician transfers their own job back to Open, keeping the work', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Deon Botha/ }).click();
+  await page.getByRole('heading', { name: /Hello, Deon/ }).waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Transfer job' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByText('All work already recorded stays on the job', { exact: false })
+    .waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Reason').selectOption('vehicle_problem');
+  await dialog.getByRole('button', { name: 'Return to Open Jobs' }).click();
+
+  await page.getByText('Open').first().waitFor({ timeout: 10000 });
+});
+
+await step('the returned job still carries its labour, travel, parts and notes', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByText('FUS-HRC-32').first().waitFor({ timeout: 10000 });
+  await page.getByText('Fault-finding on the spindle drive').first().waitFor({ timeout: 8000 });
+  await page.getByText('Isando to Vereeniging').first().waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: /Notes/ }).click();
+  await page.getByText('weekend shift', { exact: false }).first().waitFor({ timeout: 8000 });
+});
+
+await step('the transfer is on the activity trail with its reason', async () => {
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('to Open Jobs', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.getByText('Vehicle problem', { exact: false }).first().waitFor({ timeout: 8000 });
+});
+
+await step('another technician accepts the returned job and sees the previous work', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Riaan/ }).click();
+  await page.getByRole('heading', { name: /Hello, Riaan/ }).waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+
+  // The location prompt appears after acceptance, once.
+  await page.getByText('Send Site Location?').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'No, Thanks' }).click();
+
+  await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByText('FUS-HRC-32').first().waitFor({ timeout: 8000 });
+});
+
+await step('accepting from the Open Jobs list also offers the site location', async () => {
+  await page.goto(`${BASE}/jobs?status=open`, { waitUntil: 'networkidle' });
+  const acceptButton = page.getByRole('button', { name: 'Accept', exact: true }).first();
+  await acceptButton.waitFor({ timeout: 10000 });
+  await acceptButton.click();
+
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByText('Send Site Location?').waitFor({ timeout: 10000 });
+
+  // Exactly one prompt, not one per render.
+  const prompts = await page.getByText('Send Site Location?').count();
+  if (prompts !== 1) throw new Error(`expected one location prompt, saw ${prompts}`);
+
+  await page.getByRole('button', { name: 'Send Location' }).click();
+  await page.getByText('Site location queued', { exact: false }).waitFor({ timeout: 10000 });
+});
+
+await step('the site location message carries job, customer, machine, site and a map link', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  const outbox = await page.locator('main').innerText();
+  for (const fragment of ['EJE-', 'google.com/maps']) {
+    if (!outbox.includes(fragment)) {
+      throw new Error(`the site location message is missing ${fragment}`);
+    }
+  }
+});
+
 await step('master dashboard and admin', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();

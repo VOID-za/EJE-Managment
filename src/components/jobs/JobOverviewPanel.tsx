@@ -26,6 +26,7 @@ import {
   SelectField,
 } from '@/components/ui';
 import { JobCostSummary } from './JobCostSummary';
+import { RuleViolationNotice } from './RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime, isOverdue } from '@/lib/format';
@@ -323,7 +324,13 @@ export const JobOverviewPanel = ({
         onClose={() => setAssignOpen(false)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAssignOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                operation.clearError();
+                setAssignOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -363,6 +370,21 @@ export const JobOverviewPanel = ({
         }
       >
         <div className="space-y-4">
+          {/* An availability clash is refused by the domain; without this the
+              refusal would be invisible and the Assign button would just look
+              broken. */}
+          {operation.error !== null && (
+            <RuleViolationNotice
+              title={
+                operation.error === 'Technician unavailable'
+                  ? 'Technician unavailable'
+                  : 'That technician was not assigned'
+              }
+              message={operation.error === 'Technician unavailable' ? undefined : operation.error}
+              violations={operation.violations}
+            />
+          )}
+
           <SelectField
             label="Role on this job"
             value={assignMode}
