@@ -29,7 +29,7 @@ export const SIMULATED_CAPABILITIES: readonly SimulatedCapability[] = [
     id: 'whatsapp',
     name: 'WhatsApp notifications',
     explanation:
-      'Technician notifications show the exact message that would be transmitted. Nothing is sent.',
+      'A technician who accepts a job is OFFERED the site location; choosing to send it records the exact message in the Simulated Outbox. Nothing is transmitted, and nothing is sent automatically.',
     productionPlan:
       'Official WhatsApp Business Platform with approved templates, behind the WhatsAppService interface.',
   },

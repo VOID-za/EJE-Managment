@@ -88,6 +88,77 @@ await step('acceptance requires confirmation and starts the job', async () => {
   await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
 });
 
+await step('acceptance then OFFERS the site location, rather than sending it', async () => {
+  await page.getByRole('heading', { name: 'Send Site Location?' }).waitFor({ timeout: 8000 });
+  await page
+    .getByText('Would you like to send the site location to the technician via WhatsApp?')
+    .waitFor({ timeout: 5000 });
+
+  // The preview must carry everything the technician needs, and a maps link.
+  const preview = await page.locator('pre').first().innerText();
+  for (const fragment of [
+    'EJE-1048',
+    'ABC Engineering (Pty) Ltd',
+    'Leadwell V-40',
+    'Johannesburg',
+    'https://www.google.com/maps/dir/?api=1&destination=',
+  ]) {
+    if (!preview.includes(fragment)) {
+      throw new Error(`site location preview missing ${fragment}`);
+    }
+  }
+  await page.screenshot({ path: `${shots}/13-site-location-prompt.png`, fullPage: false });
+});
+
+await step('"No, Thanks" sends nothing and leaves the job in progress', async () => {
+  await page.getByRole('button', { name: 'No, Thanks' }).click();
+  await page.getByRole('heading', { name: 'Send Site Location?' }).waitFor({
+    state: 'hidden',
+    timeout: 8000,
+  });
+  await page.getByText('In Progress').first().waitFor({ timeout: 8000 });
+
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  const whatsappEntries = await page.getByText('Template: eje_site_location').count();
+  if (whatsappEntries !== 0) throw new Error('declining still queued a WhatsApp message');
+});
+
+await step('declining is recorded on the job activity trail', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('Site location not requested').first().waitFor({ timeout: 8000 });
+});
+
+await step('accepting a second job and choosing "Send Location" queues one message', async () => {
+  // EJE-1058 is seeded open; accept it to reach the prompt again.
+  await page.goto(`${BASE}/jobs/EJE-1058`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByRole('heading', { name: 'Send Site Location?' }).waitFor({ timeout: 8000 });
+
+  await page.getByRole('button', { name: 'Send Location' }).click();
+  await page.getByRole('heading', { name: 'Send Site Location?' }).waitFor({
+    state: 'hidden',
+    timeout: 8000,
+  });
+  await page.getByText('Site location queued', { exact: false }).waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('Site location requested via WhatsApp').first().waitFor({ timeout: 8000 });
+});
+
+await step('the queued WhatsApp message appears in the Simulated Outbox', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  await page.getByText('Template: eje_site_location').first().waitFor({ timeout: 8000 });
+  await page.getByText('Nothing in this list was sent').waitFor({ timeout: 5000 });
+  await page.screenshot({ path: `${shots}/14-site-location-outbox.png`, fullPage: false });
+});
+
+await step('back to EJE-1048 to continue the main journey', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1048' }).waitFor({ timeout: 8000 });
+});
+
 await step('add labour to EJE-1048', async () => {
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
   await page.getByRole('button', { name: 'Add labour' }).first().click();

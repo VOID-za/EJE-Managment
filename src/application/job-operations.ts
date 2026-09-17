@@ -10,6 +10,8 @@ import {
   getJobTypeDefinition,
   isJobEditable,
   labourRateLabel,
+  siteAddressLine,
+  siteNavigationUrl,
   pricingInputsFrom,
   SIGNATURE_DECLARATION,
   userFullName,
@@ -21,6 +23,8 @@ import {
   type JobCompletionReport,
   type JobStatus,
   type LabourRateType,
+  type Machine,
+  type Site,
   type PassFailNa,
   type PricingSnapshot,
   type UserId,
@@ -96,6 +100,102 @@ export const acceptJob = async (context: OperationContext, job: Job): Promise<Jo
     detail: `Accepted by ${userFullName(context.actor)}. Acceptance moved the job to In Progress.`,
   });
   return saved;
+};
+
+export interface SiteLocationInput {
+  readonly site: Site;
+  readonly machine: Machine;
+  readonly customerName: string;
+  /** Where to send it. Defaults to the acting technician's mobile number. */
+  readonly recipientMobile?: string;
+}
+
+export interface SiteLocationResult {
+  readonly sent: boolean;
+  readonly navigationUrl: string;
+  /** Set when the send was attempted and failed. The job is unaffected. */
+  readonly failureReason: string | null;
+}
+
+/**
+ * Builds the WhatsApp body for a site location.
+ *
+ * Kept short on purpose: every WhatsApp message costs money and interrupts a
+ * technician who is usually already driving. Job number, customer, machine,
+ * site and one link — nothing else.
+ */
+export const buildSiteLocationMessage = (input: SiteLocationInput, jobNumber: string): string =>
+  [
+    `${jobNumber} — ${input.customerName}`,
+    `${input.machine.manufacturer} ${input.machine.model}`,
+    `${input.site.name}: ${siteAddressLine(input.site)}`,
+    siteNavigationUrl(input.site),
+  ].join('\n');
+
+/**
+ * Sends the site location to the technician, on request.
+ *
+ * Called AFTER acceptance has already succeeded and committed, never as part of
+ * it. Any failure is swallowed into the result and recorded on the audit trail:
+ * a job that has been accepted stays accepted whatever WhatsApp does.
+ */
+export const sendSiteLocation = async (
+  context: OperationContext,
+  job: Job,
+  input: SiteLocationInput,
+): Promise<SiteLocationResult> => {
+  const navigationUrl = siteNavigationUrl(input.site);
+  const recipient = input.recipientMobile ?? context.actor.mobile;
+
+  try {
+    await context.services.whatsapp.send({
+      to: recipient,
+      templateName: 'eje_site_location',
+      parameters: [
+        job.jobNumber,
+        input.customerName,
+        `${input.machine.manufacturer} ${input.machine.model}`,
+        input.site.name,
+        navigationUrl,
+      ],
+      preview: buildSiteLocationMessage(input, job.jobNumber),
+    });
+
+    await audit(context, {
+      jobId: job.id,
+      type: 'site_location_sent',
+      summary: 'Site location requested via WhatsApp',
+      detail: `${input.site.name} sent to ${userFullName(context.actor)} with a navigation link.`,
+    });
+
+    return { sent: true, navigationUrl, failureReason: null };
+  } catch (cause: unknown) {
+    const failureReason =
+      cause instanceof Error ? cause.message : 'The message could not be queued.';
+
+    // Deliberately not rethrown. The job is already accepted and must stay so.
+    await audit(context, {
+      jobId: job.id,
+      type: 'site_location_failed',
+      summary: 'Site location could not be sent',
+      detail: `${failureReason} The job remains accepted and in progress.`,
+    });
+
+    return { sent: false, navigationUrl, failureReason };
+  }
+};
+
+/** Records that the technician was offered the site location and declined it. */
+export const declineSiteLocation = async (
+  context: OperationContext,
+  job: Job,
+): Promise<void> => {
+  await audit(context, {
+    jobId: job.id,
+    type: 'site_location_declined',
+    summary: 'Site location not requested',
+    detail: `${userFullName(context.actor)} declined the site location. No message was sent.`,
+  });
 };
 
 export const assignPrimaryTechnician = async (

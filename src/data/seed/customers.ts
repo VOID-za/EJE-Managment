@@ -126,6 +126,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '2094',
     accessNotes: 'Report to the main gate. Ask for the maintenance planner.',
+    latitude: -26.234,
+    longitude: 28.073,
   },
   {
     id: asSiteId('site-abc-pta'),
@@ -137,6 +139,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '0200',
     accessNotes: 'Deliveries and service vehicles use Gate 3 only.',
+    latitude: -25.642,
+    longitude: 28.091,
   },
   {
     id: asSiteId('site-abc-ger'),
@@ -148,6 +152,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '1428',
     accessNotes: 'Full safety induction required. PPE including face shield.',
+    latitude: -26.2745,
+    longitude: 28.198,
   },
   {
     id: asSiteId('site-kruger-main'),
@@ -159,6 +165,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '1501',
     accessNotes: 'Park in the visitor bays on the north side.',
+    latitude: -26.198,
+    longitude: 28.324,
   },
   {
     id: asSiteId('site-highveld-centurion'),
@@ -170,6 +178,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '0157',
     accessNotes: 'Pre-clearance required 24 hours before arrival.',
+    latitude: -25.859,
+    longitude: 28.172,
   },
   {
     id: asSiteId('site-vaal-main'),
@@ -181,6 +191,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '1930',
     accessNotes: '',
+    latitude: -26.671,
+    longitude: 27.928,
   },
   {
     id: asSiteId('site-midrand-main'),
@@ -192,6 +204,8 @@ export const seedSites: readonly Site[] = [
     province: 'Gauteng',
     postalCode: '1685',
     accessNotes: 'Production runs 24/5. Coordinate downtime with the line supervisor.',
+    latitude: -25.993,
+    longitude: 28.128,
   },
 ];
 

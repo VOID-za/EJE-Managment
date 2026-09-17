@@ -169,7 +169,7 @@ const JobDetailPage = ({
       <Card className="mb-5">
         <JobProgressRail status={job.status} />
         <div className="mt-4 border-t border-steel-100 pt-4">
-          <JobActionBar job={job} onChanged={refresh} />
+          <JobActionBar view={view} onChanged={refresh} />
         </div>
       </Card>
 

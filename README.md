@@ -35,6 +35,22 @@ node -v    # v22.x.x  (must be >= v20.9)
 git --version
 ```
 
+**Two things a fresh Windows install will trip on.** Run both once, then reopen
+PowerShell:
+
+```powershell
+# npm.ps1 is blocked by the default execution policy
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+# git clone can abort with "schannel: server closed abruptly"
+git config --global http.version HTTP/1.1
+git config --global http.postBuffer 524288000
+```
+
+If a clone still aborts, `git config --global http.sslBackend openssl` usually
+settles it — that error normally comes from antivirus or a corporate proxy
+interfering with the TLS session, not from the repository.
+
 If `winget` is unavailable, download the installers directly:
 <https://nodejs.org/en/download> and <https://git-scm.com/download/win>. Accept
 the defaults in both.
@@ -90,6 +106,11 @@ There is no password — see [Demonstration mode](#demonstration-mode).
 
 - **`node` or `npm` not recognised** — the terminal was open before Node was
   installed. Close it and open a new one.
+- **`npm.ps1 cannot be loaded because running scripts is disabled`** — the
+  Windows execution policy. Run the `Set-ExecutionPolicy` line above, then reopen
+  PowerShell. (`npm.cmd ci` also works as a one-off.)
+- **`schannel: server closed abruptly (missing close_notify)`** on clone — see
+  the `http.version` fix above.
 - **Port 3000 already in use** — run on another port: `npm run dev -- -p 3001`.
 - **The demo shows stale data** — it persists to browser storage between
   sessions. Reset it under Administration → System → Reset demonstration data.
@@ -148,7 +169,7 @@ simulated. In short:
 | Capability | In the demonstration | In production |
 |---|---|---|
 | Customer email | Recorded in the Simulated Outbox, never sent | Microsoft 365 via Graph |
-| WhatsApp | The exact message is shown, never sent | WhatsApp Business Platform |
+| WhatsApp | The exact message is recorded, never sent | WhatsApp Business Platform |
 | Job card PDF | Rendered live from the job record | Server-side PDF from the same model |
 | Photos and videos | Attachment recorded, no file uploaded | VPS storage, then object storage |
 | Sign-in | User picker, no password | Session auth against the users table |
@@ -188,6 +209,31 @@ enforced rather than documented:
   while new service jobs get `2.0-DEMO`, so the difference is visible in the
   demonstration.
 
+## Site location on acceptance
+
+Accepting a job **never** sends a WhatsApp message on its own. Acceptance
+completes and commits first; only then is the technician asked:
+
+> **Send Site Location?**
+> Would you like to send the site location to the technician via WhatsApp?
+> *[Send Location] [No, Thanks]*
+
+Choosing **Send Location** queues one short message — job number, customer,
+machine, site and a Google Maps navigation link, and nothing else, because every
+message costs money and interrupts someone who is usually already driving.
+Choosing **No, Thanks** sends nothing. Either choice is recorded on the job's
+activity trail.
+
+The job is accepted and in progress regardless. `sendSiteLocation` never throws:
+a WhatsApp outage is reported back and written to the trail, and the job is
+untouched. There is a test that runs the whole flow against a deliberately broken
+WhatsApp adapter to prove it.
+
+The Google Maps link is a **deep link, not an integration** — no API key, no SDK,
+no account — so unlike email and WhatsApp there is nothing here to swap out
+later. Sites carry an optional pinned coordinate and fall back to the postal
+address, because industrial estates routinely geocode to the wrong gate.
+
 ## Light and dark mode
 
 The theme control sits in the top bar (one tap) and in the sidebar (Light / Dark
@@ -206,9 +252,6 @@ document the customer receives.
 These are recorded deliberately rather than left to be discovered. None of them
 blocks the Phase 2 architecture; each is a contained change.
 
-- **WhatsApp is declared but never invoked.** The port and simulated adapter
-  exist and notification channels are shown in the UI, but no operation calls
-  `services.whatsapp.send()`, so the outbox only ever contains email.
 - **No draft release path.** `EJE-1060` is seeded as a draft and the state
   machine allows `draft → open`, but no UI action performs it.
 - **No job transfer, and no customer/machine/user editing.** The repositories

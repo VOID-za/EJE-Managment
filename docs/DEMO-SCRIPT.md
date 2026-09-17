@@ -65,6 +65,19 @@ Back to Overview → **Accept job**. The confirmation says it plainly:
 Accept. The job is now In Progress, the clock has started, and the audit trail
 has recorded who accepted it and when.
 
+The system then **asks** whether to send the site location:
+
+> **Send Site Location?** — Would you like to send the site location to the
+> technician via WhatsApp?
+
+Show the message preview: job number, customer, machine, site and a navigation
+link — deliberately nothing more, because every WhatsApp message costs money and
+interrupts a technician who is usually already driving. Choose **Send Location**.
+
+Worth saying out loud: the job was accepted *before* this question was asked.
+Nothing is sent automatically, and if WhatsApp were down the job would still be
+accepted — the message is a convenience, never a dependency.
+
 ## 6. Doing the work (4 min) — still on EJE-1048
 
 This is the heart of the demonstration. Take it slowly.
@@ -83,7 +96,7 @@ This is the heart of the demonstration. Take it slowly.
   Recommendations. Saving is explicit; the system warns before losing unsaved
   text.
 - **Activity** — everything just done is already on the audit trail with who and
-  when. Nobody typed it.
+  when, including whether the site location was requested. Nobody typed it.
 
 Then **Complete job**.
 

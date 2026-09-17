@@ -29,6 +29,13 @@ export interface Site {
   readonly province: string;
   readonly postalCode: string;
   readonly accessNotes: string;
+  /**
+   * Saved site location, used to build a navigation link for the technician.
+   * Null where a site has not been pinned yet; the address is then used
+   * instead, which is less precise on an industrial estate but still useful.
+   */
+  readonly latitude: number | null;
+  readonly longitude: number | null;
 }
 
 export interface CustomerNote {

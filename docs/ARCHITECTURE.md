@@ -122,6 +122,19 @@ The demo adapters record what production *would* transmit into a visible
 Simulated Outbox and never contact anything. This is a deliberate rule: the demo
 must never pretend to have sent a message.
 
+Nothing is ever sent as a side effect of a workflow step. The one outbound
+message a technician can trigger — the site location after acceptance — is an
+explicit choice, taken after acceptance has already committed, through an
+operation that cannot throw. A messaging outage is recorded on the audit trail
+and the job is unaffected. Outbound messaging is a convenience attached to the
+workflow, never a dependency of it.
+
+The Google Maps navigation link is deliberately NOT a port. Building the URL
+needs no key, SDK or account, so there is nothing to mock now or replace later;
+it lives in `src/domain/site/navigation.ts` as a pure function. Embedded maps or
+server-side geocoding would be a real integration and would get a port like the
+others.
+
 The job card preview is rendered from the live `Job` record by
 `JobCardDocument`, which is the same model the production PDF renderer will
 consume. It is not a picture of a job card that has to be thrown away.
