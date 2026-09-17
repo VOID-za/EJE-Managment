@@ -10,7 +10,7 @@ import type {
   DocumentId,
   Job,
   JobId,
-  LeaveRecord,
+  AvailabilityRecord,
   Machine,
   MachineId,
   NotificationId,
@@ -18,6 +18,7 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
+  TechnicianMessage,
   User,
   UserId,
 } from '@/domain';
@@ -35,6 +36,12 @@ export interface JobFilter {
   readonly technicianId?: UserId;
   readonly customerId?: CustomerId;
   readonly machineId?: MachineId;
+  /**
+   * Include soft-deleted jobs. Off by default, so every existing caller keeps
+   * getting live jobs only and a deleted job cannot leak into a list by
+   * someone forgetting to filter. Search and audit pass it explicitly.
+   */
+  readonly includeDeleted?: boolean;
 }
 
 export interface JobRepository {
@@ -122,12 +129,26 @@ export interface NotificationRepository {
   markHandled(id: NotificationId): Promise<void>;
 }
 
-export interface LeaveRepository {
-  /** Every leave record overlapping the given inclusive range. */
-  list(from?: string, to?: string): Promise<readonly LeaveRecord[]>;
-  listForUser(userId: UserId): Promise<readonly LeaveRecord[]>;
-  save(record: LeaveRecord): Promise<LeaveRecord>;
-  remove(id: string): Promise<void>;
+export interface AvailabilityRepository {
+  /** Every availability record overlapping the given inclusive range. */
+  list(from?: string, to?: string): Promise<readonly AvailabilityRecord[]>;
+  listForUser(userId: UserId): Promise<readonly AvailabilityRecord[]>;
+  findById(id: string): Promise<AvailabilityRecord | null>;
+  /**
+   * Adds or replaces a record.
+   *
+   * Cancelling is a status change through this method, never a removal: the
+   * audit trail has to be able to say what was cancelled, by whom and when.
+   */
+  save(record: AvailabilityRecord): Promise<AvailabilityRecord>;
+}
+
+export interface MessageRepository {
+  /** Newest first. */
+  list(): Promise<readonly TechnicianMessage[]>;
+  listForSender(senderId: UserId): Promise<readonly TechnicianMessage[]>;
+  findById(id: string): Promise<TechnicianMessage | null>;
+  save(message: TechnicianMessage): Promise<TechnicianMessage>;
 }
 
 export interface SettingsRepository {
@@ -146,5 +167,6 @@ export interface RepositoryBundle {
   readonly activity: ActivityRepository;
   readonly notifications: NotificationRepository;
   readonly settings: SettingsRepository;
-  readonly leave: LeaveRepository;
+  readonly availability: AvailabilityRepository;
+  readonly messages: MessageRepository;
 }

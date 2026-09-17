@@ -36,22 +36,36 @@ describe('loadCalendar', () => {
     );
   });
 
-  it('includes technician leave', async () => {
+  it('includes technician unavailability', async () => {
     const data = await loadCalendar(buildRepos(), wideRange);
-    const leave = data.entries.filter((entry) => entry.kind === 'leave');
+    const absences = data.entries.filter((entry) => entry.kind === 'availability');
 
-    expect(leave.length).toBeGreaterThan(0);
-    expect(leave.some((entry) => entry.kind === 'leave' && entry.leaveType === 'annual')).toBe(
-      true,
-    );
+    expect(absences.length).toBeGreaterThan(0);
+    expect(
+      absences.some(
+        (entry) => entry.kind === 'availability' && entry.availabilityType === 'annual_leave',
+      ),
+    ).toBe(true);
   });
 
   it('includes sick leave specifically', async () => {
     const data = await loadCalendar(buildRepos(), wideRange);
     const sick = data.entries.filter(
-      (entry) => entry.kind === 'leave' && entry.leaveType === 'sick',
+      (entry) => entry.kind === 'availability' && entry.availabilityType === 'sick_leave',
     );
     expect(sick.length).toBeGreaterThan(0);
+  });
+
+  it('carries the time window of a part-day absence, not just the date', async () => {
+    const data = await loadCalendar(buildRepos(), wideRange);
+    const appointment = data.entries.find(
+      (entry) => entry.kind === 'availability' && entry.availabilityType === 'appointment',
+    );
+
+    expect(appointment?.kind).toBe('availability');
+    if (appointment?.kind !== 'availability') throw new Error('no appointment seeded');
+    expect(appointment.allDay).toBe(false);
+    expect(appointment.timeLabel).toBe('09:00–11:00');
   });
 
   it('spans a multi-day service job across its whole booking', async () => {
@@ -158,20 +172,22 @@ describe('findConflicts', () => {
           technicianInitials: ['TT'],
         },
         {
-          kind: 'leave',
-          id: 'leave-1',
+          kind: 'availability',
+          id: 'availability-1',
           start: today,
           end: today,
           days: 1,
           title: 'Tester',
-          subtitle: 'Annual leave',
-          leaveType: 'annual',
-          leaveStatus: 'approved',
+          subtitle: 'Annual leave · All day',
+          availabilityType: 'annual_leave',
+          availabilityStatus: 'active',
           userId: 'u1',
           userName: 'Tester',
           userInitials: 'TT',
           blocking: true,
-          notes: '',
+          allDay: true,
+          timeLabel: 'All day',
+          description: '',
         },
       ],
       [today],

@@ -7,9 +7,10 @@ import type {
   Job,
   Machine,
   Site,
-  LeaveRecord,
+  AvailabilityRecord,
   SystemSettings,
   TechnicalDocument,
+  TechnicianMessage,
   User,
 } from '@/domain';
 import {
@@ -20,7 +21,8 @@ import {
   seedDocuments,
   seedJobs,
   seedMachines,
-  seedLeave,
+  seedAvailability,
+  seedMessages,
   seedNotifications,
   seedSettings,
   seedSites,
@@ -52,7 +54,8 @@ export interface DemoDatabase {
   checklistTemplates: ChecklistTemplate[];
   activity: ActivityEvent[];
   notifications: AppNotification[];
-  leave: LeaveRecord[];
+  availability: AvailabilityRecord[];
+  messages: TechnicianMessage[];
   settings: SystemSettings;
   favouriteDocuments: Record<string, string[]>;
   recentDocuments: Record<string, string[]>;
@@ -69,8 +72,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * v3 added the Parts job type: a nullable machine and the courier flag.
  * v4 moved users, technical documents and checklist templates into the store so
  * Masters can administer them.
+ * v5 replaced leave with availability records that carry times and authorship,
+ * added technician messages, and gave jobs cancellation and soft deletion.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -88,7 +93,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
   checklistTemplates: seedChecklistTemplates.map((template) => ({ ...template })),
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
-  leave: seedLeave.map((record) => ({ ...record })),
+  availability: seedAvailability.map((record) => ({ ...record })),
+  messages: seedMessages.map((message) => ({ ...message })),
   settings: { ...seedSettings },
   favouriteDocuments: {
     'user-tech-sipho': ['doc-lw-v40-electrical', 'doc-fanuc-alarms'],

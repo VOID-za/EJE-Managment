@@ -56,7 +56,9 @@ export const runSearch = async (
   if (needle.length === 0) return [];
 
   const [jobs, customers, sites, contacts, machines, users, documents] = await Promise.all([
-    repos.jobs.list(),
+    // Deleted jobs included: "where did EJE-1065 go?" must have an answer, and
+    // the result below is labelled so one can never be mistaken for live work.
+    repos.jobs.list({ includeDeleted: true }),
     repos.customers.list(),
     repos.customers.listSites(),
     repos.customers.listContacts(),
@@ -87,10 +89,19 @@ export const runSearch = async (
     );
 
     if (matched !== null) {
+      const inactive =
+        job.deletedAt !== null
+          ? 'Deleted'
+          : job.status === 'cancelled'
+            ? 'Cancelled'
+            : null;
+
       results.push({
         id: job.id,
         category: 'job',
-        title: job.jobNumber,
+        // A job that has left the workflow says so in its title, so a search
+        // result can never be mistaken for live work.
+        title: inactive === null ? job.jobNumber : `${job.jobNumber} — ${inactive}`,
         subtitle: `${customer?.name ?? 'Unknown customer'} · ${site?.name ?? '—'}`,
         detail:
           job.faultDescription.length > 0 ? job.faultDescription : 'No fault description recorded.',

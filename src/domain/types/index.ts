@@ -1,6 +1,7 @@
 export * from './common';
 export * from './user';
 export * from './availability';
+export * from './message';
 export * from './customer';
 export * from './machine';
 export * from './checklist';

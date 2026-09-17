@@ -10,7 +10,7 @@ import type {
   DocumentId,
   Job,
   JobId,
-  LeaveRecord,
+  AvailabilityRecord,
   Machine,
   MachineId,
   NotificationId,
@@ -18,6 +18,7 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
+  TechnicianMessage,
   User,
   UserId,
 } from '@/domain';
@@ -28,7 +29,8 @@ import type {
   DocumentRepository,
   JobFilter,
   JobRepository,
-  LeaveRepository,
+  AvailabilityRepository,
+  MessageRepository,
   MachineRepository,
   NotificationRepository,
   RepositoryBundle,
@@ -57,6 +59,12 @@ class DemoJobRepository implements JobRepository {
 
   list(filter?: JobFilter): Promise<readonly Job[]> {
     let jobs = this.context.read().jobs;
+
+    // Soft-deleted jobs are invisible unless a caller explicitly asks, so a
+    // deleted job can never leak into a list by someone forgetting to filter.
+    if (filter?.includeDeleted !== true) {
+      jobs = jobs.filter((job) => job.deletedAt === null);
+    }
 
     if (filter?.statuses !== undefined) {
       const statuses = filter.statuses;
@@ -411,13 +419,13 @@ class DemoNotificationRepository implements NotificationRepository {
   }
 }
 
-class DemoLeaveRepository implements LeaveRepository {
+class DemoAvailabilityRepository implements AvailabilityRepository {
   constructor(private readonly context: DemoContext) {}
 
-  list(from?: string, to?: string): Promise<readonly LeaveRecord[]> {
-    const records = this.context.read().leave;
-    // Overlap, not containment: a leave block that starts before the window and
-    // ends inside it still affects the window.
+  list(from?: string, to?: string): Promise<readonly AvailabilityRecord[]> {
+    const records = this.context.read().availability;
+    // Overlap, not containment: a block that starts before the window and ends
+    // inside it still affects the window.
     const filtered =
       from === undefined || to === undefined
         ? records
@@ -428,28 +436,68 @@ class DemoLeaveRepository implements LeaveRepository {
     );
   }
 
-  listForUser(userId: UserId): Promise<readonly LeaveRecord[]> {
+  listForUser(userId: UserId): Promise<readonly AvailabilityRecord[]> {
     return Promise.resolve(
-      this.context.read().leave.filter((record) => record.userId === userId),
+      [...this.context.read().availability.filter((record) => record.userId === userId)].sort(
+        (a, b) => a.startDate.localeCompare(b.startDate),
+      ),
     );
   }
 
-  save(record: LeaveRecord): Promise<LeaveRecord> {
+  findById(id: string): Promise<AvailabilityRecord | null> {
+    return Promise.resolve(
+      this.context.read().availability.find((record) => record.id === id) ?? null,
+    );
+  }
+
+  save(record: AvailabilityRecord): Promise<AvailabilityRecord> {
     this.context.commit((draft) => {
-      const index = draft.leave.findIndex((candidate) => candidate.id === record.id);
-      draft.leave =
+      const index = draft.availability.findIndex((candidate) => candidate.id === record.id);
+      // Cancelling goes through here too, as a status change: a removed record
+      // could not be audited or shown as history.
+      draft.availability =
         index === -1
-          ? [...draft.leave, record]
-          : draft.leave.map((candidate) => (candidate.id === record.id ? record : candidate));
+          ? [...draft.availability, record]
+          : draft.availability.map((candidate) =>
+              candidate.id === record.id ? record : candidate,
+            );
     });
     return Promise.resolve(record);
   }
+}
 
-  remove(id: string): Promise<void> {
+class DemoMessageRepository implements MessageRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  list(): Promise<readonly TechnicianMessage[]> {
+    return Promise.resolve(
+      [...this.context.read().messages].sort((a, b) => b.sentAt.localeCompare(a.sentAt)),
+    );
+  }
+
+  listForSender(senderId: UserId): Promise<readonly TechnicianMessage[]> {
+    return Promise.resolve(
+      [...this.context.read().messages.filter((message) => message.senderId === senderId)].sort(
+        (a, b) => b.sentAt.localeCompare(a.sentAt),
+      ),
+    );
+  }
+
+  findById(id: string): Promise<TechnicianMessage | null> {
+    return Promise.resolve(
+      this.context.read().messages.find((message) => message.id === id) ?? null,
+    );
+  }
+
+  save(message: TechnicianMessage): Promise<TechnicianMessage> {
     this.context.commit((draft) => {
-      draft.leave = draft.leave.filter((candidate) => candidate.id !== id);
+      const index = draft.messages.findIndex((candidate) => candidate.id === message.id);
+      draft.messages =
+        index === -1
+          ? [message, ...draft.messages]
+          : draft.messages.map((candidate) => (candidate.id === message.id ? message : candidate));
     });
-    return Promise.resolve();
+    return Promise.resolve(message);
   }
 }
 
@@ -478,5 +526,6 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   activity: new DemoActivityRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
-  leave: new DemoLeaveRepository(context),
+  availability: new DemoAvailabilityRepository(context),
+  messages: new DemoMessageRepository(context),
 });

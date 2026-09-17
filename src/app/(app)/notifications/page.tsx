@@ -29,6 +29,7 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   machine_approval_request: 'machines',
   document_approval_request: 'library',
   job_submitted: 'document',
+  technician_message: 'note',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -38,6 +39,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   machine_approval_request: 'Machine approval request',
   document_approval_request: 'Document approval request',
   job_submitted: 'Job submitted',
+  technician_message: 'Message from a technician',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {

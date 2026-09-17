@@ -61,7 +61,98 @@ export type JobStatus =
   | 'customer_signature'
   | 'review'
   | 'submitted'
-  | 'closed';
+  | 'closed'
+  /**
+   * A legitimate job that will not happen — the customer resolved the fault
+   * themselves, or withdrew the request. It leaves the active workflow but
+   * keeps everything it recorded, and stays searchable. Distinct from deletion,
+   * which is for a job that should never have existed at all.
+   */
+  | 'cancelled';
+
+/**
+ * Why a job was cancelled. Required, because "cancelled" on its own tells the
+ * office nothing six months later when the customer asks what happened.
+ */
+export type CancellationReason =
+  | 'customer_resolved'
+  | 'customer_cancelled'
+  | 'duplicate'
+  | 'no_longer_required'
+  | 'customer_unavailable'
+  | 'other';
+
+export const CANCELLATION_REASONS: readonly CancellationReason[] = [
+  'customer_resolved',
+  'customer_cancelled',
+  'duplicate',
+  'no_longer_required',
+  'customer_unavailable',
+  'other',
+];
+
+export const cancellationReasonLabel = (reason: CancellationReason): string => {
+  switch (reason) {
+    case 'customer_resolved':
+      return 'Customer resolved issue';
+    case 'customer_cancelled':
+      return 'Customer cancelled request';
+    case 'duplicate':
+      return 'Duplicate job';
+    case 'no_longer_required':
+      return 'No longer required';
+    case 'customer_unavailable':
+      return 'Customer unavailable';
+    case 'other':
+      return 'Other';
+  }
+};
+
+export interface JobCancellation {
+  readonly reason: CancellationReason;
+  readonly description: string;
+  readonly cancelledBy: UserId;
+  readonly cancelledAt: IsoDateTime;
+}
+
+/** Why a technician handed a job on. Required on every transfer. */
+export type TransferReason =
+  | 'unable_to_attend'
+  | 'sick_or_unavailable'
+  | 'vehicle_problem'
+  | 'scheduling_conflict'
+  | 'requires_another_technician'
+  | 'customer_requested'
+  | 'other';
+
+export const TRANSFER_REASONS: readonly TransferReason[] = [
+  'unable_to_attend',
+  'sick_or_unavailable',
+  'vehicle_problem',
+  'scheduling_conflict',
+  'requires_another_technician',
+  'customer_requested',
+  'other',
+];
+
+export const transferReasonLabel = (reason: TransferReason): string => {
+  switch (reason) {
+    case 'unable_to_attend':
+      return 'Unable to attend';
+    case 'sick_or_unavailable':
+      return 'Sick / unavailable';
+    case 'vehicle_problem':
+      return 'Vehicle problem';
+    case 'scheduling_conflict':
+      return 'Scheduling conflict';
+    case 'requires_another_technician':
+      return 'Job requires another technician';
+    case 'customer_requested':
+      return 'Customer requested a different technician';
+    case 'other':
+      return 'Other';
+  }
+};
 
 export type LabourRateType = 'normal' | 'overtime' | 'double';
 
@@ -196,6 +287,21 @@ export interface Job {
    * never alter a job card the customer has already signed.
    */
   readonly pricingSnapshot: PricingSnapshot | null;
+
+  /** Set when the job was cancelled. Never cleared. */
+  readonly cancellation: JobCancellation | null;
+
+  /**
+   * Soft deletion, for a job created by mistake.
+   *
+   * The record and its audit trail survive; the job simply stops appearing
+   * anywhere a live job would. Deletion is refused once a technician has
+   * accepted the job — at that point it is real work, and cancelling is the
+   * honest action.
+   */
+  readonly deletedAt: IsoDateTime | null;
+  readonly deletedBy: UserId | null;
+  readonly deletionReason: string;
 
   readonly createdAt: IsoDateTime;
   readonly createdBy: UserId;

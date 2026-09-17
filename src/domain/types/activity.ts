@@ -53,7 +53,18 @@ export type ActivityEventType =
   | 'checklist_template_created'
   | 'checklist_template_updated'
   | 'checklist_template_versioned'
-  | 'checklist_template_archived';
+  | 'checklist_template_archived'
+  // Availability, messaging, transfer and the two ways a job can leave the
+  // active workflow.
+  | 'availability_created'
+  | 'availability_updated'
+  | 'availability_cancelled'
+  | 'message_sent'
+  | 'message_actioned'
+  | 'job_transferred_to_open'
+  | 'job_transferred_to_technician'
+  | 'job_cancelled'
+  | 'job_deleted';
 
 export interface ActivityEvent {
   readonly id: ActivityId;

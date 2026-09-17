@@ -3,10 +3,18 @@ import {
   asLineItemId,
   canTransition,
   checkReadyForSignature,
+  checkSchedule,
   checkReadyForSubmission,
   emptyChecklistResponse,
+  cancelJobRefusal,
+  cancellationReasonLabel,
+  deleteJobRefusal,
+  describeAvailabilityConflict,
+  findJobAvailabilityConflicts,
   getJobTypeDefinition,
   isAfterSignature,
+  transferJobRefusal,
+  transferReasonLabel,
   canEditJob,
   labourRateLabel,
   siteAddressLine,
@@ -17,6 +25,7 @@ import {
   type Attachment,
   type ChecklistResponse,
   type ChecklistTemplate,
+  type CancellationReason,
   type Job,
   type JobCompletionReport,
   type JobStatus,
@@ -25,11 +34,12 @@ import {
   type Site,
   type PassFailNa,
   type PricingSnapshot,
+  type TransferReason,
   type UserId,
 } from '@/domain';
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { OperationContext } from './context';
-import { audit } from './audit';
+import { audit, notify } from './audit';
 import { WorkflowError } from './errors';
 
 /**
@@ -199,6 +209,37 @@ export const declineSiteLocation = async (
   });
 };
 
+/**
+ * Refuses to put a technician on a job that clashes with their availability.
+ *
+ * Every path that can create an assignment goes through here — direct
+ * assignment, an additional technician, a transfer, and rescheduling — so the
+ * rule cannot be bypassed by using a different screen. The Calendar merely
+ * shows what this already decided.
+ */
+export const assertTechnicianAvailable = async (
+  context: OperationContext,
+  job: Pick<Job, 'scheduledDate' | 'scheduledEndDate' | 'jobType'>,
+  technicianId: UserId,
+): Promise<void> => {
+  const [records, technician] = await Promise.all([
+    context.repos.availability.listForUser(technicianId),
+    context.repos.users.findById(technicianId),
+  ]);
+
+  const conflicts = findJobAvailabilityConflicts(records, technicianId, job);
+  if (conflicts.length === 0) return;
+
+  const name = technician === null ? 'That technician' : userFullName(technician);
+  throw new WorkflowError(
+    'Technician unavailable',
+    conflicts.map((conflict) => ({
+      code: 'technician_unavailable',
+      message: describeAvailabilityConflict(conflict, name),
+    })),
+  );
+};
+
 export const assignPrimaryTechnician = async (
   context: OperationContext,
   job: Job,
@@ -206,6 +247,7 @@ export const assignPrimaryTechnician = async (
   technicianName: string,
 ): Promise<Job> => {
   assertEditable(context, job);
+  await assertTechnicianAvailable(context, job, technicianId);
   const saved = await context.repos.jobs.save({ ...job, primaryTechnicianId: technicianId });
   await audit(context, {
     jobId: job.id,
@@ -224,6 +266,7 @@ export const addAdditionalTechnician = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   if (job.additionalTechnicianIds.includes(technicianId)) return job;
+  await assertTechnicianAvailable(context, job, technicianId);
 
   const saved = await context.repos.jobs.save({
     ...job,
@@ -1035,4 +1078,282 @@ export const submitJobCard = async (
     documentFileName: document.fileName,
     emailedTo: customerEmail,
   };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Transfer                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface TransferInput {
+  readonly reason: TransferReason;
+  readonly description: string;
+}
+
+const assertTransferReason = (input: TransferInput): void => {
+  if (input.reason === 'other' && input.description.trim().length === 0) {
+    throw new WorkflowError('A description is required when the reason is Other.', [
+      {
+        code: 'description_required',
+        message: 'Say what the reason is, so the office knows what happened.',
+      },
+    ]);
+  }
+};
+
+const assertTransferable = (context: OperationContext, job: Job): void => {
+  const refusal = transferJobRefusal(context.actor, job);
+  if (refusal === null) return;
+  throw new WorkflowError(refusal, [{ code: 'transfer_not_permitted', message: refusal }]);
+};
+
+const transferDetail = (input: TransferInput): string =>
+  input.description.trim().length > 0
+    ? `${transferReasonLabel(input.reason)}. ${input.description.trim()}`
+    : `${transferReasonLabel(input.reason)}.`;
+
+/**
+ * Hands a job back to the Open pool.
+ *
+ * Everything captured so far stays on the job — labour, travel, parts, photos,
+ * notes, checklist progress and the whole activity trail. The next technician
+ * picks up where this one stopped rather than starting again, which is the
+ * entire reason this is a status change and not a new job.
+ */
+export const returnJobToOpen = async (
+  context: OperationContext,
+  job: Job,
+  input: TransferInput,
+): Promise<Job> => {
+  assertTransferable(context, job);
+  assertTransferReason(input);
+
+  const previousTechnician = job.primaryTechnicianId;
+  const previousName =
+    previousTechnician === null
+      ? 'The technician'
+      : userFullName((await context.repos.users.findById(previousTechnician)) ?? context.actor);
+
+  transition(job, 'open');
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'open',
+    primaryTechnicianId: null,
+    // Acceptance is cleared because the job genuinely is unaccepted again; the
+    // work already captured against it is untouched.
+    acceptedAt: null,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_transferred_to_open',
+    summary: `${previousName} transferred ${job.jobNumber} to Open Jobs`,
+    detail: `${transferDetail(input)} All work already recorded remains on the job. The scheduled date is unchanged.`,
+  });
+
+  return saved;
+};
+
+/**
+ * Hands a job to a named technician.
+ *
+ * Refused when the receiving technician is unavailable for the job's scheduled
+ * period — passing a job to someone who cannot attend it solves nothing.
+ */
+export const transferJobToTechnician = async (
+  context: OperationContext,
+  job: Job,
+  technicianId: UserId,
+  input: TransferInput,
+): Promise<Job> => {
+  assertTransferable(context, job);
+  assertTransferReason(input);
+
+  if (technicianId === job.primaryTechnicianId) {
+    throw new WorkflowError('That technician already has this job.', [
+      { code: 'same_technician', message: 'Choose a different technician.' },
+    ]);
+  }
+
+  const receiving = await context.repos.users.findById(technicianId);
+  if (receiving === null || !receiving.active) {
+    throw new WorkflowError('That technician is not available to take jobs.', [
+      { code: 'user_inactive', message: 'The account is disabled.' },
+    ]);
+  }
+
+  await assertTechnicianAvailable(context, job, technicianId);
+
+  const previousName =
+    job.primaryTechnicianId === null
+      ? 'The office'
+      : userFullName((await context.repos.users.findById(job.primaryTechnicianId)) ?? context.actor);
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    primaryTechnicianId: technicianId,
+    // The receiving technician is now responsible; they no longer appear as an
+    // additional hand on their own job.
+    additionalTechnicianIds: job.additionalTechnicianIds.filter((id) => id !== technicianId),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_transferred_to_technician',
+    summary: `${previousName} transferred ${job.jobNumber} to ${userFullName(receiving)}`,
+    detail: `${transferDetail(input)} All existing job work remains available to ${receiving.firstName}.`,
+  });
+
+  await notify(context, {
+    recipientId: technicianId,
+    type: 'job_transferred',
+    title: `${job.jobNumber} transferred to you`,
+    body: `${previousName} has handed you ${job.jobNumber}. Reason: ${transferReasonLabel(input.reason)}.`,
+    jobId: job.id,
+  });
+
+  return saved;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Cancel and delete                                                          */
+/* -------------------------------------------------------------------------- */
+
+export interface CancellationInput {
+  readonly reason: CancellationReason;
+  readonly description: string;
+}
+
+/**
+ * Cancels a legitimate job that will not happen.
+ *
+ * The job keeps everything it recorded and stays searchable; it simply leaves
+ * the active workflow. This is the honest counterpart to deletion: the request
+ * was real, the work will not happen, and six months from now the office can
+ * still answer why.
+ */
+export const cancelJob = async (
+  context: OperationContext,
+  job: Job,
+  input: CancellationInput,
+): Promise<Job> => {
+  const refusal = cancelJobRefusal(context.actor.role, job.status);
+  if (refusal !== null) {
+    throw new WorkflowError(refusal, [{ code: 'cancel_not_permitted', message: refusal }]);
+  }
+  if (input.reason === 'other' && input.description.trim().length === 0) {
+    throw new WorkflowError('A description is required when the reason is Other.', [
+      { code: 'description_required', message: 'Say why the job is being cancelled.' },
+    ]);
+  }
+
+  transition(job, 'cancelled');
+  const now = context.services.clock.now();
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'cancelled',
+    cancellation: {
+      reason: input.reason,
+      description: input.description.trim(),
+      cancelledBy: context.actor.id,
+      cancelledAt: now,
+    },
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_cancelled',
+    summary: `${job.jobNumber} cancelled`,
+    detail: `${cancellationReasonLabel(input.reason)}.${
+      input.description.trim().length > 0 ? ` ${input.description.trim()}` : ''
+    } Cancelled by ${userFullName(context.actor)}. The job keeps its record and stays searchable.`,
+  });
+
+  return saved;
+};
+
+/**
+ * Soft-deletes a job created by mistake.
+ *
+ * Soft, not hard: the record and its audit trail survive, so "where did
+ * EJE-1065 go?" has an answer. Refused once a technician has accepted the job —
+ * at that point there is real work attached and cancelling is the right action.
+ */
+export const deleteJob = async (
+  context: OperationContext,
+  job: Job,
+  reason: string,
+): Promise<Job> => {
+  const refusal = deleteJobRefusal(context.actor.role, job);
+  if (refusal !== null) {
+    throw new WorkflowError(refusal, [{ code: 'delete_not_permitted', message: refusal }]);
+  }
+
+  const trimmed = reason.trim();
+  if (trimmed.length === 0) {
+    throw new WorkflowError('A reason is required.', [
+      { code: 'reason_required', message: 'Say why this job should not exist.' },
+    ]);
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    deletedAt: context.services.clock.now(),
+    deletedBy: context.actor.id,
+    deletionReason: trimmed,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_deleted',
+    summary: `${job.jobNumber} deleted`,
+    detail: `${trimmed} Deleted by ${userFullName(context.actor)}. The record and this trail are retained.`,
+  });
+
+  return saved;
+};
+
+/**
+ * Changes a job's scheduled dates.
+ *
+ * Re-checks every assigned technician against their availability, because
+ * moving a job is just as capable of creating a clash as moving a person.
+ */
+export const rescheduleJob = async (
+  context: OperationContext,
+  job: Job,
+  scheduledDate: string | null,
+  scheduledEndDate: string | null,
+): Promise<Job> => {
+  assertEditable(context, job);
+
+  const next: Job = { ...job, scheduledDate, scheduledEndDate };
+  const violations = checkSchedule(job.jobType, scheduledDate, scheduledEndDate);
+  if (violations.length > 0) {
+    throw new WorkflowError(`${job.jobNumber} cannot be scheduled that way.`, violations);
+  }
+
+  const assigned = [next.primaryTechnicianId, ...next.additionalTechnicianIds].filter(
+    (id): id is UserId => id !== null,
+  );
+  for (const technicianId of assigned) {
+    await assertTechnicianAvailable(context, next, technicianId);
+  }
+
+  const saved = await context.repos.jobs.save(next);
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_assigned',
+    summary: `${job.jobNumber} rescheduled`,
+    detail:
+      scheduledDate === null
+        ? 'The scheduled date was cleared.'
+        : `Now scheduled for ${scheduledDate}${
+            scheduledEndDate === null || scheduledEndDate === scheduledDate
+              ? ''
+              : ` to ${scheduledEndDate}`
+          }.`,
+  });
+  return saved;
 };

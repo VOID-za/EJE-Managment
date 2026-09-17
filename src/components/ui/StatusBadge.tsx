@@ -17,6 +17,8 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   review: 'violet',
   submitted: 'green',
   closed: 'neutral',
+  // Cancelled must never look like an active job, so it takes the danger tone.
+  cancelled: 'red',
 };
 
 export const JobStatusBadge = ({

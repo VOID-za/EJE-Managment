@@ -20,20 +20,22 @@ import type { CalendarEntry } from '@/application/calendar';
  * marked as continuing on both rows.
  */
 const entry = (id: string, start: string, end: string): CalendarEntry => ({
-  kind: 'leave',
+  kind: 'availability',
   id,
   start,
   end,
   days: rangeOfDays(start, end).length,
   title: id,
   subtitle: '',
-  leaveType: 'annual',
-  leaveStatus: 'approved',
+  availabilityType: 'annual_leave',
+  availabilityStatus: 'active',
   userId: 'u1',
   userName: 'Tester',
   userInitials: 'TT',
   blocking: true,
-  notes: '',
+  allDay: true,
+  timeLabel: 'All day',
+  description: '',
 });
 
 describe('date arithmetic', () => {

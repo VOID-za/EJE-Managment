@@ -1,17 +1,19 @@
 import {
-  isBlockingLeave,
+  availabilityTimeLabel,
+  availabilityTypeLabel,
+  isBlockingAvailability,
+  isJobInactive,
   jobScheduleWindow,
-  leaveTypeLabel,
   machineDisplayName,
   userFullName,
+  type AvailabilityRecord,
+  type AvailabilityStatus,
+  type AvailabilityType,
   type IsoDate,
   type Job,
   type JobPriority,
   type JobStatus,
   type JobTypeCode,
-  type LeaveRecord,
-  type LeaveStatus,
-  type LeaveType,
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
@@ -56,18 +58,21 @@ export interface JobCalendarEntry extends CalendarEntryBase {
   readonly technicianInitials: readonly string[];
 }
 
-export interface LeaveCalendarEntry extends CalendarEntryBase {
-  readonly kind: 'leave';
-  readonly leaveType: LeaveType;
-  readonly leaveStatus: LeaveStatus;
+export interface AvailabilityCalendarEntry extends CalendarEntryBase {
+  readonly kind: 'availability';
+  readonly availabilityType: AvailabilityType;
+  readonly availabilityStatus: AvailabilityStatus;
   readonly userId: string;
   readonly userName: string;
   readonly userInitials: string;
   readonly blocking: boolean;
-  readonly notes: string;
+  readonly allDay: boolean;
+  /** "09:00–11:00" or "All day". */
+  readonly timeLabel: string;
+  readonly description: string;
 }
 
-export type CalendarEntry = JobCalendarEntry | LeaveCalendarEntry;
+export type CalendarEntry = JobCalendarEntry | AvailabilityCalendarEntry;
 
 export interface CalendarData {
   readonly entries: readonly CalendarEntry[];
@@ -96,18 +101,23 @@ export const loadCalendar = async (
   repos: RepositoryBundle,
   range: CalendarRange,
 ): Promise<CalendarData> => {
-  const [jobs, customers, sites, machines, users, leave] = await Promise.all([
+  const [jobs, customers, sites, machines, users, availability] = await Promise.all([
     repos.jobs.list(),
     repos.customers.list(),
     repos.customers.listSites(),
     repos.machines.list(),
     repos.users.list(),
-    repos.leave.list(range.from, range.to),
+    repos.availability.list(range.from, range.to),
   ]);
 
   const jobEntries: JobCalendarEntry[] = [];
 
   for (const job of jobs) {
+    // A cancelled or deleted job is not scheduled work any more, so it never
+    // appears as an active calendar bar. Cancelled jobs stay searchable and in
+    // job history; only the live schedule drops them.
+    if (isJobInactive(job)) continue;
+
     const window = jobScheduleWindow(job);
     if (window === null) continue;
     if (!overlapsRange(window.start, window.end, range)) continue;
@@ -145,32 +155,37 @@ export const loadCalendar = async (
     });
   }
 
-  const leaveEntries: LeaveCalendarEntry[] = leave
+  const availabilityEntries: AvailabilityCalendarEntry[] = availability
     .filter((record) => overlapsRange(record.startDate, record.endDate, range))
-    .map((record: LeaveRecord) => {
+    .map((record: AvailabilityRecord) => {
       const user = users.find((candidate) => candidate.id === record.userId);
+      const timeLabel = availabilityTimeLabel(record);
       return {
-        kind: 'leave' as const,
-        id: `leave-${record.id}`,
+        kind: 'availability' as const,
+        id: `availability-${record.id}`,
         start: record.startDate,
         end: record.endDate,
         days: daysInclusive(record.startDate, record.endDate),
-        title: user === undefined ? leaveTypeLabel(record.type) : userFullName(user),
-        subtitle: leaveTypeLabel(record.type),
-        leaveType: record.type,
-        leaveStatus: record.status,
+        title: user === undefined ? availabilityTypeLabel(record.type) : userFullName(user),
+        // The time window belongs on the chip: "Appointment" alone does not tell
+        // a planner whether the technician is gone for two hours or all day.
+        subtitle: `${availabilityTypeLabel(record.type)} · ${timeLabel}`,
+        availabilityType: record.type,
+        availabilityStatus: record.status,
         userId: record.userId,
         userName: user === undefined ? 'Unknown' : userFullName(user),
         userInitials: user?.initials ?? '—',
-        blocking: isBlockingLeave(record),
-        notes: record.notes,
+        blocking: isBlockingAvailability(record),
+        allDay: record.allDay,
+        timeLabel,
+        description: record.description,
       };
     });
 
   return {
     // Longest first, so multi-day bars take the upper lanes and short entries
     // slot in beneath them rather than fragmenting the row.
-    entries: [...jobEntries, ...leaveEntries].sort(
+    entries: [...jobEntries, ...availabilityEntries].sort(
       (a, b) => b.days - a.days || a.start.localeCompare(b.start),
     ),
     technicians: users.filter((user) => user.role === 'technician' && user.active),
@@ -213,7 +228,9 @@ export const findConflicts = (
               id,
               name: entry.technicianNames[index] ?? 'Unknown',
             }))
-          : [{ id: entry.userId, name: entry.userName }];
+          : entry.blocking
+            ? [{ id: entry.userId, name: entry.userName }]
+            : [];
 
       for (const assignment of assignments) {
         const bucket = byTechnician.get(assignment.id) ?? { name: assignment.name, entries: [] };
@@ -223,12 +240,12 @@ export const findConflicts = (
     }
 
     for (const [technicianId, bucket] of byTechnician) {
-      // Two jobs, or a job while on approved leave, are both worth flagging.
+      // Two jobs, or a job while officially unavailable, are both worth flagging.
       const jobCount = bucket.entries.filter((entry) => entry.kind === 'job').length;
-      const onLeave = bucket.entries.some(
-        (entry) => entry.kind === 'leave' && entry.blocking,
+      const unavailable = bucket.entries.some(
+        (entry) => entry.kind === 'availability' && entry.blocking,
       );
-      if (jobCount > 1 || (jobCount > 0 && onLeave)) {
+      if (jobCount > 1 || (jobCount > 0 && unavailable)) {
         conflicts.push({
           date,
           technicianId,

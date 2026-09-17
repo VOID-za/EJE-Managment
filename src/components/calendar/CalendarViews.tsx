@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   JOB_TYPE_CODES,
   getJobTypeDefinition,
-  leaveTypeLabel,
+  availabilityTypeLabel,
   type IsoDate,
 } from '@/domain';
 import { Avatar, Badge, EmptyState, Icon, JobStatusBadge, PriorityBadge } from '@/components/ui';
@@ -229,7 +229,7 @@ export const WeekView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
 export const DayView = ({ entries, anchor }: ViewProps) => {
   const onDay = entriesOn(entries, anchor);
   const jobs = onDay.filter((entry) => entry.kind === 'job');
-  const leave = onDay.filter((entry) => entry.kind === 'leave');
+  const absences = onDay.filter((entry) => entry.kind === 'availability');
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -303,17 +303,17 @@ export const DayView = ({ entries, anchor }: ViewProps) => {
       <div>
         <h3 className="mb-3 text-sm font-semibold text-steel-900">
           Technician availability
-          <span className="tabular ml-2 text-steel-400">{leave.length}</span>
+          <span className="tabular ml-2 text-steel-400">{absences.length}</span>
         </h3>
 
-        {leave.length === 0 ? (
+        {absences.length === 0 ? (
           <div className="rounded-[var(--radius-card)] border border-verdant-200 bg-verdant-50 p-4 text-sm text-verdant-700">
             Everybody is available.
           </div>
         ) : (
           <ul className="space-y-2">
-            {leave.map((entry) =>
-              entry.kind === 'leave' ? (
+            {absences.map((entry) =>
+              entry.kind === 'availability' ? (
                 <li
                   key={entry.id}
                   className="flex items-start gap-3 rounded-[var(--radius-card)] border border-steel-200 bg-surface p-3"
@@ -323,17 +323,22 @@ export const DayView = ({ entries, anchor }: ViewProps) => {
                     <p className="truncate text-sm font-semibold text-steel-900">
                       {entry.userName}
                     </p>
-                    <p className="text-xs text-steel-600">{leaveTypeLabel(entry.leaveType)}</p>
+                    <p className="text-xs text-steel-600">
+                      {availabilityTypeLabel(entry.availabilityType)} · {entry.timeLabel}
+                    </p>
                     <p className="mt-0.5 text-[11px] text-steel-400">
                       {formatDate(entry.start)}
                       {entry.days > 1 && ` – ${formatDate(entry.end)}`}
                     </p>
-                    {entry.notes.length > 0 && (
-                      <p className="mt-1 text-xs text-steel-500">{entry.notes}</p>
+                    {entry.description.length > 0 && (
+                      <p className="mt-1 text-xs text-steel-500">{entry.description}</p>
                     )}
                   </div>
-                  <Badge tone={entry.leaveStatus === 'approved' ? 'neutral' : 'amber'} size="sm">
-                    {entry.leaveStatus === 'approved' ? 'Approved' : 'Requested'}
+                  <Badge
+                    tone={entry.availabilityStatus === 'cancelled' ? 'neutral' : 'amber'}
+                    size="sm"
+                  >
+                    {entry.availabilityStatus === 'cancelled' ? 'Cancelled' : 'Unavailable'}
                   </Badge>
                 </li>
               ) : null,
@@ -385,7 +390,9 @@ export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
                   const outside = day.slice(0, 7) !== monthKey;
                   const onDay = outside ? [] : entriesOn(entries, day);
                   const jobCount = onDay.filter((entry) => entry.kind === 'job').length;
-                  const hasLeave = onDay.some((entry) => entry.kind === 'leave');
+                  const hasAbsence = onDay.some(
+                    (entry) => entry.kind === 'availability' && entry.blocking,
+                  );
 
                   return (
                     <button
@@ -413,7 +420,7 @@ export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
                       )}
                     >
                       {fromIso(day).getDate()}
-                      {hasLeave && (
+                      {hasAbsence && (
                         <span
                           className="absolute inset-x-1 bottom-0.5 h-0.5 rounded-full bg-amber-eje-500"
                           aria-hidden="true"
@@ -459,7 +466,7 @@ export const CalendarLegend = () => (
     })}
     <span className="flex items-center gap-1.5">
       <span className="size-3 rounded-sm bg-steel-100 ring-1 ring-steel-300 ring-inset" />
-      Leave
+      Unavailable
     </span>
     <span className="flex items-center gap-1.5">
       <span className="size-3 rounded-sm bg-amber-eje-50 ring-1 ring-amber-eje-200 ring-inset" />

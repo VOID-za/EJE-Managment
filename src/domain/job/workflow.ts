@@ -21,6 +21,7 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   'review',
   'submitted',
   'closed',
+  'cancelled',
 ];
 
 /** Statuses shown as the linear progress rail on the job card. */
@@ -35,16 +36,23 @@ export const JOB_PROGRESS_STAGES: readonly JobStatus[] = [
 ];
 
 const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
-  draft: ['open'],
-  open: ['in_progress'],
+  draft: ['open', 'cancelled'],
+  // A technician handing a job back returns it to Open, which is why the
+  // reverse edge exists. It carries all the work already recorded with it.
+  open: ['in_progress', 'cancelled'],
   // Awaiting spares may be entered and left any number of times.
-  in_progress: ['awaiting_spares', 'completion'],
-  awaiting_spares: ['in_progress'],
-  completion: ['customer_signature', 'in_progress', 'awaiting_spares'],
+  in_progress: ['awaiting_spares', 'completion', 'open'],
+  awaiting_spares: ['in_progress', 'open'],
+  // Handing back from the write-up stage is legitimate — a technician taken
+  // ill before the customer signs should not have to abandon the job.
+  completion: ['customer_signature', 'in_progress', 'awaiting_spares', 'open'],
   customer_signature: ['review', 'completion'],
   review: ['submitted', 'completion'],
   submitted: ['closed'],
   closed: [],
+  // Terminal. A cancelled job is history, not something to resurrect: raise a
+  // new job instead, so the record of what was cancelled stays intact.
+  cancelled: [],
 };
 
 export const jobStatusLabel = (status: JobStatus): string => {
@@ -69,6 +77,8 @@ export const jobStatusLabel = (status: JobStatus): string => {
       return 'Master Review';
     case 'closed':
       return 'Closed';
+    case 'cancelled':
+      return 'Cancelled';
   }
 };
 
@@ -84,7 +94,8 @@ export const allowedTransitions = (from: JobStatus): readonly JobStatus[] => TRA
  * technician but not yet issued to the customer, so a Master can still correct
  * it — see `canEditJob`, which is the check screens should use.
  */
-export const isJobEditable = (status: JobStatus): boolean => status !== 'closed';
+export const isJobEditable = (status: JobStatus): boolean =>
+  status !== 'closed' && status !== 'cancelled';
 
 /**
  * Whether THIS ROLE may edit a job in this state.
@@ -94,9 +105,89 @@ export const isJobEditable = (status: JobStatus): boolean => status !== 'closed'
  * corrects and completes the job card before the customer ever sees it.
  */
 export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
-  if (status === 'closed') return false;
+  if (status === 'closed' || status === 'cancelled') return false;
   if (status === 'submitted') return role === 'master';
   return true;
+};
+
+/**
+ * Deletion is for an administrative mistake — a duplicate, the wrong customer,
+ * a job that should never have existed. Once a technician has accepted it there
+ * is real work attached, and the honest action is to CANCEL, which keeps
+ * everything.
+ */
+export const canDeleteJob = (role: UserRole, job: Pick<Job, 'status' | 'acceptedAt'>): boolean => {
+  if (role !== 'master') return false;
+  if (job.acceptedAt !== null) return false;
+  return job.status === 'open' || job.status === 'draft';
+};
+
+export const deleteJobRefusal = (
+  role: UserRole,
+  job: Pick<Job, 'status' | 'acceptedAt'>,
+): string | null => {
+  if (canDeleteJob(role, job)) return null;
+  if (role !== 'master') return 'Only a Master can delete a job.';
+  if (job.acceptedAt !== null) {
+    return 'A technician has already accepted this job, so it can no longer be deleted. Cancel it instead — that keeps the work and the history.';
+  }
+  return `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be deleted. Only a job that has not been started can be.`;
+};
+
+/**
+ * Cancellation is for a legitimate job that will not happen. Allowed while the
+ * job is still waiting to be started; once work is under way, cancelling would
+ * discard it, so that is deliberately not offered here.
+ */
+export const canCancelJob = (role: UserRole, status: JobStatus): boolean =>
+  role === 'master' && (status === 'open' || status === 'draft');
+
+export const cancelJobRefusal = (role: UserRole, status: JobStatus): string | null => {
+  if (canCancelJob(role, status)) return null;
+  if (role !== 'master') return 'Only a Master can cancel a job.';
+  if (status === 'cancelled') return 'This job is already cancelled.';
+  return `A ${jobStatusLabel(status).toLowerCase()} job cannot be cancelled from here, because work has already been recorded against it.`;
+};
+
+/** A job that has left the active workflow, whichever way it left. */
+export const isJobInactive = (job: Pick<Job, 'status' | 'deletedAt'>): boolean =>
+  job.deletedAt !== null || job.status === 'cancelled';
+
+/**
+ * Whether this user may hand this job on.
+ *
+ * A technician transfers their OWN active job — that is the whole point, since
+ * the person who cannot attend is the one who knows. A Master may transfer any
+ * active job. Nobody transfers a job that has reached the signature or beyond:
+ * the work is done and the customer has signed for it.
+ */
+export const canTransferJob = (
+  actor: { readonly id: string; readonly role: UserRole },
+  job: Pick<Job, 'status' | 'primaryTechnicianId' | 'deletedAt'>,
+): boolean => {
+  if (job.deletedAt !== null) return false;
+  if (!TRANSFERABLE_STATUSES.includes(job.status)) return false;
+  if (actor.role === 'master') return true;
+  return job.primaryTechnicianId === actor.id;
+};
+
+const TRANSFERABLE_STATUSES: readonly JobStatus[] = [
+  'open',
+  'in_progress',
+  'awaiting_spares',
+  'completion',
+];
+
+export const transferJobRefusal = (
+  actor: { readonly id: string; readonly role: UserRole },
+  job: Pick<Job, 'status' | 'primaryTechnicianId' | 'deletedAt'>,
+): string | null => {
+  if (canTransferJob(actor, job)) return null;
+  if (job.deletedAt !== null) return 'This job has been deleted.';
+  if (!TRANSFERABLE_STATUSES.includes(job.status)) {
+    return `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be transferred. The customer has already signed for this work.`;
+  }
+  return 'You can only transfer a job assigned to you.';
 };
 
 /**

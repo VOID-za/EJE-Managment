@@ -98,7 +98,7 @@ const CalendarPage = () => {
   }
 
   const jobCount = entries.filter((entry) => entry.kind === 'job').length;
-  const leaveCount = entries.filter((entry) => entry.kind === 'leave').length;
+  const absenceCount = entries.filter((entry) => entry.kind === 'availability').length;
 
   return (
     <>
@@ -189,7 +189,7 @@ const CalendarPage = () => {
 
           <p className="tabular pb-3 text-sm text-steel-500">
             {jobCount} {jobCount === 1 ? 'job' : 'jobs'}
-            {showLeave && ` · ${leaveCount} leave`}
+            {showLeave && ` · ${absenceCount} leave`}
           </p>
         </div>
       </Card>

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getJobTypeDefinition, leaveTypeShortLabel } from '@/domain';
+import { availabilityTypeShortLabel, getJobTypeDefinition } from '@/domain';
 import { Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import type { CalendarEntry } from '@/application/calendar';
@@ -7,9 +7,10 @@ import type { CalendarEntry } from '@/application/calendar';
 /**
  * A single bar on the calendar.
  *
- * Colour carries meaning: job type for work, a muted hatch for absence, and the
- * urgent red used everywhere else in the system. Leave is deliberately quieter
- * than work — a planner scans for jobs first.
+ * Colour carries meaning: job type for work, a muted grey for absence, and the
+ * urgent red used everywhere else in the system. Absence is deliberately
+ * quieter than work — a planner scans for jobs first — but never invisible, and
+ * a cancelled record is struck through so it cannot be mistaken for a live one.
  */
 const JOB_TONES: Record<string, string> = {
   red: 'bg-signal-50 text-signal-700 ring-signal-200 hover:bg-signal-100',
@@ -20,12 +21,13 @@ const JOB_TONES: Record<string, string> = {
 };
 
 export const entryClasses = (entry: CalendarEntry): string => {
-  if (entry.kind === 'leave') {
-    return entry.leaveStatus === 'requested'
-      ? 'bg-steel-50 text-steel-500 ring-steel-200 ring-dashed'
-      : entry.leaveType === 'sick'
-        ? 'bg-amber-eje-50 text-amber-eje-700 ring-amber-eje-200'
-        : 'bg-steel-100 text-steel-600 ring-steel-300';
+  if (entry.kind === 'availability') {
+    if (entry.availabilityStatus === 'cancelled') {
+      return 'bg-steel-50 text-steel-400 ring-steel-200 line-through';
+    }
+    return entry.availabilityType === 'sick_leave'
+      ? 'bg-amber-eje-50 text-amber-eje-700 ring-amber-eje-200'
+      : 'bg-steel-100 text-steel-600 ring-steel-300';
   }
   return JOB_TONES[getJobTypeDefinition(entry.jobType).accent] ?? JOB_TONES.blue!;
 };
@@ -71,9 +73,15 @@ export const CalendarEntryChip = ({
         <>
           <Icon name="user" className="size-3 shrink-0 opacity-70" />
           <span className="truncate">{entry.userInitials}</span>
-          <span className="truncate font-normal">{leaveTypeShortLabel(entry.leaveType)}</span>
-          {entry.leaveStatus === 'requested' && (
-            <span className="ml-auto shrink-0 text-[10px] font-normal italic">requested</span>
+          <span className="truncate font-normal">
+            {availabilityTypeShortLabel(entry.availabilityType)}
+          </span>
+          {/* A part-day absence is a different planning problem from a whole
+              day, so the window shows on the bar rather than only in a tooltip. */}
+          {!entry.allDay && !compact && (
+            <span className="ml-auto shrink-0 text-[10px] font-normal opacity-80">
+              {entry.timeLabel}
+            </span>
           )}
         </>
       )}

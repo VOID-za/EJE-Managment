@@ -6,7 +6,9 @@ export type NotificationType =
   | 'customer_change_request'
   | 'machine_approval_request'
   | 'document_approval_request'
-  | 'job_submitted';
+  | 'job_submitted'
+  /** A technician telling the office about their availability. */
+  | 'technician_message';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 

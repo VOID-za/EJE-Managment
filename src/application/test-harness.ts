@@ -8,7 +8,7 @@ import { SimulatedStorageService } from '@/services/simulated/storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
-import type { User } from '@/domain';
+import type { IsoDate, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -28,6 +28,14 @@ export const seedUser = (id: string): User => {
   const user = seedUsers.find((candidate) => candidate.id === id);
   if (user === undefined) throw new Error(`${id} is not a seeded user`);
   return user;
+};
+
+/** A date `days` from today, as the seed's own offsets produce. */
+export const dayOffset = (days: number): IsoDate => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
 };
 
 export const buildHarness = (): Harness => {
