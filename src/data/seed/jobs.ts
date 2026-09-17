@@ -80,10 +80,13 @@ const job = (jobNumber: string, overrides: Partial<Job>): Job => ({
 });
 
 export const seedJobs: readonly Job[] = [
+  // The flagship demonstration job: freshly dispatched and not yet accepted, so a
+  // walkthrough can run the entire journey live — accept, capture, write up, sign,
+  // submit — on one job without switching between records.
   job('EJE-1048', {
     jobType: 'breakdown',
     priority: 'urgent',
-    status: 'in_progress',
+    status: 'open',
     machineId: asMachineId('machine-abc-lv40'),
     siteId: asSiteId('site-abc-jhb'),
     contactId: asContactId('contact-abc-jhb'),
@@ -95,58 +98,60 @@ export const seedJobs: readonly Job[] = [
     additionalTechnicianIds: [asUserId('user-tech-andre')],
     createdAt: timeOffset(0, 6, 40),
     createdBy: asUserId('user-master-elmarie'),
-    acceptedAt: timeOffset(0, 7, 15),
+    notes: [
+      {
+        id: 'note-1048-1',
+        body: 'Customer production manager pushing for same-day repair. The last service on this machine recommended replacing the spindle drive cooling fan — a spare is in the Isando stores.',
+        authorId: asUserId('user-master-johan'),
+        createdAt: timeOffset(0, 6, 55),
+        internal: true,
+      },
+    ],
+  }),
+
+  // Keeps the Master dashboard's In Progress tile meaningful while EJE-1048 is
+  // still waiting to be accepted.
+  job('EJE-1061', {
+    jobType: 'breakdown',
+    priority: 'high',
+    status: 'in_progress',
+    customerId: asCustomerId('cust-kruger'),
+    siteId: asSiteId('site-kruger-main'),
+    contactId: asContactId('contact-kruger-main'),
+    machineId: asMachineId('machine-kruger-vf2'),
+    scheduledDate: dateOffset(0),
+    orderNumber: 'PO-10251',
+    referenceNumber: 'KRU-BRK-124',
+    faultDescription:
+      'Tool changer jamming intermittently on the VF-2. Machine stops mid-cycle.',
+    primaryTechnicianId: asUserId('user-tech-riaan'),
+    createdAt: timeOffset(0, 7, 20),
+    createdBy: asUserId('user-master-elmarie'),
+    acceptedAt: timeOffset(0, 7, 45),
     travel: [
       {
-        id: asLineItemId('trv-1048-1'),
-        technicianId: asUserId('user-tech-sipho'),
+        id: asLineItemId('trv-1061-1'),
+        technicianId: asUserId('user-tech-riaan'),
         date: dateOffset(0),
-        kilometres: 48,
-        description: 'Isando to Johannesburg site and return',
-        capturedAt: timeOffset(0, 8, 5),
+        kilometres: 52,
+        description: 'Isando to Benoni return',
+        capturedAt: timeOffset(0, 8, 30),
       },
     ],
     labour: [
       {
-        id: asLineItemId('lab-1048-1'),
-        technicianId: asUserId('user-tech-sipho'),
+        id: asLineItemId('lab-1061-1'),
+        technicianId: asUserId('user-tech-riaan'),
         date: dateOffset(0),
         rateType: 'normal',
-        hours: 2.5,
-        description: 'Fault finding on spindle drive and control cabinet',
-        capturedAt: timeOffset(0, 10, 40),
-      },
-    ],
-    photos: [
-      jobPhoto(
-        'att-1048-1',
-        'eje-1048-cabinet.jpg',
-        'Spindle drive showing alarm 750 on the display',
-        0,
-        9,
-        'user-tech-sipho',
-      ),
-    ],
-    notes: [
-      {
-        id: 'note-1048-1',
-        body: 'Spindle drive reporting alarm 750. Drive fan seized, drive over-temperature. Confirming whether the drive itself is damaged.',
-        authorId: asUserId('user-tech-sipho'),
-        createdAt: timeOffset(0, 9, 30),
-        internal: false,
-      },
-      {
-        id: 'note-1048-2',
-        body: 'Customer production manager pushing for same-day repair. Spare drive fan is in the Isando stores.',
-        authorId: asUserId('user-master-johan'),
-        createdAt: timeOffset(0, 9, 50),
-        internal: true,
+        hours: 2,
+        description: 'Tool changer fault finding',
+        capturedAt: timeOffset(0, 11),
       },
     ],
     completionReport: {
       ...emptyCompletionReport(),
-      faultFindings:
-        'Spindle drive cooling fan seized, causing drive over-temperature trip (alarm 750).',
+      faultFindings: 'Tool changer carousel proximity switch intermittent.',
     },
   }),
 

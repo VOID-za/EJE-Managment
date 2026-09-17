@@ -53,9 +53,9 @@ npm run smoke
 | Master dashboard — workload, exceptions, technician load | `/dashboard` as a Master |
 | Technician dashboard — today's work, touch-first | `/dashboard` as a Technician |
 | Job list and filters | `/jobs` |
-| Job card, work capture, checklist, activity | `/jobs/EJE-1048` |
+| Acceptance starting a job, then the full capture journey | `/jobs/EJE-1048` (open, awaiting acceptance) |
 | Checklist gate blocking signature | `/jobs/EJE-1053` → Checklist tab |
-| Awaiting spares | `/jobs/EJE-1051` |
+| Awaiting spares, with the reason recorded | `/jobs/EJE-1051` |
 | Signature and job card preview | `/jobs/EJE-1054/review` |
 | Customers → sites → machines → job history | `/customers/cust-abc` |
 | Machine record and service history | `/machines/machine-abc-lv40` |
@@ -100,6 +100,31 @@ src/services/     integration ports + simulated adapters
 src/components/   design system and feature components
 src/app/          routing and page composition only
 ```
+
+## Known gaps at the end of Phase 1
+
+These are recorded deliberately rather than left to be discovered. None of them
+blocks the Phase 2 architecture; each is a contained change.
+
+- **Historical pricing.** A job stores no snapshot of the rates that applied when
+  it was signed, so changing a labour rate re-prices every job, including closed
+  ones. Fix: add a `pricingSnapshot` to `Job`, captured at submission, and have
+  `calculateJobTotals` prefer it when present.
+- **Historical checklist wording.** A completed checklist records the template
+  version it was answered against, but `loadJobView` resolves the template with
+  `findForJobType`, which returns the *current* one — so an old job card renders
+  against today's wording. Fix: add `findByVersion(templateId, version)` to
+  `ChecklistTemplateRepository` and use it when the job carries a checklist.
+- **WhatsApp is declared but never invoked.** The port and simulated adapter
+  exist and notification channels are shown in the UI, but no operation calls
+  `services.whatsapp.send()`, so the outbox only ever contains email.
+- **No draft release path.** `EJE-1060` is seeded as a draft and the state
+  machine allows `draft → open`, but no UI action performs it.
+- **No job transfer, and no customer/machine/user editing.** The repositories
+  support writes; the operations and screens do not exist yet.
+- **Repository reads are unpaginated** and `JobRepository.save` writes the whole
+  job aggregate. Both are fine at EJE's scale but will want refining against a
+  real API — see `docs/ARCHITECTURE.md` §6.
 
 ## Known configuration points
 

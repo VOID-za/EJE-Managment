@@ -24,13 +24,13 @@ const event = (
 /** Seeded audit trail. New events are appended by the application at runtime. */
 export const seedActivity: readonly ActivityEvent[] = [
   event('act-1048-1', 'EJE-1048', 'job_created', 'Job created', 'Breakdown job logged after a telephone call from the customer.', 'user-master-elmarie', 0, 6, 40),
-  event('act-1048-2', 'EJE-1048', 'job_assigned', 'Job assigned to Sipho Mahlangu', 'Assigned as primary technician.', 'user-master-elmarie', 0, 6, 45),
-  event('act-1048-3', 'EJE-1048', 'job_accepted', 'Job accepted', 'Acceptance moved the job to In Progress.', 'user-tech-sipho', 0, 7, 15),
-  event('act-1048-4', 'EJE-1048', 'technician_added', 'André Steyn added to the job', 'Added as an additional technician.', 'user-master-johan', 0, 7, 30),
-  event('act-1048-5', 'EJE-1048', 'travel_added', 'Travel captured: 48 km', 'Isando to Johannesburg site and return.', 'user-tech-sipho', 0, 8, 5),
-  event('act-1048-6', 'EJE-1048', 'photo_uploaded', 'Photo uploaded', 'Spindle drive showing alarm 750 on the display.', 'user-tech-sipho', 0, 9, 0),
-  event('act-1048-7', 'EJE-1048', 'note_added', 'Note added', 'Drive fan seized, drive over-temperature.', 'user-tech-sipho', 0, 9, 30),
-  event('act-1048-8', 'EJE-1048', 'labour_added', 'Labour captured: 2.5 hrs normal time', 'Fault finding on spindle drive and control cabinet.', 'user-tech-sipho', 0, 10, 40),
+  event('act-1048-2', 'EJE-1048', 'job_assigned', 'Job assigned to Sipho Mahlangu', 'Assigned as primary technician, with André Steyn assisting.', 'user-master-elmarie', 0, 6, 45),
+  event('act-1048-3', 'EJE-1048', 'note_added', 'Internal note added', 'Spare drive fan is in the Isando stores.', 'user-master-johan', 0, 6, 55),
+
+  event('act-1061-1', 'EJE-1061', 'job_created', 'Job created', 'Tool changer fault reported by the workshop.', 'user-master-elmarie', 0, 7, 20),
+  event('act-1061-2', 'EJE-1061', 'job_accepted', 'Job accepted', 'Acceptance moved the job to In Progress.', 'user-tech-riaan', 0, 7, 45),
+  event('act-1061-3', 'EJE-1061', 'travel_added', 'Travel captured: 52 km', 'Isando to Benoni return.', 'user-tech-riaan', 0, 8, 30),
+  event('act-1061-4', 'EJE-1061', 'labour_added', 'Labour captured: 2.00 hrs normal time', 'Tool changer fault finding.', 'user-tech-riaan', 0, 11, 0),
 
   event('act-1053-1', 'EJE-1053', 'job_created', 'Job created', 'Scheduled service raised from the maintenance agreement.', 'user-master-denise', -5, 9, 0),
   event('act-1053-2', 'EJE-1053', 'job_accepted', 'Job accepted', 'Acceptance moved the job to In Progress.', 'user-tech-thabo', 0, 7, 50),

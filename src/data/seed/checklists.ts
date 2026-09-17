@@ -16,9 +16,13 @@ import { timeOffset } from './reference';
  *   2. Bump `version` and set `sourceDocument` to the controlled document id.
  *   3. Set the previous template's `status` to 'archived'.
  *
- * Completed job checklists store `templateId` + `templateVersion` against every
- * response, so historical job cards keep rendering against the wording that was
- * actually presented to the customer at the time of signature.
+ * Completed job checklists store `templateId` + `templateVersion`, which is what
+ * makes versioned wording possible. Note the current limitation: the job-card
+ * read path resolves the template with `findForJobType`, which returns the
+ * CURRENT template, so an old job card is rendered against today's wording. The
+ * stored version is recorded but not yet used for retrieval. Closing that gap
+ * needs a `findByVersion(templateId, version)` method on
+ * `ChecklistTemplateRepository` and a change to `loadJobView`.
  */
 
 export const seedChecklistTemplates: readonly ChecklistTemplate[] = [

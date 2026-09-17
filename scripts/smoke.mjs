@@ -62,11 +62,30 @@ await step('technician dashboard shows assigned work', async () => {
   await page.screenshot({ path: `${shots}/01-tech-dashboard.png`, fullPage: false });
 });
 
+await step('EJE-1048 is waiting for acceptance on the technician dashboard', async () => {
+  await page.getByText('Waiting for you to accept').waitFor({ timeout: 8000 });
+});
+
 await step('open job EJE-1048', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1048' }).waitFor({ timeout: 8000 });
-  await page.getByText('In Progress').first().waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/02-job-detail.png`, fullPage: false });
+});
+
+await step('capturing work is blocked before the job is accepted', async () => {
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  if (await page.getByRole('button', { name: 'Add labour' }).first().isVisible()) {
+    throw new Error('Labour capture should not be offered on an unaccepted job');
+  }
+  await page.getByRole('tab', { name: 'Overview' }).click();
+});
+
+await step('acceptance requires confirmation and starts the job', async () => {
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByText('there is no separate start step', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
 });
 
 await step('add labour to EJE-1048', async () => {
