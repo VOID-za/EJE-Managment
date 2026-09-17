@@ -17,7 +17,7 @@ export const LoadingPanel = ({ rows = 4, label }: { readonly rows?: number; read
     {Array.from({ length: rows }, (_, index) => (
       <div
         key={index}
-        className="flex items-center gap-4 rounded-[var(--radius-card)] border border-steel-200 bg-white p-4"
+        className="flex items-center gap-4 rounded-[var(--radius-card)] border border-steel-200 bg-surface p-4"
       >
         <Skeleton className="size-10 shrink-0 rounded-full" />
         <div className="flex-1 space-y-2">
@@ -45,7 +45,7 @@ export const EmptyState = ({ title, description, icon, action, className }: Empt
       className,
     )}
   >
-    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-white text-steel-400 ring-1 ring-steel-200">
+    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-surface text-steel-400 ring-1 ring-steel-200">
       {icon ?? (
         <svg viewBox="0 0 24 24" className="size-6" fill="none" aria-hidden="true">
           <path
@@ -78,7 +78,7 @@ export const ErrorState = ({
     role="alert"
     className="flex flex-col items-center justify-center rounded-[var(--radius-card)] border border-signal-200 bg-signal-50 px-6 py-10 text-center"
   >
-    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-white text-signal-600 ring-1 ring-signal-200">
+    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-surface text-signal-600 ring-1 ring-signal-200">
       <svg viewBox="0 0 24 24" className="size-6" fill="none" aria-hidden="true">
         <path
           d="M12 8v5m0 3h.01M10.3 3.9 2.6 17.3A2 2 0 0 0 4.3 20.3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"

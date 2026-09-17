@@ -10,7 +10,7 @@ import { useId } from 'react';
 import { cn } from '@/lib/cn';
 
 const CONTROL_BASE =
-  'w-full rounded-[var(--radius-control)] border border-steel-300 bg-white text-steel-900 ' +
+  'w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface text-steel-900 ' +
   'placeholder:text-steel-400 transition-colors ' +
   'hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none ' +
   'disabled:cursor-not-allowed disabled:bg-steel-50 disabled:text-steel-500';

@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import { useApp } from '@/providers/AppProvider';
 import { Logo } from './Logo';
 import { DemoModeBadge } from './DemoModeBadge';
+import { ThemeToggle } from './ThemeToggle';
 
 const GROUP_ORDER: readonly NavigationItem['group'][] = ['work', 'records', 'system'];
 
@@ -29,7 +30,7 @@ export const Sidebar = ({
   );
 
   return (
-    <div className="eje-grid-texture flex h-full flex-col bg-steel-900">
+    <div className="eje-grid-texture flex h-full flex-col bg-chrome">
       <div className="px-5 py-5">
         <Link href="/dashboard" onClick={onNavigate} className="block">
           <Logo />
@@ -43,7 +44,7 @@ export const Sidebar = ({
 
           return (
             <div key={group} className="mb-5">
-              <p className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-steel-500 uppercase">
+              <p className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-chrome-faint uppercase">
                 {NAV_GROUP_LABELS[group]}
               </p>
               <ul className="space-y-0.5">
@@ -59,8 +60,8 @@ export const Sidebar = ({
                         className={cn(
                           'flex min-h-11 items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm font-medium transition-colors',
                           active
-                            ? 'bg-eje-600 text-white shadow-sm'
-                            : 'text-steel-300 hover:bg-white/8 hover:text-white',
+                            ? 'bg-action text-white shadow-sm'
+                            : 'text-chrome-muted hover:bg-white/8 hover:text-white',
                         )}
                       >
                         <Icon name={item.icon as IconName} className="size-[18px]" />
@@ -81,8 +82,9 @@ export const Sidebar = ({
       </nav>
 
       <div className="border-t border-white/10 p-3">
-        <div className="mb-2 px-2">
+        <div className="mb-2 flex items-center justify-between gap-2 px-2">
           <DemoModeBadge compact />
+          <ThemeToggle />
         </div>
         {currentUser !== null && (
           <div className="flex items-center gap-3 rounded-[var(--radius-control)] bg-white/5 p-2.5">
@@ -91,7 +93,7 @@ export const Sidebar = ({
               <p className="truncate text-sm font-semibold text-white">
                 {userFullName(currentUser)}
               </p>
-              <p className="truncate text-xs text-steel-400">
+              <p className="truncate text-xs text-chrome-dim">
                 {currentUser.role === 'master' ? 'Master' : 'Technician'}
               </p>
             </div>
@@ -100,7 +102,7 @@ export const Sidebar = ({
               onClick={signOut}
               title="Sign out"
               aria-label="Sign out"
-              className="rounded-[var(--radius-control)] p-2 text-steel-400 transition-colors hover:bg-white/10 hover:text-white"
+              className="rounded-[var(--radius-control)] p-2 text-chrome-dim transition-colors hover:bg-white/10 hover:text-white"
             >
               <Icon name="logout" className="size-[18px]" />
             </button>

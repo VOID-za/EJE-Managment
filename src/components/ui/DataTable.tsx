@@ -47,7 +47,7 @@ export const DataTable = <T,>({
   return (
     <div
       className={cn(
-        'eje-scrollbar overflow-x-auto rounded-[var(--radius-card)] border border-steel-200 bg-white shadow-[var(--shadow-card)]',
+        'eje-scrollbar overflow-x-auto rounded-[var(--radius-card)] border border-steel-200 bg-surface shadow-[var(--shadow-card)]',
         className,
       )}
     >

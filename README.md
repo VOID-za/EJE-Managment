@@ -101,20 +101,41 @@ src/components/   design system and feature components
 src/app/          routing and page composition only
 ```
 
+## Historical accuracy
+
+Two things about a signed job card must never change afterwards, and both are
+enforced rather than documented:
+
+- **Pricing.** When the customer signs, a full copy of the rates in force — the
+  three labour rates, the call-out fee, the kilometre rate and VAT — is frozen
+  onto the job. Every figure on that job is calculated from the copy for the rest
+  of its life, so a Master changing a rate re-prices open work only. Part prices
+  are captured per line and were already historical.
+- **Checklist wording.** A completed checklist records the template id and
+  version it was answered against, and the job card is rendered from that stored
+  version. Revising a checklist does not rewrite a job card the customer already
+  signed. `EJE-1044` is seeded completed against service checklist `1.0-DEMO`
+  while new service jobs get `2.0-DEMO`, so the difference is visible in the
+  demonstration.
+
+## Light and dark mode
+
+The theme control sits in the top bar (one tap) and in the sidebar (Light / Dark
+/ System). **Light is the default**, including on a machine set to dark; System
+is offered but never assumed. The choice persists across refresh and is applied
+by a small inline script before first paint, so the theme never flashes.
+
+Dark mode is a second hand-tuned palette, not an inversion: see
+`src/app/globals.css`, where each theme declares its values once and Tailwind's
+tokens map onto them. No component carries a `dark:` variant. A job card preview
+is pinned to the light palette in both themes, because it represents the paper
+document the customer receives.
+
 ## Known gaps at the end of Phase 1
 
 These are recorded deliberately rather than left to be discovered. None of them
 blocks the Phase 2 architecture; each is a contained change.
 
-- **Historical pricing.** A job stores no snapshot of the rates that applied when
-  it was signed, so changing a labour rate re-prices every job, including closed
-  ones. Fix: add a `pricingSnapshot` to `Job`, captured at submission, and have
-  `calculateJobTotals` prefer it when present.
-- **Historical checklist wording.** A completed checklist records the template
-  version it was answered against, but `loadJobView` resolves the template with
-  `findForJobType`, which returns the *current* one — so an old job card renders
-  against today's wording. Fix: add `findByVersion(templateId, version)` to
-  `ChecklistTemplateRepository` and use it when the job carries a checklist.
 - **WhatsApp is declared but never invoked.** The port and simulated adapter
   exist and notification channels are shown in the UI, but no operation calls
   `services.whatsapp.send()`, so the outbox only ever contains email.

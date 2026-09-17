@@ -17,7 +17,7 @@ const TONES: Record<BadgeTone, string> = {
   amber: 'bg-amber-eje-50 text-amber-eje-700 ring-amber-eje-200',
   red: 'bg-signal-50 text-signal-700 ring-signal-200',
   violet: 'bg-violet-eje-50 text-violet-eje-700 ring-violet-eje-100',
-  outline: 'bg-white text-steel-600 ring-steel-300',
+  outline: 'bg-surface text-steel-600 ring-steel-300',
 };
 
 export interface BadgeProps {

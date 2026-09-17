@@ -45,7 +45,7 @@ export const Tabs = ({ tabs, activeId, onChange, className }: TabsProps) => (
           {tab.badge}
           {active && (
             <span
-              className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-eje-600"
+              className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-action"
               aria-hidden="true"
             />
           )}

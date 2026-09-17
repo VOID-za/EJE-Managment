@@ -45,7 +45,10 @@ question and renders the answer:
 - `canTransition(from, to)` — is this workflow step legal?
 - `checkReadyForSignature(job)` — and if not, *why not*, as a list of
   violations the UI can display.
-- `calculateJobTotals(job, settings)` — what is this job worth?
+- `calculateJobTotals(job, settings)` — what is this job worth? It resolves rates
+  through `resolveJobPricing`, so a job carrying a pricing snapshot is priced at
+  that snapshot everywhere, by construction rather than by each caller
+  remembering to check.
 - `can(role, 'jobs.assign')` — capability, not a role string comparison.
 
 This is why the job card can tell a technician exactly what is outstanding
@@ -66,6 +69,19 @@ write.
 **Nothing is discarded silently.** Line removal and every workflow transition go
 through a confirmation dialog; the completion write-up saves explicitly and warns
 before unsaved text is lost.
+
+## 2a. Historical accuracy
+
+Two kinds of record must not change after the fact, and both are handled the
+same way: the job stores what it was judged against, and the read path uses it.
+
+- A `PricingSnapshot` is frozen onto the job when the customer signs — the moment
+  the figure becomes a commitment, rather than at submission. It stores values,
+  not a settings id, because the settings record is mutable.
+- A `ChecklistInstance` stores `templateId` and `templateVersion`, and
+  `loadJobView` resolves the template with `findByVersion`. When a version is no
+  longer held the UI says so rather than falling back to current wording — a
+  silent fallback would be worse than an honest gap.
 
 ## 3. Data access
 
@@ -130,6 +146,7 @@ change there and nowhere else.
 | Storage | Placeholder keys | VPS disk, then S3-compatible |
 | Offline | Browser storage | IndexedDB + service worker + sync engine |
 | Job types, checklists, rates | Seeded constants | Master-editable tables |
+| Theme | `data-theme` + localStorage | Unchanged; optionally stored per user |
 | Deployment | `next start` | Hostinger VPS, Docker Compose, Caddy, Cloudflare, Redis |
 
 **Unchanged by all of the above:** `src/domain`, `src/application`, and every

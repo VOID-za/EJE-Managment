@@ -17,7 +17,7 @@ export const Logo = ({
         'relative flex size-9 items-center justify-center rounded-[0.55rem] font-black tracking-tighter',
         variant === 'dark'
           ? 'bg-eje-500 text-white'
-          : 'bg-white text-eje-700 ring-1 ring-steel-200',
+          : 'bg-surface text-eje-700 ring-1 ring-steel-200',
       )}
     >
       <span className="text-[13px]">EJE</span>
@@ -41,7 +41,7 @@ export const Logo = ({
       <span
         className={cn(
           'text-[11px] font-medium tracking-wide uppercase',
-          variant === 'dark' ? 'text-steel-400' : 'text-steel-500',
+          variant === 'dark' ? 'text-chrome-dim' : 'text-chrome-faint',
         )}
       >
         Job Card System

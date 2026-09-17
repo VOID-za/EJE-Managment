@@ -102,7 +102,7 @@ const SearchPageContent = () => {
               onChange={(event) => setTerm(event.target.value)}
               placeholder="Job number, customer, serial number, order number, fault…"
               autoComplete="off"
-              className="h-14 w-full rounded-[var(--radius-control)] border border-steel-300 bg-white pr-4 pl-12 text-base placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
+              className="h-14 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-4 pl-12 text-base placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
             />
           </div>
         </form>
@@ -204,7 +204,7 @@ const FilterChip = ({
       'min-h-9 rounded-full px-3.5 text-sm font-semibold transition-colors',
       active
         ? 'bg-steel-900 text-white'
-        : 'bg-white text-steel-600 ring-1 ring-steel-300 ring-inset hover:bg-steel-50',
+        : 'bg-surface text-steel-600 ring-1 ring-steel-300 ring-inset hover:bg-steel-50',
     )}
   >
     {label}
@@ -214,7 +214,7 @@ const FilterChip = ({
 const ResultRow = ({ result }: { readonly result: SearchResult }) => (
   <Link
     href={result.href}
-    className="flex items-start gap-3 rounded-[var(--radius-card)] border border-steel-200 bg-white p-4 transition-shadow hover:shadow-[var(--shadow-raised)]"
+    className="flex items-start gap-3 rounded-[var(--radius-card)] border border-steel-200 bg-surface p-4 transition-shadow hover:shadow-[var(--shadow-raised)]"
   >
     <span className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-steel-100 text-steel-500">
       <Icon name={CATEGORY_ICONS[result.category]} className="size-5" />

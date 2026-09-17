@@ -227,6 +227,163 @@ await step('tablet viewport layout', async () => {
   await page.screenshot({ path: `${shots}/09-tablet.png`, fullPage: false });
 });
 
+
+// --- Theme -----------------------------------------------------------------
+// Chromium returns computed colours in lab(), so every colour below is resolved
+// to sRGB by painting it to a canvas rather than parsed out of the string.
+const TO_RGB = `(value) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1; canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = value;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return { r, g, b };
+}`;
+
+const relativeLuminance = `(rgb) => {
+  const channel = (c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}`;
+
+const themeState = () =>
+  page.evaluate(
+    ([toRgbSrc, lumSrc]) => {
+      const toRgb = eval(toRgbSrc);
+      const luminance = eval(lumSrc);
+      const body = getComputedStyle(document.body);
+      const heading = document.querySelector('h1');
+      const bg = toRgb(body.backgroundColor);
+      const result = {
+        theme: document.documentElement.dataset.theme,
+        colorScheme: body.colorScheme,
+        bgLuminance: luminance(bg),
+        headingContrast: null,
+      };
+      if (heading !== null) {
+        const fg = luminance(toRgb(getComputedStyle(heading).color));
+        const [hi, lo] = fg > result.bgLuminance ? [fg, result.bgLuminance] : [result.bgLuminance, fg];
+        result.headingContrast = (hi + 0.05) / (lo + 0.05);
+      }
+      return result;
+    },
+    [TO_RGB, relativeLuminance],
+  );
+
+await step('light is the default theme', async () => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const state = await themeState();
+  if (state.theme !== 'light') throw new Error(`expected light by default, got ${state.theme}`);
+  if (state.bgLuminance < 0.7) throw new Error('light background is not light');
+});
+
+await step('switching to dark re-themes the application', async () => {
+  const before = await themeState();
+
+  await page.getByRole('button', { name: /Switch to dark mode/ }).first().click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+
+  const after = await themeState();
+  if (after.bgLuminance >= before.bgLuminance) throw new Error('background did not darken');
+  if (after.bgLuminance > 0.12) throw new Error(`dark background too light: ${after.bgLuminance}`);
+  if (!after.colorScheme.includes('dark')) throw new Error('color-scheme not set to dark');
+
+  await page.screenshot({ path: `${shots}/10-dark-dashboard.png`, fullPage: false });
+});
+
+await step('the sidebar control reflects the active theme', async () => {
+  const pressed = await page
+    .getByRole('radio', { name: 'Dark theme' })
+    .first()
+    .getAttribute('aria-checked');
+  if (pressed !== 'true') throw new Error(`sidebar control out of sync: ${pressed}`);
+});
+
+await step('dark mode survives a full reload, applied before hydration', async () => {
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const immediate = await page.evaluate(() => document.documentElement.dataset.theme);
+  if (immediate !== 'dark') throw new Error(`theme lost on reload, got ${immediate}`);
+
+  await page.waitForLoadState('networkidle');
+  const settled = await page.evaluate(() => document.documentElement.dataset.theme);
+  if (settled !== 'dark') throw new Error('theme reverted after hydration');
+});
+
+await step('dark mode applies across every major screen', async () => {
+  for (const path of [
+    '/jobs',
+    '/jobs/EJE-1049',
+    '/customers/cust-abc',
+    '/machines',
+    '/library',
+    '/search?q=Leadwell',
+    '/notifications',
+    '/activity',
+    '/schedule',
+  ]) {
+    await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
+    const state = await themeState();
+    if (state.theme !== 'dark') throw new Error(`${path} lost the dark theme`);
+    if (state.bgLuminance > 0.12) throw new Error(`${path} did not darken`);
+    if (!state.colorScheme.includes('dark')) {
+      throw new Error(`${path} did not set color-scheme for native controls`);
+    }
+    if (state.headingContrast !== null && state.headingContrast < 4.5) {
+      throw new Error(
+        `${path} heading contrast only ${state.headingContrast.toFixed(2)}:1`,
+      );
+    }
+  }
+});
+
+await step('admin screens render in dark for a Master', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Master' }).click();
+  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+
+  const state = await themeState();
+  if (state.theme !== 'dark') throw new Error('admin lost the dark theme');
+  if (state.headingContrast < 4.5) {
+    throw new Error(`admin heading contrast only ${state.headingContrast.toFixed(2)}:1`);
+  }
+  await page.screenshot({ path: `${shots}/11-dark-admin.png`, fullPage: false });
+});
+
+await step('the job card preview stays light, because it represents paper', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1054/review`, { waitUntil: 'networkidle' });
+  const documentRgb = await page.evaluate(
+    (toRgbSrc) => {
+      const toRgb = eval(toRgbSrc);
+      const article = document.querySelector('article[data-theme="light"]');
+      return article === null ? null : toRgb(getComputedStyle(article).backgroundColor);
+    },
+    TO_RGB,
+  );
+  if (documentRgb === null) throw new Error('job card document not found');
+  if (documentRgb.r < 240 || documentRgb.g < 240 || documentRgb.b < 240) {
+    throw new Error(`job card should stay white, got ${JSON.stringify(documentRgb)}`);
+  }
+  await page.screenshot({ path: `${shots}/12-dark-jobcard.png`, fullPage: false });
+});
+
+await step('returning to light mode persists across a reload', async () => {
+  await page.getByRole('button', { name: /Switch to light mode/ }).first().click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const after = await page.evaluate(() => document.documentElement.dataset.theme);
+  if (after !== 'light') throw new Error(`expected light after reload, got ${after}`);
+
+  const state = await themeState();
+  if (state.bgLuminance < 0.7) throw new Error('light mode did not restore');
+});
+
 await browser.close();
 
 console.log('\n=== SUMMARY ===');

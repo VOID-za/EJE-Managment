@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { AppProvider } from '@/providers/AppProvider';
+import { THEME_BOOT_SCRIPT } from '@/lib/theme';
 import './globals.css';
 
 const inter = Inter({
@@ -34,7 +35,17 @@ export const viewport: Viewport = {
 };
 
 const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
-  <html lang="en-ZA" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+  <html
+    lang="en-ZA"
+    // Rendered light; the boot script below corrects this before first paint if
+    // the viewer has chosen otherwise, so the theme never flashes.
+    data-theme="light"
+    className={`${inter.variable} ${jetbrainsMono.variable}`}
+    suppressHydrationWarning
+  >
+    <head>
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+    </head>
     <body className="min-h-dvh antialiased">
       <AppProvider>{children}</AppProvider>
     </body>

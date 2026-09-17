@@ -28,7 +28,7 @@ export const JobProgressRail = ({ status }: { readonly status: JobStatus }) => {
                   interrupted
                     ? 'bg-amber-eje-50 text-amber-eje-700 ring-1 ring-amber-eje-200'
                     : active
-                      ? 'bg-eje-600 text-white'
+                      ? 'bg-action text-white'
                       : done
                         ? 'bg-verdant-50 text-verdant-700'
                         : 'bg-steel-100 text-steel-400',
@@ -43,7 +43,7 @@ export const JobProgressRail = ({ status }: { readonly status: JobStatus }) => {
                         ? 'bg-white/25 text-white'
                         : done
                           ? 'bg-verdant-500 text-white'
-                          : 'bg-white text-steel-400',
+                          : 'bg-surface text-steel-400',
                   )}
                 >
                   {done ? <Icon name="check" className="size-3" /> : index + 1}

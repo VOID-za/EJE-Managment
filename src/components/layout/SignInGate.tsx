@@ -6,6 +6,7 @@ import { Avatar, Badge, Button, Icon } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
 import { Logo } from './Logo';
+import { ThemeToggle } from './ThemeToggle';
 
 /**
  * Demonstration sign-in.
@@ -22,7 +23,7 @@ export const SignInGate = () => {
   const visible = users.filter((user) => user.role === role && user.active);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-steel-900 lg:flex-row">
+    <div className="flex min-h-dvh flex-col bg-chrome lg:flex-row">
       <div className="eje-grid-texture relative flex flex-col justify-between overflow-hidden p-8 lg:w-[46%] lg:p-12">
         <Logo />
 
@@ -33,7 +34,7 @@ export const SignInGate = () => {
           <h1 className="mt-4 text-4xl leading-tight font-bold text-white lg:text-5xl">
             Every job card, from the call-out to the customer signature.
           </h1>
-          <p className="mt-5 text-base leading-relaxed text-steel-300">
+          <p className="mt-5 text-base leading-relaxed text-chrome-muted">
             Breakdowns, installations, services and repairs — captured on site, costed
             automatically and signed off by the customer before the technician leaves.
           </p>
@@ -45,7 +46,7 @@ export const SignInGate = () => {
               'Customer signature and job card issued on the spot',
               'Full audit trail against every job, machine and customer',
             ].map((line) => (
-              <li key={line} className="flex items-start gap-3 text-sm text-steel-300">
+              <li key={line} className="flex items-start gap-3 text-sm text-chrome-muted">
                 <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-eje-500/20 text-eje-300">
                   <Icon name="check" className="size-3.5" />
                 </span>
@@ -55,7 +56,11 @@ export const SignInGate = () => {
           </ul>
         </div>
 
-        <p className="relative text-xs text-steel-500">
+        <div className="relative mb-6">
+          <ThemeToggle />
+        </div>
+
+        <p className="relative text-xs text-chrome-faint">
           Demonstration build · fictional data only · no messages are transmitted
         </p>
       </div>
@@ -89,7 +94,7 @@ export const SignInGate = () => {
                 className={cn(
                   'min-h-10 rounded-[0.45rem] text-sm font-semibold transition-colors',
                   role === option
-                    ? 'bg-white text-steel-900 shadow-sm'
+                    ? 'bg-surface text-steel-900 shadow-sm'
                     : 'text-steel-600 hover:text-steel-800',
                 )}
               >

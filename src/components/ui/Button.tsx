@@ -6,15 +6,15 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    'bg-eje-600 text-white shadow-sm hover:bg-eje-700 active:bg-eje-800 disabled:bg-steel-300 disabled:text-steel-500',
+    'bg-action text-white shadow-sm hover:bg-action-hover active:bg-action-active disabled:bg-steel-300 disabled:text-steel-500',
   secondary:
-    'bg-white text-steel-800 ring-1 ring-inset ring-steel-300 hover:bg-steel-50 active:bg-steel-100 disabled:text-steel-400 disabled:bg-steel-50',
+    'bg-surface text-steel-800 ring-1 ring-inset ring-steel-300 hover:bg-steel-50 active:bg-steel-100 disabled:text-steel-400 disabled:bg-steel-50',
   ghost:
     'bg-transparent text-steel-700 hover:bg-steel-100 active:bg-steel-200 disabled:text-steel-400',
   danger:
-    'bg-signal-600 text-white shadow-sm hover:bg-signal-700 active:bg-signal-700 disabled:bg-steel-300 disabled:text-steel-500',
+    'bg-danger text-white shadow-sm hover:bg-danger-hover active:bg-danger-hover disabled:bg-steel-300 disabled:text-steel-500',
   success:
-    'bg-verdant-600 text-white shadow-sm hover:bg-verdant-700 active:bg-verdant-700 disabled:bg-steel-300 disabled:text-steel-500',
+    'bg-success text-white shadow-sm hover:bg-success-hover active:bg-success-hover disabled:bg-steel-300 disabled:text-steel-500',
 };
 
 /** Sizes keep a minimum 44px target so the UI stays usable with gloves on a tablet. */

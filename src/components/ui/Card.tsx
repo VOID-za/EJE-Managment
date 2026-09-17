@@ -10,7 +10,7 @@ export interface CardProps {
 export const Card = ({ children, className, padded = true }: CardProps) => (
   <section
     className={cn(
-      'rounded-[var(--radius-card)] border border-steel-200 bg-white shadow-[var(--shadow-card)]',
+      'rounded-[var(--radius-card)] border border-steel-200 bg-surface shadow-[var(--shadow-card)]',
       padded && 'p-5',
       className,
     )}

@@ -130,7 +130,7 @@ const LibraryPage = () => {
                 value={term}
                 onChange={(event) => setTerm(event.target.value)}
                 placeholder="Document name, machine model or tag"
-                className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-white pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
               />
             </div>
           </div>
@@ -347,7 +347,11 @@ const DocumentPreview = ({
 
         <SectionHeading title="Preview" className="!mb-0" />
         <div className="rounded-[var(--radius-card)] bg-steel-200/60 p-6">
-          <div className="mx-auto max-w-lg space-y-3 bg-white p-8 shadow-[var(--shadow-card)]">
+          <div
+            // A document preview represents paper, so it stays light in both themes.
+            data-theme="light"
+            className="mx-auto max-w-lg space-y-3 bg-white p-8 shadow-[var(--shadow-card)]"
+          >
             <p className="text-[10px] font-semibold tracking-[0.2em] text-steel-400 uppercase">
               {document.manufacturer}
             </p>

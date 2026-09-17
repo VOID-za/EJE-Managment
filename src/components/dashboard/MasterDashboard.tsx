@@ -161,7 +161,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
               <li key={row.job.id}>
                 <Link
                   href={`/jobs/${row.job.jobNumber}`}
-                  className="flex flex-wrap items-center gap-3 rounded-[var(--radius-control)] border border-signal-200 bg-white px-3 py-2.5 transition-colors hover:border-signal-300"
+                  className="flex flex-wrap items-center gap-3 rounded-[var(--radius-control)] border border-signal-200 bg-surface px-3 py-2.5 transition-colors hover:border-signal-300"
                 >
                   <span className="font-mono text-sm font-semibold text-steel-900">
                     {row.job.jobNumber}

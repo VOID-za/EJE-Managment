@@ -45,7 +45,7 @@ export const StatTile = ({
   const palette = TONES[tone];
 
   const body = (
-    <div className="relative flex h-full items-start gap-4 overflow-hidden rounded-[var(--radius-card)] border border-steel-200 bg-white p-5 shadow-[var(--shadow-card)] transition-shadow group-hover:shadow-[var(--shadow-raised)]">
+    <div className="relative flex h-full items-start gap-4 overflow-hidden rounded-[var(--radius-card)] border border-steel-200 bg-surface p-5 shadow-[var(--shadow-card)] transition-shadow group-hover:shadow-[var(--shadow-raised)]">
       <span
         className={cn('absolute inset-y-0 left-0 w-1', palette.accent)}
         aria-hidden="true"

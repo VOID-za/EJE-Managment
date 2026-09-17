@@ -507,7 +507,7 @@ const LabourDialog = ({
                   'tabular h-12 rounded-[var(--radius-control)] border text-sm font-semibold transition-colors',
                   hours === String(preset)
                     ? 'border-eje-500 bg-eje-50 text-eje-700'
-                    : 'border-steel-300 bg-white text-steel-700 hover:border-steel-400',
+                    : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
                 )}
               >
                 {preset}

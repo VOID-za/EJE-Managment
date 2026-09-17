@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Avatar, Button, Icon } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
+import { ThemeToggleButton } from './ThemeToggle';
 import { userFullName } from '@/domain';
 import { cn } from '@/lib/cn';
 
@@ -25,7 +26,7 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-steel-200 bg-white/85 px-4 backdrop-blur-md lg:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-steel-200 bg-surface/85 px-4 backdrop-blur-md lg:px-6">
       <button
         type="button"
         onClick={onOpenMenu}
@@ -49,12 +50,14 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
           className={cn(
             'h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-steel-50 pr-3 pl-10 text-sm',
             'placeholder:text-steel-400 hover:border-steel-400',
-            'focus:border-eje-500 focus:bg-white focus:ring-2 focus:ring-eje-100 focus:outline-none',
+            'focus:border-eje-500 focus:bg-surface focus:ring-2 focus:ring-eje-100 focus:outline-none',
           )}
         />
       </form>
 
       <div className="ml-auto flex items-center gap-1.5">
+        <ThemeToggleButton />
+
         <Link
           href="/notifications"
           aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}

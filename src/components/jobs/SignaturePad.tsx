@@ -95,7 +95,7 @@ export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) 
         onPointerLeave={end}
         onPointerCancel={end}
         className={cn(
-          'relative h-52 w-full touch-none overflow-hidden rounded-[var(--radius-control)] border-2 border-dashed bg-white select-none',
+          'relative h-52 w-full touch-none overflow-hidden rounded-[var(--radius-control)] border-2 border-dashed bg-surface select-none',
           disabled ? 'cursor-not-allowed border-steel-200 bg-steel-50' : 'cursor-crosshair border-steel-300',
         )}
       >

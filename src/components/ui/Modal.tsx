@@ -68,7 +68,7 @@ export const Modal = ({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          'relative flex max-h-[92vh] w-full flex-col overflow-hidden bg-white shadow-[var(--shadow-overlay)]',
+          'relative flex max-h-[92vh] w-full flex-col overflow-hidden bg-surface shadow-[var(--shadow-overlay)]',
           'rounded-t-2xl sm:rounded-[var(--radius-card)]',
           SIZES[size],
         )}

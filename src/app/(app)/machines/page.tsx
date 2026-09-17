@@ -167,7 +167,7 @@ const MachinesPage = () => {
                 value={term}
                 onChange={(event) => setTerm(event.target.value)}
                 placeholder="Model, serial number, customer or site"
-                className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-white pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
               />
             </div>
           </div>

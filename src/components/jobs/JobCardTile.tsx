@@ -18,7 +18,7 @@ export const JobCardTile = ({ row }: { readonly row: JobListRow }) => {
     <Link
       href={`/jobs/${job.jobNumber}`}
       className={cn(
-        'group relative block overflow-hidden rounded-[var(--radius-card)] border bg-white p-4 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-raised)]',
+        'group relative block overflow-hidden rounded-[var(--radius-card)] border bg-surface p-4 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-raised)]',
         urgent ? 'border-signal-200' : 'border-steel-200',
       )}
     >

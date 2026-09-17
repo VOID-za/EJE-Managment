@@ -132,10 +132,13 @@ situation demands.
 **Administration**: users, job types and their requirements, labour rates, the
 kilometre rate, VAT, checklist versions, document approval.
 
-Change a labour rate and show a job re-pricing. Be straight about the current
-limitation the dialog states: today a rate change re-prices *every* job, including
-closed ones, because jobs do not yet store the rates that applied at signature.
-That is the first item on the Phase 2 list.
+Change a labour rate and show open work re-pricing — then open the job just
+signed and show that its total has **not** moved. Every job freezes the rates it
+was signed at, so a rate change can never reach a signed job card.
+
+Then open **EJE-1044**, the service from six months ago, and show two things: its
+totals are calculated at the older rates it was signed at, and its checklist is
+rendered at version 1.0 while new service jobs use 2.0. History stays as it was.
 
 Close on **Administration → System → Integrations** — every simulated capability
 and what each becomes in production.
@@ -156,6 +159,10 @@ site-specific contacts, machines, full job history.
 
 **"Does it work on a tablet?"** → It was built for one. Resize, or hand them the
 tablet.
+
+**"Can we have a dark mode?"** → Tap the moon in the top bar. Light is the
+default; the choice is remembered. Note that the job card preview stays white —
+it represents the document the customer receives.
 
 **"How long to production?"** → `docs/ARCHITECTURE.md` §6 lists exactly what
 changes and what does not. The business rules, the workflow and every screen stay

@@ -105,7 +105,7 @@ const MachineDetailPage = ({
         actions={
           customer !== null && (
             <Link href={`/customers/${customer.id}`}>
-              <span className="inline-flex h-11 items-center gap-2 rounded-[var(--radius-control)] bg-white px-4 text-sm font-semibold text-steel-800 ring-1 ring-steel-300 ring-inset hover:bg-steel-50">
+              <span className="inline-flex h-11 items-center gap-2 rounded-[var(--radius-control)] bg-surface px-4 text-sm font-semibold text-steel-800 ring-1 ring-steel-300 ring-inset hover:bg-steel-50">
                 <Icon name="customers" className="size-4" />
                 Open customer
               </span>

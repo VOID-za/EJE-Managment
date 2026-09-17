@@ -450,7 +450,7 @@ const ChoiceButtons = ({
             active && choice.tone === 'verdant' && 'border-verdant-500 bg-verdant-500 text-white',
             active && choice.tone === 'signal' && 'border-signal-500 bg-signal-500 text-white',
             active && choice.tone === 'steel' && 'border-steel-500 bg-steel-500 text-white',
-            !active && 'border-steel-200 bg-white text-steel-600 hover:border-steel-400',
+            !active && 'border-steel-200 bg-surface text-steel-600 hover:border-steel-400',
           )}
         >
           {choice.label}
@@ -485,8 +485,8 @@ const YesNoButtons = ({
           className={cn(
             'h-14 rounded-[var(--radius-control)] border-2 text-sm font-bold transition-colors disabled:opacity-60',
             active
-              ? 'border-eje-600 bg-eje-600 text-white'
-              : 'border-steel-200 bg-white text-steel-600 hover:border-steel-400',
+              ? 'border-action bg-action text-white'
+              : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-400',
           )}
         >
           {option.label}
