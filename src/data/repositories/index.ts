@@ -8,6 +8,7 @@ import type {
   CustomerId,
   Job,
   JobId,
+  LeaveRecord,
   Machine,
   MachineId,
   NotificationId,
@@ -97,6 +98,14 @@ export interface NotificationRepository {
   markHandled(id: NotificationId): Promise<void>;
 }
 
+export interface LeaveRepository {
+  /** Every leave record overlapping the given inclusive range. */
+  list(from?: string, to?: string): Promise<readonly LeaveRecord[]>;
+  listForUser(userId: UserId): Promise<readonly LeaveRecord[]>;
+  save(record: LeaveRecord): Promise<LeaveRecord>;
+  remove(id: string): Promise<void>;
+}
+
 export interface SettingsRepository {
   get(): Promise<SystemSettings>;
   save(settings: SystemSettings): Promise<SystemSettings>;
@@ -113,4 +122,5 @@ export interface RepositoryBundle {
   readonly activity: ActivityRepository;
   readonly notifications: NotificationRepository;
   readonly settings: SettingsRepository;
+  readonly leave: LeaveRepository;
 }

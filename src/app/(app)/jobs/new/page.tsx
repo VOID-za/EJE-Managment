@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import {
   asActivityId,
+  checkSchedule,
+  daysBetween,
   asContactId,
   asCustomerId,
   asJobId,
@@ -60,6 +62,7 @@ const NewJobPage = () => {
   const [jobType, setJobType] = useState<JobTypeCode>('breakdown');
   const [priority, setPriority] = useState<JobPriority>('urgent');
   const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledEndDate, setScheduledEndDate] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [faultDescription, setFaultDescription] = useState('');
@@ -132,6 +135,17 @@ const NewJobPage = () => {
     if (faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
+
+    // Service work is booked across a range, so the dates have to make sense.
+    const scheduleViolations = checkSchedule(
+      jobType,
+      scheduledDate.length > 0 ? scheduledDate : null,
+      scheduledEndDate.length > 0 ? scheduledEndDate : null,
+    );
+    const [scheduleProblem] = scheduleViolations;
+    if (scheduleProblem !== undefined) {
+      next.scheduledEndDate = scheduleProblem.message;
+    }
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
@@ -154,6 +168,8 @@ const NewJobPage = () => {
         priority,
         status: 'open',
         scheduledDate: scheduledDate.length > 0 ? scheduledDate : null,
+        scheduledEndDate:
+          definition.schedulesDateRange && scheduledEndDate.length > 0 ? scheduledEndDate : null,
         orderNumber: orderNumber.trim(),
         referenceNumber: referenceNumber.trim(),
         faultDescription: faultDescription.trim(),
@@ -304,6 +320,8 @@ const NewJobPage = () => {
                     const code = event.target.value as JobTypeCode;
                     setJobType(code);
                     setPriority(getJobTypeDefinition(code).defaultPriority);
+                    // Only service work is booked across a range.
+                    if (!getJobTypeDefinition(code).schedulesDateRange) setScheduledEndDate('');
                   }}
                   options={JOB_TYPE_CODES.map((code) => ({
                     value: code,
@@ -321,12 +339,41 @@ const NewJobPage = () => {
                   }))}
                 />
                 <TextField
-                  label="Scheduled date"
+                  label={definition.schedulesDateRange ? 'Scheduled start date' : 'Scheduled date'}
                   type="date"
                   value={scheduledDate}
                   onChange={(event) => setScheduledDate(event.target.value)}
                 />
               </div>
+
+              {definition.schedulesDateRange && (
+                <div className="grid grid-cols-1 gap-4 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 p-4 sm:grid-cols-2">
+                  <TextField
+                    label="Scheduled end date"
+                    type="date"
+                    value={scheduledEndDate}
+                    min={scheduledDate.length > 0 ? scheduledDate : undefined}
+                    onChange={(event) => setScheduledEndDate(event.target.value)}
+                    error={errors.scheduledEndDate}
+                    hint="A service is quoted for a number of days and is booked across a range."
+                  />
+                  <div className="flex items-end pb-1">
+                    <p className="text-sm text-eje-800">
+                      {scheduledDate.length > 0 && scheduledEndDate.length > 0 ? (
+                        <>
+                          Booked for{' '}
+                          <span className="font-semibold">
+                            {daysBetween(scheduledDate, scheduledEndDate) + 1} days
+                          </span>{' '}
+                          on the calendar.
+                        </>
+                      ) : (
+                        'Leave the end date blank for a single-day service.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <TextAreaField
                 label="Fault description / work requested"

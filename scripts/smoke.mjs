@@ -354,6 +354,82 @@ await step('technical library preview', async () => {
   await page.screenshot({ path: `${shots}/08-library.png`, fullPage: false });
 });
 
+await step('calendar shows jobs, multi-day service and leave', async () => {
+  await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });
+
+  // Month view by default, with the seeded multi-day service visible.
+  await page.getByRole('tab', { name: 'Month' }).waitFor({ timeout: 8000 });
+  await page.getByText('EJE-1049').first().waitFor({ timeout: 8000 });
+
+  // A multi-day bar must be visibly wider than a single-day one.
+  // A multi-day bar is legitimately split when it crosses a week boundary, so
+  // compare the widest fragment.
+  const widest = async (selector) => {
+    const boxes = await page.locator(selector).all();
+    let max = 0;
+    for (const box of boxes) {
+      const rect = await box.boundingBox();
+      if (rect !== null) max = Math.max(max, rect.width);
+    }
+    return max;
+  };
+
+  const multiDay = await widest('a[href="/jobs/EJE-1049"]');
+  const single = await widest('a[href="/jobs/EJE-1048"]');
+  if (multiDay === 0 || single === 0) throw new Error('calendar bars not rendered');
+  if (multiDay <= single) {
+    throw new Error(
+      `multi-day service (${multiDay}px) does not span more than a single-day job (${single}px)`,
+    );
+  }
+
+  await page.screenshot({ path: `${shots}/15-calendar-month.png`, fullPage: false });
+});
+
+await step('calendar shows technician leave and sick leave', async () => {
+  const leaveChips = await page.getByText('Leave', { exact: true }).count();
+  const sickChips = await page.getByText('Sick', { exact: true }).count();
+  if (leaveChips === 0) throw new Error('no annual leave on the calendar');
+  if (sickChips === 0) throw new Error('no sick leave on the calendar');
+});
+
+await step('calendar has day, week, month and year views', async () => {
+  for (const view of ['Day', 'Week', 'Year', 'Month']) {
+    await page.getByRole('tab', { name: view }).click();
+    await page.waitForTimeout(250);
+    const selected = await page.getByRole('tab', { name: view }).getAttribute('aria-selected');
+    if (selected !== 'true') throw new Error(`${view} view did not activate`);
+  }
+
+  await page.getByRole('tab', { name: 'Week' }).click();
+  await page.screenshot({ path: `${shots}/16-calendar-week.png`, fullPage: false });
+  await page.getByRole('tab', { name: 'Year' }).click();
+  await page.screenshot({ path: `${shots}/17-calendar-year.png`, fullPage: false });
+});
+
+await step('clicking a day opens the day view with its work and availability', async () => {
+  await page.getByRole('tab', { name: 'Month' }).click();
+  await page.getByRole('button', { name: 'Today' }).click();
+  await page.getByRole('tab', { name: 'Day' }).click();
+  await page.getByRole('heading', { name: /^Scheduled work/ }).waitFor({ timeout: 8000 });
+  await page.getByRole('heading', { name: /^Technician availability/ }).waitFor({
+    timeout: 8000,
+  });
+  await page.screenshot({ path: `${shots}/18-calendar-day.png`, fullPage: false });
+});
+
+await step('Machines is no longer a top-level navigation item', async () => {
+  const machinesNav = await page
+    .locator('nav a[href="/machines"]')
+    .count();
+  if (machinesNav !== 0) throw new Error('Machines is still in the sidebar');
+
+  // The machine screens still work, and search still finds machines.
+  await page.goto(`${BASE}/machines/machine-abc-lv40`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: /Leadwell V-40/ }).waitFor({ timeout: 8000 });
+});
+
 await step('tablet viewport layout', async () => {
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });

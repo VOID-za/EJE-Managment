@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import type { JobListRow } from '@/application/job-view';
 import { Avatar, DataTable, Icon, JobStatusBadge, PriorityBadge, type Column } from '@/components/ui';
+import { jobScheduleWindow } from '@/domain';
 import { formatDate, isOverdue } from '@/lib/format';
 import { JobTypeChip } from './JobTypeChip';
 import { cn } from '@/lib/cn';
@@ -76,15 +77,19 @@ export const JobListTable = ({
           isOverdue(row.job.scheduledDate) &&
           row.job.status !== 'closed' &&
           row.job.status !== 'submitted';
+        const window = jobScheduleWindow(row.job);
         return (
           <span
             className={cn(
-              'tabular inline-flex items-center gap-1.5 text-sm',
+              'tabular inline-flex items-center gap-1.5 text-sm whitespace-nowrap',
               overdue ? 'font-semibold text-signal-600' : 'text-steel-600',
             )}
           >
             {overdue && <Icon name="warning" className="size-3.5" />}
             {formatDate(row.job.scheduledDate)}
+            {window !== null && window.days > 1 && (
+              <span className="text-xs text-steel-400">+{window.days - 1}d</span>
+            )}
           </span>
         );
       },

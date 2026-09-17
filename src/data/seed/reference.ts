@@ -37,6 +37,20 @@ export const timeOffset = (days: number, hours: number, minutes = 0): IsoDateTim
 
 export const TODAY: IsoDate = dateOffset(0);
 
+/**
+ * The next Monday on or after today, plus an optional offset.
+ *
+ * Multi-day service jobs are anchored to a Monday so they render as one
+ * continuous bar in the calendar's month view rather than being split across a
+ * week boundary — which is correct behaviour, but a poor first impression.
+ */
+export const nextMonday = (addDays = 0, weeksAhead = 0): IsoDate => {
+  const date = startOfToday();
+  const daysUntilMonday = (8 - date.getDay()) % 7 || 7;
+  date.setDate(date.getDate() + daysUntilMonday + weeksAhead * 7 + addDays);
+  return toIsoDate(date);
+};
+
 export const seedSettings: SystemSettings = {
   companyName: 'EJE Industrial Electronics',
   companyRegistration: '2004/018273/07',

@@ -12,22 +12,20 @@ export interface NavigationItem {
 /**
  * Navigation is data, not markup, so a role sees exactly the sections its
  * capabilities allow and nothing has to be conditionally hidden in the JSX.
+ *
+ * Machines deliberately have no top-level item. They belong to a site, which
+ * belongs to a customer, and the hierarchy EJE actually works in is
+ * customer -> site -> machine -> job history. The machine screens still exist
+ * and global search still finds a machine directly by serial number.
  */
 export const NAVIGATION: readonly NavigationItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'work' },
   { href: '/jobs', label: 'Jobs', icon: 'jobs', group: 'work' },
-  { href: '/schedule', label: 'Schedule', icon: 'calendar', group: 'work' },
+  { href: '/calendar', label: 'Calendar', icon: 'calendar', group: 'work' },
   {
     href: '/customers',
     label: 'Customers',
     icon: 'customers',
-    capability: 'customers.view',
-    group: 'records',
-  },
-  {
-    href: '/machines',
-    label: 'Machines',
-    icon: 'machines',
     capability: 'customers.view',
     group: 'records',
   },

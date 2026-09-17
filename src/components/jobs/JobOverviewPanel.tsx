@@ -6,6 +6,7 @@ import {
   can,
   contactFullName,
   getJobTypeDefinition,
+  jobScheduleWindow,
   machineDisplayName,
   userFullName,
   type User,
@@ -52,6 +53,7 @@ export const JobOverviewPanel = ({
   const technicians = users.filter((user) => user.role === 'technician' && user.active);
 
   const overdue = isOverdue(job.scheduledDate) && job.status !== 'closed';
+  const scheduleWindow = jobScheduleWindow(job);
 
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
@@ -88,13 +90,25 @@ export const JobOverviewPanel = ({
               { label: 'Job type', value: definition.label },
               { label: 'Priority', value: <PriorityBadge priority={job.priority} size="sm" /> },
               {
-                label: 'Scheduled date',
-                value: (
-                  <span className={overdue ? 'font-semibold text-signal-600' : undefined}>
-                    {formatDate(job.scheduledDate)}
-                    {overdue && ' (overdue)'}
-                  </span>
-                ),
+                label: scheduleWindow !== null && scheduleWindow.days > 1
+                  ? 'Scheduled'
+                  : 'Scheduled date',
+                value:
+                  scheduleWindow !== null && scheduleWindow.days > 1 ? (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className={overdue ? 'font-semibold text-signal-600' : undefined}>
+                        {formatDate(scheduleWindow.start)} – {formatDate(scheduleWindow.end)}
+                      </span>
+                      <Badge tone="blue" size="sm">
+                        {scheduleWindow.days} days
+                      </Badge>
+                    </span>
+                  ) : (
+                    <span className={overdue ? 'font-semibold text-signal-600' : undefined}>
+                      {formatDate(job.scheduledDate)}
+                      {overdue && ' (overdue)'}
+                    </span>
+                  ),
               },
               {
                 label: 'Order number',

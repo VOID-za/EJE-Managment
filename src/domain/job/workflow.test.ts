@@ -31,6 +31,7 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   priority: 'urgent',
   status: 'completion',
   scheduledDate: '2026-09-15',
+  scheduledEndDate: null,
   orderNumber: 'PO-88123',
   referenceNumber: 'REF-2291',
   faultDescription: 'Machine stopped during operation. Spindle fault reported.',

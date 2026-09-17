@@ -15,6 +15,13 @@ export interface JobTypeDefinition {
   readonly checklistRequired: boolean;
   /** At least one job photo is required before completion. */
   readonly photosRequired: boolean;
+  /**
+   * The job is booked across a date range rather than a single day, because the
+   * work is quoted for a number of days.
+   */
+  readonly schedulesDateRange: boolean;
+  /** Labour and travel do not apply to this job type. */
+  readonly capturesLabourAndTravel: boolean;
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
   readonly accent: 'red' | 'blue' | 'green' | 'violet';
@@ -27,6 +34,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     description: 'Unplanned machine failure requiring a reactive site visit.',
     checklistRequired: false,
     photosRequired: false,
+    schedulesDateRange: false,
+    capturesLabourAndTravel: true,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -36,6 +45,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     description: 'Commissioning and hand-over of a machine at a customer site.',
     checklistRequired: true,
     photosRequired: true,
+    schedulesDateRange: false,
+    capturesLabourAndTravel: true,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -45,6 +56,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     description: 'Planned preventative maintenance against the service schedule.',
     checklistRequired: true,
     photosRequired: false,
+    schedulesDateRange: true,
+    capturesLabourAndTravel: true,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -54,6 +67,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     description: 'Workshop or on-site testing and repair of a unit or assembly.',
     checklistRequired: false,
     photosRequired: false,
+    schedulesDateRange: false,
+    capturesLabourAndTravel: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },

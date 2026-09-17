@@ -8,6 +8,7 @@ import type {
   CustomerId,
   Job,
   JobId,
+  LeaveRecord,
   Machine,
   MachineId,
   NotificationId,
@@ -25,6 +26,7 @@ import type {
   DocumentRepository,
   JobFilter,
   JobRepository,
+  LeaveRepository,
   MachineRepository,
   NotificationRepository,
   RepositoryBundle,
@@ -303,6 +305,48 @@ class DemoNotificationRepository implements NotificationRepository {
   }
 }
 
+class DemoLeaveRepository implements LeaveRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  list(from?: string, to?: string): Promise<readonly LeaveRecord[]> {
+    const records = this.context.read().leave;
+    // Overlap, not containment: a leave block that starts before the window and
+    // ends inside it still affects the window.
+    const filtered =
+      from === undefined || to === undefined
+        ? records
+        : records.filter((record) => record.startDate <= to && record.endDate >= from);
+
+    return Promise.resolve(
+      [...filtered].sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    );
+  }
+
+  listForUser(userId: UserId): Promise<readonly LeaveRecord[]> {
+    return Promise.resolve(
+      this.context.read().leave.filter((record) => record.userId === userId),
+    );
+  }
+
+  save(record: LeaveRecord): Promise<LeaveRecord> {
+    this.context.commit((draft) => {
+      const index = draft.leave.findIndex((candidate) => candidate.id === record.id);
+      draft.leave =
+        index === -1
+          ? [...draft.leave, record]
+          : draft.leave.map((candidate) => (candidate.id === record.id ? record : candidate));
+    });
+    return Promise.resolve(record);
+  }
+
+  remove(id: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.leave = draft.leave.filter((candidate) => candidate.id !== id);
+    });
+    return Promise.resolve();
+  }
+}
+
 class DemoSettingsRepository implements SettingsRepository {
   constructor(private readonly context: DemoContext) {}
 
@@ -328,4 +372,5 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   activity: new DemoActivityRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
+  leave: new DemoLeaveRepository(context),
 });

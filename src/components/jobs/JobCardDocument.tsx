@@ -4,6 +4,7 @@ import {
   customerFacingNotes,
   evaluateChecklist,
   getJobTypeDefinition,
+  jobScheduleWindow,
   jobStatusLabel,
   labourRateLabel,
   machineDisplayName,
@@ -28,6 +29,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
   const { job, customer, site, contact, machine, settings, checklistTemplate } = view;
   const totals = calculateJobTotals(job, settings);
   const definition = getJobTypeDefinition(job.jobType);
+  const scheduleWindow = jobScheduleWindow(job);
 
   // Internal notes are EJE-only and must never reach this document. The rule
   // lives in the domain so every surface applies the same one.
@@ -122,7 +124,14 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
           <div className="mt-4">
             <SectionTitle>Job details</SectionTitle>
             <dl className="space-y-0.5 text-steel-600">
-              <Row label="Scheduled" value={formatDate(job.scheduledDate)} />
+              <Row
+                label="Scheduled"
+                value={
+                  scheduleWindow !== null && scheduleWindow.days > 1
+                    ? `${formatDate(scheduleWindow.start)} – ${formatDate(scheduleWindow.end)} (${scheduleWindow.days} days)`
+                    : formatDate(job.scheduledDate)
+                }
+              />
               <Row label="Order number" value={job.orderNumber.length > 0 ? job.orderNumber : '—'} />
               <Row
                 label="Reference"

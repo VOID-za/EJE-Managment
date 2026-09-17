@@ -128,7 +128,16 @@ export interface Job {
   readonly jobType: JobTypeCode;
   readonly priority: JobPriority;
   readonly status: JobStatus;
+  /** First day of the booking. For most job types this is the only date. */
   readonly scheduledDate: IsoDate | null;
+  /**
+   * Last day of the booking, INCLUSIVE.
+   *
+   * Service work is quoted for a number of days, so a service job occupies a
+   * range on the calendar rather than a single day. Null on job types that are
+   * booked for one day; see `JobTypeDefinition.schedulesDateRange`.
+   */
+  readonly scheduledEndDate: IsoDate | null;
   readonly orderNumber: string;
   readonly referenceNumber: string;
   readonly faultDescription: string;

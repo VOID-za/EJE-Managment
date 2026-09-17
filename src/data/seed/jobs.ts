@@ -14,7 +14,7 @@ import {
   type Attachment,
   type Job,
 } from '@/domain';
-import { dateOffset, timeOffset } from './reference';
+import { dateOffset, nextMonday, timeOffset } from './reference';
 
 /**
  * Seeded demo jobs.
@@ -52,6 +52,7 @@ const baseJob = (jobNumber: string): Job => ({
   priority: 'normal',
   status: 'open',
   scheduledDate: null,
+  scheduledEndDate: null,
   orderNumber: '',
   referenceNumber: '',
   faultDescription: '',
@@ -167,7 +168,9 @@ export const seedJobs: readonly Job[] = [
     siteId: asSiteId('site-abc-pta'),
     contactId: asContactId('contact-abc-pta'),
     machineId: asMachineId('machine-abc-st20'),
-    scheduledDate: dateOffset(3),
+    // Anchored to a Monday so the booking renders as one continuous bar.
+    scheduledDate: nextMonday(),
+    scheduledEndDate: nextMonday(2),
     orderNumber: 'PO-88201',
     referenceNumber: 'ABC-SVC-Q3',
     faultDescription:
@@ -292,7 +295,8 @@ export const seedJobs: readonly Job[] = [
     siteId: asSiteId('site-abc-ger'),
     contactId: asContactId('contact-abc-ger'),
     machineId: asMachineId('machine-abc-mcv760'),
-    scheduledDate: dateOffset(0),
+    scheduledDate: dateOffset(-1),
+    scheduledEndDate: dateOffset(1),
     orderNumber: 'PO-88190',
     referenceNumber: 'ABC-SVC-GER-08',
     faultDescription: 'Scheduled preventative service on the MCV-760 machining centre.',
@@ -452,7 +456,8 @@ export const seedJobs: readonly Job[] = [
     siteId: asSiteId('site-highveld-centurion'),
     contactId: asContactId('contact-highveld-main'),
     machineId: asMachineId('machine-highveld-grinder'),
-    scheduledDate: dateOffset(-3),
+    scheduledDate: dateOffset(-4),
+    scheduledEndDate: dateOffset(-3),
     orderNumber: 'PO-77388',
     referenceNumber: 'HAC-SVC-221',
     faultDescription: 'Annual preventative service on the Okamoto surface grinder.',

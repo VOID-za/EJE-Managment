@@ -6,6 +6,7 @@ import type {
   Job,
   Machine,
   Site,
+  LeaveRecord,
   SystemSettings,
 } from '@/domain';
 import {
@@ -14,6 +15,7 @@ import {
   seedCustomers,
   seedJobs,
   seedMachines,
+  seedLeave,
   seedNotifications,
   seedSettings,
   seedSites,
@@ -38,6 +40,7 @@ export interface DemoDatabase {
   machines: Machine[];
   activity: ActivityEvent[];
   notifications: AppNotification[];
+  leave: LeaveRecord[];
   settings: SystemSettings;
   favouriteDocuments: Record<string, string[]>;
   recentDocuments: Record<string, string[]>;
@@ -45,8 +48,14 @@ export interface DemoDatabase {
 
 export const STORAGE_KEY = 'eje.demo.database.v1';
 
-/** Current shape version. A mismatch discards the persisted copy and re-seeds. */
-export const SCHEMA_VERSION = 1;
+/**
+ * Current shape version. A mismatch discards the persisted copy and re-seeds.
+ *
+ * Bump this whenever the stored shape changes, otherwise a browser that has
+ * already run the demo keeps its old snapshot and silently misses new fields.
+ * v2 added technician leave and the service end date.
+ */
+export const SCHEMA_VERSION = 2;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -61,6 +70,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   machines: seedMachines.map((machine) => ({ ...machine })),
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
+  leave: seedLeave.map((record) => ({ ...record })),
   settings: { ...seedSettings },
   favouriteDocuments: {
     'user-tech-sipho': ['doc-lw-v40-electrical', 'doc-fanuc-alarms'],
