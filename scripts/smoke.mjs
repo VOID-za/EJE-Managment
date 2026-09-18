@@ -45,6 +45,18 @@ const step = async (name, fn) => {
   }
 };
 
+const signInAsMasterIfNeeded = async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const heading = await page.locator('h1').first().innerText().catch(() => '');
+  if (heading.includes('Elmarie')) return;
+  if ((await page.getByRole('button', { name: 'Sign out' }).count()) > 0) {
+    await page.getByRole('button', { name: 'Sign out' }).click();
+  }
+  await page.getByRole('tab', { name: 'Master' }).click();
+  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 15000 });
+};
+
 await step('sign in page renders', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Sign in' }).waitFor({ timeout: 10000 });
@@ -1147,21 +1159,6 @@ await step('the machine number is searchable on its own', async () => {
     .first().waitFor({ timeout: 10000 });
 });
 
-await step('a machine with job history is withdrawn, not destroyed', async () => {
-  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: 'Machines' }).click();
-  const card = page.locator('section').filter({ hasText: 'LW-V40-70214' }).last();
-  await card.getByRole('button', { name: 'Remove' }).first().click();
-  await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  await page.getByRole('button', { name: 'Remove' }).last().click();
-  await page.getByText('so the machine is kept', { exact: false })
-    .first().waitFor({ timeout: 10000 });
-
-  // The closed job carried out on it still renders its machine.
-  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
-  await page.getByText('LW-V40-70214').first().waitFor({ timeout: 10000 });
-});
-
 await step('the Coordinator signs in and gets the office, not a technician tablet', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();
@@ -1179,7 +1176,7 @@ await step('the Coordinator reaches Closed Jobs, which is what she invoices from
 
 await step('the Coordinator is offered no Rates & VAT tab, and cannot reach one', async () => {
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: 'Users' }).waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: 'Users', exact: true }).waitFor({ timeout: 10000 });
   if ((await page.getByRole('tab', { name: 'Rates & VAT' }).count()) !== 0) {
     throw new Error('the Coordinator was offered the charge-out rates');
   }
@@ -2007,6 +2004,30 @@ await step('returning to light mode persists across a reload', async () => {
   const state = await themeState();
   if (state.bgLuminance < 0.7) throw new Error('light mode did not restore');
 });
+
+await step('a machine with job history is withdrawn, not destroyed', async () => {
+  /*
+   * Last, deliberately. Withdrawing a machine takes it out of the register, the
+   * pickers and the searches, so running this earlier would change what every
+   * later check is looking at — and a suite that quietly depends on the order
+   * of its own side effects is worse than no suite.
+   */
+  await signInAsMasterIfNeeded();
+
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Machines' }).click();
+  const card = page.locator('section').filter({ hasText: 'LW-V40-70214' }).last();
+  await card.getByRole('button', { name: 'Remove' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('so the machine is kept', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+
+  // The closed job carried out on it still renders its machine.
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByText('LW-V40-70214').first().waitFor({ timeout: 10000 });
+});
+
 
 await browser.close();
 
