@@ -174,6 +174,11 @@ export const WorkCapturePanel = ({
                   </p>
                   <p className="mt-0.5 text-xs text-steel-400">
                     {technicianName(entry.technicianId)}
+                    {/* Said out loud when the office wrote it up for them, so
+                        nobody has to guess whose hours these are. */}
+                    {entry.capturedBy !== entry.technicianId && (
+                      <> · captured by {technicianName(entry.capturedBy)}</>
+                    )}
                   </p>
                 </div>
                 <span className="tabular text-sm font-semibold text-steel-900">

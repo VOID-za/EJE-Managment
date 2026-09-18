@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { getJobTypeDefinition, type Job } from '@/domain';
+import { can, getJobTypeDefinition, type Job } from '@/domain';
 import {
   acceptJob,
   buildSiteLocationMessage,
@@ -14,7 +14,7 @@ import { Badge, Button, ConfirmDialog, Icon, Modal } from '@/components/ui';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Accepting a job, and the site-location offer that follows it.
@@ -43,6 +43,7 @@ export const AcceptJobFlow = ({
   readonly onAccepted: () => void;
 }) => {
   const { operationContext } = useApp();
+  const currentUser = useCurrentUser();
   const operation = useOperation();
   const [locationPrompt, setLocationPrompt] = useState<Job | null>(null);
   const [locationBusy, setLocationBusy] = useState(false);
@@ -137,7 +138,15 @@ export const AcceptJobFlow = ({
           // Offered only once the job is safely accepted, and only where there
           // is a site to travel to: parts are collected from the EJE counter,
           // so a site pin would send the technician nowhere.
-          if (getJobTypeDefinition(job.jobType).visitsSite) {
+          //
+          // And only to somebody who is going to drive there. The office does
+          // not need a pin to a site it is not attending, so the Coordinator is
+          // never asked — she has no `jobs.acceptField` capability, which is
+          // the same thing the operation checks.
+          if (
+            getJobTypeDefinition(job.jobType).visitsSite &&
+            can(currentUser.role, 'jobs.acceptField')
+          ) {
             setLocationOutcome(null);
             setLocationPrompt(acceptedJob);
           } else {

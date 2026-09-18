@@ -21,6 +21,7 @@ interface MachineRow {
   readonly id: string;
   readonly label: string;
   readonly serialNumber: string;
+  readonly machineNumber: string;
   readonly machineType: MachineType;
   readonly manufacturer: string;
   readonly customerName: string;
@@ -47,6 +48,7 @@ const MachinesPage = () => {
       id: machine.id,
       label: machineDisplayName(machine),
       serialNumber: machine.serialNumber,
+      machineNumber: machine.machineNumber,
       machineType: machine.machineType,
       manufacturer: machine.manufacturer,
       customerName:
@@ -73,6 +75,7 @@ const MachinesPage = () => {
           needle.length === 0 ||
           row.label.toLowerCase().includes(needle) ||
           row.serialNumber.toLowerCase().includes(needle) ||
+          row.machineNumber.toLowerCase().includes(needle) ||
           row.customerName.toLowerCase().includes(needle) ||
           row.siteName.toLowerCase().includes(needle),
       );
@@ -84,7 +87,14 @@ const MachinesPage = () => {
       header: 'Machine',
       render: (row) => (
         <div className="min-w-0">
-          <p className="truncate font-semibold text-steel-900">{row.label}</p>
+          <p className="truncate font-semibold text-steel-900">
+            {row.machineNumber.length > 0 && (
+              <Badge tone="blue" size="sm" className="mr-2">
+                {row.machineNumber}
+              </Badge>
+            )}
+            {row.label}
+          </p>
           <p className="truncate font-mono text-xs text-steel-500">{row.serialNumber}</p>
         </div>
       ),
@@ -144,7 +154,7 @@ const MachinesPage = () => {
       <PageHeader
         title="Machines"
         breadcrumbs={[{ label: 'Machines' }]}
-        description="Every machine EJE maintains, with its serial number, site and service history."
+        description="Every machine EJE maintains, with its serial number, the customer's own machine number, its site and its service history."
       />
 
       <Card className="mb-5">
@@ -166,7 +176,7 @@ const MachinesPage = () => {
                 type="search"
                 value={term}
                 onChange={(event) => setTerm(event.target.value)}
-                placeholder="Model, serial number, customer or site"
+                placeholder="Model, serial number, machine number, customer or site"
                 className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
               />
             </div>

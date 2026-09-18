@@ -79,6 +79,7 @@ const withWork = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
           hours: 3,
           description: 'Fault finding and repair',
           capturedAt: '2026-09-15T09:00:00.000Z',
+          capturedBy: technicianId,
         },
       ],
       ...overrides,

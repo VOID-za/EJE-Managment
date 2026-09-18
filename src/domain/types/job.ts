@@ -198,21 +198,39 @@ export type LabourRateType = 'normal' | 'overtime' | 'double';
 
 export interface LabourEntry {
   readonly id: LineItemId;
+  /** Whose work these hours are — the technician who attended. */
   readonly technicianId: UserId;
   readonly date: IsoDate;
   readonly rateType: LabourRateType;
   readonly hours: number;
   readonly description: string;
   readonly capturedAt: IsoDateTime;
+  /**
+   * Who wrote the line down.
+   *
+   * Usually the same person as `technicianId`. Different when the office
+   * captures a technician's work administratively, which the job card and the
+   * audit trail both have to be able to say.
+   */
+  readonly capturedBy: UserId;
 }
 
 export interface TravelEntry {
   readonly id: LineItemId;
+  /** Whose travel this is. See `LabourEntry.technicianId`. */
   readonly technicianId: UserId;
   readonly date: IsoDate;
   readonly kilometres: number;
   readonly description: string;
   readonly capturedAt: IsoDateTime;
+  /**
+   * Who wrote the line down.
+   *
+   * Usually the same person as `technicianId`. Different when the office
+   * captures a technician's work administratively, which the job card and the
+   * audit trail both have to be able to say.
+   */
+  readonly capturedBy: UserId;
 }
 
 export interface PartEntry {
@@ -222,7 +240,16 @@ export interface PartEntry {
   readonly quantity: number;
   readonly unitPrice: Cents;
   readonly capturedAt: IsoDateTime;
+  /**
+   * Who wrote the line down.
+   *
+   * Usually the same person as `technicianId`. Different when the office
+   * captures a technician's work administratively, which the job card and the
+   * audit trail both have to be able to say.
+   */
+  readonly capturedBy: UserId;
 }
+
 
 export interface JobNote {
   readonly id: string;

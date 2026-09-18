@@ -210,6 +210,9 @@ export const JobOverviewPanel = ({
                     label: 'Serial number',
                     value: <span className="font-mono">{machine.serialNumber}</span>,
                   },
+                  ...(machine.machineNumber.trim().length > 0
+                    ? [{ label: 'Machine number', value: machine.machineNumber.trim() }]
+                    : []),
                   { label: 'Machine type', value: machine.machineType },
                   { label: 'Control system', value: machine.controlSystem },
                   { label: 'Year', value: String(machine.year) },

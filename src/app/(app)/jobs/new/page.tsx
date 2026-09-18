@@ -18,7 +18,7 @@ import {
   getJobTypeDefinition,
   JOB_TYPE_CODES,
   jobTypeLabel,
-  machineDisplayName,
+  machineLabel,
   PRIORITY_ORDER,
   priorityLabel,
   userFullName,
@@ -318,7 +318,9 @@ const NewJobPage = () => {
                 onChange={(event) => setMachineId(event.target.value)}
                 options={machines.map((machine) => ({
                   value: machine.id,
-                  label: `${machineDisplayName(machine)} — ${machine.serialNumber}`,
+                  // The customer's own machine number leads where they use one:
+                  // the caller says "STM2 is down", not the serial number.
+                  label: `${machineLabel(machine)} — ${machine.serialNumber}`,
                 }))}
               />
             </div>

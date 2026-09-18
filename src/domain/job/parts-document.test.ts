@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildPartsDocument, showsPricesOnCollectionDocument } from './parts-document';
-import { asLineItemId } from '../types/common';
+import { asLineItemId, asUserId } from '../types/common';
 import type { PartEntry } from '../types/job';
 
 /**
@@ -10,6 +10,8 @@ import type { PartEntry } from '../types/job';
  * document withholds prices. The prices themselves must survive on the job for
  * EJE costing — withheld, never deleted.
  */
+const technicianId = asUserId('user-tech-1');
+
 const parts: PartEntry[] = [
   {
     id: asLineItemId('p1'),
@@ -18,6 +20,7 @@ const parts: PartEntry[] = [
     quantity: 2,
     unitPrice: 48500,
     capturedAt: '2026-09-17T10:00:00.000Z',
+    capturedBy: technicianId,
   },
   {
     id: asLineItemId('p2'),
@@ -26,6 +29,7 @@ const parts: PartEntry[] = [
     quantity: 3,
     unitPrice: 42000,
     capturedAt: '2026-09-17T10:05:00.000Z',
+    capturedBy: technicianId,
   },
 ];
 

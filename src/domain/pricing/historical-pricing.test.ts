@@ -52,6 +52,7 @@ const workedJob = (overrides: Partial<Job> = {}) =>
         hours: 4,
         description: 'Spindle drive repair',
         capturedAt: '2026-09-15T09:00:00.000Z',
+        capturedBy: technicianId,
       },
       {
         id: asLineItemId('l2'),
@@ -61,6 +62,7 @@ const workedJob = (overrides: Partial<Job> = {}) =>
         hours: 2,
         description: 'After-hours completion',
         capturedAt: '2026-09-15T18:00:00.000Z',
+        capturedBy: technicianId,
       },
     ],
     travel: [
@@ -71,6 +73,7 @@ const workedJob = (overrides: Partial<Job> = {}) =>
         kilometres: 48,
         description: 'Isando to site and return',
         capturedAt: '2026-09-15T08:00:00.000Z',
+        capturedBy: technicianId,
       },
     ],
     parts: [
@@ -81,6 +84,7 @@ const workedJob = (overrides: Partial<Job> = {}) =>
         quantity: 1,
         unitPrice: 48500,
         capturedAt: '2026-09-15T13:00:00.000Z',
+        capturedBy: technicianId,
       },
     ],
     calloutApplied: true,

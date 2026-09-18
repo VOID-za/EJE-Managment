@@ -34,7 +34,9 @@ const MachineDetailPage = ({
 
     const [customer, sites, jobs] = await Promise.all([
       repos.customers.findById(machine.customerId),
-      repos.customers.listSites(machine.customerId),
+      // Includes a withdrawn site: this machine may be archived itself, and it
+      // still has to say where it stood.
+      repos.customers.listSites(machine.customerId, { includeArchived: true }),
       repos.jobs.list({ machineId: id }),
     ]);
 
@@ -92,9 +94,17 @@ const MachineDetailPage = ({
         }
         meta={
           <div className="flex flex-wrap items-center gap-2">
+            {machine.machineNumber.length > 0 && (
+              <Badge tone="blue">{machine.machineNumber}</Badge>
+            )}
             <Badge tone="outline">
               <span className="font-mono">{machine.serialNumber}</span>
             </Badge>
+            {machine.archivedAt !== null && (
+              <Badge tone="amber" dot>
+                Withdrawn from the register
+              </Badge>
+            )}
             <Badge tone="neutral">{machine.machineType}</Badge>
             <Badge tone="neutral">{machine.controlSystem}</Badge>
             <Badge tone={machine.active ? 'green' : 'neutral'} dot>
@@ -126,6 +136,10 @@ const MachineDetailPage = ({
               {
                 label: 'Serial number',
                 value: <span className="font-mono">{machine.serialNumber}</span>,
+              },
+              {
+                label: 'Machine number',
+                value: machine.machineNumber.length > 0 ? machine.machineNumber : '—',
               },
               { label: 'Machine type', value: machine.machineType },
               { label: 'Control system', value: machine.controlSystem },

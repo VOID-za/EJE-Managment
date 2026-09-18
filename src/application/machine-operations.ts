@@ -67,7 +67,10 @@ const assertSerialFree = async (
   serialNumber: string,
   excludingId?: string,
 ): Promise<void> => {
-  const machines = await context.repos.machines.list();
+  // Archived machines are included: a serial number identifies one physical
+  // asset, and re-adding a withdrawn machine under the same serial would split
+  // its history exactly as a duplicate would.
+  const machines = await context.repos.machines.list({ includeArchived: true });
   const clash = findSerialClash(machines, serialNumber, excludingId);
   if (clash === null) return;
 

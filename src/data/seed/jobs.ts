@@ -206,6 +206,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 52,
         description: 'Isando to Benoni return',
         capturedAt: timeOffset(0, 8, 30),
+        capturedBy: asUserId('user-tech-riaan'),
       },
     ],
     labour: [
@@ -217,6 +218,7 @@ export const seedJobs: readonly Job[] = [
         hours: 2,
         description: 'Tool changer fault finding',
         capturedAt: timeOffset(0, 11),
+        capturedBy: asUserId('user-tech-riaan'),
       },
     ],
     completionReport: {
@@ -290,6 +292,7 @@ export const seedJobs: readonly Job[] = [
         hours: 4,
         description: 'Bench testing of Z-axis drive, fault isolated to output stage',
         capturedAt: timeOffset(-4, 15),
+        capturedBy: asUserId('user-tech-deon'),
       },
     ],
     notes: [
@@ -333,6 +336,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 92,
         description: 'Isando to Centurion return',
         capturedAt: timeOffset(-2, 9),
+        capturedBy: asUserId('user-tech-naledi'),
       },
     ],
     labour: [
@@ -344,6 +348,7 @@ export const seedJobs: readonly Job[] = [
         hours: 3,
         description: 'B-axis fault diagnosis',
         capturedAt: timeOffset(-2, 14),
+        capturedBy: asUserId('user-tech-naledi'),
       },
     ],
     completionReport: {
@@ -376,6 +381,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 34,
         description: 'Isando to Germiston return',
         capturedAt: timeOffset(0, 8, 30),
+        capturedBy: asUserId('user-tech-thabo'),
       },
     ],
     labour: [
@@ -387,6 +393,7 @@ export const seedJobs: readonly Job[] = [
         hours: 4,
         description: 'Preventative service as per the service checklist',
         capturedAt: timeOffset(0, 13),
+        capturedBy: asUserId('user-tech-thabo'),
       },
     ],
     parts: [
@@ -397,6 +404,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 2,
         unitPrice: 18500,
         capturedAt: timeOffset(0, 13, 10),
+        capturedBy: asUserId('user-tech-thabo'),
       },
       {
         id: asLineItemId('prt-1053-2'),
@@ -405,6 +413,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 42000,
         capturedAt: timeOffset(0, 13, 12),
+        capturedBy: asUserId('user-tech-thabo'),
       },
     ],
     completionReport: {
@@ -453,6 +462,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 128,
         description: 'Isando to Vereeniging return',
         capturedAt: timeOffset(-1, 8),
+        capturedBy: asUserId('user-tech-lerato'),
       },
     ],
     labour: [
@@ -464,6 +474,7 @@ export const seedJobs: readonly Job[] = [
         hours: 5,
         description: 'Fault finding and transformer replacement',
         capturedAt: timeOffset(-1, 15),
+        capturedBy: asUserId('user-tech-lerato'),
       },
     ],
     parts: [
@@ -474,6 +485,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 312000,
         capturedAt: timeOffset(-1, 15, 5),
+        capturedBy: asUserId('user-tech-lerato'),
       },
     ],
     completionReport: {
@@ -539,6 +551,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 88,
         description: 'Isando to Centurion return',
         capturedAt: timeOffset(-3, 8),
+        capturedBy: asUserId('user-tech-riaan'),
       },
     ],
     labour: [
@@ -550,6 +563,7 @@ export const seedJobs: readonly Job[] = [
         hours: 3.5,
         description: 'Annual preventative service',
         capturedAt: timeOffset(-3, 14),
+        capturedBy: asUserId('user-tech-riaan'),
       },
     ],
     completionReport: {
@@ -597,6 +611,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 48,
         description: 'Isando to Johannesburg site and return',
         capturedAt: timeOffset(-21, 8),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     labour: [
@@ -608,6 +623,7 @@ export const seedJobs: readonly Job[] = [
         hours: 3,
         description: 'Coolant pump replacement',
         capturedAt: timeOffset(-21, 12),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     parts: [
@@ -618,6 +634,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 486000,
         capturedAt: timeOffset(-21, 12, 5),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     completionReport: {
@@ -666,6 +683,7 @@ export const seedJobs: readonly Job[] = [
         hours: 3,
         description: 'Preventative service',
         capturedAt: timeOffset(-38, 13),
+        capturedBy: asUserId('user-tech-deon'),
       },
     ],
     travel: [
@@ -676,6 +694,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 52,
         description: 'Isando to Benoni return',
         capturedAt: timeOffset(-38, 8),
+        capturedBy: asUserId('user-tech-deon'),
       },
     ],
     completionReport: {
@@ -837,6 +856,7 @@ export const seedJobs: readonly Job[] = [
         hours: 2,
         description: 'Fault-finding on the spindle drive',
         capturedAt: timeOffset(0, 9, 30),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     travel: [
@@ -847,6 +867,7 @@ export const seedJobs: readonly Job[] = [
         kilometres: 62,
         description: 'Isando to Vereeniging',
         capturedAt: timeOffset(0, 7, 40),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     parts: [
@@ -857,6 +878,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 3,
         unitPrice: 18_500,
         capturedAt: timeOffset(0, 10),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     notes: [
@@ -904,6 +926,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 214_000,
         capturedAt: timeOffset(-1, 9, 25),
+        capturedBy: asUserId('user-tech-sipho'),
       },
       {
         id: asLineItemId('prt-1064-2'),
@@ -912,6 +935,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 2,
         unitPrice: 67_500,
         capturedAt: timeOffset(-1, 9, 30),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
   }),
@@ -947,6 +971,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 2,
         unitPrice: 48_500,
         capturedAt: timeOffset(-2, 9),
+        capturedBy: asUserId('user-tech-sipho'),
       },
       {
         id: asLineItemId('prt-1062-2'),
@@ -955,6 +980,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 132_000,
         capturedAt: timeOffset(-2, 9, 5),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     pricingSnapshot: {
@@ -1003,6 +1029,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 1_240_000,
         capturedAt: timeOffset(0, 8, 50),
+        capturedBy: asUserId('user-tech-sipho'),
       },
       {
         id: asLineItemId('prt-1063-2'),
@@ -1011,6 +1038,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 2,
         unitPrice: 386_000,
         capturedAt: timeOffset(0, 8, 55),
+        capturedBy: asUserId('user-tech-sipho'),
       },
     ],
     notes: [
@@ -1074,6 +1102,7 @@ export const seedJobs: readonly Job[] = [
         hours: 3.5,
         description: 'Preventative service',
         capturedAt: timeOffset(-180, 12, 30),
+        capturedBy: asUserId('user-tech-riaan'),
       },
     ],
     checklist: {
@@ -1198,6 +1227,7 @@ export const seedJobs: readonly Job[] = [
         hours: 8,
         description: 'Installation and commissioning',
         capturedAt: timeOffset(-140, 16),
+        capturedBy: asUserId('user-tech-francois'),
       },
       {
         id: asLineItemId('lab-1039-2'),
@@ -1207,6 +1237,7 @@ export const seedJobs: readonly Job[] = [
         hours: 2,
         description: 'Operator familiarisation after hours',
         capturedAt: timeOffset(-140, 16, 5),
+        capturedBy: asUserId('user-tech-francois'),
       },
     ],
     completionReport: {

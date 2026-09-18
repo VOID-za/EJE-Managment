@@ -104,8 +104,9 @@ export const loadCalendar = async (
   const [jobs, customers, sites, machines, users, availability] = await Promise.all([
     repos.jobs.list(),
     repos.customers.list(),
-    repos.customers.listSites(),
-    repos.machines.list(),
+    // Resolution: a scheduled job keeps naming its site and machine.
+    repos.customers.listSites(undefined, { includeArchived: true }),
+    repos.machines.list({ includeArchived: true }),
     repos.users.list(),
     repos.availability.list(range.from, range.to),
   ]);

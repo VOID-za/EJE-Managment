@@ -30,14 +30,22 @@ const text = (value: unknown): string => (typeof value === 'string' ? value : ''
  * v8 -> v9.
  *
  * Adds the customer's office address, the customer's own machine number, the
- * delivery record a job now carries, and the archive marker that lets a site,
- * contact or machine be withdrawn without destroying the jobs that name it.
+ * delivery record a job now carries, the archive marker that lets a site,
+ * contact or machine be withdrawn without destroying the jobs that name it, and
+ * `capturedBy` on every captured line.
  *
  * The office address is taken from the customer's first site, which is where it
  * was in practice before the field existed — a single-site customer's site IS
  * their office. It is editable afterwards, so a customer whose head office is
  * elsewhere is corrected in one place rather than guessed at here.
  */
+const withCapturedBy = (entries: Loose[], fallback: string): Loose[] =>
+  entries.map((entry) =>
+    entry.capturedBy !== undefined
+      ? entry
+      : { ...entry, capturedBy: text(entry.technicianId) || fallback },
+  );
+
 const v8ToV9 = (data: Loose): Loose => {
   const sites = rows(data, 'sites');
 
@@ -67,7 +75,18 @@ const v8ToV9 = (data: Loose): Loose => {
     // A job persisted before delivery was tracked has no delivery record. Null
     // is the honest value: nothing is known about what became of its copy, and
     // a closed job is closed either way.
-    jobs: rows(data, 'jobs').map((job) => ({ delivery: null, ...job })),
+    //
+    // A line captured before the office could capture work administratively was
+    // captured by the technician it is attributed to, so that is who it says
+    // wrote it down. Parts carry no technician, so they fall back to whoever
+    // created the job — the only person the record actually knows about.
+    jobs: rows(data, 'jobs').map((job) => ({
+      delivery: null,
+      ...job,
+      labour: withCapturedBy(rows(job, 'labour'), text(job.createdBy)),
+      travel: withCapturedBy(rows(job, 'travel'), text(job.createdBy)),
+      parts: withCapturedBy(rows(job, 'parts'), text(job.createdBy)),
+    })),
   };
 };
 

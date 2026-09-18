@@ -166,7 +166,15 @@ describe('collecting parts', () => {
     let job = await loadJob(harness, 'EJE-1048');
     // Turn the flagship job into a parts collection to prove the declaration is
     // chosen from the job type rather than hard-coded at the signature step.
-    job = await harness.repos.jobs.save({ ...job, jobType: 'parts', machineId: null });
+    // Unassigned, because a collection is taken by whoever is at the counter —
+    // and because capturing work on somebody else's job is now refused, which
+    // is a separate rule with its own tests.
+    job = await harness.repos.jobs.save({
+      ...job,
+      jobType: 'parts',
+      machineId: null,
+      primaryTechnicianId: null,
+    });
     job = await acceptJob(harness.tech, job);
     job = await addPart(harness.tech, job, {
       partNumber: 'FAN-24V-80',

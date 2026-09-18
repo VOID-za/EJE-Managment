@@ -15,7 +15,10 @@ import {
   describeAvailabilityConflict,
   findJobAvailabilityConflicts,
   getJobTypeDefinition,
+  isAdministrativeCapture,
   isAfterSignature,
+  isJobTechnician,
+  workAttribution,
   transferJobRefusal,
   transferReasonLabel,
   canEditJob,
@@ -80,6 +83,57 @@ const assertEditable = (context: OperationContext, job: Job): void => {
     ],
   );
 };
+
+/**
+ * Whether this person may capture work on THIS job.
+ *
+ * Two questions, not one. Capturing work at all is a capability
+ * (`jobs.captureWork`). Capturing work on a job you are not on is a second one
+ * (`jobs.captureAdministratively`), because that is the office writing up what
+ * a technician telephoned in — a legitimate thing that a technician must not be
+ * able to do to somebody else's job.
+ *
+ * Enforced here rather than by whichever screen happens to call in: hiding a
+ * button is not authorisation.
+ */
+const assertCanCapture = (context: OperationContext, job: Job): void => {
+  if (!can(context.actor.role, 'jobs.captureWork')) {
+    throw new WorkflowError(`You cannot capture work on ${job.jobNumber}.`, [
+      { code: 'not_permitted', message: 'Your role does not capture work on jobs.' },
+    ]);
+  }
+  if (isJobTechnician(context.actor, job)) return;
+  if (can(context.actor.role, 'jobs.captureAdministratively')) return;
+
+  throw new WorkflowError(`${job.jobNumber} is not assigned to you.`, [
+    {
+      code: 'not_on_job',
+      message: 'You can only capture work on a job you are working on.',
+    },
+  ]);
+};
+
+/**
+ * The line-item fields that say whose work it is and who wrote it down.
+ *
+ * Every captured line carries both, so a job card can credit the technician who
+ * attended while the audit trail still shows who sat at the keyboard.
+ */
+const captureAttribution = (
+  context: OperationContext,
+  job: Job,
+): { readonly technicianId: UserId; readonly capturedBy: UserId } => ({
+  technicianId: workAttribution(context.actor, job),
+  capturedBy: context.actor.id,
+});
+
+/** Appended to an audit detail when the office captured somebody else's work. */
+const administrativeNote = (context: OperationContext, job: Job): string =>
+  isAdministrativeCapture(context.actor, job)
+    ? ` Captured administratively by ${userFullName(context.actor)}; the work remains ${
+        job.primaryTechnicianId === null ? 'unassigned' : 'the assigned technician\u2019s'
+      }.`
+    : '';
 
 const transition = (job: Job, to: JobStatus): void => {
   if (!canTransition(job.status, to)) {
@@ -351,9 +405,10 @@ export const addLabour = async (
   input: LabourInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('lab')),
-    technicianId: context.actor.id,
+    ...captureAttribution(context, job),
     date: input.date,
     rateType: input.rateType,
     hours: input.hours,
@@ -366,7 +421,9 @@ export const addLabour = async (
     jobId: job.id,
     type: 'labour_added',
     summary: `Labour captured: ${formatHours(input.hours)} ${labourRateLabel(input.rateType).toLowerCase()}`,
-    detail: input.description.length > 0 ? input.description : 'No description supplied.',
+    detail:
+      (input.description.length > 0 ? input.description : 'No description supplied.') +
+      administrativeNote(context, job),
   });
   return saved;
 };
@@ -383,9 +440,10 @@ export const addTravel = async (
   input: TravelInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('trv')),
-    technicianId: context.actor.id,
+    ...captureAttribution(context, job),
     date: input.date,
     kilometres: input.kilometres,
     description: input.description,
@@ -397,7 +455,9 @@ export const addTravel = async (
     jobId: job.id,
     type: 'travel_added',
     summary: `Travel captured: ${formatKilometres(input.kilometres)}`,
-    detail: input.description.length > 0 ? input.description : 'No description supplied.',
+    detail:
+      (input.description.length > 0 ? input.description : 'No description supplied.') +
+      administrativeNote(context, job),
   });
   return saved;
 };
@@ -416,6 +476,7 @@ export const addPart = async (
   input: PartInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   const entry = {
     id: asLineItemId(context.services.ids.next('prt')),
     partNumber: input.partNumber,
@@ -423,6 +484,7 @@ export const addPart = async (
     quantity: input.quantity,
     unitPrice: input.unitPrice,
     capturedAt: context.services.clock.now(),
+    capturedBy: context.actor.id,
   };
 
   const saved = await context.repos.jobs.save({ ...job, parts: [...job.parts, entry] });
@@ -430,7 +492,7 @@ export const addPart = async (
     jobId: job.id,
     type: 'part_added',
     summary: `Part captured: ${input.partNumber}`,
-    detail: `${input.description}, quantity ${input.quantity}.`,
+    detail: `${input.description}, quantity ${input.quantity}.` + administrativeNote(context, job),
   });
   return saved;
 };
@@ -449,6 +511,7 @@ export const updateLabour = async (
   input: LabourInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
 
   const existing = job.labour.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -487,6 +550,7 @@ export const updateTravel = async (
   input: TravelInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
 
   const existing = job.travel.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -524,6 +588,7 @@ export const updatePart = async (
   input: PartInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
 
   const existing = job.parts.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -565,6 +630,7 @@ export const removeLineItem = async (
   lineId: string,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   const next: Job =
     kind === 'labour'
       ? { ...job, labour: job.labour.filter((entry) => entry.id !== lineId) }
@@ -586,6 +652,7 @@ export const setCalloutApplied = async (
   applied: boolean,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   if (job.calloutApplied === applied) return job;
   return context.repos.jobs.save({ ...job, calloutApplied: applied });
 };
@@ -635,6 +702,7 @@ export const addMedia = async (
   input: MediaInput,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   const stored = await context.services.storage.put(input.fileName, 'image/jpeg', null);
 
   const attachment: Attachment = {
@@ -668,6 +736,7 @@ export const moveToAwaitingSpares = async (
   job: Job,
   reason: string,
 ): Promise<Job> => {
+  assertCanCapture(context, job);
   transition(job, 'awaiting_spares');
 
   const saved = await context.repos.jobs.save({
@@ -685,6 +754,7 @@ export const moveToAwaitingSpares = async (
 };
 
 export const returnToInProgress = async (context: OperationContext, job: Job): Promise<Job> => {
+  assertCanCapture(context, job);
   transition(job, 'in_progress');
 
   const saved = await context.repos.jobs.save({
@@ -702,6 +772,7 @@ export const returnToInProgress = async (context: OperationContext, job: Job): P
 };
 
 export const startCompletion = async (context: OperationContext, job: Job): Promise<Job> => {
+  assertCanCapture(context, job);
   transition(job, 'completion');
 
   const saved = await context.repos.jobs.save({ ...job, status: 'completion' });
@@ -720,6 +791,7 @@ export const saveCompletionReport = async (
   report: JobCompletionReport,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   return context.repos.jobs.save({ ...job, completionReport: report });
 };
 
@@ -730,6 +802,7 @@ export const startChecklist = async (
   template: ChecklistTemplate,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   if (job.checklist !== null) return job;
 
   const responses = template.sections.flatMap((section) =>
@@ -764,6 +837,7 @@ export const answerChecklistItem = async (
   answer: ChecklistAnswer,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -804,6 +878,7 @@ export const addChecklistPhoto = async (
   fileName: string,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -843,6 +918,7 @@ export const completeChecklist = async (
   template: ChecklistTemplate,
 ): Promise<Job> => {
   assertEditable(context, job);
+  assertCanCapture(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
   }
@@ -875,6 +951,7 @@ export const captureSignature = async (
   job: Job,
   input: SignatureInput,
 ): Promise<Job> => {
+  assertCanCapture(context, job);
   const readiness = checkReadyForSignature(job);
   if (!readiness.allowed) {
     throw new WorkflowError(
@@ -928,6 +1005,7 @@ export const captureSignature = async (
 
 /** Moves a job from Completion into the signature step. */
 export const startSignature = async (context: OperationContext, job: Job): Promise<Job> => {
+  assertCanCapture(context, job);
   const readiness = checkReadyForSignature(job);
   if (!readiness.allowed) {
     throw new WorkflowError(

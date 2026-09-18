@@ -266,6 +266,11 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
             title: machineDisplayName(machine),
             rows: [
               { label: 'Serial number', value: machine.serialNumber, mono: true },
+              // Only where the customer has one. Most do not, and an empty row
+              // on a document the customer keeps is worse than no row.
+              ...(machine.machineNumber.trim().length > 0
+                ? [{ label: 'Machine number', value: machine.machineNumber.trim() }]
+                : []),
               { label: 'Machine type', value: machine.machineType },
               { label: 'Control', value: machine.controlSystem },
               { label: 'Year', value: String(machine.year) },

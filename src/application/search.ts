@@ -1,4 +1,4 @@
-import { contactFullName, machineDisplayName, userFullName } from '@/domain';
+import { contactFullName, machineLabel, userFullName } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -118,7 +118,7 @@ export const runSearch = async (
         { field: 'Customer name', value: customer.name },
         { field: 'Account number', value: customer.accountNumber },
         { field: 'VAT number', value: customer.vatNumber },
-        { field: 'Email', value: customer.email },
+        { field: 'Registration number', value: customer.registrationNumber },
         {
           field: 'Contact',
           value: customerContacts.map((contact) => contactFullName(contact)).join(' '),
@@ -169,6 +169,9 @@ export const runSearch = async (
     const matched = firstMatch(
       [
         { field: 'Serial number', value: machine.serialNumber },
+        // The customer's own number is often the ONLY thing they quote on the
+        // telephone — "STM2 is down" — so it has to be searchable.
+        { field: 'Machine number', value: machine.machineNumber },
         { field: 'Model', value: machine.model },
         { field: 'Manufacturer', value: machine.manufacturer },
         { field: 'Machine type', value: machine.machineType },
@@ -181,7 +184,7 @@ export const runSearch = async (
       results.push({
         id: machine.id,
         category: 'machine',
-        title: machineDisplayName(machine),
+        title: machineLabel(machine),
         subtitle: machine.serialNumber,
         detail: `${customer?.name ?? 'Unknown customer'} · ${machine.machineType}`,
         href: `/machines/${machine.id}`,

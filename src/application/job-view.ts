@@ -8,7 +8,7 @@ import type {
   SystemSettings,
   User,
 } from '@/domain';
-import { getJobTypeDefinition } from '@/domain';
+import { getJobTypeDefinition, machineLabel as machineLabelFor } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -56,8 +56,11 @@ export const loadJobView = async (
     repos.customers.findById(job.customerId),
     job.machineId === null ? Promise.resolve(null) : repos.machines.findById(job.machineId),
     repos.settings.get(),
-    repos.customers.listSites(job.customerId),
-    repos.customers.listContacts(job.customerId),
+    // Resolution, not selection: a job must still resolve the site and contact
+    // it was carried out for even after that record has been withdrawn from the
+    // register, or a closed job card would stop rendering.
+    repos.customers.listSites(job.customerId, { includeArchived: true }),
+    repos.customers.listContacts(job.customerId, { includeArchived: true }),
     repos.users.list(),
   ]);
 
@@ -122,8 +125,9 @@ export const loadJobRows = async (
 ): Promise<readonly JobListRow[]> => {
   const [customers, sites, machines, users] = await Promise.all([
     repos.customers.list(),
-    repos.customers.listSites(),
-    repos.machines.list(),
+    // See `loadJobView`: rows resolve archived records too.
+    repos.customers.listSites(undefined, { includeArchived: true }),
+    repos.machines.list({ includeArchived: true }),
     repos.users.list(),
   ]);
 
@@ -139,8 +143,7 @@ export const loadJobRows = async (
       customerName:
         customers.find((candidate) => candidate.id === job.customerId)?.name ?? 'Unknown customer',
       siteName: sites.find((candidate) => candidate.id === job.siteId)?.name ?? '—',
-      machineLabel:
-        machine === undefined ? '—' : `${machine.manufacturer} ${machine.model}`,
+      machineLabel: machine === undefined ? '—' : machineLabelFor(machine),
       machineSerial: machine?.serialNumber ?? '—',
       technicianName:
         technician === undefined ? 'Unassigned' : `${technician.firstName} ${technician.lastName}`,

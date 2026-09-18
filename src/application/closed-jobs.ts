@@ -88,7 +88,8 @@ export const loadClosedJobs = async (
   const [jobs, customers, sites, users] = await Promise.all([
     repos.jobs.list({ statuses: ['closed'] }),
     repos.customers.list(),
-    repos.customers.listSites(),
+    // Closed jobs resolve their site even where it has since been withdrawn.
+    repos.customers.listSites(undefined, { includeArchived: true }),
     repos.users.list(),
   ]);
 
