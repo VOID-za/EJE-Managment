@@ -159,7 +159,22 @@ const labelValueRows = (
   x: number,
   width: number,
 ): void => {
-  const labelWidth = 78;
+  /*
+   * The label column is as wide as the widest label in THIS block, never
+   * narrower than it has always been.
+   *
+   * It was a fixed 78pt, which every label fitted until the customer's machine
+   * number arrived: "Machine number" measures wider than that, so the value was
+   * printed hard against it — "Machine numberMID1" — on the document the
+   * customer keeps. A fixed column cannot be right for labels that are data.
+   * The floor keeps every block whose labels already fit laid out exactly as
+   * before, so no document that renders correctly today moves.
+   */
+  const widest = rows.reduce(
+    (max, row) => Math.max(max, textWidth(row.label, SIZE.body)),
+    0,
+  );
+  const labelWidth = Math.max(78, Math.ceil(widest) + 6);
   for (const row of rows) {
     sheet.need(GAP.line);
     sheet.pdf.text(x, sheet.cursor, row.label, { size: SIZE.body, colour: MUTED });

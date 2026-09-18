@@ -223,3 +223,57 @@ describe('the PDF and the screen render one document', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 });
+
+/**
+ * Labels and their values must not touch.
+ *
+ * The label column was a fixed width that every label happened to fit — until
+ * the customer's own machine number arrived. "Machine number" measures wider
+ * than that column, so on a machine that HAS one the document printed
+ * "Machine numberMID1", with the value hard against the label, on the copy the
+ * customer keeps. Nothing caught it: the geometry check looks for overlap, and
+ * two runs that merely abut do not overlap.
+ *
+ * So this measures the gap. EJE-1039 is the fixture, because its machine is one
+ * of the few with a machine number recorded against it.
+ */
+describe('nothing is printed hard against the thing beside it', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  for (const jobNumber of CLOSED) {
+    it(`${jobNumber} leaves a readable gap between every side-by-side run`, async () => {
+      const report = await inspect(harness, jobNumber);
+
+      const touching: string[] = [];
+      for (const run of report.runs) {
+        for (const other of report.runs) {
+          if (run === other || run.page !== other.page) continue;
+          // Same line, and `other` starts to the right of `run`.
+          if (Math.abs(run.y - other.y) > 1) continue;
+          if (other.x < run.x) continue;
+          const gap = other.x - (run.x + run.width);
+          if (gap >= 0 && gap < 2) {
+            touching.push(`p${run.page}: "${run.value}" → "${other.value}" (gap ${gap.toFixed(2)}pt)`);
+          }
+        }
+      }
+
+      expect(touching, jobNumber).toEqual([]);
+    });
+  }
+
+  it('gives the machine number room, and prints it', async () => {
+    const report = await inspect(harness, 'EJE-1039');
+    const label = report.runs.find((run) => run.value.includes('Machine number'));
+    expect(label, 'EJE-1039 does not print a machine number label').toBeDefined();
+
+    const value = report.runs.find(
+      (run) => run.page === label!.page && Math.abs(run.y - label!.y) <= 1 && run.x > label!.x,
+    );
+    expect(value?.value.trim()).toBe('MID1');
+    expect(value!.x - (label!.x + label!.width)).toBeGreaterThanOrEqual(2);
+  });
+});
