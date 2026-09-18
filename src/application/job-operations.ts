@@ -26,6 +26,7 @@ import {
   siteAddressLine,
   siteNavigationUrl,
   pricingInputsFrom,
+  roleLabel,
   signatureDeclarationFor,
   userFullName,
   type Attachment,
@@ -134,6 +135,53 @@ const administrativeNote = (context: OperationContext, job: Job): string =>
         job.primaryTechnicianId === null ? 'unassigned' : 'the assigned technician\u2019s'
       }.`
     : '';
+
+/**
+ * Whether this person may put somebody on a job, and whether that somebody is
+ * a field technician at all.
+ *
+ * Two separate refusals, both needed. Assigning work is the office's
+ * (`jobs.assign`). And whoever is assigned has to be a person who goes out to
+ * machines (`jobs.acceptField`) — otherwise a Coordinator could be named as
+ * the technician on a breakdown, and the job card would print the office as
+ * having attended a machine they never saw. She is deliberately barred from
+ * ACCEPTING field work; being assigned to it by the back door has to be barred
+ * for the same reason.
+ *
+ * The screens only ever offer technicians. That is convenience, not
+ * authorisation: this is what actually refuses the request.
+ */
+const assertAssignable = async (
+  context: OperationContext,
+  job: Job,
+  technicianId: UserId,
+): Promise<void> => {
+  if (!can(context.actor.role, 'jobs.assign')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be assigned by you.`, [
+      { code: 'not_permitted', message: 'Assigning work to a technician is an office function.' },
+    ]);
+  }
+
+  const target = await context.repos.users.findById(technicianId);
+  if (target === null) {
+    throw new WorkflowError('That account no longer exists.', [
+      { code: 'unknown_user', message: 'Choose a technician who is still on the system.' },
+    ]);
+  }
+  if (!target.active) {
+    throw new WorkflowError(`${userFullName(target)} is disabled.`, [
+      { code: 'user_inactive', message: 'A disabled account cannot be given work.' },
+    ]);
+  }
+  if (!can(target.role, 'jobs.acceptField')) {
+    throw new WorkflowError(`${userFullName(target)} does not carry out field work.`, [
+      {
+        code: 'not_a_field_technician',
+        message: `${roleLabel(target.role)} accounts run the office. A job is assigned to the technician who will attend the machine.`,
+      },
+    ]);
+  }
+};
 
 const transition = (job: Job, to: JobStatus): void => {
   if (!canTransition(job.status, to)) {
@@ -338,6 +386,7 @@ export const assignPrimaryTechnician = async (
   technicianName: string,
 ): Promise<Job> => {
   assertEditable(context, job);
+  await assertAssignable(context, job, technicianId);
   await assertTechnicianAvailable(context, job, technicianId);
   const saved = await context.repos.jobs.save({ ...job, primaryTechnicianId: technicianId });
   await audit(context, {
@@ -357,6 +406,7 @@ export const addAdditionalTechnician = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   if (job.additionalTechnicianIds.includes(technicianId)) return job;
+  await assertAssignable(context, job, technicianId);
   await assertTechnicianAvailable(context, job, technicianId);
 
   const saved = await context.repos.jobs.save({
@@ -792,7 +842,29 @@ export const saveCompletionReport = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
-  return context.repos.jobs.save({ ...job, completionReport: report });
+
+  const changed = (Object.keys(report) as (keyof JobCompletionReport)[]).filter(
+    (field) => report[field] !== job.completionReport[field],
+  );
+  const saved = await context.repos.jobs.save({ ...job, completionReport: report });
+
+  /*
+   * Recorded, because this is the narrative the customer signs for.
+   *
+   * It was previously saved silently, so the most consequential text on a job
+   * card — what was found and what was done — could change with nothing to show
+   * who changed it. Writes that alter nothing are not events, so an autosave
+   * that re-sends the same text does not fill the trail with noise.
+   */
+  if (changed.length > 0) {
+    await audit(context, {
+      jobId: job.id,
+      type: 'completion_report_saved',
+      summary: 'Completion write-up saved',
+      detail: `Updated: ${changed.join(', ')}.` + administrativeNote(context, job),
+    });
+  }
+  return saved;
 };
 
 /** Creates an empty checklist instance bound to the current template version. */
@@ -1209,6 +1281,26 @@ export const issueJobCard = async (
   if (!readiness.allowed) {
     throw new WorkflowError(`${job.jobNumber} cannot be issued yet.`, readiness.violations);
   }
+
+  /*
+   * Refused BEFORE anything is generated or stored.
+   *
+   * A job card issued to nowhere cannot be delivered and cannot be retried —
+   * the recipient is frozen onto the document — so the job would be locked
+   * read-only awaiting a delivery that could never arrive. Checking here, while
+   * the job is still editable, means the office adds the contact's address and
+   * issues normally.
+   */
+  if (customerEmail.trim().length === 0) {
+    throw new WorkflowError(`${job.jobNumber} has nobody to send the job card to.`, [
+      {
+        code: 'recipient_required',
+        message:
+          'No email address is recorded for the contact on this job. Capture one on the customer’s contact, then issue the job card.',
+      },
+    ]);
+  }
+
   transition(job, 'awaiting_delivery');
 
   const now = context.services.clock.now();
@@ -1579,6 +1671,16 @@ export const transferJobToTechnician = async (
   if (receiving === null || !receiving.active) {
     throw new WorkflowError('That technician is not available to take jobs.', [
       { code: 'user_inactive', message: 'The account is disabled.' },
+    ]);
+  }
+  // A transfer hands the field work on, so the receiver has to be someone who
+  // does field work — the same rule as an assignment.
+  if (!can(receiving.role, 'jobs.acceptField')) {
+    throw new WorkflowError(`${userFullName(receiving)} does not carry out field work.`, [
+      {
+        code: 'not_a_field_technician',
+        message: `${roleLabel(receiving.role)} accounts run the office. Transfer the job to the technician who will attend the machine.`,
+      },
     ]);
   }
 

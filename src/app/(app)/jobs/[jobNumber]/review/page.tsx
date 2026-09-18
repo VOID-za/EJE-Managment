@@ -135,7 +135,16 @@ const ReviewJobPage = ({
   }
 
   const { job, customer, contact } = view;
-  const customerEmail = contact?.email ?? customer.email;
+  /*
+   * The job card goes to the person on the job.
+   *
+   * There is deliberately no company-mailbox fallback: email belongs to a named
+   * contact, and sending a signed job card to a shared address nobody in
+   * particular reads is not delivery to the customer. Where the contact has no
+   * address the operation refuses to issue and says whose address is missing,
+   * which is a problem the office fixes in one place.
+   */
+  const customerEmail = contact?.email.trim() ?? '';
   const customerDisplayName = contact === null ? customer.name : contactFullName(contact);
 
   const isMaster = currentUser.role === 'master';
@@ -294,7 +303,11 @@ const ReviewJobPage = ({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
               title="Ready to submit"
-              description={`Submitting generates the signed job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`}
+              description={
+                customerEmail.length === 0
+                  ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
+                  : `Submitting generates the signed job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
+              }
             />
             {canIssue && (
               <Button
@@ -391,7 +404,7 @@ const ReviewJobPage = ({
         <Card className="mb-5 border-steel-200 print:hidden">
           <CardHeader
             title="Issued and closed"
-            description="This is the final job card as it was issued to the customer. Read-only, and unaffected by later rate, price or checklist changes."
+            description="The job card the customer holds is the PDF on file below. Read-only, and unaffected by later rate, price or checklist changes."
             action={
               view.job.finalDocument === null ? undefined : (
                 <Badge tone="green" size="sm" dot>
@@ -400,6 +413,15 @@ const ReviewJobPage = ({
               )
             }
           />
+
+          {/* Said plainly, because the two are not the same artefact: the
+              stored PDF is what was issued and cannot change, while the card
+              rendered below is drawn from the customer record as it stands
+              today — so a machine renamed since will read differently here. */}
+          <p className="mt-3 text-sm text-steel-600">
+            The preview below is drawn from the current customer, site and machine record. Where
+            those have been amended since, the document on file is the one the customer received.
+          </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button

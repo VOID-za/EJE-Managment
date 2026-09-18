@@ -174,13 +174,6 @@ export const NewCustomerDialog = ({
               onChange={(event) => set('phone', event.target.value)}
             />
             <TextField
-              label="Account email"
-              type="email"
-              value={draft.email}
-              onChange={(event) => set('email', event.target.value)}
-              hint="Fallback only: a job card goes to the contact on the job, and to this address when that contact has none."
-            />
-            <TextField
               label="Payment terms"
               value={draft.paymentTerms}
               onChange={(event) => set('paymentTerms', event.target.value)}

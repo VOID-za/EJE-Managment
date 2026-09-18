@@ -1029,6 +1029,28 @@ await step('the overview no longer shows a company email or a head office block'
   }
 });
 
+await step('neither customer form asks for a company email', async () => {
+  // Email belongs to a named contact person, so a company address is not
+  // something the office should be able to capture in the first place.
+  await page.getByRole('button', { name: 'Edit' }).first().click();
+  const editing = page.getByRole('dialog');
+  await editing.waitFor({ timeout: 5000 });
+  if ((await editing.getByLabel('Account email').count()) !== 0) {
+    throw new Error('Edit Customer still asks for a company email');
+  }
+  await editing.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Add customer' }).click();
+  const adding = page.getByRole('dialog');
+  await adding.waitFor({ timeout: 5000 });
+  if ((await adding.getByLabel('Account email').count()) !== 0) {
+    throw new Error('Add Customer still asks for a company email');
+  }
+  await adding.getByRole('button', { name: 'Cancel' }).click();
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+});
+
 await step('the office address is edited on the customer, not on a site', async () => {
   await page.getByRole('button', { name: 'Edit' }).first().click();
   const dialog = page.getByRole('dialog');

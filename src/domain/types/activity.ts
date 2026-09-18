@@ -23,6 +23,8 @@ export type ActivityEventType =
   | 'moved_to_awaiting_spares'
   | 'returned_to_in_progress'
   | 'completion_started'
+  /** The write-up the customer signs for: fault findings, work performed. */
+  | 'completion_report_saved'
   | 'customer_signed'
   | 'pdf_generated'
   | 'job_submitted'

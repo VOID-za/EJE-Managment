@@ -98,11 +98,16 @@ export interface Customer {
   readonly vatNumber: string;
   readonly phone: string;
   /**
-   * The account's correspondence address.
+   * LEGACY. A company-level email address, retained but no longer used.
    *
-   * Not shown on the customer overview — the office works to a named contact,
-   * not to a shared mailbox — but kept as the fallback recipient for a job card
-   * when the contact on the job has no email of their own.
+   * Email belongs to a named contact person: a job card goes to the person who
+   * asked for the work and signed for it, never to a shared company mailbox
+   * that nobody in particular reads. Nothing captures, displays or sends to
+   * this field any more — see `Contact.email`.
+   *
+   * It is kept rather than dropped so that an address captured before that rule
+   * existed is not destroyed; a customer whose only address was this one is
+   * corrected by capturing it on a contact.
    */
   readonly email: string;
   /**

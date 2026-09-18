@@ -13,7 +13,6 @@ interface Draft {
   readonly registrationNumber: string;
   readonly vatNumber: string;
   readonly phone: string;
-  readonly email: string;
   readonly industry: string;
   readonly paymentTerms: string;
   readonly officeAddress: PostalAddress;
@@ -26,7 +25,6 @@ const draftFrom = (customer: Customer): Draft => ({
   registrationNumber: customer.registrationNumber,
   vatNumber: customer.vatNumber,
   phone: customer.phone,
-  email: customer.email,
   industry: customer.industry,
   paymentTerms: customer.paymentTerms,
   officeAddress: customer.officeAddress,
@@ -88,7 +86,6 @@ export const EditCustomerDialog = ({
         registrationNumber: draft.registrationNumber.trim(),
         vatNumber: draft.vatNumber.trim(),
         phone: draft.phone.trim(),
-        email: draft.email.trim(),
         industry: draft.industry.trim(),
         paymentTerms: draft.paymentTerms.trim(),
         officeAddress: {
@@ -171,13 +168,6 @@ export const EditCustomerDialog = ({
               label="Payment terms"
               value={draft.paymentTerms}
               onChange={(event) => set('paymentTerms', event.target.value)}
-            />
-            <TextField
-              label="Account email"
-              type="email"
-              value={draft.email}
-              onChange={(event) => set('email', event.target.value)}
-              hint="Not shown on the overview. Used only as the fallback recipient when the contact on a job has no email."
               containerClassName="sm:col-span-2"
             />
           </div>

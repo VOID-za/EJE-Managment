@@ -3,18 +3,15 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import {
-  asActivityId,
   checkSchedule,
   daysBetween,
   asContactId,
   asCustomerId,
-  asJobId,
   asMachineId,
   asSiteId,
   asUserId,
   can,
   contactFullName,
-  emptyCompletionReport,
   getJobTypeDefinition,
   JOB_TYPE_CODES,
   jobTypeLabel,
@@ -41,7 +38,10 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
+import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { useOperation } from '@/hooks/useOperation';
+import { createJob } from '@/application/job-creation';
 
 /**
  * Job creation.
@@ -53,7 +53,7 @@ import { useApp, useCurrentUser } from '@/providers/AppProvider';
 const NewJobPage = () => {
   const router = useRouter();
   const user = useCurrentUser();
-  const { repositories, services } = useApp();
+  const operation = useOperation();
 
   const [customerId, setCustomerId] = useState('');
   const [siteId, setSiteId] = useState('');
@@ -70,7 +70,6 @@ const NewJobPage = () => {
   const [courierCollection, setCourierCollection] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   const dataQuery = useQuery('jobs:new:data', async (repos) => {
     const [customers, sites, contacts, machines, users, settings] = await Promise.all([
@@ -159,93 +158,30 @@ const NewJobPage = () => {
     if (Object.keys(next).length > 0) return;
 
     setSaving(true);
-    setSaveError(null);
 
-    try {
-      const settings = data.settings;
-      const jobNumber = `${settings.jobNumberPrefix}${settings.nextJobSequence}`;
-      const now = services.clock.now();
-
-      const job: Job = {
-        id: asJobId(`job-${jobNumber.toLowerCase()}`),
-        jobNumber,
+    let created: Job | null = null;
+    const ok = await operation.run(async (context) => {
+      created = await createJob(context, {
         customerId: asCustomerId(customerId),
         siteId: asSiteId(siteId),
         contactId: asContactId(contactId),
         machineId: machineId.length > 0 ? asMachineId(machineId) : null,
         jobType,
         priority,
-        status: 'open',
         scheduledDate: scheduledDate.length > 0 ? scheduledDate : null,
-        scheduledEndDate:
-          definition.schedulesDateRange && scheduledEndDate.length > 0 ? scheduledEndDate : null,
-        orderNumber: orderNumber.trim(),
-        referenceNumber: referenceNumber.trim(),
-        faultDescription: faultDescription.trim(),
-        attachments: [],
+        scheduledEndDate: scheduledEndDate.length > 0 ? scheduledEndDate : null,
+        orderNumber,
+        referenceNumber,
+        faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? asUserId(technicianId) : null,
-        additionalTechnicianIds: [],
-        labour: [],
-        travel: [],
-        parts: [],
-        photos: [],
-        videos: [],
-        notes: [],
-        completionReport: emptyCompletionReport(),
-        checklist: null,
-        signature: null,
-        awaitingSparesReason: '',
-        // A call-out fee is a per-job commercial decision, applied on the job card.
-        calloutApplied: false,
-        courierCollection: jobType === 'parts' ? courierCollection : false,
-        pricingSnapshot: null,
-        finalDocument: null,
-  delivery: null,
-        cancellation: null,
-        deletedAt: null,
-        deletedBy: null,
-        deletionReason: '',
-        createdAt: now,
-        createdBy: user.id,
-        acceptedAt: null,
-        completedAt: null,
-        submittedAt: null,
-        closedAt: null,
-      };
-
-      await repositories.jobs.save(job);
-      await repositories.settings.save({
-        ...settings,
-        nextJobSequence: settings.nextJobSequence + 1,
+        courierCollection,
       });
-      await repositories.activity.append({
-        id: asActivityId(services.ids.next('act')),
-        jobId: job.id,
-        type: 'job_created',
-        summary: 'Job created',
-        detail: `${definition.label} job raised by ${userFullName(user)}.`,
-        actorId: user.id,
-        occurredAt: now,
-      });
+    });
 
-      if (technicianId.length > 0) {
-        const technician = data.users.find((candidate) => candidate.id === technicianId);
-        await repositories.activity.append({
-          id: asActivityId(services.ids.next('act')),
-          jobId: job.id,
-          type: 'job_assigned',
-          summary: `Job assigned to ${technician === undefined ? 'a technician' : userFullName(technician)}`,
-          detail: 'Assigned as primary technician.',
-          actorId: user.id,
-          occurredAt: now,
-        });
-      }
+    setSaving(false);
+    if (!ok || created === null) return;
 
-      router.push(`/jobs/${jobNumber}`);
-    } catch (cause: unknown) {
-      setSaveError(cause instanceof Error ? cause.message : 'The job could not be created.');
-      setSaving(false);
-    }
+    router.push(`/jobs/${(created as Job).jobNumber}`);
   };
 
   return (
@@ -479,10 +415,12 @@ const NewJobPage = () => {
             />
           </Card>
 
-          {saveError !== null && (
-            <p role="alert" className="text-sm font-medium text-signal-600">
-              {saveError}
-            </p>
+          {operation.error !== null && (
+            <RuleViolationNotice
+              title="The job could not be raised"
+              message={operation.error}
+              violations={operation.violations}
+            />
           )}
 
           <div className="flex flex-wrap justify-end gap-2">
