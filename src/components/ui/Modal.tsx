@@ -33,23 +33,42 @@ export const Modal = ({
 }: ModalProps) => {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  /*
+   * The latest `onClose`, without making the effect below depend on it.
+   *
+   * This is the whole bug that made every dialog unusable. The effect moves
+   * focus to the dialog when it opens, and it used to list `onClose` as a
+   * dependency. Callers pass a handler defined in their own render — the normal
+   * thing to do — so its identity changed on every keystroke, the effect re-ran,
+   * and focus was pulled out of the input the user was typing into. One
+   * character per click, in every form in the application.
+   *
+   * A ref keeps Escape closing with the current handler while the effect runs
+   * only when the dialog actually opens or closes.
+   */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKeyDown);
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Once, on open. Never again while the dialog is up.
     dialogRef.current?.focus();
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || typeof document === 'undefined') return null;
 

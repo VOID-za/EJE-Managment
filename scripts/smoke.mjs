@@ -840,6 +840,78 @@ await step('master dashboard and admin', async () => {
   await page.screenshot({ path: `${shots}/07-master-dashboard.png`, fullPage: false });
 });
 
+await step('every dialog field accepts typing, not one character per click', async () => {
+  /*
+   * The regression this guards: the Modal moved focus to itself whenever its
+   * `onClose` prop changed identity, which is every render, so a keystroke
+   * pulled focus out of the input being typed into. Users could enter one
+   * character per click, in every form in the application.
+   *
+   * `fill()` cannot see it — it sets the value in one operation. This types.
+   */
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Add customer' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+
+  const types = async (label, text) => {
+    const field = page.getByLabel(label);
+    await field.click();
+    await field.fill('');
+    await page.keyboard.type(text, { delay: 15 });
+    const value = await field.inputValue();
+    if (value !== text) {
+      throw new Error(`typing into "${label}" produced ${JSON.stringify(value)}`);
+    }
+    // Focus must still be in the field the user is typing into.
+    const tag = await page.evaluate(() => document.activeElement?.tagName ?? 'none');
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+      throw new Error(`focus left the field for ${tag} while typing "${label}"`);
+    }
+  };
+
+  for (const [label, text] of [
+    ['Company name', 'Typing Test Engineering'],
+    ['Account number', 'TYP001'],
+    ['Registration number', '1998/004521/07'],
+    ['VAT number', '4220156783'],
+    ['Industry', 'Precision Engineering'],
+    ['Site name', 'Typing Test Works'],
+    ['City / town', 'Johannesburg'],
+    ['Street address', '14 Anvil Road, Isando'],
+    ['First name', 'Marlene'],
+    ['Surname', 'Fourie'],
+  ]) {
+    await types(label, text);
+  }
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('the same is true of the Add Machine form', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Machines' }).click();
+  await page.getByRole('button', { name: 'Add machine' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+
+  for (const [label, text] of [
+    ['Manufacturer', 'Leadwell'],
+    ['Model', 'V-40 Vertical Machining Centre'],
+    ['Serial number', 'TYPING-TEST-0001'],
+    ['Control system', 'Fanuc 0i-MF'],
+    ['Notes', 'Typed into a textarea, one character at a time.'],
+  ]) {
+    const field = dialog.getByLabel(label);
+    await field.click();
+    await field.fill('');
+    await page.keyboard.type(text, { delay: 15 });
+    const value = await field.inputValue();
+    if (value !== text) {
+      throw new Error(`typing into "${label}" produced ${JSON.stringify(value)}`);
+    }
+  }
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
 await step('a Master can add a customer, with its first site', async () => {
   await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Add customer' }).click();
