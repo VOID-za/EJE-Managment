@@ -84,7 +84,7 @@ const AdminPage = () => {
     return (
       <EmptyState
         title="Administration is restricted"
-        description="Only Masters can access system administration."
+        description="System administration is reached by the office."
         icon={<Icon name="settings" />}
       />
     );

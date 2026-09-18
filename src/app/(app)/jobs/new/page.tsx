@@ -107,7 +107,7 @@ const NewJobPage = () => {
     return (
       <EmptyState
         title="Not available for your role"
-        description="Only Masters can create jobs. Ask the office to raise a job card for you."
+        description="Jobs are raised by the office. Ask them to raise a job card for you."
         icon={<Icon name="warning" />}
       />
     );

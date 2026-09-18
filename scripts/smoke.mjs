@@ -1062,9 +1062,10 @@ await step('a contact nothing refers to is deleted outright', async () => {
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: 'Remove' }).last().click();
   await page.getByText('has been deleted', { exact: false }).first().waitFor({ timeout: 10000 });
-  if ((await page.getByText('Thandi Ngwenya').count()) !== 0) {
-    throw new Error('the deleted contact is still listed');
-  }
+  // Scoped to the list: the outcome banner names the contact too, and matching
+  // that would report a deletion that never happened.
+  const listed = await page.locator('li').filter({ hasText: 'Thandi Ngwenya' }).count();
+  if (listed !== 0) throw new Error('the deleted contact is still listed');
 });
 
 await step('a contact a job has named is kept, not destroyed', async () => {
@@ -1093,7 +1094,12 @@ await step('a site is added and edited', async () => {
   await dialog.getByRole('button', { name: 'Add site' }).click();
   await page.getByRole('heading', { name: 'Boksburg' }).first().waitFor({ timeout: 10000 });
 
-  const card = page.locator('div').filter({ hasText: /^Boksburg/ }).first();
+  // A Card renders as a <section>, so a site card is located by the heading it
+  // contains rather than by guessing at a wrapper div.
+  const card = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Boksburg', exact: true }) })
+    .first();
   await card.getByRole('button', { name: 'Edit' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('dialog').getByLabel('Site access').fill('Report to the weighbridge.');
@@ -1103,7 +1109,10 @@ await step('a site is added and edited', async () => {
 });
 
 await step('a site with machines on it cannot simply be removed', async () => {
-  const johannesburg = page.locator('div').filter({ hasText: /^Johannesburg/ }).first();
+  const johannesburg = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Johannesburg', exact: true }) })
+    .first();
   await johannesburg.getByRole('button', { name: 'Remove' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: 'Remove' }).last().click();
@@ -1115,7 +1124,7 @@ await step('a site with machines on it cannot simply be removed', async () => {
 await step('a machine carries the customer’s own machine number', async () => {
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Machines' }).click();
-  const card = page.locator('div').filter({ hasText: 'LW-V40-70214' }).last();
+  const card = page.locator('section').filter({ hasText: 'LW-V40-70214' }).last();
   await card.getByRole('button', { name: 'Edit' }).first().click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
@@ -1132,7 +1141,8 @@ await step('a machine carries the customer’s own machine number', async () => 
 
 await step('the machine number is searchable on its own', async () => {
   await page.goto(`${BASE}/search?q=STM1`, { waitUntil: 'networkidle' });
-  await page.getByText('Machine number', { exact: false }).first().waitFor({ timeout: 10000 });
+  await page.getByText('Matched machine number', { exact: false })
+    .first().waitFor({ timeout: 10000 });
   await page.getByText('STM1 — Leadwell V-40', { exact: false })
     .first().waitFor({ timeout: 10000 });
 });
@@ -1140,7 +1150,7 @@ await step('the machine number is searchable on its own', async () => {
 await step('a machine with job history is withdrawn, not destroyed', async () => {
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Machines' }).click();
-  const card = page.locator('div').filter({ hasText: 'LW-V40-70214' }).last();
+  const card = page.locator('section').filter({ hasText: 'LW-V40-70214' }).last();
   await card.getByRole('button', { name: 'Remove' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: 'Remove' }).last().click();

@@ -74,8 +74,8 @@ const ClosedJobsPage = () => {
   if (!canView) {
     return (
       <EmptyState
-        title="Closed Jobs is a Master screen"
-        description="Historical jobs are reached through the customer, site or machine you are working on."
+        title="Closed Jobs is an office screen"
+        description="The archive is where the office finds a job card to invoice from. A technician reaches the historical jobs they worked through the customer, site or machine."
         icon={<Icon name="document" />}
       />
     );
