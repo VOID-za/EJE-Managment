@@ -1046,17 +1046,19 @@ export const generateJobCardDocument = async (context: OperationContext, job: Jo
 };
 
 /**
- * Submits and closes the job.
+ * HISTORICAL: hand a signed job card to the office for Master Review.
  *
- * DEMO BEHAVIOUR: the customer email is recorded in the simulated outbox. No
- * message is transmitted.
- */
-/**
- * Technician hand-over: submit the signed job card for Master review.
+ * No longer on the route. A technician who has finished the work and taken the
+ * customer's signature now issues the job card themselves — the office was not
+ * adding anything to a job it had not attended, and the stage only delayed the
+ * customer's copy.
+ *
+ * Kept because jobs that entered Master Review before the change are still
+ * sitting in it and have to be able to move on, and because tests reconstruct
+ * that state to prove they still can. No screen calls it.
  *
  * Deliberately does NOT email the customer and does NOT finalise the customer
- * document. The office reviews and corrects the job card first; the customer
- * only ever sees what a Master has approved.
+ * document: that is `issueJobCard`.
  */
 export const submitForMasterReview = async (
   context: OperationContext,

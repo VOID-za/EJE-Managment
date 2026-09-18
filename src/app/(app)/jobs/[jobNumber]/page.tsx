@@ -175,7 +175,9 @@ const JobDetailPage = ({
                   ? 'Read-only — this job is closed'
                   : job.status === 'cancelled'
                     ? 'Read-only — this job was cancelled'
-                    : 'Read-only — awaiting Master review'}
+                    : job.status === 'awaiting_delivery'
+                      ? 'Read-only — the job card has been issued'
+                      : 'Read-only — awaiting Master review'}
               </Badge>
             )}
           </div>

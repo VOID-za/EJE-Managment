@@ -203,78 +203,53 @@ await step('the signature persists on the job across a reload', async () => {
   await page.getByText('already been signed', { exact: false }).waitFor({ timeout: 10000 });
 });
 
-// ── PART 19: new submission, Master notification, click-through ──────────────
-await step('the technician submits EJE-1065 for Master Review', async () => {
+// ── PART 19: the technician issues the job card themselves ───────────────────
+await step('the technician submits EJE-1065 — no Master Review in the way', async () => {
   await visit('/jobs/EJE-1065/review');
-  await page.getByRole('button', { name: 'Submit for Master Review' }).click();
+  if ((await page.getByRole('button', { name: 'Submit for Master Review' }).count()) !== 0) {
+    throw new Error('Master Review is still on the route for a breakdown job');
+  }
+  await page.getByRole('button', { name: 'Submit job card' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
-  await page.getByRole('button', { name: 'Submit for review' }).click();
-  await page.getByText('With the office for review').first().waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Submit job card' }).last().click();
+  await page.getByText('EJE-1065-Final-Job-Card.pdf', { exact: false })
+    .first().waitFor({ timeout: 25000 });
 });
 
-await step('no customer email was sent at hand-over', async () => {
-  await visit('/notifications?tab=outbox');
-  if ((await page.getByText('EJE-1065-Final-Job-Card.pdf').count()) !== 0) {
-    throw new Error('the technician hand-over emailed the customer');
+await step('the job did NOT close on a send the provider merely accepted', async () => {
+  if ((await page.getByText('successfully delivered', { exact: false }).count()) !== 0) {
+    throw new Error('the screen claimed a delivery that nothing has confirmed');
   }
+  await visit('/jobs/EJE-1065');
+  await assertNot404('the issued job');
+  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 15000 });
 });
 
-await step('every active Master has a notification for the new submission', async () => {
-  for (const master of [
-    { name: 'Elmarie Coetzee', greeting: /Good day, Elmarie/ },
-    { name: 'Johan', greeting: /Good day, Johan/ },
-  ]) {
-    await signInAs('Master', master.name, master.greeting);
-    await visit('/notifications');
-    const rows = page.locator('li').filter({ hasText: 'Job EJE-1065 submitted for review' });
-    const count = await rows.count();
-    if (count !== 1) {
-      throw new Error(`${master.name} has ${count} notifications for EJE-1065, expected exactly 1`);
-    }
-  }
-});
-
-await step('the notification opens the Master Review screen for EJE-1065, not a 404', async () => {
-  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
-  await visit('/notifications');
-  const row = page.locator('li').filter({ hasText: 'Job EJE-1065 submitted for review' }).first();
-  const link = row.getByRole('link').first();
-  const href = await link.getAttribute('href');
-  // The canonical Master Review route, not the job page and not a stale path.
-  if (href !== '/jobs/EJE-1065/review') {
-    throw new Error(`the notification points at ${href}`);
-  }
-  await link.click();
-  await page.waitForURL('**/jobs/EJE-1065/review', { timeout: 20000 });
-  await assertNot404('the Master Review notification');
-  await page.getByRole('heading', { name: 'Review job card' }).waitFor({ timeout: 15000 });
-  await page.getByText('EJE-1065').first().waitFor({ timeout: 10000 });
-});
-
-await step('the review screen offers the Master both editing and issuing', async () => {
-  await page.getByRole('button', { name: 'Submit Job Card' }).waitFor({ timeout: 15000 });
-  // "Edit job" goes back to the job itself, so landing on review costs nothing.
-  const edit = page.getByRole('button', { name: 'Edit job' });
-  await edit.waitFor({ timeout: 10000 });
-  await edit.click();
-  await page.waitForURL('**/jobs/EJE-1065', { timeout: 20000 });
-  await assertNot404('Edit job');
-  await page.getByRole('heading', { name: 'EJE-1065' }).waitFor({ timeout: 15000 });
-  await visit('/jobs/EJE-1065/review');
-});
-
-// ── PART 20: finalise, close, final document ─────────────────────────────────
-await step('the Master issues the job card, which closes the job', async () => {
-  await page.getByRole('button', { name: 'Submit Job Card' }).click();
-  await page.getByRole('dialog').waitFor({ timeout: 10000 });
-  await page.getByRole('button', { name: 'Submit', exact: true }).click();
-  await page.getByText('submitted and closed', { exact: false }).waitFor({ timeout: 20000 });
-});
-
-await step('the customer was emailed exactly once, only now', async () => {
+await step('the customer copy was recorded exactly once, and is pending', async () => {
   await visit('/notifications?tab=outbox');
   const emails = await page.getByText('EJE-1065-Final-Job-Card.pdf').count();
-  if (emails !== 1) throw new Error(`the final job card was emailed ${emails} times, expected 1`);
+  if (emails !== 1) throw new Error(`the final job card was sent ${emails} times, expected 1`);
+  await page.getByText('Delivery pending').first().waitFor({ timeout: 15000 });
+});
+
+// ── PART 20: delivery confirmation closes the job ────────────────────────────
+await step('confirming the delivery is what closes EJE-1065', async () => {
+  const row = page.locator('li').filter({ hasText: 'EJE-1065' }).first();
+  await row.getByRole('button', { name: 'Confirm delivered' }).click();
+  await page.getByText('Delivered').first().waitFor({ timeout: 20000 });
+
+  await visit('/jobs/EJE-1065');
+  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 20000 });
+});
+
+await step('closing did not send the customer a second copy', async () => {
+  await visit('/notifications?tab=outbox');
+  const emails = await page.getByText('EJE-1065-Final-Job-Card.pdf').count();
+  if (emails !== 1) throw new Error(`the final job card was sent ${emails} times, expected 1`);
+});
+
+await step('the office picks the closed job up from here', async () => {
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
 });
 
 await step('EJE-1065 now appears in the Closed Jobs archive', async () => {

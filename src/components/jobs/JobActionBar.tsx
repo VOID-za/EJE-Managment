@@ -142,12 +142,35 @@ export const JobActionBar = ({
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
         leadingIcon={<Icon name="document" className="size-5" />}
       >
-        Review &amp; hand over
+        Review &amp; submit job card
       </Button>,
     );
   }
 
-  // Master review: the office corrects the job card, then issues it.
+  /*
+   * Issued, and waiting on the customer's copy reaching them.
+   *
+   * There is an action here on purpose: the job is not finished, and whoever
+   * opens it needs somewhere to go — the review screen carries the delivery
+   * state and the re-send.
+   */
+  if (job.status === 'awaiting_delivery') {
+    actions.push(
+      <Button
+        key="delivery"
+        size="lg"
+        variant="secondary"
+        onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
+        leadingIcon={<Icon name="mail" className="size-5" />}
+      >
+        {job.delivery?.state === 'failed'
+          ? 'Delivery failed — re-send'
+          : 'Awaiting delivery confirmation'}
+      </Button>,
+    );
+  }
+
+  // Historical Master Review: the office corrects the job card, then issues it.
   if (job.status === 'submitted') {
     actions.push(
       <Button

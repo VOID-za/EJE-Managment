@@ -169,6 +169,17 @@ await step('add labour to EJE-1048', async () => {
   await page.getByText('Replaced spindle drive cooling fan').waitFor({ timeout: 8000 });
 });
 
+await step('the technician adds the part they fitted', async () => {
+  await page.getByRole('button', { name: 'Add part' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Part number').fill('FAN-24V-80');
+  await dialog.getByLabel('Description').fill('Spindle drive cooling fan');
+  await dialog.getByLabel(/Unit price/).fill('485');
+  await dialog.getByRole('button', { name: 'Add part' }).click();
+  await page.getByText('FAN-24V-80').first().waitFor({ timeout: 8000 });
+});
+
 await step('labour line is priced', async () => {
   // 2 hrs at R950.00 normal time = R1 900.00
   await page.getByText(/R\u00a01\u00a0900,00/).first().waitFor({ timeout: 8000 });
@@ -279,60 +290,63 @@ await step('the captured signature is rendered in solid black', async () => {
   }
 });
 
-await step('technician hands over for Master review, WITHOUT emailing', async () => {
-  await page.getByRole('button', { name: 'Submit for Master Review' }).click();
+await step('the technician submits the job card — there is no Master Review', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
+  if (await page.getByRole('button', { name: 'Submit for Master Review' }).count() !== 0) {
+    throw new Error('Master Review is still offered for a breakdown job');
+  }
+  await page.getByRole('button', { name: 'Submit job card' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  await page.getByText('is not emailed at this step', { exact: false }).waitFor();
-  await page.getByRole('button', { name: 'Submit for review' }).click();
-  await page.getByText('With the office for review').first().waitFor({ timeout: 10000 });
-  await page.screenshot({ path: `${shots}/05-master-review.png`, fullPage: false });
+  await page.getByText('closes when the customer', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Submit job card' }).last().click();
+  await page.getByText('EJE-1048-Final-Job-Card.pdf', { exact: false })
+    .first().waitFor({ timeout: 15000 });
+  await page.screenshot({ path: `${shots}/05-submitted.png`, fullPage: false });
 });
 
-await step('no customer email has been sent at technician hand-over', async () => {
-  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
-  const jobCardEmails = await page.getByText('EJE-1048-Final-Job-Card.pdf').count();
-  if (jobCardEmails !== 0) throw new Error('technician hand-over emailed the customer');
-});
+await step('an accepted send does NOT close the job, and does not claim delivery', async () => {
+  const banner = await page.getByText(/is still pending|could not be delivered/i).count();
+  if (banner === 0) {
+    throw new Error('the screen did not say the delivery was pending');
+  }
+  const claimed = await page.getByText('and delivered to', { exact: false }).count();
+  if (claimed !== 0) throw new Error('the screen claimed a delivery nothing has confirmed');
 
-await step('the job is read-only for the technician while in Master review', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByText('awaiting Master review', { exact: false }).first().waitFor({
-    timeout: 8000,
-  });
+  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 8000 });
+  if (await page.getByText('Read-only — this job is closed').count() !== 0) {
+    throw new Error('the job closed on an accepted send');
+  }
 });
 
-await step('a Master can edit the job during review', async () => {
+await step('the issued job is already read-only, before delivery is confirmed', async () => {
+  await page.getByText('Read-only — the job card has been issued', { exact: false })
+    .first().waitFor({ timeout: 8000 });
+});
+
+await step('the customer email is in the outbox, marked pending rather than delivered', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  await page.getByText('Nothing in this list was sent').waitFor({ timeout: 8000 });
+  await page.getByText('EJE-1048-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.getByText('Delivery pending').first().waitFor({ timeout: 8000 });
+});
+
+await step('confirming the delivery is what closes the job', async () => {
+  await page.getByRole('button', { name: 'Confirm delivered' }).first().click();
+  await page.getByText('Delivered').first().waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByText('Read-only — this job is closed', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/05-closed-on-delivery.png`, fullPage: false });
+});
+
+await step('sign in as a Master for the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
-
-  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
-  await page.getByRole('button', { name: 'Add part' }).first().click();
-  await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  const partDialog = page.getByRole('dialog');
-  await partDialog.getByLabel('Part number').fill('FAN-24V-80');
-  await partDialog.getByLabel('Description').fill('Spindle drive cooling fan');
-  await partDialog.getByLabel(/Unit price/).fill('485');
-  await page.getByRole('button', { name: 'Add part' }).last().click();
-  await page.getByText('FAN-24V-80').first().waitFor({ timeout: 8000 });
-});
-
-await step('Master submits, which emails the customer and closes the job', async () => {
-  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Submit Job Card' }).click();
-  await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  await page.getByText('Once submitted, this job will be closed', { exact: false }).waitFor();
-  await page.getByRole('button', { name: 'Submit', exact: true }).click();
-  await page.getByText('submitted and closed', { exact: false }).waitFor({ timeout: 10000 });
-  await page.screenshot({ path: `${shots}/05-submitted.png`, fullPage: false });
-});
-
-await step('the customer email appears only after Master submission', async () => {
-  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
-  await page.getByText('Nothing in this list was sent').waitFor({ timeout: 8000 });
-  await page.getByText('EJE-1048-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
+  await page.waitForURL('**/dashboard', { timeout: 10000 });
 });
 
 await step('closed job is read-only', async () => {
@@ -970,6 +984,217 @@ await step('a duplicate serial number is refused', async () => {
   await dialog.getByText('is already on the register', { exact: false })
     .waitFor({ timeout: 8000 });
   await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('the customer overview shows the company details the office asked for', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Company details' }).waitFor({ timeout: 8000 });
+
+  for (const label of [
+    'Registered name',
+    'Account number',
+    'Registration number',
+    'VAT number',
+    'Office number',
+    'Industry',
+    'Payment terms',
+    'Customer since',
+    'Office address',
+  ]) {
+    if ((await page.getByText(label, { exact: true }).count()) === 0) {
+      throw new Error(`the overview does not show "${label}"`);
+    }
+  }
+});
+
+await step('the overview no longer shows a company email or a head office block', async () => {
+  const body = await page.locator('main').innerText();
+  if (body.includes('maintenance@abc-engineering-demo.co.za')) {
+    throw new Error('the company email is still on the overview');
+  }
+  if ((await page.getByRole('heading', { name: 'Head office contacts' }).count()) !== 0) {
+    throw new Error('the head office contact block is still on the overview');
+  }
+});
+
+await step('the office address is edited on the customer, not on a site', async () => {
+  await page.getByRole('button', { name: 'Edit' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Street address').fill('400 Corporate Park');
+  await dialog.getByLabel('City or town').fill('Sandton');
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByText('400 Corporate Park', { exact: false }).first().waitFor({ timeout: 10000 });
+});
+
+await step('contacts are added, edited and removed on Sites & Contacts', async () => {
+  await page.getByRole('tab', { name: 'Sites & Contacts' }).click();
+  await page.getByRole('heading', { name: 'Head office contacts' }).waitFor({ timeout: 8000 });
+
+  await page.getByRole('button', { name: 'Add contact' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+
+  // Typed rather than filled: the edit dialogs must not lose focus either.
+  for (const [label, text] of [
+    ['First name', 'Thandi'],
+    ['Surname', 'Ngwenya'],
+    ['Role', 'Maintenance Manager'],
+    ['Email', 'thandi@abc-engineering-demo.co.za'],
+    ['Contact number', '+27 82 555 0999'],
+  ]) {
+    const field = dialog.getByLabel(label);
+    await field.click();
+    await field.fill('');
+    await page.keyboard.type(text, { delay: 12 });
+    if ((await field.inputValue()) !== text) {
+      throw new Error(`typing into the contact "${label}" produced the wrong value`);
+    }
+  }
+  await dialog.getByRole('button', { name: 'Add contact' }).click();
+  await page.getByText('Thandi Ngwenya').first().waitFor({ timeout: 10000 });
+  await page.getByText('Maintenance Manager').first().waitFor({ timeout: 8000 });
+});
+
+await step('a contact nothing refers to is deleted outright', async () => {
+  const row = page.locator('li').filter({ hasText: 'Thandi Ngwenya' }).first();
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('has been deleted', { exact: false }).first().waitFor({ timeout: 10000 });
+  if ((await page.getByText('Thandi Ngwenya').count()) !== 0) {
+    throw new Error('the deleted contact is still listed');
+  }
+});
+
+await step('a contact a job has named is kept, not destroyed', async () => {
+  // Pieter Nel signed EJE-1044. Removing him must archive rather than delete.
+  const row = page.locator('li').filter({ hasText: 'Pieter Nel' }).first();
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('so the record is kept', { exact: false }).first()
+    .waitFor({ timeout: 10000 });
+
+  // And the job card that named him still renders.
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByText('Pieter Nel').first().waitFor({ timeout: 10000 });
+});
+
+await step('a site is added and edited', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Sites & Contacts' }).click();
+  await page.getByRole('button', { name: 'Add site' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Site name').fill('Boksburg');
+  await dialog.getByLabel('Street address').fill('14 Anvil Road');
+  await dialog.getByLabel('City or town').fill('Boksburg');
+  await dialog.getByRole('button', { name: 'Add site' }).click();
+  await page.getByRole('heading', { name: 'Boksburg' }).first().waitFor({ timeout: 10000 });
+
+  const card = page.locator('div').filter({ hasText: /^Boksburg/ }).first();
+  await card.getByRole('button', { name: 'Edit' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('dialog').getByLabel('Site access').fill('Report to the weighbridge.');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save changes' }).click();
+  await page.getByText('Report to the weighbridge.', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+});
+
+await step('a site with machines on it cannot simply be removed', async () => {
+  const johannesburg = page.locator('div').filter({ hasText: /^Johannesburg/ }).first();
+  await johannesburg.getByRole('button', { name: 'Remove' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('still has machines on it', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('a machine carries the customer’s own machine number', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Machines' }).click();
+  const card = page.locator('div').filter({ hasText: 'LW-V40-70214' }).last();
+  await card.getByRole('button', { name: 'Edit' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+
+  const field = dialog.getByLabel('Machine number');
+  await field.click();
+  await page.keyboard.type('STM1', { delay: 15 });
+  if ((await field.inputValue()) !== 'STM1') {
+    throw new Error('typing the machine number lost characters');
+  }
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByText('STM1').first().waitFor({ timeout: 10000 });
+});
+
+await step('the machine number is searchable on its own', async () => {
+  await page.goto(`${BASE}/search?q=STM1`, { waitUntil: 'networkidle' });
+  await page.getByText('Machine number', { exact: false }).first().waitFor({ timeout: 10000 });
+  await page.getByText('STM1 — Leadwell V-40', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+});
+
+await step('a machine with job history is withdrawn, not destroyed', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Machines' }).click();
+  const card = page.locator('div').filter({ hasText: 'LW-V40-70214' }).last();
+  await card.getByRole('button', { name: 'Remove' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('so the machine is kept', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+
+  // The closed job carried out on it still renders its machine.
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByText('LW-V40-70214').first().waitFor({ timeout: 10000 });
+});
+
+await step('the Coordinator signs in and gets the office, not a technician tablet', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Coordinator' }).click();
+  await page.getByRole('button', { name: /Christene van Niekerk/ }).click();
+  await page.getByText('Total Open Jobs').waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/07-coordinator-dashboard.png`, fullPage: false });
+});
+
+await step('the Coordinator reaches Closed Jobs, which is what she invoices from', async () => {
+  await page.goto(`${BASE}/jobs/closed`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Closed Jobs' }).first().waitFor({ timeout: 10000 });
+  await page.getByText('EJE-1044').first().waitFor({ timeout: 10000 });
+});
+
+await step('the Coordinator is offered no Rates & VAT tab, and cannot reach one', async () => {
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Users' }).waitFor({ timeout: 10000 });
+  if ((await page.getByRole('tab', { name: 'Rates & VAT' }).count()) !== 0) {
+    throw new Error('the Coordinator was offered the charge-out rates');
+  }
+  if ((await page.getByRole('tab', { name: 'Checklists' }).count()) !== 0) {
+    throw new Error('the Coordinator was offered checklist administration');
+  }
+});
+
+await step('the Coordinator cannot create anything but a technician', async () => {
+  await page.getByRole('button', { name: 'Add user' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  const text = await dialog.innerText();
+  if (!text.includes('Role: Technician')) {
+    throw new Error('the Coordinator was offered a role other than Technician');
+  }
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('back to a Master for the rest of the office journey', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('tab', { name: 'Master' }).click();
+  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
 });
 
 await step('a technician-added machine is waiting for the Master to confirm', async () => {
