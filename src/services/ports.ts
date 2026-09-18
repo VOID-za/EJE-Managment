@@ -152,6 +152,10 @@ export interface StoredDocument {
   readonly fileName: string;
   readonly contentType: string;
   readonly bytes: Uint8Array;
+  /** Which renderer produced them; see `StoredFileRecord`. */
+  readonly renderer?: number;
+  /** True when these bytes are a cache for history, not an issued document. */
+  readonly backfilled?: boolean;
 }
 
 export interface StorageService {

@@ -25,13 +25,22 @@ export interface TextRun {
   readonly width: number;
 }
 
+/** Where the signature mark sits, in PDF user space (origin bottom-left). */
+export interface SignatureBox {
+  readonly page: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface PdfInspection {
   readonly pageCount: number;
   readonly runs: readonly TextRun[];
   /** How the signature is present, or null if it is not present at all. */
   readonly signature:
-    | { readonly kind: 'drawn'; readonly segments: number }
-    | { readonly kind: 'facsimile'; readonly text: string }
+    | { readonly kind: 'drawn'; readonly segments: number; readonly box: SignatureBox }
+    | { readonly kind: 'facsimile'; readonly text: string; readonly box: SignatureBox }
     | null;
   /** Human-readable geometry faults: overruns, collisions, off-page text. */
   readonly problems: readonly string[];
@@ -176,13 +185,44 @@ export const inspectPdf = (
     // The signature: the customer's own drawn geometry, or the script-face
     // facsimile the on-screen card falls back to for a seeded job.
     const script = pageRuns.filter((run) => run.font === 'script');
-    const moves = [...stream.matchAll(/([\d.-]+) ([\d.-]+) m/g)].length;
-    const lines = [...stream.matchAll(/([\d.-]+) ([\d.-]+) l/g)].length;
+    // `1 J 1 j` — round caps and joins — is emitted only for a drawn signature.
+    const signatureStroke = /[\d.]+ w 1 J 1 j ((?:[\d.-]+ [\d.-]+ [ml] ?)+)S/.exec(stream)?.[1] ?? null;
 
     if (script.length > 0) {
-      signature = { kind: 'facsimile', text: script.map((run) => run.value).join(' ') };
-    } else if (moves > 0 && lines >= 2) {
-      signature = { kind: 'drawn', segments: lines };
+      const first = script[0]!;
+      const last = script[script.length - 1]!;
+      signature = {
+        kind: 'facsimile',
+        text: script.map((run) => run.value).join(' '),
+        box: {
+          page,
+          x: first.x,
+          // The baseline is the bottom of the glyphs; allow for descenders.
+          y: first.y - first.size * 0.28,
+          width: last.x + last.width - first.x,
+          height: first.size * 1.15,
+        },
+      };
+    } else if (signatureStroke !== null) {
+      // Only the signature path is stroked with round caps and joins — page
+      // rules are not — so this is the signature's own geometry and not the
+      // bounding box of every line on the page.
+      const points = [...signatureStroke.matchAll(/([\d.-]+) ([\d.-]+) (?:m|l)/g)].map(
+        (match) => ({ x: Number(match[1]), y: Number(match[2]) }),
+      );
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+      signature = {
+        kind: 'drawn',
+        segments: [...signatureStroke.matchAll(/[\d.-]+ [\d.-]+ l/g)].length,
+        box: {
+          page,
+          x: Math.min(...xs),
+          y: Math.min(...ys),
+          width: Math.max(...xs) - Math.min(...xs),
+          height: Math.max(...ys) - Math.min(...ys),
+        },
+      };
     }
   });
 

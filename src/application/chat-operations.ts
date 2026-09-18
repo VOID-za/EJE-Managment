@@ -162,7 +162,18 @@ export const sendMessage = async (
 
   const saved = await context.repos.chat.saveConversation({
     ...conversation,
-    lastMessageAt: now,
+    /*
+     * When the newest message in this thread arrived — which can only move
+     * forward.
+     *
+     * Taking `now` unconditionally let it move BACKWARDS, because a thread can
+     * hold a message stamped later than now: seeded demonstration data used
+     * fixed clock hours, so a demo opened early in the morning had threads
+     * whose last message was still in the future. Replying then dropped the
+     * thread down the list, and the Messages screen opened somebody else's
+     * conversation.
+     */
+    lastMessageAt: now > conversation.lastMessageAt ? now : conversation.lastMessageAt,
   });
 
   // One notification per recipient, pointing at the conversation rather than a

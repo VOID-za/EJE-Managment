@@ -1,5 +1,5 @@
 import { asJobId, asUserId, type ChatMessage, type Conversation } from '@/domain';
-import { timeOffset } from './reference';
+import { minutesAgo, timeOffset } from './reference';
 
 /**
  * Seeded conversations.
@@ -22,8 +22,8 @@ export const seedConversations: readonly Conversation[] = [
     jobId: null,
     jobNumber: null,
     createdBy: asUserId('user-tech-lerato'),
-    createdAt: timeOffset(0, 7, 5),
-    lastMessageAt: timeOffset(0, 7, 12),
+    createdAt: minutesAgo(48),
+    lastMessageAt: minutesAgo(41),
   },
   {
     id: 'conv-deon-office',
@@ -31,8 +31,8 @@ export const seedConversations: readonly Conversation[] = [
     jobId: null,
     jobNumber: null,
     createdBy: asUserId('user-tech-deon'),
-    createdAt: timeOffset(0, 6, 40),
-    lastMessageAt: timeOffset(0, 6, 40),
+    createdAt: minutesAgo(73),
+    lastMessageAt: minutesAgo(73),
   },
   {
     id: 'conv-francois-office',
@@ -83,12 +83,12 @@ export const seedChatMessages: readonly ChatMessage[] = [
     'conv-lerato-office',
     'user-tech-lerato',
     "Morning. I've got a doctor's appointment this morning at 09:00. I should be back on the road by 11:00.",
-    timeOffset(0, 7, 5),
+    minutesAgo(48),
     {
       readBy: MASTERS,
       availabilityRecordId: 'avail-lerato-appointment',
       actionedBy: asUserId('user-master-elmarie'),
-      actionedAt: timeOffset(0, 7, 10),
+      actionedAt: minutesAgo(43),
     },
   ),
   message(
@@ -96,7 +96,7 @@ export const seedChatMessages: readonly ChatMessage[] = [
     'conv-lerato-office',
     'user-master-elmarie',
     'Thanks Lerato — recorded on the calendar. I have moved your 10:00 to the afternoon.',
-    timeOffset(0, 7, 12),
+    minutesAgo(41),
     { readBy: [asUserId('user-tech-lerato')] },
   ),
 
@@ -106,7 +106,7 @@ export const seedChatMessages: readonly ChatMessage[] = [
     'conv-deon-office',
     'user-tech-deon',
     'The N1 is closed at Buccleuch after an accident. I am going to be about an hour late to the Midrand call. Do you want me to phone the customer?',
-    timeOffset(0, 6, 40),
+    minutesAgo(73),
   ),
 
   message(

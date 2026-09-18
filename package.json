@@ -18,7 +18,8 @@
     "redeploy": "npm run clean && npm run build && npm run start",
     "clean": "node scripts/clean.mjs",
     "e2e": "node scripts/workflow-e2e.mjs",
-    "pdf-check": "node scripts/pdf-visual-check.mjs"
+    "pdf-check": "node scripts/pdf-visual-check.mjs",
+    "pdf-pixels": "vitest run --config vitest.browser.config.mts"
   },
   "dependencies": {
     "next": "16.3.5",

@@ -35,6 +35,22 @@ export const timeOffset = (days: number, hours: number, minutes = 0): IsoDateTim
   return date.toISOString();
 };
 
+/**
+ * A moment `minutes` before now.
+ *
+ * For seeded data that has to be in the PAST whenever the demonstration is
+ * opened. `timeOffset(0, 7, 12)` means "today at 07:12", which is two hours in
+ * the future to anyone who starts the demo at five in the morning — and a
+ * conversation whose last message is in the future sorts above one that has
+ * just been sent, so the wrong thread opens.
+ */
+export const minutesAgo = (minutes: number): IsoDateTime => {
+  const date = new Date();
+  date.setSeconds(0, 0);
+  date.setMinutes(date.getMinutes() - minutes);
+  return date.toISOString();
+};
+
 export const TODAY: IsoDate = dateOffset(0);
 
 /**

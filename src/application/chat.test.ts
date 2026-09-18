@@ -432,3 +432,50 @@ describe('historical conversations', () => {
     );
   });
 });
+
+describe('thread ordering', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  it('never moves a thread backwards in the list when somebody replies', async () => {
+    // A thread can legitimately hold a message stamped later than now — seeded
+    // demonstration data did, when the demo was opened early enough in the day.
+    // Replying to it must not drop it below older threads, which is what sent
+    // the Messages screen to the wrong conversation.
+    const conversations = await harness.repos.chat.listConversations(
+      seedUser('user-master-elmarie').id,
+    );
+    const thread = conversations[0]!;
+    const future = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    await harness.repos.chat.saveConversation({ ...thread, lastMessageAt: future });
+
+    const stamped = (await harness.repos.chat.findConversation(thread.id))!;
+    const result = await sendMessage(
+      harness.as(seedUser('user-master-elmarie')),
+      stamped,
+      'Replying to a thread whose last message is in the future.',
+    );
+
+    expect(result.conversation.lastMessageAt).toBe(future);
+    // Still the most recent thread, so the screen still opens it.
+    const reordered = await harness.repos.chat.listConversations(
+      seedUser('user-master-elmarie').id,
+    );
+    expect(reordered[0]?.id).toBe(thread.id);
+  });
+
+  it('seeds no conversation whose last message is in the future', async () => {
+    const now = new Date().toISOString();
+    for (const conversation of await harness.repos.chat.listConversations(
+      seedUser('user-master-elmarie').id,
+    )) {
+      expect(conversation.lastMessageAt <= now, conversation.id).toBe(true);
+      expect(conversation.createdAt <= now, conversation.id).toBe(true);
+    }
+    for (const message of await harness.repos.chat.listMessages('conv-lerato-office')) {
+      expect(message.sentAt <= now, message.id).toBe(true);
+    }
+  });
+});

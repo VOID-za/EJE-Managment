@@ -19,6 +19,19 @@ import type { FinalDocumentSource, StoredDocument } from '@/services/ports';
 export const FINAL_DOCUMENT_CONTENT_TYPE = 'application/pdf';
 
 /**
+ * The current renderer.
+ *
+ * Bump this whenever the rendered document changes. Bytes written when a Master
+ * ISSUED a job card are the historical document and are never re-rendered
+ * whatever this says. Bytes written by the backfill below are a cache for
+ * history that never had an issue event, and are re-rendered when this changes
+ * — otherwise a browser that downloaded a seeded job's card once keeps that
+ * first render for good, faults included, which is exactly what happened when
+ * the signature was missing from it.
+ */
+export const RENDERER_VERSION = 2;
+
+/**
  * Builds the renderer's input from the job's own stored record.
  *
  * Uses `loadJobView`, which resolves the checklist by the version recorded on
@@ -88,6 +101,10 @@ export const storeFinalDocument = async (
     fileName: descriptor.fileName,
     contentType: FINAL_DOCUMENT_CONTENT_TYPE,
     bytes: rendered.bytes,
+    renderer: RENDERER_VERSION,
+    // Issued, not backfilled: these bytes are the historical document and are
+    // never re-rendered, however the renderer changes later.
+    backfilled: false,
   });
   return rendered.pageCount;
 };
@@ -122,7 +139,12 @@ export const loadFinalDocumentFile = async (
   }
 
   const stored = await context.services.storage.getDocument(descriptor.storageKey);
-  if (stored !== null) return stored;
+  if (stored !== null) {
+    const staleBackfill =
+      stored.backfilled === true && stored.renderer !== RENDERER_VERSION;
+    // An issued document is returned exactly as it was written, always.
+    if (!staleBackfill) return stored;
+  }
 
   /*
    * No bytes yet. This is the seeded history: those jobs were closed before
@@ -144,6 +166,8 @@ export const loadFinalDocumentFile = async (
     fileName: descriptor.fileName,
     contentType: FINAL_DOCUMENT_CONTENT_TYPE,
     bytes: rendered.bytes,
+    renderer: RENDERER_VERSION,
+    backfilled: true,
   };
   await context.services.storage.putDocument(document);
   return document;

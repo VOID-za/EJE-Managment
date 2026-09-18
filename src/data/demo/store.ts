@@ -77,6 +77,9 @@ export interface StoredFileRecord {
   readonly fileName: string;
   readonly contentType: string;
   readonly base64: string;
+  /** See `StoredFileRecord` in `src/services/simulated/storage.ts`. */
+  readonly renderer?: number;
+  readonly backfilled?: boolean;
 }
 
 export const STORAGE_KEY = 'eje.demo.database.v1';
@@ -96,8 +99,11 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * notifications an explicit link, and stored the final document on a closed job.
  * v7 added `files`: the stored BYTES of a final document, so downloading a
  * closed job's job card returns the issued file instead of rendering one.
+ * v8 discards those cached bytes: a browser that had downloaded a seeded job's
+ * job card was being handed that first render for good, so renderer fixes never
+ * reached it. Backfilled files now carry the renderer that made them.
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 interface PersistedEnvelope {
   readonly version: number;

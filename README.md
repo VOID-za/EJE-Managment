@@ -182,6 +182,12 @@ npm run pdf-check                    # EJE-1044, the regression fixture
 npm run pdf-check -- EJE-1062        # the parts collection note
 ```
 
+`npm run pdf-pixels` is the automated half of that: it renders the stored
+document through the same PDF engine and counts the dark pixels where the
+signature should be, so a signature that is missing, white, clipped or hidden
+behind the panel fails a test rather than reaching a customer. It needs a
+Chromium install, which is why it is a separate command from `npm test`.
+
 ## What to look at
 
 | Area | Route |
@@ -410,7 +416,16 @@ blocks the Phase 2 architecture; each is a contained change.
   have no bytes until someone first opens their document. That render is a
   one-time backfill from the job's own frozen record — snapshot pricing, the
   checklist version recorded on the job, the captured signature — and is written
-  to storage, so every download after it returns the same file.
+  to storage, so every download after it returns the same file. A backfill
+  records which renderer produced it and is re-rendered if the renderer changes;
+  a document written when a Master *issued* a job card never is, because that
+  one is the historical record.
+- **EJE-1044's signature is a facsimile, not a capture.** Its seeded signature
+  is the label `demo-signature-pieter-nel`, because a seed cannot ship a real
+  person's signature. The screen and the PDF both draw the name in a cursive
+  face for that case, through the same `signatureFacsimile` decision. A job
+  signed in the application stores real stroke geometry, and both draw that
+  instead.
 - **Conversations are one-to-one or office-wide, with no attachments.** A
   technician writes to "the office" (every active Master) or a Master writes to
   one technician; there is no arbitrary group thread, no photo or file on a

@@ -16,6 +16,18 @@ export interface StoredFileRecord {
   readonly fileName: string;
   readonly contentType: string;
   readonly base64: string;
+  /**
+   * The renderer that produced these bytes.
+   *
+   * A file written when a Master ISSUED a job card is the historical document
+   * and is never re-rendered. A file written by the backfill — for a job that
+   * was already closed when the demonstration began, so no issue event ever
+   * happened — is only a cache, and a renderer fix has to be able to reach it.
+   * Without this, a browser that downloaded EJE-1044 once kept being handed
+   * that first render for good, including its faults.
+   */
+  readonly renderer?: number;
+  readonly backfilled?: boolean;
 }
 
 /** Base64 without depending on Node's Buffer or the DOM's atob/btoa. */
@@ -84,6 +96,8 @@ export class SimulatedStorageService implements StorageService {
       fileName: document.fileName,
       contentType: document.contentType,
       base64: bytesToBase64(document.bytes),
+      renderer: document.renderer,
+      backfilled: document.backfilled,
     });
     return Promise.resolve();
   }
@@ -96,6 +110,8 @@ export class SimulatedStorageService implements StorageService {
       fileName: record.fileName,
       contentType: record.contentType,
       bytes: base64ToBytes(record.base64),
+      renderer: record.renderer,
+      backfilled: record.backfilled,
     });
   }
 }

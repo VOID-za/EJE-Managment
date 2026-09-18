@@ -10,6 +10,7 @@ import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
 import type { IsoDate, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import type { AppServices } from './context';
 
 /**
  * A fresh demo backend for a test.
@@ -19,6 +20,7 @@ import type { RepositoryBundle } from '@/data/repositories';
  */
 export interface Harness {
   readonly repos: RepositoryBundle;
+  readonly services: AppServices;
   readonly outbox: SimulatedOutbox;
   /** An operation context acting as the given user. */
   as(user: User): OperationContext;
@@ -54,5 +56,5 @@ export const buildHarness = (): Harness => {
     storage: new SimulatedStorageService(inMemoryFileStore()),
   };
 
-  return { repos, outbox, as: (user) => ({ repos, services, actor: user }) };
+  return { repos, outbox, services, as: (user) => ({ repos, services, actor: user }) };
 };
