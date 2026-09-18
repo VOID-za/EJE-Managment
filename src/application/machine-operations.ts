@@ -199,12 +199,34 @@ export const updateMachine = async (
   }
   await assertSerialFree(context, machine.serialNumber, machine.id);
 
+  // Read before the write, so the trail can name what actually changed rather
+  // than just saying the record was touched.
+  const previous = await context.repos.machines.findById(machine.id);
   const saved = await context.repos.machines.save(machine);
+
+  const changes: string[] = [];
+  if (previous !== null) {
+    if (previous.serialNumber !== saved.serialNumber) {
+      changes.push(`serial ${previous.serialNumber} → ${saved.serialNumber}`);
+    }
+    if (previous.machineNumber !== saved.machineNumber) {
+      changes.push(
+        `machine number ${previous.machineNumber || '—'} → ${saved.machineNumber || '—'}`,
+      );
+    }
+    if (previous.siteId !== saved.siteId) changes.push('site');
+    if (previous.active !== saved.active) {
+      changes.push(saved.active ? 'returned to service' : 'taken out of service');
+    }
+  }
+
   await audit(context, {
     jobId: null,
     type: 'machine_updated',
     summary: `Machine updated: ${machineDisplayName(saved)}`,
-    detail: `Serial ${saved.serialNumber} amended by ${userFullName(context.actor)}.`,
+    detail:
+      `Serial ${saved.serialNumber} amended by ${userFullName(context.actor)}.` +
+      (changes.length > 0 ? ` Changed: ${changes.join(', ')}.` : ''),
   });
   return saved;
 };

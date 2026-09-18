@@ -76,7 +76,7 @@ describe('the customer’s own machine number', () => {
     expect(machines[0]!.title).toBe('STM3 — Mazak QT-200');
   });
 
-  it('can be added to a machine that never had one', async () => {
+  it('can be added to a machine that never had one, and the change is audited', async () => {
     const machine = await createMachine(harness.as(master), NEW_MACHINE);
     const saved = await updateMachine(harness.as(coordinator), {
       ...machine,
@@ -84,6 +84,14 @@ describe('the customer’s own machine number', () => {
     });
     expect(saved.machineNumber).toBe('STM2');
     expect((await stored(harness, machine.id))?.machineNumber).toBe('STM2');
+
+    // The trail names the field that changed, not merely that something did.
+    const events = await harness.repos.activity.list();
+    const entry = events.find(
+      (event) => event.type === 'machine_updated' && event.actorId === coordinator.id,
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.detail).toContain('machine number — → STM2');
   });
 });
 
