@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useState } from 'react';
 import {
   activeUsers,
+  assignableRoles,
   canManageUser,
   disabledUsers,
   manageUserRefusal,
   roleLabel,
   userFullName,
   type User,
+  type UserRole,
 } from '@/domain';
 import {
   createUser,
@@ -27,6 +29,7 @@ import {
   EmptyState,
   Icon,
   Modal,
+  SelectField,
   Tabs,
   TextField,
   type Column,
@@ -285,6 +288,11 @@ const UserEditor = ({
   const [email, setEmail] = useState(existing?.email ?? '');
   const [mobile, setMobile] = useState(existing?.mobile ?? '');
   const [jobTitle, setJobTitle] = useState(existing?.jobTitle ?? 'Field Service Technician');
+  // What this actor is allowed to create. A Master may add an office
+  // Coordinator or a technician; a Coordinator may add technicians only, so she
+  // cannot promote herself by creating an account and signing in as it.
+  const creatable = assignableRoles(actor.role);
+  const [role, setRole] = useState<UserRole>(creatable[0] ?? 'technician');
 
   // Guard in depth: the operations refuse this too, but an unmanageable account
   // should never have reached an editor in the first place.
@@ -299,7 +307,7 @@ const UserEditor = ({
             email,
             mobile,
             jobTitle,
-            role: 'technician',
+            role,
           })
         : updateUser(context, {
             ...existing,
@@ -319,7 +327,7 @@ const UserEditor = ({
       title={existing === null ? 'Add user' : `Edit ${userFullName(existing)}`}
       description={
         existing === null
-          ? 'Creates a technician account. Master accounts are not created from here.'
+          ? 'Creates an account. Master accounts are not created from here.'
           : undefined
       }
       onClose={onClose}
@@ -378,12 +386,26 @@ const UserEditor = ({
           />
         </div>
 
-        {existing === null && (
-          <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-600">
-            <span className="font-semibold text-steel-800">Role: Technician.</span> A Master
-            account cannot be created from this screen.
-          </div>
-        )}
+        {existing === null &&
+          (creatable.length > 1 ? (
+            <SelectField
+              label="Role"
+              value={role}
+              onChange={(event) => setRole(event.target.value as UserRole)}
+              options={creatable.map((candidate) => ({
+                value: candidate,
+                label: roleLabel(candidate),
+              }))}
+              hint="A Master account cannot be created from this screen."
+            />
+          ) : (
+            <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-600">
+              <span className="font-semibold text-steel-800">
+                Role: {roleLabel(creatable[0] ?? 'technician')}.
+              </span>{' '}
+              Office and Master accounts are created by a Master.
+            </div>
+          ))}
         {existing !== null && existing.role === 'master' && (
           <div className="rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 px-4 py-3 text-sm text-eje-800">
             This is your own Master account. The role itself cannot be changed here.

@@ -1,3 +1,4 @@
+import { can } from '../access';
 import type { Machine } from '../types/machine';
 import type { UserRole } from '../types/user';
 
@@ -27,12 +28,15 @@ export const findSerialClash = (
 };
 
 /**
- * A Master adds directly to the official register. A technician's addition is
- * usable straight away but stays unconfirmed until a Master approves it, so
- * nobody on site is blocked waiting for the office.
+ * The office adds directly to the official register. A technician's addition is
+ * usable straight away but stays unconfirmed until the office approves it, so
+ * nobody on site is blocked waiting for a telephone call.
+ *
+ * Keyed on the capability rather than on `role === 'master'`: the register is
+ * the office's to keep, and a Coordinator keeps it just as a Master does.
  */
 export const approvalForNewMachine = (role: UserRole): Machine['approval'] =>
-  role === 'master' ? 'approved' : 'pending_approval';
+  can(role, 'machines.manage') ? 'approved' : 'pending_approval';
 
 export const pendingMachines = (machines: readonly Machine[]): readonly Machine[] =>
   machines.filter((machine) => machine.approval === 'pending_approval');

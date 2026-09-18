@@ -61,6 +61,8 @@ export type ActivityEventType =
   | 'user_disabled'
   | 'user_reactivated'
   | 'password_reset_sent'
+  /** Charge-out rates, travel, call-out or VAT changed. Masters only. */
+  | 'settings_updated'
   | 'document_added'
   | 'document_updated'
   | 'document_versioned'

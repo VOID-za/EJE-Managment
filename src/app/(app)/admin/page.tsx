@@ -30,7 +30,9 @@ import { ChecklistAdminPanel } from '@/components/admin/ChecklistAdminPanel';
 import { LibraryAdminPanel } from '@/components/admin/LibraryAdminPanel';
 import { UsersPanel } from '@/components/admin/UsersPanel';
 import { SIMULATED_CAPABILITIES } from '@/config/demo';
+import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
+import { updateSettings } from '@/application/settings-operations';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { formatCurrency } from '@/lib/format';
 import type { TemplateUsage } from '@/domain';
@@ -94,6 +96,27 @@ const AdminPage = () => {
 
   const data = query.data;
 
+  /*
+   * Which sections this role administers.
+   *
+   * The commercial terms and the standard of work are a Master's; the office
+   * administers people and the library. Every operation behind these tabs
+   * enforces the same capability itself — this only decides what is worth
+   * showing, because a tab that would refuse every action is just a trap.
+   */
+  const tabs = [
+    { id: 'users', label: 'Users' },
+    { id: 'jobTypes', label: 'Job Types & Priorities' },
+    ...(can(user.role, 'settings.manage')
+      ? [
+          { id: 'rates', label: 'Rates & VAT' },
+          { id: 'checklists', label: 'Checklists' },
+        ]
+      : []),
+    ...(can(user.role, 'library.manage') ? [{ id: 'library', label: 'Technical Library' }] : []),
+    { id: 'system', label: 'System' },
+  ];
+
   return (
     <>
       <PageHeader
@@ -103,14 +126,7 @@ const AdminPage = () => {
       />
 
       <Tabs
-        tabs={[
-          { id: 'users', label: 'Users' },
-          { id: 'jobTypes', label: 'Job Types & Priorities' },
-          { id: 'rates', label: 'Rates & VAT' },
-          { id: 'checklists', label: 'Checklists' },
-          { id: 'library', label: 'Technical Library' },
-          { id: 'system', label: 'System' },
-        ]}
+        tabs={tabs}
         activeId={tab}
         onChange={(id) => setTab(id as TabId)}
         className="mb-5"
@@ -122,15 +138,17 @@ const AdminPage = () => {
         <>
           {tab === 'users' && <UsersPanel users={data.users} onChanged={query.refetch} />}
           {tab === 'jobTypes' && <JobTypesPanel />}
-          {tab === 'rates' && <RatesPanel settings={data.settings} onSaved={query.refetch} />}
-          {tab === 'checklists' && (
+          {tab === 'rates' && can(user.role, 'settings.manage') && (
+            <RatesPanel settings={data.settings} onSaved={query.refetch} />
+          )}
+          {tab === 'checklists' && can(user.role, 'settings.manage') && (
             <ChecklistAdminPanel
               templates={data.templates}
               usage={data.usage}
               onChanged={query.refetch}
             />
           )}
-          {tab === 'library' && (
+          {tab === 'library' && can(user.role, 'library.manage') && (
             <LibraryAdminPanel documents={data.documents} onChanged={query.refetch} />
           )}
           {tab === 'system' && (
@@ -227,7 +245,7 @@ const RatesPanel = ({
   readonly settings: SystemSettings;
   readonly onSaved: () => void;
 }) => {
-  const { repositories } = useApp();
+  const operation = useOperation();
   const [draft, setDraft] = useState(() => ({
     normal: (settings.labourRates.normal / 100).toFixed(2),
     overtime: (settings.labourRates.overtime / 100).toFixed(2),
@@ -248,25 +266,36 @@ const RatesPanel = ({
 
   const save = async () => {
     setSaving(true);
-    await repositories.settings.save({
-      ...settings,
-      labourRates: {
-        normal: toCents(draft.normal),
-        overtime: toCents(draft.overtime),
-        double: toCents(draft.double),
-      },
-      calloutRate: toCents(draft.callout),
-      kilometreRate: toCents(draft.kilometre),
-      vatPercentage: Number.parseFloat(draft.vat),
-    });
+    // Through the operation, which is where the Master-only rule is enforced
+    // and where the change is recorded on the audit trail.
+    const ok = await operation.run((context) =>
+      updateSettings(context, {
+        ...settings,
+        labourRates: {
+          normal: toCents(draft.normal),
+          overtime: toCents(draft.overtime),
+          double: toCents(draft.double),
+        },
+        calloutRate: toCents(draft.callout),
+        kilometreRate: toCents(draft.kilometre),
+        vatPercentage: Number.parseFloat(draft.vat),
+      }),
+    );
     setSaving(false);
     setConfirmOpen(false);
+    if (!ok) return;
     setSaved(true);
     onSaved();
   };
 
   return (
     <div className="space-y-5">
+      {operation.error !== null && (
+        <p role="alert" className="text-sm font-medium text-signal-600">
+          {operation.error}
+        </p>
+      )}
+
       <AdminNotice
         title="Changing rates affects every open job"
         body="A rate change re-prices open work immediately. It cannot reach a job the customer has already signed: every job freezes a full copy of the rates at signature and is priced from that copy for the rest of its life."

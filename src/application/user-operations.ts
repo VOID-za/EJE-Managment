@@ -1,8 +1,11 @@
 import {
+  assignableRoles,
   asUserId,
+  can,
   deriveInitials,
   findEmailClash,
   manageUserRefusal,
+  roleLabel,
   userFullName,
   type User,
   type UserRole,
@@ -28,10 +31,18 @@ export interface NewUserInput {
   readonly role: UserRole;
 }
 
-const assertMaster = (context: OperationContext): void => {
-  if (context.actor.role === 'master') return;
-  throw new WorkflowError('Only a Master can manage user accounts.', [
-    { code: 'not_permitted', message: 'User administration is a Master function.' },
+/**
+ * Whether this person administers user accounts at all.
+ *
+ * A capability rather than a role test, because the office administers
+ * technicians and a Master administers the office. WHICH accounts each may
+ * touch is `assertManages` below — this only refuses somebody who has no
+ * business on the Users screen at all.
+ */
+const assertManagesUsers = (context: OperationContext): void => {
+  if (can(context.actor.role, 'users.manageTechnicians')) return;
+  throw new WorkflowError('Only the office can manage user accounts.', [
+    { code: 'not_permitted', message: 'User administration is an office function.' },
   ]);
 };
 
@@ -69,16 +80,25 @@ export const createUser = async (
   context: OperationContext,
   input: NewUserInput,
 ): Promise<User> => {
-  assertMaster(context);
+  assertManagesUsers(context);
 
-  // A Master cannot mint another Master: that is a change to the office itself.
-  if (input.role === 'master') {
-    throw new WorkflowError('A Master account cannot be created from here.', [
-      {
-        code: 'master_not_assignable',
-        message: 'Masters can create technician and office accounts only.',
-      },
-    ]);
+  // Nobody mints a Master from here — that is a change to the office itself —
+  // and a Coordinator creates technicians only, so she cannot promote herself
+  // by creating an account and signing in as it.
+  if (!assignableRoles(context.actor.role).includes(input.role)) {
+    throw new WorkflowError(
+      input.role === 'master'
+        ? 'A Master account cannot be created from here.'
+        : `A ${roleLabel(context.actor.role)} cannot create a ${roleLabel(input.role)} account.`,
+      [
+        {
+          code: 'role_not_assignable',
+          message: `You can create: ${assignableRoles(context.actor.role)
+            .map((role) => roleLabel(role))
+            .join(', ')}.`,
+        },
+      ],
+    );
   }
 
   const firstName = required(input.firstName, 'first_name_required', 'A first name is required.');
@@ -110,7 +130,7 @@ export const createUser = async (
 };
 
 export const updateUser = async (context: OperationContext, user: User): Promise<User> => {
-  assertMaster(context);
+  assertManagesUsers(context);
   const existing = await context.repos.users.findById(user.id);
   if (existing === null) throw new WorkflowError('That user no longer exists.');
   assertManages(context, existing);
@@ -144,7 +164,7 @@ export const setUserActive = async (
   user: User,
   active: boolean,
 ): Promise<User> => {
-  assertMaster(context);
+  assertManagesUsers(context);
   assertManages(context, user);
   if (user.id === context.actor.id && !active) {
     throw new WorkflowError('You cannot disable your own account.', [
@@ -182,7 +202,7 @@ export const sendPasswordReset = async (
   context: OperationContext,
   user: User,
 ): Promise<PasswordResetResult> => {
-  assertMaster(context);
+  assertManagesUsers(context);
   assertManages(context, user);
   if (!user.active) {
     throw new WorkflowError('A disabled account cannot be sent a reset link.', [

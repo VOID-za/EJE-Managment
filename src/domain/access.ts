@@ -128,7 +128,17 @@ const BY_ROLE: Record<UserRole, readonly Capability[]> = {
   technician: TECHNICIAN_CAPABILITIES,
 };
 
-export const capabilitiesFor = (role: UserRole): readonly Capability[] => BY_ROLE[role];
+/**
+ * What this role may do.
+ *
+ * Falls back to nothing for a role the table does not know. A persisted user
+ * record with an unrecognised role is corrupt, and the safe reading of corrupt
+ * authorisation data is that it grants nothing.
+ */
+export const capabilitiesFor = (role: UserRole): readonly Capability[] =>
+  BY_ROLE[role] ?? NO_CAPABILITIES;
+
+const NO_CAPABILITIES: readonly Capability[] = [];
 
 export const can = (role: UserRole, capability: Capability): boolean =>
   capabilitiesFor(role).includes(capability);

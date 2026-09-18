@@ -20,7 +20,10 @@ import { WorkflowError } from './errors';
  * one, and retiring a version archives it rather than destroying it.
  */
 const assertMaster = (context: OperationContext): void => {
-  if (can(context.actor.role, 'admin.access')) return;
+  // `settings.manage`, not `admin.access`: a Coordinator reaches Administration
+  // to manage users and the library, and a checklist is part of the standard of
+  // work rather than day-to-day office administration.
+  if (can(context.actor.role, 'settings.manage')) return;
   throw new WorkflowError('Only a Master can administer checklists.', [
     { code: 'not_permitted', message: 'Checklist administration is a Master function.' },
   ]);
