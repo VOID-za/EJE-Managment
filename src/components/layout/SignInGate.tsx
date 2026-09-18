@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { userFullName, type User } from '@/domain';
+import { roleLabel, userFullName, type User, type UserRole } from '@/domain';
 import { Avatar, Badge, Button, Icon } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
@@ -18,7 +18,7 @@ import { ThemeToggle } from './ThemeToggle';
  */
 export const SignInGate = () => {
   const { users, signIn } = useApp();
-  const [role, setRole] = useState<'master' | 'technician'>('master');
+  const [role, setRole] = useState<UserRole>('master');
 
   const visible = users.filter((user) => user.role === role && user.active);
 
@@ -82,9 +82,9 @@ export const SignInGate = () => {
 
           <div
             role="tablist"
-            className="mb-4 grid grid-cols-2 gap-1 rounded-[var(--radius-control)] bg-steel-200/70 p-1"
+            className="mb-4 grid grid-cols-3 gap-1 rounded-[var(--radius-control)] bg-steel-200/70 p-1"
           >
-            {(['master', 'technician'] as const).map((option) => (
+            {(['master', 'coordinator', 'technician'] as const).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -98,15 +98,17 @@ export const SignInGate = () => {
                     : 'text-steel-600 hover:text-steel-800',
                 )}
               >
-                {option === 'master' ? 'Master' : 'Technician'}
+                {roleLabel(option)}
               </button>
             ))}
           </div>
 
           <p className="mb-3 text-xs text-steel-500">
             {role === 'master'
-              ? 'Masters manage customers, machines, job allocation and system configuration. The office administrator uses this role.'
-              : 'Technicians accept jobs, capture work on site and obtain the customer signature.'}
+              ? 'Masters run the business: everything the office does, plus charge-out rates, checklists and Master accounts.'
+              : role === 'coordinator'
+                ? 'The office administrator. Customers, machines, scheduling, technicians and the paperwork the business invoices from — but not field work.'
+                : 'Technicians accept jobs, capture work on site and obtain the customer signature.'}
           </p>
 
           <ul className="eje-scrollbar max-h-[46vh] space-y-2 overflow-y-auto pr-1">

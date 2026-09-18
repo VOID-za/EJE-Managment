@@ -15,6 +15,7 @@ import {
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { WorkflowError } from './errors';
+import type { RemovalResult } from './removal';
 
 /**
  * Machine register operations.
@@ -31,6 +32,8 @@ export interface NewMachineInput {
   readonly manufacturer: string;
   readonly model: string;
   readonly serialNumber: string;
+  /** The customer's own number for the machine. Optional — most have none. */
+  readonly machineNumber: string;
   readonly machineType: MachineType;
   readonly year: number;
   readonly installationDate: string;
@@ -112,6 +115,7 @@ export const createMachine = async (
     manufacturer: required(input.manufacturer, 'manufacturer_required', 'A manufacturer is required.'),
     model: required(input.model, 'model_required', 'A model is required.'),
     serialNumber,
+    machineNumber: input.machineNumber.trim(),
     machineType: input.machineType,
     year: input.year,
     installationDate: input.installationDate,
@@ -124,6 +128,7 @@ export const createMachine = async (
     approvedBy: approval === 'approved' ? context.actor.id : null,
     approvedAt: approval === 'approved' ? now : null,
     createdAt: now,
+    archivedAt: null,
   };
 
   const saved = await context.repos.machines.save(machine);
@@ -199,4 +204,58 @@ export const updateMachine = async (
     detail: `Serial ${saved.serialNumber} amended by ${userFullName(context.actor)}.`,
   });
   return saved;
+};
+
+/**
+ * Removes a machine from the register.
+ *
+ * Deleted outright when no job was ever carried out on it — a machine captured
+ * against the wrong customer, or a duplicate caught before any work. Archived
+ * once it has job history, because those jobs describe work on THIS machine and
+ * a job card that could no longer name it would be worthless.
+ */
+export const removeMachine = async (
+  context: OperationContext,
+  machine: Machine,
+): Promise<RemovalResult> => {
+  if (!can(context.actor.role, 'machines.manage')) {
+    throw new WorkflowError('Only the office can remove a machine from the register.', [
+      {
+        code: 'not_permitted',
+        message: 'Technicians can add a machine they find on site, but not remove one.',
+      },
+    ]);
+  }
+
+  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const referencing = jobs.filter((job) => job.machineId === machine.id);
+  const name = machineDisplayName(machine);
+
+  if (referencing.length === 0) {
+    await context.repos.machines.delete(machine.id);
+    await audit(context, {
+      jobId: null,
+      type: 'machine_deleted',
+      summary: `Machine deleted: ${name}`,
+      detail: `Serial ${machine.serialNumber} removed by ${userFullName(context.actor)}. No job had ever been carried out on it.`,
+    });
+    return { outcome: 'deleted', message: `${name} has been deleted.` };
+  }
+
+  await context.repos.machines.save({
+    ...machine,
+    archivedAt: context.services.clock.now(),
+  });
+  await audit(context, {
+    jobId: null,
+    type: 'machine_archived',
+    summary: `Machine archived: ${name}`,
+    detail: `Serial ${machine.serialNumber} has ${referencing.length} ${referencing.length === 1 ? 'job' : 'jobs'} on record, so it is kept and withdrawn from the register rather than deleted.`,
+  });
+  return {
+    outcome: 'archived',
+    message: `${name} has been removed from the register. ${referencing.length} ${
+      referencing.length === 1 ? 'job was' : 'jobs were'
+    } carried out on it, so the machine is kept and that history still reads correctly.`,
+  };
 };

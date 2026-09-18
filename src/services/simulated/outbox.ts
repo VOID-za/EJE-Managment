@@ -1,4 +1,4 @@
-import type { OutboxEntry, OutboxReader } from '../ports';
+import type { DeliveryState, OutboxEntry, OutboxReader } from '../ports';
 
 /**
  * Simulated outbox shared by the email and WhatsApp adapters.
@@ -23,6 +23,28 @@ export class SimulatedOutbox implements OutboxReader {
     this.persist();
     this.listeners.forEach((listener) => listener());
     return entry;
+  }
+
+  /**
+   * Moves an entry to a new delivery state.
+   *
+   * This stands in for the delivery report a real provider sends back — a Graph
+   * message trace, or a webhook. In the demonstration it is driven from the
+   * Simulated Outbox screen, which is the only honest way to show a delivery
+   * that the demo cannot actually observe: nothing here invents a confirmation
+   * on its own.
+   */
+  setDelivery(id: string, delivery: DeliveryState, failureReason = ''): OutboxEntry | null {
+    let updated: OutboxEntry | null = null;
+    this.entries = this.read().map((entry) => {
+      if (entry.id !== id) return entry;
+      updated = { ...entry, delivery, failureReason };
+      return updated;
+    });
+    if (updated === null) return null;
+    this.persist();
+    this.listeners.forEach((listener) => listener());
+    return updated;
   }
 
   list(): Promise<readonly OutboxEntry[]> {
@@ -56,7 +78,17 @@ export class SimulatedOutbox implements OutboxReader {
     if (typeof window === 'undefined') return this.entries;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw !== null) this.entries = JSON.parse(raw) as readonly OutboxEntry[];
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as readonly OutboxEntry[];
+        // Entries written before delivery was tracked carry no state. They are
+        // read as pending, never as delivered: an old record is not evidence
+        // that anything arrived.
+        this.entries = parsed.map((entry) => ({
+          ...entry,
+          delivery: entry.delivery ?? 'pending_delivery',
+          failureReason: entry.failureReason ?? '',
+        }));
+      }
     } catch {
       // A corrupt outbox must never block the demo.
       this.entries = EMPTY;

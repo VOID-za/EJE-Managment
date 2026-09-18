@@ -30,6 +30,7 @@ import type {
   DocumentRepository,
   JobFilter,
   JobRepository,
+  RegisterFilter,
   AvailabilityRepository,
   ChatRepository,
   MachineRepository,
@@ -126,20 +127,40 @@ class DemoCustomerRepository implements CustomerRepository {
     );
   }
 
-  listSites(customerId?: CustomerId): Promise<readonly Site[]> {
-    const sites = this.context.read().sites;
+  listSites(customerId?: CustomerId, filter?: RegisterFilter): Promise<readonly Site[]> {
+    let sites = this.context.read().sites;
+    if (filter?.includeArchived !== true) {
+      sites = sites.filter((site) => site.archivedAt === null);
+    }
     return Promise.resolve(
       customerId === undefined ? sites : sites.filter((site) => site.customerId === customerId),
     );
   }
 
-  listContacts(customerId?: CustomerId): Promise<readonly Contact[]> {
-    const contacts = this.context.read().contacts;
+  listContacts(customerId?: CustomerId, filter?: RegisterFilter): Promise<readonly Contact[]> {
+    let contacts = this.context.read().contacts;
+    if (filter?.includeArchived !== true) {
+      contacts = contacts.filter((contact) => contact.archivedAt === null);
+    }
     return Promise.resolve(
       customerId === undefined
         ? contacts
         : contacts.filter((contact) => contact.customerId === customerId),
     );
+  }
+
+  deleteSite(id: SiteId): Promise<void> {
+    this.context.commit((draft) => {
+      draft.sites = draft.sites.filter((site) => site.id !== id);
+    });
+    return Promise.resolve();
+  }
+
+  deleteContact(id: ContactId): Promise<void> {
+    this.context.commit((draft) => {
+      draft.contacts = draft.contacts.filter((contact) => contact.id !== id);
+    });
+    return Promise.resolve();
   }
 
   findSiteById(id: SiteId): Promise<Site | null> {
@@ -193,8 +214,13 @@ class DemoCustomerRepository implements CustomerRepository {
 class DemoMachineRepository implements MachineRepository {
   constructor(private readonly context: DemoContext) {}
 
-  list(): Promise<readonly Machine[]> {
-    return Promise.resolve(this.context.read().machines);
+  list(filter?: RegisterFilter): Promise<readonly Machine[]> {
+    const machines = this.context.read().machines;
+    return Promise.resolve(
+      filter?.includeArchived === true
+        ? machines
+        : machines.filter((machine) => machine.archivedAt === null),
+    );
   }
 
   findById(id: MachineId): Promise<Machine | null> {
@@ -212,6 +238,13 @@ class DemoMachineRepository implements MachineRepository {
           : draft.machines.map((candidate) => (candidate.id === machine.id ? machine : candidate));
     });
     return Promise.resolve(machine);
+  }
+
+  delete(id: MachineId): Promise<void> {
+    this.context.commit((draft) => {
+      draft.machines = draft.machines.filter((machine) => machine.id !== id);
+    });
+    return Promise.resolve();
   }
 }
 

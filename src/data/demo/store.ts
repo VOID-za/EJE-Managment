@@ -30,6 +30,7 @@ import {
   seedSites,
   seedUsers,
 } from '../seed';
+import { migrateDatabase } from './migrations';
 
 /**
  * The demo's mutable dataset.
@@ -85,10 +86,11 @@ export interface StoredFileRecord {
 export const STORAGE_KEY = 'eje.demo.database.v1';
 
 /**
- * Current shape version. A mismatch discards the persisted copy and re-seeds.
+ * Current shape version.
  *
- * Bump this whenever the stored shape changes, otherwise a browser that has
- * already run the demo keeps its old snapshot and silently misses new fields.
+ * Bump this whenever the stored shape changes, and add the matching step in
+ * `./migrations` — otherwise a browser that has already run the demo keeps its
+ * old snapshot and silently misses new fields.
  * v2 added technician leave and the service end date.
  * v3 added the Parts job type: a nullable machine and the courier flag.
  * v4 moved users, technical documents and checklist templates into the store so
@@ -102,8 +104,15 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * v8 discards those cached bytes: a browser that had downloaded a seeded job's
  * job card was being handed that first render for good, so renderer fixes never
  * reached it. Backfilled files now carry the renderer that made them.
+ * v9 added the customer's office address, the customer's own machine number,
+ * the delivery record a job carries while its copy is in transit, and the
+ * archive marker on sites, contacts and machines.
+ *
+ * From v8 onwards a mismatch is MIGRATED rather than discarded — see
+ * `./migrations`. Only a snapshot older than that is re-seeded, and only
+ * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -149,8 +158,14 @@ export const loadDatabase = (): DemoDatabase => {
     if (raw === null) return createSeededDatabase();
 
     const parsed = JSON.parse(raw) as PersistedEnvelope;
-    if (parsed.version !== SCHEMA_VERSION) return createSeededDatabase();
-    return parsed.data;
+    if (parsed.version === SCHEMA_VERSION) return parsed.data;
+
+    // An older snapshot is brought forward, not thrown away: the customers,
+    // jobs and job cards captured in this browser are the demonstration.
+    const migrated = migrateDatabase(parsed.version, parsed.data, SCHEMA_VERSION);
+    if (migrated === null) return createSeededDatabase();
+    persistDatabase(migrated);
+    return migrated;
   } catch {
     // A corrupt or unreadable snapshot must never block the demo.
     return createSeededDatabase();

@@ -15,6 +15,7 @@ const site = (overrides: Partial<Site> = {}): Site => ({
   accessNotes: '',
   latitude: -26.2745,
   longitude: 28.198,
+  archivedAt: null,
   ...overrides,
 });
 

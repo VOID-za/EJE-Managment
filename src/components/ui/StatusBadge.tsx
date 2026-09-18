@@ -15,6 +15,9 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   completion: 'violet',
   customer_signature: 'violet',
   review: 'violet',
+  // Amber, not green: sent is not delivered, and the office should be able to
+  // see at a glance that something is still outstanding.
+  awaiting_delivery: 'amber',
   submitted: 'green',
   closed: 'neutral',
   // Cancelled must never look like an active job, so it takes the danger tone.

@@ -11,12 +11,11 @@ import {
   saveCompletionReport,
   startCompletion,
   startSignature,
-  submitForMasterReview,
-  submitJobCard,
+  issueJobCard,
 } from './job-operations';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
 import { pdfPlainText } from '@/lib/pdf/inspect';
 import type { Job } from '@/domain';
 
@@ -63,15 +62,15 @@ const closeJob = async (harness: Harness): Promise<Job> => {
     customerSurname: 'Nel',
     strokeData: 'M0.100,0.600 L0.300,0.200 L0.500,0.700 L0.800,0.300',
   });
-  job = await submitForMasterReview(tech, job);
-
-  const result = await submitJobCard(
-    harness.as(master),
+  // The technician's submission issues the job card itself now — no Master
+  // Review. It closes only once the provider confirms the customer's copy.
+  const result = await issueJobCard(
+    tech,
     job,
     'pieter.nel@abc-engineering-demo.co.za',
     'Pieter Nel',
   );
-  return result.job;
+  return confirmDelivery(harness, tech, result.job);
 };
 
 describe('a closed job has a downloadable final document', () => {

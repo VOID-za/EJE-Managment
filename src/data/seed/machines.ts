@@ -35,6 +35,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Leadwell',
     model: 'V-40',
     serialNumber: 'LW-V40-70214',
+    machineNumber: '',
     machineType: 'CNC Milling Machine',
     year: 2018,
     installationDate: '2018-11-06',
@@ -50,6 +51,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-980, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-abc-st20'),
@@ -58,6 +60,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Haas',
     model: 'ST-20',
     serialNumber: 'HA-ST20-33907',
+    machineNumber: '',
     machineType: 'CNC Lathe',
     year: 2020,
     installationDate: '2020-04-22',
@@ -70,6 +73,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-800, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-abc-mcv760'),
@@ -78,6 +82,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Leadwell',
     model: 'MCV-760',
     serialNumber: 'LW-MCV760-51188',
+    machineNumber: '',
     machineType: 'Machining Centre',
     year: 2016,
     installationDate: '2016-08-15',
@@ -90,6 +95,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-1050, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-kruger-vf2'),
@@ -98,6 +104,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Haas',
     model: 'VF-2',
     serialNumber: 'HA-VF2-11742',
+    machineNumber: '',
     machineType: 'CNC Milling Machine',
     year: 2014,
     installationDate: '2014-02-11',
@@ -110,6 +117,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-860, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-highveld-dmu50'),
@@ -118,6 +126,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'DMG Mori',
     model: 'DMU 50',
     serialNumber: 'DM-DMU50-90455',
+    machineNumber: '',
     machineType: 'Machining Centre',
     year: 2022,
     installationDate: '2022-09-30',
@@ -130,6 +139,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-700, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-highveld-grinder'),
@@ -138,6 +148,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Okamoto',
     model: 'ACC-64DX',
     serialNumber: 'OK-ACC64-20613',
+    machineNumber: '',
     machineType: 'Surface Grinder',
     year: 2019,
     installationDate: '2019-06-18',
@@ -150,6 +161,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-640, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-vaal-tl2'),
@@ -158,6 +170,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Haas',
     model: 'TL-2',
     serialNumber: 'HA-TL2-45520',
+    machineNumber: '',
     machineType: 'CNC Lathe',
     year: 2017,
     installationDate: '2017-03-27',
@@ -170,6 +183,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-420, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-midrand-press'),
@@ -178,6 +192,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Amada',
     model: 'HFE-1303',
     serialNumber: 'AM-HFE1303-77301',
+    machineNumber: 'MID1',
     machineType: 'Press Brake',
     year: 2021,
     installationDate: '2021-07-09',
@@ -190,6 +205,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-190, 8),
+    archivedAt: null,
   },
   {
     id: asMachineId('machine-midrand-lathe'),
@@ -198,6 +214,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Doosan',
     model: 'Puma 2600',
     serialNumber: 'DS-PUMA2600-60918',
+    machineNumber: 'MID2',
     machineType: 'CNC Lathe',
     year: 2023,
     installationDate: '2023-05-14',
@@ -210,6 +227,7 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: asUserId('user-master-elmarie'),
     approvedAt: timeOffset(-980, 8),
     createdAt: timeOffset(-140, 8),
+    archivedAt: null,
   },
 
   // Found on site by a technician and added from the job screen. It is usable
@@ -222,6 +240,7 @@ export const seedMachines: readonly Machine[] = [
     manufacturer: 'Bomar',
     model: 'Individual 620.460 DGH',
     serialNumber: 'BM-IND620-44127',
+    machineNumber: '',
     machineType: 'Other',
     year: 2020,
     installationDate: '2020-08-19',
@@ -234,5 +253,6 @@ export const seedMachines: readonly Machine[] = [
     approvedBy: null,
     approvedAt: null,
     createdAt: timeOffset(-2, 11, 20),
+    archivedAt: null,
   },
 ];

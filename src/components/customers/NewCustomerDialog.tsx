@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CONTACT_ROLE_SUGGESTIONS } from '@/domain';
 import { createCustomer, type NewCustomerInput } from '@/application/customer-operations';
 import { Button, Modal, SectionHeading, TextAreaField, TextField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
@@ -54,6 +55,12 @@ export const NewCustomerDialog = ({
   const operation = useOperation();
   const [draft, setDraft] = useState<NewCustomerInput>(EMPTY);
   const [addContact, setAddContact] = useState(true);
+  /*
+   * Most customers run the account from the site the technician visits, so the
+   * office address defaults to the first site rather than being asked for
+   * twice. It is edited on the customer afterwards where it differs.
+   */
+  const [officeAtSite, setOfficeAtSite] = useState(true);
 
   const set = <K extends keyof NewCustomerInput>(key: K, value: NewCustomerInput[K]): void =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -82,6 +89,15 @@ export const NewCustomerDialog = ({
     const ok = await operation.run(async (context) => {
       const result = await createCustomer(context, {
         ...draft,
+        officeAddress: officeAtSite
+          ? {
+              line1: draft.site.addressLine1,
+              line2: draft.site.addressLine2,
+              city: draft.site.city,
+              province: draft.site.province,
+              postalCode: draft.site.postalCode,
+            }
+          : undefined,
         contact: addContact ? draft.contact : null,
       });
       createdId = result.customer.id;
@@ -152,16 +168,17 @@ export const NewCustomerDialog = ({
               onChange={(event) => set('vatNumber', event.target.value)}
             />
             <TextField
-              label="Phone"
+              label="Office number"
               type="tel"
               value={draft.phone}
               onChange={(event) => set('phone', event.target.value)}
             />
             <TextField
-              label="Email"
+              label="Account email"
               type="email"
               value={draft.email}
               onChange={(event) => set('email', event.target.value)}
+              hint="Fallback only: a job card goes to the contact on the job, and to this address when that contact has none."
             />
             <TextField
               label="Payment terms"
@@ -170,6 +187,21 @@ export const NewCustomerDialog = ({
               containerClassName="sm:col-span-2"
             />
           </div>
+
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
+            <input
+              type="checkbox"
+              checked={officeAtSite}
+              onChange={(event) => setOfficeAtSite(event.target.checked)}
+              className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+            />
+            The head office is at the first site below
+          </label>
+          {!officeAtSite && (
+            <p className="mt-2 text-xs text-steel-500">
+              The office address is left blank and captured on the customer afterwards.
+            </p>
+          )}
         </div>
 
         <div>
@@ -251,10 +283,17 @@ export const NewCustomerDialog = ({
                 onChange={(event) => setContact('lastName', event.target.value)}
               />
               <TextField
-                label="Position"
+                label="Role"
                 value={draft.contact.position}
                 onChange={(event) => setContact('position', event.target.value)}
+                list="new-customer-contact-roles"
+                placeholder="e.g. Maintenance Manager"
               />
+              <datalist id="new-customer-contact-roles">
+                {CONTACT_ROLE_SUGGESTIONS.map((role) => (
+                  <option key={role} value={role} />
+                ))}
+              </datalist>
               <TextField
                 label="Phone"
                 type="tel"

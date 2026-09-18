@@ -52,22 +52,47 @@ export interface JobRepository {
   save(job: Job): Promise<Job>;
 }
 
+/**
+ * Whether a list should include records removed from the live register.
+ *
+ * Archived sites, contacts and machines are still referenced by the jobs that
+ * were done against them, so they are never gone — they are simply not offered
+ * again. Lists leave them out by default so an archived record cannot reappear
+ * in a picker because a caller forgot to filter; the `findById` methods always
+ * resolve them, which is what keeps a historical job card readable.
+ */
+export interface RegisterFilter {
+  readonly includeArchived?: boolean;
+}
+
 export interface CustomerRepository {
   list(): Promise<readonly Customer[]>;
   findById(id: CustomerId): Promise<Customer | null>;
-  listSites(customerId?: CustomerId): Promise<readonly Site[]>;
-  listContacts(customerId?: CustomerId): Promise<readonly Contact[]>;
+  listSites(customerId?: CustomerId, filter?: RegisterFilter): Promise<readonly Site[]>;
+  listContacts(customerId?: CustomerId, filter?: RegisterFilter): Promise<readonly Contact[]>;
   findSiteById(id: SiteId): Promise<Site | null>;
   findContactById(id: ContactId): Promise<Contact | null>;
   save(customer: Customer): Promise<Customer>;
   saveSite(site: Site): Promise<Site>;
   saveContact(contact: Contact): Promise<Contact>;
+  /**
+   * Removes the record outright.
+   *
+   * Only ever called for a record nothing refers to — the application layer
+   * establishes that first and archives instead when anything does. Production
+   * gets the same treatment: a hard DELETE, guarded by the same check, so a
+   * foreign key can never be left dangling.
+   */
+  deleteSite(id: SiteId): Promise<void>;
+  deleteContact(id: ContactId): Promise<void>;
 }
 
 export interface MachineRepository {
-  list(): Promise<readonly Machine[]>;
+  list(filter?: RegisterFilter): Promise<readonly Machine[]>;
   findById(id: MachineId): Promise<Machine | null>;
   save(machine: Machine): Promise<Machine>;
+  /** See `CustomerRepository.deleteSite`. */
+  delete(id: MachineId): Promise<void>;
 }
 
 export interface UserRepository {

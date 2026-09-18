@@ -20,7 +20,7 @@ import { SimulatedStorageService } from '@/services/simulated/storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import type { AppServices, OperationContext } from '@/application/context';
-import type { OutboxEntry } from '@/services/ports';
+import type { DeliveryState, OutboxEntry } from '@/services/ports';
 
 /**
  * Application composition root.
@@ -37,6 +37,15 @@ interface AppContextValue {
   /** Changes on every write so queries re-run. Becomes cache invalidation in Phase 2. */
   readonly version: number;
   readonly outbox: readonly OutboxEntry[];
+  /**
+   * Records what the provider would have reported about a message it accepted.
+   *
+   * Demo-only, and deliberately narrow: production learns this from the
+   * provider's delivery report rather than from anybody pressing a button. It
+   * is exposed so the Simulated Outbox screen can stand in for that report
+   * without the rest of the application knowing which adapter is behind it.
+   */
+  reportDelivery(messageId: string, state: DeliveryState, failureReason?: string): void;
   signIn(userId: UserId): void;
   signOut(): void;
   resetDemoData(): void;
@@ -123,6 +132,13 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     [users, currentUserId],
   );
 
+  const reportDelivery = useCallback(
+    (messageId: string, state: DeliveryState, failureReason = '') => {
+      runtime.simulatedOutbox.setDelivery(messageId, state, failureReason);
+    },
+    [runtime.simulatedOutbox],
+  );
+
   const signIn = useCallback(
     (userId: UserId) => runtime.session.signIn(userId),
     [runtime.session],
@@ -148,6 +164,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       users,
       version,
       outbox,
+      reportDelivery,
       signIn,
       signOut,
       resetDemoData,
@@ -160,6 +177,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       users,
       version,
       outbox,
+      reportDelivery,
       signIn,
       signOut,
       resetDemoData,

@@ -52,6 +52,7 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   courierCollection: false,
   pricingSnapshot: null,
   finalDocument: null,
+  delivery: null,
   cancellation: null,
   deletedAt: null,
   deletedBy: null,

@@ -10,6 +10,7 @@ import {
   startSignature,
   submitForMasterReview,
   submitJobCard,
+  confirmJobCardDelivery,
 } from './job-operations';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
@@ -87,6 +88,18 @@ const workAndSign = async (harness: Harness): Promise<Job> => {
     customerSurname: 'Nel',
     strokeData: 'M0,0 L1,1',
   });
+};
+
+/**
+ * Stands in for the provider's delivery report.
+ *
+ * Issuing a job card no longer closes it: the provider has merely accepted the
+ * mail. Something has to confirm the customer received it, and in production
+ * that is Microsoft 365's delivery report.
+ */
+const confirmDelivery = async (harness: Harness, job: Job): Promise<Job> => {
+  harness.outbox.setDelivery(job.delivery?.messageId ?? '', 'delivered');
+  return confirmJobCardDelivery(harness.master, job);
 };
 
 const emails = (harness: Harness) =>
@@ -336,7 +349,7 @@ describe('Master submission', () => {
     expect(generated[0]?.summary).toBe('Final job card document generated');
   });
 
-  it('closes and locks the job', async () => {
+  it('locks the job as soon as it is issued, before delivery is confirmed', async () => {
     const signed = await workAndSign(harness);
     const handed = await submitForMasterReview(harness.tech, signed);
     const result = await submitJobCard(
@@ -346,21 +359,45 @@ describe('Master submission', () => {
       'Pieter Nel',
     );
 
-    expect(result.job.status).toBe('closed');
-    expect(result.job.closedAt).not.toBeNull();
+    // Issued but NOT closed: the provider has the mail, nobody has confirmed
+    // the customer received it.
+    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.closedAt).toBeNull();
+    expect(result.delivery.state).toBe('pending_delivery');
+
+    // Already read-only — the document has gone out, so the record must keep
+    // matching it.
     expect(canEditJob('master', result.job.status)).toBe(false);
     expect(canEditJob('technician', result.job.status)).toBe(false);
-
     await expect(
       addNote(harness.master, result.job, 'Too late.', true),
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('refuses to issue a job that is not in Master Review', async () => {
+  it('closes only once delivery is confirmed', async () => {
     const signed = await workAndSign(harness);
+    const handed = await submitForMasterReview(harness.tech, signed);
+    const result = await submitJobCard(
+      harness.master,
+      handed,
+      'customer@example-demo.co.za',
+      'Pieter Nel',
+    );
+    expect(result.job.status).toBe('awaiting_delivery');
+
+    const closed = await confirmDelivery(harness, result.job);
+    expect(closed.status).toBe('closed');
+    expect(closed.closedAt).not.toBeNull();
+    expect(closed.delivery?.state).toBe('delivered');
+    expect(closed.delivery?.confirmedAt).not.toBeNull();
+  });
+
+  it('refuses to issue a job that has not reached its customer signature', async () => {
+    const view = await loadJobView(harness.repos, 'EJE-1048');
+    const open = await acceptJob(harness.tech, view!.job);
 
     await expect(
-      submitJobCard(harness.master, signed, 'customer@example-demo.co.za', 'Pieter Nel'),
+      submitJobCard(harness.master, open, 'customer@example-demo.co.za', 'Pieter Nel'),
     ).rejects.toBeInstanceOf(WorkflowError);
     expect(emails(harness)).toHaveLength(0);
   });

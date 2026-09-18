@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { can, userFullName } from '@/domain';
+import { can, roleLabel, userFullName } from '@/domain';
 import { NAV_GROUP_LABELS, NAVIGATION, type NavigationItem } from '@/config/navigation';
 import { Avatar, Icon, type IconName } from '@/components/ui';
 import { cn } from '@/lib/cn';
@@ -101,7 +101,7 @@ export const Sidebar = ({
                 {userFullName(currentUser)}
               </p>
               <p className="truncate text-xs text-chrome-dim">
-                {currentUser.role === 'master' ? 'Master' : 'Technician'}
+                {roleLabel(currentUser.role)}
               </p>
             </div>
             <button

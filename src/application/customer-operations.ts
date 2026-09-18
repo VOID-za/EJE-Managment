@@ -3,15 +3,20 @@ import {
   asCustomerId,
   asSiteId,
   can,
+  contactFullName,
+  emptyAddress,
+  machineDisplayName,
   type Contact,
   type Customer,
   type CustomerId,
+  type PostalAddress,
   type Site,
   type SiteId,
 } from '@/domain';
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
+import type { RemovalResult } from './removal';
 
 /**
  * Customer register operations.
@@ -31,6 +36,14 @@ const assertManages = (context: OperationContext): void => {
   ]);
 };
 
+const trimAddress = (address: PostalAddress): PostalAddress => ({
+  line1: address.line1.trim(),
+  line2: address.line2.trim(),
+  city: address.city.trim(),
+  province: address.province.trim(),
+  postalCode: address.postalCode.trim(),
+});
+
 const required = (value: string, code: string, message: string): string => {
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new WorkflowError(message, [{ code, message }]);
@@ -44,6 +57,7 @@ export interface NewCustomerInput {
   readonly vatNumber: string;
   readonly phone: string;
   readonly email: string;
+  readonly officeAddress?: PostalAddress;
   readonly industry: string;
   readonly paymentTerms: string;
   /** The first site. A customer with nowhere to send a technician is not useful. */
@@ -119,6 +133,7 @@ export const createCustomer = async (
     vatNumber: input.vatNumber.trim(),
     phone: input.phone.trim(),
     email: input.email.trim(),
+    officeAddress: trimAddress(input.officeAddress ?? emptyAddress()),
     industry: input.industry.trim(),
     paymentTerms: input.paymentTerms.trim(),
     active: true,
@@ -186,6 +201,7 @@ export const createSite = async (
     // The demo has no map picker; the address is used for navigation instead.
     latitude: null,
     longitude: null,
+    archivedAt: null,
   };
 
   const saved = await context.repos.customers.saveSite(site);
@@ -219,6 +235,7 @@ export const createContact = async (
     email: input.email.trim(),
     phone: input.phone.trim(),
     isPrimary: input.isPrimary,
+    archivedAt: null,
   };
 
   const saved = await context.repos.customers.saveContact(contact);
@@ -258,4 +275,112 @@ export const updateSite = async (context: OperationContext, site: Site): Promise
     detail: `${saved.addressLine1}, ${saved.city}.`,
   });
   return saved;
+};
+
+/**
+ * Removes a contact.
+ *
+ * Deleted outright when no job has ever named them; archived when one has, so
+ * the job cards that record who signed for the work still resolve the person.
+ * Which of the two happened is returned rather than assumed, because the office
+ * needs to know whether the name will still appear in history.
+ */
+export const removeContact = async (
+  context: OperationContext,
+  contact: Contact,
+): Promise<RemovalResult> => {
+  assertManages(context);
+
+  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const referencing = jobs.filter((job) => job.contactId === contact.id);
+  const name = contactFullName(contact);
+
+  if (referencing.length === 0) {
+    await context.repos.customers.deleteContact(contact.id);
+    await audit(context, {
+      jobId: null,
+      type: 'contact_deleted',
+      summary: `Contact deleted: ${name}`,
+      detail: `${contact.position || 'Contact'} removed. No job had ever named them.`,
+    });
+    return { outcome: 'deleted', message: `${name} has been deleted.` };
+  }
+
+  await context.repos.customers.saveContact({
+    ...contact,
+    archivedAt: context.services.clock.now(),
+  });
+  await audit(context, {
+    jobId: null,
+    type: 'contact_archived',
+    summary: `Contact archived: ${name}`,
+    detail: `Named on ${referencing.length} ${referencing.length === 1 ? 'job' : 'jobs'}, so the record is kept and withdrawn from the register rather than deleted.`,
+  });
+  return {
+    outcome: 'archived',
+    message: `${name} has been removed from the customer. ${referencing.length} ${
+      referencing.length === 1 ? 'job names' : 'jobs name'
+    } them, so the record is kept and those job cards still read correctly.`,
+  };
+};
+
+/**
+ * Removes a site.
+ *
+ * Refused while machines still stand at it: deleting the site would leave those
+ * machines pointing at somewhere that no longer exists, and silently moving
+ * them would be a decision only the office can make. Once it is empty, the site
+ * goes the same way as a contact — deleted if no job was ever done there,
+ * archived if one was. The site's own contacts go with it, each on its own
+ * merits.
+ */
+export const removeSite = async (
+  context: OperationContext,
+  site: Site,
+): Promise<RemovalResult> => {
+  assertManages(context);
+
+  const machines = await context.repos.machines.list();
+  const atSite = machines.filter((machine) => machine.siteId === site.id);
+  if (atSite.length > 0) {
+    throw new WorkflowError(`${site.name} still has machines on it.`, [
+      {
+        code: 'site_has_machines',
+        message: `${atSite.length} ${atSite.length === 1 ? 'machine is' : 'machines are'} recorded at this site, starting with the ${machineDisplayName(atSite[0]!)}. Move or remove ${atSite.length === 1 ? 'it' : 'them'} first.`,
+      },
+    ]);
+  }
+
+  const contacts = await context.repos.customers.listContacts(site.customerId);
+  for (const contact of contacts.filter((candidate) => candidate.siteId === site.id)) {
+    await removeContact(context, contact);
+  }
+
+  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const referencing = jobs.filter((job) => job.siteId === site.id);
+
+  if (referencing.length === 0) {
+    await context.repos.customers.deleteSite(site.id);
+    await audit(context, {
+      jobId: null,
+      type: 'site_deleted',
+      summary: `Site deleted: ${site.name}`,
+      detail: `${site.addressLine1}, ${site.city}. No job had ever been carried out there.`,
+    });
+    return { outcome: 'deleted', message: `${site.name} has been deleted.` };
+  }
+
+  await context.repos.customers.saveSite({ ...site, archivedAt: context.services.clock.now() });
+  await audit(context, {
+    jobId: null,
+    type: 'site_archived',
+    summary: `Site archived: ${site.name}`,
+    detail: `${referencing.length} ${referencing.length === 1 ? 'job was' : 'jobs were'} carried out there, so the site is kept and withdrawn from the register rather than deleted.`,
+  });
+  return {
+    outcome: 'archived',
+    message: `${site.name} has been removed from the customer. ${referencing.length} ${
+      referencing.length === 1 ? 'job was' : 'jobs were'
+    } carried out there, so the site is kept and that job history still reads correctly.`,
+  };
 };

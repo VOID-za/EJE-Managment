@@ -25,6 +25,10 @@ export class SimulatedWhatsAppService implements WhatsAppService {
       attachments: [],
       createdAt: this.clock.now(),
       simulated: true,
+      // A WhatsApp send is accepted by the platform, not confirmed to the
+      // handset, so it carries the same honest state as an email.
+      delivery: 'pending_delivery',
+      failureReason: '',
     };
     return Promise.resolve(this.outbox.record(entry));
   }

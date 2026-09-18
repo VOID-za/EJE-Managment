@@ -1,35 +1,61 @@
 import type { User, UserRole } from '../types/user';
 
 /**
- * Who a Master may administer.
+ * Who this person may administer.
  *
- * A Master runs the office: they create and manage technicians and other
- * non-Master accounts. They may NOT edit another Master — Master accounts are
- * peers, and one office administrator quietly disabling another's account is
- * not a change the system should allow. A Master may still edit their own
- * record; that is a self-service change, not administration of a peer.
+ * A Master runs the business and may administer anyone except another Master:
+ * Master accounts are peers, and one quietly disabling another's is not a
+ * change the system should allow. Anyone may edit their own record; that is
+ * self-service, not administration of somebody else.
+ *
+ * A Coordinator runs the office and may administer TECHNICIANS only. She may
+ * not touch a Master or another Coordinator — promoting, demoting or disabling
+ * an office administrator is a Master's decision, and without that rule a
+ * Coordinator could simply make herself a Master.
  */
 export const canManageUser = (actor: Pick<User, 'id' | 'role'>, target: User): boolean => {
-  if (actor.role !== 'master') return false;
   if (target.id === actor.id) return true;
-  return target.role !== 'master';
+  if (actor.role === 'master') return target.role !== 'master';
+  if (actor.role === 'coordinator') return target.role === 'technician';
+  return false;
 };
 
-/** Why a Master cannot edit this account, phrased for the screen. */
+/** Why this account cannot be edited, phrased for the screen. */
 export const manageUserRefusal = (
   actor: Pick<User, 'id' | 'role'>,
   target: User,
 ): string | null => {
   if (canManageUser(actor, target)) return null;
-  if (actor.role !== 'master') return 'Only a Master can manage user accounts.';
+  if (actor.role === 'technician') return 'Only the office can manage user accounts.';
+  if (actor.role === 'coordinator') {
+    return 'A Coordinator can manage technicians. Master and Coordinator accounts are managed by a Master.';
+  }
   return 'Master accounts cannot be edited by another Master.';
 };
 
-/** Roles a Master may assign. A Master cannot mint another Master. */
-export const ASSIGNABLE_ROLES: readonly UserRole[] = ['technician'];
+/**
+ * The roles this person may assign.
+ *
+ * A Master may create a Coordinator or a technician, but never another Master.
+ * A Coordinator may only create technicians — otherwise she could promote
+ * herself by creating an account and signing in as it.
+ */
+export const assignableRoles = (actorRole: UserRole): readonly UserRole[] => {
+  if (actorRole === 'master') return ['coordinator', 'technician'];
+  if (actorRole === 'coordinator') return ['technician'];
+  return [];
+};
 
-export const roleLabel = (role: UserRole): string =>
-  role === 'master' ? 'Master' : 'Technician';
+export const roleLabel = (role: UserRole): string => {
+  switch (role) {
+    case 'master':
+      return 'Master';
+    case 'coordinator':
+      return 'Coordinator';
+    case 'technician':
+      return 'Technician';
+  }
+};
 
 /**
  * The people currently working at EJE.

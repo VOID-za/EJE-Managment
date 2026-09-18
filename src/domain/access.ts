@@ -3,51 +3,132 @@ import type { UserRole } from './types/user';
 /**
  * Capability-based access rules.
  *
- * Components ask `can(role, 'jobs.create')` rather than testing
- * `role === 'master'`. When Phase 2 introduces finer-grained roles or per-user
- * overrides, only this module changes.
+ * Components and operations ask `can(role, 'jobs.create')` rather than testing
+ * `role === 'master'`, so adding a role is a change here and nowhere else.
+ *
+ * There are three roles, and the distinction that matters is not seniority but
+ * WHERE the person works:
+ *
+ * - `master`     — full administration, including the commercial settings and
+ *                  other Masters.
+ * - `coordinator`— the office administrator. Runs customers, machines, jobs,
+ *                  scheduling and technicians day to day, and prepares the
+ *                  paperwork the business invoices from. Not a field worker.
+ * - `technician` — does the work on site.
+ *
+ * The Coordinator is deliberately NOT "a technician with more buttons". She
+ * cannot accept or execute a field job, because the person who attended the
+ * machine has to be the person recorded as having attended it. She can do
+ * everything around that.
  */
 export type Capability =
+  // Jobs
   | 'jobs.viewAll'
   | 'jobs.create'
   | 'jobs.assign'
-  | 'jobs.accept'
+  /** Accept and execute a field job: the person who goes to the machine. */
+  | 'jobs.acceptField'
+  /** Capture work on a job — hours, travel, parts, the write-up. */
   | 'jobs.captureWork'
+  /** Hand a completed job card over / issue it. */
   | 'jobs.submit'
+  /**
+   * Process a Parts collection end to end.
+   *
+   * Separate from `jobs.acceptField` because a parts collection happens at the
+   * counter, not on a customer's site: the office hands over the goods and takes
+   * the collector's signature itself.
+   */
+  | 'jobs.processParts'
+  /**
+   * Capture completion information on someone else's job, for administration.
+   *
+   * Recorded as an administrative capture, never as field execution: the
+   * technician who did the work stays the technician on the job.
+   */
+  | 'jobs.captureAdministratively'
+  // Records
   | 'customers.view'
   | 'customers.manage'
   | 'machines.manage'
   | 'library.view'
   | 'library.manage'
+  // Scheduling
+  | 'availability.manage'
+  // Administration
   | 'admin.access'
+  | 'users.manageTechnicians'
+  /** Create, edit, disable or promote a Master. Masters only, always. */
+  | 'users.manageMasters'
+  /** Charge-out rates, VAT, checklist templates, system settings. */
+  | 'settings.manage'
   | 'activity.viewAll';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
   'jobs.create',
   'jobs.assign',
-  'jobs.accept',
+  'jobs.acceptField',
   'jobs.captureWork',
   'jobs.submit',
+  'jobs.processParts',
+  'jobs.captureAdministratively',
   'customers.view',
   'customers.manage',
   'machines.manage',
   'library.view',
   'library.manage',
+  'availability.manage',
   'admin.access',
+  'users.manageTechnicians',
+  'users.manageMasters',
+  'settings.manage',
+  'activity.viewAll',
+];
+
+/**
+ * The office administrator.
+ *
+ * Everything an office runs on, and nothing that belongs on a customer's site.
+ * Note what is absent: `jobs.acceptField`, so she cannot take a breakdown as
+ * though she attended it; `users.manageMasters`, so she cannot make herself
+ * one; and `settings.manage`, so the charge-out rates stay with a Master.
+ */
+const COORDINATOR_CAPABILITIES: readonly Capability[] = [
+  'jobs.viewAll',
+  'jobs.create',
+  'jobs.assign',
+  'jobs.captureWork',
+  'jobs.submit',
+  'jobs.processParts',
+  'jobs.captureAdministratively',
+  'customers.view',
+  'customers.manage',
+  'machines.manage',
+  'library.view',
+  'library.manage',
+  'availability.manage',
+  'admin.access',
+  'users.manageTechnicians',
   'activity.viewAll',
 ];
 
 const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
-  'jobs.accept',
+  'jobs.acceptField',
   'jobs.captureWork',
   'jobs.submit',
+  'jobs.processParts',
   'customers.view',
   'library.view',
 ];
 
-export const capabilitiesFor = (role: UserRole): readonly Capability[] =>
-  role === 'master' ? MASTER_CAPABILITIES : TECHNICIAN_CAPABILITIES;
+const BY_ROLE: Record<UserRole, readonly Capability[]> = {
+  master: MASTER_CAPABILITIES,
+  coordinator: COORDINATOR_CAPABILITIES,
+  technician: TECHNICIAN_CAPABILITIES,
+};
+
+export const capabilitiesFor = (role: UserRole): readonly Capability[] => BY_ROLE[role];
 
 export const can = (role: UserRole, capability: Capability): boolean =>
   capabilitiesFor(role).includes(capability);

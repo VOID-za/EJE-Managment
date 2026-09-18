@@ -8,8 +8,9 @@ import { inMemoryFileStore, SimulatedStorageService } from '@/services/simulated
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
-import type { IsoDate, User } from '@/domain';
+import type { IsoDate, Job, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { confirmJobCardDelivery } from './job-operations';
 import type { AppServices } from './context';
 
 /**
@@ -38,6 +39,24 @@ export const dayOffset = (days: number): IsoDate => {
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + days);
   return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+};
+
+/**
+ * Confirms the provider delivered a customer's copy, then closes the job.
+ *
+ * Stands in for the delivery report Microsoft 365 sends in production. Tests
+ * need it because issuing a job card no longer closes the job: an accepted send
+ * is not a delivered mail, so the job waits until something confirms delivery.
+ */
+export const confirmDelivery = async (
+  harness: Harness,
+  context: OperationContext,
+  job: Job,
+): Promise<Job> => {
+  const messageId = job.delivery?.messageId ?? '';
+  if (messageId.length === 0) throw new Error(`${job.jobNumber} has no message to confirm`);
+  harness.outbox.setDelivery(messageId, 'delivered');
+  return confirmJobCardDelivery(context, job);
 };
 
 export const buildHarness = (): Harness => {

@@ -26,6 +26,13 @@ export type ActivityEventType =
   | 'customer_signed'
   | 'pdf_generated'
   | 'job_submitted'
+  /**
+   * A change in what became of the customer's copy.
+   *
+   * Every attempt and every state change is recorded, so "we sent it" can be
+   * checked against what the provider actually reported.
+   */
+  | 'delivery_state_changed'
   | 'master_amended_after_signature'
   | 'job_closed'
   | 'document_viewed'
@@ -35,11 +42,20 @@ export type ActivityEventType =
   | 'customer_updated'
   | 'site_created'
   | 'site_updated'
+  // Removal is recorded either way it goes: a record nothing refers to is
+  // deleted outright, one with job history is archived so those jobs still
+  // resolve it. The two are different events because they are different facts.
+  | 'site_deleted'
+  | 'site_archived'
   | 'contact_created'
   | 'contact_updated'
+  | 'contact_deleted'
+  | 'contact_archived'
   | 'machine_created'
   | 'machine_approved'
   | 'machine_updated'
+  | 'machine_deleted'
+  | 'machine_archived'
   | 'user_created'
   | 'user_updated'
   | 'user_disabled'

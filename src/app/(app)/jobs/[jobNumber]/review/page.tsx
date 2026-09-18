@@ -2,11 +2,18 @@
 
 import { useRouter } from 'next/navigation';
 import { use, useCallback, useEffect, useState } from 'react';
-import { contactFullName } from '@/domain';
+import {
+  can,
+  contactFullName,
+  deliveryMessage,
+  deliveryStateLabel,
+  isDelivered,
+  type DeliveryRecord,
+} from '@/domain';
 import {
   generateJobCardDocument,
-  submitForMasterReview,
-  submitJobCard,
+  issueJobCard,
+  retryJobCardDelivery,
 } from '@/application/job-operations';
 import { loadFinalDocumentFile } from '@/application/final-document';
 import { loadJobView } from '@/application/job-view';
@@ -52,7 +59,11 @@ const ReviewJobPage = ({
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [generated, setGenerated] = useState<GeneratedPdf | null>(null);
-  const [submitted, setSubmitted] = useState<{ fileName: string; to: string } | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    fileName: string;
+    to: string;
+    delivery: DeliveryRecord;
+  } | null>(null);
 
   const viewQuery = useQuery(`job:${jobNumber}:review`, (repos) => loadJobView(repos, jobNumber));
   const view = viewQuery.data ?? null;
@@ -128,14 +139,20 @@ const ReviewJobPage = ({
   const customerDisplayName = contact === null ? customer.name : contactFullName(contact);
 
   const isMaster = currentUser.role === 'master';
-  const awaitingHandOver = job.status === 'review';
   const inMasterReview = job.status === 'submitted';
+  const awaitingDelivery = job.status === 'awaiting_delivery';
   const closed = job.status === 'closed';
 
-  // Two distinct submissions. The technician hands the job to the office; only a
-  // Master issues it to the customer.
-  const canHandOver = awaitingHandOver;
-  const canIssue = inMasterReview && isMaster;
+  /*
+   * One submission, by whoever finished the job.
+   *
+   * There is no Master Review in the normal workflow any more: the person who
+   * did the work and took the signature submits the job card, and that issues
+   * it. `submitted` is only reachable by jobs that entered Master Review before
+   * this changed, and a Master can still move those on.
+   */
+  const canIssue =
+    can(currentUser.role, 'jobs.submit') && (job.status === 'review' || (inMasterReview && isMaster));
 
   return (
     <>
@@ -176,26 +193,58 @@ const ReviewJobPage = ({
         }
       />
 
+      {/*
+        The result, reported from what the provider said.
+
+        "Successfully delivered" appears for a confirmed delivery and for
+        nothing else. A pending send says pending, and a failure says the job is
+        not closed — because it is not.
+      */}
       {submitted !== null && (
-        <Card className="mb-5 border-verdant-200 bg-verdant-50">
+        <Card
+          className={cn(
+            'mb-5',
+            isDelivered(submitted.delivery)
+              ? 'border-verdant-200 bg-verdant-50'
+              : submitted.delivery.state === 'failed'
+                ? 'border-signal-200 bg-signal-50'
+                : 'border-amber-eje-200 bg-amber-eje-50',
+          )}
+        >
           <div className="flex items-start gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-verdant-500 text-white">
-              <Icon name="check" className="size-5" />
+            <span
+              className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-full text-white',
+                isDelivered(submitted.delivery)
+                  ? 'bg-verdant-500'
+                  : submitted.delivery.state === 'failed'
+                    ? 'bg-signal-500'
+                    : 'bg-amber-eje-500',
+              )}
+            >
+              <Icon
+                name={isDelivered(submitted.delivery) ? 'check' : 'clock'}
+                className="size-5"
+              />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-verdant-700">
-                {job.jobNumber} submitted and closed
+              <p className="text-sm font-semibold text-steel-900">
+                {deliveryMessage(submitted.delivery, `Job card ${job.jobNumber}`)}
               </p>
               <p className="mt-1 text-sm text-steel-700">
-                {submitted.fileName} was queued for delivery to {submitted.to}.
+                {submitted.fileName} is stored against the job, so it never has to be signed or
+                produced again.
               </p>
-              <p className="mt-1.5 text-xs text-steel-500">
-                Demonstration mode: the email is recorded in the Simulated Outbox on the
-                Notifications screen. No message was transmitted.
-              </p>
+              {!isDelivered(submitted.delivery) && (
+                <p className="mt-1.5 text-xs text-steel-600">
+                  {job.jobNumber} stays open until the customer&rsquo;s copy is confirmed
+                  delivered. Confirm or fail the delivery in the Simulated Outbox to see what
+                  happens next.
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => router.push(`/jobs/${job.jobNumber}`)}>
-                  View closed job
+                  View job
                 </Button>
                 <Button
                   size="sm"
@@ -204,6 +253,26 @@ const ReviewJobPage = ({
                 >
                   Open Simulated Outbox
                 </Button>
+                {submitted.delivery.state === 'failed' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={operation.running}
+                    onClick={async () => {
+                      const ok = await operation.run(async (context) => {
+                        const again = await retryJobCardDelivery(context, job, customerDisplayName);
+                        setSubmitted({
+                          fileName: again.documentFileName,
+                          to: again.emailedTo,
+                          delivery: again.delivery,
+                        });
+                      });
+                      if (ok) viewQuery.refetch();
+                    }}
+                  >
+                    Send again
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -220,21 +289,62 @@ const ReviewJobPage = ({
         </div>
       )}
 
-      {canHandOver && submitted === null && (
-        <Card className="mb-5">
+      {job.status === 'review' && submitted === null && (
+        <Card className="mb-5 border-eje-200 bg-eje-50/50">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title="Ready to hand over"
-              description="The office reviews and approves this job card before the customer receives it. Nothing is emailed at this step."
+              title="Ready to submit"
+              description={`Submitting generates the signed job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`}
             />
-            <Button
-              size="lg"
-              onClick={() => setConfirmOpen(true)}
-              leadingIcon={<Icon name="check" className="size-5" />}
-            >
-              Submit for Master Review
-            </Button>
+            {canIssue && (
+              <Button
+                size="lg"
+                onClick={() => setConfirmOpen(true)}
+                leadingIcon={<Icon name="mail" className="size-5" />}
+              >
+                Submit job card
+              </Button>
+            )}
           </div>
+        </Card>
+      )}
+
+      {awaitingDelivery && submitted === null && (
+        <Card className="mb-5 border-amber-eje-200 bg-amber-eje-50">
+          <CardHeader
+            title={`Issued — ${deliveryStateLabel(job.delivery?.state ?? 'pending_delivery').toLowerCase()}`}
+            description={deliveryMessage(job.delivery, `Job card ${job.jobNumber}`)}
+            action={
+              <Badge tone={job.delivery?.state === 'failed' ? 'red' : 'amber'} size="sm" dot>
+                Not closed
+              </Badge>
+            }
+          />
+          <p className="mt-3 text-xs text-steel-600">
+            The signed job card is stored against the job. Re-sending uses that same document — the
+            customer is never sent two different job cards, and nothing has to be signed again.
+          </p>
+          {can(currentUser.role, 'jobs.submit') && (
+            <Button
+              className="mt-4"
+              variant="secondary"
+              loading={operation.running}
+              leadingIcon={<Icon name="mail" className="size-5" />}
+              onClick={async () => {
+                const ok = await operation.run(async (context) => {
+                  const again = await retryJobCardDelivery(context, job, customerDisplayName);
+                  setSubmitted({
+                    fileName: again.documentFileName,
+                    to: again.emailedTo,
+                    delivery: again.delivery,
+                  });
+                });
+                if (ok) viewQuery.refetch();
+              }}
+            >
+              Send to the customer again
+            </Button>
+          )}
         </Card>
       )}
 
@@ -318,43 +428,39 @@ const ReviewJobPage = ({
 
       <ConfirmDialog
         open={confirmOpen}
-        title={canIssue ? 'Submit Job Card?' : 'Submit for Master Review?'}
+        title="Submit Job Card?"
         message={
-          canIssue ? (
-            <>
-              <p>
-                Once submitted, this job will be closed and the signed job card will be emailed to
-                the customer.
-              </p>
-              <p className="mt-3 rounded-[var(--radius-control)] bg-amber-eje-50 px-3 py-2.5 text-xs text-amber-eje-700">
-                Demonstration mode: no email is actually sent. The message is recorded in the
-                Simulated Outbox so you can see exactly what production would transmit.
-              </p>
-            </>
-          ) : (
-            <>
-              <p>
-                {job.jobNumber} will be handed to the office for review. The customer is{' '}
-                <span className="font-semibold">not</span> emailed at this step.
-              </p>
-              <p className="mt-2 text-steel-500">
-                A Master checks and corrects the job card, then issues it to the customer.
-              </p>
-            </>
-          )
+          <>
+            <p>
+              The signed job card will be generated and emailed to {customerDisplayName} at{' '}
+              {customerEmail}. This cannot be undone: once submitted, nothing on the job can be
+              changed.
+            </p>
+            <p className="mt-2 text-steel-500">
+              {job.jobNumber} closes when the customer&rsquo;s copy is confirmed delivered — not
+              when it is sent. If delivery is still pending or fails, the job stays open and can be
+              re-sent.
+            </p>
+            <p className="mt-3 rounded-[var(--radius-control)] bg-amber-eje-50 px-3 py-2.5 text-xs text-amber-eje-700">
+              Demonstration mode: no mail leaves the browser. The message is recorded in the
+              Simulated Outbox, where delivery is confirmed or failed by hand — which is what the
+              provider&rsquo;s delivery report does in production.
+            </p>
+          </>
         }
-        confirmLabel={canIssue ? 'Submit' : 'Submit for review'}
+        confirmLabel="Submit job card"
         cancelLabel="Cancel"
         busy={operation.running}
         onConfirm={async () => {
           const ok = await operation.run(async (context) => {
-            if (canIssue) {
-              const result = await submitJobCard(context, job, customerEmail, customerDisplayName);
-              setSubmitted({ fileName: result.documentFileName, to: result.emailedTo });
-            } else {
-              await submitForMasterReview(context, job);
-              setSubmitted(null);
-            }
+            const result = await issueJobCard(context, job, customerEmail, customerDisplayName);
+            // Reported from what the PROVIDER said, never from the call having
+            // returned. `deliveryMessage` is the only place that phrasing lives.
+            setSubmitted({
+              fileName: result.documentFileName,
+              to: result.emailedTo,
+              delivery: result.delivery,
+            });
           });
           setConfirmOpen(false);
           if (ok) viewQuery.refetch();

@@ -131,6 +131,7 @@ const baseJob = (jobNumber: string): Job => ({
   courierCollection: false,
   pricingSnapshot: null,
   finalDocument: null,
+  delivery: null,
   cancellation: null,
   deletedAt: null,
   deletedBy: null,

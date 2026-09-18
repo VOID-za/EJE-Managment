@@ -7,6 +7,8 @@ import {
   startSignature,
   submitForMasterReview,
   submitJobCard,
+  issueJobCard,
+  confirmJobCardDelivery,
 } from './job-operations';
 import { loadJobView } from './job-view';
 import type { OperationContext } from './context';
@@ -219,21 +221,25 @@ describe('the courier collection document', () => {
     );
   });
 
-  it('still routes through Master review before the customer is emailed', async () => {
+  it('is issued by whoever submits it, and closes only on confirmed delivery', async () => {
     const courier = await loadJob(harness, 'EJE-1063');
-    const handed = await submitForMasterReview(harness.tech, courier);
-    expect(handed.status).toBe('submitted');
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(0);
 
-    const issued = await submitJobCard(
-      harness.master,
-      handed,
+    // No Master Review: the submission issues the collection note itself.
+    const issued = await issueJobCard(
+      harness.tech,
+      courier,
       'buyer@kruger-demo.co.za',
       'Kruger Engineering',
     );
-    expect(issued.job.status).toBe('closed');
+    expect(issued.job.status).toBe('awaiting_delivery');
     expect(issued.emailedTo).toBe('buyer@kruger-demo.co.za');
+    expect(issued.delivery.state).toBe('pending_delivery');
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(1);
+
+    harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
+    const closed = await confirmJobCardDelivery(harness.tech, issued.job);
+    expect(closed.status).toBe('closed');
   });
 });
 

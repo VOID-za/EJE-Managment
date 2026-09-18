@@ -1,6 +1,7 @@
 import type {
   ChecklistTemplate,
   Contact,
+  DeliveryState,
   Customer,
   IsoDateTime,
   Job,
@@ -9,6 +10,7 @@ import type {
   SystemSettings,
   User,
 } from '@/domain';
+export type { DeliveryState } from '@/domain';
 
 /**
  * Integration ports.
@@ -33,6 +35,14 @@ export interface OutboxEntry {
   readonly createdAt: IsoDateTime;
   /** Always true in the demo. A real adapter records a provider message id. */
   readonly simulated: true;
+  /**
+   * What the provider says became of it.
+   *
+   * Kept on the entry so the outbox shows the truth rather than implying that
+   * everything listed in it arrived.
+   */
+  readonly delivery: DeliveryState;
+  readonly failureReason: string;
 }
 
 export interface EmailMessage {
@@ -43,9 +53,38 @@ export interface EmailMessage {
   readonly attachments?: readonly { readonly fileName: string; readonly storageKey: string }[];
 }
 
+/**
+ * What a provider tells us when we hand it a message.
+ *
+ * `pending_delivery` is the normal, honest answer: Microsoft 365 returns 202
+ * the moment it accepts the message, which says nothing about whether the
+ * customer's mailbox took it. `delivered` may only be returned by a provider
+ * that has genuinely confirmed delivery to the recipient.
+ */
+export interface DeliveryReceipt {
+  readonly messageId: string;
+  readonly state: DeliveryState;
+  readonly failureReason: string;
+  /** The outbox record, where the adapter keeps one. */
+  readonly entry: OutboxEntry | null;
+}
+
 export interface EmailService {
-  /** Microsoft 365 / Graph in production. */
-  send(message: EmailMessage): Promise<OutboxEntry>;
+  /**
+   * Hands the message to the provider.
+   *
+   * Returns what the PROVIDER said, not what we hope happened. An
+   * implementation must never return `delivered` because a request was
+   * accepted — see `DeliveryState`.
+   */
+  send(message: EmailMessage): Promise<DeliveryReceipt>;
+  /**
+   * Asks the provider what became of a message it accepted earlier.
+   *
+   * In production this reads the delivery report (Graph message trace, or the
+   * provider's webhook state). Returns null when the provider has no record.
+   */
+  deliveryState(messageId: string): Promise<DeliveryReceipt | null>;
 }
 
 export interface WhatsAppMessage {

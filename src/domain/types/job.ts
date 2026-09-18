@@ -1,3 +1,4 @@
+import type { DeliveryRecord } from './delivery';
 import type {
   Attachment,
   Cents,
@@ -60,6 +61,24 @@ export type JobStatus =
   | 'completion'
   | 'customer_signature'
   | 'review'
+  /**
+   * Submitted by the technician, and waiting on the customer's copy reaching
+   * them.
+   *
+   * The job card is signed, the final document exists and has been sent, but
+   * the provider has not confirmed delivery. The job is NOT closed: a job card
+   * the customer never received is not a job card that has been issued. It is
+   * also no longer editable — the document has gone out, and the record must
+   * keep matching it.
+   */
+  | 'awaiting_delivery'
+  /**
+   * Historical: handed to the office for Master Review.
+   *
+   * No longer reached by new work — a technician's submission now issues the
+   * job card directly — but kept so jobs that went through that stage stay
+   * readable and can still be issued.
+   */
   | 'submitted'
   | 'closed'
   /**
@@ -315,6 +334,14 @@ export interface Job {
    * Its presence is what makes a closed job's paperwork answerable years later.
    */
   readonly finalDocument: FinalDocument | null;
+
+  /**
+   * What became of the customer's copy of the final job card.
+   *
+   * Null until the job card is issued. The job closes only when this reaches
+   * `delivered` — an accepted send is not a received mail.
+   */
+  readonly delivery: DeliveryRecord | null;
 
   /** Set when the job was cancelled. Never cleared. */
   readonly cancellation: JobCancellation | null;

@@ -10,6 +10,7 @@ import {
   startSignature,
   submitForMasterReview,
   submitJobCard,
+  confirmJobCardDelivery,
 } from './job-operations';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
@@ -39,16 +40,26 @@ const master: User = seedUsers.find((user) => user.role === 'master' && user.act
 /** Technician hands over, then a Master issues it — the full two-step close. */
 const handOverAndIssue = async (
   context: OperationContext,
+  outbox: SimulatedOutbox,
   job: Job,
   email = 'customer@example-demo.co.za',
   name = 'Pieter Nel',
 ) => {
   const reviewed = await submitForMasterReview(context, job);
   const masterContext: OperationContext = { ...context, actor: master };
-  return submitJobCard(masterContext, reviewed, email, name);
+  const issued = await submitJobCard(masterContext, reviewed, email, name);
+  // Issuing hands the mail to the provider; the job closes when delivery is
+  // confirmed, which in production is the provider's delivery report.
+  outbox.setDelivery(issued.delivery.messageId, 'delivered');
+  const closed = await confirmJobCardDelivery(masterContext, issued.job);
+  return { ...issued, job: closed };
 };
 
-const buildContext = (): { context: OperationContext; repos: RepositoryBundle } => {
+const buildContext = (): {
+  context: OperationContext;
+  repos: RepositoryBundle;
+  outbox: SimulatedOutbox;
+} => {
   const store = new DemoStore();
   const repos = createDemoRepositories({ read: store.read, commit: store.commit });
   const clock = new SystemClock();
@@ -57,6 +68,7 @@ const buildContext = (): { context: OperationContext; repos: RepositoryBundle } 
 
   return {
     repos,
+    outbox,
     context: {
       repos,
       actor,
@@ -106,11 +118,13 @@ const workAndSign = async (context: OperationContext, jobNumber: string): Promis
 describe('a signed job keeps the rates it was signed at', () => {
   let context: OperationContext;
   let repos: RepositoryBundle;
+  let outbox: SimulatedOutbox;
 
   beforeEach(() => {
     const built = buildContext();
     context = built.context;
     repos = built.repos;
+    outbox = built.outbox;
   });
 
   it('freezes pricing when the customer signs, and survives a rate change', async () => {
@@ -124,7 +138,7 @@ describe('a signed job keeps the rates it was signed at', () => {
     const totalsAtSignature = calculateJobTotals(signed, rateA);
 
     // Submit and close the job.
-    const result = await handOverAndIssue(context, signed);
+    const result = await handOverAndIssue(context, outbox, signed);
     expect(result.job.status).toBe('closed');
     expect(result.job.pricingSnapshot).toEqual(signed.pricingSnapshot);
 
@@ -156,7 +170,7 @@ describe('a signed job keeps the rates it was signed at', () => {
   it('prices a different, unsigned job at the new rates', async () => {
     const rateA = await repos.settings.get();
     const signed = await workAndSign(context, 'EJE-1048');
-    await handOverAndIssue(context, signed);
+    await handOverAndIssue(context, outbox, signed);
 
     await repos.settings.save({
       ...rateA,
@@ -189,7 +203,7 @@ describe('a signed job keeps the rates it was signed at', () => {
       labourRates: { normal: 999999, overtime: 999999, double: 999999 },
     });
 
-    const result = await handOverAndIssue(context, signed);
+    const result = await handOverAndIssue(context, outbox, signed);
     expect(result.job.pricingSnapshot).toEqual(original);
   });
 });

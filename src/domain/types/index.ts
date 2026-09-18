@@ -6,6 +6,7 @@ export * from './customer';
 export * from './machine';
 export * from './checklist';
 export * from './job';
+export * from './delivery';
 export * from './library';
 export * from './activity';
 export * from './notification';

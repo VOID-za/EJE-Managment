@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
+import { deliveryStateLabel } from '@/domain';
+import { confirmJobCardDelivery } from '@/application/job-operations';
 import {
   Badge,
   Button,
@@ -287,7 +289,33 @@ const NotificationRow = ({
  * WhatsApp. Nothing here left the browser.
  */
 const OutboxPanel = () => {
-  const { outbox } = useApp();
+  const { outbox, reportDelivery, operationContext } = useApp();
+
+  /*
+   * Confirming or failing a delivery.
+   *
+   * This stands in for the delivery report Microsoft 365 sends back in
+   * production. The demonstration cannot observe a real mailbox, and inventing
+   * a confirmation would be precisely the false success the delivery states
+   * exist to prevent — so the confirmation is an explicit act here, and the job
+   * that depends on it is closed only when it happens.
+   */
+  const settle = async (messageId: string, state: 'delivered' | 'failed'): Promise<void> => {
+    reportDelivery(
+      messageId,
+      state,
+      state === 'failed' ? 'The recipient mailbox rejected the message.' : '',
+    );
+
+    // Any job waiting on this message now hears about it.
+    const context = operationContext();
+    const jobs = await context.repos.jobs.list({ statuses: ['awaiting_delivery'] });
+    for (const job of jobs) {
+      if (job.delivery?.messageId === messageId) {
+        await confirmJobCardDelivery(context, job);
+      }
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -305,6 +333,13 @@ const OutboxPanel = () => {
               job card is submitted, the message that production would transmit is recorded here
               instead. Connecting Microsoft 365 and the WhatsApp Business Platform in Phase 2
               replaces the adapter behind these interfaces — no business logic changes.
+            </p>
+            <p className="mt-2 text-sm text-steel-700">
+              Because nothing is really sent, nothing here can really be delivered either. An
+              accepted message therefore sits at <strong>Delivery pending</strong> until somebody
+              reports what became of it, which is what the provider&rsquo;s delivery report does in
+              production. A job waiting on that message closes only when it is confirmed
+              delivered.
             </p>
           </div>
         </div>
@@ -333,8 +368,18 @@ const OutboxPanel = () => {
                         />
                         {entry.channel === 'email' ? 'Email' : 'WhatsApp'}
                       </Badge>
-                      <Badge tone="amber" size="sm">
-                        Simulated
+                      <Badge
+                        tone={
+                          entry.delivery === 'delivered'
+                            ? 'green'
+                            : entry.delivery === 'failed'
+                              ? 'red'
+                              : 'amber'
+                        }
+                        size="sm"
+                        dot
+                      >
+                        {deliveryStateLabel(entry.delivery)}
                       </Badge>
                     </div>
                   }
@@ -356,6 +401,31 @@ const OutboxPanel = () => {
                 <p className="mt-3 text-xs text-steel-400">
                   Recorded {formatDateTime(entry.createdAt)}
                 </p>
+
+                {entry.failureReason.length > 0 && (
+                  <p className="mt-1 text-xs font-medium text-signal-600">{entry.failureReason}</p>
+                )}
+
+                {/* The provider's delivery report, by hand. Only a confirmed
+                    delivery closes the job that is waiting on it. */}
+                {entry.channel === 'email' &&
+                  (entry.delivery === 'pending_delivery' || entry.delivery === 'sending') && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-steel-100 pt-3">
+                      <span className="text-xs text-steel-500">
+                        Demonstration: report what the provider would report.
+                      </span>
+                      <Button size="sm" onClick={() => void settle(entry.id, 'delivered')}>
+                        Confirm delivered
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void settle(entry.id, 'failed')}
+                      >
+                        Mark as failed
+                      </Button>
+                    </div>
+                  )}
               </Card>
             </li>
           ))}

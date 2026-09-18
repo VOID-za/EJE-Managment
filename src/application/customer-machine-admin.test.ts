@@ -111,6 +111,7 @@ const NEW_MACHINE = {
   manufacturer: 'Mazak',
   model: 'QT-200',
   serialNumber: 'MZ-QT200-11902',
+  machineNumber: '',
   machineType: 'CNC Lathe' as const,
   year: 2021,
   installationDate: '2021-04-12',

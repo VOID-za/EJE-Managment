@@ -43,6 +43,21 @@ export const seedUsers: readonly User[] = [
     createdAt: timeOffset(-540, 8),
   },
   {
+    // The office administrator the technicians write to. Coordinator, not
+    // Master: she runs the office day to day but does not set charge-out rates
+    // or administer Master accounts.
+    id: asUserId('user-coord-christene'),
+    firstName: 'Christene',
+    lastName: 'van Niekerk',
+    initials: 'CV',
+    email: 'christene.vanniekerk@eje-demo.co.za',
+    mobile: '+27 82 555 0126',
+    role: 'coordinator',
+    jobTitle: 'Office Coordinator',
+    active: true,
+    createdAt: timeOffset(-430, 8),
+  },
+  {
     id: asUserId('user-tech-sipho'),
     firstName: 'Sipho',
     lastName: 'Mahlangu',

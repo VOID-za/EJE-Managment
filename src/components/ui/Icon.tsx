@@ -38,6 +38,7 @@ export type IconName =
   | 'logout'
   | 'menu'
   | 'trash'
+  | 'edit'
   | 'download'
   | 'mail'
   | 'whatsapp'
@@ -83,6 +84,7 @@ const PATHS: Record<IconName, string> = {
   logout: 'M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6',
   menu: 'M4 7h16M4 12h16M4 17h16',
   trash: 'M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  edit: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Zm11-14 3 3',
   download: 'M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 20h16',
   mail: 'M3 7h18v12H3zM3 7l9 7 9-7',
   whatsapp:

@@ -47,8 +47,13 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   // ill before the customer signs should not have to abandon the job.
   completion: ['customer_signature', 'in_progress', 'awaiting_spares', 'open'],
   customer_signature: ['review', 'completion'],
-  review: ['submitted', 'completion'],
-  submitted: ['closed'],
+  // A technician's submission now issues the job card itself, so `review` goes
+  // straight to awaiting delivery. The edge to `submitted` remains only so a
+  // job already sitting in Master Review can still be moved on.
+  review: ['awaiting_delivery', 'submitted', 'completion'],
+  // Only a confirmed delivery closes a job. The self-edge is a retry.
+  awaiting_delivery: ['closed', 'awaiting_delivery'],
+  submitted: ['awaiting_delivery', 'closed'],
   closed: [],
   // Terminal. A cancelled job is history, not something to resurrect: raise a
   // new job instead, so the record of what was cancelled stays intact.
@@ -71,6 +76,10 @@ export const jobStatusLabel = (status: JobStatus): string => {
       return 'Customer Signature';
     case 'review':
       return 'Review';
+    case 'awaiting_delivery':
+      // Issued and sent; waiting on the provider to confirm the customer
+      // received it. Not closed, because nobody has confirmed they have it.
+      return 'Awaiting Delivery';
     case 'submitted':
       // Submitted BY THE TECHNICIAN, and now waiting on a Master. The customer
       // has not been emailed at this point.
@@ -90,12 +99,14 @@ export const allowedTransitions = (from: JobStatus): readonly JobStatus[] => TRA
 /**
  * Whether anyone at all may still change this job.
  *
- * Only a closed job is final. A job in Master Review has been submitted by the
- * technician but not yet issued to the customer, so a Master can still correct
- * it — see `canEditJob`, which is the check screens should use.
+ * A closed job is final, and so is one awaiting delivery: its job card has been
+ * generated and sent, so changing the job would leave the record disagreeing
+ * with the document the customer holds. A job still in the historical Master
+ * Review stage has not been issued, so a Master can correct it — see
+ * `canEditJob`, which is the check screens should use.
  */
 export const isJobEditable = (status: JobStatus): boolean =>
-  status !== 'closed' && status !== 'cancelled';
+  status !== 'closed' && status !== 'cancelled' && status !== 'awaiting_delivery';
 
 /**
  * Whether THIS ROLE may edit a job in this state.
@@ -106,6 +117,9 @@ export const isJobEditable = (status: JobStatus): boolean =>
  */
 export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
   if (status === 'closed' || status === 'cancelled') return false;
+  // Issued. The document is with the customer and the record must keep
+  // matching it, whether or not delivery has been confirmed yet.
+  if (status === 'awaiting_delivery') return false;
   if (status === 'submitted') return role === 'master';
   return true;
 };

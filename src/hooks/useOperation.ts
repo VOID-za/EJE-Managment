@@ -20,6 +20,15 @@ export interface UseOperationResult extends OperationState {
    * result is `true` when the operation completed.
    */
   run(operation: (context: OperationContext) => Promise<unknown>): Promise<boolean>;
+  /**
+   * The same, for an operation whose RESULT the screen needs.
+   *
+   * Returns null when the operation was refused, which is distinguishable from
+   * a result because operations that use this return an object. Used where the
+   * outcome itself is the message — a removal that archived rather than
+   * deleted, for instance, has to say so.
+   */
+  runFor<T>(operation: (context: OperationContext) => Promise<T>): Promise<T | null>;
 }
 
 export const useOperation = (): UseOperationResult => {
@@ -51,10 +60,32 @@ export const useOperation = (): UseOperationResult => {
     [operationContext],
   );
 
+  const runFor = useCallback(
+    async <T,>(operation: (context: OperationContext) => Promise<T>): Promise<T | null> => {
+      setRunning(true);
+      setError(null);
+      setViolations([]);
+      try {
+        return await operation(operationContext());
+      } catch (cause: unknown) {
+        if (cause instanceof WorkflowError) {
+          setError(cause.message);
+          setViolations(cause.violations);
+        } else {
+          setError(cause instanceof Error ? cause.message : 'The action could not be completed.');
+        }
+        return null;
+      } finally {
+        setRunning(false);
+      }
+    },
+    [operationContext],
+  );
+
   const clearError = useCallback(() => {
     setError(null);
     setViolations([]);
   }, []);
 
-  return { run, running, error, violations, clearError };
+  return { run, runFor, running, error, violations, clearError };
 };

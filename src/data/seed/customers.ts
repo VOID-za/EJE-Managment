@@ -21,6 +21,13 @@ export const seedCustomers: readonly Customer[] = [
     email: 'maintenance@abc-engineering-demo.co.za',
     industry: 'Precision Engineering',
     paymentTerms: '30 days from statement',
+    officeAddress: {
+      line1: 'Unit 7, Steelpark Industrial Estate',
+      line2: '112 Foundry Road',
+      city: 'Johannesburg',
+      province: 'Gauteng',
+      postalCode: '2094',
+    },
     active: true,
     notes: [
       {
@@ -49,6 +56,13 @@ export const seedCustomers: readonly Customer[] = [
     email: 'workshop@krugerprecision-demo.co.za',
     industry: 'Tool & Die',
     paymentTerms: '30 days',
+    officeAddress: {
+      line1: '21 Anvil Street',
+      line2: 'Benoni South',
+      city: 'Benoni',
+      province: 'Gauteng',
+      postalCode: '1501',
+    },
     active: true,
     notes: [
       {
@@ -71,6 +85,13 @@ export const seedCustomers: readonly Customer[] = [
     email: 'facilities@highveldaero-demo.co.za',
     industry: 'Aerospace Manufacturing',
     paymentTerms: '45 days',
+    officeAddress: {
+      line1: 'Building D, Aeropark',
+      line2: '9 Turbine Avenue',
+      city: 'Centurion',
+      province: 'Gauteng',
+      postalCode: '0157',
+    },
     active: true,
     notes: [
       {
@@ -93,6 +114,13 @@ export const seedCustomers: readonly Customer[] = [
     email: 'admin@vaaltoolroom-demo.co.za',
     industry: 'Contract Machining',
     paymentTerms: 'COD',
+    officeAddress: {
+      line1: '77 Mill Street',
+      line2: 'Duncanville',
+      city: 'Vereeniging',
+      province: 'Gauteng',
+      postalCode: '1930',
+    },
     active: true,
     notes: [],
     documents: [],
@@ -108,6 +136,13 @@ export const seedCustomers: readonly Customer[] = [
     email: 'plant@midrandautomation-demo.co.za',
     industry: 'Automotive Components',
     paymentTerms: '30 days',
+    officeAddress: {
+      line1: '5 Gemini Road',
+      line2: 'Halfway House',
+      city: 'Midrand',
+      province: 'Gauteng',
+      postalCode: '1685',
+    },
     active: true,
     notes: [],
     documents: [],
@@ -128,6 +163,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Report to the main gate. Ask for the maintenance planner.',
     latitude: -26.234,
     longitude: 28.073,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-abc-pta'),
@@ -141,6 +177,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Deliveries and service vehicles use Gate 3 only.',
     latitude: -25.642,
     longitude: 28.091,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-abc-ger'),
@@ -154,6 +191,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Full safety induction required. PPE including face shield.',
     latitude: -26.2745,
     longitude: 28.198,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-kruger-main'),
@@ -167,6 +205,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Park in the visitor bays on the north side.',
     latitude: -26.198,
     longitude: 28.324,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-highveld-centurion'),
@@ -180,6 +219,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Pre-clearance required 24 hours before arrival.',
     latitude: -25.859,
     longitude: 28.172,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-vaal-main'),
@@ -193,6 +233,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: '',
     latitude: -26.671,
     longitude: 27.928,
+    archivedAt: null,
   },
   {
     id: asSiteId('site-midrand-main'),
@@ -206,6 +247,7 @@ export const seedSites: readonly Site[] = [
     accessNotes: 'Production runs 24/5. Coordinate downtime with the line supervisor.',
     latitude: -25.993,
     longitude: 28.128,
+    archivedAt: null,
   },
 ];
 
@@ -220,6 +262,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'marlene.fourie@abc-engineering-demo.co.za',
     phone: '+27 11 555 0211',
     isPrimary: true,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-abc-jhb'),
@@ -231,6 +274,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'pieter.nel@abc-engineering-demo.co.za',
     phone: '+27 82 555 0322',
     isPrimary: false,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-abc-pta'),
@@ -242,6 +286,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'refilwe.mokoena@abc-engineering-demo.co.za',
     phone: '+27 82 555 0344',
     isPrimary: false,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-abc-ger'),
@@ -253,6 +298,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'craig.b@abc-engineering-demo.co.za',
     phone: '+27 82 555 0366',
     isPrimary: false,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-kruger-main'),
@@ -264,6 +310,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'hennie@krugerprecision-demo.co.za',
     phone: '+27 82 555 0455',
     isPrimary: true,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-highveld-main'),
@@ -275,6 +322,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'anita.ferreira@highveldaero-demo.co.za',
     phone: '+27 82 555 0511',
     isPrimary: true,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-vaal-main'),
@@ -286,6 +334,7 @@ export const seedContacts: readonly Contact[] = [
     email: 'sanele.zulu@vaaltoolroom-demo.co.za',
     phone: '+27 82 555 0622',
     isPrimary: true,
+    archivedAt: null,
   },
   {
     id: asContactId('contact-midrand-main'),
@@ -297,5 +346,6 @@ export const seedContacts: readonly Contact[] = [
     email: 'gerhard.smit@midrandautomation-demo.co.za',
     phone: '+27 82 555 0733',
     isPrimary: true,
+    archivedAt: null,
   },
 ];

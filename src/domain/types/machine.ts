@@ -37,6 +37,15 @@ export interface Machine {
   readonly manufacturer: string;
   readonly model: string;
   readonly serialNumber: string;
+  /**
+   * The customer's own number for the machine, where they use one.
+   *
+   * Strucmac label their machines STM1, STM2, STM3 and ask for them by that
+   * number; the serial number on the rating plate means nothing to them.
+   * Optional and free text, because it is the customer's convention rather than
+   * ours, and most customers have none — an empty string for those.
+   */
+  readonly machineNumber: string;
   readonly machineType: MachineType;
   readonly year: number;
   readonly installationDate: IsoDate;
@@ -49,6 +58,13 @@ export interface Machine {
   readonly approvedBy: UserId | null;
   readonly approvedAt: IsoDateTime | null;
   readonly createdAt: IsoDateTime;
+  /**
+   * When this machine was removed from the register.
+   *
+   * A machine with job history is archived rather than deleted, so the jobs
+   * that were carried out on it still name it. See `Contact.archivedAt`.
+   */
+  readonly archivedAt: IsoDateTime | null;
 }
 
 export const isMachineConfirmed = (machine: Pick<Machine, 'approval'>): boolean =>
@@ -56,3 +72,16 @@ export const isMachineConfirmed = (machine: Pick<Machine, 'approval'>): boolean 
 
 export const machineDisplayName = (machine: Pick<Machine, 'manufacturer' | 'model'>): string =>
   `${machine.manufacturer} ${machine.model}`;
+
+/**
+ * How a machine is named where the customer has their own number for it.
+ *
+ * The customer's number leads, because that is what they say on the telephone;
+ * the manufacturer and model follow so the office still knows what it is.
+ */
+export const machineLabel = (
+  machine: Pick<Machine, 'manufacturer' | 'model' | 'machineNumber'>,
+): string =>
+  machine.machineNumber.trim().length > 0
+    ? `${machine.machineNumber.trim()} — ${machineDisplayName(machine)}`
+    : machineDisplayName(machine);
