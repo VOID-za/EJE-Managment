@@ -5,7 +5,6 @@ import {
   addPart,
   addTravel,
   removeLineItem,
-  submitForMasterReview,
   updateLabour,
   updatePart,
   updateTravel,
@@ -259,7 +258,7 @@ describe('amending does not disturb historical pricing', () => {
       },
     };
     await harness.repos.jobs.save(frozen);
-    const handed = await submitForMasterReview(harness.context, frozen);
+    const handed = frozen;
 
     // Rates change afterwards.
     await harness.repos.settings.save({

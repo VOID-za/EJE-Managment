@@ -5,6 +5,7 @@ export * from './Card';
 export * from './DataTable';
 export * from './Field';
 export * from './Icon';
+export * from './Menu';
 export * from './Modal';
 export * from './SectionHeading';
 export * from './StatTile';

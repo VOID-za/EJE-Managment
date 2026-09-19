@@ -8,7 +8,7 @@ import { inMemoryFileStore, SimulatedStorageService } from '@/services/simulated
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
-import type { IsoDate, Job, User } from '@/domain';
+import type { IsoDate, IsoDateTime, Job, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { confirmJobCardDelivery } from './job-operations';
 import type { AppServices } from './context';
@@ -58,6 +58,31 @@ export const confirmDelivery = async (
   harness.outbox.setDelivery(messageId, 'delivered');
   return confirmJobCardDelivery(context, job);
 };
+
+/**
+ * Puts a job into the retired Master Review state, as a FIXTURE.
+ *
+ * Master Review is gone from the workflow: no transition leads into
+ * `submitted`, so there is no operation that can produce this state and there
+ * is deliberately no way for a new job to reach it. Jobs that entered it before
+ * it was retired still exist, though, and have to stay readable and issuable —
+ * so tests that cover that compatibility build the state directly, the way a
+ * persisted snapshot from before the change would present it.
+ *
+ * Writing through the repository rather than through an operation is the point:
+ * this is old data, not a path anybody can take.
+ */
+export const historicalMasterReview = async (
+  repos: RepositoryBundle,
+  job: Job,
+  at: IsoDateTime,
+): Promise<Job> =>
+  repos.jobs.save({
+    ...job,
+    status: 'submitted',
+    submittedAt: job.submittedAt ?? at,
+    completedAt: job.completedAt ?? at,
+  });
 
 export const buildHarness = (): Harness => {
   const store = new DemoStore();

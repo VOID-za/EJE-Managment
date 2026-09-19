@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Avatar, Button, Icon } from '@/components/ui';
+import { Avatar, Icon, Menu } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
 import { ThemeToggleButton } from './ThemeToggle';
-import { userFullName } from '@/domain';
+import { roleLabel, userFullName } from '@/domain';
 import { cn } from '@/lib/cn';
 
 export interface TopBarProps {
@@ -16,7 +16,7 @@ export interface TopBarProps {
 
 export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
   const router = useRouter();
-  const { currentUser } = useApp();
+  const { currentUser, signOut } = useApp();
   const [term, setTerm] = useState('');
 
   const submitSearch = (event: React.FormEvent) => {
@@ -71,19 +71,38 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
           )}
         </Link>
 
-        <Link href="/jobs/new" className="hidden sm:block">
-          <Button size="sm" leadingIcon={<Icon name="plus" className="size-4" />}>
-            New Job
-          </Button>
-        </Link>
-
+        {/* The only place the signed-in person and their actions live. The
+            sidebar carries navigation and nothing else. */}
         {currentUser !== null && (
-          <div className="ml-1 hidden items-center gap-2.5 border-l border-steel-200 pl-3 lg:flex">
-            <Avatar initials={currentUser.initials} size="sm" />
-            <div className="leading-tight">
-              <p className="text-xs font-semibold text-steel-800">{userFullName(currentUser)}</p>
-              <p className="text-[11px] text-steel-500">{currentUser.jobTitle}</p>
-            </div>
+          <div className="ml-1 border-l border-steel-200 pl-1.5">
+            <Menu
+              trigger="plain"
+              label={userFullName(currentUser)}
+              sublabel={roleLabel(currentUser.role)}
+              leading={<Avatar initials={currentUser.initials} size="sm" />}
+              triggerClassName="gap-2.5"
+              items={[
+                {
+                  id: 'profile',
+                  label: 'My availability',
+                  icon: <Icon name="calendar" className="size-4" />,
+                  onSelect: () => router.push(`/technicians/${currentUser.id}`),
+                },
+                {
+                  id: 'notifications',
+                  label: 'Notifications',
+                  icon: <Icon name="bell" className="size-4" />,
+                  onSelect: () => router.push('/notifications'),
+                },
+                {
+                  id: 'signout',
+                  label: 'Sign out',
+                  icon: <Icon name="logout" className="size-4" />,
+                  destructive: true,
+                  onSelect: signOut,
+                },
+              ]}
+            />
           </div>
         )}
       </div>

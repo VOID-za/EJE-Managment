@@ -2,14 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { can, roleLabel, userFullName } from '@/domain';
+import { can } from '@/domain';
 import { NAV_GROUP_LABELS, NAVIGATION, type NavigationItem } from '@/config/navigation';
-import { Avatar, Icon, type IconName } from '@/components/ui';
+import { Icon, type IconName } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/providers/AppProvider';
 import { Logo } from './Logo';
 import { DemoModeBadge } from './DemoModeBadge';
-import { ThemeToggle } from './ThemeToggle';
 
 const GROUP_ORDER: readonly NavigationItem['group'][] = ['work', 'records', 'system'];
 
@@ -23,7 +22,7 @@ export const Sidebar = ({
   readonly unreadMessages: number;
 }) => {
   const pathname = usePathname();
-  const { currentUser, signOut } = useApp();
+  const { currentUser } = useApp();
 
   const visible = NAVIGATION.filter(
     (item) =>
@@ -88,33 +87,10 @@ export const Sidebar = ({
         })}
       </nav>
 
-      <div className="border-t border-white/10 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2 px-2">
-          <DemoModeBadge compact />
-          <ThemeToggle />
-        </div>
-        {currentUser !== null && (
-          <div className="flex items-center gap-3 rounded-[var(--radius-control)] bg-white/5 p-2.5">
-            <Avatar initials={currentUser.initials} size="md" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                {userFullName(currentUser)}
-              </p>
-              <p className="truncate text-xs text-chrome-dim">
-                {roleLabel(currentUser.role)}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={signOut}
-              title="Sign out"
-              aria-label="Sign out"
-              className="rounded-[var(--radius-control)] p-2 text-chrome-dim transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <Icon name="logout" className="size-[18px]" />
-            </button>
-          </div>
-        )}
+      {/* Navigation only. Who is signed in, signing out and the theme all
+          live in the top bar, so there is one of each rather than two. */}
+      <div className="border-t border-white/10 px-2 py-3">
+        <DemoModeBadge compact />
       </div>
     </div>
   );

@@ -8,7 +8,6 @@ import {
   setCalloutApplied,
   startCompletion,
   startSignature,
-  submitForMasterReview,
   submitJobCard,
   confirmJobCardDelivery,
 } from './job-operations';
@@ -37,7 +36,7 @@ import type { RepositoryBundle } from '@/data/repositories';
 const actor: User = seedUsers.find((user) => user.role === 'technician' && user.active)!;
 const master: User = seedUsers.find((user) => user.role === 'master' && user.active)!;
 
-/** Technician hands over, then a Master issues it — the full two-step close. */
+/** The whole close: the person who took the signature issues it, then delivery. */
 const handOverAndIssue = async (
   context: OperationContext,
   outbox: SimulatedOutbox,
@@ -45,9 +44,9 @@ const handOverAndIssue = async (
   email = 'customer@example-demo.co.za',
   name = 'Pieter Nel',
 ) => {
-  const reviewed = await submitForMasterReview(context, job);
+  // Straight from Review. There is no Master Review in between any more.
   const masterContext: OperationContext = { ...context, actor: master };
-  const issued = await submitJobCard(masterContext, reviewed, email, name);
+  const issued = await submitJobCard(masterContext, job, email, name);
   // Issuing hands the mail to the provider; the job closes when delivery is
   // confirmed, which in production is the provider's delivery report.
   outbox.setDelivery(issued.delivery.messageId, 'delivered');

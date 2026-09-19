@@ -1,16 +1,23 @@
-import { JOB_PROGRESS_STAGES, jobStatusLabel, type JobStatus } from '@/domain';
+import {
+  JOB_PROGRESS_STAGES,
+  jobProgressPosition,
+  jobStatusLabel,
+  type JobStatus,
+} from '@/domain';
 import { cn } from '@/lib/cn';
 import { Icon } from '@/components/ui';
 
 /**
  * Linear progress rail for the job lifecycle.
  *
- * Awaiting Spares is shown as an interruption of the current stage rather than
- * a stage of its own, because it can occur any number of times.
+ * The rail draws the six stages of the active workflow and nothing else. Where
+ * a job sits, and whether something is holding it there — awaiting spares,
+ * awaiting delivery, or the retired Master Review stage a historical job is
+ * still in — is decided by `jobProgressPosition` in the domain, so the picture
+ * and the state machine cannot drift apart.
  */
 export const JobProgressRail = ({ status }: { readonly status: JobStatus }) => {
-  const effective: JobStatus = status === 'awaiting_spares' ? 'in_progress' : status;
-  const currentIndex = JOB_PROGRESS_STAGES.indexOf(effective);
+  const { index: currentIndex, interruption } = jobProgressPosition(status);
 
   return (
     <div className="eje-scrollbar overflow-x-auto pb-1">
@@ -18,7 +25,7 @@ export const JobProgressRail = ({ status }: { readonly status: JobStatus }) => {
         {JOB_PROGRESS_STAGES.map((stage, index) => {
           const done = currentIndex > index;
           const active = currentIndex === index;
-          const interrupted = active && status === 'awaiting_spares';
+          const interrupted = active && interruption !== null;
 
           return (
             <li key={stage} className="flex items-center gap-1">
@@ -48,7 +55,7 @@ export const JobProgressRail = ({ status }: { readonly status: JobStatus }) => {
                 >
                   {done ? <Icon name="check" className="size-3" /> : index + 1}
                 </span>
-                {interrupted ? 'Awaiting Spares' : jobStatusLabel(stage)}
+                {interrupted ? interruption : jobStatusLabel(stage)}
               </div>
               {index < JOB_PROGRESS_STAGES.length - 1 && (
                 <span

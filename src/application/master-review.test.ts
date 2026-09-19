@@ -8,7 +8,6 @@ import {
   saveCompletionReport,
   startCompletion,
   startSignature,
-  submitForMasterReview,
   submitJobCard,
   confirmJobCardDelivery,
 } from './job-operations';
@@ -23,15 +22,24 @@ import { SimulatedPdfService } from '@/services/simulated/pdf';
 import { inMemoryFileStore, SimulatedStorageService } from '@/services/simulated/storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
+import { historicalMasterReview } from './test-harness';
 import { seedUsers } from '@/data/seed';
 import { calculateJobTotals, canEditJob, type Job, type User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
- * Technician hand-over versus Master issue.
+ * The retired Master Review stage, and issuing from it.
  *
- * The commercial rule: the customer is emailed by the OFFICE, once, after a
- * Master has checked the job card — never by the technician on site.
+ * Master Review is no longer part of the workflow: a technician's submission
+ * issues the job card itself, and nothing transitions a job into `submitted`
+ * any more. Jobs that entered it before it was retired still exist, so what is
+ * covered here is COMPATIBILITY — such a job stays readable, stays editable by
+ * a Master, keeps the rates it was signed at, and can still be issued, sent and
+ * closed.
+ *
+ * The state is therefore built as a fixture, through the repository, exactly as
+ * a snapshot saved before the change would present it. There is deliberately no
+ * operation that can produce it.
  */
 const technician: User = seedUsers.find((user) => user.id === 'user-tech-sipho')!;
 const master: User = seedUsers.find((user) => user.id === 'user-master-elmarie')!;
@@ -105,128 +113,7 @@ const confirmDelivery = async (harness: Harness, job: Job): Promise<Job> => {
 const emails = (harness: Harness) =>
   harness.outbox.listSync().filter((entry) => entry.channel === 'email');
 
-describe('technician submission', () => {
-  let harness: Harness;
-  beforeEach(() => {
-    harness = build();
-  });
-
-  it('does NOT email the customer', async () => {
-    const signed = await workAndSign(harness);
-    await submitForMasterReview(harness.tech, signed);
-
-    expect(emails(harness)).toHaveLength(0);
-  });
-
-  it('moves the job into Master Review rather than closing it', async () => {
-    const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
-
-    expect(handed.status).toBe('submitted');
-    expect(handed.closedAt).toBeNull();
-    expect(handed.submittedAt).not.toBeNull();
-  });
-
-  it('records the hand-over, stating that the customer was not emailed', async () => {
-    const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
-
-    const trail = await harness.repos.activity.list(handed.id);
-    const entry = trail.find((event) => event.type === 'job_submitted');
-    expect(entry?.summary).toBe('Submitted for Master review');
-    expect(entry?.detail).toContain('not been emailed');
-  });
-
-  it('notifies EVERY active Master, exactly once each', async () => {
-    const signed = await workAndSign(harness);
-    await submitForMasterReview(harness.tech, signed);
-
-    const users = await harness.repos.users.list();
-    const activeMasters = users.filter((user) => user.role === 'master' && user.active);
-    expect(activeMasters.length).toBeGreaterThan(1);
-
-    for (const master of activeMasters) {
-      const mine = (await harness.repos.notifications.list(master.id)).filter(
-        (notification) =>
-          notification.type === 'job_submitted' && notification.body.includes('EJE-1048'),
-      );
-      // Exactly one: a signed job card must be announced, and only once.
-      expect(mine).toHaveLength(1);
-      expect(mine[0]?.title).toBe('Job EJE-1048 submitted for review');
-      expect(mine[0]?.body).toContain('Sipho Mahlangu');
-      expect(mine[0]?.body).toContain('Master Review');
-      expect(mine[0]?.readAt).toBeNull();
-    }
-  });
-
-  it('does NOT notify a disabled Master', async () => {
-    // A notification nobody can sign in to read is not a notification.
-    const users = await harness.repos.users.list();
-    const johan = users.find((user) => user.id === 'user-master-johan')!;
-    await harness.repos.users.save({ ...johan, active: false });
-
-    const signed = await workAndSign(harness);
-    await submitForMasterReview(harness.tech, signed);
-
-    const forJohan = (await harness.repos.notifications.list(johan.id)).filter(
-      (notification) => notification.link === '/jobs/EJE-1048/review',
-    );
-    expect(forJohan).toHaveLength(0);
-  });
-
-  it('links the notification at the Master Review screen for that job', async () => {
-    const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
-
-    const notifications = await harness.repos.notifications.list(master.id);
-    const submitted = notifications.find(
-      (notification) => notification.type === 'job_submitted',
-    );
-
-    expect(submitted?.link).toBe('/jobs/EJE-1048/review');
-    expect(submitted?.jobId).toBe(handed.id);
-  });
-
-  it('cannot be submitted twice, so the notification cannot be duplicated', async () => {
-    const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
-
-    // The state machine refuses submitted -> submitted. Re-rendering, reloading
-    // or reopening the job cannot reach this path at all, and a second explicit
-    // attempt is refused rather than notifying everyone again.
-    await expect(
-      submitForMasterReview(harness.tech, handed),
-    ).rejects.toBeInstanceOf(WorkflowError);
-
-    // Scoped to this job: the seed already contains an unrelated job_submitted
-    // notification, which is exactly the kind of thing a loose filter hides.
-    const mine = (await harness.repos.notifications.list(master.id)).filter(
-      (notification) =>
-        notification.type === 'job_submitted' && notification.link === '/jobs/EJE-1048/review',
-    );
-    expect(mine).toHaveLength(1);
-  });
-
-  it('does not notify the submitter about their own submission', async () => {
-    const signed = await workAndSign(harness);
-    await submitForMasterReview(harness.tech, signed);
-
-    const mine = (await harness.repos.notifications.list(technician.id)).filter(
-      (notification) => notification.link === '/jobs/EJE-1048/review',
-    );
-    expect(mine).toHaveLength(0);
-  });
-
-  it('does not generate the final customer document', async () => {
-    const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
-
-    const trail = await harness.repos.activity.list(handed.id);
-    expect(trail.some((event) => event.type === 'pdf_generated')).toBe(false);
-  });
-});
-
-describe('a Master can edit a job in Master Review', () => {
+describe('a Master can still edit a job left in Master Review', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = build();
@@ -241,7 +128,7 @@ describe('a Master can edit a job in Master Review', () => {
 
   it('lets a Master add a part that the technician missed', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     const amended = await addPart(harness.master, handed, {
       partNumber: 'FAN-24V-80',
@@ -256,7 +143,7 @@ describe('a Master can edit a job in Master Review', () => {
 
   it('lets a Master add a note during review', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     const amended = await addNote(harness.master, handed, 'Checked against the PO.', true);
     expect(amended.notes.some((note) => note.body === 'Checked against the PO.')).toBe(true);
@@ -264,7 +151,7 @@ describe('a Master can edit a job in Master Review', () => {
 
   it('refuses the same edit from a technician', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     await expect(
       addNote(harness.tech, handed, 'Technician trying to edit.', false),
@@ -274,7 +161,7 @@ describe('a Master can edit a job in Master Review', () => {
   it('prices a Master amendment at the rates frozen at signature', async () => {
     const signed = await workAndSign(harness);
     const rates = await harness.repos.settings.get();
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     // The office raises rates between signature and issue.
     await harness.repos.settings.save({
@@ -297,7 +184,7 @@ describe('a Master can edit a job in Master Review', () => {
 
   it('does not let a Master overwrite the customer signature', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     // There is no operation that replaces a signature, and re-signing requires
     // the job to be back at the signature step.
@@ -315,7 +202,7 @@ describe('a Master can edit a job in Master Review', () => {
   });
 });
 
-describe('Master submission', () => {
+describe('issuing a job left in Master Review', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = build();
@@ -323,7 +210,7 @@ describe('Master submission', () => {
 
   it('emails the customer exactly once', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
     const result = await submitJobCard(
       harness.master,
@@ -340,7 +227,7 @@ describe('Master submission', () => {
 
   it('generates the final document at this point, not before', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
     await submitJobCard(harness.master, handed, 'customer@example-demo.co.za', 'Pieter Nel');
 
     const trail = await harness.repos.activity.list(handed.id);
@@ -351,7 +238,7 @@ describe('Master submission', () => {
 
   it('locks the job as soon as it is issued, before delivery is confirmed', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
     const result = await submitJobCard(
       harness.master,
       handed,
@@ -376,7 +263,7 @@ describe('Master submission', () => {
 
   it('closes only once delivery is confirmed', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
     const result = await submitJobCard(
       harness.master,
       handed,
@@ -404,7 +291,7 @@ describe('Master submission', () => {
 
   it('includes a Master amendment in the issued document', async () => {
     const signed = await workAndSign(harness);
-    const handed = await submitForMasterReview(harness.tech, signed);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
     const amended = await addPart(harness.master, handed, {
       partNumber: 'FAN-24V-80',
       description: 'Spindle drive cooling fan',

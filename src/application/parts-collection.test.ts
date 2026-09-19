@@ -5,7 +5,6 @@ import {
   captureSignature,
   startCompletion,
   startSignature,
-  submitForMasterReview,
   submitJobCard,
   issueJobCard,
   confirmJobCardDelivery,
@@ -274,10 +273,9 @@ describe('the parts delivery note document', () => {
 
   it('titles a courier document a delivery note', async () => {
     const courier = await loadJob(harness, 'EJE-1063');
-    const handed = await submitForMasterReview(harness.tech, courier);
     const issued = await submitJobCard(
       harness.master,
-      handed,
+      courier,
       'buyer@kruger-demo.co.za',
       'Kruger Engineering',
     );
@@ -286,8 +284,7 @@ describe('the parts delivery note document', () => {
 
   it('emails the customer about a collection note, not a job card', async () => {
     const courier = await loadJob(harness, 'EJE-1063');
-    const handed = await submitForMasterReview(harness.tech, courier);
-    await submitJobCard(harness.master, handed, 'buyer@kruger-demo.co.za', 'Kruger Engineering');
+    await submitJobCard(harness.master, courier, 'buyer@kruger-demo.co.za', 'Kruger Engineering');
 
     const email = harness.outbox.listSync().find((entry) => entry.channel === 'email');
     expect(email?.subject).toContain('Delivery Note');

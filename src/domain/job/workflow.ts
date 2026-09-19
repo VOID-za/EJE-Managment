@@ -24,16 +24,72 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   'cancelled',
 ];
 
-/** Statuses shown as the linear progress rail on the job card. */
+/**
+ * The stages shown on the job card's progress rail: the ACTIVE workflow.
+ *
+ * Six stages, and `submitted` is deliberately not one of them. That status is
+ * the retired Master Review stage — no new job can reach it, since a
+ * technician's submission issues the job card itself — so listing it here drew
+ * a seventh step labelled "Master Review" on every job, including jobs that
+ * could never go there. The rail is what the workflow IS, not what it once was.
+ *
+ * Statuses that are not stages are placed onto the rail by
+ * `jobProgressPosition` rather than being added to it: awaiting spares and
+ * awaiting delivery are interruptions of a stage, and a historical Master
+ * Review job sits at the stage it had actually reached.
+ */
 export const JOB_PROGRESS_STAGES: readonly JobStatus[] = [
   'open',
   'in_progress',
   'completion',
   'customer_signature',
   'review',
-  'submitted',
   'closed',
 ];
+
+export interface JobProgressPosition {
+  /** Index into `JOB_PROGRESS_STAGES`, or -1 for a job outside the rail. */
+  readonly index: number;
+  /**
+   * What to show in place of the stage's own name, when the job is held at
+   * that stage by something that is not a stage of its own. Null otherwise.
+   */
+  readonly interruption: string | null;
+}
+
+/**
+ * Where a job sits on the six-stage rail.
+ *
+ * Every status maps onto a stage, because a job always has a position even
+ * when its status is not itself a step: spares and delivery hold a job AT a
+ * stage rather than adding one, and a job still in the retired Master Review
+ * stage is shown where it genuinely got to — at Review — and labelled as the
+ * historical state it is, so those records stay readable without Master Review
+ * reappearing as a step of the live workflow.
+ */
+export const jobProgressPosition = (status: JobStatus): JobProgressPosition => {
+  const at = (stage: JobStatus, interruption: string | null = null): JobProgressPosition => ({
+    index: JOB_PROGRESS_STAGES.indexOf(stage),
+    interruption,
+  });
+
+  switch (status) {
+    case 'awaiting_spares':
+      return at('in_progress', 'Awaiting Spares');
+    // Issued: the customer's copy is in transit, so the work is done but the
+    // job is not closed. It waits at Review rather than pretending to be shut.
+    case 'awaiting_delivery':
+      return at('review', 'Awaiting Delivery');
+    // Historical only. Shown at the stage it reached, named for what it is.
+    case 'submitted':
+      return at('review', 'Master Review (historical)');
+    case 'draft':
+    case 'cancelled':
+      return { index: -1, interruption: null };
+    default:
+      return at(status);
+  }
+};
 
 const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   draft: ['open', 'cancelled'],
@@ -47,12 +103,16 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   // ill before the customer signs should not have to abandon the job.
   completion: ['customer_signature', 'in_progress', 'awaiting_spares', 'open'],
   customer_signature: ['review', 'completion'],
-  // A technician's submission now issues the job card itself, so `review` goes
-  // straight to awaiting delivery. The edge to `submitted` remains only so a
-  // job already sitting in Master Review can still be moved on.
-  review: ['awaiting_delivery', 'submitted', 'completion'],
+  // A technician's submission issues the job card itself, so `review` goes
+  // straight to awaiting delivery. There is deliberately NO edge to
+  // `submitted`: Master Review is retired, and a stage nothing can enter is the
+  // only kind that cannot quietly come back.
+  review: ['awaiting_delivery', 'completion'],
   // Only a confirmed delivery closes a job. The self-edge is a retry.
   awaiting_delivery: ['closed', 'awaiting_delivery'],
+  // Historical only. Nothing transitions INTO this state any more; the edges
+  // out of it exist so a job that entered Master Review before it was retired
+  // can still be issued and closed.
   submitted: ['awaiting_delivery', 'closed'],
   closed: [],
   // Terminal. A cancelled job is history, not something to resurrect: raise a

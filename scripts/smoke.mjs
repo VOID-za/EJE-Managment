@@ -45,13 +45,25 @@ const step = async (name, fn) => {
   }
 };
 
+/**
+ * Signing out now lives in the top-right profile menu, not the sidebar.
+ *
+ * The sidebar carries navigation and nothing else, so every sign-out goes
+ * through the menu — which is also what proves the menu works.
+ */
+const signOut = async () => {
+  const trigger = page.locator('header [aria-haspopup="menu"]');
+  if ((await trigger.count()) === 0) return;
+  await trigger.click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await page.getByRole('tablist').first().waitFor({ timeout: 10000 });
+};
+
 const signInAsMasterIfNeeded = async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   const heading = await page.locator('h1').first().innerText().catch(() => '');
   if (heading.includes('Elmarie')) return;
-  if ((await page.getByRole('button', { name: 'Sign out' }).count()) > 0) {
-    await page.getByRole('button', { name: 'Sign out' }).click();
-  }
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 15000 });
@@ -355,7 +367,7 @@ await step('confirming the delivery is what closes the job', async () => {
 
 await step('sign in as a Master for the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.waitForURL('**/dashboard', { timeout: 10000 });
@@ -510,7 +522,7 @@ await step('the courier job still holds its prices internally', async () => {
 
 await step('a technician can message the office', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Technician' }).click();
   await page.getByRole('button', { name: /Lerato/ }).click();
   await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 10000 });
@@ -564,7 +576,7 @@ await step('the message alone does NOT make the technician unavailable', async (
 
 await step('the Master is notified of the message, and the notification opens the chat', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
@@ -773,7 +785,7 @@ await step('an accepted job can no longer be deleted, only cancelled', async () 
 
 await step('a technician transfers their own job back to Open, keeping the work', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Technician' }).click();
   await page.getByRole('button', { name: /Deon Botha/ }).click();
   await page.getByRole('heading', { name: /Hello, Deon/ }).waitFor({ timeout: 10000 });
@@ -811,7 +823,7 @@ await step('the transfer is on the activity trail with its reason', async () => 
 
 await step('another technician accepts the returned job and sees the previous work', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Technician' }).click();
   await page.getByRole('button', { name: /Riaan/ }).click();
   await page.getByRole('heading', { name: /Hello, Riaan/ }).waitFor({ timeout: 10000 });
@@ -858,7 +870,7 @@ await step('the site location message carries job, customer, machine, site and a
 
 await step('master dashboard and admin', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
@@ -1183,7 +1195,7 @@ await step('the machine number is searchable on its own', async () => {
 
 await step('the Coordinator signs in and gets the office, not a technician tablet', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Coordinator' }).click();
   await page.getByRole('button', { name: /Christene van Niekerk/ }).click();
   await page.getByText('Total Open Jobs').waitFor({ timeout: 10000 });
@@ -1220,7 +1232,7 @@ await step('the Coordinator cannot create anything but a technician', async () =
 
 await step('back to a Master for the rest of the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
@@ -1916,6 +1928,66 @@ const themeState = () =>
     [TO_RGB, relativeLuminance],
   );
 
+await step('the sidebar carries navigation and nothing else', async () => {
+  await signInAsMasterIfNeeded();
+  const sidebar = page.locator('aside').first();
+  const text = await sidebar.innerText();
+  for (const gone of ['New Job', 'Sign out', 'Elmarie']) {
+    if (text.includes(gone)) throw new Error(`the sidebar still shows "${gone}"`);
+  }
+  if ((await sidebar.locator('button[aria-label^="Switch to"]').count()) !== 0) {
+    throw new Error('the sidebar still has a theme control');
+  }
+  if ((await sidebar.getByRole('radiogroup', { name: 'Colour theme' }).count()) !== 0) {
+    throw new Error('the sidebar still has the theme radiogroup');
+  }
+});
+
+await step('the header carries the profile, and no global New Job', async () => {
+  const header = page.locator('header').first();
+  if ((await header.innerText()).includes('New Job')) {
+    throw new Error('the header still has a global New Job button');
+  }
+  await header.getByText('Elmarie Coetzee').waitFor({ timeout: 8000 });
+  await header.getByText('Master', { exact: true }).waitFor({ timeout: 8000 });
+
+  await header.locator('[aria-haspopup="menu"]').click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+});
+
+await step('New Job lives on the Jobs screen, and still works', async () => {
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'New Job' }).first().click();
+  await page.waitForURL('**/jobs/new', { timeout: 10000 });
+  await page.getByRole('heading', { name: 'New job' }).waitFor({ timeout: 8000 });
+});
+
+await step('the progress rail is the six stages of the live workflow', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
+  const rail = page.locator('ol').filter({ hasText: 'Customer Signature' }).first();
+  await rail.waitFor({ timeout: 10000 });
+  const stages = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').trim(),
+  );
+  const expected = ['Open', 'In Progress', 'Completion', 'Customer Signature', 'Review', 'Closed'];
+  if (JSON.stringify(stages) !== JSON.stringify(expected)) {
+    throw new Error(`rail is ${stages.join(' | ')}`);
+  }
+});
+
+await step('a job left in the retired Master Review stage is still readable', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1055`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1055' }).waitFor({ timeout: 10000 });
+  const rail = page.locator('ol').filter({ hasText: 'Customer Signature' }).first();
+  const stages = await rail.locator('li').allInnerTexts();
+  if (stages.length !== 6) throw new Error(`${stages.length} stages on a historical job`);
+  // Shown where it actually got to, named as the historical state it is.
+  if (!stages[4].includes('Master Review (historical)')) {
+    throw new Error(`historical job not marked: ${stages[4]}`);
+  }
+});
+
 await step('light is the default theme', async () => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
@@ -1938,12 +2010,14 @@ await step('switching to dark re-themes the application', async () => {
   await page.screenshot({ path: `${shots}/10-dark-dashboard.png`, fullPage: false });
 });
 
-await step('the sidebar control reflects the active theme', async () => {
-  const pressed = await page
-    .getByRole('radio', { name: 'Dark theme' })
-    .first()
-    .getAttribute('aria-checked');
-  if (pressed !== 'true') throw new Error(`sidebar control out of sync: ${pressed}`);
+await step('there is exactly one theme control, and it is in the top bar', async () => {
+  const toggles = await page.locator('button[aria-label^="Switch to"]').count();
+  if (toggles !== 1) throw new Error(`${toggles} theme controls found, expected 1`);
+  const inHeader = await page.locator('header button[aria-label^="Switch to"]').count();
+  if (inHeader !== 1) throw new Error('the theme control is not in the top bar');
+  // It reflects the theme in force, so the next click is the right one.
+  const label = await page.locator('button[aria-label^="Switch to"]').getAttribute('aria-label');
+  if (label !== 'Switch to light mode') throw new Error(`control out of sync: ${label}`);
 });
 
 await step('dark mode survives a full reload, applied before hydration', async () => {
@@ -1985,7 +2059,7 @@ await step('dark mode applies across every major screen', async () => {
 
 await step('admin screens render in dark for a Master', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });

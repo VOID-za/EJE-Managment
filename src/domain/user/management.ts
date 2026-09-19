@@ -46,6 +46,35 @@ export const assignableRoles = (actorRole: UserRole): readonly UserRole[] => {
   return [];
 };
 
+/**
+ * The roles this actor may set on THIS account, for the editor's dropdown.
+ *
+ * Empty when the role must not be touched at all — an account the actor cannot
+ * administer, their own (changing your own permissions is not administration),
+ * or a Master, whose role is fixed wherever it is edited from. Otherwise it is
+ * what the actor may assign, with the target's current role always included so
+ * the control can show what it is today.
+ *
+ * The same rule is enforced in `updateUser`; this exists so the screen cannot
+ * offer something the operation would refuse.
+ */
+export const assignableRolesFor = (
+  actor: Pick<User, 'id' | 'role'>,
+  target: User,
+): readonly UserRole[] => {
+  if (!canManageUser(actor, target)) return [];
+  if (target.id === actor.id) return [];
+  if (target.role === 'master') return [];
+
+  const assignable = assignableRoles(actor.role);
+  if (assignable.length === 0) return [];
+  return assignable.includes(target.role) ? assignable : [target.role, ...assignable];
+};
+
+/** Whether this actor may change this account's role at all. */
+export const canChangeRole = (actor: Pick<User, 'id' | 'role'>, target: User): boolean =>
+  assignableRolesFor(actor, target).length > 1;
+
 export const roleLabel = (role: UserRole): string => {
   switch (role) {
     case 'master':

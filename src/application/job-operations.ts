@@ -49,7 +49,7 @@ import {
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
-import { audit, notify, notifyMasters } from './audit';
+import { audit, notify } from './audit';
 import { storeFinalDocument } from './final-document';
 import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
@@ -1117,85 +1117,6 @@ export const generateJobCardDocument = async (context: OperationContext, job: Jo
   return generated;
 };
 
-/**
- * HISTORICAL: hand a signed job card to the office for Master Review.
- *
- * No longer on the route. A technician who has finished the work and taken the
- * customer's signature now issues the job card themselves — the office was not
- * adding anything to a job it had not attended, and the stage only delayed the
- * customer's copy.
- *
- * Kept because jobs that entered Master Review before the change are still
- * sitting in it and have to be able to move on, and because tests reconstruct
- * that state to prove they still can. No screen calls it.
- *
- * Deliberately does NOT email the customer and does NOT finalise the customer
- * document: that is `issueJobCard`.
- */
-export const submitForMasterReview = async (
-  context: OperationContext,
-  job: Job,
-): Promise<Job> => {
-  const readiness = checkReadyForSubmission(job);
-  if (!readiness.allowed) {
-    throw new WorkflowError(
-      `${job.jobNumber} cannot be submitted for review yet.`,
-      readiness.violations,
-    );
-  }
-  transition(job, 'submitted');
-
-  const now = context.services.clock.now();
-
-  // Backstop only: signature should already have frozen the rates.
-  const settings = await context.repos.settings.get();
-  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
-    ...pricingInputsFrom(settings),
-    capturedAt: now,
-    reason: 'submission',
-  };
-
-  const saved = await context.repos.jobs.save({
-    ...job,
-    status: 'submitted',
-    pricingSnapshot: snapshot,
-    submittedAt: now,
-    completedAt: job.completedAt ?? now,
-  });
-
-  await audit(context, {
-    jobId: job.id,
-    type: 'job_submitted',
-    summary: 'Submitted for Master review',
-    detail: `${userFullName(context.actor)} handed the signed job card to the office. The customer has not been emailed.`,
-  });
-
-  // The office has to be told, or a signed job card sits in Master Review until
-  // somebody happens to look. One notification per active Master, linking at
-  // the REVIEW screen rather than the job: the Master's next action is to check
-  // the job card and issue it, and that screen carries both that action and an
-  // "Edit job" button back to the job. Duplicates are impossible because the
-  // transition above refuses a second call: `submitted` cannot move to
-  // `submitted`.
-  await notifyMasters(context, {
-    type: 'job_submitted',
-    title: `Job ${job.jobNumber} submitted for review`,
-    body: `${userFullName(context.actor)} submitted ${job.jobNumber} for Master Review.`,
-    jobId: job.id,
-    link: `/jobs/${job.jobNumber}/review`,
-  });
-
-  return saved;
-};
-
-/**
- * Records that a Master changed the job after the customer signed.
- *
- * The rates are frozen by the pricing snapshot, so a correction is priced at
- * exactly what the customer saw — but the TOTAL can still move if a Master adds
- * or removes work. That is a real commercial event, so it is written to the
- * trail rather than happening quietly.
- */
 export const recordPostSignatureChange = async (
   context: OperationContext,
   job: Job,

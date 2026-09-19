@@ -141,6 +141,45 @@ export const updateUser = async (context: OperationContext, user: User): Promise
       { code: 'master_not_editable', message: 'Master accounts are managed outside this screen.' },
     ]);
   }
+
+  /*
+   * A role change is a permission change, so it is held to the same rule as
+   * creating an account with that role.
+   *
+   * Without this, an edit could carry ANY role: the only check was that a
+   * Master was not being demoted, so a technician could be saved as a Master —
+   * or a Coordinator could promote a technician to Coordinator — simply by
+   * passing a different value. A screen that does not offer the option is not
+   * what stops that; this is.
+   */
+  const roleChanged = existing.role !== user.role;
+
+  // Not on your own account, whoever you are. Changing your own permissions is
+  // not administration, and a Coordinator who demoted herself would simply lose
+  // the office with nobody having decided that.
+  if (roleChanged && existing.id === context.actor.id) {
+    throw new WorkflowError('You cannot change your own role.', [
+      {
+        code: 'own_role',
+        message: 'A role is set by somebody who administers the account, not by its holder.',
+      },
+    ]);
+  }
+
+  if (roleChanged && !assignableRoles(context.actor.role).includes(user.role)) {
+    throw new WorkflowError(
+      `${roleLabel(context.actor.role)} accounts cannot make somebody a ${roleLabel(user.role)}.`,
+      [
+        {
+          code: 'role_not_assignable',
+          message: `You can set: ${assignableRoles(context.actor.role)
+            .map((role) => roleLabel(role))
+            .join(', ')}.`,
+        },
+      ],
+    );
+  }
+
   await assertEmailFree(context, user.email, user.id);
 
   const saved = await context.repos.users.save({
@@ -156,6 +195,21 @@ export const updateUser = async (context: OperationContext, user: User): Promise
     summary: `User updated: ${userFullName(saved)}`,
     detail: `Account details amended by ${userFullName(context.actor)}.`,
   });
+
+  /*
+   * A role change is recorded as its own event, saying what it was and what it
+   * became. "Account details amended" is not an answer to "who made her a
+   * Coordinator, and when?" — and that is the question an administrator will
+   * actually be asked.
+   */
+  if (roleChanged) {
+    await audit(context, {
+      jobId: null,
+      type: 'user_role_changed',
+      summary: `Role changed: ${userFullName(saved)}`,
+      detail: `Changed ${userFullName(saved)} from ${roleLabel(existing.role)} to ${roleLabel(saved.role)}, by ${userFullName(context.actor)}.`,
+    });
+  }
   return saved;
 };
 

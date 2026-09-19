@@ -96,8 +96,10 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
                 Schedule
               </Button>
             </Link>
-            <Link href="/jobs/new">
-              <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
+            {/* Raising a job belongs on the Jobs screen, which is where the
+                office goes to see what is already open before adding to it. */}
+            <Link href="/jobs">
+              <Button leadingIcon={<Icon name="jobs" className="size-4" />}>Jobs</Button>
             </Link>
           </>
         }

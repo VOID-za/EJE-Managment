@@ -60,6 +60,8 @@ export type ActivityEventType =
   | 'machine_archived'
   | 'user_created'
   | 'user_updated'
+  /** A permission change: who changed it, whose it was, and from what to what. */
+  | 'user_role_changed'
   | 'user_disabled'
   | 'user_reactivated'
   | 'password_reset_sent'

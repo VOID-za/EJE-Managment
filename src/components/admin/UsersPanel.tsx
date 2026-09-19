@@ -1,13 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   activeUsers,
   assignableRoles,
+  assignableRolesFor,
+  canChangeRole,
   canManageUser,
   disabledUsers,
-  manageUserRefusal,
   roleLabel,
   userFullName,
   type User,
@@ -28,6 +30,7 @@ import {
   DataTable,
   EmptyState,
   Icon,
+  Menu,
   Modal,
   SelectField,
   Tabs,
@@ -67,6 +70,7 @@ export const UsersPanel = ({
   readonly onChanged: () => void;
 }) => {
   const actor = useCurrentUser();
+  const router = useRouter();
   const operation = useOperation();
   const [list, setList] = useState<ListId>('active');
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -114,40 +118,53 @@ export const UsersPanel = ({
       header: '',
       align: 'right',
       render: (row) => {
-        const refusal = manageUserRefusal(actor, row);
-        if (refusal !== null) {
-          // No edit controls at all for an account this Master may not manage.
-          return <span className="text-xs text-steel-400">{refusal}</span>;
+        /*
+         * Only what this person may actually do to this account.
+         *
+         * Built from the same domain rules the operations enforce, so the menu
+         * cannot offer something that would then be refused — and a protected
+         * account (another Master) simply has no actions rather than being
+         * hidden from the list.
+         */
+        const items = [];
+        if (canManageUser(actor, row)) {
+          if (row.role === 'technician') {
+            items.push({
+              id: 'availability',
+              label: 'Availability',
+              icon: <Icon name="calendar" className="size-4" />,
+              onSelect: () => router.push(`/technicians/${row.id}`),
+            });
+          }
+          items.push({
+            id: 'edit',
+            label: canChangeRole(actor, row) ? 'Edit user and role' : 'Edit user',
+            icon: <Icon name="edit" className="size-4" />,
+            onSelect: () => setEditor({ user: row, mode: 'edit' }),
+          });
+          if (row.active) {
+            items.push({
+              id: 'reset',
+              label: 'Reset password',
+              icon: <Icon name="refresh" className="size-4" />,
+              onSelect: () => setResetting(row),
+            });
+          }
+          items.push({
+            id: 'active',
+            label: row.active ? 'Disable user' : 'Reactivate user',
+            icon: <Icon name={row.active ? 'close' : 'check'} className="size-4" />,
+            destructive: row.active,
+            onSelect: () => setConfirming({ user: row, enable: !row.active }),
+          });
         }
+
         return (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {row.role !== 'master' && (
-              <Link href={`/technicians/${row.id}`}>
-                <Button size="sm" variant="ghost">
-                  Availability
-                </Button>
-              </Link>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setEditor({ user: row, mode: 'edit' })}
-            >
-              Edit
-            </Button>
-            {row.active && (
-              <Button size="sm" variant="ghost" onClick={() => setResetting(row)}>
-                Reset password
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant={row.active ? 'ghost' : 'secondary'}
-              onClick={() => setConfirming({ user: row, enable: !row.active })}
-            >
-              {row.active ? 'Disable' : 'Reactivate'}
-            </Button>
-          </div>
+          <Menu
+            label="Manage"
+            items={items}
+            emptyLabel={row.id === actor.id ? undefined : 'Protected account'}
+          />
         );
       },
     },
@@ -157,7 +174,7 @@ export const UsersPanel = ({
     <div className="space-y-4">
       <AdminNotice
         title="User management"
-        body="Masters add users, set roles, disable leavers and reactivate returners. A Master cannot edit another Master — those accounts show no controls. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work. Open a technician to record their availability."
+        body="Masters add users, set roles — including moving somebody between Technician and Coordinator — disable leavers and reactivate returners. A Master cannot edit another Master: those accounts stay listed, with no actions on them. The office manages technicians only. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work."
       />
 
       {operation.error !== null && (
@@ -292,7 +309,15 @@ const UserEditor = ({
   // Coordinator or a technician; a Coordinator may add technicians only, so she
   // cannot promote herself by creating an account and signing in as it.
   const creatable = assignableRoles(actor.role);
-  const [role, setRole] = useState<UserRole>(creatable[0] ?? 'technician');
+  /*
+   * On an edit, the roles this actor may set on THIS account; on a create, the
+   * roles they may hand out. Empty means the role is not theirs to touch —
+   * their own account, or a Master — and the control is not rendered.
+   */
+  const settable = existing === null ? creatable : assignableRolesFor(actor, existing);
+  const [role, setRole] = useState<UserRole>(
+    existing?.role ?? creatable[0] ?? 'technician',
+  );
 
   // Guard in depth: the operations refuse this too, but an unmanageable account
   // should never have reached an editor in the first place.
@@ -316,6 +341,9 @@ const UserEditor = ({
             email: email.trim(),
             mobile: mobile.trim(),
             jobTitle: jobTitle.trim(),
+            // Unchanged unless this actor may set it, and the operation checks
+            // that again rather than trusting what arrives.
+            role: settable.length > 1 ? role : existing.role,
           }),
     );
     if (ok) onSaved();
@@ -386,29 +414,31 @@ const UserEditor = ({
           />
         </div>
 
-        {existing === null &&
-          (creatable.length > 1 ? (
-            <SelectField
-              label="Role"
-              value={role}
-              onChange={(event) => setRole(event.target.value as UserRole)}
-              options={creatable.map((candidate) => ({
-                value: candidate,
-                label: roleLabel(candidate),
-              }))}
-              hint="A Master account cannot be created from this screen."
-            />
-          ) : (
-            <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-600">
-              <span className="font-semibold text-steel-800">
-                Role: {roleLabel(creatable[0] ?? 'technician')}.
-              </span>{' '}
-              Office and Master accounts are created by a Master.
-            </div>
-          ))}
-        {existing !== null && existing.role === 'master' && (
-          <div className="rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 px-4 py-3 text-sm text-eje-800">
-            This is your own Master account. The role itself cannot be changed here.
+        {settable.length > 1 ? (
+          <SelectField
+            label="Role"
+            value={role}
+            onChange={(event) => setRole(event.target.value as UserRole)}
+            options={settable.map((candidate) => ({
+              value: candidate,
+              label: roleLabel(candidate),
+            }))}
+            hint={
+              existing === null
+                ? 'A Master account cannot be created from this screen.'
+                : 'Changing this changes what they can do, as soon as it is saved. A Master account cannot be set from here.'
+            }
+          />
+        ) : (
+          <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-600">
+            <span className="font-semibold text-steel-800">
+              Role: {roleLabel(existing?.role ?? creatable[0] ?? 'technician')}.
+            </span>{' '}
+            {existing === null
+              ? 'Office and Master accounts are created by a Master.'
+              : existing.id === actor.id
+                ? 'Your own role is set by somebody who administers your account.'
+                : 'This role is not yours to change from here.'}
           </div>
         )}
       </div>
