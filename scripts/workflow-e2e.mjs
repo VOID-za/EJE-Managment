@@ -67,8 +67,12 @@ const assertNot404 = async (what) => {
 
 const signInAs = async (role, name, greeting) => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  if ((await page.getByRole('button', { name: 'Sign out' }).count()) > 0) {
-    await page.getByRole('button', { name: 'Sign out' }).click();
+  // Signing out lives in the top-right profile menu now, not the sidebar.
+  const profile = page.locator('header [aria-haspopup="menu"]');
+  if ((await profile.count()) > 0) {
+    await profile.click();
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+    await page.getByRole('tablist').first().waitFor({ timeout: 20000 });
   }
   await page.getByRole('tab', { name: role }).click();
   await page.getByRole('button', { name: new RegExp(name) }).click();

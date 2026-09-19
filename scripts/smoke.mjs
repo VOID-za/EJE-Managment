@@ -1265,15 +1265,63 @@ await step('disabled users are kept out of the default user list', async () => {
   await page.getByText('Yusuf Patel').first().waitFor({ timeout: 8000 });
 });
 
-await step('a Master cannot edit another Master', async () => {
+await step('a Master cannot edit another Master, who stays listed', async () => {
   await page.getByRole('tab', { name: /Active users/ }).click();
   const denise = page.getByRole('row').filter({ hasText: 'Denise' }).first();
+  // Listed, not hidden — with no management offered on the account at all.
   await denise.waitFor({ timeout: 8000 });
-  await denise.getByText('Master accounts cannot be edited by another Master')
-    .waitFor({ timeout: 8000 });
-  if (await denise.getByRole('button', { name: 'Disable' }).count() > 0) {
-    throw new Error('a Master was offered a control to disable another Master');
+  await denise.getByText('Protected account').waitFor({ timeout: 8000 });
+  if ((await denise.getByRole('button', { name: 'Manage' }).count()) !== 0) {
+    throw new Error('a Master was offered Manage on another Master');
   }
+});
+
+await step('one Manage menu replaces the row of buttons', async () => {
+  for (const gone of ['Availability', 'Reset password', 'Disable']) {
+    if ((await page.getByRole('button', { name: gone, exact: true }).count()) !== 0) {
+      throw new Error(`the old "${gone}" button is still in the table`);
+    }
+  }
+  const sipho = page.getByRole('row').filter({ hasText: 'Sipho Mahlangu' }).first();
+  await sipho.getByRole('button', { name: 'Manage' }).click();
+  for (const item of ['Availability', 'Edit user and role', 'Reset password', 'Disable user']) {
+    await page.getByRole('menuitem', { name: item }).waitFor({ timeout: 5000 });
+  }
+  await page.keyboard.press('Escape');
+});
+
+await step('a Master moves a technician to Coordinator and back', async () => {
+  const row = () => page.getByRole('row').filter({ hasText: 'Sipho Mahlangu' }).first();
+
+  await row().getByRole('button', { name: 'Manage' }).click();
+  await page.getByRole('menuitem', { name: 'Edit user and role' }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+  const options = await dialog.getByLabel('Role').locator('option').allTextContents();
+  if (options.includes('Master')) throw new Error('Master was offered as an assignable role');
+  await dialog.getByLabel('Role').selectOption({ label: 'Coordinator' });
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('Coordinator'),
+    { timeout: 10000 },
+  );
+
+  await row().getByRole('button', { name: 'Manage' }).click();
+  await page.getByRole('menuitem', { name: 'Edit user and role' }).click();
+  dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+  await dialog.getByLabel('Role').selectOption({ label: 'Technician' });
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await page.waitForTimeout(600);
+  if (!(await row().innerText()).includes('Technician')) throw new Error('role did not revert');
+});
+
+await step('the role change is on the activity trail, with both roles', async () => {
+  await page.goto(`${BASE}/activity`, { waitUntil: 'networkidle' });
+  await page.getByText('from Technician to Coordinator', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Users', exact: true }).click();
 });
 
 await step('a Master can add and then disable a technician', async () => {
@@ -1287,8 +1335,13 @@ await step('a Master can add and then disable a technician', async () => {
 
   const row = page.getByRole('row').filter({ hasText: 'Nomvula Khumalo' }).first();
   await row.waitFor({ timeout: 10000 });
+  // A new account is a technician unless the Master chose otherwise.
+  if (!(await row.innerText()).includes('Technician')) {
+    throw new Error('a new user did not default to Technician');
+  }
 
-  await row.getByRole('button', { name: 'Disable' }).click();
+  await row.getByRole('button', { name: 'Manage' }).click();
+  await page.getByRole('menuitem', { name: 'Disable user' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Disable user' }).click();
 
   await page.waitForFunction(

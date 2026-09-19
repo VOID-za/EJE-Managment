@@ -315,8 +315,14 @@ const UserEditor = ({
    * their own account, or a Master — and the control is not rendered.
    */
   const settable = existing === null ? creatable : assignableRolesFor(actor, existing);
+  /*
+   * A new account is a technician unless somebody says otherwise: that is what
+   * the office adds nearly every time, and defaulting to the more privileged
+   * role would quietly hand out the office's permissions to anyone who did not
+   * read the dropdown.
+   */
   const [role, setRole] = useState<UserRole>(
-    existing?.role ?? creatable[0] ?? 'technician',
+    existing?.role ?? (creatable.includes('technician') ? 'technician' : (creatable[0] ?? 'technician')),
   );
 
   // Guard in depth: the operations refuse this too, but an unmanageable account

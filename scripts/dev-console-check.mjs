@@ -34,6 +34,15 @@ page.on('console', (message) => {
 });
 page.on('pageerror', (error) => problems.push(`[pageerror] ${error.message}`));
 
+/** Signing out is in the top-right profile menu now, not the sidebar. */
+const signOut = async () => {
+  const trigger = page.locator('header [aria-haspopup="menu"]');
+  if ((await trigger.count()) === 0) return;
+  await trigger.click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await page.getByRole('tablist').first().waitFor({ timeout: 15000 });
+};
+
 const step = async (name, fn) => {
   const before = problems.length;
   await fn();
@@ -145,7 +154,7 @@ await step('technician opens the transfer dialog on their own job', async () => 
   // Sipho is the primary technician on EJE-1067, which is in progress with work
   // already captured — the case a transfer has to carry forward.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Technician' }).click();
   await page.getByRole('button', { name: /Sipho Mahlangu/ }).click();
   await page.getByRole('heading', { name: /Hello, Sipho/ }).waitFor({ timeout: 20000 });
@@ -164,7 +173,7 @@ await step('technician opens the transfer dialog on their own job', async () => 
 
 await step('sign in as a Master', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 20000 });
