@@ -218,17 +218,79 @@ await step('write completion report', async () => {
   await page.getByText('Saved').first().waitFor({ timeout: 8000 });
 });
 
-await step('move job to completion', async () => {
+await step('Complete job opens the guided close-out, not just a status change', async () => {
   await page.getByRole('tab', { name: 'Overview' }).click();
   await page.getByRole('button', { name: 'Complete job' }).click();
-  await page.getByText('Completion').first().waitFor({ timeout: 8000 });
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Complete job EJE-1048', { exact: false }).waitFor({ timeout: 8000 });
+  // The customer and machine stay on screen throughout: the tablet gets handed
+  // over, and whoever holds it has to be able to see whose machine this is.
+  await page.getByText('ABC Engineering (Pty) Ltd').first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/03-wizard-completion.png`, fullPage: false });
 });
 
-await step('start customer signature', async () => {
-  await page.getByRole('button', { name: 'Customer signature' }).click();
-  await page.waitForURL('**/sign', { timeout: 10000 });
-  await page.getByRole('heading', { name: 'Customer signature' }).waitFor({ timeout: 8000 });
-  await page.getByText('I confirm that the work described above has been completed.').waitFor();
+await step('a breakdown is given no checklist step', async () => {
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').trim(),
+  );
+  if (names.length !== 3) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  if (names.some((name) => /checklist/i.test(name))) {
+    throw new Error('a breakdown was given a checklist step');
+  }
+});
+
+await step('the three non-functional blocks are gone from the completion step', async () => {
+  const body = await page.locator('main').innerText();
+  for (const gone of [
+    'No labour captured',
+    'Add the hours worked on this job, split by normal, overtime and double time.',
+    'No travel captured',
+    'Travel is charged per kilometre. Capture the distance for each trip.',
+    'No parts used',
+    'Capture every part fitted, with its part number, quantity and unit price.',
+  ]) {
+    if (body.includes(gone)) throw new Error(`still rendered: "${gone}"`);
+  }
+});
+
+await step('the wizard shows the review, with what was captured and nothing empty', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
+
+  const card = page.locator('section').filter({ hasText: 'Ready for the customer' }).last();
+  const body = await card.innerText();
+  if (!body.includes('Replaced the seized spindle drive cooling fan')) {
+    throw new Error('the write-up is not on the review step');
+  }
+  if (!/labour/i.test(body)) throw new Error('captured labour is not on the review step');
+  // The part fitted earlier is listed, because it was actually captured.
+  if (!body.includes('FAN-24V-80')) throw new Error('the fitted part is not on the review step');
+  // No travel was captured on this job, so that section is simply absent —
+  // there is no empty block explaining what could have been entered.
+  if (/travel/i.test(body)) throw new Error('an empty Travel section was rendered');
+});
+
+await step('Back keeps everything that was entered', async () => {
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 10000 });
+  const value = await page.getByLabel(/Work performed/).inputValue();
+  if (!value.includes('Replaced the seized spindle drive cooling fan')) {
+    throw new Error('going back lost the write-up');
+  }
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
+});
+
+await step('the signature step carries the declaration exactly once', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 15000 });
+
+  const declaration = page.getByText(
+    'I confirm that the work described above has been completed.',
+  );
+  const count = await declaration.count();
+  if (count !== 1) throw new Error(`the declaration appears ${count} times, expected once`);
   await page.screenshot({ path: `${shots}/03-signature.png`, fullPage: false });
 });
 
@@ -246,7 +308,7 @@ await step('capture signature', async () => {
   await page.mouse.up();
 
   await page.getByRole('button', { name: 'Confirm signature' }).click();
-  await page.waitForURL('**/review', { timeout: 10000 });
+  await page.waitForURL('**/review', { timeout: 15000 });
 });
 
 await step('job card preview renders real data', async () => {
@@ -383,8 +445,23 @@ await step('checklist blocks signature until complete (EJE-1053 service job)', a
   await page.getByRole('heading', { name: 'EJE-1053' }).waitFor({ timeout: 8000 });
   await page.getByText('checklist is required for this job type', { exact: false })
     .first().waitFor({ timeout: 8000 });
-  const signBtn = page.getByRole('button', { name: 'Customer signature' });
-  if (!(await signBtn.isDisabled())) throw new Error('Signature button should be disabled');
+
+  // The gate now lives inside the guided close-out: a service job gets a
+  // Checklist step, and Continue stays shut until the checklist is done.
+  await page.getByRole('button', { name: 'Continue completing' }).click();
+  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 15000 });
+
+  const cont = page.getByRole('button', { name: 'Continue' });
+  if (!(await cont.isDisabled())) {
+    throw new Error('the checklist step let the job through before the checklist was done');
+  }
+  await page.getByText('Still to do before this step is finished').waitFor({ timeout: 8000 });
+
+  // Leave the wizard the way a technician would, back to the tabs.
+  await page.getByRole('button', { name: 'Leave the wizard' }).click();
+  await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 10000 });
 });
 
 await step('checklist runner works', async () => {
@@ -454,9 +531,24 @@ await step('accepting a Parts job does NOT offer the site location', async () =>
 
 await step('the collector, not the customer, signs for parts', async () => {
   await page.getByRole('button', { name: 'Complete job' }).click();
-  await page.getByRole('button', { name: /signature/i }).first().click();
-  await page.waitForURL('**/sign', { timeout: 10000 });
-  await page.getByRole('heading', { name: 'Collector signature' }).waitFor({ timeout: 8000 });
+  await page.getByText('Step 1 of 3', { exact: false }).waitFor({ timeout: 15000 });
+
+  // A collection has no checklist, so the guided close-out is three steps.
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
+  );
+  if (names.length !== 3) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  if (!names.includes('Collector signature')) {
+    throw new Error(`the collection was sent to the wrong signatory: ${names.join(' | ')}`);
+  }
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 15000 });
+
+  await page.getByRole('heading', { name: 'Collector acknowledgement' }).waitFor({ timeout: 8000 });
   await page.getByText('I confirm that I have collected the parts listed above.').waitFor();
   await page.getByLabel('Collector name').waitFor();
   await page.getByLabel('Collector surname').waitFor();
@@ -1390,21 +1482,24 @@ await step('the Jobs screen offers the lists the office asks for by name', async
   const labels = (await chips.allInnerTexts()).map((name) =>
     name.replace(/[\s\u00a0]*(\d+|—)\s*$/, '').replace(/\s+/g, ' ').trim(),
   );
-  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Master Review', 'Cancelled']) {
+  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Awaiting delivery', 'Cancelled']) {
     if (!labels.includes(label)) {
       throw new Error(`the Jobs screen has no "${label}" quick filter (found ${labels.join(', ')})`);
     }
   }
+  if (labels.some((label) => /master review/i.test(label))) {
+    throw new Error(`the Jobs screen still offers a Master Review quick filter (${labels.join(', ')})`);
+  }
 
   // A quick filter drives the same status filter the dropdown does.
-  await page.getByRole('button', { name: /^Master Review/ }).first().click();
+  await page.getByRole('button', { name: /^Awaiting spares/ }).first().click();
   await page.waitForFunction(
-    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1055'),
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-'),
     { timeout: 10000 },
   );
   const selected = await page.getByLabel('Status').inputValue();
-  if (selected !== 'submitted') {
-    throw new Error(`the Master Review quick filter left the Status filter on ${selected}`);
+  if (selected !== 'awaiting_spares') {
+    throw new Error(`the Awaiting spares quick filter left the Status filter on ${selected}`);
   }
 
   // Closed work leaves for the archive rather than filling the working list.
@@ -1413,6 +1508,33 @@ await step('the Jobs screen offers the lists the office asks for by name', async
   await closed.click();
   await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
   await page.screenshot({ path: `${shots}/18-jobs-quick-filters.png`, fullPage: false });
+});
+
+await step('the Jobs page shows no Master Review count, filter or badge', async () => {
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  const body = await page.locator('main').innerText();
+  if (/master review/i.test(body)) throw new Error('Master Review is on the Jobs page');
+
+  const options = await page.locator('select').first().locator('option').allTextContents();
+  if (options.some((option) => /master/i.test(option))) {
+    throw new Error(`the status filter offers: ${options.join(' | ')}`);
+  }
+  if (!options.includes('Review')) throw new Error('Review is missing from the status filter');
+});
+
+await step('a job left in the retired stage is listed under Review, not Master Review', async () => {
+  await page.locator('select').first().selectOption({ label: 'Review' });
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1055'),
+    { timeout: 10000 },
+  );
+  const table = await page.locator('table').first().innerText();
+  if (/master review/i.test(table)) throw new Error('the list still says Master Review');
+
+  await page.goto(`${BASE}/jobs/EJE-1055`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1055' }).waitFor({ timeout: 10000 });
+  const detail = await page.locator('main').innerText();
+  if (/master review/i.test(detail)) throw new Error('the job detail still says Master Review');
 });
 
 await step('Closed Jobs is its own place in the navigation', async () => {
@@ -2029,15 +2151,18 @@ await step('the progress rail is the six stages of the live workflow', async () 
   }
 });
 
-await step('a job left in the retired Master Review stage is still readable', async () => {
+await step('a job left in the retired stage is still readable, shown at Review', async () => {
   await page.goto(`${BASE}/jobs/EJE-1055`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1055' }).waitFor({ timeout: 10000 });
   const rail = page.locator('ol').filter({ hasText: 'Customer Signature' }).first();
-  const stages = await rail.locator('li').allInnerTexts();
+  const stages = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').trim(),
+  );
   if (stages.length !== 6) throw new Error(`${stages.length} stages on a historical job`);
-  // Shown where it actually got to, named as the historical state it is.
-  if (!stages[4].includes('Master Review (historical)')) {
-    throw new Error(`historical job not marked: ${stages[4]}`);
+  // Shown at the stage it actually reached, with no retired stage named.
+  if (stages[4] !== 'Review') throw new Error(`historical job sits at: ${stages[4]}`);
+  if (stages.some((stage) => /master/i.test(stage))) {
+    throw new Error(`the rail still names a retired stage: ${stages.join(' | ')}`);
   }
 });
 

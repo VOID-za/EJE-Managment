@@ -13,7 +13,6 @@ import {
   moveToAwaitingSpares,
   returnToInProgress,
   startCompletion,
-  startSignature,
 } from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
 import { Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
@@ -32,9 +31,12 @@ import { TransferJobDialog } from './TransferJobDialog';
 export const JobActionBar = ({
   view,
   onChanged,
+  onCompleteJob,
 }: {
   readonly view: JobView;
   readonly onChanged: () => void;
+  /** Opens the guided close-out. The job screen owns the wizard. */
+  readonly onCompleteJob: () => void;
 }) => {
   const { job } = view;
   const router = useRouter();
@@ -79,8 +81,19 @@ export const JobActionBar = ({
         key="complete"
         size="lg"
         onClick={async () => {
+          /*
+           * Move the job into Completion, THEN open the wizard.
+           *
+           * The status change is the same operation as before — the wizard is
+           * not a second workflow — but it is no longer the whole of what the
+           * button does. Closing a job is a sequence, and this is where it
+           * starts.
+           */
           const ok = await operation.run((context) => startCompletion(context, job));
-          if (ok) onChanged();
+          if (ok) {
+            onChanged();
+            onCompleteJob();
+          }
         }}
         loading={operation.running}
         leadingIcon={<Icon name="wrench" className="size-5" />}
@@ -103,20 +116,17 @@ export const JobActionBar = ({
     );
   }
 
+  // Both of these are the close-out already under way, so they return to the
+  // wizard rather than dropping the technician onto a page in the middle of it.
   if (job.status === 'completion') {
     actions.push(
       <Button
-        key="sign"
+        key="complete-continue"
         size="lg"
-        disabled={!signatureReadiness.allowed}
-        onClick={async () => {
-          const ok = await operation.run((context) => startSignature(context, job));
-          if (ok) router.push(`/jobs/${job.jobNumber}/sign`);
-        }}
-        loading={operation.running}
-        leadingIcon={<Icon name="signature" className="size-5" />}
+        onClick={onCompleteJob}
+        leadingIcon={<Icon name="wrench" className="size-5" />}
       >
-        Customer signature
+        Continue completing
       </Button>,
     );
   }
@@ -126,7 +136,7 @@ export const JobActionBar = ({
       <Button
         key="sign-continue"
         size="lg"
-        onClick={() => router.push(`/jobs/${job.jobNumber}/sign`)}
+        onClick={onCompleteJob}
         leadingIcon={<Icon name="signature" className="size-5" />}
       >
         Capture signature

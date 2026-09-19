@@ -69,10 +69,12 @@ describe('where each status sits on that rail', () => {
     expect(position.index).toBeLessThan(indexOf('closed'));
   });
 
-  it('shows a historical Master Review job at Review, named as historical', () => {
+  it('shows a job left in the retired stage simply as Review', () => {
     const position = jobProgressPosition('submitted');
     expect(position.index).toBe(indexOf('review'));
-    expect(position.interruption).toBe('Master Review (historical)');
+    // No annotation at all: the retired stage is not a concept put in front of
+    // users, and Review is where the job actually got to.
+    expect(position.interruption).toBeNull();
   });
 
   it('places a job outside the workflow nowhere on the rail', () => {

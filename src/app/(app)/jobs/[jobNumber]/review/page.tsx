@@ -370,7 +370,7 @@ const ReviewJobPage = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title={canIssue ? 'Master review' : 'With the office for review'}
+              title={canIssue ? 'Ready to issue' : 'With the office'}
               description={
                 canIssue
                   ? `Correct anything that needs it on the job, then issue it. The job card will be emailed to ${customerDisplayName} at ${customerEmail} and the job closed.`

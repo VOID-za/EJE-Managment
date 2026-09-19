@@ -11,6 +11,15 @@ import { getJobTypeDefinition } from './job-types';
  * system: the same machine will sit behind the REST API.
  */
 
+/**
+ * The statuses a person can pick from, in workflow order.
+ *
+ * `submitted` is deliberately absent: Master Review is retired, nothing can
+ * enter it, and offering it as a filter would present a stage of the system
+ * that no longer exists. The few historical jobs still in it are shown — and
+ * filtered — as Review, which is the stage they actually reached; see
+ * `jobStatusLabel` and `statusMatches`.
+ */
 export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   'draft',
   'open',
@@ -19,7 +28,7 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   'completion',
   'customer_signature',
   'review',
-  'submitted',
+  'awaiting_delivery',
   'closed',
   'cancelled',
 ];
@@ -35,8 +44,8 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
  *
  * Statuses that are not stages are placed onto the rail by
  * `jobProgressPosition` rather than being added to it: awaiting spares and
- * awaiting delivery are interruptions of a stage, and a historical Master
- * Review job sits at the stage it had actually reached.
+ * awaiting delivery are interruptions of a stage, and a job left in the retired
+ * stage sits at the stage it had actually reached.
  */
 export const JOB_PROGRESS_STAGES: readonly JobStatus[] = [
   'open',
@@ -80,9 +89,15 @@ export const jobProgressPosition = (status: JobStatus): JobProgressPosition => {
     // job is not closed. It waits at Review rather than pretending to be shut.
     case 'awaiting_delivery':
       return at('review', 'Awaiting Delivery');
-    // Historical only. Shown at the stage it reached, named for what it is.
+    /*
+     * Historical only, and shown simply as Review.
+     *
+     * It reached Review and stopped there; naming the retired stage on the
+     * rail would put a step in front of the technician that the system no
+     * longer has and they cannot act on.
+     */
     case 'submitted':
-      return at('review', 'Master Review (historical)');
+      return at('review');
     case 'draft':
     case 'cancelled':
       return { index: -1, interruption: null };
@@ -141,15 +156,32 @@ export const jobStatusLabel = (status: JobStatus): string => {
       // received it. Not closed, because nobody has confirmed they have it.
       return 'Awaiting Delivery';
     case 'submitted':
-      // Submitted BY THE TECHNICIAN, and now waiting on a Master. The customer
-      // has not been emailed at this point.
-      return 'Master Review';
+      /*
+       * The retired Master Review stage.
+       *
+       * Shown as Review, which is where such a job actually got to: signed,
+       * written up, waiting to be issued. Master Review is not a concept this
+       * system has any more, so naming it here would put a stage in front of
+       * users — in badges, filters, counts and tooltips — that they cannot
+       * reach and cannot act on. The STATUS is untouched, so the historical
+       * record is intact; only its presentation is current.
+       */
+      return 'Review';
     case 'closed':
       return 'Closed';
     case 'cancelled':
       return 'Cancelled';
   }
 };
+
+/**
+ * Whether a job with this status belongs under this status filter.
+ *
+ * Exists so a historical `submitted` job is found under Review rather than
+ * being unreachable: it is labelled Review, so it has to be listed there too.
+ */
+export const statusMatches = (status: JobStatus, filter: JobStatus): boolean =>
+  status === filter || (filter === 'review' && status === 'submitted');
 
 export const canTransition = (from: JobStatus, to: JobStatus): boolean =>
   TRANSITIONS[from].includes(to);

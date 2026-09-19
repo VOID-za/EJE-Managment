@@ -32,7 +32,6 @@ import {
   Card,
   CardHeader,
   ConfirmDialog,
-  EmptyState,
   Icon,
   Modal,
   SelectField,
@@ -139,14 +138,7 @@ export const WorkCapturePanel = ({
           )}
         </div>
 
-        {job.labour.length === 0 ? (
-          <div className="p-5">
-            <EmptyState
-              title="No labour captured"
-              description="Add the hours worked on this job, split by normal, overtime and double time."
-            />
-          </div>
-        ) : (
+        {job.labour.length === 0 ? null : (
           <ul className="divide-y divide-steel-100">
             {job.labour.map((entry, index) => (
               <li key={entry.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
@@ -258,14 +250,7 @@ export const WorkCapturePanel = ({
           )}
         </div>
 
-        {job.travel.length === 0 ? (
-          <div className="p-5">
-            <EmptyState
-              title="No travel captured"
-              description="Travel is charged per kilometre. Capture the distance for each trip."
-            />
-          </div>
-        ) : (
+        {job.travel.length === 0 ? null : (
           <ul className="divide-y divide-steel-100">
             {job.travel.map((entry, index) => (
               <li key={entry.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
@@ -330,14 +315,7 @@ export const WorkCapturePanel = ({
           )}
         </div>
 
-        {job.parts.length === 0 ? (
-          <div className="p-5">
-            <EmptyState
-              title="No parts used"
-              description="Capture every part fitted, with its part number, quantity and unit price."
-            />
-          </div>
-        ) : (
+        {job.parts.length === 0 ? null : (
           <div className="eje-scrollbar overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { use, useState } from 'react';
 import {
   getJobTypeDefinition,
@@ -27,6 +28,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { ChecklistRunner } from '@/components/jobs/ChecklistRunner';
 import { CompletionReportPanel } from '@/components/jobs/CompletionReportPanel';
 import { FinalDocumentCard } from '@/components/jobs/FinalDocumentCard';
+import { CompleteJobWizard } from '@/components/jobs/CompleteJobWizard';
 import { JobActionBar } from '@/components/jobs/JobActionBar';
 import { JobMediaPanel } from '@/components/jobs/JobMediaPanel';
 import { JobNotesPanel } from '@/components/jobs/JobNotesPanel';
@@ -55,6 +57,10 @@ const JobDetailPage = ({
   const { jobNumber } = use(params);
   const currentUser = useCurrentUser();
   const [tab, setTab] = useState<TabId>('overview');
+  // The guided close-out, opened from the action bar and owned here so it can
+  // take the screen and hand over to the review page once the customer signs.
+  const [completing, setCompleting] = useState(false);
+  const router = useRouter();
 
   const viewQuery = useQuery(`job:${jobNumber}`, (repos) => loadJobView(repos, jobNumber));
   const supportQuery = useQuery(`job:${jobNumber}:support`, async (repos) => {
@@ -177,7 +183,7 @@ const JobDetailPage = ({
                     ? 'Read-only — this job was cancelled'
                     : job.status === 'awaiting_delivery'
                       ? 'Read-only — the job card has been issued'
-                      : 'Read-only — awaiting Master review'}
+                      : 'Read-only — with the office'}
               </Badge>
             )}
           </div>
@@ -220,10 +226,29 @@ const JobDetailPage = ({
         </Card>
       )}
 
+      {/*
+       * The close-out takes the whole screen while it is running.
+       *
+       * One task at a time is the point of it: the tabs behind would let a
+       * technician wander off mid-sequence, and the tablet is about to be
+       * handed to a customer.
+       */}
+      {completing ? (
+        <CompleteJobWizard
+          view={view}
+          onClose={() => setCompleting(false)}
+          onChanged={refresh}
+          onSigned={(signed) => {
+            setCompleting(false);
+            router.push(`/jobs/${signed.jobNumber}/review`);
+          }}
+        />
+      ) : (
+        <>
       <Card className="mb-5">
         <JobProgressRail status={job.status} />
         <div className="mt-4 border-t border-steel-100 pt-4">
-          <JobActionBar view={view} onChanged={refresh} />
+          <JobActionBar view={view} onChanged={refresh} onCompleteJob={() => setCompleting(true)} />
         </div>
       </Card>
 
@@ -283,6 +308,8 @@ const JobDetailPage = ({
             emptyMessage="Actions taken against this job will be recorded here."
           />
         </Card>
+      )}
+        </>
       )}
     </>
   );

@@ -92,10 +92,10 @@ const drawSignature = async () => {
   await page.waitForTimeout(350);
 };
 
-// ── PART 18: EJE-1056 Master Review route ────────────────────────────────────
+// ── PART 18: EJE-1056 review route ───────────────────────────────────────────
 await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
 
-await step('EJE-1056 Master Review route loads, typed straight into the address bar', async () => {
+await step('EJE-1056 review route loads, typed straight into the address bar', async () => {
   await visit('/jobs/EJE-1056/review');
   await page.getByRole('heading', { name: 'Review job card' }).waitFor({ timeout: 15000 });
   await page.getByText('EJE-1056').first().waitFor({ timeout: 10000 });
@@ -128,7 +128,7 @@ await step('EJE-1065 is not ready, and the page says why instead of 404ing', asy
   await page.getByText('not ready for signature', { exact: false }).waitFor({ timeout: 10000 });
 });
 
-await step('a technician drives EJE-1065 to the signature stage through the UI', async () => {
+await step('a technician drives EJE-1065 through the guided close-out', async () => {
   await signInAs('Technician', 'Sipho Mahlangu', /Hello, Sipho/);
   await visit('/jobs/EJE-1065');
 
@@ -136,26 +136,27 @@ await step('a technician drives EJE-1065 to the signature stage through the UI',
   await page.getByRole('button', { name: 'Accept and start' }).click();
   await page.getByRole('button', { name: 'No, Thanks' }).click({ timeout: 20000 });
 
-  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
-  await page.getByRole('button', { name: 'Add labour' }).first().click();
-  await page.getByRole('button', { name: '2', exact: true }).click();
-  await page.getByRole('button', { name: 'Add labour' }).last().click();
-  await page.getByText('Normal Time').first().waitFor({ timeout: 15000 });
+  // Complete Job opens the wizard; the close-out happens inside it.
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 20000 });
+  await assertNot404('the completion wizard');
 
-  await page.getByRole('tab', { name: 'Completion' }).click();
   await page.getByLabel(/Work performed/).fill('Replaced the faulty contactor and retested the line.');
   await page.getByRole('button', { name: 'Save write-up' }).click();
   await page.getByText('Saved').first().waitFor({ timeout: 15000 });
 
-  await page.getByRole('tab', { name: 'Overview' }).click();
-  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await page.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByText('Normal Time').first().waitFor({ timeout: 15000 });
 });
 
-await step('the Customer signature button navigates to the signature route', async () => {
-  await page.getByRole('button', { name: 'Customer signature' }).click({ timeout: 20000 });
-  await page.waitForURL('**/jobs/EJE-1065/sign', { timeout: 20000 });
-  await assertNot404('the Customer signature button');
-  await page.getByRole('heading', { name: 'Customer signature' }).first().waitFor({ timeout: 15000 });
+await step('the wizard reaches its review and then the signature step', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Ready for the customer').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 20000 });
+  await assertNot404('the signature step');
 });
 
 await step('the signature screen shows the existing EJE acceptance wording', async () => {
@@ -208,10 +209,11 @@ await step('the signature persists on the job across a reload', async () => {
 });
 
 // ── PART 19: the technician issues the job card themselves ───────────────────
-await step('the technician submits EJE-1065 — no Master Review in the way', async () => {
+await step('the technician submits EJE-1065 — nothing in the way', async () => {
   await visit('/jobs/EJE-1065/review');
-  if ((await page.getByRole('button', { name: 'Submit for Master Review' }).count()) !== 0) {
-    throw new Error('Master Review is still on the route for a breakdown job');
+  const body = await page.locator('main').innerText();
+  if (/master review/i.test(body)) {
+    throw new Error('the review screen still mentions the retired stage');
   }
   await page.getByRole('button', { name: 'Submit job card' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });

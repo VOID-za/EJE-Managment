@@ -8,6 +8,7 @@ import {
   isJobOpenWork,
   JOB_STATUS_ORDER,
   jobStatusLabel,
+  statusMatches,
   JOB_TYPE_CODES,
   jobTypeLabel,
   PRIORITY_ORDER,
@@ -49,7 +50,9 @@ const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: st
   { value: 'open-work', label: 'Open work' },
   { value: 'open', label: 'Open' },
   { value: 'awaiting_spares', label: 'Awaiting spares' },
-  { value: 'submitted', label: 'Master Review' },
+  // Issued and waiting on the customer's copy arriving — the live stage that
+  // actually holds jobs up, and the one the office chases.
+  { value: 'awaiting_delivery', label: 'Awaiting delivery' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -64,7 +67,9 @@ const matchesStatus = (status: JobStatus, filter: StatusFilter, scheduled: strin
     case 'awaiting_completion':
       return status === 'completion' || status === 'customer_signature' || status === 'review';
     default:
-      return status === filter;
+      // `statusMatches` rather than equality, so a historical Master Review
+      // job is listed under Review, which is what it is labelled.
+      return statusMatches(status, filter);
   }
 };
 

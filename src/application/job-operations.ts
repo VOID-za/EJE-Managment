@@ -72,7 +72,7 @@ const assertEditable = (context: OperationContext, job: Job): void => {
   throw new WorkflowError(
     job.status === 'closed'
       ? `${job.jobNumber} is closed and can no longer be changed.`
-      : `${job.jobNumber} is in Master review and can only be changed by a Master.`,
+      : `${job.jobNumber} is with the office and can only be changed by a Master.`,
     [
       {
         code: 'job_locked',
@@ -1128,7 +1128,7 @@ export const recordPostSignatureChange = async (
     jobId: job.id,
     type: 'master_amended_after_signature',
     summary: 'Job amended after customer signature',
-    detail: `${description} Changed by ${userFullName(context.actor)} during Master review. Rates remain those frozen at signature.`,
+    detail: `${description} Changed by ${userFullName(context.actor)} after the customer signed. Rates remain those frozen at signature.`,
   });
 };
 
