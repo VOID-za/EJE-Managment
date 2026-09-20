@@ -10,14 +10,6 @@ import {
   signatoryLabelsFor,
   type Job,
 } from '@/domain';
-import {
-  captureSignature,
-  recordSignatureRefusal,
-  returnToCustomerSignature,
-  setCollectionMethod,
-  startSignature,
-} from '@/application/job-operations';
-import type { OperationContext } from '@/application/context';
 import type { JobView } from '@/application/job-view';
 import {
   Badge,
@@ -35,6 +27,7 @@ import { JobMediaPanel } from './JobMediaPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { SignaturePad } from './SignaturePad';
 import { WorkCapturePanel } from './WorkCapturePanel';
+import { jobs as api } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/format';
@@ -250,22 +243,16 @@ export const CompleteJobWizard = ({
   const blocks = blockedBy();
 
   /*
-   * Runs an operation against the job as it is in the repository RIGHT NOW.
-   *
    * The wizard writes several times in a row — the collection, then the
-   * signature — while the screen it is drawn from refetches asynchronously. An
-   * operation handed the `view`'s copy would spread a job from before the
-   * previous write and silently undo it: the collection method chosen on step 3
-   * disappeared the moment the signature was captured on step 4. Reading first
-   * costs one lookup and makes the sequence safe in any order.
+   * signature — while the screen it is drawn from refetches asynchronously.
+   *
+   * It used to have to re-read the job before each write, because an operation
+   * handed the screen's stale copy would spread a job from before the previous
+   * write and silently undo it. That cannot happen now: each command names the
+   * job by id and the SERVER loads it, inside the transaction that changes it.
+   * The staleness the helper existed to work around is gone with the client's
+   * copy of the record.
    */
-  const runOnFreshJob = <T,>(
-    run: (context: OperationContext, current: Job) => Promise<T>,
-  ): Promise<T | null> =>
-    operation.runFor(async (context) => {
-      const fresh = await context.repos.jobs.findByJobNumber(job.jobNumber);
-      return run(context, fresh ?? job);
-    });
 
   const back = (): void => {
     operation.clearError();
@@ -286,8 +273,8 @@ export const CompleteJobWizard = ({
     // operation that owns it, so the preview and the document that follow are
     // drawn from the record rather than from a screen's memory.
     if (step.id === 'collection') {
-      const ok = await runOnFreshJob((context, current) =>
-        setCollectionMethod(context, current, { courier, waybillNumber: waybill }),
+      const ok = await operation.runFor(() =>
+        api.setCollection(job.id, courier, waybill),
       );
       if (ok === null) return;
       onChanged();
@@ -296,7 +283,7 @@ export const CompleteJobWizard = ({
     // Moving onto the signature is a real state change, so it happens once,
     // here, through the operation that owns it.
     if (steps[position + 1]?.id === 'signature' && job.status !== 'customer_signature') {
-      const ok = await runOnFreshJob((context, current) => startSignature(context, current));
+      const ok = await operation.runFor(() => api.startSignature(job.id));
       if (ok === null) return;
       onChanged();
     }
@@ -317,9 +304,7 @@ export const CompleteJobWizard = ({
     }
     setErrors({});
 
-    const refused = await runOnFreshJob((context, current) =>
-      recordSignatureRefusal(context, current, { reason: refusalReason }),
-    );
+    const refused = await operation.runFor(() => api.recordRefusal(job.id, refusalReason));
     if (refused === null) return;
     onChanged();
     onSigned(refused);
@@ -339,9 +324,7 @@ export const CompleteJobWizard = ({
       await forward();
       return;
     }
-    const returned = await runOnFreshJob((context, current) =>
-      returnToCustomerSignature(context, current, ''),
-    );
+    const returned = await operation.runFor(() => api.returnForSignature(job.id, ''));
     if (returned === null) return;
     onChanged();
     onSigned(returned);
@@ -373,8 +356,8 @@ export const CompleteJobWizard = ({
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
-    const signed = await runOnFreshJob((context, current) =>
-      captureSignature(context, current, {
+    const signed = await operation.runFor(() =>
+      api.captureSignature(job.id, {
         customerName: firstName.trim(),
         customerSurname: surname.trim(),
         strokeData,

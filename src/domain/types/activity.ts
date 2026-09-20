@@ -106,7 +106,24 @@ export type ActivityEventType =
    * happens next. When the destructive step then fails, this says so — because
    * a trail that records a deletion which did not happen is worse than no trail.
    */
-  | 'job_deletion_failed';
+  | 'job_deletion_failed'
+  /* ---- authentication. Who got in, who did not, and who was turned out ---- */
+  /** A successful sign-in. */
+  | 'user_signed_in'
+  /**
+   * A sign-in that was refused.
+   *
+   * Recorded with the address that was tried and NOT with what was typed as a
+   * password — a trail that captures a mistyped password captures a real one
+   * sooner or later. Carries no actor when the address matches no account,
+   * because nobody did it.
+   */
+  | 'user_sign_in_failed'
+  /** An account locked after repeated failures. */
+  | 'user_locked_out'
+  | 'user_signed_out'
+  /** Every live session for one person ended at once, e.g. on being disabled. */
+  | 'user_sessions_revoked';
 
 export interface ActivityEvent {
   readonly id: ActivityId;

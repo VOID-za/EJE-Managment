@@ -11,13 +11,9 @@ import {
   checkReadyForSignature,
   refusalAwaitingResolution,
 } from '@/domain';
-import {
-  moveToAwaitingSpares,
-  returnToInProgress,
-  startCompletion,
-} from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
 import { Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from './RuleViolationNotice';
@@ -91,7 +87,7 @@ export const JobActionBar = ({
            * button does. Closing a job is a sequence, and this is where it
            * starts.
            */
-          const ok = await operation.run((context) => startCompletion(context, job));
+          const ok = await operation.run(() => jobs.startCompletion(job.id));
           if (ok) {
             onChanged();
             onCompleteJob();
@@ -318,7 +314,7 @@ export const JobActionBar = ({
         confirmLabel="Resume job"
         busy={operation.running}
         onConfirm={async () => {
-          const ok = await operation.run((context) => returnToInProgress(context, job));
+          const ok = await operation.run(() => jobs.returnToProgress(job.id));
           setConfirmResume(false);
           if (ok) onChanged();
         }}
@@ -340,8 +336,8 @@ export const JobActionBar = ({
               loading={operation.running}
               disabled={sparesReason.trim().length === 0}
               onClick={async () => {
-                const ok = await operation.run((context) =>
-                  moveToAwaitingSpares(context, job, sparesReason.trim()),
+                const ok = await operation.run(() =>
+                  jobs.awaitingSpares(job.id, sparesReason.trim()),
                 );
                 if (ok) {
                   setSparesOpen(false);

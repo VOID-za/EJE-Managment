@@ -8,9 +8,9 @@ import {
   type MachineType,
   type Site,
 } from '@/domain';
-import { createMachine, updateMachine } from '@/application/machine-operations';
 import { Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { machines } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
@@ -150,11 +150,11 @@ export const MachineDialog = ({
 
   const submit = async (): Promise<void> => {
     let savedId: string | null = null;
-    const ok = await operation.run(async (context) => {
+    const ok = await operation.run(async () => {
       const year = Number.parseInt(draft.year, 10) || new Date().getFullYear();
       if (machine !== null) {
-        const saved = await updateMachine(context, {
-          ...machine,
+        const saved = await machines.update(machine.id, {
+          customerId,
           siteId: (sites.find((site) => site.id === draft.siteId) ?? sites[0])!.id,
           manufacturer: draft.manufacturer.trim(),
           model: draft.model.trim(),
@@ -171,7 +171,7 @@ export const MachineDialog = ({
         return;
       }
 
-      const created = await createMachine(context, {
+      const created = await machines.create({
         customerId,
         siteId: (sites.find((site) => site.id === draft.siteId) ?? sites[0])!.id,
         manufacturer: draft.manufacturer,

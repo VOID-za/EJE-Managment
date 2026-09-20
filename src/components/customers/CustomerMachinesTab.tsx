@@ -13,7 +13,6 @@ import {
   type User,
 } from '@/domain';
 import type { JobListRow } from '@/application/job-view';
-import { approveMachine, removeMachine } from '@/application/machine-operations';
 import {
   Badge,
   Button,
@@ -25,6 +24,7 @@ import {
   Icon,
 } from '@/components/ui';
 import { MachineDialog } from '@/components/machines/MachineDialog';
+import { machines as machineApi } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatRelative } from '@/lib/format';
@@ -66,7 +66,7 @@ export const CustomerMachinesTab = ({
 
   const confirmRemoval = async (): Promise<void> => {
     if (pending === null) return;
-    const result = await operation.runFor((context) => removeMachine(context, pending));
+    const result = await operation.runFor(() => machineApi.remove(pending.id));
     if (result === null) return;
     setPending(null);
     setOutcome(result.message);
@@ -219,7 +219,7 @@ export const CustomerMachinesTab = ({
                   size="sm"
                   loading={operation.running}
                   onClick={async () => {
-                    const ok = await operation.run((context) => approveMachine(context, machine));
+                    const ok = await operation.run(() => machineApi.approve(machine.id));
                     if (ok) onChanged();
                   }}
                 >

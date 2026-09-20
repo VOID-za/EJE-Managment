@@ -13,6 +13,7 @@ import type { DatabaseExecutor } from '@/db/client';
 import { machineTypeCodeFor, machineTypeFromCode } from '@/db/reference-data';
 import * as schema from '@/db/schema';
 import { VersionLedger, requireWritten } from './versions';
+import { isUuid } from './identifiers';
 
 type MachineRow = typeof schema.machines.$inferSelect;
 type PhotoRow = typeof schema.machinePhotos.$inferSelect;
@@ -52,6 +53,7 @@ export class PostgresMachineRepository implements MachineRepository {
 
   /** Always resolves, archived or not: a historical job card has to render. */
   async findById(id: MachineId): Promise<Machine | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.machines)

@@ -10,7 +10,6 @@ import {
   type Site,
   type SiteId,
 } from '@/domain';
-import { removeContact, removeSite } from '@/application/customer-operations';
 import {
   Avatar,
   Badge,
@@ -23,6 +22,7 @@ import {
 } from '@/components/ui';
 import { ContactDialog } from './ContactDialog';
 import { SiteDialog } from './SiteDialog';
+import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 
@@ -71,10 +71,10 @@ export const CustomerSitesTab = ({
 
   const confirmRemoval = async (): Promise<void> => {
     if (pending === null) return;
-    const result = await operation.runFor((context) =>
+    const result = await operation.runFor(() =>
       pending.kind === 'site'
-        ? removeSite(context, pending.site)
-        : removeContact(context, pending.contact),
+        ? customers.removeSite(pending.site.id)
+        : customers.removeContact(pending.contact.id),
     );
     if (result === null) return;
     setPending(null);

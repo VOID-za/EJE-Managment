@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { JobView } from '@/application/job-view';
 import { Badge, Button, Icon, LoadingPanel } from '@/components/ui';
-import { useApp } from '@/providers/AppProvider';
+import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { SystemClock } from '@/services/simulated/system';
 import { downloadBytes } from '@/lib/download';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
@@ -27,7 +28,19 @@ export const JobCardPdfPreview = ({
   /** One line above the document saying what this copy is. */
   readonly caption?: string;
 }) => {
-  const { operationContext } = useApp();
+  /*
+   * The renderer runs HERE, in the browser, on the view the server sent.
+   *
+   * It is drawing, not business: no record is read, written or decided by it,
+   * so there is nothing for the server to authorise. The bytes never leave the
+   * tablet unless the job is issued, and issuing goes through the API like
+   * every other change. Deliberately unchanged from the previous phase — the
+   * document a customer signs must keep looking exactly as it did.
+   */
+  const [pdf, clock] = useMemo(() => {
+    const tick = new SystemClock();
+    return [new SimulatedPdfService(tick), tick] as const;
+  }, []);
   const [state, setState] = useState<
     | { readonly kind: 'loading' }
     | { readonly kind: 'ready'; readonly url: string; readonly fileName: string; readonly bytes: Uint8Array; readonly pages: number }
@@ -74,15 +87,14 @@ export const JobCardPdfPreview = ({
       // settled, which is a cascade the linter is right to object to.
       if (!cancelled) setState({ kind: 'loading' });
       try {
-        const { services } = operationContext();
         // The descriptor names the file; the renderer produces the bytes. Both
         // come from the same service the final document is issued through, so a
         // courier's copy previews as a Delivery Note and a customer's does not.
         const descriptor =
           view.job.jobType === 'parts'
-            ? await services.pdf.generatePartsNote(view.job, 'preview')
-            : await services.pdf.generateJobCard(view.job, 'preview');
-        const rendered = await services.pdf.render(
+            ? await pdf.generatePartsNote(view.job, 'preview')
+            : await pdf.generateJobCard(view.job, 'preview');
+        const rendered = await pdf.render(
           {
             job: view.job,
             customer: view.customer,
@@ -94,7 +106,7 @@ export const JobCardPdfPreview = ({
             users: view.users,
           },
           'preview',
-          services.clock.now(),
+          clock.now(),
         );
         if (cancelled) return;
 

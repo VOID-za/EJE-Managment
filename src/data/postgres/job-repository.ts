@@ -13,6 +13,7 @@ import * as schema from '@/db/schema';
 import { loadChecklists, writeChecklist } from './job-checklist';
 import { toDomainJob, toJobRow, vatBasisPointsFromPercent, type JobRowSet } from './job-mapper';
 import { VersionLedger, requireWritten } from './versions';
+import { isUuid } from './identifiers';
 
 /** The three money columns a snapshot carries, named once. */
 const totalsOf = (totals: PricingSnapshotTotals) => ({
@@ -97,6 +98,7 @@ export class PostgresJobRepository implements JobRepository {
   }
 
   async findById(id: JobId): Promise<Job | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db.select().from(schema.jobs).where(eq(schema.jobs.id, id)).limit(1);
     const assembled = await this.assemble(rows);
     return assembled[0] ?? null;

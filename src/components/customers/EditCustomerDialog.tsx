@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Customer, PostalAddress } from '@/domain';
-import { updateCustomer } from '@/application/customer-operations';
 import { Button, Modal, SectionHeading, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 
 interface Draft {
@@ -78,9 +78,8 @@ export const EditCustomerDialog = ({
   };
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run(async (context) => {
-      await updateCustomer(context, {
-        ...customer,
+    const ok = await operation.run(async () => {
+      await customers.update(customer.id, {
         name: draft.name.trim(),
         accountNumber: draft.accountNumber.trim(),
         registrationNumber: draft.registrationNumber.trim(),

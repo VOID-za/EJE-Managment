@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { can, type TechnicalDocumentType } from '@/domain';
-import { addDocument } from '@/application/library-operations';
 import { Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { library } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 
@@ -45,8 +45,8 @@ export const UploadDocumentDialog = ({
   const [fileName, setFileName] = useState('');
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run((context) =>
-      addDocument(context, {
+    const ok = await operation.run(() =>
+      library.create({
         name,
         description,
         documentType,

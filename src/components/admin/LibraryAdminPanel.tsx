@@ -3,13 +3,6 @@
 import { useState } from 'react';
 import type { TechnicalDocument, TechnicalDocumentType } from '@/domain';
 import {
-  addDocument,
-  addDocumentVersion,
-  approveDocument,
-  archiveDocument,
-  updateDocument,
-} from '@/application/library-operations';
-import {
   Badge,
   Button,
   Card,
@@ -24,6 +17,7 @@ import {
 } from '@/components/ui';
 import { AdminNotice } from './AdminNotice';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { library } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDate } from '@/lib/format';
 
@@ -111,7 +105,7 @@ export const LibraryAdminPanel = ({
               size="sm"
               loading={operation.running}
               onClick={async () => {
-                const ok = await operation.run((context) => approveDocument(context, row));
+                const ok = await operation.run(() => library.approve(row.id));
                 if (ok) onChanged();
               }}
             >
@@ -202,7 +196,7 @@ export const LibraryAdminPanel = ({
         busy={operation.running}
         onConfirm={async () => {
           if (archiving === null) return;
-          const ok = await operation.run((context) => archiveDocument(context, archiving));
+          const ok = await operation.run(() => library.archive(archiving.id));
           setArchiving(null);
           if (ok) onChanged();
         }}
@@ -245,12 +239,12 @@ const DocumentDialog = ({
         : `Edit ${existing?.name ?? ''}`;
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run((context) => {
+    const ok = await operation.run(() => {
       const pages = Number.parseInt(pageCount, 10) || 1;
       const tagList = tags.split(',').map((tag) => tag.trim()).filter((tag) => tag.length > 0);
 
       if (editing.mode === 'create') {
-        return addDocument(context, {
+        return library.create({
           name,
           description,
           documentType,
@@ -263,20 +257,20 @@ const DocumentDialog = ({
         });
       }
       if (revising) {
-        return addDocumentVersion(context, editing.document, {
+        return library.addVersion(editing.document.id, {
           version,
           fileName,
           pageCount: pages,
           description,
         });
       }
-      return updateDocument(context, {
-        ...editing.document,
+      return library.update(editing.document.id, {
         name: name.trim(),
         description: description.trim(),
         documentType,
         manufacturer: manufacturer.trim(),
         machineModel: machineModel.trim(),
+        version: editing.document.version,
         tags: tagList,
       });
     });

@@ -11,14 +11,9 @@ import {
   type ChatMessage,
   type User,
 } from '@/domain';
-import {
-  createAvailability,
-  updateAvailability,
-  type AvailabilityInput,
-} from '@/application/availability-operations';
-import { attachAvailabilityToMessage } from '@/application/chat-operations';
 import { Badge, Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { availability, conversations } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDate } from '@/lib/format';
 import { businessToday } from '@/lib/business-time';
@@ -59,7 +54,7 @@ export const AvailabilityDialog = ({
 
   const multiDay = endDate > startDate;
 
-  const input = (): AvailabilityInput => ({
+  const input = () => ({
     userId: technician.id,
     type,
     startDate,
@@ -72,15 +67,26 @@ export const AvailabilityDialog = ({
 
   const submit = async (): Promise<void> => {
     let affectedJobs: readonly Job[] = [];
-    const ok = await operation.run(async (context) => {
+    const ok = await operation.run(async () => {
       const result =
         existing === undefined || existing === null
-          ? await createAvailability(context, input())
-          : await updateAvailability(context, existing, input());
+          ? await availability.create(input())
+          : await availability.update(existing.id, input());
       affectedJobs = result.affectedJobs;
 
+      /*
+       * Linking the request that prompted it.
+       *
+       * A second call rather than one: the record and the link are separate
+       * facts, and the office may record an absence nobody asked for. Both run
+       * server-side, each in its own transaction.
+       */
       if (fromMessage !== undefined && fromMessage !== null) {
-        await attachAvailabilityToMessage(context, fromMessage, result.record);
+        await conversations.attachAvailability(
+          fromMessage.conversationId,
+          fromMessage.id,
+          result.record.id,
+        );
       }
     });
 

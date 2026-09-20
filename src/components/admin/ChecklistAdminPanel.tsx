@@ -15,13 +15,6 @@ import {
   type TemplateUsage,
 } from '@/domain';
 import {
-  archiveTemplate,
-  createTemplate,
-  publishTemplate,
-  saveTemplateDraft,
-  startNewVersion,
-} from '@/application/checklist-admin';
-import {
   Badge,
   Button,
   Card,
@@ -35,6 +28,7 @@ import {
 } from '@/components/ui';
 import { AdminNotice } from './AdminNotice';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { checklists } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDate } from '@/lib/format';
 
@@ -172,7 +166,9 @@ export const ChecklistAdminPanel = ({
                 variant="secondary"
                 loading={operation.running}
                 onClick={async () => {
-                  const ok = await operation.run((context) => startNewVersion(context, template));
+                  const ok = await operation.run(() =>
+                    checklists.startVersion(template.id, template.version),
+                  );
                   if (ok) onChanged();
                 }}
               >
@@ -184,7 +180,9 @@ export const ChecklistAdminPanel = ({
                   loading={operation.running}
                   disabled={template.sections.length === 0}
                   onClick={async () => {
-                    const ok = await operation.run((context) => publishTemplate(context, template));
+                    const ok = await operation.run(() =>
+                      checklists.publish(template.id, template.version),
+                    );
                     if (ok) onChanged();
                   }}
                 >
@@ -234,7 +232,9 @@ export const ChecklistAdminPanel = ({
         busy={operation.running}
         onConfirm={async () => {
           if (archiving === null) return;
-          const ok = await operation.run((context) => archiveTemplate(context, archiving));
+          const ok = await operation.run(() =>
+            checklists.archive(archiving.id, archiving.version),
+          );
           setArchiving(null);
           if (ok) onChanged();
         }}
@@ -271,8 +271,8 @@ const NewChecklistDialog = ({
           <Button
             loading={operation.running}
             onClick={async () => {
-              const ok = await operation.run((context) =>
-                createTemplate(context, { name, description, jobTypeCode, sourceDocument }),
+              const ok = await operation.run(() =>
+                checklists.create({ name, description, jobTypeCode, sourceDocument }),
               );
               if (ok) onCreated();
             }}
@@ -439,8 +439,14 @@ const ChecklistEditor = ({
           <Button
             loading={operation.running}
             onClick={async () => {
-              const ok = await operation.run((context) =>
-                saveTemplateDraft(context, { ...template, sections }),
+              const ok = await operation.run(() =>
+                checklists.saveDraft(template.id, {
+                  version: template.version,
+                  name: template.name,
+                  description: template.description,
+                  sourceDocument: template.sourceDocument,
+                  sections,
+                }),
               );
               if (ok) onSaved();
             }}

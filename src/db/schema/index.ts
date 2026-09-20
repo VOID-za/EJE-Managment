@@ -26,3 +26,4 @@ export * from './availability';
 export * from './collaboration';
 export * from './library';
 export * from './audit';
+export * from './api';

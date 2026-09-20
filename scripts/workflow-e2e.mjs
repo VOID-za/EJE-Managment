@@ -20,6 +20,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { resetDemonstration, signInAs as signInWith } from './sign-in.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? 'http://localhost:3000';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
@@ -38,9 +39,23 @@ const pageErrors = [];
  * the step name is what turns it into a place to look.
  */
 let currentStep = 'before the first step';
+
+/*
+ * A REFUSAL IS NOT A CONSOLE ERROR.
+ *
+ * The browser logs every non-2xx fetch, and the application now asks a server
+ * for everything — so a refused sign-in, a validation failure the screen
+ * renders and a first visit with no session each produce one. 5xx is
+ * deliberately absent: an internal error is a fault, and this suite must keep
+ * failing on one.
+ */
+const EXPECTED_HTTP = /Failed to load resource:.*status of (400|401|403|404|409|422|429)\b/;
+
 page.on('pageerror', (error) => pageErrors.push(`[${currentStep}] ${error.message}`));
 page.on('console', (message) => {
-  if (message.type() === 'error') pageErrors.push(`[${currentStep}] ${message.text()}`);
+  if (message.type() !== 'error') return;
+  if (EXPECTED_HTTP.test(message.text())) return;
+  pageErrors.push(`[${currentStep}] ${message.text()}`);
 });
 
 const step = async (name, fn) => {
@@ -73,19 +88,14 @@ const assertNot404 = async (what) => {
   }
 };
 
-const signInAs = async (role, name, greeting) => {
-  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  // Signing out lives in the top-right profile menu now, not the sidebar.
-  const profile = page.locator('header [aria-haspopup="menu"]');
-  if ((await profile.count()) > 0) {
-    await profile.click();
-    await page.getByRole('menuitem', { name: 'Sign out' }).click();
-    await page.getByRole('tablist').first().waitFor({ timeout: 20000 });
-  }
-  await page.getByRole('tab', { name: role }).click();
-  await page.getByRole('button', { name: new RegExp(name) }).click();
-  await page.getByRole('heading', { name: greeting }).waitFor({ timeout: 20000 });
-};
+/**
+ * Signs in with an email address and a password.
+ *
+ * `role` is kept in the call sites purely as documentation of who is being
+ * signed in — it is no longer sent anywhere, because the server decides it.
+ */
+const signInAs = (role, name, greeting) =>
+  signInWith(page, name, { base: BASE, greeting });
 
 const drawSignature = async () => {
   const pad = page.locator('div.touch-none').first();
@@ -99,6 +109,16 @@ const drawSignature = async () => {
   await page.mouse.up();
   await page.waitForTimeout(350);
 };
+
+/*
+ * A clean demonstration, first.
+ *
+ * The store is the server's now, so a second run would otherwise open on the
+ * first run's work.
+ */
+await step('the demonstration data is reset to its seeded state', () =>
+  resetDemonstration(page, BASE),
+);
 
 // ── PART 18: EJE-1056 review route ───────────────────────────────────────────
 await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);

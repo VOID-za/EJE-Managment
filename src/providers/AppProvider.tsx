@@ -4,210 +4,175 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import type { User, UserId } from '@/domain';
-import { createDemoRepositories } from '@/data/demo/repositories';
-import { DemoStore, SessionStore } from '@/data/demo/demo-store';
-import type { SnapshotFailure } from '@/data/demo/store';
-import type { RepositoryBundle } from '@/data/repositories';
-import { SimulatedEmailService } from '@/services/simulated/email';
-import { SimulatedOutbox } from '@/services/simulated/outbox';
-import { SimulatedPdfService } from '@/services/simulated/pdf';
-import { SimulatedStorageService } from '@/services/simulated/storage';
-import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
-import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
-import type { AppServices, OperationContext } from '@/application/context';
-import type { DeliveryState, OutboxEntry } from '@/services/ports';
+import type { User, UserId, UserRole } from '@/domain';
+import { auth, type SafeUser } from '@/api/endpoints';
+import { ApiRequestError, onSessionEnded } from '@/api/client';
 
 /**
- * The BROWSER's composition root.
+ * The browser's state, which is now almost none of it.
  *
- * It builds the demonstration adapters, and it always will: PostgreSQL is never
- * exposed to a client, so a page running in somebody's browser cannot be handed
- * the production repositories. The server's choice is made in
- * `src/data/backend.ts` — one module, reading the server's environment — and
- * `createPostgresRepositories` is what it builds. What is missing between the
- * two is the HTTP layer, which is the next phase.
+ * WHAT THIS FILE USED TO BE: the composition root. It built the demonstration
+ * repositories, the simulated services and an `OperationContext`, and handed
+ * them to every screen — so the business logic ran in the browser and the
+ * browser decided who was performing it.
  *
- * So this file is honest rather than aspirational: everything it assembles is
- * simulated, the demonstration keeps working, and nothing here can be
- * misconfigured into serving demonstration data to the business — because
- * nothing here is what production will run.
+ * WHAT IT IS NOW: a session. It asks the server who is signed in, keeps the
+ * answer, and counts writes so queries know to re-run. It holds no repository,
+ * no service, no operation context and no user id it chose for itself. There is
+ * no path from here to PostgreSQL, and there cannot be — the client bundle
+ * contains neither a driver nor a connection string.
+ *
+ * `signIn` posts an email and a password. The SERVER decides whether that is
+ * anybody, and what role they have; the identity below is whatever it said.
  */
+export type PersistenceBackend = 'postgres' | 'demo';
+
 interface AppContextValue {
-  readonly repositories: RepositoryBundle;
-  readonly services: AppServices;
   readonly currentUser: User | null;
-  readonly users: readonly User[];
-  /** Changes on every write so queries re-run. Becomes cache invalidation in Phase 2. */
+  /** Null until the first `/api/auth/me` has answered. */
+  readonly ready: boolean;
+  /**
+   * Which store is behind the API.
+   *
+   * Surfaced so the application can SAY when it is running the demonstration
+   * data rather than the business's. A demonstration that looks identical to
+   * production is how somebody captures a real job card into nothing.
+   */
+  readonly backend: PersistenceBackend | null;
+  /** Bumped on every write so `useQuery` re-runs. */
   readonly version: number;
-  /**
-   * Set when saved data could not be read, or a change could not be saved.
-   *
-   * Surfaced so the application can SAY so. The demo used to answer both by
-   * quietly falling back — unreadable data became the seed, and a failed write
-   * became nothing at all — which is how a day of captured work could vanish
-   * without anyone being told.
-   */
-  readonly storageFailure: SnapshotFailure | null;
-  readonly outbox: readonly OutboxEntry[];
-  /**
-   * Records what the provider would have reported about a message it accepted.
-   *
-   * Demo-only, and deliberately narrow: production learns this from the
-   * provider's delivery report rather than from anybody pressing a button. It
-   * is exposed so the Simulated Outbox screen can stand in for that report
-   * without the rest of the application knowing which adapter is behind it.
-   */
-  reportDelivery(messageId: string, state: DeliveryState, failureReason?: string): void;
-  signIn(userId: UserId): void;
-  signOut(): void;
-  resetDemoData(): void;
-  /** Builds the context passed to application operations. */
-  operationContext(): OperationContext;
+  /** Set when the last request could not reach the server. */
+  readonly connectionError: string | null;
+  signIn(email: string, password: string): Promise<{ ok: boolean; message: string | null }>;
+  signOut(): Promise<void>;
+  /** Called by `useOperation` after a successful write. */
+  invalidate(): void;
+  reportConnectionError(message: string | null): void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-interface Runtime {
-  readonly store: DemoStore;
-  readonly session: SessionStore;
-  readonly repositories: RepositoryBundle;
-  readonly services: AppServices;
-  readonly simulatedOutbox: SimulatedOutbox;
-}
-
-const createRuntime = (): Runtime => {
-  const store = new DemoStore();
-  const session = new SessionStore();
-  const clock = new SystemClock();
-  const ids = new SequentialIdGenerator();
-  const simulatedOutbox = new SimulatedOutbox();
-
-  return {
-    store,
-    session,
-    simulatedOutbox,
-    repositories: createDemoRepositories({ read: store.read, commit: store.commit }),
-    services: {
-      clock,
-      ids,
-      email: new SimulatedEmailService(simulatedOutbox, clock, ids),
-      whatsapp: new SimulatedWhatsAppService(simulatedOutbox, clock, ids),
-      pdf: new SimulatedPdfService(clock),
-      // The demo's disk: a closed job's final document is kept in the persisted
-      // snapshot, so a download hands back the file that was issued.
-      storage: new SimulatedStorageService({
-        get: (storageKey) => store.read().files[storageKey],
-        set: (storageKey, record) => {
-          store.commit((draft) => {
-            draft.files[storageKey] = record;
-          });
-        },
-      }),
-    },
-  };
-};
+/** The API's safe projection is exactly the domain `User` minus nothing it needs. */
+const toUser = (safe: SafeUser): User => ({
+  id: safe.id as UserId,
+  firstName: safe.firstName,
+  lastName: safe.lastName,
+  initials: safe.initials,
+  email: safe.email,
+  mobile: safe.mobile,
+  role: safe.role as UserRole,
+  jobTitle: safe.jobTitle,
+  active: safe.active,
+  createdAt: safe.createdAt,
+});
 
 export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
-  // Created once per mount. The runtime owns all mutable state; React only
-  // subscribes to it.
-  const [runtime] = useState(createRuntime);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [backend, setBackend] = useState<PersistenceBackend | null>(null);
+  const [ready, setReady] = useState(false);
+  const [version, setVersion] = useState(0);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  const version = useSyncExternalStore(
-    runtime.store.subscribe,
-    runtime.store.getVersion,
-    runtime.store.getServerVersion,
-  );
+  // Who the server says we are. Asked once on mount; the cookie is what carries
+  // the session across a reload, so there is nothing to restore from storage.
+  useEffect(() => {
+    let cancelled = false;
+    auth
+      .me()
+      .then((result) => {
+        if (cancelled) return;
+        setCurrentUser(toUser(result.user));
+        setBackend(result.backend);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        // Not signed in is the ordinary case on a first visit, and is not an
+        // error to report; anything else is a connection the person should know
+        // about.
+        if (cause instanceof ApiRequestError && cause.code === 'network') {
+          setConnectionError(cause.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const currentUserId = useSyncExternalStore(
-    runtime.session.subscribe,
-    runtime.session.getSnapshot,
-    runtime.session.getServerSnapshot,
-  );
-
-  const outbox = useSyncExternalStore(
-    runtime.simulatedOutbox.subscribe,
-    runtime.simulatedOutbox.listSync,
-    runtime.simulatedOutbox.listServer,
-  );
-
-  const storageFailure = useSyncExternalStore(
-    runtime.store.subscribe,
-    runtime.store.getFailure,
-    runtime.store.getServerFailure,
-  );
-
-  // Users are administered, so they come from the store rather than the seed
-  // constants: a user a Master adds can sign in, and a rename shows up at once.
-  const users = useMemo(() => {
-    // `version` is the store's write counter. Reading it here is what makes this
-    // re-run after a write — the lint rule cannot see that through `store.read`.
-    void version;
-    return runtime.store.read().users;
-  }, [runtime.store, version]);
-
-  const currentUser = useMemo(
-    () => users.find((user) => user.id === currentUserId) ?? null,
-    [users, currentUserId],
-  );
-
-  const reportDelivery = useCallback(
-    (messageId: string, state: DeliveryState, failureReason = '') => {
-      runtime.simulatedOutbox.setDelivery(messageId, state, failureReason);
-    },
-    [runtime.simulatedOutbox],
-  );
+  /*
+   * The server ending the session ends it here too.
+   *
+   * Any request may be the one that discovers a revoked session — a disabled
+   * account, a logout elsewhere, an expiry. The client hears about it once,
+   * centrally, rather than every screen having to check.
+   */
+  useEffect(() => onSessionEnded(() => setCurrentUser(null)), []);
 
   const signIn = useCallback(
-    (userId: UserId) => runtime.session.signIn(userId),
-    [runtime.session],
+    async (email: string, password: string) => {
+      try {
+        const result = await auth.signIn(email, password);
+        setCurrentUser(toUser(result.user));
+        setConnectionError(null);
+        // The identity changed, so everything on screen is somebody else's.
+        setVersion((current) => current + 1);
+        const me = await auth.me().catch(() => null);
+        if (me !== null) setBackend(me.backend);
+        return { ok: true, message: null };
+      } catch (cause) {
+        const message =
+          cause instanceof ApiRequestError
+            ? cause.message
+            : 'The sign-in could not be completed.';
+        return { ok: false, message };
+      }
+    },
+    [],
   );
-  const signOut = useCallback(() => runtime.session.signOut(), [runtime.session]);
-  const resetDemoData = useCallback(() => {
-    runtime.store.reset();
-    runtime.simulatedOutbox.clear();
-  }, [runtime.store, runtime.simulatedOutbox]);
 
-  const operationContext = useCallback((): OperationContext => {
-    if (currentUser === null) {
-      throw new Error('No user is signed in. Operations require an actor.');
-    }
-    return { repos: runtime.repositories, services: runtime.services, actor: currentUser };
-  }, [currentUser, runtime.repositories, runtime.services]);
+  const signOut = useCallback(async () => {
+    // Told to the server first, so the session is revoked rather than merely
+    // forgotten by this browser.
+    await auth.signOut().catch(() => undefined);
+    setCurrentUser(null);
+    setVersion((current) => current + 1);
+  }, []);
+
+  const invalidate = useCallback(() => setVersion((current) => current + 1), []);
+  const reportConnectionError = useCallback(
+    (message: string | null) => setConnectionError(message),
+    [],
+  );
 
   const value = useMemo<AppContextValue>(
     () => ({
-      repositories: runtime.repositories,
-      services: runtime.services,
       currentUser,
-      users,
+      ready,
+      backend,
       version,
-      storageFailure,
-      outbox,
-      reportDelivery,
+      connectionError,
       signIn,
       signOut,
-      resetDemoData,
-      operationContext,
+      invalidate,
+      reportConnectionError,
     }),
     [
-      runtime.repositories,
-      runtime.services,
       currentUser,
-      users,
+      ready,
+      backend,
       version,
-      storageFailure,
-      outbox,
-      reportDelivery,
+      connectionError,
       signIn,
       signOut,
-      resetDemoData,
-      operationContext,
+      invalidate,
+      reportConnectionError,
     ],
   );
 

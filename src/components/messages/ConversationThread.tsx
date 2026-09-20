@@ -1,5 +1,6 @@
 'use client';
 
+import { conversations } from '@/api/endpoints';
 import { useState } from 'react';
 import Link from 'next/link';
 import {
@@ -11,7 +12,6 @@ import {
   type Conversation,
   type User,
 } from '@/domain';
-import { sendMessage } from '@/application/chat-operations';
 import { Avatar, Badge, Button, Icon, TextAreaField } from '@/components/ui';
 import { AvailabilityDialog } from '@/components/availability/AvailabilityDialog';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
@@ -55,7 +55,7 @@ export const ConversationThread = ({
   const named = (id: string): User | undefined => users.find((user) => user.id === id);
 
   const send = async (): Promise<void> => {
-    const ok = await operation.run((context) => sendMessage(context, conversation, body));
+    const ok = await operation.run(() => conversations.send(conversation.id, body));
     if (ok) {
       setBody('');
       onSent();

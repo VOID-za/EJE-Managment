@@ -23,6 +23,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
+import { resetDemonstration, signInAs } from './sign-in.mjs';
 
 const BASE = process.env.EJE_PDF_URL ?? 'http://localhost:3000';
 const OUT = process.env.EJE_PDF_OUT ?? '.pdf-check';
@@ -70,9 +71,10 @@ const browser = await chromium.launch(
 );
 const page = await browser.newPage({ viewport: { width: 1000, height: 1300 }, acceptDownloads: true });
 
-await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'Master' }).click();
-await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+// The store is the server's now, so a previous run's work would otherwise be
+// what these documents are rendered from.
+await resetDemonstration(page, BASE);
+await signInAs(page, 'Elmarie Coetzee');
 await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 25000 });
 
 for (const jobNumber of TARGETS) {

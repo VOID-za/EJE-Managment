@@ -9,11 +9,7 @@ import {
   type TransferReason,
   type User,
 } from '@/domain';
-import {
-  returnJobToOpen,
-  transferJobToTechnician,
-  type TransferInput,
-} from '@/application/job-operations';
+import { jobs } from '@/api/endpoints';
 import { Button, Modal, SelectField, TextAreaField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
@@ -52,18 +48,16 @@ export const TransferJobDialog = ({
     (candidate) => candidate.active && candidate.id !== job.primaryTechnicianId,
   );
 
-  const input = (): TransferInput => ({ reason, description });
+  const input = (): { reason: TransferReason; description: string } => ({
+    reason,
+    description,
+  });
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run((context) =>
+    const ok = await operation.run(() =>
       destination === 'open'
-        ? returnJobToOpen(context, job, input())
-        : transferJobToTechnician(
-            context,
-            job,
-            candidates.find((candidate) => candidate.id === technicianId)!.id,
-            input(),
-          ),
+        ? jobs.transferToOpen(job.id, input())
+        : jobs.transferToTechnician(job.id, { technicianId, ...input() }),
     );
     if (ok) onTransferred();
   };

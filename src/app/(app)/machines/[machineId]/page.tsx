@@ -2,8 +2,7 @@
 
 import Link from 'next/link';
 import { use } from 'react';
-import { asMachineId, machineDisplayName } from '@/domain';
-import { loadJobRows } from '@/application/job-view';
+import { machineDisplayName } from '@/domain';
 import {
   Badge,
   Card,
@@ -17,6 +16,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { formatDate, formatFileSize } from '@/lib/format';
 
@@ -27,26 +27,7 @@ const MachineDetailPage = ({
 }) => {
   const { machineId } = use(params);
 
-  const query = useQuery(`machine:${machineId}`, async (repos) => {
-    const id = asMachineId(machineId);
-    const machine = await repos.machines.findById(id);
-    if (machine === null) return null;
-
-    const [customer, sites, jobs] = await Promise.all([
-      repos.customers.findById(machine.customerId),
-      // Includes a withdrawn site: this machine may be archived itself, and it
-      // still has to say where it stood.
-      repos.customers.listSites(machine.customerId, { includeArchived: true }),
-      repos.jobs.list({ machineId: id }),
-    ]);
-
-    return {
-      machine,
-      customer,
-      site: sites.find((candidate) => candidate.id === machine.siteId) ?? null,
-      jobRows: await loadJobRows(repos, jobs),
-    };
-  });
+  const query = useQuery(`machine:${machineId}`, () => reads.machine(machineId));
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;

@@ -4,6 +4,7 @@ import type { AvailabilityRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { VersionLedger, requireWritten } from './versions';
+import { isUuid } from './identifiers';
 
 type AvailabilityRow = typeof schema.availability.$inferSelect;
 
@@ -84,6 +85,7 @@ export class PostgresAvailabilityRepository implements AvailabilityRepository {
   }
 
   async findById(id: string): Promise<AvailabilityRecord | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.availability)

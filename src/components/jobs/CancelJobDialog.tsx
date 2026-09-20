@@ -1,5 +1,6 @@
 'use client';
 
+import { jobs } from '@/api/endpoints';
 import { useState } from 'react';
 import {
   CANCELLATION_REASONS,
@@ -7,7 +8,6 @@ import {
   type CancellationReason,
   type Job,
 } from '@/domain';
-import { cancelJob, deleteJob } from '@/application/job-operations';
 import { Button, Modal, SelectField, TextAreaField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
@@ -37,10 +37,10 @@ export const CancelJobDialog = ({
   const [description, setDescription] = useState('');
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run((context) =>
+    const ok = await operation.run(() =>
       mode === 'cancel'
-        ? cancelJob(context, job, { reason, description })
-        : deleteJob(context, job, description),
+        ? jobs.cancel(job.id, { reason, description })
+        : jobs.remove(job.id, description),
     );
     if (ok) onDone();
   };

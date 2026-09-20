@@ -18,8 +18,9 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { UploadDocumentDialog } from '@/components/library/UploadDocumentDialog';
+import { library, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatFileSize } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -36,7 +37,6 @@ type TabId = 'all' | 'favourites' | 'recent';
 
 const LibraryPage = () => {
   const user = useCurrentUser();
-  const { repositories } = useApp();
 
   const [tab, setTab] = useState<TabId>('all');
   const [term, setTerm] = useState('');
@@ -49,14 +49,7 @@ const LibraryPage = () => {
   // see them here, or an unapproved document could be followed on site.
   const seesPending = can(user.role, 'library.manage');
 
-  const query = useQuery(`library:${user.id}`, async (repos) => {
-    const [documents, favourites, recent] = await Promise.all([
-      repos.documents.list(),
-      repos.documents.listFavourites(user.id),
-      repos.documents.listRecentlyViewed(user.id),
-    ]);
-    return { documents, favourites, recent };
-  });
+  const query = useQuery(`library:${user.id}`, () => reads.library());
 
   const documents = useMemo(() => query.data?.documents ?? [], [query.data]);
   const favourites = useMemo(() => query.data?.favourites ?? [], [query.data]);
@@ -96,11 +89,11 @@ const LibraryPage = () => {
 
   const openDocument = async (document: TechnicalDocument) => {
     setPreview(document);
-    await repositories.documents.recordView(user.id, document.id);
+    await library.recordView(document.id);
   };
 
   const toggleFavourite = async (document: TechnicalDocument) => {
-    await repositories.documents.toggleFavourite(user.id, document.id);
+    await library.toggleFavourite(document.id);
     query.refetch();
   };
 

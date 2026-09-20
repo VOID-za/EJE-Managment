@@ -13,8 +13,8 @@ import {
   type ActivityEvent,
   type User,
 } from '@/domain';
-import { loadJobActivity } from '@/application/activity-read';
-import { loadJobView } from '@/application/job-view';
+import { isNotFound } from '@/api/client';
+import { reads } from '@/api/endpoints';
 import {
   Badge,
   Card,
@@ -66,27 +66,24 @@ const JobDetailPage = ({
   const [completing, setCompleting] = useState(false);
   const router = useRouter();
 
-  const viewQuery = useQuery(`job:${jobNumber}`, (repos) =>
-    loadJobView(repos, jobNumber, currentUser),
-  );
   /*
-   * The job's own history, read for THIS viewer.
+   * The job, the people on it and its own history — one read, for THIS viewer.
    *
-   * It used to load the whole company's trail and filter it by job id in the
-   * component — which meant the refusal the job record had correctly been
-   * redacted of was printed underneath, in the Activity tab, verbatim.
-   * `loadJobActivity` applies the same rule the job is redacted by.
+   * The trail used to be the whole company's, filtered by job id in the
+   * component, which meant the refusal the job record had correctly been
+   * redacted of was printed underneath in the Activity tab, verbatim. The
+   * server composes it now, through `loadJobActivity`, which applies the same
+   * rule the job is redacted by. A job this viewer may not read is answered as
+   * not found — the same answer a job number nobody issued gives.
    */
-  const supportQuery = useQuery(`job:${jobNumber}:support:${currentUser.id}`, async (repos) => {
-    const stored = await repos.jobs.findByJobNumber(jobNumber);
-    const [users, activity] = await Promise.all([
-      repos.users.list(),
-      stored === null
-        ? Promise.resolve([] as readonly ActivityEvent[])
-        : loadJobActivity(repos, currentUser, stored.id),
-    ]);
-    return { users, activity };
-  });
+  const screenQuery = useQuery(`job:${jobNumber}:${currentUser.id}`, () =>
+    reads.job(jobNumber).catch((cause: unknown) => {
+      if (isNotFound(cause)) return null;
+      throw cause;
+    }),
+  );
+  const viewQuery = { ...screenQuery, data: screenQuery.data?.view ?? null };
+  const supportQuery = { ...screenQuery, data: screenQuery.data ?? null };
 
   if (viewQuery.error !== null) {
     return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;

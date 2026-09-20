@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import type { User } from '@/domain';
-import { loadJobRows } from '@/application/job-view';
 import {
   Badge,
   Button,
@@ -17,6 +16,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobCardTile } from '@/components/jobs/JobCardTile';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { formatRelative } from '@/lib/format';
 import { byStatus, openJobs, todaysJobs, upcomingJobs } from './dashboard-data';
@@ -28,21 +28,18 @@ import { byStatus, openJobs, todaysJobs, upcomingJobs } from './dashboard-data';
  * technician should be able to find the right job in one tap.
  */
 export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
-  const jobsQuery = useQuery(`dashboard:tech:${user.id}`, async (repos) => {
-    const [mine, all] = await Promise.all([
-      repos.jobs.list({ technicianId: user.id }),
-      repos.jobs.list(),
-    ]);
-    const [mineRows, allRows] = await Promise.all([
-      loadJobRows(repos, mine, user),
-      loadJobRows(repos, all, user),
-    ]);
-    return { mineRows, allRows };
+  /*
+   * One read for the whole screen.
+   *
+   * The server composes it, with DECISION 5 already applied: "everything this
+   * technician may see" is the open pool plus their own work, which is exactly
+   * the two lists below. It no longer reads every job in the business to find
+   * them.
+   */
+  const jobsQuery = useQuery(`dashboard:tech:${user.id}`, async () => {
+    const screen = await reads.dashboard();
+    return screen.field ?? { mineRows: [], allRows: [], notifications: [] };
   });
-
-  const notificationsQuery = useQuery(`dashboard:tech:notifications:${user.id}`, (repos) =>
-    repos.notifications.list(user.id),
-  );
 
   if (jobsQuery.error !== null) {
     return <ErrorState message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
@@ -58,7 +55,7 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
 
   const mine = jobsQuery.data?.mineRows ?? [];
   const all = jobsQuery.data?.allRows ?? [];
-  const unread = (notificationsQuery.data ?? []).filter(
+  const unread = (jobsQuery.data?.notifications ?? []).filter(
     (notification) => notification.readAt === null,
   );
 

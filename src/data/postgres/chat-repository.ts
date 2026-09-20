@@ -3,6 +3,7 @@ import { asJobId, asUserId, type ChatMessage, type Conversation, type UserId } f
 import type { ChatRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
+import { isUuid } from './identifiers';
 
 type ConversationRow = typeof schema.chatConversations.$inferSelect;
 type MessageRow = typeof schema.chatMessages.$inferSelect;
@@ -43,6 +44,7 @@ export class PostgresChatRepository implements ChatRepository {
   }
 
   async findConversation(id: string): Promise<Conversation | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.chatConversations)
@@ -121,6 +123,7 @@ export class PostgresChatRepository implements ChatRepository {
   }
 
   async findMessage(id: string): Promise<ChatMessage | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.chatMessages)

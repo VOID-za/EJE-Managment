@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RepositoryBundle } from '@/data/repositories';
 import { useApp } from '@/providers/AppProvider';
 
 export interface QueryResult<T> {
@@ -22,26 +21,25 @@ interface Settled<T> {
 }
 
 /**
- * Minimal async data hook over the repository layer.
+ * Minimal async data hook over the API.
  *
- * The query re-runs when `key` changes, when a write bumps the store version,
- * or when `refetch` is called; those three form the token. Two distinct states
- * fall out of comparing the settled result against the current request:
+ * The loader now takes NOTHING: it calls `@/api/endpoints`, which calls the
+ * server, which decides what this actor may have. Previously it was handed a
+ * `RepositoryBundle` and read the data directly in the browser — which is what
+ * made the browser a participant in authorisation rather than a consumer of it.
+ *
+ * The three re-run triggers are unchanged: the key changes, a write bumps the
+ * version, or `refetch` is called. So is the distinction the screens depend on:
  *
  *  - `loading` — nothing has resolved for this key yet, so show a skeleton.
  *  - `refreshing` — a write has invalidated the data but the previous result is
  *    still valid to display.
  *
- * The distinction matters: without it, every capture on a job card would tear
- * the whole screen down to a skeleton and lose the state of any open panel.
- * This is stale-while-revalidate, and it is exactly what the Phase 2 query cache
- * will do at the same call sites.
+ * Without the second, every capture on a job card would tear the screen down to
+ * a skeleton and lose the state of any open panel.
  */
-export const useQuery = <T,>(
-  key: string,
-  loader: (repos: RepositoryBundle) => Promise<T>,
-): QueryResult<T> => {
-  const { repositories, version } = useApp();
+export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult<T> => {
+  const { version } = useApp();
   const [nonce, setNonce] = useState(0);
   const token = `${key}::${version}::${nonce}`;
 
@@ -64,7 +62,7 @@ export const useQuery = <T,>(
     let cancelled = false;
 
     loaderRef
-      .current(repositories)
+      .current()
       .then((result) => {
         if (!cancelled) setSettled({ key, token, data: result, error: null });
       })
@@ -82,7 +80,7 @@ export const useQuery = <T,>(
       cancelled = true;
     };
     // `token` already encodes `key`; listing it as a dependency would be redundant.
-  }, [key, token, repositories]);
+  }, [key, token]);
 
   const refetch = useCallback(() => setNonce((current) => current + 1), []);
 

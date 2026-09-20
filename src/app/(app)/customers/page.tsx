@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { can, isJobOpenWork } from '@/domain';
+import { can } from '@/domain';
 import {
   Badge,
   Button,
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { NewCustomerDialog } from '@/components/customers/NewCustomerDialog';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 
@@ -37,27 +38,7 @@ const CustomersPage = () => {
   // The official customer record belongs to the office, so only a Master adds one.
   const canManage = can(currentUser.role, 'customers.manage');
 
-  const query = useQuery('customers:list', async (repos) => {
-    const [customers, sites, machines, jobs] = await Promise.all([
-      repos.customers.list(),
-      repos.customers.listSites(),
-      repos.machines.list(),
-      repos.jobs.list(),
-    ]);
-
-    return customers.map<CustomerRow>((customer) => ({
-      id: customer.id,
-      name: customer.name,
-      accountNumber: customer.accountNumber,
-      industry: customer.industry,
-      siteCount: sites.filter((site) => site.customerId === customer.id).length,
-      machineCount: machines.filter((machine) => machine.customerId === customer.id).length,
-      openJobs: jobs.filter(
-        (job) => job.customerId === customer.id && isJobOpenWork(job.status),
-      ).length,
-      active: customer.active,
-    }));
-  });
+  const query = useQuery('customers:list', () => reads.customers());
 
   const rows = useMemo(() => {
     const needle = term.trim().toLowerCase();

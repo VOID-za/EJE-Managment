@@ -15,17 +15,7 @@ import {
   type SystemSettings,
   type User,
 } from '@/domain';
-import {
-  addLabour,
-  addPart,
-  addTravel,
-  removeLineItem,
-  setCalloutApplied,
-  updateLabour,
-  updatePart,
-  updateTravel,
-  type LineItemKind,
-} from '@/application/job-operations';
+import type { LineItemKind } from '@/application/job-operations';
 import {
   Badge,
   Button,
@@ -39,6 +29,7 @@ import {
   TextField,
 } from '@/components/ui';
 import { formatCurrency, formatDate } from '@/lib/format';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
 import { businessToday } from '@/lib/business-time';
@@ -89,8 +80,8 @@ export const WorkCapturePanel = ({
 
   const confirmRemoval = async () => {
     if (pendingRemoval === null) return;
-    const ok = await operation.run((context) =>
-      removeLineItem(context, job, pendingRemoval.kind, pendingRemoval.id),
+    const ok = await operation.run(() =>
+      jobs.removeLine(job.id, pendingRemoval.kind, pendingRemoval.id),
     );
     setPendingRemoval(null);
     if (ok) onChanged();
@@ -209,9 +200,8 @@ export const WorkCapturePanel = ({
               checked={job.calloutApplied}
               disabled={!editable || operation.running}
               onChange={async (event) => {
-                const ok = await operation.run((context) =>
-                  setCalloutApplied(context, job, event.target.checked),
-                );
+                const applied = event.target.checked;
+                const ok = await operation.run(() => jobs.setCallout(job.id, applied));
                 if (ok) onChanged();
               }}
               className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
@@ -376,10 +366,10 @@ export const WorkCapturePanel = ({
         existing={job.labour.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) =>
+          const ok = await operation.run(() =>
             editingId === null
-              ? addLabour(context, job, values)
-              : updateLabour(context, job, editingId, values),
+              ? jobs.addLabour(job.id, values)
+              : jobs.updateLabour(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();
@@ -396,10 +386,10 @@ export const WorkCapturePanel = ({
         existing={job.travel.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) =>
+          const ok = await operation.run(() =>
             editingId === null
-              ? addTravel(context, job, values)
-              : updateTravel(context, job, editingId, values),
+              ? jobs.addTravel(job.id, values)
+              : jobs.updateTravel(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();
@@ -416,10 +406,10 @@ export const WorkCapturePanel = ({
         existing={job.parts.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
-          const ok = await operation.run((context) =>
+          const ok = await operation.run(() =>
             editingId === null
-              ? addPart(context, job, values)
-              : updatePart(context, job, editingId, values),
+              ? jobs.addPart(job.id, values)
+              : jobs.updatePart(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();

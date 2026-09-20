@@ -4,6 +4,7 @@ import type { UserRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { VersionLedger, requireWritten } from './versions';
+import { isUuid } from './identifiers';
 
 type UserRow = typeof schema.users.$inferSelect;
 
@@ -49,6 +50,7 @@ export class PostgresUserRepository implements UserRepository {
   }
 
   async findById(id: UserId): Promise<User | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1);
     this.versions.rememberAll(rows);
     return rows[0] === undefined ? null : toDomainUser(rows[0]);

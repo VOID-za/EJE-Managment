@@ -17,6 +17,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
 
 const BASE = process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const shots = process.argv[2] ?? process.env.EJE_SMOKE_SHOTS ?? '.smoke';
@@ -30,8 +31,25 @@ const browser = await chromium.launch(
 );
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
+/*
+ * A REFUSAL IS NOT A CONSOLE ERROR.
+ *
+ * The browser logs every non-2xx fetch as "Failed to load resource", and the
+ * application now asks a server for everything — so a refused sign-in, a
+ * validation failure the screen renders, a job the actor may not read and a
+ * first visit with no session all produce one. Each is the API working
+ * correctly, and each is asserted where it happens.
+ *
+ * 5xx is NOT on this list: an internal error is a fault, and these suites must
+ * keep failing on one.
+ */
+const EXPECTED_HTTP = /Failed to load resource:.*status of (400|401|403|404|409|422|429)\b/;
+
 page.on('console', (msg) => {
-  if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
+  if (msg.type() !== 'error') return;
+  const text = msg.text();
+  if (EXPECTED_HTTP.test(text)) return;
+  errors.push(`console: ${text}`);
 });
 page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
 
@@ -59,32 +77,142 @@ const step = async (name, fn) => {
  * The sidebar carries navigation and nothing else, so every sign-out goes
  * through the menu — which is also what proves the menu works.
  */
-const signOut = async () => {
-  const trigger = page.locator('header [aria-haspopup="menu"]');
-  if ((await trigger.count()) === 0) return;
-  await trigger.click();
-  await page.getByRole('menuitem', { name: 'Sign out' }).click();
-  await page.getByRole('tablist').first().waitFor({ timeout: 10000 });
-};
+const signOut = () => signOutOf(page, 10000);
 
 const signInAsMasterIfNeeded = async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   const heading = await page.locator('h1').first().innerText().catch(() => '');
   if (heading.includes('Elmarie')) return;
-  await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
-  await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 15000 });
+  await signInAs(page, 'Elmarie Coetzee', { greeting: /Good day, Elmarie/, timeout: 15000 });
 };
+
+/*
+ * A clean demonstration, first.
+ *
+ * The store is the SERVER'S now, so a second run would open on the first run's
+ * work. This is the one step that must succeed before any other means anything.
+ */
+await step('the demonstration data is reset to its seeded state', async () => {
+  await resetDemonstration(page, BASE);
+});
 
 await step('sign in page renders', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Sign in' }).waitFor({ timeout: 10000 });
 });
 
+/*
+ * WHAT THIS STEP REPLACES.
+ *
+ * It used to assert the identity picker: three role tabs and a list of people,
+ * one click to become any of them. That is gone, and what replaced it is worth
+ * asserting in its place — an email address, a password, no role selector, and
+ * a server that refuses the wrong one.
+ */
+await step('the sign-in screen asks for a password and offers no role', async () => {
+  await page.getByLabel('Email address').waitFor({ timeout: 8000 });
+  await page.getByLabel('Password').waitFor({ timeout: 8000 });
+
+  for (const role of ['Master', 'Coordinator', 'Technician']) {
+    if ((await page.getByRole('tab', { name: role }).count()) > 0) {
+      throw new Error(`the sign-in screen still offers a ${role} role to pick`);
+    }
+  }
+});
+
+/**
+ * Submits the sign-in form and returns what the screen said.
+ *
+ * Waits for the ANSWER rather than reading straight after the click: the
+ * verification is an Argon2id hash on the server, deliberately slow, and the
+ * form is busy until it comes back. Reading early gets the empty live region,
+ * and clicking again while it is busy gets nothing at all.
+ */
+const attemptSignIn = async (email, password) => {
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('[role="alert"]')].some(
+        (node) => (node.textContent ?? '').trim().length > 0,
+      ),
+    null,
+    { timeout: 20000 },
+  );
+
+  return (await page.getByRole('alert').allInnerTexts()).join(' ').trim();
+};
+
+await step('a wrong password is refused, and says nothing about the account', async () => {
+  const message = await attemptSignIn('sipho.mahlangu@eje-demo.co.za', 'not-the-password');
+
+  if (!/do not match/i.test(message)) {
+    throw new Error(`unexpected sign-in refusal: ${message}`);
+  }
+  if (/locked|disabled|no such|does not exist/i.test(message)) {
+    throw new Error(`the refusal discloses account state: ${message}`);
+  }
+  // Still at the gate.
+  await page.getByRole('heading', { name: 'Sign in' }).waitFor({ timeout: 5000 });
+});
+
+await step('an unknown address is refused in exactly the same words', async () => {
+  const message = await attemptSignIn('nobody@eje-demo.co.za', 'not-the-password');
+
+  if (!/do not match/i.test(message)) {
+    throw new Error(`an unknown address was answered differently: ${message}`);
+  }
+});
+
+await step('the API refuses an unauthenticated request', async () => {
+  const result = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs`, { credentials: 'omit' });
+    return { status: response.status, body: await response.text() };
+  }, BASE);
+
+  if (result.status !== 401) {
+    throw new Error(`GET /api/jobs without a session answered ${result.status}`);
+  }
+  if (/argon2|password|token/i.test(result.body)) {
+    throw new Error('the refusal body mentions a credential');
+  }
+});
+
+await step('no session token is readable from the browser', async () => {
+  const cookies = await page.evaluate(() => document.cookie);
+  if (cookies.includes('eje_session')) {
+    throw new Error('the session cookie is readable by script — it must be HttpOnly');
+  }
+  const stored = await page.evaluate(() => {
+    const read = (store) => {
+      const out = {};
+      for (let index = 0; index < store.length; index += 1) {
+        const key = store.key(index);
+        out[key] = store.getItem(key);
+      }
+      return out;
+    };
+    return { local: read(window.localStorage), session: read(window.sessionStorage) };
+  });
+
+  // The theme preference is a per-viewer convenience and is allowed; anything
+  // that looks like an identity is not.
+  const entries = [
+    ...Object.entries(stored.local),
+    ...Object.entries(stored.session),
+  ].filter(([key]) => key !== 'eje.theme');
+
+  for (const [key, value] of entries) {
+    if (/session|token|user|password|auth|identity/i.test(`${key} ${value}`)) {
+      throw new Error(`authentication state was found in browser storage: ${key}=${value}`);
+    }
+  }
+});
+
 await step('sign in as technician Sipho Mahlangu', async () => {
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Sipho Mahlangu/ }).click();
+  await signInAs(page, 'Sipho Mahlangu');
   await page.getByRole('heading', { name: /Hello, Sipho/ }).waitFor({ timeout: 10000 });
 });
 
@@ -174,8 +302,7 @@ await step('declining is recorded on the job activity trail', async () => {
  */
 await step('signing in as the technician whose second job it is', async () => {
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
+  await signInAs(page, 'Lerato Dlamini');
   // Signing in returns you to the page you were on, which here is a job screen
   // rather than the dashboard — so the greeting is asked for where it lives.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
@@ -208,8 +335,7 @@ await step('the queued WhatsApp message appears in the Simulated Outbox', async 
 
 await step('back to EJE-1048 to continue the main journey', async () => {
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Sipho Mahlangu/ }).click();
+  await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: /Hello, Sipho/ }).waitFor({ timeout: 15000 });
 
@@ -558,8 +684,7 @@ await step(`a second job is taken to the signature step (${REFUSED_JOB})`, async
   // Lerato have no business reading what this customer said.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Riaan van Wyk/ }).click();
+  await signInAs(page, 'Riaan van Wyk');
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
@@ -756,8 +881,7 @@ await step('a technician cannot resolve or correct their own refusal', async () 
 await step('another technician cannot see the refusal at all', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
+  await signInAs(page, 'Lerato Dlamini');
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 
   /*
@@ -842,8 +966,7 @@ await step('nor through search, which is the same data reached another way', asy
 await step('the submitting technician still sees their own refusal', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Riaan van Wyk/ }).click();
+  await signInAs(page, 'Riaan van Wyk');
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
@@ -854,8 +977,7 @@ await step('the submitting technician still sees their own refusal', async () =>
 await step('sign in as a Master for the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.waitForURL('**/dashboard', { timeout: 10000 });
 });
 
@@ -1160,8 +1282,19 @@ await step('supplying the note clears the block', async () => {
   await noteBoxes.first().fill('Station 2 emergency stop does not latch — replacement ordered.');
   await noteBoxes.first().blur();
   await page.getByText('Required — explain the finding').first().waitFor({ timeout: 8000 });
-  const stillInvalid = await page.locator('textarea[aria-invalid="true"]').count();
-  if (stillInvalid !== 0) throw new Error('note was recorded but the item is still flagged');
+
+  /*
+   * Waited for rather than read straight away.
+   *
+   * The answer is now a round trip to the server, so the flag clears when the
+   * server has actually recorded the note — not on the keystroke. That is the
+   * behaviour worth having: what the screen shows is what was stored.
+   */
+  await page.waitForFunction(
+    () => document.querySelectorAll('textarea[aria-invalid="true"]').length === 0,
+    null,
+    { timeout: 15000 },
+  );
 });
 
 await step('a Parts job offers no labour, travel or call-out capture', async () => {
@@ -1302,8 +1435,15 @@ await step('a Test & Repair is worked and taken to its collection step', async (
 
   await page.getByRole('button', { name: 'Accept job' }).click();
   await page.getByRole('button', { name: 'Accept and start' }).click();
+
+  /*
+   * The site-location offer arrives when the SERVER has accepted the job, not
+   * on the click, so it is waited for rather than counted. Counting first is
+   * how a test passes on a fast machine and leaves a modal open on a slow one.
+   */
   const decline = page.getByRole('button', { name: 'No, Thanks' });
-  if ((await decline.count()) > 0) await decline.click({ timeout: 10000 });
+  await decline.click({ timeout: 15000 }).catch(() => undefined);
+  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 15000 }).catch(() => undefined);
 
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
   await page.getByRole('button', { name: 'Add labour' }).first().click();
@@ -1459,8 +1599,7 @@ await step('the courier job still holds its prices internally', async () => {
 await step('a technician can message the office', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Lerato/ }).click();
+  await signInAs(page, 'Lerato Dlamini');
   await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
@@ -1513,8 +1652,7 @@ await step('the message alone does NOT make the technician unavailable', async (
 await step('the Master is notified of the message, and the notification opens the chat', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
@@ -1747,8 +1885,7 @@ await step('an accepted job can no longer be deleted, only cancelled', async () 
 await step('a technician transfers their own job back to Open, keeping the work', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Deon Botha/ }).click();
+  await signInAs(page, 'Deon Botha');
   await page.getByRole('heading', { name: /Hello, Deon/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
@@ -1785,8 +1922,7 @@ await step('the transfer is on the activity trail with its reason', async () => 
 await step('another technician accepts the returned job and sees the previous work', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Riaan/ }).click();
+  await signInAs(page, 'Riaan van Wyk');
   await page.getByRole('heading', { name: /Hello, Riaan/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
@@ -1832,8 +1968,7 @@ await step('the site location message carries job, customer, machine, site and a
 await step('master dashboard and admin', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
   await page.getByText('Total Open Jobs').waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/07-master-dashboard.png`, fullPage: false });
@@ -2157,8 +2292,7 @@ await step('the machine number is searchable on its own', async () => {
 await step('the Coordinator signs in and gets the office, not a technician tablet', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Coordinator' }).click();
-  await page.getByRole('button', { name: /Christene van Niekerk/ }).click();
+  await signInAs(page, 'Christene van Niekerk');
   await page.getByText('Total Open Jobs').waitFor({ timeout: 10000 });
   await page.screenshot({ path: `${shots}/07-coordinator-dashboard.png`, fullPage: false });
 });
@@ -2194,8 +2328,7 @@ await step('the Coordinator cannot create anything but a technician', async () =
 await step('back to a Master for the rest of the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
 });
 
@@ -3107,8 +3240,7 @@ await step('dark mode applies across every major screen', async () => {
 await step('admin screens render in dark for a Master', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
 
   const state = await themeState();

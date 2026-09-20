@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { getJobTypeDefinition, type Attachment, type Job, type User } from '@/domain';
-import { addMedia, removeMedia } from '@/application/job-operations';
 import {
   Badge,
   Button,
@@ -13,6 +12,7 @@ import {
   SelectField,
   TextField,
 } from '@/components/ui';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { formatFileSize, formatRelative } from '@/lib/format';
 
@@ -44,16 +44,16 @@ export const JobMediaPanel = ({
 
   /** Takes an attachment off the job, through the operation that records it. */
   const remove = async (kindToRemove: 'photo' | 'video', attachmentId: string) => {
-    const ok = await operation.run((context) =>
-      removeMedia(context, job, kindToRemove, attachmentId),
+    const ok = await operation.run(() =>
+      jobs.removeMedia(job.id, kindToRemove, attachmentId),
     );
     if (ok) onChanged();
   };
 
   const submit = async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
-    const ok = await operation.run((context) =>
-      addMedia(context, job, {
+    const ok = await operation.run(() =>
+      jobs.addMedia(job.id, {
         kind,
         fileName: `${job.jobNumber}-${stamp}.${kind === 'photo' ? 'jpg' : 'mp4'}`,
         caption: caption.trim(),

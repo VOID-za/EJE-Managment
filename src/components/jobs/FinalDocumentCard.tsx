@@ -3,11 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { getJobTypeDefinition, userFullName, type Job, type User } from '@/domain';
-import { loadFinalDocumentFile } from '@/application/final-document';
 import { Badge, Button, Card, CardHeader, DefinitionGrid, Icon } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { downloadBytes } from '@/lib/download';
 import { formatDateTime } from '@/lib/format';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 
 /**
@@ -48,8 +48,8 @@ export const FinalDocumentCard = ({
    */
   const download = useCallback(async () => {
     setDownloaded(false);
-    const ok = await operation.run(async (context) => {
-      const file = await loadFinalDocumentFile(context, job.jobNumber);
+    const ok = await operation.run(async () => {
+      const file = await jobs.finalDocument(job.jobNumber);
       downloadBytes(file.bytes, file.fileName, file.contentType);
     });
     if (ok) setDownloaded(true);

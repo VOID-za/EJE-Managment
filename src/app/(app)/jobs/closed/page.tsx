@@ -12,7 +12,6 @@ import {
 import {
   CLOSED_JOBS_PAGE_SIZE,
   emptyClosedJobFilters,
-  loadClosedJobs,
   type ClosedJobFilters,
 } from '@/application/closed-jobs';
 import {
@@ -30,6 +29,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate } from '@/lib/format';
@@ -58,8 +58,8 @@ const ClosedJobsPage = () => {
    * `canView` branch below is the friendly wording for that refusal, and the
    * query is not even run for somebody it would refuse.
    */
-  const query = useQuery(`closed-jobs:${currentUser.id}:${JSON.stringify(filters)}`, (repos) =>
-    canView ? loadClosedJobs(repos, currentUser, filters) : Promise.resolve(null),
+  const query = useQuery(`closed-jobs:${currentUser.id}:${JSON.stringify(filters)}`, () =>
+    canView ? reads.closedJobs(filters) : Promise.resolve(null),
   );
 
   const set = <K extends keyof ClosedJobFilters>(key: K, value: ClosedJobFilters[K]): void =>

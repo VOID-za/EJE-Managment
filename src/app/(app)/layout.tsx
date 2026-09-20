@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { SignInGate } from '@/components/layout/SignInGate';
-import { StorageFailureBanner } from '@/components/layout/StorageFailureBanner';
+import { ConnectionBanner } from '@/components/layout/ConnectionBanner';
 import { useApp } from '@/providers/AppProvider';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { cn } from '@/lib/cn';
 
@@ -14,32 +15,27 @@ import { cn } from '@/lib/cn';
  * tablet and phone, with a sticky top bar carrying global search.
  */
 const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
-  const { currentUser } = useApp();
+  const { currentUser, ready } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const notifications = useQuery(
-    `notifications:${currentUser?.id ?? 'none'}`,
-    async (repos) =>
-      currentUser === null ? [] : repos.notifications.list(currentUser.id),
+  /*
+   * The two badges the shell carries, counted on the server.
+   *
+   * Messages have their own badge: a chat waiting for a reply is a different
+   * kind of claim on your attention from a system alert, so they are counted
+   * and shown separately.
+   */
+  const badges = useQuery(`shell:${currentUser?.id ?? 'none'}`, () =>
+    currentUser === null
+      ? Promise.resolve({ unreadNotifications: 0, unreadMessages: 0 })
+      : reads.shell(),
   );
 
-  const unreadCount = (notifications.data ?? []).filter(
-    (notification) => notification.readAt === null,
-  ).length;
+  const unreadCount = badges.data?.unreadNotifications ?? 0;
+  const unreadMessages = badges.data?.unreadMessages ?? 0;
 
-  // Messages carry their own badge. A chat waiting for a reply is a different
-  // kind of claim on your attention from a system alert, so they are counted
-  // and shown separately.
-  const messages = useQuery(`messages:unread:${currentUser?.id ?? 'none'}`, async (repos) => {
-    if (currentUser === null) return [];
-    const all = await repos.chat.listMessagesFor(currentUser.id);
-    return all.filter(
-      (message) =>
-        message.senderId !== currentUser.id && !message.readBy.includes(currentUser.id),
-    );
-  });
-  const unreadMessages = (messages.data ?? []).length;
-
+  // Nothing has been asked of the server yet, so there is no answer to draw on.
+  if (!ready) return null;
   if (currentUser === null) return <SignInGate />;
 
   return (
@@ -85,7 +81,7 @@ const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
         </div>
         {/* Above everything, because it is about whether anything below it is
             actually being kept. */}
-        <StorageFailureBanner />
+        <ConnectionBanner />
         <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 lg:px-8 lg:py-8">
           {children}
         </main>

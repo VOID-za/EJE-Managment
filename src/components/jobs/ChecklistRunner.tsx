@@ -11,13 +11,9 @@ import {
   type Job,
   type PassFailNa,
 } from '@/domain';
-import {
-  addChecklistPhoto,
-  answerChecklistItem,
-  completeChecklist,
-  startChecklist,
-} from '@/application/job-operations';
+import type { ChecklistAnswer } from '@/application/job-operations';
 import { Badge, Button, Card, ConfirmDialog, Icon } from '@/components/ui';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
 import { RuleViolationNotice } from './RuleViolationNotice';
@@ -57,8 +53,8 @@ export const ChecklistRunner = ({
   const started = job.checklist !== null;
   const completed = job.checklist?.completedAt !== null && job.checklist !== null;
 
-  const answer = async (itemId: string, value: Parameters<typeof answerChecklistItem>[3]) => {
-    const ok = await operation.run((context) => answerChecklistItem(context, job, itemId, value));
+  const answer = async (itemId: string, value: ChecklistAnswer) => {
+    const ok = await operation.run(() => jobs.answerChecklist(job.id, { itemId, ...value }));
     if (ok) onChanged();
   };
 
@@ -80,9 +76,7 @@ export const ChecklistRunner = ({
               className="mt-6"
               loading={operation.running}
               onClick={async () => {
-                const ok = await operation.run((context) =>
-                  startChecklist(context, job, template),
-                );
+                const ok = await operation.run(() => jobs.startChecklist(job.id));
                 if (ok) onChanged();
               }}
             >
@@ -173,8 +167,8 @@ export const ChecklistRunner = ({
                 busy={operation.running}
                 onAnswer={(value) => answer(item.id, value)}
                 onAddPhoto={async () => {
-                  const ok = await operation.run((context) =>
-                    addChecklistPhoto(context, job, item.id, `${item.id}-evidence.jpg`),
+                  const ok = await operation.run(() =>
+                    jobs.addChecklistPhoto(job.id, item.id, `${item.id}-evidence.jpg`),
                   );
                   if (ok) onChanged();
                 }}
@@ -243,9 +237,7 @@ export const ChecklistRunner = ({
         confirmVariant="success"
         busy={operation.running}
         onConfirm={async () => {
-          const ok = await operation.run((context) =>
-            completeChecklist(context, job, template),
-          );
+          const ok = await operation.run(() => jobs.completeChecklist(job.id));
           setConfirmComplete(false);
           if (ok) onChanged();
         }}
@@ -267,7 +259,7 @@ const ChecklistItemRow = ({
   readonly response: ChecklistResponse | undefined;
   readonly editable: boolean;
   readonly busy: boolean;
-  readonly onAnswer: (value: Parameters<typeof answerChecklistItem>[3]) => void;
+  readonly onAnswer: (value: ChecklistAnswer) => void;
   readonly onAddPhoto: () => void;
 }) => {
   const [measurement, setMeasurement] = useState(

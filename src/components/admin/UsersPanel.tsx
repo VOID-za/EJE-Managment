@@ -16,12 +16,6 @@ import {
   type UserRole,
 } from '@/domain';
 import {
-  createUser,
-  sendPasswordReset,
-  setUserActive,
-  updateUser,
-} from '@/application/user-operations';
-import {
   Avatar,
   Badge,
   Button,
@@ -39,6 +33,7 @@ import {
 } from '@/components/ui';
 import { AdminNotice } from './AdminNotice';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { users as userApi } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate } from '@/lib/format';
@@ -251,8 +246,8 @@ export const UsersPanel = ({
         busy={operation.running}
         onConfirm={async () => {
           if (confirming === null) return;
-          const ok = await operation.run((context) =>
-            setUserActive(context, confirming.user, confirming.enable),
+          const ok = await operation.run(() =>
+            userApi.setActive(confirming.user.id, confirming.enable),
           );
           setConfirming(null);
           if (ok) onChanged();
@@ -273,7 +268,7 @@ export const UsersPanel = ({
         onConfirm={async () => {
           if (resetting === null) return;
           const target = resetting;
-          const ok = await operation.run((context) => sendPasswordReset(context, target));
+          const ok = await operation.run(() => userApi.sendPasswordReset(target.id));
           setResetting(null);
           if (ok) {
             setResetSentTo(target.email);
@@ -330,18 +325,10 @@ const UserEditor = ({
   if (existing !== null && !canManageUser(actor, existing)) return null;
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run((context) =>
+    const ok = await operation.run(() =>
       existing === null
-        ? createUser(context, {
-            firstName,
-            lastName,
-            email,
-            mobile,
-            jobTitle,
-            role,
-          })
-        : updateUser(context, {
-            ...existing,
+        ? userApi.create({ firstName, lastName, email, mobile, jobTitle, role })
+        : userApi.update(existing.id, {
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             email: email.trim(),

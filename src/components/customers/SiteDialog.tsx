@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CustomerId, Site } from '@/domain';
-import { createSite, updateSite } from '@/application/customer-operations';
 import { Button, Modal, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 
 interface Draft {
@@ -84,10 +84,9 @@ export const SiteDialog = ({
   };
 
   const submit = async (): Promise<void> => {
-    const ok = await operation.run(async (context) => {
+    const ok = await operation.run(async () => {
       if (site !== null) {
-        await updateSite(context, {
-          ...site,
+        await customers.updateSite(site.id, {
           name: draft.name.trim(),
           addressLine1: draft.addressLine1.trim(),
           addressLine2: draft.addressLine2.trim(),
@@ -98,7 +97,7 @@ export const SiteDialog = ({
         });
         return;
       }
-      await createSite(context, customerId, draft);
+      await customers.addSite(customerId, draft);
     });
     if (ok) onSaved();
   };

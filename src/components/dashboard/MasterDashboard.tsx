@@ -2,8 +2,6 @@
 
 import Link from 'next/link';
 import { userFullName, type User } from '@/domain';
-import { loadActivityFeed } from '@/application/activity-read';
-import { loadJobRows } from '@/application/job-view';
 import {
   Avatar,
   Badge,
@@ -21,6 +19,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { formatDate, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -39,24 +38,18 @@ import {
 
 /** Operational overview for Masters: workload, exceptions and recent movement. */
 export const MasterDashboard = ({ user }: { readonly user: User }) => {
-  const jobsQuery = useQuery('dashboard:master:jobs', async (repos) => {
-    const jobs = await repos.jobs.list();
-    return loadJobRows(repos, jobs, user);
-  });
-
   /*
-   * Recent activity comes through the authorised read, not straight from the
-   * repository. This dashboard is only rendered for the office, which holds
-   * `activity.viewAll` — routing it through `loadActivityFeed` anyway means the
+   * One read for the whole screen, composed on the server.
+   *
+   * Recent activity still comes through the AUTHORISED read: the server calls
+   * `loadActivityFeed`, which refuses a role without `activity.viewAll`. The
    * trail has exactly one way in, and no screen can become the exception.
    */
-  const supportQuery = useQuery(`dashboard:master:support:${user.id}`, async (repos) => {
-    const [feed, notifications] = await Promise.all([
-      loadActivityFeed(repos, user),
-      repos.notifications.list(user.id),
-    ]);
-    return { users: feed.users, activity: feed.events.slice(0, 8), notifications };
+  const jobsQuery = useQuery(`dashboard:master:${user.id}`, async () => {
+    const screen = await reads.dashboard();
+    return screen.office ?? { rows: [], users: [], activity: [], notifications: [] };
   });
+  const supportQuery = jobsQuery;
 
   if (jobsQuery.error !== null) {
     return <ErrorState message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
@@ -70,7 +63,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
     );
   }
 
-  const rows = jobsQuery.data ?? [];
+  const rows = jobsQuery.data?.rows ?? [];
   const users = supportQuery.data?.users ?? [];
   const activity = supportQuery.data?.activity ?? [];
   const notifications = (supportQuery.data?.notifications ?? []).filter(

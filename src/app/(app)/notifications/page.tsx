@@ -5,7 +5,6 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
 import { deliveryStateLabel } from '@/domain';
-import { confirmJobCardDelivery } from '@/application/job-operations';
 import {
   Badge,
   Button,
@@ -19,8 +18,13 @@ import {
   type IconName,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import {
+  notifications as notificationsApi,
+  outbox as outboxApi,
+  reads,
+} from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -66,21 +70,19 @@ type TabId = 'inbox' | 'handled' | 'outbox';
 
 const NotificationsPageContent = () => {
   const user = useCurrentUser();
-  const { repositories, outbox } = useApp();
   const params = useSearchParams();
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId | null) ?? 'inbox');
 
-  const query = useQuery(`notifications:${user.id}`, (repos) => repos.notifications.list(user.id));
-  const jobsQuery = useQuery('notifications:jobNumbers', async (repos) => {
-    const jobs = await repos.jobs.list();
-    return new Map(jobs.map((job) => [job.id as string, job.jobNumber]));
-  });
+  const query = useQuery(`notifications:${user.id}`, () => reads.notifications());
+  const outboxQuery = useQuery('outbox:count', () => reads.outbox());
+  // A Map does not survive JSON, so the API sends pairs and it is rebuilt here.
+  const jobNumbers = new Map(query.data?.jobNumbers ?? []);
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
   }
 
-  const notifications = query.data ?? [];
+  const notifications = query.data?.notifications ?? [];
   const inbox = notifications.filter((notification) => notification.handledAt === null);
   const handled = notifications.filter((notification) => notification.handledAt !== null);
   const unread = notifications.filter((notification) => notification.readAt === null);
@@ -98,7 +100,7 @@ const NotificationsPageContent = () => {
             <Button
               variant="secondary"
               onClick={async () => {
-                await repositories.notifications.markAllRead(user.id);
+                await notificationsApi.readAll();
                 query.refetch();
               }}
             >
@@ -126,7 +128,7 @@ const NotificationsPageContent = () => {
             label: 'Simulated Outbox',
             badge: (
               <Badge tone="amber" size="sm">
-                {outbox.length}
+                {outboxQuery.data?.entries.length ?? 0}
               </Badge>
             ),
           },
@@ -159,14 +161,14 @@ const NotificationsPageContent = () => {
                 jobNumber={
                   notification.jobId === null
                     ? null
-                    : (jobsQuery.data?.get(notification.jobId) ?? null)
+                    : (jobNumbers.get(notification.jobId) ?? null)
                 }
                 onRead={async () => {
-                  await repositories.notifications.markRead(notification.id);
+                  await notificationsApi.read(notification.id);
                   query.refetch();
                 }}
                 onHandled={async () => {
-                  await repositories.notifications.markHandled(notification.id);
+                  await notificationsApi.handled(notification.id);
                   query.refetch();
                 }}
               />
@@ -295,7 +297,8 @@ const NotificationRow = ({
  * WhatsApp. Nothing here left the browser.
  */
 const OutboxPanel = () => {
-  const { outbox, reportDelivery, operationContext } = useApp();
+  const query = useQuery('outbox', () => reads.outbox());
+  const outbox = query.data?.entries ?? [];
 
   /*
    * Confirming or failing a delivery.
@@ -307,20 +310,18 @@ const OutboxPanel = () => {
    * that depends on it is closed only when it happens.
    */
   const settle = async (messageId: string, state: 'delivered' | 'failed'): Promise<void> => {
-    reportDelivery(
+    /*
+     * The report, and what it does to the job, both happen on the server.
+     *
+     * A job waiting on this message is closed by `confirmJobCardDelivery` —
+     * from what the provider said, never from the call having returned.
+     */
+    await outboxApi.reportDelivery(
       messageId,
       state,
       state === 'failed' ? 'The recipient mailbox rejected the message.' : '',
     );
-
-    // Any job waiting on this message now hears about it.
-    const context = operationContext();
-    const jobs = await context.repos.jobs.list({ statuses: ['awaiting_delivery'] });
-    for (const job of jobs) {
-      if (job.delivery?.messageId === messageId) {
-        await confirmJobCardDelivery(context, job);
-      }
-    }
+    query.refetch();
   };
 
   return (

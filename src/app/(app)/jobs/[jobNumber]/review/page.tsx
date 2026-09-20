@@ -11,13 +11,8 @@ import {
   refusalAwaitingResolution,
   type DeliveryRecord,
 } from '@/domain';
-import {
-  generateJobCardDocument,
-  issueJobCard,
-  retryJobCardDelivery,
-} from '@/application/job-operations';
-import { loadFinalDocumentFile } from '@/application/final-document';
-import { loadJobView } from '@/application/job-view';
+import { isNotFound } from '@/api/client';
+import { jobs as api, reads } from '@/api/endpoints';
 import type { GeneratedPdf } from '@/services/ports';
 import {
   Badge,
@@ -39,7 +34,7 @@ import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Review and submit.
@@ -56,7 +51,6 @@ const ReviewJobPage = ({
   const { jobNumber } = use(params);
   const router = useRouter();
   const operation = useOperation();
-  const { operationContext } = useApp();
   const currentUser = useCurrentUser();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -67,8 +61,14 @@ const ReviewJobPage = ({
     delivery: DeliveryRecord;
   } | null>(null);
 
-  const viewQuery = useQuery(`job:${jobNumber}:review`, (repos) =>
-    loadJobView(repos, jobNumber, currentUser),
+  const viewQuery = useQuery(`job:${jobNumber}:review:${currentUser.id}`, () =>
+    reads
+      .job(jobNumber)
+      .then((screen) => screen.view)
+      .catch((cause: unknown) => {
+        if (isNotFound(cause)) return null;
+        throw cause;
+      }),
   );
   const view = viewQuery.data ?? null;
   const jobId = view?.job.id ?? null;
@@ -98,14 +98,20 @@ const ReviewJobPage = ({
   useEffect(() => {
     if (view === null || storedFinal !== null || generated !== null) return;
     let cancelled = false;
-    void generateJobCardDocument(operationContext(), view.job).then((descriptor) => {
-      if (!cancelled) setGenerated(descriptor);
-    });
+    void api
+      .generateDocument(view.job.id)
+      .then((descriptor) => {
+        if (!cancelled) setGenerated(descriptor);
+      })
+      .catch(() => {
+        // A preview that could not be produced is not a failure of the screen;
+        // the header simply carries no descriptor.
+      });
     return () => {
       cancelled = true;
     };
     // The descriptor depends only on the job identity.
-  }, [jobId, view, generated, storedFinal, operationContext]);
+  }, [jobId, view, generated, storedFinal]);
 
   /**
    * Download the final job card.
@@ -117,8 +123,8 @@ const ReviewJobPage = ({
    * the current page rather than the document that was issued.
    */
   const downloadFinal = useCallback(async () => {
-    await operation.run(async (context) => {
-      const file = await loadFinalDocumentFile(context, jobNumber);
+    await operation.run(async () => {
+      const file = await api.finalDocument(jobNumber);
       downloadBytes(file.bytes, file.fileName, file.contentType);
     });
   }, [operation, jobNumber]);
@@ -287,8 +293,8 @@ const ReviewJobPage = ({
                     variant="secondary"
                     loading={operation.running}
                     onClick={async () => {
-                      const ok = await operation.run(async (context) => {
-                        const again = await retryJobCardDelivery(context, job, customerDisplayName);
+                      const ok = await operation.run(async () => {
+                        const again = await api.retryDelivery(job.id);
                         setSubmitted({
                           fileName: again.documentFileName,
                           to: again.emailedTo,
@@ -370,8 +376,8 @@ const ReviewJobPage = ({
               loading={operation.running}
               leadingIcon={<Icon name="mail" className="size-5" />}
               onClick={async () => {
-                const ok = await operation.run(async (context) => {
-                  const again = await retryJobCardDelivery(context, job, customerDisplayName);
+                const ok = await operation.run(async () => {
+                  const again = await api.retryDelivery(job.id);
                   setSubmitted({
                     fileName: again.documentFileName,
                     to: again.emailedTo,
@@ -500,8 +506,8 @@ const ReviewJobPage = ({
         cancelLabel="Cancel"
         busy={operation.running}
         onConfirm={async () => {
-          const ok = await operation.run(async (context) => {
-            const result = await issueJobCard(context, job, customerEmail, customerDisplayName);
+          const ok = await operation.run(async () => {
+            const result = await api.issue(job.id);
             // Reported from what the PROVIDER said, never from the call having
             // returned. `deliveryMessage` is the only place that phrasing lives.
             setSubmitted({

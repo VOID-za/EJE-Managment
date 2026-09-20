@@ -19,12 +19,13 @@ import {
   type JobStatus,
   type JobTypeCode,
 } from '@/domain';
-import { loadJobList, type JobListRow } from '@/application/job-view';
 import { Button, Card, ErrorState, Icon, LoadingPanel, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { cn } from '@/lib/cn';
+import { reads } from '@/api/endpoints';
+import type { JobListRow } from '@/application/job-view';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { isOverdue } from '@/lib/format';
@@ -100,7 +101,7 @@ const JobsPageContent = () => {
 
   // Scoped by the read, which decides what this person may see; the filters
   // below are the user's own choices over what came back.
-  const query = useQuery(`jobs:list:${user.id}`, (repos) => loadJobList(repos, user));
+  const query = useQuery(`jobs:list:${user.id}`, async () => (await reads.jobs()).rows);
 
   const rows = useMemo(() => {
     const all = query.data ?? [];

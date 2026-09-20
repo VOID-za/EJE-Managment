@@ -1,8 +1,8 @@
 'use client';
 
+import { jobs } from '@/api/endpoints';
 import { useState } from 'react';
 import { userFullName, type Job, type User } from '@/domain';
-import { addNote } from '@/application/job-operations';
 import { Avatar, Badge, Button, Card, EmptyState, Icon, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
 import { formatRelative } from '@/lib/format';
@@ -29,7 +29,7 @@ export const JobNotesPanel = ({
 
   const submit = async () => {
     if (body.trim().length === 0) return;
-    const ok = await operation.run((context) => addNote(context, job, body.trim(), internal));
+    const ok = await operation.run(() => jobs.addNote(job.id, body.trim(), internal));
     if (ok) {
       setBody('');
       setInternal(false);

@@ -14,6 +14,7 @@ import type { CustomerRepository, RegisterFilter } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { VersionLedger, requireWritten } from './versions';
+import { isUuid } from './identifiers';
 
 type CustomerRow = typeof schema.customers.$inferSelect;
 type NoteRow = typeof schema.customerNotes.$inferSelect;
@@ -89,6 +90,7 @@ export class PostgresCustomerRepository implements CustomerRepository {
   }
 
   async findById(id: CustomerId): Promise<Customer | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.customers)
@@ -131,12 +133,14 @@ export class PostgresCustomerRepository implements CustomerRepository {
 
   /** Resolution, not selection: an archived site still has to resolve. */
   async findSiteById(id: SiteId): Promise<Site | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db.select().from(schema.sites).where(eq(schema.sites.id, id)).limit(1);
     this.siteVersions.rememberAll(rows);
     return rows[0] === undefined ? null : toDomainSite(rows[0]);
   }
 
   async findContactById(id: ContactId): Promise<Contact | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.contacts)

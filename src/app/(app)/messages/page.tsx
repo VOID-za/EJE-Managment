@@ -2,11 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  loadConversations,
-  markConversationRead,
-  permittedRecipients,
-} from '@/application/chat-operations';
+import { permittedRecipients } from '@/application/chat-operations';
 import {
   Button,
   Card,
@@ -19,8 +15,9 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { ConversationList } from '@/components/messages/ConversationList';
 import { ConversationThread } from '@/components/messages/ConversationThread';
 import { NewConversationDialog } from '@/components/messages/NewConversationDialog';
+import { conversations as conversationsApi, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Messages.
@@ -34,22 +31,14 @@ import { useApp, useCurrentUser } from '@/providers/AppProvider';
  */
 const MessagesPageContent = () => {
   const currentUser = useCurrentUser();
-  const { operationContext } = useApp();
   const params = useSearchParams();
 
   const [selected, setSelected] = useState<string | null>(params.get('conversation'));
   const [composing, setComposing] = useState(false);
 
-  const query = useQuery(`messages:${currentUser.id}`, async (repos) => {
-    const context = { ...operationContext(), repos };
-    const [summaries, users, availability, jobs] = await Promise.all([
-      loadConversations(context),
-      repos.users.list(),
-      repos.availability.list(),
-      repos.jobs.list(),
-    ]);
-    return { summaries, users, availability, jobs };
-  });
+  const query = useQuery(`messages:${currentUser.id}:${selected ?? 'none'}`, () =>
+    reads.messages(selected),
+  );
 
   const data = query.data;
   // Memoised because the unread total derives from it; a fresh array identity
@@ -59,12 +48,13 @@ const MessagesPageContent = () => {
   // Default to the conversation named in the URL — a chat notification links
   // straight here — otherwise the most recent, so the screen is never blank
   // when there is something to read.
-  const activeId = selected ?? summaries[0]?.conversation.id ?? null;
+  // The server says which thread it sent; the URL wins where it names one.
+  const activeId = selected ?? data?.selectedId ?? summaries[0]?.conversation.id ?? null;
   const active = summaries.find((summary) => summary.conversation.id === activeId) ?? null;
 
-  const threadQuery = useQuery(`messages:thread:${activeId ?? 'none'}`, (repos) =>
-    activeId === null ? Promise.resolve([]) : repos.chat.listMessages(activeId),
-  );
+  // The thread comes back with the list: one read for the screen, and the
+  // server refuses a conversation this actor is not in.
+  const thread = useMemo(() => data?.thread ?? [], [data]);
 
   const unreadTotal = useMemo(
     () => summaries.reduce((total, summary) => total + summary.unread, 0),
@@ -73,8 +63,7 @@ const MessagesPageContent = () => {
 
   const refresh = useCallback(() => {
     query.refetch();
-    threadQuery.refetch();
-  }, [query, threadQuery]);
+  }, [query]);
 
   // Opening a thread clears its unread messages. In an effect, never during
   // render: notifying the store while rendering is what produces React's
@@ -92,7 +81,7 @@ const MessagesPageContent = () => {
     const conversation = active.conversation;
     void (async () => {
       try {
-        await markConversationRead(operationContext(), conversation);
+        await conversationsApi.markRead(conversation.id);
         if (!cancelled) refresh();
       } catch {
         // Marking read is a convenience; failing it must never break the thread.
@@ -103,7 +92,7 @@ const MessagesPageContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [active, unreadHere, operationContext, refresh]);
+  }, [active, unreadHere, refresh]);
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
@@ -164,7 +153,7 @@ const MessagesPageContent = () => {
               ) : (
                 <ConversationThread
                   conversation={active.conversation}
-                  messages={threadQuery.data ?? []}
+                  messages={thread}
                   users={data.users}
                   availability={data.availability}
                   onSent={refresh}

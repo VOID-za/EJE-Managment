@@ -5,11 +5,6 @@ import { useMemo, useState } from 'react';
 import {
   checkSchedule,
   daysBetween,
-  asContactId,
-  asCustomerId,
-  asMachineId,
-  asSiteId,
-  asUserId,
   can,
   contactFullName,
   getJobTypeDefinition,
@@ -37,11 +32,11 @@ import {
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { jobs as api, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
-import { createJob } from '@/application/job-creation';
 
 /**
  * Job creation.
@@ -72,17 +67,7 @@ const NewJobPage = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  const dataQuery = useQuery('jobs:new:data', async (repos) => {
-    const [customers, sites, contacts, machines, users, settings] = await Promise.all([
-      repos.customers.list(),
-      repos.customers.listSites(),
-      repos.customers.listContacts(),
-      repos.machines.list(),
-      repos.users.list(),
-      repos.settings.get(),
-    ]);
-    return { customers, sites, contacts, machines, users, settings };
-  });
+  const dataQuery = useQuery('jobs:new:data', () => reads.jobForm());
 
   const data = dataQuery.data;
 
@@ -161,12 +146,12 @@ const NewJobPage = () => {
     setSaving(true);
 
     let created: Job | null = null;
-    const ok = await operation.run(async (context) => {
-      created = await createJob(context, {
-        customerId: asCustomerId(customerId),
-        siteId: asSiteId(siteId),
-        contactId: asContactId(contactId),
-        machineId: machineId.length > 0 ? asMachineId(machineId) : null,
+    const ok = await operation.run(async () => {
+      created = await api.create({
+        customerId,
+        siteId,
+        contactId,
+        machineId: machineId.length > 0 ? machineId : null,
         jobType,
         priority,
         scheduledDate: scheduledDate.length > 0 ? scheduledDate : null,
@@ -174,7 +159,7 @@ const NewJobPage = () => {
         orderNumber,
         referenceNumber,
         faultDescription,
-        primaryTechnicianId: technicianId.length > 0 ? asUserId(technicianId) : null,
+        primaryTechnicianId: technicianId.length > 0 ? technicianId : null,
         courierCollection,
         deliveryNote,
       });

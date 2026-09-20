@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { isJobOpenWork, machineDisplayName, type MachineType } from '@/domain';
+import { type MachineType } from '@/domain';
 import {
   Badge,
   Card,
@@ -14,6 +14,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { formatDate } from '@/lib/format';
 
@@ -36,30 +37,7 @@ const MachinesPage = () => {
   const [term, setTerm] = useState('');
   const [manufacturer, setManufacturer] = useState('all');
 
-  const query = useQuery('machines:list', async (repos) => {
-    const [machines, customers, sites, jobs] = await Promise.all([
-      repos.machines.list(),
-      repos.customers.list(),
-      repos.customers.listSites(),
-      repos.jobs.list(),
-    ]);
-
-    return machines.map<MachineRow>((machine) => ({
-      id: machine.id,
-      label: machineDisplayName(machine),
-      serialNumber: machine.serialNumber,
-      machineNumber: machine.machineNumber,
-      machineType: machine.machineType,
-      manufacturer: machine.manufacturer,
-      customerName:
-        customers.find((customer) => customer.id === machine.customerId)?.name ?? 'Unknown',
-      siteName: sites.find((site) => site.id === machine.siteId)?.name ?? '—',
-      year: machine.year,
-      installationDate: machine.installationDate,
-      openJobs: jobs.filter((job) => job.machineId === machine.id && isJobOpenWork(job.status))
-        .length,
-    }));
-  });
+  const query = useQuery('machines:list', () => reads.machines());
 
   const manufacturers = useMemo(
     () => [...new Set((query.data ?? []).map((row) => row.manufacturer))].sort(),

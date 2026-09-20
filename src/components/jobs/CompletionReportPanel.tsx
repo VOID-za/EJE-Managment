@@ -1,8 +1,8 @@
 'use client';
 
+import { jobs } from '@/api/endpoints';
 import { useEffect, useState } from 'react';
 import type { Job, JobCompletionReport } from '@/domain';
-import { saveCompletionReport } from '@/application/job-operations';
 import { Badge, Button, Card, CardHeader, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
 
@@ -82,7 +82,7 @@ export const CompletionReportPanel = ({
   }, [dirty]);
 
   const save = async () => {
-    const ok = await operation.run((context) => saveCompletionReport(context, job, draft));
+    const ok = await operation.run(() => jobs.saveReport(job.id, draft));
     if (ok) {
       setSavedAt(new Date().toISOString());
       onChanged();

@@ -43,7 +43,13 @@ export const users = pgTable(
     role: userRole('role').notNull(),
     jobTitle: text('job_title').notNull().default(''),
 
-    /* ---- credentials: schema only, unused until the authentication phase ---- */
+    /*
+     * ---- credentials ----
+     *
+     * Read by `src/server/auth/postgres-store.ts` and by NOTHING else. No
+     * repository selects them, `User` does not carry them, and no API response
+     * has anywhere to put them.
+     */
     /** argon2id encoded hash, parameters included. Null until a password is set. */
     passwordHash: text('password_hash'),
     passwordSetAt: instant('password_set_at'),
@@ -72,11 +78,16 @@ export const users = pgTable(
 );
 
 /**
- * Server-side sessions. SCHEMA ONLY in this phase.
+ * Server-side sessions. Written by `src/server/auth/postgres-store.ts`.
  *
  * Opaque tokens rather than JWTs, because disabling an account has to take
  * effect on the next request rather than at the next expiry. Only the SHA-256
  * of the cookie value is stored, so a database leak yields no usable session.
+ *
+ * Two clocks: `expires_at` slides forward with activity (12 hours) and
+ * `absolute_expires_at` never moves (30 days). `revoked_at` is set on sign-out
+ * and when an account is disabled — rows are never deleted, so a session that
+ * was ended stays ended.
  */
 export const sessions = pgTable(
   'sessions',

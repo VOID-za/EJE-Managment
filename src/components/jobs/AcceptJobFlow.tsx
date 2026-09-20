@@ -2,19 +2,14 @@
 
 import { useState } from 'react';
 import { can, getJobTypeDefinition, type Job } from '@/domain';
-import {
-  acceptJob,
-  buildSiteLocationMessage,
-  declineSiteLocation,
-  sendSiteLocation,
-  type SiteLocationInput,
-} from '@/application/job-operations';
-import { loadJobView, type JobView } from '@/application/job-view';
+import { buildSiteLocationMessage } from '@/application/job-operations';
+import type { JobView } from '@/application/job-view';
+import { jobs as api, reads } from '@/api/endpoints';
 import { Badge, Button, ConfirmDialog, Icon, Modal } from '@/components/ui';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Accepting a job, and the site-location offer that follows it.
@@ -42,7 +37,6 @@ export const AcceptJobFlow = ({
   readonly onClose: () => void;
   readonly onAccepted: () => void;
 }) => {
-  const { operationContext } = useApp();
   const currentUser = useCurrentUser();
   const operation = useOperation();
   const [locationPrompt, setLocationPrompt] = useState<Job | null>(null);
@@ -59,17 +53,24 @@ export const AcceptJobFlow = ({
 
   // The caller may already hold the view (the job screen does); the Open Jobs
   // list does not, so it is loaded here rather than by every row.
-  const loaded = useQuery(`accept:${jobNumber}`, (repos) =>
+  const loaded = useQuery(`accept:${jobNumber}`, async () =>
     providedView === undefined || providedView === null
-      ? loadJobView(repos, jobNumber)
-      : Promise.resolve(providedView),
+      ? (await reads.job(jobNumber)).view
+      : providedView,
   );
   const view = providedView ?? loaded.data ?? null;
 
   if (view === null) return null;
   const { job } = view;
 
-  const siteLocationInput: SiteLocationInput = {
+  /*
+   * The preview only.
+   *
+   * What is actually SENT is composed on the server from the job's own site,
+   * machine and customer — a request that could name its own address would be a
+   * way to send a technician somewhere under EJE's name.
+   */
+  const siteLocationInput = {
     site: view.site,
     machine: view.machine,
     customerName: view.customer.name,
@@ -124,8 +125,8 @@ export const AcceptJobFlow = ({
         busy={operation.running}
         onConfirm={async () => {
           let acceptedJob: Job | null = null;
-          const ok = await operation.run(async (context) => {
-            acceptedJob = await acceptJob(context, job);
+          const ok = await operation.run(async () => {
+            acceptedJob = await api.accept(job.id);
           });
           if (!ok) {
             setAccepted(false);
@@ -179,7 +180,7 @@ export const AcceptJobFlow = ({
                 // queued for later.
                 setLocationBusy(true);
                 try {
-                  await declineSiteLocation(operationContext(), accepted);
+                  await api.declineSiteLocation(accepted.id);
                 } catch {
                   // Best-effort: recording a declined offer must never surface
                   // as a failure on a job that is already accepted.
@@ -202,11 +203,7 @@ export const AcceptJobFlow = ({
                 setLocationBusy(true);
                 // sendSiteLocation never throws: a WhatsApp failure is reported
                 // here and recorded on the trail, and the job stays accepted.
-                const result = await sendSiteLocation(
-                  operationContext(),
-                  accepted,
-                  siteLocationInput,
-                );
+                const result = await api.sendSiteLocation(accepted.id);
                 setLocationBusy(false);
                 setLocationPrompt(null);
                 setLocationOutcome(

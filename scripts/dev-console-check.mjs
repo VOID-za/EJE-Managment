@@ -14,6 +14,7 @@
  *   EJE_DEV_URL=http://localhost:3500 npm run dev-check
  */
 import { chromium } from 'playwright';
+import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
 
 const BASE = process.env.EJE_DEV_URL ?? 'http://localhost:3000';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
@@ -23,25 +24,34 @@ const browser = await chromium.launch(
 );
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
+/*
+ * A REFUSAL IS NOT A CONSOLE ERROR.
+ *
+ * The browser logs every non-2xx fetch as "Failed to load resource", and the
+ * application now asks a server for everything — so a refused sign-in, a
+ * validation failure the screen renders, a job the actor may not read and a
+ * first visit with no session all produce one. Each is the API working
+ * correctly, and each is asserted where it happens.
+ *
+ * 5xx is NOT on this list: an internal error is a fault, and these suites must
+ * keep failing on one.
+ */
+const EXPECTED_HTTP = /Failed to load resource:.*status of (400|401|403|404|409|422|429)\b/;
+
 const problems = [];
 page.on('console', (message) => {
   if (message.type() === 'error' || message.type() === 'warning') {
     const text = message.text();
     // Next's dev overlay and telemetry notices are not application problems.
     if (text.includes('Download the React DevTools')) return;
+    if (EXPECTED_HTTP.test(text)) return;
     problems.push(`[${message.type()}] ${text}`);
   }
 });
 page.on('pageerror', (error) => problems.push(`[pageerror] ${error.message}`));
 
 /** Signing out is in the top-right profile menu now, not the sidebar. */
-const signOut = async () => {
-  const trigger = page.locator('header [aria-haspopup="menu"]');
-  if ((await trigger.count()) === 0) return;
-  await trigger.click();
-  await page.getByRole('menuitem', { name: 'Sign out' }).click();
-  await page.getByRole('tablist').first().waitFor({ timeout: 15000 });
-};
+const signOut = () => signOutOf(page, 15000);
 
 const step = async (name, fn) => {
   const before = problems.length;
@@ -51,10 +61,13 @@ const step = async (name, fn) => {
   added.forEach((problem) => console.log(`         ${problem}`));
 };
 
+await step('reset the demonstration data', async () => {
+  await resetDemonstration(page, BASE);
+});
+
 await step('sign in as a technician', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
+  await signInAs(page, 'Lerato Dlamini');
   await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 20000 });
 });
 
@@ -116,6 +129,16 @@ await step('technician messages the office and replies in the thread', async () 
   await compose.waitFor({ timeout: 10000 });
   await compose.getByLabel('Message').fill('Running late — traffic on the R21.');
   await compose.getByRole('button', { name: 'Send message' }).click();
+
+  /*
+   * Wait for the DIALOG to go, not for the text.
+   *
+   * The text is in the compose box the moment it is typed, so waiting for it
+   * matches before the server has been asked anything — and the next step then
+   * types into a form that is still open. The dialog closes when the server has
+   * actually started the conversation, which is the thing being waited for.
+   */
+  await compose.waitFor({ state: 'detached', timeout: 20000 });
   await page.getByText('traffic on the R21', { exact: false }).first().waitFor({ timeout: 20000 });
 
   await page.getByLabel('Message').fill('Should be on site by 10:30.');
@@ -159,8 +182,7 @@ await step('technician opens the transfer dialog on their own job', async () => 
   // already captured — the case a transfer has to carry forward.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Technician' }).click();
-  await page.getByRole('button', { name: /Sipho Mahlangu/ }).click();
+  await signInAs(page, 'Sipho Mahlangu');
   await page.getByRole('heading', { name: /Hello, Sipho/ }).waitFor({ timeout: 20000 });
 
   await page.goto(`${BASE}/jobs/EJE-1067`, { waitUntil: 'networkidle' });
@@ -178,8 +200,7 @@ await step('technician opens the transfer dialog on their own job', async () => 
 await step('sign in as a Master', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
-  await page.getByRole('tab', { name: 'Master' }).click();
-  await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
+  await signInAs(page, 'Elmarie Coetzee');
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 20000 });
 });
 

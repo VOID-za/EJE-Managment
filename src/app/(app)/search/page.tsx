@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
 import {
   CATEGORY_LABELS,
-  runSearch,
   type SearchCategory,
   type SearchResult,
 } from '@/application/search';
@@ -20,6 +19,7 @@ import {
   type IconName,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
@@ -60,9 +60,7 @@ const SearchPageContent = () => {
   const [category, setCategory] = useState<SearchCategory | 'all'>('all');
 
   // Scoped by the actor inside `runSearch`, not by anything on this screen.
-  const query = useQuery(`search:${currentUser.id}:${initial}`, (repos) =>
-    runSearch(repos, currentUser, initial),
-  );
+  const query = useQuery(`search:${currentUser.id}:${initial}`, () => reads.search(initial));
 
   const grouped = useMemo(() => {
     const results = (query.data ?? []).filter(

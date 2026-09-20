@@ -8,9 +8,9 @@ import {
   type Site,
   type SiteId,
 } from '@/domain';
-import { createContact, updateContact } from '@/application/customer-operations';
 import { Button, Modal, SelectField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 
 const ROLE_LIST_ID = 'contact-role-suggestions';
@@ -108,21 +108,20 @@ export const ContactDialog = ({
 
   const submit = async (): Promise<void> => {
     const siteId = draft.siteId === HEAD_OFFICE ? null : (draft.siteId as SiteId);
-    const ok = await operation.run(async (context) => {
+    const ok = await operation.run(async () => {
       if (contact !== null) {
-        await updateContact(context, {
-          ...contact,
+        await customers.updateContact(contact.id, {
           firstName: draft.firstName.trim(),
           lastName: draft.lastName.trim(),
           position: draft.position.trim(),
           email: draft.email.trim(),
           phone: draft.phone.trim(),
-          siteId,
           isPrimary: draft.isPrimary,
         });
         return;
       }
-      await createContact(context, customerId, siteId, {
+      await customers.addContact(customerId, {
+        siteId,
         firstName: draft.firstName,
         lastName: draft.lastName,
         position: draft.position,

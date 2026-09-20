@@ -2,7 +2,6 @@
 
 import { use, useState } from 'react';
 import {
-  asUserId,
   availabilityTimeLabel,
   availabilityTypeLabel,
   can,
@@ -11,8 +10,6 @@ import {
   userFullName,
   type AvailabilityRecord,
 } from '@/domain';
-import { cancelAvailability } from '@/application/availability-operations';
-import { loadJobRows } from '@/application/job-view';
 import {
   Avatar,
   Badge,
@@ -31,6 +28,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { AvailabilityDialog } from '@/components/availability/AvailabilityDialog';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { useOperation } from '@/hooks/useOperation';
+import { availability, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -63,27 +61,7 @@ const TechnicianProfilePage = ({
   const today = businessToday();
   const canManage = can(currentUser.role, 'admin.access');
 
-  const query = useQuery(`technician:${userId}`, async (repos) => {
-    const id = asUserId(userId);
-    const technician = await repos.users.findById(id);
-    if (technician === null) return null;
-
-    const [records, jobs, messages, users] = await Promise.all([
-      repos.availability.listForUser(id),
-      repos.jobs.list({ technicianId: id }),
-      // Their side of the chat: the requests they have sent the office, and
-      // what was recorded as a result.
-      repos.chat.listConversations(id).then(async (conversations) => {
-        const threads = await Promise.all(
-          conversations.map((conversation) => repos.chat.listMessages(conversation.id)),
-        );
-        return threads.flat().filter((message) => message.senderId === id);
-      }),
-      repos.users.list(),
-    ]);
-
-    return { technician, records, jobRows: await loadJobRows(repos, jobs), messages, users };
-  });
+  const query = useQuery(`technician:${userId}`, () => reads.technician(userId));
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
@@ -350,7 +328,7 @@ const TechnicianProfilePage = ({
         busy={operation.running}
         onConfirm={async () => {
           if (cancelling === null) return;
-          const ok = await operation.run((context) => cancelAvailability(context, cancelling));
+          const ok = await operation.run(() => availability.cancel(cancelling.id));
           setCancelling(null);
           if (ok) query.refetch();
         }}

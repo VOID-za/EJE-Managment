@@ -31,11 +31,10 @@ import { LibraryAdminPanel } from '@/components/admin/LibraryAdminPanel';
 import { UsersPanel } from '@/components/admin/UsersPanel';
 import { SIMULATED_CAPABILITIES } from '@/config/demo';
 import { useOperation } from '@/hooks/useOperation';
+import { demo, reads, settings as settingsApi } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { updateSettings } from '@/application/settings-operations';
-import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatCurrency } from '@/lib/format';
-import type { TemplateUsage } from '@/domain';
 
 type TabId =
   | 'users'
@@ -58,27 +57,9 @@ const AdminPage = () => {
   const user = useCurrentUser();
   const [tab, setTab] = useState<TabId>('users');
 
-  const query = useQuery('admin:data', async (repos) => {
-    const [users, settings, templates, documents, customers, machines, jobs] = await Promise.all([
-      repos.users.list(),
-      repos.settings.get(),
-      repos.checklistTemplates.list(),
-      repos.documents.list(),
-      repos.customers.list(),
-      repos.machines.list(),
-      repos.jobs.list(),
-    ]);
-    // Which template versions jobs have actually completed against. This is what
-    // makes a version immutable, so it is read here rather than guessed at.
-    const usage: TemplateUsage[] = jobs
-      .map((job) => job.checklist)
-      .filter((checklist) => checklist !== null)
-      .map((checklist) => ({
-        templateId: checklist.templateId,
-        templateVersion: checklist.templateVersion,
-      }));
-    return { users, settings, templates, documents, customers, machines, usage };
-  });
+  // Composed on the server, which also refuses a role without `admin.access` —
+  // the check below is a courtesy, never the thing that protects the screen.
+  const query = useQuery('admin:data', () => reads.admin());
 
   if (!can(user.role, 'admin.access')) {
     return (
@@ -268,9 +249,25 @@ const RatesPanel = ({
     setSaving(true);
     // Through the operation, which is where the Master-only rule is enforced
     // and where the change is recorded on the audit trail.
-    const ok = await operation.run((context) =>
-      updateSettings(context, {
-        ...settings,
+    const ok = await operation.run(() =>
+      /*
+       * The editable fields, named one by one.
+       *
+       * Deliberately not a spread of the stored settings: `nextJobSequence` is
+       * the server's, and a client that sends it back is a client that can hand
+       * out a job number twice. The server refuses it, and this is what the
+       * server is asking for.
+       */
+      settingsApi.update({
+        companyName: settings.companyName,
+        companyRegistration: settings.companyRegistration,
+        companyVatNumber: settings.companyVatNumber,
+        companyPhone: settings.companyPhone,
+        companyEmail: settings.companyEmail,
+        companyAddress: settings.companyAddress,
+        jobNumberPrefix: settings.jobNumberPrefix,
+        quietHoursStart: settings.quietHoursStart,
+        quietHoursEnd: settings.quietHoursEnd,
         labourRates: {
           normal: toCents(draft.normal),
           overtime: toCents(draft.overtime),
@@ -402,7 +399,7 @@ const SystemPanel = ({
   readonly settings: SystemSettings;
   readonly counts: { customers: number; machines: number; users: number };
 }) => {
-  const { resetDemoData } = useApp();
+  const operation = useOperation();
   const [confirmReset, setConfirmReset] = useState(false);
 
   return (
@@ -523,8 +520,8 @@ const SystemPanel = ({
         }
         confirmLabel="Reset demo data"
         confirmVariant="danger"
-        onConfirm={() => {
-          resetDemoData();
+        onConfirm={async () => {
+          await operation.run(() => demo.reset());
           setConfirmReset(false);
         }}
         onCancel={() => setConfirmReset(false)}

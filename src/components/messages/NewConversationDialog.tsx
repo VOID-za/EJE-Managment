@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { userFullName, type Job, type User } from '@/domain';
-import { startConversation } from '@/application/chat-operations';
 import { Button, Modal, SelectField, TextAreaField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { conversations } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
-import { asUserId } from '@/domain';
 
 /**
  * Start a conversation.
@@ -46,15 +45,15 @@ export const NewConversationDialog = ({
     let startedId: string | null = null;
     const job = linkable.find((candidate) => candidate.id === jobId) ?? null;
 
-    const ok = await operation.run(async (context) => {
-      const result = await startConversation(context, {
+    const ok = await operation.run(async () => {
+      const result = await conversations.start({
         // Empty means "the office": the operation resolves it to every active
         // Master, so a technician never has to guess who is on duty.
-        recipientIds: recipientId === 'office' || recipientId === '' ? [] : [asUserId(recipientId)],
+        recipientIds: recipientId === 'office' || recipientId === '' ? [] : [recipientId],
         body,
-        job: job === null ? null : { id: job.id, jobNumber: job.jobNumber },
+        jobId: job === null ? null : job.id,
       });
-      startedId = result.conversation.id;
+      startedId = (result as { conversation: { id: string } }).conversation.id;
     });
 
     if (ok && startedId !== null) onStarted(startedId);

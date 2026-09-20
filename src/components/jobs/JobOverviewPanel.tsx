@@ -11,7 +11,6 @@ import {
   userFullName,
   type User,
 } from '@/domain';
-import { addAdditionalTechnician, assignPrimaryTechnician } from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
 import {
   Avatar,
@@ -27,6 +26,7 @@ import {
 } from '@/components/ui';
 import { JobCostSummary } from './JobCostSummary';
 import { RuleViolationNotice } from './RuleViolationNotice';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime, isOverdue } from '@/lib/format';
@@ -345,20 +345,10 @@ export const JobOverviewPanel = ({
                 );
                 if (technician === undefined) return;
 
-                const ok = await operation.run((context) =>
+                const ok = await operation.run(() =>
                   assignMode === 'primary'
-                    ? assignPrimaryTechnician(
-                        context,
-                        job,
-                        technician.id,
-                        userFullName(technician),
-                      )
-                    : addAdditionalTechnician(
-                        context,
-                        job,
-                        technician.id,
-                        userFullName(technician),
-                      ),
+                    ? jobs.assignPrimary(job.id, technician.id)
+                    : jobs.addTechnician(job.id, technician.id),
                 );
                 if (ok) {
                   setAssignOpen(false);

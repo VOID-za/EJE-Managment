@@ -11,11 +11,8 @@ import {
   type SignatureRefusal,
   type User,
 } from '@/domain';
-import {
-  resolveSignatureRefusal,
-  returnToCustomerSignature,
-} from '@/application/job-operations';
 import { Badge, Button, Card, ConfirmDialog, Icon, TextAreaField } from '@/components/ui';
+import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -142,8 +139,8 @@ export const SignatureRefusalPanel = ({
                     loading={operation.running}
                     leadingIcon={<Icon name="signature" className="size-5" />}
                     onClick={async () => {
-                      const ok = await operation.run((context) =>
-                        returnToCustomerSignature(context, job, note),
+                      const ok = await operation.run(() =>
+                        jobs.returnForSignature(job.id, note),
                       );
                       if (ok) onChanged();
                     }}
@@ -189,9 +186,7 @@ export const SignatureRefusalPanel = ({
         confirmLabel="Issue without a signature"
         onCancel={() => setConfirmIssue(false)}
         onConfirm={async () => {
-          const ok = await operation.run((context) =>
-            resolveSignatureRefusal(context, job, note),
-          );
+          const ok = await operation.run(() => jobs.resolveRefusal(job.id, note));
           setConfirmIssue(false);
           if (ok) onChanged();
         }}

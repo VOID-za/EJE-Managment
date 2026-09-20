@@ -65,6 +65,13 @@ export const OFFICE_ONLY_EVENT_TYPES: readonly ActivityEventType[] = [
   'password_reset_sent',
   'master_amended_after_signature',
   'job_card_corrected',
+  // Who signed in, who failed to, and whose sessions were ended. Security
+  // history is the office's, and a failed sign-in names an address.
+  'user_signed_in',
+  'user_sign_in_failed',
+  'user_locked_out',
+  'user_signed_out',
+  'user_sessions_revoked',
 ];
 
 /**

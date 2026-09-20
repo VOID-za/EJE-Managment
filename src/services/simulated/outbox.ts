@@ -3,24 +3,25 @@ import type { DeliveryState, OutboxEntry, OutboxReader } from '../ports';
 /**
  * Simulated outbox shared by the email and WhatsApp adapters.
  *
- * Nothing here leaves the browser. The Notifications screen reads this outbox
- * so a demo audience can see exactly what production *would* transmit.
+ * NOTHING HERE IS TRANSMITTED. The Notifications screen reads this outbox
+ * through `GET /api/outbox` so an audience can see exactly what production
+ * *would* send. Production replaces it entirely with provider delivery
+ * receipts.
  *
- * Entries are persisted to browser storage for the same reason the demo dataset
- * is: a demonstration must survive a page refresh. Production replaces this
- * entirely with provider delivery receipts.
+ * It lives in the SERVER process, with the rest of the composition root. It
+ * used to persist itself to browser storage, because it used to run in the
+ * browser; the entries now last as long as the process does, which is stated
+ * plainly rather than disguised — a restart loses them, the same as the issued
+ * documents, and durable delivery records belong with the real integration.
  */
-const STORAGE_KEY = 'eje.demo.outbox.v1';
 const EMPTY: readonly OutboxEntry[] = [];
 
 export class SimulatedOutbox implements OutboxReader {
   private entries: readonly OutboxEntry[] = EMPTY;
-  private loaded = false;
   private readonly listeners = new Set<() => void>();
 
   record(entry: OutboxEntry): OutboxEntry {
-    this.entries = [entry, ...this.read()];
-    this.persist();
+    this.entries = [entry, ...this.entries];
     this.listeners.forEach((listener) => listener());
     return entry;
   }
@@ -42,7 +43,6 @@ export class SimulatedOutbox implements OutboxReader {
       return updated;
     });
     if (updated === null) return null;
-    this.persist();
     this.listeners.forEach((listener) => listener());
     return updated;
   }
@@ -53,16 +53,11 @@ export class SimulatedOutbox implements OutboxReader {
 
   clear(): void {
     this.entries = EMPTY;
-    this.loaded = true;
-    this.persist();
     this.listeners.forEach((listener) => listener());
   }
 
-  /** Stable snapshot for `useSyncExternalStore`. */
+  /** A synchronous snapshot, for the tests and for server code holding it. */
   listSync = (): readonly OutboxEntry[] => this.read();
-
-  /** The server never has outbox entries. */
-  listServer = (): readonly OutboxEntry[] => EMPTY;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -72,36 +67,6 @@ export class SimulatedOutbox implements OutboxReader {
   };
 
   private read(): readonly OutboxEntry[] {
-    if (this.loaded) return this.entries;
-    this.loaded = true;
-
-    if (typeof window === 'undefined') return this.entries;
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw !== null) {
-        const parsed = JSON.parse(raw) as readonly OutboxEntry[];
-        // Entries written before delivery was tracked carry no state. They are
-        // read as pending, never as delivered: an old record is not evidence
-        // that anything arrived.
-        this.entries = parsed.map((entry) => ({
-          ...entry,
-          delivery: entry.delivery ?? 'pending_delivery',
-          failureReason: entry.failureReason ?? '',
-        }));
-      }
-    } catch {
-      // A corrupt outbox must never block the demo.
-      this.entries = EMPTY;
-    }
     return this.entries;
-  }
-
-  private persist(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.entries));
-    } catch {
-      // Storage may be full or blocked; the demo continues in memory.
-    }
   }
 }

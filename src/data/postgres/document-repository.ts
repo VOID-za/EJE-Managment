@@ -3,6 +3,7 @@ import { asDocumentId, asUserId, type DocumentId, type TechnicalDocument, type U
 import type { DocumentRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
+import { isUuid } from './identifiers';
 
 type DocumentRow = typeof schema.libraryDocuments.$inferSelect;
 type VersionRow = typeof schema.libraryDocumentVersions.$inferSelect;
@@ -48,6 +49,7 @@ export class PostgresDocumentRepository implements DocumentRepository {
   }
 
   async findById(id: DocumentId): Promise<TechnicalDocument | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select({ document: schema.libraryDocuments, version: schema.libraryDocumentVersions })
       .from(schema.libraryDocuments)

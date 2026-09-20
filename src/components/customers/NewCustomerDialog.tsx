@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { CONTACT_ROLE_SUGGESTIONS } from '@/domain';
-import { createCustomer, type NewCustomerInput } from '@/application/customer-operations';
+import type { NewCustomerInput } from '@/application/customer-operations';
 import { Button, Modal, SectionHeading, TextAreaField, TextField } from '@/components/ui';
+import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 
@@ -86,8 +87,8 @@ export const NewCustomerDialog = ({
 
   const submit = async (): Promise<void> => {
     let createdId: string | null = null;
-    const ok = await operation.run(async (context) => {
-      const result = await createCustomer(context, {
+    const ok = await operation.run(async () => {
+      const result = await customers.create({
         ...draft,
         officeAddress: officeAtSite
           ? {
@@ -100,7 +101,7 @@ export const NewCustomerDialog = ({
           : undefined,
         contact: addContact ? draft.contact : null,
       });
-      createdId = result.customer.id;
+      createdId = (result as { customer: { id: string } }).customer.id;
     });
     if (ok && createdId !== null) {
       setDraft(EMPTY);

@@ -29,13 +29,26 @@ system without a rewrite.** Everything below follows from that.
 │                   Pure TypeScript. No React, no I/O.          │
 ├──────────────────────────────────────────────────────────────┤
 │  src/data         Repository INTERFACES (async, domain types) │
-│                   + the demo adapter                          │
+│                   + the PostgreSQL and demonstration adapters │
 │  src/services     Integration PORTS + simulated adapters      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 Dependencies point downwards only. `src/domain` imports nothing from the layers
-above it, which is what makes it directly reusable server-side in Phase 2.
+above it, which is what made it directly reusable server-side.
+
+**The application now runs on the server.** `src/components` no longer holds
+repositories: it calls `src/api`, which is HTTP and JSON and nothing else, and
+`src/app/api/**` resolves the actor from the session cookie and calls the SAME
+operations. The two new layers sit between the components and the application:
+
+```
+src/api      The browser's client. Fetch, JSON, one error type. No rules.
+src/server   Authentication, the actor, validation, idempotency, the read
+             models, and the composition root. Never reachable from a client.
+```
+
+See [`security.md`](./security.md).
 
 ## 2. The rules that keep it honest
 
@@ -210,16 +223,16 @@ export interface JobRepository {
 }
 ```
 
-The demo binds these to a browser-persisted snapshot (`src/data/demo/`). Phase 2
-binds them to HTTP clients calling the Node/Drizzle REST API. Nothing above the
-data layer knows or cares which.
+These are bound on the SERVER — to PostgreSQL (`src/data/postgres/`), or to the
+demonstration snapshot (`src/data/demo/`) where that was chosen. Nothing above
+the data layer knows or cares which, and the browser never holds either.
 
 The demo dataset is held in a plain class outside React and read through
 `useSyncExternalStore`. That is the correct primitive for a store whose value
 differs between the server render and the hydrated client, and it keeps
 hydration honest without render-phase mutation.
 
-`useQuery` is a small stale-while-revalidate hook over the repositories. It
+`useQuery` is a small stale-while-revalidate hook over the API client. It
 distinguishes *loading* (nothing to show yet) from *refreshing* (a write
 invalidated the data but the previous result is still valid) — without that
 distinction, every capture on a job card would tear the screen down to a
@@ -254,9 +267,14 @@ consume. It is not a picture of a job card that has to be thrown away.
 
 ## 5. Composition root
 
-`src/providers/AppProvider.tsx` is the only module that knows which concrete
-adapters are in use. Swapping the demo adapters for production clients is a
-change there and nowhere else.
+`src/server/runtime.ts` is the only module that knows which concrete adapters
+are in use. It is a SERVER module: it chooses from the server's environment,
+once, and the browser has no vote.
+
+`src/providers/AppProvider.tsx` used to be that module. It now holds a session
+and nothing else — no repository, no service, no operation context, and no user
+id it chose for itself. Swapping a simulated integration for a production client
+is a change in `runtime.ts` and nowhere else.
 
 ## 6. What changes in Phase 2
 

@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import type { ActivityEventType } from '@/domain';
 import { canReadActivityFeed, userFullName } from '@/domain';
-import { loadActivityFeed } from '@/application/activity-read';
 import {
   Card,
   EmptyState,
@@ -14,6 +13,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 
@@ -66,8 +66,14 @@ const ActivityPage = () => {
    */
   const permitted = canReadActivityFeed(currentUser.role);
 
-  const query = useQuery(`activity:all:${currentUser.id}`, async (repos) =>
-    canReadActivityFeed(currentUser.role) ? loadActivityFeed(repos, currentUser) : null,
+  const query = useQuery(`activity:all:${currentUser.id}`, async () =>
+    canReadActivityFeed(currentUser.role) ? reads.activity() : null,
+  );
+
+  // A Map does not survive JSON, so the API sends pairs and it is rebuilt here.
+  const jobNumbers = useMemo(
+    () => new Map(query.data?.jobNumbers ?? []),
+    [query.data?.jobNumbers],
   );
 
   const events = useMemo(() => {
@@ -146,7 +152,7 @@ const ActivityPage = () => {
           <ActivityFeed
             events={events}
             users={query.data?.users ?? []}
-            jobNumbers={query.data?.jobNumbers}
+            jobNumbers={jobNumbers}
             emptyMessage="No activity matches the current filters."
           />
         </Card>

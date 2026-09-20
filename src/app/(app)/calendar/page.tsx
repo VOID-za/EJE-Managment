@@ -8,7 +8,7 @@ import {
   type IsoDate,
   type JobTypeCode,
 } from '@/domain';
-import { entriesOn, findConflicts, loadCalendar, type CalendarEntry } from '@/application/calendar';
+import { entriesOn, findConflicts, type CalendarEntry } from '@/application/calendar';
 import {
   Badge,
   Button,
@@ -37,6 +37,7 @@ import {
   viewRange,
   type CalendarView,
 } from '@/components/calendar/calendar-grid';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { cn } from '@/lib/cn';
 
@@ -80,8 +81,8 @@ const CalendarPage = () => {
 
   const range = viewRange(view, anchor);
 
-  const query = useQuery(`calendar:${range.from}:${range.to}`, (repos) =>
-    loadCalendar(repos, range),
+  const query = useQuery(`calendar:${range.from}:${range.to}`, () =>
+    reads.calendar(range.from, range.to),
   );
 
   const entries = useMemo(() => {

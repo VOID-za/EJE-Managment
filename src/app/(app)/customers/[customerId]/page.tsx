@@ -1,8 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
-import { asCustomerId, userFullName } from '@/domain';
-import { loadJobRows } from '@/application/job-view';
+import { userFullName } from '@/domain';
 import {
   Badge,
   Card,
@@ -18,6 +17,7 @@ import { JobListTable } from '@/components/jobs/JobListTable';
 import { CustomerMachinesTab } from '@/components/customers/CustomerMachinesTab';
 import { CustomerOverviewTab } from '@/components/customers/CustomerOverviewTab';
 import { CustomerSitesTab } from '@/components/customers/CustomerSitesTab';
+import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { formatRelative } from '@/lib/format';
 
@@ -40,28 +40,7 @@ const CustomerDetailPage = ({
   const { customerId } = use(params);
   const [tab, setTab] = useState<TabId>('overview');
 
-  const query = useQuery(`customer:${customerId}`, async (repos) => {
-    const id = asCustomerId(customerId);
-    const customer = await repos.customers.findById(id);
-    if (customer === null) return null;
-
-    const [sites, contacts, machines, jobs, users] = await Promise.all([
-      repos.customers.listSites(id),
-      repos.customers.listContacts(id),
-      repos.machines.list(),
-      repos.jobs.list({ customerId: id }),
-      repos.users.list(),
-    ]);
-
-    return {
-      customer,
-      sites,
-      contacts,
-      machines: machines.filter((machine) => machine.customerId === id),
-      jobRows: await loadJobRows(repos, jobs),
-      users,
-    };
-  });
+  const query = useQuery(`customer:${customerId}`, () => reads.customer(customerId));
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
