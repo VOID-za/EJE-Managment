@@ -138,6 +138,32 @@ describe('migrating a persisted snapshot', () => {
     expect(migrated.machines[0]!.archivedAt).toBe('yesterday');
   });
 
+  it('says nothing is known about an old job’s signature refusal', () => {
+    const migrated = migrateDatabase(8, v8Snapshot(), SCHEMA_VERSION)!;
+    // Null, not false and not invented: no snapshot before v10 recorded a
+    // refusal, so every job in one either was signed or never got that far.
+    expect(migrated.jobs[0]!.signatureRefusal).toBeNull();
+  });
+
+  it('keeps a refusal a v10 snapshot already carried', () => {
+    const snapshot = v8Snapshot();
+    const refusal = {
+      refused: true,
+      reason: 'Customer representative was not available to sign.',
+      recordedBy: 'user-tech-1',
+      recordedAt: '2024-02-01T10:00:00.000Z',
+      acknowledgedBy: null,
+      acknowledgedAt: null,
+      acknowledgementNote: '',
+    };
+    const withRefusal = {
+      ...snapshot,
+      jobs: [{ ...snapshot.jobs[0]!, signatureRefusal: refusal }],
+    };
+    const migrated = migrateDatabase(8, withRefusal, SCHEMA_VERSION)!;
+    expect(migrated.jobs[0]!.signatureRefusal).toEqual(refusal);
+  });
+
   it('is a no-op path for a snapshot that is already current', () => {
     const migrated = migrateDatabase(SCHEMA_VERSION, v8Snapshot(), SCHEMA_VERSION);
     expect(migrated).not.toBeNull();

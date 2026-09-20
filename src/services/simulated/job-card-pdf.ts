@@ -538,7 +538,51 @@ const photographs = (sheet: Sheet, model: JobCardModel): void => {
   sheet.move(GAP.section);
 };
 
+/**
+ * The customer's refusal, in place of the signature block.
+ *
+ * Deliberately NOT a bordered box with the declaration printed beside it: there
+ * is no acceptance here and the document must not look as though there nearly
+ * was one. It states what happened, why, who took it and when, and draws no
+ * signature mark of any kind.
+ */
+const refusal = (sheet: Sheet, model: JobCardModel): void => {
+  const block = model.refusal;
+  if (block === null) return;
+
+  sheet.need(110);
+  sheet.move(GAP.sectionLarge);
+  sheet.rule(INK, 1.4);
+  sheet.move(GAP.section);
+  sheet.sectionTitle('Customer acceptance');
+
+  sheet.paragraph(block.heading.toUpperCase(), {
+    font: 'bold',
+    size: SIZE.total,
+    colour: INK,
+  });
+  sheet.move(4);
+
+  sheet.paragraph('Reason', {
+    font: 'bold',
+    size: SIZE.small,
+    colour: MUTED,
+    leading: GAP.line,
+  });
+  sheet.paragraph(block.reason, { colour: BODY });
+  sheet.move(5);
+
+  labelValueRows(sheet, block.rows, MARGIN, CONTENT_WIDTH);
+  sheet.move(GAP.section);
+};
+
 const acceptance = (sheet: Sheet, model: JobCardModel): void => {
+  // A refused job card has no acceptance block at all — see `refusal`.
+  if (model.refusal !== null) {
+    refusal(sheet, model);
+    return;
+  }
+
   const columnWidth = (CONTENT_WIDTH - 24) / 2;
   const rightX = MARGIN + columnWidth + 24;
   const boxHeight = 62;

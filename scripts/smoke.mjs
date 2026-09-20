@@ -427,12 +427,324 @@ await step('confirming the delivery is what closes the job', async () => {
   await page.screenshot({ path: `${shots}/05-closed-on-delivery.png`, fullPage: false });
 });
 
+/*
+ * The customer who would not sign.
+ *
+ * EJE-1059 is taken through the same close-out as EJE-1048 was, except that at
+ * the signature step the technician records a refusal instead. The point of
+ * running it in a browser is the half of the rule that is not in the domain
+ * tests: that the two outcomes are one choice on one screen, that the signature
+ * capture actually disappears, and that Continue cannot be pressed on an empty
+ * reason.
+ */
+const REFUSAL_REASON = 'Site manager left before the work was finished and nobody else would sign.';
+
+await step('a second job is taken to the signature step (EJE-1059)', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1059' }).waitFor({ timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  // Whatever the site-location prompt offers, decline it: this journey is
+  // about the signature, not the location.
+  const decline = page.getByRole('button', { name: 'No, Thanks' });
+  if ((await decline.count()) > 0) await decline.click({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await page.getByLabel('Description of work').fill('Tested and repaired the spindle drive');
+  await page.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByText('Tested and repaired the spindle drive').waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  await page.getByLabel(/Work performed/).fill(
+    'Bench tested the spindle drive, replaced the encoder coupling and re-ran the axis.',
+  );
+  await page.getByRole('button', { name: 'Save write-up' }).click();
+  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 15000 });
+});
+
+await step('the signature step opens on the signature, not on the refusal', async () => {
+  await page.getByRole('heading', { name: 'Customer acceptance' }).waitFor({ timeout: 8000 });
+  await page
+    .getByText('I confirm that the work described above has been completed.')
+    .waitFor({ timeout: 8000 });
+  await page.getByLabel('Customer name').waitFor({ timeout: 8000 });
+  if ((await page.locator('div.touch-none').count()) === 0) {
+    throw new Error('the signature pad is not on the signature step');
+  }
+  // The refusal is offered, and is NOT the default.
+  const toggle = page.getByRole('checkbox', { name: /Customer refused to sign/ });
+  await toggle.waitFor({ timeout: 8000 });
+  if (await toggle.isChecked()) throw new Error('the step opened already refusing');
+  if ((await page.getByLabel(/Customer refusal reason/).count()) !== 0) {
+    throw new Error('the refusal reason is shown before the refusal is chosen');
+  }
+});
+
+await step('choosing the refusal removes the signature capture entirely', async () => {
+  await page.getByRole('checkbox', { name: /Customer refused to sign/ }).check();
+  await page.getByLabel(/Customer refusal reason/).waitFor({ timeout: 8000 });
+
+  if ((await page.locator('div.touch-none').count()) !== 0) {
+    throw new Error('the signature pad is still on screen after the customer refused');
+  }
+  if ((await page.getByLabel('Customer name').count()) !== 0) {
+    throw new Error('the signature name fields are still on screen after the customer refused');
+  }
+  if (
+    (await page
+      .getByText('I confirm that the work described above has been completed.')
+      .count()) !== 0
+  ) {
+    throw new Error('the acceptance declaration is still shown beside a refusal');
+  }
+  await page.screenshot({ path: `${shots}/19-refusal.png`, fullPage: false });
+});
+
+await step('an empty or token reason will not submit', async () => {
+  const submit = page.getByRole('button', { name: 'Record refusal' });
+  await submit.waitFor({ timeout: 8000 });
+  if (!(await submit.isDisabled())) throw new Error('an empty refusal could be submitted');
+
+  await page.getByLabel(/Customer refusal reason/).fill('no');
+  if (!(await submit.isDisabled())) throw new Error('a token reason could be submitted');
+});
+
+await step('Back keeps the refusal and its reason', async () => {
+  await page.getByLabel(/Customer refusal reason/).fill(REFUSAL_REASON);
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 10000 });
+
+  const toggle = page.getByRole('checkbox', { name: /Customer refused to sign/ });
+  if (!(await toggle.isChecked())) throw new Error('going back lost the refusal');
+  const value = await page.getByLabel(/Customer refusal reason/).inputValue();
+  if (value !== REFUSAL_REASON) throw new Error('going back lost the reason');
+});
+
+await step('switching back to the signature clears the refusal', async () => {
+  await page.getByRole('checkbox', { name: /Customer refused to sign/ }).uncheck();
+  await page.getByLabel('Customer name').waitFor({ timeout: 8000 });
+  if ((await page.locator('div.touch-none').count()) === 0) {
+    throw new Error('the signature pad did not come back');
+  }
+  if ((await page.getByLabel(/Customer refusal reason/).count()) !== 0) {
+    throw new Error('the refusal reason is still on screen after switching back');
+  }
+
+  // And choosing the refusal again starts from a blank reason, so a discarded
+  // one cannot be submitted by accident.
+  await page.getByRole('checkbox', { name: /Customer refused to sign/ }).check();
+  const value = await page.getByLabel(/Customer refusal reason/).inputValue();
+  if (value.length !== 0) throw new Error('the discarded reason came back');
+});
+
+await step('recording the refusal finishes the close-out', async () => {
+  await page.getByLabel(/Customer refusal reason/).fill(REFUSAL_REASON);
+  await page.getByRole('button', { name: 'Record refusal' }).click();
+  await page.waitForURL('**/review', { timeout: 15000 });
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
+});
+
+await step('the job card is held until a Master has reviewed the refusal', async () => {
+  await page.getByText('Waiting on a Master').waitFor({ timeout: 10000 });
+  if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
+    throw new Error('an unreviewed refusal could still be issued');
+  }
+
+  // And the job screen does not promise a submission it cannot deliver.
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page
+    .getByRole('button', { name: 'Refusal — waiting on a Master' })
+    .waitFor({ timeout: 10000 });
+  if ((await page.getByRole('button', { name: /Review & submit/ }).count()) !== 0) {
+    throw new Error('the job still offered to submit an unreviewed refusal');
+  }
+});
+
+await step('the refusal shows on the job as an exception, not a seventh stage', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
+  await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
+
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
+  );
+  if (names.length !== 6) throw new Error(`the rail has ${names.length} stages: ${names.join(' | ')}`);
+  if (names.some((name) => /master review/i.test(name))) {
+    throw new Error('Master Review came back on the rail');
+  }
+  // The exception is a flag ON the signature stage.
+  if (!names.some((name) => /Customer Signature — Customer refused to sign/i.test(name))) {
+    throw new Error(`the refusal is not marked on the signature stage: ${names.join(' | ')}`);
+  }
+  await page.screenshot({ path: `${shots}/20-refusal-rail.png`, fullPage: false });
+});
+
+await step('the refusal is on the job activity trail', async () => {
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
+  await page.getByText(`Reason: ${REFUSAL_REASON}`, { exact: false }).first().waitFor({
+    timeout: 8000,
+  });
+});
+
+await step('a technician cannot review their own refusal', async () => {
+  if ((await page.getByRole('button', { name: 'Record my review' }).count()) !== 0) {
+    throw new Error('a technician was offered the Master review');
+  }
+});
+
 await step('sign in as a Master for the office journey', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await signOut();
   await page.getByRole('tab', { name: 'Master' }).click();
   await page.getByRole('button', { name: /Elmarie Coetzee/ }).click();
   await page.waitForURL('**/dashboard', { timeout: 10000 });
+});
+
+await step('the Master is notified that the customer refused to sign', async () => {
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  const card = page
+    .locator('main li')
+    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .first();
+  await card.waitFor({ timeout: 10000 });
+
+  const body = await card.innerText();
+  for (const expected of [
+    'EJE-1059',
+    'Customer:',
+    'Site:',
+    'Machine:',
+    'Technician: Sipho Mahlangu',
+    REFUSAL_REASON,
+  ]) {
+    if (!body.includes(expected)) throw new Error(`the notification omits "${expected}"`);
+  }
+  await page.screenshot({ path: `${shots}/21-refusal-notification.png`, fullPage: false });
+});
+
+await step('the notification opens the job it is about', async () => {
+  await page
+    .locator('main li')
+    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .first()
+    .getByRole('button', { name: /Open/ })
+    .first()
+    .click();
+  await page.waitForURL('**/jobs/EJE-1059', { timeout: 10000 });
+});
+
+await step('the Master sees the refusal, the reason, who took it and when', async () => {
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
+  await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
+  const panel = await page.locator('main').innerText();
+  if (!/Recorded by Sipho Mahlangu/.test(panel)) {
+    throw new Error('the refusal does not say who recorded it');
+  }
+  if (!/Awaiting a Master/.test(panel)) {
+    throw new Error('the refusal is not shown as outstanding');
+  }
+});
+
+await step('the Master still sees the whole job behind the exception', async () => {
+  // The exception does not replace the record: the write-up, the captured work
+  // and the history are all still there to judge the refusal against.
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  await page.getByText('Bench tested the spindle drive', { exact: false }).first().waitFor({
+    timeout: 8000,
+  });
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByText('Tested and repaired the spindle drive').first().waitFor({ timeout: 8000 });
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
+});
+
+await step('the Master records their review, and it is audited', async () => {
+  await page.getByLabel('What was decided').fill('Spoke to the customer, who confirmed the work.');
+  await page.getByRole('button', { name: 'Record my review' }).click();
+  await page.getByText('Reviewed').first().waitFor({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByText('Refusal to sign reviewed by a Master').first().waitFor({ timeout: 8000 });
+  await page
+    .getByText('Spoke to the customer, who confirmed the work.', { exact: false })
+    .first()
+    .waitFor({ timeout: 8000 });
+});
+
+await step('the reviewed refusal is no longer outstanding in the inbox', async () => {
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  const outstanding = await page
+    .locator('main li')
+    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .count();
+  if (outstanding !== 0) {
+    throw new Error('the refusal is still in the inbox after it was reviewed');
+  }
+
+  await page.getByRole('tab', { name: /Handled/ }).click();
+  await page
+    .locator('main li')
+    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .first()
+    .waitFor({ timeout: 10000 });
+});
+
+await step('the reviewed job card can now be issued', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
+  await page.getByText('Ready to submit').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Submit job card' }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Submit job card' }).last().click();
+  await page.getByText('EJE-1059-Final-Job-Card.pdf').first().waitFor({ timeout: 20000 });
+});
+
+await step('the refused job card carries no signature, and says why', async () => {
+  const card = await page.locator('main').innerText();
+  if (!/CUSTOMER REFUSED TO SIGN|Customer refused to sign/i.test(card)) {
+    throw new Error('the issued job card does not say the customer refused');
+  }
+  if (card.includes('I confirm that the work described above has been completed.')) {
+    throw new Error('the refused job card carries the acceptance declaration');
+  }
+  await page.screenshot({ path: `${shots}/22-refusal-job-card.png`, fullPage: false });
+});
+
+await step('confirming delivery closes the refused job too', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  const entry = page.locator('main li').filter({ hasText: 'EJE-1059' }).first();
+  await entry.waitFor({ timeout: 10000 });
+  await entry.getByRole('button', { name: 'Confirm delivered' }).first().click();
+
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.getByText('Read-only — this job is closed', { exact: false }).first().waitFor({
+    timeout: 15000,
+  });
+  // And the refusal is still exactly what was recorded on site.
+  await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
+});
+
+await step('no Master Review appeared anywhere along the refusal route', async () => {
+  for (const path of ['/jobs', '/jobs/EJE-1059', '/jobs/EJE-1059/review', '/notifications']) {
+    await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
+    const body = await page.locator('main').innerText();
+    if (/master review/i.test(body)) throw new Error(`Master Review is on ${path}`);
+  }
 });
 
 await step('closed job is read-only', async () => {

@@ -26,6 +26,10 @@ export type ActivityEventType =
   /** The write-up the customer signs for: fault findings, work performed. */
   | 'completion_report_saved'
   | 'customer_signed'
+  /** The customer would not sign, and why. The other outcome of that stage. */
+  | 'customer_refused_to_sign'
+  /** A Master reviewed the refusal, which is what releases the job card. */
+  | 'signature_refusal_reviewed'
   | 'pdf_generated'
   | 'job_submitted'
   /**

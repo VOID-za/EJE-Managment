@@ -7,6 +7,11 @@ export type NotificationType =
   | 'machine_approval_request'
   | 'document_approval_request'
   | 'job_submitted'
+  /**
+   * The customer refused to sign a job card. Raised to every active Master,
+   * because issuing the job card waits on one of them reviewing it.
+   */
+  | 'signature_refused'
   /** A chat message from another user. Links to the conversation, not a job. */
   | 'chat_message';
 

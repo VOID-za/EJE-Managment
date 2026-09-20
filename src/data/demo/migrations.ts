@@ -90,8 +90,22 @@ const v8ToV9 = (data: Loose): Loose => {
   };
 };
 
+/**
+ * v9 -> v10.
+ *
+ * Adds the customer's refusal to sign. Null is the only honest value for a job
+ * persisted before the field existed: nothing in the old snapshot records a
+ * refusal, so every one of those jobs either was signed or never reached the
+ * signature stage. Nothing is inferred and nothing is discarded.
+ */
+const v9ToV10 = (data: Loose): Loose => ({
+  ...data,
+  jobs: rows(data, 'jobs').map((job) => ({ signatureRefusal: null, ...job })),
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
+  9: v9ToV10,
 };
 
 /**

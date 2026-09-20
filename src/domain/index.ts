@@ -7,6 +7,7 @@ export * from './job/job-types';
 export * from './job/scheduling';
 export * from './job/parts-document';
 export * from './job/signatory';
+export * from './job/signature-refusal';
 export * from './availability/conflicts';
 export * from './machine/register';
 export * from './user/management';

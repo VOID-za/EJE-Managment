@@ -8,6 +8,7 @@ import {
   canDeleteJob,
   canTransferJob,
   checkReadyForSignature,
+  refusalAwaitingReview,
 } from '@/domain';
 import {
   moveToAwaitingSpares,
@@ -145,14 +146,22 @@ export const JobActionBar = ({
   }
 
   if (job.status === 'review') {
+    /*
+     * A refusal the office has not reviewed changes what this button honestly
+     * offers. The job card cannot be submitted yet — the review screen says so
+     * and withholds the action — so the button says so too rather than
+     * promising a submission it will not deliver.
+     */
+    const awaitingMaster = refusalAwaitingReview(job);
     actions.push(
       <Button
         key="review"
         size="lg"
+        variant={awaitingMaster ? 'secondary' : 'primary'}
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
-        leadingIcon={<Icon name="document" className="size-5" />}
+        leadingIcon={<Icon name={awaitingMaster ? 'warning' : 'document'} className="size-5" />}
       >
-        Review &amp; submit job card
+        {awaitingMaster ? 'Refusal — waiting on a Master' : 'Review & submit job card'}
       </Button>,
     );
   }

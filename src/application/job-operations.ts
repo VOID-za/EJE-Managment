@@ -6,8 +6,10 @@ import {
   deliveryStateLabel,
   emptyDelivery,
   checkReadyForSignature,
+  checkRefusalReason,
   checkSchedule,
   checkReadyForSubmission,
+  checkSignatureOutcome,
   emptyChecklistResponse,
   cancelJobRefusal,
   cancellationReasonLabel,
@@ -41,6 +43,7 @@ import {
   type Site,
   type PassFailNa,
   type PricingSnapshot,
+  type SignatureRefusal,
   type TransferReason,
   type User,
   type DeliveryRecord,
@@ -49,7 +52,7 @@ import {
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
-import { audit, notify } from './audit';
+import { audit, notify, notifyMasters } from './audit';
 import { storeFinalDocument } from './final-document';
 import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
@@ -1024,6 +1027,23 @@ export const captureSignature = async (
   input: SignatureInput,
 ): Promise<Job> => {
   assertCanCapture(context, job);
+
+  /*
+   * A refused job card cannot be signed.
+   *
+   * Checked HERE and not only on the screen that offers the choice. A refusal
+   * is the customer's answer; quietly overwriting it with a signature would
+   * turn "they would not sign" into "they signed", which is the one thing a
+   * signed job card must never be able to say.
+   */
+  const outcome = checkSignatureOutcome(job, 'signed');
+  if (!outcome.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} cannot take a customer signature.`,
+      outcome.violations,
+    );
+  }
+
   const readiness = checkReadyForSignature(job);
   if (!readiness.allowed) {
     throw new WorkflowError(
@@ -1073,6 +1093,226 @@ export const captureSignature = async (
     detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.`,
   });
   return saved;
+};
+
+export interface RefusalInput {
+  readonly reason: string;
+}
+
+/**
+ * The customer would not sign.
+ *
+ * The other outcome of the signature stage, and it goes through the same gate:
+ * the work must be finished, written up and — where the job type requires one —
+ * checklisted, exactly as it must be before anybody signs. What differs is what
+ * is recorded and what happens next.
+ *
+ *   1. The refusal is written onto the job as a record, not a flag: the reason,
+ *      who took it and when.
+ *   2. The rates freeze, as they do at a signature. The work happened and the
+ *      figure is the figure; a later rate change must not reach this job.
+ *   3. The job moves to `review`, the same stage a signed job reaches. It does
+ *      NOT get a stage of its own — the exception is attached to the job and
+ *      shown against Customer Signature.
+ *   4. Every active Master is notified, because issuing the job card now waits
+ *      on one of them reviewing the refusal.
+ *
+ * The technician is finished at this point. They never repeat the close-out and
+ * are never asked for a second signature.
+ */
+export const recordSignatureRefusal = async (
+  context: OperationContext,
+  job: Job,
+  input: RefusalInput,
+): Promise<Job> => {
+  assertCanCapture(context, job);
+
+  // A signed job card cannot then be refused: that would discard a signature
+  // the customer actually gave.
+  const outcome = checkSignatureOutcome(job, 'refused');
+  if (!outcome.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} cannot record a refusal to sign.`,
+      outcome.violations,
+    );
+  }
+
+  const readiness = checkReadyForSignature(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} is not ready for customer signature.`,
+      readiness.violations,
+    );
+  }
+
+  // Validated in the operation, not merely in the wizard. A refusal without a
+  // reason is a dead end for whoever has to deal with it afterwards.
+  const reasonCheck = checkRefusalReason(input.reason);
+  if (!reasonCheck.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} needs a reason for the customer's refusal.`,
+      reasonCheck.violations,
+    );
+  }
+
+  if (job.status !== 'customer_signature') {
+    transition(job, 'customer_signature');
+  }
+
+  const now = context.services.clock.now();
+  const settings = await context.repos.settings.get();
+  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
+    ...pricingInputsFrom(settings),
+    capturedAt: now,
+    reason: 'signature_refused',
+  };
+
+  const refusal: SignatureRefusal = {
+    refused: true,
+    reason: input.reason.trim(),
+    recordedBy: context.actor.id,
+    recordedAt: now,
+    acknowledgedBy: null,
+    acknowledgedAt: null,
+    acknowledgementNote: '',
+  };
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'review',
+    completedAt: job.completedAt ?? now,
+    pricingSnapshot: snapshot,
+    signature: null,
+    signatureRefusal: refusal,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'customer_refused_to_sign',
+    summary: 'Customer refused to sign',
+    detail: `Customer refused to sign. Reason: ${refusal.reason} Recorded by ${userFullName(context.actor)}.`,
+  });
+
+  /*
+   * Raised to the Masters, as a system notification.
+   *
+   * Deliberately NOT a chat message: this is not one person telling another
+   * something, it is the system reporting an exception that the office owns and
+   * has to clear before the job card can be issued.
+   */
+  const view = await loadJobView(context.repos, job.jobNumber);
+  const technician =
+    job.primaryTechnicianId === null
+      ? context.actor
+      : ((await context.repos.users.list()).find(
+          (user) => user.id === job.primaryTechnicianId,
+        ) ?? context.actor);
+
+  const lines = [
+    `Job: ${job.jobNumber}`,
+    `Customer: ${view?.customer.name ?? 'Unknown customer'}`,
+    `Site: ${view?.site.name ?? 'Unknown site'}`,
+    ...(view?.machine == null
+      ? []
+      : [`Machine: ${view.machine.manufacturer} ${view.machine.model}`]),
+    `Technician: ${userFullName(technician)}`,
+    `Reason: ${refusal.reason}`,
+  ];
+
+  await notifyMasters(context, {
+    type: 'signature_refused',
+    title: `${job.jobNumber} — customer refused to sign`,
+    body: lines.join('\n'),
+    jobId: job.id,
+    link: `/jobs/${job.jobNumber}`,
+  });
+
+  return saved;
+};
+
+/**
+ * A Master reviews the refusal, which releases the job card.
+ *
+ * The minimum the exception needs to stop being an open question: somebody in
+ * the office looked at it, is recorded as having looked at it, and said so. It
+ * is not an approval workflow and it does not change the job — the refusal
+ * itself stands on the record unaltered.
+ *
+ * Handling the job also files the Masters' notifications about it, so a refusal
+ * that has been dealt with cannot sit in the inbox as though it had not.
+ */
+export const acknowledgeSignatureRefusal = async (
+  context: OperationContext,
+  job: Job,
+  note: string,
+): Promise<Job> => {
+  if (!can(context.actor.role, 'jobs.reviewSignatureRefusal')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be reviewed by you.`, [
+      {
+        code: 'not_permitted',
+        message: 'Only a Master can review a customer’s refusal to sign.',
+      },
+    ]);
+  }
+  if (job.signatureRefusal === null) {
+    throw new WorkflowError(`${job.jobNumber} has no refusal to review.`, [
+      { code: 'no_refusal', message: 'The customer did not refuse to sign this job card.' },
+    ]);
+  }
+  if (job.signatureRefusal.acknowledgedAt !== null) {
+    throw new WorkflowError(`${job.jobNumber} has already been reviewed.`, [
+      {
+        code: 'already_reviewed',
+        message: 'This refusal has already been reviewed by a Master.',
+      },
+    ]);
+  }
+
+  const now = context.services.clock.now();
+  const saved = await context.repos.jobs.save({
+    ...job,
+    signatureRefusal: {
+      ...job.signatureRefusal,
+      acknowledgedBy: context.actor.id,
+      acknowledgedAt: now,
+      acknowledgementNote: note.trim(),
+    },
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'signature_refusal_reviewed',
+    summary: 'Refusal to sign reviewed by a Master',
+    detail:
+      `Reviewed by ${userFullName(context.actor)}. The customer refused to sign: ${job.signatureRefusal.reason}` +
+      (note.trim().length === 0 ? '' : ` Master's note: ${note.trim()}`),
+  });
+
+  await fileRefusalNotifications(context, job);
+  return saved;
+};
+
+/**
+ * Marks every Master's refusal notification for this job as handled.
+ *
+ * Without this the notification outlives the thing it was about: the Master
+ * clears the exception on the job and the inbox still shows it as outstanding.
+ */
+const fileRefusalNotifications = async (
+  context: OperationContext,
+  job: Job,
+): Promise<void> => {
+  const users = await context.repos.users.list();
+  for (const user of users) {
+    if (user.role !== 'master') continue;
+    const notifications = await context.repos.notifications.list(user.id);
+    for (const notification of notifications) {
+      if (notification.type !== 'signature_refused') continue;
+      if (notification.jobId !== job.id) continue;
+      if (notification.handledAt !== null) continue;
+      await context.repos.notifications.markHandled(notification.id);
+    }
+  }
 };
 
 /** Moves a job from Completion into the signature step. */

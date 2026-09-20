@@ -272,7 +272,26 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
 
       <section className="mt-8 border-t-2 border-steel-900 pt-5">
         <SectionTitle>Customer acceptance</SectionTitle>
-        {model.acceptance === null ? (
+        {/* A refusal replaces the acceptance outright. No signature box is
+            drawn, because there is no signature and an empty box beside a
+            declaration reads as an omission rather than as the answer the
+            customer gave. */}
+        {model.refusal !== null ? (
+          <div>
+            <p className="text-sm font-bold tracking-wide text-steel-900 uppercase">
+              {model.refusal.heading}
+            </p>
+            <p className="mt-2 text-[11px] font-bold tracking-[0.12em] text-steel-500 uppercase">
+              Reason
+            </p>
+            <p className="mt-0.5 whitespace-pre-wrap text-steel-800">{model.refusal.reason}</p>
+            <dl className="mt-2 space-y-0.5 text-steel-600">
+              {model.refusal.rows.map((row) => (
+                <Row key={row.label} {...row} />
+              ))}
+            </dl>
+          </div>
+        ) : model.acceptance === null ? (
           <p className="text-steel-500 italic">Not yet signed.</p>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">

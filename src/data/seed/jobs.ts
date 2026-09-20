@@ -126,6 +126,7 @@ const baseJob = (jobNumber: string): Job => ({
   completionReport: emptyCompletionReport(),
   checklist: null,
   signature: null,
+  signatureRefusal: null,
   awaitingSparesReason: '',
   calloutApplied: false,
   courierCollection: false,

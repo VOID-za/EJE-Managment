@@ -9,6 +9,7 @@ import {
   labourRateLabel,
   machineDisplayName,
   priorityLabel,
+  signatoryLabelsFor,
   userFullName,
   type ChecklistItem,
   type ChecklistResponse,
@@ -118,6 +119,21 @@ export interface JobCardModel {
     /** Raw stored signature data; `signatureFacsimile` decides how to draw it. */
     readonly signatureData: string;
     readonly caption: string;
+  } | null;
+
+  /**
+   * Printed in place of the acceptance when the customer refused to sign.
+   *
+   * Mutually exclusive with `acceptance`, and the reason this is a block of its
+   * own rather than a variation of that one: a refused job card must carry NO
+   * signature box and no signature mark of any kind. There is nothing to draw,
+   * and a box left empty beside a declaration reads as an oversight rather than
+   * as the customer's answer.
+   */
+  readonly refusal: {
+    readonly heading: string;
+    readonly reason: string;
+    readonly rows: readonly LabelValue[];
   } | null;
 
   readonly footerLines: readonly string[];
@@ -371,11 +387,35 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
             caption: job.jobType === 'parts' ? 'Collector signature' : 'Customer signature',
           },
 
+    // The customer's refusal, frozen onto the document exactly as a signature
+    // would be. Drawn from the job's own stored record, so the issued PDF says
+    // what was true when it was issued.
+    refusal:
+      job.signatureRefusal === null
+        ? null
+        : {
+            heading: signatoryLabelsFor(job.jobType).refusedLabel,
+            reason: job.signatureRefusal.reason,
+            rows: [
+              {
+                label: 'Recorded by',
+                value: authorName(job.signatureRefusal.recordedBy),
+              },
+              { label: 'Date', value: formatDateTime(job.signatureRefusal.recordedAt) },
+            ],
+          },
+
     footerLines: [
       `${settings.companyName} · ${job.jobNumber} · Generated ${formatDateTime(input.generatedAt)} · Demonstration document, fictional data`,
+      // Says WHY the rates were frozen when they were. A refused job card must
+      // not claim the customer signed — the rest of the document exists to say
+      // they did not.
       ...(job.pricingSnapshot !== null
         ? [
-            `Priced at the rates in force on ${formatDateTime(job.pricingSnapshot.capturedAt)}, when the customer signed.`,
+            `Priced at the rates in force on ${formatDateTime(job.pricingSnapshot.capturedAt)}, ` +
+              (job.signatureRefusal === null
+                ? 'when the customer signed.'
+                : 'when the work was completed.'),
           ]
         : []),
     ],

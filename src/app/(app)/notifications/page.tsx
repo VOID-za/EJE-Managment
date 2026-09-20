@@ -31,6 +31,7 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   machine_approval_request: 'machines',
   document_approval_request: 'library',
   job_submitted: 'document',
+  signature_refused: 'warning',
   chat_message: 'note',
 };
 
@@ -41,6 +42,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   machine_approval_request: 'Machine approval request',
   document_approval_request: 'Document approval request',
   job_submitted: 'Job submitted',
+  signature_refused: 'Customer refused to sign',
   chat_message: 'New message',
 };
 
@@ -54,6 +56,10 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
   'customer_change_request',
   'machine_approval_request',
   'document_approval_request',
+  // A refusal is filed automatically once a Master reviews it on the job. It is
+  // actionable here too, so a Master who deals with it another way — a phone
+  // call to the customer — can still say so rather than leaving it open.
+  'signature_refused',
 ];
 
 type TabId = 'inbox' | 'handled' | 'outbox';

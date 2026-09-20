@@ -8,6 +8,7 @@ import {
   deliveryMessage,
   deliveryStateLabel,
   isDelivered,
+  refusalAwaitingReview,
   type DeliveryRecord,
 } from '@/domain';
 import {
@@ -35,6 +36,7 @@ import { downloadBytes } from '@/lib/download';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
 import { PartsCollectionNote } from '@/components/jobs/PartsCollectionNote';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
@@ -160,8 +162,20 @@ const ReviewJobPage = ({
    * it. `submitted` is only reachable by jobs that entered Master Review before
    * this changed, and a Master can still move those on.
    */
+  /*
+   * A refusal the office has not looked at holds the job card here.
+   *
+   * Not a permission problem and not a missing signature — the work is done and
+   * the document is ready. It waits on a Master reading why the customer would
+   * not sign. `checkReadyForSubmission` refuses it either way; this is what
+   * stops the button offering something that would be refused.
+   */
+  const refusalPending = refusalAwaitingReview(job);
+
   const canIssue =
-    can(currentUser.role, 'jobs.submit') && (job.status === 'review' || (inMasterReview && isMaster));
+    can(currentUser.role, 'jobs.submit') &&
+    !refusalPending &&
+    (job.status === 'review' || (inMasterReview && isMaster));
 
   return (
     <>
@@ -201,6 +215,8 @@ const ReviewJobPage = ({
           </Button>
         }
       />
+
+      <SignatureRefusalPanel job={job} users={view.users} onChanged={() => viewQuery.refetch()} />
 
       {/*
         The result, reported from what the provider said.
@@ -299,14 +315,21 @@ const ReviewJobPage = ({
       )}
 
       {job.status === 'review' && submitted === null && (
-        <Card className="mb-5 border-eje-200 bg-eje-50/50">
+        <Card
+          className={cn(
+            'mb-5',
+            refusalPending ? 'border-amber-eje-200 bg-amber-eje-50' : 'border-eje-200 bg-eje-50/50',
+          )}
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title="Ready to submit"
+              title={refusalPending ? 'Waiting on a Master' : 'Ready to submit'}
               description={
-                customerEmail.length === 0
-                  ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
-                  : `Submitting generates the signed job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
+                refusalPending
+                  ? `The customer refused to sign ${job.jobNumber}. A Master reviews the refusal above, and the job card is then issued from here — nothing has to be signed again.`
+                  : customerEmail.length === 0
+                    ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
+                    : `Submitting generates the ${job.signatureRefusal === null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
               }
             />
             {canIssue && (

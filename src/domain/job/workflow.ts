@@ -400,14 +400,46 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
   return violations.length === 0 ? ok : blocked(violations);
 };
 
-/** Requirements before a signed job may be submitted and closed. */
+/**
+ * Requirements before a job may be submitted and closed.
+ *
+ * The signature stage has two legitimate outcomes, and this is where the
+ * difference between them shows:
+ *
+ * - The customer SIGNED. The technician issues the job card themselves, as
+ *   they always have.
+ * - The customer REFUSED. The job is not stuck and it is not finished: the
+ *   work and the write-up are done, but the office has not yet seen why the
+ *   customer would not put their name to it. So it waits — at Review, with an
+ *   exception on the job rather than a stage of its own — until a Master has
+ *   reviewed the refusal. Once reviewed it issues exactly as a signed job
+ *   does: one document, generated once, emailed, closed on delivery. The
+ *   technician never repeats the close-out and never collects a second
+ *   signature.
+ */
 export const checkReadyForSubmission = (job: Job): TransitionCheck => {
   const violations: RuleViolation[] = [];
 
-  if (job.signature === null) {
+  if (job.signature === null && job.signatureRefusal === null) {
     violations.push({
       code: 'signature_required',
       message: 'A customer signature is required before submission.',
+    });
+  }
+
+  if (job.signature !== null && job.signatureRefusal !== null) {
+    violations.push({
+      code: 'conflicting_signature_outcome',
+      message:
+        'This job records both a customer signature and a refusal to sign. It cannot be issued until the record says which happened.',
+    });
+  }
+
+  if (job.signatureRefusal !== null && job.signatureRefusal.acknowledgedAt === null) {
+    violations.push({
+      code: 'refusal_not_reviewed',
+      message:
+        'The customer refused to sign. A Master must review the refusal before this job card is issued.',
     });
   }
 

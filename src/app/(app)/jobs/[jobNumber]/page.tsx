@@ -7,6 +7,7 @@ import {
   canEditJob,
   cancellationReasonLabel,
   isJobWorkable,
+  signatureExceptionLabel,
   userFullName,
   type ActivityEvent,
   type User,
@@ -34,6 +35,7 @@ import { JobMediaPanel } from '@/components/jobs/JobMediaPanel';
 import { JobNotesPanel } from '@/components/jobs/JobNotesPanel';
 import { JobOverviewPanel } from '@/components/jobs/JobOverviewPanel';
 import { JobProgressRail } from '@/components/jobs/JobProgressRail';
+import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
@@ -103,6 +105,10 @@ const JobDetailPage = ({
   const refresh = () => viewQuery.refetch();
 
   const checklistTabVisible = definition.checklistRequired || job.checklist !== null;
+
+  // Null on every job the customer signed, which is what keeps the rail exactly
+  // as it is for normal work.
+  const refusalException = signatureExceptionLabel(job);
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -245,8 +251,20 @@ const JobDetailPage = ({
         />
       ) : (
         <>
+      {/* The exception comes before the record: whoever opens a refused job has
+          to know that is what they are looking at, and a Master has to be able
+          to deal with it without hunting for it. */}
+      <SignatureRefusalPanel job={job} users={users} onChanged={refresh} />
+
       <Card className="mb-5">
-        <JobProgressRail status={job.status} />
+        <JobProgressRail
+          status={job.status}
+          exception={
+            refusalException === null
+              ? null
+              : { stage: 'customer_signature', label: refusalException }
+          }
+        />
         <div className="mt-4 border-t border-steel-100 pt-4">
           <JobActionBar view={view} onChanged={refresh} onCompleteJob={() => setCompleting(true)} />
         </div>

@@ -3,14 +3,27 @@
 import { useMemo, useState } from 'react';
 import {
   checkReadyForSignature,
+  checkRefusalReason,
   evaluateChecklist,
   getJobTypeDefinition,
   signatoryLabelsFor,
   type Job,
 } from '@/domain';
-import { captureSignature, startSignature } from '@/application/job-operations';
+import {
+  captureSignature,
+  recordSignatureRefusal,
+  startSignature,
+} from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
-import { Badge, Button, Card, CardHeader, Icon, TextField } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Icon,
+  TextAreaField,
+  TextField,
+} from '@/components/ui';
 import { ChecklistRunner } from './ChecklistRunner';
 import { CompletionReportPanel } from './CompletionReportPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
@@ -98,6 +111,31 @@ export const CompleteJobWizard = ({
   const [strokeData, setStrokeData] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  /*
+   * The two outcomes of the signature step, held as ONE choice.
+   *
+   * `refusing` is not an extra field beside the signature — it swaps what the
+   * step is asking for. Selecting it clears the signature entirely and clearing
+   * it discards the reason, so the screen can never hold both at once. The
+   * operation refuses both-at-once independently; this is the half of it the
+   * technician can see.
+   */
+  const [refusing, setRefusing] = useState(false);
+  const [refusalReason, setRefusalReason] = useState('');
+
+  const chooseRefusal = (next: boolean): void => {
+    setRefusing(next);
+    setErrors({});
+    operation.clearError();
+    if (next) {
+      setFirstName('');
+      setSurname('');
+      setStrokeData('');
+    } else {
+      setRefusalReason('');
+    }
+  };
+
   const readiness = checkReadyForSignature(job);
   const checklist =
     view.checklistTemplate === null
@@ -149,7 +187,33 @@ export const CompleteJobWizard = ({
     setIndex((current) => current + 1);
   };
 
+  /**
+   * Records the refusal and finishes the close-out.
+   *
+   * Validated against the same domain rule the operation applies, so the
+   * technician is never let through here only to be refused at the end.
+   */
+  const refuse = async (): Promise<void> => {
+    const check = checkRefusalReason(refusalReason);
+    if (!check.allowed) {
+      setErrors({ refusalReason: check.violations[0]?.message ?? 'A reason is required.' });
+      return;
+    }
+    setErrors({});
+
+    const refused = await operation.runFor((context) =>
+      recordSignatureRefusal(context, job, { reason: refusalReason }),
+    );
+    if (refused === null) return;
+    onChanged();
+    onSigned(refused);
+  };
+
   const sign = async (): Promise<void> => {
+    if (refusing) {
+      await refuse();
+      return;
+    }
     const next: Record<string, string> = {};
     if (firstName.trim().length === 0) {
       next.firstName = `The ${labels.nameLabel.toLowerCase()} is required.`;
@@ -366,36 +430,97 @@ export const CompleteJobWizard = ({
 
       {step.id === 'signature' && (
         <Card>
-          <CardHeader title={labels.sectionTitle} description={labels.sectionDescription} />
-          <p className="mt-4 rounded-[var(--radius-control)] bg-steel-50 px-4 py-3 text-sm font-medium text-steel-800">
-            {labels.declaration}
-          </p>
+          <CardHeader
+            title={refusing ? labels.refusedLabel : labels.sectionTitle}
+            description={
+              refusing
+                ? 'The work stands as recorded. Say why the customer would not put their name to it.'
+                : labels.sectionDescription
+            }
+          />
 
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <TextField
-              label={labels.nameLabel}
-              required
-              value={firstName}
-              error={errors.firstName}
-              onChange={(event) => setFirstName(event.target.value)}
-            />
-            <TextField
-              label={labels.surnameLabel}
-              required
-              value={surname}
-              error={errors.surname}
-              onChange={(event) => setSurname(event.target.value)}
-            />
-          </div>
-
-          <div className="mt-5">
-            <SignaturePad onChange={setStrokeData} />
-            {errors.signature !== undefined && (
-              <p role="alert" className="mt-2 text-sm font-medium text-signal-600">
-                {errors.signature}
+          {/* The signature side of the choice. Hidden outright when the customer
+              has refused — a disabled pad beside a refusal invites somebody to
+              sign on the customer's behalf. */}
+          {!refusing && (
+            <>
+              <p className="mt-4 rounded-[var(--radius-control)] bg-steel-50 px-4 py-3 text-sm font-medium text-steel-800">
+                {labels.declaration}
               </p>
+
+              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <TextField
+                  label={labels.nameLabel}
+                  required
+                  value={firstName}
+                  error={errors.firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                />
+                <TextField
+                  label={labels.surnameLabel}
+                  required
+                  value={surname}
+                  error={errors.surname}
+                  onChange={(event) => setSurname(event.target.value)}
+                />
+              </div>
+
+              <div className="mt-5">
+                <SignaturePad onChange={setStrokeData} />
+                {errors.signature !== undefined && (
+                  <p role="alert" className="mt-2 text-sm font-medium text-signal-600">
+                    {errors.signature}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {refusing && (
+            <div className="mt-5">
+              <TextAreaField
+                label={labels.refusalTitle}
+                required
+                rows={5}
+                value={refusalReason}
+                error={errors.refusalReason}
+                hint="This reason is recorded against the job and sent to a Master."
+                onChange={(event) => setRefusalReason(event.target.value)}
+              />
+            </div>
+          )}
+
+          {/*
+            The choice itself, below whichever side is showing.
+
+            A checkbox rather than a second button, because the two outcomes are
+            one decision and the technician has to be able to change their mind
+            before they commit to either.
+          */}
+          <label
+            className={cn(
+              'mt-6 flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border px-4 py-3 transition-colors',
+              refusing
+                ? 'border-amber-eje-300 bg-amber-eje-50'
+                : 'border-steel-200 bg-surface hover:border-steel-300',
             )}
-          </div>
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 size-5 shrink-0 accent-[var(--color-amber-eje-500)]"
+              checked={refusing}
+              onChange={(event) => chooseRefusal(event.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-steel-900">
+                {labels.refusedLabel}
+              </span>
+              <span className="mt-0.5 block text-sm text-steel-600">
+                Tick this only if the customer would not sign. The job card is still issued, and a
+                Master reviews the refusal first.
+              </span>
+            </span>
+          </label>
         </Card>
       )}
 
@@ -418,9 +543,15 @@ export const CompleteJobWizard = ({
               size="lg"
               onClick={sign}
               loading={operation.running}
-              leadingIcon={<Icon name="signature" className="size-5" />}
+              /* Disabled until there is a reason, so "Continue" cannot be
+                 pressed on an empty refusal. The operation enforces the same
+                 rule, which is what makes this safe to be a convenience. */
+              disabled={refusing && !checkRefusalReason(refusalReason).allowed}
+              leadingIcon={
+                <Icon name={refusing ? 'warning' : 'signature'} className="size-5" />
+              }
             >
-              {labels.confirmLabel}
+              {refusing ? 'Record refusal' : labels.confirmLabel}
             </Button>
           ) : (
             <Button

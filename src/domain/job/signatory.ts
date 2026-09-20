@@ -22,6 +22,10 @@ export interface SignatoryLabels {
   readonly signatureLabel: string;
   readonly confirmLabel: string;
   readonly pageTitle: string;
+  /** The exception recorded when this signatory would not sign. */
+  readonly refusedLabel: string;
+  /** What the technician is asked for instead of a signature. */
+  readonly refusalTitle: string;
 }
 
 const CUSTOMER: SignatoryLabels = {
@@ -33,6 +37,8 @@ const CUSTOMER: SignatoryLabels = {
   signatureLabel: 'Signature',
   confirmLabel: 'Confirm signature',
   pageTitle: 'Customer signature',
+  refusedLabel: 'Customer refused to sign',
+  refusalTitle: 'Customer refusal reason',
 };
 
 const COLLECTOR: SignatoryLabels = {
@@ -45,6 +51,8 @@ const COLLECTOR: SignatoryLabels = {
   signatureLabel: 'Collector signature',
   confirmLabel: 'Confirm collection',
   pageTitle: 'Collector signature',
+  refusedLabel: 'Collector refused to sign',
+  refusalTitle: 'Collector refusal reason',
 };
 
 export const signatoryLabelsFor = (jobType: JobTypeCode): SignatoryLabels =>

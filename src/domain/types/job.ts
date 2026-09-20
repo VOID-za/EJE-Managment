@@ -21,8 +21,14 @@ import type { PricingInputs } from './settings';
  */
 export interface PricingSnapshot extends PricingInputs {
   readonly capturedAt: IsoDateTime;
-  /** Why the snapshot was taken, for the audit trail. */
-  readonly reason: 'customer_signature' | 'submission';
+  /**
+   * Why the snapshot was taken, for the audit trail.
+   *
+   * A refusal freezes the rates exactly as a signature does: the work is
+   * finished and the figure is the figure, whether or not the customer put
+   * their name to it. Recorded distinctly so the trail says which happened.
+   */
+  readonly reason: 'customer_signature' | 'signature_refused' | 'submission';
 }
 
 /**
@@ -269,6 +275,39 @@ export interface CustomerSignature {
   readonly declaration: string;
 }
 
+/**
+ * The customer would not sign.
+ *
+ * A refusal is an OUTCOME of the signature stage, not a failure of it: the work
+ * was done and written up, and the person on site declined to put their name to
+ * it. Recording that honestly is the whole point — the alternative is a
+ * technician pressed into signing on the customer's behalf, which is what a
+ * signed job card exists to prevent.
+ *
+ * It is a record rather than a flag because every question the office will ask
+ * later needs an answer: why, who took it, and when. `acknowledged*` is the
+ * Master's review of it, which is what allows the job card to be issued; see
+ * `checkReadyForSubmission`.
+ */
+export interface SignatureRefusal {
+  /**
+   * Always true.
+   *
+   * Present so the stored record reads as a fact rather than as the absence of
+   * one, and so a refusal cannot be confused with a partially written record.
+   */
+  readonly refused: true;
+  /** Why the customer would not sign. Required, and never blank. */
+  readonly reason: string;
+  readonly recordedBy: UserId;
+  readonly recordedAt: IsoDateTime;
+  /** The Master who reviewed the refusal. Null until one has. */
+  readonly acknowledgedBy: UserId | null;
+  readonly acknowledgedAt: IsoDateTime | null;
+  /** What the Master decided. Optional — the acknowledgement itself is the act. */
+  readonly acknowledgementNote: string;
+}
+
 /** Free-text work write-up captured by the technician at completion. */
 export interface JobCompletionReport {
   readonly faultFindings: string;
@@ -330,6 +369,16 @@ export interface Job {
   readonly completionReport: JobCompletionReport;
   readonly checklist: ChecklistInstance | null;
   readonly signature: CustomerSignature | null;
+
+  /**
+   * Set instead of `signature` when the customer refused to sign.
+   *
+   * MUTUALLY EXCLUSIVE with `signature`: a job has one signature outcome, and
+   * the rule is enforced in `checkSignatureOutcome` and in the operations, not
+   * merely by the screens. Null on every job whose customer signed, and on
+   * every job that has not reached the signature stage.
+   */
+  readonly signatureRefusal: SignatureRefusal | null;
 
   /** Reason recorded when the job was last moved to `awaiting_spares`. */
   readonly awaitingSparesReason: string;
