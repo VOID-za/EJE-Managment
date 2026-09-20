@@ -5,8 +5,10 @@ import {
   canTransition,
   deliveryStateLabel,
   emptyDelivery,
+  checkCollectionDetails,
   checkReadyForSignature,
   checkRefusalReason,
+  outstandingRefusal,
   checkSchedule,
   checkReadyForSubmission,
   checkSignatureOutcome,
@@ -42,7 +44,9 @@ import {
   type Machine,
   type Site,
   type PassFailNa,
+  type IsoDateTime,
   type PricingSnapshot,
+  type RefusalResolution,
   type SignatureRefusal,
   type TransferReason,
   type User,
@@ -52,7 +56,7 @@ import {
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
-import { audit, notify, notifyMasters } from './audit';
+import { audit, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
@@ -478,6 +482,7 @@ export const addLabour = async (
       (input.description.length > 0 ? input.description : 'No description supplied.') +
       administrativeNote(context, job),
   });
+  await recordPostSignatureChange(context, saved, 'A labour line was added.');
   return saved;
 };
 
@@ -512,6 +517,7 @@ export const addTravel = async (
       (input.description.length > 0 ? input.description : 'No description supplied.') +
       administrativeNote(context, job),
   });
+  await recordPostSignatureChange(context, saved, 'A travel line was added.');
   return saved;
 };
 
@@ -547,6 +553,7 @@ export const addPart = async (
     summary: `Part captured: ${input.partNumber}`,
     detail: `${input.description}, quantity ${input.quantity}.` + administrativeNote(context, job),
   });
+  await recordPostSignatureChange(context, saved, 'A parts line was added.');
   return saved;
 };
 
@@ -691,7 +698,11 @@ export const removeLineItem = async (
         ? { ...job, travel: job.travel.filter((entry) => entry.id !== lineId) }
         : { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) };
 
-  return context.repos.jobs.save(next);
+  const saved = await context.repos.jobs.save(next);
+  // Removing a line from a job the customer has already been shown changes what
+  // they are being asked to pay, so it is recorded the same way an amendment is.
+  await recordPostSignatureChange(context, saved, `A ${kind} line was removed.`);
+  return saved;
 };
 
 /**
@@ -781,6 +792,45 @@ export const addMedia = async (
     summary: input.kind === 'photo' ? 'Photo uploaded' : 'Video uploaded',
     detail: input.caption.length > 0 ? input.caption : input.fileName,
   });
+  await recordPostSignatureChange(context, saved, 'A photograph or video was added.');
+  return saved;
+};
+
+/**
+ * Takes a photograph or video off the job.
+ *
+ * For the obvious mistake — the wrong machine, a thumb over the lens, a shot of
+ * the floor — caught before the customer is asked to sign. The removal is
+ * recorded, because a photograph that was on a job card and then was not is
+ * exactly the kind of thing somebody asks about later.
+ */
+export const removeMedia = async (
+  context: OperationContext,
+  job: Job,
+  kind: 'photo' | 'video',
+  attachmentId: string,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+
+  const existing = (kind === 'photo' ? job.photos : job.videos).find(
+    (candidate) => candidate.id === attachmentId,
+  );
+  if (existing === undefined) return job;
+
+  const next: Job =
+    kind === 'photo'
+      ? { ...job, photos: job.photos.filter((candidate) => candidate.id !== attachmentId) }
+      : { ...job, videos: job.videos.filter((candidate) => candidate.id !== attachmentId) };
+
+  const saved = await context.repos.jobs.save(next);
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_removed',
+    summary: kind === 'photo' ? 'Photo removed' : 'Video removed',
+    detail: `${existing.caption.length > 0 ? existing.caption : existing.fileName} was removed by ${userFullName(context.actor)}.`,
+  });
+  await recordPostSignatureChange(context, saved, 'A photograph or video was removed.');
   return saved;
 };
 
@@ -866,6 +916,9 @@ export const saveCompletionReport = async (
       summary: 'Completion write-up saved',
       detail: `Updated: ${changed.join(', ')}.` + administrativeNote(context, job),
     });
+    // A write-up changed after the job left the technician is the office
+    // correcting the job card, and is recorded as that.
+    await recordPostSignatureChange(context, saved, 'The completion write-up was amended.');
   }
   return saved;
 };
@@ -1172,10 +1225,16 @@ export const recordSignatureRefusal = async (
     reason: input.reason.trim(),
     recordedBy: context.actor.id,
     recordedAt: now,
-    acknowledgedBy: null,
-    acknowledgedAt: null,
-    acknowledgementNote: '',
+    resolvedBy: null,
+    resolvedAt: null,
+    resolution: null,
+    resolutionNote: '',
   };
+
+  // APPENDED. A second refusal does not replace the first: the office has to be
+  // able to see that this customer has now turned the job card away twice, and
+  // for what reasons.
+  const attempt = job.signatureRefusals.length + 1;
 
   const saved = await context.repos.jobs.save({
     ...job,
@@ -1183,13 +1242,13 @@ export const recordSignatureRefusal = async (
     completedAt: job.completedAt ?? now,
     pricingSnapshot: snapshot,
     signature: null,
-    signatureRefusal: refusal,
+    signatureRefusals: [...job.signatureRefusals, refusal],
   });
 
   await audit(context, {
     jobId: job.id,
     type: 'customer_refused_to_sign',
-    summary: 'Customer refused to sign',
+    summary: attempt === 1 ? 'Customer refused to sign' : `Customer refused to sign (attempt ${attempt})`,
     detail: `Customer refused to sign. Reason: ${refusal.reason} Recorded by ${userFullName(context.actor)}.`,
   });
 
@@ -1219,7 +1278,7 @@ export const recordSignatureRefusal = async (
     `Reason: ${refusal.reason}`,
   ];
 
-  await notifyMasters(context, {
+  await notifyOffice(context, {
     type: 'signature_refused',
     title: `${job.jobNumber} — customer refused to sign`,
     body: lines.join('\n'),
@@ -1231,62 +1290,125 @@ export const recordSignatureRefusal = async (
 };
 
 /**
- * A Master resolves the signature refusal, which releases the job card.
+ * Whoever in the office may deal with a refusal, checked once.
  *
- * An administrative action on the job as it stands, and nothing more. It does
- * not move the job — the status is `review` before and after — and it does not
- * alter the refusal, which stands on the record exactly as the technician took
- * it. All it clears is the blocking condition that stopped the job card being
- * issued, and it records who cleared it.
- *
- * Resolving also files the Masters' notifications about this job, so a refusal
- * that has been dealt with cannot sit in the inbox as though it had not.
+ * Both a Master and a Coordinator may: correcting a job card the customer
+ * objected to is office administration, not field work. A technician may not,
+ * including the one who took the refusal — they are the person the customer
+ * turned away, not the person who decides what EJE does next.
  */
-export const resolveSignatureRefusal = async (
-  context: OperationContext,
-  job: Job,
-  note: string,
-): Promise<Job> => {
+const assertCanResolveRefusal = (context: OperationContext, job: Job): SignatureRefusal => {
   if (!can(context.actor.role, 'jobs.resolveSignatureRefusal')) {
     throw new WorkflowError(`${job.jobNumber} cannot be resolved by you.`, [
       {
         code: 'not_permitted',
-        message: 'Only a Master can resolve a customer’s refusal to sign.',
+        message: 'Only the office can resolve a customer’s refusal to sign.',
       },
     ]);
   }
-  if (job.signatureRefusal === null) {
-    throw new WorkflowError(`${job.jobNumber} has no signature refusal to resolve.`, [
-      { code: 'no_refusal', message: 'The customer did not refuse to sign this job card.' },
-    ]);
+  const outstanding = outstandingRefusal(job);
+  if (outstanding === null) {
+    // Two different problems, and they are told apart: nothing was ever
+    // refused, or somebody has already dealt with it.
+    const alreadyResolved = job.signatureRefusals.length > 0;
+    throw new WorkflowError(
+      alreadyResolved
+        ? `${job.jobNumber} has already been resolved.`
+        : `${job.jobNumber} has no outstanding signature refusal.`,
+      [
+        alreadyResolved
+          ? {
+              code: 'already_resolved',
+              message: 'This signature refusal has already been resolved.',
+            }
+          : {
+              code: 'no_refusal',
+              message: 'The customer did not refuse to sign this job card.',
+            },
+      ],
+    );
   }
-  if (job.signatureRefusal.acknowledgedAt !== null) {
-    throw new WorkflowError(`${job.jobNumber} has already been resolved.`, [
+  return outstanding;
+};
+
+/** Writes the resolution onto the outstanding refusal, leaving the rest alone. */
+const withResolvedRefusal = (
+  job: Job,
+  resolution: RefusalResolution,
+  actorId: UserId,
+  at: IsoDateTime,
+  note: string,
+): readonly SignatureRefusal[] =>
+  job.signatureRefusals.map((refusal, index) =>
+    index === job.signatureRefusals.length - 1
+      ? {
+          ...refusal,
+          resolvedBy: actorId,
+          resolvedAt: at,
+          resolution,
+          resolutionNote: note.trim(),
+        }
+      : refusal,
+  );
+
+/**
+ * The office corrects the job card and puts it back in front of the customer.
+ *
+ * THE normal answer to a refusal. A customer who would not sign usually would
+ * not sign SOMETHING — a figure, a description, work they say was not done —
+ * and the fix is to put that right and ask again, not to file a note and post
+ * them the document they already objected to.
+ *
+ * What this does NOT do is undo any work. The job goes back to
+ * `customer_signature` carrying everything on it: the write-up, the labour, the
+ * travel, the parts, the checklist, the photos. Only the signature is asked for
+ * again. The technician is not sent back to site and captures nothing twice.
+ *
+ * The refusal is marked resolved and stays on the record. If the customer
+ * refuses the corrected card too, that is a SECOND refusal appended beside the
+ * first, not a replacement for it.
+ */
+export const returnToCustomerSignature = async (
+  context: OperationContext,
+  job: Job,
+  note: string,
+): Promise<Job> => {
+  if (!can(context.actor.role, 'jobs.resubmitForSignature')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be returned for signature by you.`, [
       {
-        code: 'already_resolved',
-        message: 'This signature refusal has already been resolved.',
+        code: 'not_permitted',
+        message: 'Only the office can return a corrected job card for signature.',
       },
     ]);
+  }
+  const outstanding = assertCanResolveRefusal(context, job);
+
+  // The corrected card still has to be a card the system would accept: a
+  // correction that removed the write-up cannot go back to the customer.
+  const readiness = checkReadyForSignature(job);
+  if (!readiness.allowed) {
+    throw new WorkflowError(
+      `${job.jobNumber} is not ready to go back to the customer.`,
+      readiness.violations,
+    );
   }
 
+  transition(job, 'customer_signature');
   const now = context.services.clock.now();
+
   const saved = await context.repos.jobs.save({
     ...job,
-    signatureRefusal: {
-      ...job.signatureRefusal,
-      acknowledgedBy: context.actor.id,
-      acknowledgedAt: now,
-      acknowledgementNote: note.trim(),
-    },
+    status: 'customer_signature',
+    signatureRefusals: withResolvedRefusal(job, 'resubmitted', context.actor.id, now, note),
   });
 
   await audit(context, {
     jobId: job.id,
-    type: 'signature_refusal_resolved',
-    summary: 'Signature refusal resolved',
+    type: 'returned_for_customer_signature',
+    summary: 'Corrected job card returned for customer signature',
     detail:
-      `Signature refusal resolved by ${userFullName(context.actor)}. The customer refused to sign: ${job.signatureRefusal.reason}` +
-      (note.trim().length === 0 ? '' : ` Master note: ${note.trim()}`),
+      `Returned for signature by ${userFullName(context.actor)} after the customer refused: ${outstanding.reason}` +
+      (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
   });
 
   await fileRefusalNotifications(context, job);
@@ -1294,9 +1416,46 @@ export const resolveSignatureRefusal = async (
 };
 
 /**
- * Marks every Master's refusal notification for this job as handled.
+ * The office accepts the refusal and issues the job card as it stands.
  *
- * Without this the notification outlives the thing it was about: the Master
+ * The other answer, and the rarer one: a customer who will not sign whatever is
+ * put in front of them. The work was done, the figure is the figure, and EJE
+ * still has to issue the paperwork — which is exactly the document that records
+ * the refusal rather than a signature. See the refusal block on the job card.
+ *
+ * It does not move the job: the status is `review` before and after. All it
+ * clears is the condition that was holding the job card back.
+ */
+export const resolveSignatureRefusal = async (
+  context: OperationContext,
+  job: Job,
+  note: string,
+): Promise<Job> => {
+  const outstanding = assertCanResolveRefusal(context, job);
+
+  const now = context.services.clock.now();
+  const saved = await context.repos.jobs.save({
+    ...job,
+    signatureRefusals: withResolvedRefusal(job, 'issued_unsigned', context.actor.id, now, note),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'signature_refusal_resolved',
+    summary: 'Signature refusal resolved',
+    detail:
+      `Signature refusal resolved by ${userFullName(context.actor)}, to issue without a signature. The customer refused to sign: ${outstanding.reason}` +
+      (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
+  });
+
+  await fileRefusalNotifications(context, job);
+  return saved;
+};
+
+/**
+ * Marks the office's refusal notifications for this job as handled.
+ *
+ * Without this the notification outlives the thing it was about: the office
  * clears the exception on the job and the inbox still shows it as outstanding.
  */
 const fileRefusalNotifications = async (
@@ -1305,7 +1464,7 @@ const fileRefusalNotifications = async (
 ): Promise<void> => {
   const users = await context.repos.users.list();
   for (const user of users) {
-    if (user.role !== 'master') continue;
+    if (user.role !== 'master' && user.role !== 'coordinator') continue;
     const notifications = await context.repos.notifications.list(user.id);
     for (const notification of notifications) {
       if (notification.type !== 'signature_refused') continue;
@@ -1314,6 +1473,69 @@ const fileRefusalNotifications = async (
       await context.repos.notifications.markHandled(notification.id);
     }
   }
+};
+
+export interface CollectionInput {
+  /** True when a courier is collecting rather than the customer themselves. */
+  readonly courier: boolean;
+  /** The courier's waybill number. Required for a courier collection. */
+  readonly waybillNumber: string;
+}
+
+/**
+ * Records how the goods are actually being collected.
+ *
+ * Set when the job is raised and confirmed again HERE, at the counter, because
+ * who was expected and who turns up are not the same question: a customer who
+ * said they would collect sends a driver often enough that guessing is how a
+ * courier ends up holding a document with the customer's prices on it.
+ *
+ * Changing it changes what the collection document shows — see
+ * `showsPricesOnCollectionDocument` — and nothing else. The prices stay on the
+ * job either way.
+ */
+export const setCollectionMethod = async (
+  context: OperationContext,
+  job: Job,
+  input: CollectionInput,
+): Promise<Job> => {
+  assertCanCapture(context, job);
+
+  if (!getJobTypeDefinition(job.jobType).collectedOnCompletion) {
+    throw new WorkflowError(`${job.jobNumber} is not collected from the counter.`, [
+      {
+        code: 'not_a_collection',
+        message: 'This job type is completed on the customer’s site, not collected.',
+      },
+    ]);
+  }
+
+  const waybillNumber = input.courier ? input.waybillNumber.trim() : '';
+  const check = checkCollectionDetails({
+    jobType: job.jobType,
+    courierCollection: input.courier,
+    waybillNumber,
+  });
+  if (!check.allowed) {
+    throw new WorkflowError(`${job.jobNumber} needs a waybill number.`, check.violations);
+  }
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    courierCollection: input.courier,
+    waybillNumber,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'collection_method_set',
+    summary: input.courier ? 'Courier collection' : 'Customer collection',
+    detail: input.courier
+      ? `Collected by courier on waybill ${waybillNumber}. Prices are withheld from the courier's copy.`
+      : 'Collected by the customer. The collection document shows the prices.',
+  });
+
+  return saved;
 };
 
 /** Moves a job from Completion into the signature step. */
@@ -1358,12 +1580,37 @@ export const generateJobCardDocument = async (context: OperationContext, job: Jo
   return generated;
 };
 
+/**
+ * Audits a change made to a job after the technician handed it over.
+ *
+ * ONE place, because there is one question to answer: who changed what, and
+ * when, on a job the customer has already been shown. It says which of the two
+ * situations it was, because they are genuinely different facts:
+ *
+ * - The customer REFUSED and the office is putting the job card right, which is
+ *   the correction loop working as intended.
+ * - The customer SIGNED and the office amended the job afterwards, which is the
+ *   one that needs looking at.
+ *
+ * Silent for a job still in the technician's hands: that is ordinary capture,
+ * already recorded by the operation that did it.
+ */
 export const recordPostSignatureChange = async (
   context: OperationContext,
   job: Job,
   description: string,
 ): Promise<void> => {
   if (!isAfterSignature(job.status)) return;
+
+  if (outstandingRefusal(job) !== null) {
+    await audit(context, {
+      jobId: job.id,
+      type: 'job_card_corrected',
+      summary: 'Job card corrected by the office',
+      detail: `${description} Corrected by ${userFullName(context.actor)} after the customer refused to sign. The technician's original submission is unchanged in the history above.`,
+    });
+    return;
+  }
 
   await audit(context, {
     jobId: job.id,

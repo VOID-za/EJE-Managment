@@ -68,6 +68,7 @@ const NewJobPage = () => {
   const [faultDescription, setFaultDescription] = useState('');
   const [technicianId, setTechnicianId] = useState('');
   const [courierCollection, setCourierCollection] = useState(false);
+  const [deliveryNote, setDeliveryNote] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -175,6 +176,7 @@ const NewJobPage = () => {
         faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? asUserId(technicianId) : null,
         courierCollection,
+        deliveryNote,
       });
     });
 
@@ -329,7 +331,11 @@ const NewJobPage = () => {
                 </div>
               )}
 
-              {jobType === 'parts' && (
+              {/* Offered wherever the work is collected from the counter: a
+                  repaired unit leaves on the same kind of trip a box of parts
+                  does, and a courier must not see the customer's prices on
+                  either document. */}
+              {definition.collectedOnCompletion && (
                 <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4">
                   <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-semibold text-amber-eje-700">
                     <input
@@ -343,7 +349,7 @@ const NewJobPage = () => {
                   <p className="mt-1.5 text-sm text-steel-700">
                     {courierCollection
                       ? 'Prices will be hidden from the collection document. The courier has no reason to see them; the prices stay on the job for EJE costing.'
-                      : 'The customer is collecting the parts themselves, so prices may be shown on the collection document.'}
+                      : 'The customer is collecting themselves, so prices may be shown on the collection document. Whoever actually turns up is confirmed again at the collection.'}
                   </p>
                 </div>
               )}
@@ -391,6 +397,19 @@ const NewJobPage = () => {
                   onChange={(event) => setReferenceNumber(event.target.value)}
                   placeholder="Internal or customer reference"
                 />
+                {/* Optional, always. Some customers reconcile parts and
+                    workshop repairs against a delivery note rather than an
+                    order number, and a document that cannot quote it back is
+                    one their accounts department cannot match. */}
+                {definition.capturesDeliveryNote && (
+                  <TextField
+                    label="Delivery note"
+                    value={deliveryNote}
+                    onChange={(event) => setDeliveryNote(event.target.value)}
+                    placeholder="e.g. DN-12345"
+                    hint="Optional. The customer’s own delivery note number, printed on the collection document."
+                  />
+                )}
               </div>
             </div>
           </Card>

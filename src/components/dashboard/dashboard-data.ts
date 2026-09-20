@@ -1,5 +1,10 @@
 import type { Job, JobPriority, User } from '@/domain';
-import { isJobOpenWork, PRIORITY_ORDER, priorityLabel } from '@/domain';
+import {
+  isJobOpenWork,
+  PRIORITY_ORDER,
+  priorityLabel,
+  refusalAwaitingResolution,
+} from '@/domain';
 import type { JobListRow } from '@/application/job-view';
 import { isOverdue, isToday } from '@/lib/format';
 
@@ -16,6 +21,20 @@ export const byStatus = (rows: readonly JobListRow[], statuses: readonly Job['st
 
 export const openJobs = (rows: readonly JobListRow[]) =>
   rows.filter((row) => isJobOpenWork(row.job.status));
+
+/**
+ * Jobs a customer refused to sign, that nobody has dealt with yet.
+ *
+ * Dynamic by construction: it reads the refusals on the job, so correcting and
+ * resubmitting a job card takes it out of this list and a second refusal puts
+ * it back. Nothing has to be ticked off anywhere.
+ *
+ * It counts what the VIEWER can see: the rows are redacted per person before
+ * they get here, so a technician's own numbers are their own jobs and the
+ * office's are everybody's. See `loadJobRows`.
+ */
+export const unresolvedRefusals = (rows: readonly JobListRow[]) =>
+  rows.filter((row) => refusalAwaitingResolution(row.job));
 
 export const overdueJobs = (rows: readonly JobListRow[]) =>
   rows.filter((row) => isJobOpenWork(row.job.status) && isOverdue(row.job.scheduledDate));

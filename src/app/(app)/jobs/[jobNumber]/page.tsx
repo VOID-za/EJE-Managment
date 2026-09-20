@@ -7,6 +7,7 @@ import {
   canEditJob,
   cancellationReasonLabel,
   isJobWorkable,
+  refusalAwaitingResolution,
   signatureExceptionLabel,
   userFullName,
   type ActivityEvent,
@@ -64,7 +65,9 @@ const JobDetailPage = ({
   const [completing, setCompleting] = useState(false);
   const router = useRouter();
 
-  const viewQuery = useQuery(`job:${jobNumber}`, (repos) => loadJobView(repos, jobNumber));
+  const viewQuery = useQuery(`job:${jobNumber}`, (repos) =>
+    loadJobView(repos, jobNumber, currentUser),
+  );
   const supportQuery = useQuery(`job:${jobNumber}:support`, async (repos) => {
     const [users, activity] = await Promise.all([repos.users.list(), repos.activity.list()]);
     return { users, activity };
@@ -242,11 +245,21 @@ const JobDetailPage = ({
       {completing ? (
         <CompleteJobWizard
           view={view}
+          // The office correcting a refused job card runs the same sequence the
+          // technician ran, through the same panels, and ends by handing it
+          // back for signature instead of taking one.
+          mode={refusalAwaitingResolution(job) ? 'correct' : 'complete'}
           onClose={() => setCompleting(false)}
           onChanged={refresh}
           onSigned={(signed) => {
             setCompleting(false);
-            router.push(`/jobs/${signed.jobNumber}/review`);
+            refresh();
+            // A corrected job card goes back to Customer Signature and stays
+            // here, where whoever is with the customer picks it up. A signed
+            // one goes on to be issued.
+            if (signed.status !== 'customer_signature') {
+              router.push(`/jobs/${signed.jobNumber}/review`);
+            }
           }}
         />
       ) : (

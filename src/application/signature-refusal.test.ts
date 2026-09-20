@@ -17,6 +17,7 @@ import {
   checkReadyForSubmission,
   checkRefusalReason,
   checkSignatureOutcome,
+  currentRefusal,
   isSignatureRefused,
   JOB_PROGRESS_STAGES,
   JOB_STATUS_ORDER,
@@ -89,9 +90,9 @@ describe('recording a refusal', () => {
     const job = await readyToSign();
     const refused = await recordSignatureRefusal(harness.as(technician), job, { reason: REASON });
 
-    expect(refused.signatureRefusal).not.toBeNull();
-    expect(refused.signatureRefusal?.refused).toBe(true);
-    expect(refused.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(refused)).not.toBeNull();
+    expect(currentRefusal(refused)?.refused).toBe(true);
+    expect(currentRefusal(refused)?.reason).toBe(REASON);
     expect(isSignatureRefused(refused)).toBe(true);
     expect(signatureOutcomeOf(refused)).toBe('refused');
   });
@@ -100,11 +101,11 @@ describe('recording a refusal', () => {
     const job = await readyToSign();
     const refused = await recordSignatureRefusal(harness.as(technician), job, { reason: REASON });
 
-    expect(refused.signatureRefusal?.recordedBy).toBe(technician.id);
-    expect(refused.signatureRefusal?.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(currentRefusal(refused)?.recordedBy).toBe(technician.id);
+    expect(currentRefusal(refused)?.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // Not yet reviewed: that is a separate act, by a different person.
-    expect(refused.signatureRefusal?.acknowledgedBy).toBeNull();
-    expect(refused.signatureRefusal?.acknowledgedAt).toBeNull();
+    expect(currentRefusal(refused)?.resolvedBy).toBeNull();
+    expect(currentRefusal(refused)?.resolvedAt).toBeNull();
   });
 
   it('survives a reload, because it was written through the repository', async () => {
@@ -112,7 +113,7 @@ describe('recording a refusal', () => {
     await recordSignatureRefusal(harness.as(technician), job, { reason: REASON });
 
     const reread = await harness.repos.jobs.findByJobNumber('EJE-1048');
-    expect(reread?.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(reread!)?.reason).toBe(REASON);
   });
 
   it('leaves no customer signature behind', async () => {
@@ -153,7 +154,7 @@ describe('recording a refusal', () => {
       const refused = await recordSignatureRefusal(harness.as(technician), job, { reason });
       // Presence is the rule. The system does not get to decide whether a
       // technician's explanation is a good one.
-      expect(refused.signatureRefusal?.reason).toBe(reason);
+      expect(currentRefusal(refused)?.reason).toBe(reason);
     },
   );
 
@@ -162,7 +163,7 @@ describe('recording a refusal', () => {
     const refused = await recordSignatureRefusal(harness.as(technician), job, {
       reason: `  ${REASON}  `,
     });
-    expect(refused.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(refused)?.reason).toBe(REASON);
   });
 
   it('will not record a refusal against a job the customer already signed', async () => {
@@ -195,7 +196,7 @@ describe('recording a refusal', () => {
     // And the refusal is untouched by the attempt.
     const reread = await harness.repos.jobs.findByJobNumber('EJE-1048');
     expect(reread?.signature).toBeNull();
-    expect(reread?.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(reread!)?.reason).toBe(REASON);
   });
 
   it('applies the same readiness gate as a signature', async () => {
@@ -340,10 +341,22 @@ describe('a Master resolving the refusal', () => {
     refused = await recordSignatureRefusal(context, job, { reason: REASON });
   });
 
-  it('belongs to the Master, and to nobody else', () => {
-    expect(can('master', 'jobs.resolveSignatureRefusal')).toBe(true);
-    expect(can('coordinator', 'jobs.resolveSignatureRefusal')).toBe(false);
-    expect(can('technician', 'jobs.resolveSignatureRefusal')).toBe(false);
+  it('belongs to the office — Master and Coordinator — and to nobody else', () => {
+    // Correcting a job card the customer objected to is administration, which
+    // is the Coordinator's work as much as a Master's. A technician has no
+    // part in it: they are the person the customer turned away.
+    for (const capability of [
+      'jobs.resolveSignatureRefusal',
+      'jobs.resubmitForSignature',
+      'jobs.editSubmittedJob',
+      'jobs.viewAnySignatureRefusal',
+    ] as const) {
+      expect(can('master', capability), capability).toBe(true);
+      expect(can('coordinator', capability), capability).toBe(true);
+      expect(can('technician', capability), capability).toBe(false);
+    }
+    // And the Coordinator is still not a technician.
+    expect(can('coordinator', 'jobs.acceptField')).toBe(false);
   });
 
   it('refuses a technician trying to clear their own refusal', async () => {
@@ -359,13 +372,13 @@ describe('a Master resolving the refusal', () => {
       'Customer confirmed the work by telephone.',
     );
 
-    expect(reviewed.signatureRefusal?.acknowledgedBy).toBe(master.id);
-    expect(reviewed.signatureRefusal?.acknowledgedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(reviewed.signatureRefusal?.acknowledgementNote).toBe(
+    expect(currentRefusal(reviewed)?.resolvedBy).toBe(master.id);
+    expect(currentRefusal(reviewed)?.resolvedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(currentRefusal(reviewed)?.resolutionNote).toBe(
       'Customer confirmed the work by telephone.',
     );
     // The refusal itself is never rewritten by the resolution.
-    expect(reviewed.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(reviewed)?.reason).toBe(REASON);
     expect(reviewed.signature).toBeNull();
   });
 
@@ -377,9 +390,10 @@ describe('a Master resolving the refusal', () => {
     expect(event).toBeDefined();
     expect(event?.actorId).toBe(master.id);
     expect(event?.summary).toBe('Signature refusal resolved');
-    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee.');
+    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee');
+    expect(event?.detail).toContain('to issue without a signature');
     expect(event?.detail).toContain(REASON);
-    expect(event?.detail).toContain('Master note: Invoice to proceed.');
+    expect(event?.detail).toContain('Note: Invoice to proceed.');
   });
 
   it('audits a resolution with no note, without a dangling label', async () => {
@@ -387,8 +401,9 @@ describe('a Master resolving the refusal', () => {
 
     const events = await harness.repos.activity.list(refused.id);
     const event = events.find((entry) => entry.type === 'signature_refusal_resolved');
-    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee.');
-    expect(event?.detail).not.toContain('Master note:');
+    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee');
+    expect(event?.detail).toContain('to issue without a signature');
+    expect(event?.detail).not.toContain('Note:');
   });
 
   it('never calls the resolution a review by the office', async () => {
@@ -536,7 +551,7 @@ describe('what the refusal does to the workflow', () => {
     const closed = await confirmDelivery(harness, harness.as(master), result.job);
     expect(closed.status).toBe('closed');
     // And the refusal is still exactly what the technician recorded.
-    expect(closed.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(closed)?.reason).toBe(REASON);
     expect(closed.signature).toBeNull();
   });
 
@@ -544,6 +559,8 @@ describe('what the refusal does to the workflow', () => {
     const reviewed = await resolveSignatureRefusal(harness.as(master), refused, '');
     // The job is past the signature stage and cannot be sent back to it by
     // recording another outcome.
+    // Resolved by issuing the card as it stands: the customer said no, the
+    // document says so, and a signature captured now would contradict it.
     expect(checkSignatureOutcome(reviewed, 'signed').allowed).toBe(false);
     expect(reviewed.status).toBe('review');
   });
@@ -581,7 +598,7 @@ describe('a normal signature is untouched by any of this', () => {
     expect(signed.signature?.declaration).toBe(
       'I confirm that the work described above has been completed.',
     );
-    expect(signed.signatureRefusal).toBeNull();
+    expect(currentRefusal(signed)).toBeNull();
     expect(signed.pricingSnapshot?.reason).toBe('customer_signature');
     expect(signatureExceptionLabel(signed)).toBeNull();
     expect(checkReadyForSubmission(signed).allowed).toBe(true);

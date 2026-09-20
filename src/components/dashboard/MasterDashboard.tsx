@@ -32,6 +32,7 @@ import {
   overdueJobs,
   recentlyClosed,
   recentlySubmitted,
+  unresolvedRefusals,
   upcomingJobs,
 } from './dashboard-data';
 
@@ -39,7 +40,7 @@ import {
 export const MasterDashboard = ({ user }: { readonly user: User }) => {
   const jobsQuery = useQuery('dashboard:master:jobs', async (repos) => {
     const jobs = await repos.jobs.list();
-    return loadJobRows(repos, jobs);
+    return loadJobRows(repos, jobs, user);
   });
 
   const supportQuery = useQuery('dashboard:master:support', async (repos) => {
@@ -77,6 +78,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
   const awaitingSpares = byStatus(rows, ['awaiting_spares']);
   const awaitingCompletion = byStatus(rows, ['completion', 'customer_signature', 'review']);
   const overdue = overdueJobs(rows);
+  const refusals = unresolvedRefusals(rows);
   const submitted = recentlySubmitted(rows);
   const closed = recentlyClosed(rows);
   const upcoming = upcomingJobs(rows);
@@ -137,6 +139,23 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
           tone="green"
           href="/jobs?status=awaiting_completion"
           icon={<Icon name="signature" />}
+        />
+      </div>
+
+      {/*
+        Its own row, because it is not a workload number like the four above —
+        it is a queue of exceptions, each one a customer who turned a job card
+        away and a job that cannot be issued until somebody deals with it.
+        Office only: a technician has no global view of other people's refusals.
+      */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile
+          label="Customer Signature Refusals"
+          value={refusals.length}
+          caption="Requires attention"
+          tone={refusals.length > 0 ? 'red' : 'neutral'}
+          href="/jobs?signatureRefusal=unresolved"
+          icon={<Icon name="warning" />}
         />
       </div>
 

@@ -33,6 +33,24 @@ export interface JobTypeDefinition {
    * and is how the collection note is reconciled against their purchase order.
    */
   readonly requiresOrderNumber: boolean;
+  /**
+   * The customer's own delivery note number may be recorded on this job type.
+   *
+   * Optional wherever it is offered. True for the job types whose customers
+   * actually reconcile by one — parts and workshop repairs — rather than
+   * everywhere, because a field nobody fills in is a field everybody learns to
+   * skip.
+   */
+  readonly capturesDeliveryNote: boolean;
+  /**
+   * The job ends with somebody collecting goods from the EJE counter, rather
+   * than with the customer signing on their own site.
+   *
+   * That changes the close-out: the technician is asked WHO is collecting, and
+   * a courier gets a document with no prices on it. See
+   * `showsPricesOnCollectionDocument`.
+   */
+  readonly collectedOnCompletion: boolean;
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
   readonly accent: 'red' | 'blue' | 'green' | 'violet' | 'amber';
@@ -49,6 +67,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    capturesDeliveryNote: false,
+    collectedOnCompletion: false,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -62,6 +82,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    capturesDeliveryNote: false,
+    collectedOnCompletion: false,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -75,6 +97,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    capturesDeliveryNote: false,
+    collectedOnCompletion: false,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -90,6 +114,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: false,
     visitsSite: false,
     requiresOrderNumber: true,
+    capturesDeliveryNote: true,
+    collectedOnCompletion: true,
     defaultPriority: 'normal',
     accent: 'amber',
   },
@@ -104,6 +130,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    capturesDeliveryNote: true,
+    collectedOnCompletion: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },

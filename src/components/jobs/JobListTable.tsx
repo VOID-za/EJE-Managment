@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { JobListRow } from '@/application/job-view';
 import {
   Avatar,
+  Badge,
   Button,
   DataTable,
   Icon,
@@ -11,7 +12,12 @@ import {
   PriorityBadge,
   type Column,
 } from '@/components/ui';
-import { canAcceptJob, jobScheduleWindow } from '@/domain';
+import {
+  canAcceptJob,
+  currentRefusal,
+  jobScheduleWindow,
+  refusalAwaitingResolution,
+} from '@/domain';
 import { formatDate, isOverdue } from '@/lib/format';
 import { JobTypeChip } from './JobTypeChip';
 import { cn } from '@/lib/cn';
@@ -29,6 +35,14 @@ export interface JobListTableProps {
    * same either way.
    */
   readonly onAccept?: (row: JobListRow) => void;
+  /**
+   * Replaces the Scheduled column with the refusal and its date.
+   *
+   * For the office's refusal queue, where "when was this scheduled" is not the
+   * question — "when did the customer turn it away, and has anyone dealt with
+   * it" is.
+   */
+  readonly showRefusal?: boolean;
 }
 
 export const JobListTable = ({
@@ -37,6 +51,7 @@ export const JobListTable = ({
   emptyDescription,
   showTechnician = true,
   onAccept,
+  showRefusal = false,
 }: JobListTableProps) => {
   const router = useRouter();
 
@@ -83,8 +98,40 @@ export const JobListTable = ({
     {
       key: 'status',
       header: 'Status',
-      render: (row) => <JobStatusBadge status={row.job.status} size="sm" />,
+      render: (row) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <JobStatusBadge status={row.job.status} size="sm" />
+          {/* The exception, wherever the job is listed. The status stays what
+              it is — Review — and this says what happened at the signature. */}
+          {refusalAwaitingResolution(row.job) && (
+            <Badge tone="red" size="sm" dot>
+              Refused
+            </Badge>
+          )}
+        </div>
+      ),
     },
+    ...(showRefusal
+      ? [
+          {
+            key: 'refusal',
+            header: 'Refused',
+            secondary: true,
+            render: (row: JobListRow) => {
+              const refusal = currentRefusal(row.job);
+              if (refusal === null) return <span className="text-steel-400">—</span>;
+              return (
+                <div className="min-w-0">
+                  <span className="block text-sm whitespace-nowrap text-steel-700">
+                    {formatDate(refusal.recordedAt)}
+                  </span>
+                  <span className="block truncate text-xs text-steel-500">{refusal.reason}</span>
+                </div>
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: 'scheduled',
       header: 'Scheduled',

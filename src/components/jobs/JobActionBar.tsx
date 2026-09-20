@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
+  can,
   canAcceptJob,
   canCancelJob,
   canDeleteJob,
@@ -152,17 +153,40 @@ export const JobActionBar = ({
      * withholds the action — so the button says so too rather than promising a
      * submission it will not deliver. The job is still at Review either way.
      */
-    const awaitingMaster = refusalAwaitingResolution(job);
+    const awaitingResolution = refusalAwaitingResolution(job);
+    const canCorrect = can(currentUser.role, 'jobs.editSubmittedJob');
+
+    if (awaitingResolution && canCorrect) {
+      /*
+       * The office's way into a refused job card.
+       *
+       * It goes to the job's own tabs — the completion write-up, the captured
+       * work, the checklist, the photos — because correcting a job card is
+       * editing the job, not operating a separate editor. The refusal panel at
+       * the top of that screen is where it is then sent back for signature.
+       */
+      actions.push(
+        <Button
+          key="correct"
+          size="lg"
+          onClick={onCompleteJob}
+          leadingIcon={<Icon name="wrench" className="size-5" />}
+        >
+          Correct &amp; resubmit
+        </Button>,
+      );
+    }
+
     actions.push(
       <Button
         key="review"
         size="lg"
-        variant={awaitingMaster ? 'secondary' : 'primary'}
+        variant={awaitingResolution ? 'secondary' : 'primary'}
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
-        leadingIcon={<Icon name={awaitingMaster ? 'warning' : 'document'} className="size-5" />}
+        leadingIcon={<Icon name={awaitingResolution ? 'warning' : 'document'} className="size-5" />}
       >
-        {awaitingMaster
-          ? 'Signature refusal — awaiting Master resolution'
+        {awaitingResolution
+          ? 'Signature refusal — awaiting resolution'
           : 'Review & submit job card'}
       </Button>,
     );

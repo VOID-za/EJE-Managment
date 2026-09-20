@@ -45,6 +45,8 @@ export interface NewJobInput {
   readonly faultDescription: string;
   readonly primaryTechnicianId: UserId | null;
   readonly courierCollection: boolean;
+  /** The customer's own delivery note reference. Optional, and often blank. */
+  readonly deliveryNote: string;
 }
 
 export const createJob = async (
@@ -120,11 +122,19 @@ export const createJob = async (
     completionReport: emptyCompletionReport(),
     checklist: null,
     signature: null,
-    signatureRefusal: null,
+    signatureRefusals: [],
     awaitingSparesReason: '',
     // A call-out fee is a per-job commercial decision, applied on the job card.
     calloutApplied: false,
-    courierCollection: input.jobType === 'parts' ? input.courierCollection : false,
+    // Offered on the job types whose work is collected from the counter; false
+    // everywhere else, where nobody collects anything.
+    courierCollection: getJobTypeDefinition(input.jobType).collectedOnCompletion
+      ? input.courierCollection
+      : false,
+    waybillNumber: '',
+    deliveryNote: getJobTypeDefinition(input.jobType).capturesDeliveryNote
+      ? input.deliveryNote.trim()
+      : '',
     pricingSnapshot: null,
     finalDocument: null,
     delivery: null,

@@ -64,8 +64,6 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
           <p className="font-mono text-2xl font-bold text-steel-900">
             {model.jobNumber}
           </p>
-          <p className="mt-1 text-xs text-steel-500">{model.jobMeta}</p>
-          <p className="text-xs text-steel-500">{model.statusLine}</p>
         </div>
       </header>
 

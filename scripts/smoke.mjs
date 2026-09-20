@@ -36,12 +36,20 @@ page.on('console', (msg) => {
 page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
 
 const step = async (name, fn) => {
+  const before = errors.length;
   try {
     await fn();
     log(`PASS  ${name}`);
   } catch (e) {
     log(`FAIL  ${name} :: ${e.message}`);
     errors.push(`${name}: ${e.message}`);
+  }
+  // Attribute any console or page error to the step that provoked it, so a
+  // summary line is something a person can act on rather than hunt for.
+  for (let index = before; index < errors.length; index += 1) {
+    if (/^(console|pageerror):/.test(errors[index])) {
+      errors[index] = `${errors[index]}  [during: ${name}]`;
+    }
   }
 };
 
@@ -229,15 +237,65 @@ await step('Complete job opens the guided close-out, not just a status change', 
   await page.screenshot({ path: `${shots}/03-wizard-completion.png`, fullPage: false });
 });
 
-await step('a breakdown is given no checklist step', async () => {
+await step('a breakdown is given no checklist step, and no collection step', async () => {
   const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
   const names = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').trim(),
   );
-  if (names.length !== 3) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  // Completion, Review, Customer signature, Signed. A breakdown has no
+  // checklist, and nobody collects it from a counter.
+  if (names.length !== 4) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
   if (names.some((name) => /checklist/i.test(name))) {
     throw new Error('a breakdown was given a checklist step');
   }
+  if (names.some((name) => /collection/i.test(name))) {
+    throw new Error('a breakdown was given a collection step');
+  }
+});
+
+await step('the completion step carries the job photographs', async () => {
+  // The existing photo panel, in the close-out, so a technician never has to
+  // leave the sequence to attach what they took on site.
+  const add = page.getByRole('button', { name: 'Add photo', exact: true });
+  await add.waitFor({ timeout: 10000 });
+  await page.getByText('No photos attached').first().waitFor({ timeout: 8000 });
+
+  for (const caption of ['Failed cooling fan, as found', 'New fan fitted and running']) {
+    await add.click();
+    const dialog = page.getByRole('dialog');
+    await dialog.waitFor({ timeout: 8000 });
+    await dialog.getByLabel('Caption').fill(caption);
+    await dialog.getByRole('button', { name: 'Attach photo' }).click();
+    await page.getByText(caption).first().waitFor({ timeout: 10000 });
+  }
+
+  // Both of them, with a preview tile each.
+  await page.getByRole('heading', { name: /^Photos/ }).first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/31-wizard-photos.png`, fullPage: false });
+});
+
+await step('a photograph taken by mistake can be removed before signature', async () => {
+  await page
+    .getByRole('button', { name: 'Remove New fan fitted and running' })
+    .click({ timeout: 10000 });
+  await page.getByText('New fan fitted and running').first().waitFor({
+    state: 'detached',
+    timeout: 10000,
+  });
+
+  // The one that was right is still there.
+  await page.getByText('Failed cooling fan, as found').first().waitFor({ timeout: 8000 });
+});
+
+await step('the photographs are on the job, not only in the wizard', async () => {
+  // Same attachment system: the close-out writes to the job's own photo panel.
+  await page.getByRole('button', { name: 'Leave the wizard' }).click();
+  await page.getByRole('tab', { name: 'Photos' }).click();
+  await page.getByText('Failed cooling fan, as found').first().waitFor({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await page.getByRole('button', { name: 'Continue completing' }).click();
+  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 15000 });
 });
 
 await step('the three non-functional blocks are gone from the completion step', async () => {
@@ -282,6 +340,19 @@ await step('Back keeps everything that was entered', async () => {
   await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
 });
 
+await step('the review step shows the real job card PDF', async () => {
+  // The same renderer that produces the issued document, in the browser's own
+  // PDF viewer — not an HTML lookalike.
+  const frame = page.locator('iframe[title$="job card preview"]');
+  await frame.waitFor({ timeout: 20000 });
+  await page.getByText('Preview — not yet issued').first().waitFor({ timeout: 8000 });
+  const src = await frame.getAttribute('src');
+  if (src === null || !src.startsWith('blob:')) {
+    throw new Error(`the preview is not a rendered document (src=${src})`);
+  }
+  await page.screenshot({ path: `${shots}/23-review-pdf.png`, fullPage: false });
+});
+
 await step('the signature step carries the declaration exactly once', async () => {
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 15000 });
@@ -308,6 +379,20 @@ await step('capture signature', async () => {
   await page.mouse.up();
 
   await page.getByRole('button', { name: 'Confirm signature' }).click();
+  // Onto the signed document, which is the last thing the technician sees.
+  await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 20000 });
+});
+
+await step('the signed document is shown before anything is submitted', async () => {
+  await page.getByRole('heading', { name: 'Signed', exact: true }).waitFor({ timeout: 10000 });
+  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+  // There is no way back past a signature.
+  if ((await page.getByRole('button', { name: 'Back' }).count()) !== 0) {
+    throw new Error('the wizard offered to go back behind a captured signature');
+  }
+  await page.screenshot({ path: `${shots}/24-signed-preview.png`, fullPage: false });
+
+  await page.getByRole('button', { name: 'Continue to submission' }).click();
   await page.waitForURL('**/review', { timeout: 15000 });
 });
 
@@ -430,7 +515,7 @@ await step('confirming the delivery is what closes the job', async () => {
 /*
  * The customer who would not sign.
  *
- * EJE-1059 is taken through the same close-out as EJE-1048 was, except that at
+ * A second job is taken through the same close-out as EJE-1048 was, except that at
  * the signature step the technician records a refusal instead. The point of
  * running it in a browser is the half of the rule that is not in the domain
  * tests: that the two outcomes are one choice on one screen, that the signature
@@ -439,39 +524,43 @@ await step('confirming the delivery is what closes the job', async () => {
  */
 const REFUSAL_REASON = 'Site manager left before the work was finished and nobody else would sign.';
 
-await step('a second job is taken to the signature step (EJE-1059)', async () => {
-  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: 'EJE-1059' }).waitFor({ timeout: 10000 });
+/** EJE-1061 is a breakdown already in progress, worked by Sipho. */
+const REFUSED_JOB = 'EJE-1061';
 
-  await page.getByRole('button', { name: 'Accept job' }).click();
-  await page.getByRole('button', { name: 'Accept and start' }).click();
-  // Whatever the site-location prompt offers, decline it: this journey is
-  // about the signature, not the location.
-  const decline = page.getByRole('button', { name: 'No, Thanks' });
-  if ((await decline.count()) > 0) await decline.click({ timeout: 10000 });
+await step(`a second job is taken to the signature step (${REFUSED_JOB})`, async () => {
+  // Worked by Riaan, which is what makes the privacy rule testable: Sipho and
+  // Lerato have no business reading what this customer said.
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Riaan van Wyk/ }).click();
+  await page.waitForURL('**/dashboard', { timeout: 15000 });
+
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: REFUSED_JOB }).waitFor({ timeout: 10000 });
 
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
   await page.getByRole('button', { name: 'Add labour' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: '2', exact: true }).click();
-  await page.getByLabel('Description of work').fill('Tested and repaired the spindle drive');
+  await page.getByLabel('Description of work').fill('Traced and repaired the axis fault');
   await page.getByRole('button', { name: 'Add labour' }).last().click();
-  await page.getByText('Tested and repaired the spindle drive').waitFor({ timeout: 8000 });
+  await page.getByText('Traced and repaired the axis fault').waitFor({ timeout: 8000 });
 
   await page.getByRole('tab', { name: 'Completion' }).click();
   await page.getByLabel(/Work performed/).fill(
-    'Bench tested the spindle drive, replaced the encoder coupling and re-ran the axis.',
+    'Traced the axis fault to a failed contactor, replaced it and re-ran the machine.',
   );
   await page.getByRole('button', { name: 'Save write-up' }).click();
   await page.getByText('Saved').first().waitFor({ timeout: 8000 });
 
   await page.getByRole('tab', { name: 'Overview' }).click();
   await page.getByRole('button', { name: 'Complete job' }).click();
-  await page.getByText('Step 1 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 3 of 4', { exact: false }).waitFor({ timeout: 15000 });
 });
 
 await step('the signature step opens on the signature, not on the refusal', async () => {
@@ -534,9 +623,9 @@ await step('a short but real reason is accepted', async () => {
 await step('Back keeps the refusal and its reason', async () => {
   await page.getByLabel(/Customer refusal reason/).fill(REFUSAL_REASON);
   await page.getByRole('button', { name: 'Back' }).click();
-  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 10000 });
+  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 10000 });
+  await page.getByText('Step 3 of 4', { exact: false }).waitFor({ timeout: 10000 });
 
   const toggle = page.getByRole('checkbox', { name: /Customer refused to sign/ });
   if (!(await toggle.isChecked())) throw new Error('going back lost the refusal');
@@ -568,16 +657,16 @@ await step('recording the refusal finishes the close-out', async () => {
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
 });
 
-await step('the job card is held until a Master resolves the refusal', async () => {
-  await page.getByText('Awaiting Master resolution').first().waitFor({ timeout: 10000 });
+await step('the job card is held until the office resolves the refusal', async () => {
+  await page.getByText('Awaiting resolution').first().waitFor({ timeout: 10000 });
   if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
     throw new Error('an unresolved refusal could still be issued');
   }
 
   // And the job screen does not promise a submission it cannot deliver.
-  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
   await page
-    .getByRole('button', { name: 'Signature refusal — awaiting Master resolution' })
+    .getByRole('button', { name: 'Signature refusal — awaiting resolution' })
     .waitFor({ timeout: 10000 });
   if ((await page.getByRole('button', { name: /Review & submit/ }).count()) !== 0) {
     throw new Error('the job still offered to submit an unresolved refusal');
@@ -585,7 +674,7 @@ await step('the job card is held until a Master resolves the refusal', async () 
 });
 
 await step('the refusal shows on the job as an exception, not a seventh stage', async () => {
-  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
   await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
 
@@ -612,10 +701,60 @@ await step('the refusal is on the job activity trail', async () => {
   });
 });
 
-await step('a technician cannot resolve their own refusal', async () => {
-  if ((await page.getByRole('button', { name: 'Record Resolution' }).count()) !== 0) {
-    throw new Error('a technician was offered the Master resolution');
+await step('a technician cannot resolve or correct their own refusal', async () => {
+  for (const forbidden of [
+    'Record Resolution',
+    'Resubmit for customer signature',
+    'Issue without a signature',
+    'Correct & resubmit',
+  ]) {
+    if ((await page.getByRole('button', { name: forbidden }).count()) !== 0) {
+      throw new Error(`a technician was offered "${forbidden}"`);
+    }
   }
+});
+
+await step('another technician cannot see the refusal at all', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
+  await page.waitForURL('**/dashboard', { timeout: 15000 });
+
+  // Straight at the job by its URL, which is the only way she could get there.
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: REFUSED_JOB }).waitFor({ timeout: 10000 });
+  const body = await page.locator('main').innerText();
+
+  for (const leaked of [REFUSAL_REASON, 'Customer refused to sign', 'Awaiting resolution']) {
+    if (body.includes(leaked)) {
+      throw new Error(`another technician was shown "${leaked}" on somebody else's job`);
+    }
+  }
+  // Not a hidden panel: the rail itself carries no exception, because the job
+  // she was handed has no refusals on it.
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).join(' | ');
+  if (/refused/i.test(names)) throw new Error(`the rail leaked the refusal: ${names}`);
+
+  // And no global refusal count on her dashboard.
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const dashboard = await page.locator('main').innerText();
+  if (/Customer Signature Refusals/i.test(dashboard)) {
+    throw new Error('a technician was given the global refusal count');
+  }
+});
+
+await step('the submitting technician still sees their own refusal', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Riaan van Wyk/ }).click();
+  await page.waitForURL('**/dashboard', { timeout: 15000 });
+
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
+  await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
 });
 
 await step('sign in as a Master for the office journey', async () => {
@@ -630,17 +769,17 @@ await step('the Master is notified that the customer refused to sign', async () 
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
   const card = page
     .locator('main li')
-    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .filter({ hasText: `${REFUSED_JOB} — customer refused to sign` })
     .first();
   await card.waitFor({ timeout: 10000 });
 
   const body = await card.innerText();
   for (const expected of [
-    'EJE-1059',
+    REFUSED_JOB,
     'Customer:',
     'Site:',
     'Machine:',
-    'Technician: Sipho Mahlangu',
+    'Technician: Riaan van Wyk',
     REFUSAL_REASON,
   ]) {
     if (!body.includes(expected)) throw new Error(`the notification omits "${expected}"`);
@@ -651,54 +790,159 @@ await step('the Master is notified that the customer refused to sign', async () 
 await step('the notification opens the job it is about', async () => {
   await page
     .locator('main li')
-    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .filter({ hasText: `${REFUSED_JOB} — customer refused to sign` })
     .first()
     .getByRole('button', { name: /Open/ })
     .first()
     .click();
-  await page.waitForURL('**/jobs/EJE-1059', { timeout: 10000 });
+  await page.waitForURL(`**/jobs/${REFUSED_JOB}`, { timeout: 10000 });
 });
 
 await step('the Master sees the refusal, the reason, who took it and when', async () => {
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
   await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
   const panel = await page.locator('main').innerText();
-  for (const expected of ['Recorded by', 'Sipho Mahlangu', 'Recorded', 'Awaiting Master resolution']) {
+  for (const expected of ['Recorded by', 'Riaan van Wyk', 'Recorded', 'Awaiting resolution']) {
     if (!panel.includes(expected)) throw new Error(`the refusal panel omits "${expected}"`);
   }
 });
 
 await step('the Master still sees the whole job behind the exception', async () => {
-  // The exception does not replace the record: the write-up, the captured work
-  // and the history are all still there to judge the refusal against.
+  // The exception does not replace the record: the write-up, the captured work,
+  // the photographs and the history are all there to judge the refusal against.
   await page.getByRole('tab', { name: 'Completion' }).click();
-  await page.getByText('Bench tested the spindle drive', { exact: false }).first().waitFor({
+  await page.getByText('Traced the axis fault', { exact: false }).first().waitFor({
     timeout: 8000,
   });
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
-  await page.getByText('Tested and repaired the spindle drive').first().waitFor({ timeout: 8000 });
+  await page.getByText('Traced and repaired the axis fault').first().waitFor({ timeout: 8000 });
+  await page.getByRole('tab', { name: 'Photos' }).click();
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
 });
 
-await step('the Master records the resolution, and it is audited', async () => {
-  await page.getByLabel('Master decision').fill('Spoke to the customer, who confirmed the work.');
-  await page.getByRole('button', { name: 'Record Resolution' }).click();
-  await page.getByText('Resolved', { exact: true }).first().waitFor({ timeout: 10000 });
+await step('the Master corrects the job card through the same panels', async () => {
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Correct & resubmit' }).click();
+  await page.getByText('Step 1 of 2', { exact: false }).waitFor({ timeout: 15000 });
+
+  // The office correction ends at the review, not at a signature: EJE does not
+  // sign on the customer's behalf.
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
+  );
+  // Completion and Review. A breakdown has no checklist, and the office does
+  // not take the signature.
+  if (names.length !== 2) throw new Error(`${names.length} correction steps: ${names.join(' | ')}`);
+  if (names.some((name) => /signature/i.test(name))) {
+    throw new Error(`the office was offered the signature pad: ${names.join(' | ')}`);
+  }
+
+  // The technician's own write-up, in the technician's own panel.
+  const writeUp = await page.getByLabel(/Work performed/).inputValue();
+  if (!writeUp.includes('Traced the axis fault')) {
+    throw new Error('the correction did not open on the captured write-up');
+  }
+  await page.getByLabel(/Work performed/).fill(
+    'Traced the axis fault to a failed contactor, replaced it and re-ran the machine. One hour on site.',
+  );
+  await page.getByRole('button', { name: 'Save write-up' }).click();
+  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/26-correct-and-resubmit.png`, fullPage: false });
+});
+
+await step('the corrected job card is previewed, then returned for signature', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 2', { exact: false }).waitFor({ timeout: 15000 });
+  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'Resubmit for customer signature' }).click();
+  await page.getByText('Customer Signature').first().waitFor({ timeout: 15000 });
+});
+
+await step('the corrected job is back at Customer Signature, with the history kept', async () => {
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  const body = await page.locator('main').innerText();
+
+  // Resolved, not deleted: the refusal and what was decided about it stay.
+  if (!body.includes('Resolved')) throw new Error('the refusal is not shown as resolved');
+  if (!body.includes(REFUSAL_REASON)) throw new Error('the original refusal reason was lost');
+  if (!/Corrected and returned for signature/.test(body)) {
+    throw new Error('the outcome of the refusal is not recorded on the job');
+  }
+
+  // Back at the signature stage, and the rail is still six.
+  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
+  );
+  if (names.length !== 6) throw new Error(`the rail has ${names.length} stages`);
+  if (/master review/i.test(names.join(' '))) throw new Error('Master Review came back');
 
   await page.getByRole('tab', { name: 'Activity' }).click();
-  await page.getByText('Signature refusal resolved').first().waitFor({ timeout: 8000 });
-  await page
-    .getByText('Spoke to the customer, who confirmed the work.', { exact: false })
-    .first()
-    .waitFor({ timeout: 8000 });
+  await page.getByText('Corrected job card returned for customer signature').first().waitFor({
+    timeout: 8000,
+  });
+  await page.getByText('Job card corrected by the office').first().waitFor({ timeout: 8000 });
+});
+
+await step('the dashboard refusal count clears once it is dealt with', async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const tile = page.locator('main a, main div').filter({ hasText: 'Customer Signature Refusals' }).last();
+  await tile.waitFor({ timeout: 10000 });
+  if (!/Requires attention/.test(await tile.innerText())) {
+    throw new Error('the refusal tile does not say what it is for');
+  }
+  // Resolved by returning it for signature, so it is out of the queue.
+  if (!/\b0\b/.test(await tile.innerText())) {
+    throw new Error(`the refusal count did not clear: ${await tile.innerText()}`);
+  }
+});
+
+await step('the customer signs the corrected job card', async () => {
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Capture signature' }).click();
+  // The close-out opens at the start, as it always does: the corrected card is
+  // there to be checked again before it is put in front of the customer.
+  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 4', { exact: false }).waitFor({ timeout: 15000 });
+
+  await page.getByLabel('Customer name').fill('Gerhard');
+  await page.getByLabel('Customer surname').fill('Smit');
+  const pad = page.locator('div.touch-none').first();
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 60, box.y + 110);
+  await page.mouse.down();
+  for (let i = 0; i < 20; i += 1) {
+    await page.mouse.move(box.x + 60 + i * 14, box.y + 110 - Math.sin(i / 2) * 35);
+  }
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Confirm signature' }).click();
+
+  await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue to submission' }).click();
+  await page.waitForURL('**/review', { timeout: 15000 });
+});
+
+await step('the signed corrected card carries no refusal block', async () => {
+  // The DOCUMENT, not the page: the office's refusal panel above it is EJE's
+  // own record and is supposed to be there.
+  const card = await page.locator('article').first().innerText();
+  if (/CUSTOMER REFUSED TO SIGN/i.test(card)) {
+    throw new Error('the signed job card still shows the refusal to the customer');
+  }
+  if (!card.includes('Gerhard')) throw new Error('the signature is not on the job card');
 });
 
 await step('the resolved refusal is no longer outstanding in the inbox', async () => {
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
   const outstanding = await page
     .locator('main li')
-    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .filter({ hasText: `${REFUSED_JOB} — customer refused to sign` })
     .count();
   if (outstanding !== 0) {
     throw new Error('the refusal is still in the inbox after it was reviewed');
@@ -707,47 +951,53 @@ await step('the resolved refusal is no longer outstanding in the inbox', async (
   await page.getByRole('tab', { name: /Handled/ }).click();
   await page
     .locator('main li')
-    .filter({ hasText: 'EJE-1059 — customer refused to sign' })
+    .filter({ hasText: `${REFUSED_JOB} — customer refused to sign` })
     .first()
     .waitFor({ timeout: 10000 });
 });
 
 await step('the resolved job card can now be issued', async () => {
-  await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}/review`, { waitUntil: 'networkidle' });
   await page.getByText('Ready to submit').waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'Submit job card' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 8000 });
   await page.getByRole('button', { name: 'Submit job card' }).last().click();
-  await page.getByText('EJE-1059-Final-Job-Card.pdf').first().waitFor({ timeout: 20000 });
+  await page.getByText(`${REFUSED_JOB}-Final-Job-Card.pdf`).first().waitFor({ timeout: 20000 });
 });
 
-await step('the refused job card carries no signature, and says why', async () => {
-  const card = await page.locator('main').innerText();
-  if (!/CUSTOMER REFUSED TO SIGN|Customer refused to sign/i.test(card)) {
-    throw new Error('the issued job card does not say the customer refused');
+await step('the issued card carries the signature the customer eventually gave', async () => {
+  const card = await page.locator('article').first().innerText();
+  // Refused once, corrected, signed. The document the customer receives is the
+  // one they signed — the earlier refusal is EJE's record, not their paperwork.
+  if (!card.includes('Gerhard')) throw new Error('the signature is not on the issued card');
+  if (/CUSTOMER REFUSED TO SIGN/i.test(card)) {
+    throw new Error('the signed job card still shows the refusal to the customer');
   }
-  if (card.includes('I confirm that the work described above has been completed.')) {
-    throw new Error('the refused job card carries the acceptance declaration');
-  }
-  await page.screenshot({ path: `${shots}/22-refusal-job-card.png`, fullPage: false });
+  await page.screenshot({ path: `${shots}/22-corrected-job-card.png`, fullPage: false });
 });
 
 await step('confirming delivery closes the refused job too', async () => {
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
-  const entry = page.locator('main li').filter({ hasText: 'EJE-1059' }).first();
+  const entry = page.locator('main li').filter({ hasText: REFUSED_JOB }).first();
   await entry.waitFor({ timeout: 10000 });
   await entry.getByRole('button', { name: 'Confirm delivered' }).first().click();
 
-  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
   await page.getByText('Read-only — this job is closed', { exact: false }).first().waitFor({
     timeout: 15000,
   });
-  // And the refusal is still exactly what was recorded on site.
+  // And the refusal history is still exactly what was recorded on site: the
+  // customer's eventual signature does not erase the first refusal.
   await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
 });
 
 await step('no Master Review appeared anywhere along the refusal route', async () => {
-  for (const path of ['/jobs', '/jobs/EJE-1059', '/jobs/EJE-1059/review', '/notifications']) {
+  for (const path of [
+    '/jobs',
+    `/jobs/${REFUSED_JOB}`,
+    `/jobs/${REFUSED_JOB}/review`,
+    '/notifications',
+  ]) {
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
     const body = await page.locator('main').innerText();
     if (/master review/i.test(body)) throw new Error(`Master Review is on ${path}`);
@@ -768,9 +1018,9 @@ await step('checklist blocks signature until complete (EJE-1053 service job)', a
   // The gate now lives inside the guided close-out: a service job gets a
   // Checklist step, and Continue stays shut until the checklist is done.
   await page.getByRole('button', { name: 'Continue completing' }).click();
-  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 2 of 5', { exact: false }).waitFor({ timeout: 15000 });
 
   const cont = page.getByRole('button', { name: 'Continue' });
   if (!(await cont.isDisabled())) {
@@ -850,22 +1100,42 @@ await step('accepting a Parts job does NOT offer the site location', async () =>
 
 await step('the collector, not the customer, signs for parts', async () => {
   await page.getByRole('button', { name: 'Complete job' }).click();
-  await page.getByText('Step 1 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 15000 });
 
-  // A collection has no checklist, so the guided close-out is three steps.
+  // A collection has no checklist, but it IS asked who is collecting.
   const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
   const names = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
   );
-  if (names.length !== 3) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  if (names.length !== 5) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  if (!names.includes('Collection')) {
+    throw new Error(`the collection was given no collection step: ${names.join(' | ')}`);
+  }
   if (!names.includes('Collector signature')) {
     throw new Error(`the collection was sent to the wrong signatory: ${names.join(' | ')}`);
   }
 
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByText('Step 2 of 5', { exact: false }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 15000 });
+
+  // Step 3 — who is collecting. Customer collection is the default, and needs
+  // no waybill.
+  await page.getByText('Step 3 of 5', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('heading', { name: 'How is this being collected?' }).waitFor({
+    timeout: 8000,
+  });
+  const customerChoice = page.getByRole('button', { name: /Customer collection/ });
+  if ((await customerChoice.getAttribute('aria-pressed')) !== 'true') {
+    throw new Error('customer collection was not the default for EJE-1064');
+  }
+  if ((await page.getByLabel('Waybill number').count()) !== 0) {
+    throw new Error('a customer collection was asked for a waybill');
+  }
+  await page.screenshot({ path: `${shots}/25-collection-type.png`, fullPage: false });
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 4 of 5', { exact: false }).waitFor({ timeout: 15000 });
 
   await page.getByRole('heading', { name: 'Collector acknowledgement' }).waitFor({ timeout: 8000 });
   await page.getByText('I confirm that I have collected the parts listed above.').waitFor();
@@ -892,10 +1162,159 @@ await step('capturing the collector signature produces a collection note', async
   await page.mouse.up();
 
   await page.getByRole('button', { name: 'Confirm collection' }).click();
+  await page.getByText('Step 5 of 5', { exact: false }).waitFor({ timeout: 20000 });
+  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue to submission' }).click();
+
   await page.waitForURL('**/review', { timeout: 10000 });
   await page.getByText('Parts Collection Note').first().waitFor({ timeout: 8000 });
   await page.getByText('OKA-WW-320').first().waitFor({ timeout: 8000 });
   await page.getByText('Thabo').first().waitFor({ timeout: 8000 });
+});
+
+/*
+ * A workshop repair collected by a courier.
+ *
+ * The commercial rule in a browser: a driver collecting on the customer's
+ * behalf is handed a document with no prices on it, and cannot be handed one at
+ * all without a waybill number. EJE-1059 is a Test & Repair, which is now
+ * collected from the counter exactly as parts are.
+ */
+await step('a Test & Repair offers a delivery note when the job is raised', async () => {
+  await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'New Job' }).first().waitFor({ timeout: 15000 });
+
+  // Nothing on a breakdown, which nobody collects and which has no delivery note.
+  if ((await page.getByLabel('Delivery note').count()) !== 0) {
+    throw new Error('a breakdown was offered a delivery note');
+  }
+  if ((await page.getByText('Courier Collection').count()) !== 0) {
+    throw new Error('a breakdown was offered a courier collection');
+  }
+
+  await page.getByLabel('Job type').selectOption('test_and_repair');
+  await page.getByLabel('Delivery note').waitFor({ timeout: 8000 });
+  await page.getByText('Courier Collection').first().waitFor({ timeout: 8000 });
+
+  // And on a parts collection too, which is the other thing collected.
+  await page.getByLabel('Job type').selectOption('parts');
+  await page.getByLabel('Delivery note').waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/27-new-job-delivery-note.png`, fullPage: false });
+});
+
+await step('a Test & Repair is worked and taken to its collection step', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1059' }).waitFor({ timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  const decline = page.getByRole('button', { name: 'No, Thanks' });
+  if ((await decline.count()) > 0) await decline.click({ timeout: 10000 });
+
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await page.getByLabel('Description of work').fill('Bench tested the spindle drive');
+  await page.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByText('Bench tested the spindle drive').waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  await page.getByLabel(/Work performed/).fill(
+    'Bench tested the spindle drive and replaced the encoder coupling.',
+  );
+  await page.getByRole('button', { name: 'Save write-up' }).click();
+  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 5', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 5', { exact: false }).waitFor({ timeout: 15000 });
+});
+
+await step('a courier collection will not continue without a waybill', async () => {
+  await page.getByRole('button', { name: /Courier collection/ }).click();
+  await page.getByLabel('Waybill number').waitFor({ timeout: 8000 });
+
+  const cont = page.getByRole('button', { name: 'Continue' });
+  if (!(await cont.isDisabled())) {
+    throw new Error('a courier collection continued with no waybill number');
+  }
+  await page.getByLabel('Waybill number').fill('   ');
+  if (!(await cont.isDisabled())) {
+    throw new Error('whitespace was accepted as a waybill number');
+  }
+
+  await page.getByLabel('Waybill number').fill('DAW-4471');
+  if (await cont.isDisabled()) throw new Error('a valid waybill was still refused');
+  await page.screenshot({ path: `${shots}/28-courier-collection.png`, fullPage: false });
+});
+
+await step('the waybill sits immediately above the courier signature pad', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 4 of 5', { exact: false }).waitFor({ timeout: 15000 });
+
+  const waybill = page.getByLabel('Waybill number');
+  await waybill.waitFor({ timeout: 8000 });
+  if ((await waybill.inputValue()) !== 'DAW-4471') {
+    throw new Error('the waybill did not carry through to the signature step');
+  }
+
+  // Measured, not assumed: the waybill is the last thing above the pad.
+  const pad = page.locator('div.touch-none').first();
+  const padBox = await pad.boundingBox();
+  const waybillBox = await waybill.boundingBox();
+  if (waybillBox.y >= padBox.y) {
+    throw new Error('the waybill is not above the signature pad');
+  }
+  const surname = await page.getByLabel('Collector surname').boundingBox();
+  if (waybillBox.y <= surname.y) {
+    throw new Error('the waybill is not immediately above the pad, below the name fields');
+  }
+  await page.screenshot({ path: `${shots}/29-waybill-above-signature.png`, fullPage: false });
+});
+
+await step('the courier signs, and the document carries no prices', async () => {
+  await page.getByLabel('Collector name').fill('Johan');
+  await page.getByLabel('Collector surname').fill('Pretorius');
+
+  const pad = page.locator('div.touch-none').first();
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 60, box.y + 110);
+  await page.mouse.down();
+  for (let i = 0; i < 20; i += 1) {
+    await page.mouse.move(box.x + 60 + i * 14, box.y + 110 - Math.sin(i / 2) * 35);
+  }
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Confirm collection' }).click();
+
+  await page.getByText('Step 5 of 5', { exact: false }).waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue to submission' }).click();
+  await page.waitForURL('**/review', { timeout: 15000 });
+
+  const card = await page.locator('article').first().innerText();
+  // What the courier must see.
+  for (const expected of ['Courier collection', 'DAW-4471', 'Johan']) {
+    if (!card.includes(expected)) throw new Error(`the courier document omits "${expected}"`);
+  }
+  // What the courier must NOT see. "VAT" alone is EJE's own registration
+  // number in the letter head, so the charges block itself is what is checked.
+  for (const forbidden of ['VAT @', 'Subtotal', 'Total']) {
+    if (card.includes(forbidden)) {
+      throw new Error(`the courier document shows "${forbidden}"`);
+    }
+  }
+  await page.screenshot({ path: `${shots}/30-courier-document.png`, fullPage: false });
+});
+
+await step('the same job still holds its prices internally', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
+  // Withheld from the courier's copy; never deleted from the job.
+  await page.getByText(/R\u00a0[\d\u00a0]+,\d\d/).first().waitFor({ timeout: 8000 });
 });
 
 await step('a customer collection note SHOWS prices', async () => {

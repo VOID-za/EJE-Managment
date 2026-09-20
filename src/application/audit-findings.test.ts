@@ -176,6 +176,7 @@ describe('raising a job is an operation, not a screen', () => {
     faultDescription: 'Spindle alarm.',
     primaryTechnicianId: null,
     courierCollection: false,
+    deliveryNote: '',
   };
 
   it('refuses a technician raising one, at the service layer', async () => {

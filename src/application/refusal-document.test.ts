@@ -14,7 +14,7 @@ import { loadJobView } from './job-view';
 import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
 import { buildJobCardModel } from '@/lib/job-card/model';
 import { inspectPdf, pdfPlainText } from '@/lib/pdf/inspect';
-import type { Job } from '@/domain';
+import { currentRefusal, type Job } from '@/domain';
 
 /**
  * What a refused job card actually says on paper.
@@ -141,10 +141,12 @@ describe('the issued document for a refused job card', () => {
      */
     await harness.repos.jobs.save({
       ...issued,
-      signatureRefusal: {
-        ...issued.signatureRefusal!,
-        reason: 'A completely different reason, written afterwards.',
-      },
+      signatureRefusals: [
+        {
+          ...currentRefusal(issued)!,
+          reason: 'A completely different reason, written afterwards.',
+        },
+      ],
     });
 
     const after = await loadFinalDocumentFile(harness.as(master), 'EJE-1048');
@@ -156,7 +158,7 @@ describe('the issued document for a refused job card', () => {
     expect(issued.status).toBe('closed');
     expect(issued.finalDocument).not.toBeNull();
     expect(issued.signature).toBeNull();
-    expect(issued.signatureRefusal?.reason).toBe(REASON);
+    expect(currentRefusal(issued)?.reason).toBe(REASON);
   });
 
   it('emailed the customer once, with the stored document', async () => {
@@ -196,15 +198,18 @@ describe('the model both renderers read', () => {
     const model = await modelFor('EJE-1044', {
       ...view!.job,
       signature: null,
-      signatureRefusal: {
-        refused: true,
-        reason: REASON,
-        recordedBy: technician.id,
-        recordedAt: '2026-09-18T09:00:00.000Z',
-        acknowledgedBy: null,
-        acknowledgedAt: null,
-        acknowledgementNote: '',
-      },
+      signatureRefusals: [
+        {
+          refused: true,
+          reason: REASON,
+          recordedBy: technician.id,
+          recordedAt: '2026-09-18T09:00:00.000Z',
+          resolvedBy: null,
+          resolvedAt: null,
+          resolution: null,
+          resolutionNote: '',
+        },
+      ],
     });
 
     expect(model.refusal).not.toBeNull();
@@ -235,15 +240,18 @@ describe('the model both renderers read', () => {
     const model = await modelFor('EJE-1062', {
       ...view!.job,
       signature: null,
-      signatureRefusal: {
-        refused: true,
-        reason: 'The driver would not sign for the goods.',
-        recordedBy: technician.id,
-        recordedAt: '2026-09-18T09:00:00.000Z',
-        acknowledgedBy: null,
-        acknowledgedAt: null,
-        acknowledgementNote: '',
-      },
+      signatureRefusals: [
+        {
+          refused: true,
+          reason: 'The driver would not sign for the goods.',
+          recordedBy: technician.id,
+          recordedAt: '2026-09-18T09:00:00.000Z',
+          resolvedBy: null,
+          resolvedAt: null,
+          resolution: null,
+          resolutionNote: '',
+        },
+      ],
     });
     expect(model.refusal?.heading).toBe('Collector refused to sign');
   });

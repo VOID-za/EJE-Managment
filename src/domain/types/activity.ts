@@ -16,6 +16,8 @@ export type ActivityEventType =
   | 'technician_removed'
   | 'note_added'
   | 'photo_uploaded'
+  /** An attachment taken off the job, and by whom. */
+  | 'photo_removed'
   | 'labour_added'
   | 'travel_added'
   | 'part_added'
@@ -28,8 +30,14 @@ export type ActivityEventType =
   | 'customer_signed'
   /** The customer would not sign, and why. The other outcome of that stage. */
   | 'customer_refused_to_sign'
-  /** A Master resolved the refusal, which is what releases the job card. */
+  /** The office resolved the refusal, which is what releases the job card. */
   | 'signature_refusal_resolved'
+  /** A corrected job card went back to the customer to be signed again. */
+  | 'returned_for_customer_signature'
+  /** The office corrected a job card the technician had already submitted. */
+  | 'job_card_corrected'
+  /** Who is collecting, which decides whether the document carries prices. */
+  | 'collection_method_set'
   | 'pdf_generated'
   | 'job_submitted'
   /**

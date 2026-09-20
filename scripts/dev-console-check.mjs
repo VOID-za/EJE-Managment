@@ -80,11 +80,11 @@ await step('drive a job through to the signature screen', async () => {
   await page.getByRole('tab', { name: 'Overview' }).click();
   // Complete job opens the guided close-out, and the signature is its last step.
   await page.getByRole('button', { name: 'Complete job' }).click();
-  await page.getByText('Step 1 of 3', { exact: false }).waitFor({ timeout: 30000 });
+  await page.getByText('Step 1 of 4', { exact: false }).waitFor({ timeout: 30000 });
   await page.getByRole('button', { name: 'Continue' }).click({ timeout: 20000 });
-  await page.getByText('Step 2 of 3', { exact: false }).waitFor({ timeout: 30000 });
+  await page.getByText('Step 2 of 4', { exact: false }).waitFor({ timeout: 30000 });
   await page.getByRole('button', { name: 'Continue' }).click({ timeout: 20000 });
-  await page.getByText('Step 3 of 3', { exact: false }).waitFor({ timeout: 30000 });
+  await page.getByText('Step 3 of 4', { exact: false }).waitFor({ timeout: 30000 });
 });
 
 await step('draw on the signature pad', async () => {

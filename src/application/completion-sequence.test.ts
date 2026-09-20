@@ -52,7 +52,7 @@ describe('which steps a job type gets', () => {
     );
   });
 
-  it.each(['breakdown', 'installation', 'service', 'test_and_repair'] as JobTypeCode[])(
+  it.each(['breakdown', 'installation', 'service'] as JobTypeCode[])(
     '%s uses the customer work declaration, unchanged',
     (jobType) => {
       expect(signatoryLabelsFor(jobType).declaration).toBe(
@@ -60,6 +60,15 @@ describe('which steps a job type gets', () => {
       );
     },
   );
+
+  it('asks a test and repair collector to confirm receipt, not the work', () => {
+    // The unit is collected from the counter, often by a driver who did not
+    // watch the repair and cannot honestly confirm it was done.
+    expect(signatoryLabelsFor('test_and_repair').declaration).toBe(
+      'I confirm that I have collected the items listed above.',
+    );
+    expect(getJobTypeDefinition('test_and_repair').collectedOnCompletion).toBe(true);
+  });
 });
 
 describe('what holds each wizard step open', () => {

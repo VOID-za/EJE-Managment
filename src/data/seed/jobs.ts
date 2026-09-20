@@ -126,10 +126,12 @@ const baseJob = (jobNumber: string): Job => ({
   completionReport: emptyCompletionReport(),
   checklist: null,
   signature: null,
-  signatureRefusal: null,
+  signatureRefusals: [],
   awaitingSparesReason: '',
   calloutApplied: false,
   courierCollection: false,
+  waybillNumber: '',
+  deliveryNote: '',
   pricingSnapshot: null,
   finalDocument: null,
   delivery: null,
@@ -674,7 +676,7 @@ export const seedJobs: readonly Job[] = [
     submittedAt: timeOffset(-38, 13, 15),
     closedAt: timeOffset(-38, 13, 15),
     pricingSnapshot: ratesAt(timeOffset(-38, 13, 5), 83000, 73000),
-    finalDocument: finalJobCard('EJE-1057', 1, timeOffset(-38, 13, 15), 'hennie@krugerprecision-demo.co.za'),
+    finalDocument: finalJobCard('EJE-1057', 2, timeOffset(-38, 13, 15), 'hennie@krugerprecision-demo.co.za'),
     labour: [
       {
         id: asLineItemId('lab-1057-1'),

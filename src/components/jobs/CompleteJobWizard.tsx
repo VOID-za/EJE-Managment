@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  checkCollectionDetails,
   checkReadyForSignature,
   checkRefusalReason,
   evaluateChecklist,
@@ -12,8 +13,11 @@ import {
 import {
   captureSignature,
   recordSignatureRefusal,
+  returnToCustomerSignature,
+  setCollectionMethod,
   startSignature,
 } from '@/application/job-operations';
+import type { OperationContext } from '@/application/context';
 import type { JobView } from '@/application/job-view';
 import {
   Badge,
@@ -26,6 +30,8 @@ import {
 } from '@/components/ui';
 import { ChecklistRunner } from './ChecklistRunner';
 import { CompletionReportPanel } from './CompletionReportPanel';
+import { JobCardPdfPreview } from './JobCardPdfPreview';
+import { JobMediaPanel } from './JobMediaPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { SignaturePad } from './SignaturePad';
 import { WorkCapturePanel } from './WorkCapturePanel';
@@ -33,7 +39,7 @@ import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/format';
 
-type StepId = 'completion' | 'checklist' | 'review' | 'signature';
+type StepId = 'completion' | 'checklist' | 'review' | 'collection' | 'signature' | 'issued';
 
 interface Step {
   readonly id: StepId;
@@ -62,24 +68,37 @@ export const CompleteJobWizard = ({
   onClose,
   onChanged,
   onSigned,
+  mode = 'complete',
 }: {
   readonly view: JobView;
   readonly onClose: () => void;
   readonly onChanged: () => void;
   /** Called once the customer has signed, so the caller can move on to issue. */
   readonly onSigned: (job: Job) => void;
+  /**
+   * What this run of the wizard is for.
+   *
+   * `complete` is the technician closing the job out. `correct` is the office
+   * putting right a job card the customer refused: the SAME steps and the same
+   * panels, because correcting a job card is editing the job, but it ends by
+   * returning the card for signature rather than by taking one. The office
+   * never signs on the customer's behalf.
+   */
+  readonly mode?: 'complete' | 'correct';
 }) => {
   const { job } = view;
   const operation = useOperation();
   const definition = getJobTypeDefinition(job.jobType);
   const labels = signatoryLabelsFor(job.jobType);
+  const correcting = mode === 'correct';
 
   const steps = useMemo<readonly Step[]>(() => {
     const all: Step[] = [
       {
         id: 'completion',
         title: 'Completion',
-        blurb: 'What was found, what was done, and the time, travel and parts it took.',
+        blurb:
+          'What was found, what was done, the time, travel and parts it took — and the photographs.',
       },
     ];
     // Only where the job type actually requires one. A breakdown or a test and
@@ -91,20 +110,66 @@ export const CompleteJobWizard = ({
         blurb: `The mandatory ${definition.label.toLowerCase()} checklist.`,
       });
     }
+    all.push({
+      id: 'review',
+      title: 'Review',
+      blurb:
+        correcting
+          ? 'The corrected job card, exactly as the customer will see it. Send it back for signature when it is right.'
+          : 'The job card exactly as the customer will receive it. Check it before they sign.',
+    });
+    // The office corrects and hands back. It does not take the signature, and
+    // it does not decide who collects — the technician at the counter does.
+    if (correcting) return all;
+    // Anything collected from the counter is asked WHO is collecting, because
+    // the answer changes what the document shows.
+    if (definition.collectedOnCompletion) {
+      all.push({
+        id: 'collection',
+        title: 'Collection',
+        blurb: 'Who is collecting — the customer themselves, or a courier on their behalf.',
+      });
+    }
     all.push(
-      { id: 'review', title: 'Review', blurb: 'Check it over before the customer signs.' },
       {
         id: 'signature',
         title: labels.pageTitle,
         blurb: 'Hand the tablet over once you have checked the summary.',
       },
+      {
+        id: 'issued',
+        title: 'Signed',
+        blurb: 'The signed document, before it goes to the customer.',
+      },
     );
     return all;
-  }, [definition, labels, view.checklistTemplate]);
+  }, [correcting, definition, labels, view.checklistTemplate]);
 
   const [index, setIndex] = useState(0);
-  const step = steps[index]!;
-  const isLast = index === steps.length - 1;
+
+  /*
+   * Clamped, because the step list can shrink underneath the screen.
+   *
+   * Recording a refusal turns the job into one the office has to correct, and a
+   * correction is a shorter sequence than a close-out. For the instant between
+   * the job being saved and this component unmounting, the position it was on
+   * no longer exists — and reading past the end of the list is how a finished
+   * job card ends on a blank error screen.
+   */
+  const position = Math.min(index, steps.length - 1);
+  const step = steps[position]!;
+  const isSignatureStep = step.id === 'signature';
+  const isIssuedStep = step.id === 'issued';
+
+  /*
+   * The signed job, held here until the technician has seen it.
+   *
+   * `onChanged` refetches, but the point of this step is that nothing moves on
+   * until the signed document has been looked at — so the preview is drawn from
+   * the job the operation actually returned rather than from whatever the
+   * parent has got round to loading.
+   */
+  const [signedJob, setSignedJob] = useState<Job | null>(null);
 
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
@@ -122,6 +187,17 @@ export const CompleteJobWizard = ({
    */
   const [refusing, setRefusing] = useState(false);
   const [refusalReason, setRefusalReason] = useState('');
+
+  /*
+   * The collection, held locally until the step is left.
+   *
+   * Seeded from the job, because the office records who is expected when the
+   * job is raised. Confirmed here, because who actually turns up at the counter
+   * is a different question — and the answer decides whether the document
+   * carries prices.
+   */
+  const [courier, setCourier] = useState(job.courierCollection);
+  const [waybill, setWaybill] = useState(job.waybillNumber);
 
   const chooseRefusal = (next: boolean): void => {
     setRefusing(next);
@@ -161,30 +237,70 @@ export const CompleteJobWizard = ({
         .map((violation) => violation.message);
     }
     if (step.id === 'review') return readiness.violations.map((violation) => violation.message);
+    if (step.id === 'collection') {
+      return checkCollectionDetails({
+        jobType: job.jobType,
+        courierCollection: courier,
+        waybillNumber: waybill,
+      }).violations.map((violation) => violation.message);
+    }
     return [];
   };
 
   const blocks = blockedBy();
 
+  /*
+   * Runs an operation against the job as it is in the repository RIGHT NOW.
+   *
+   * The wizard writes several times in a row — the collection, then the
+   * signature — while the screen it is drawn from refetches asynchronously. An
+   * operation handed the `view`'s copy would spread a job from before the
+   * previous write and silently undo it: the collection method chosen on step 3
+   * disappeared the moment the signature was captured on step 4. Reading first
+   * costs one lookup and makes the sequence safe in any order.
+   */
+  const runOnFreshJob = <T,>(
+    run: (context: OperationContext, current: Job) => Promise<T>,
+  ): Promise<T | null> =>
+    operation.runFor(async (context) => {
+      const fresh = await context.repos.jobs.findByJobNumber(job.jobNumber);
+      return run(context, fresh ?? job);
+    });
+
   const back = (): void => {
     operation.clearError();
     setErrors({});
-    if (index === 0) onClose();
-    else setIndex((current) => current - 1);
+    // There is no going back past a signature. The customer signed a document;
+    // re-opening the pad behind that would be how a second, different signature
+    // gets captured against the same acceptance.
+    if (isIssuedStep) return;
+    if (position === 0) onClose();
+    else setIndex(position - 1);
   };
 
   const forward = async (): Promise<void> => {
     if (blocks.length > 0) return;
     operation.clearError();
 
-    // Moving onto the signature is a real state change, so it happens once,
-    // here, through the operation that owns it.
-    if (steps[index + 1]?.id === 'signature' && job.status !== 'customer_signature') {
-      const ok = await operation.run((context) => startSignature(context, job));
-      if (!ok) return;
+    // Leaving the collection step writes the answer to the job, through the
+    // operation that owns it, so the preview and the document that follow are
+    // drawn from the record rather than from a screen's memory.
+    if (step.id === 'collection') {
+      const ok = await runOnFreshJob((context, current) =>
+        setCollectionMethod(context, current, { courier, waybillNumber: waybill }),
+      );
+      if (ok === null) return;
       onChanged();
     }
-    setIndex((current) => current + 1);
+
+    // Moving onto the signature is a real state change, so it happens once,
+    // here, through the operation that owns it.
+    if (steps[position + 1]?.id === 'signature' && job.status !== 'customer_signature') {
+      const ok = await runOnFreshJob((context, current) => startSignature(context, current));
+      if (ok === null) return;
+      onChanged();
+    }
+    setIndex(position + 1);
   };
 
   /**
@@ -201,12 +317,34 @@ export const CompleteJobWizard = ({
     }
     setErrors({});
 
-    const refused = await operation.runFor((context) =>
-      recordSignatureRefusal(context, job, { reason: refusalReason }),
+    const refused = await runOnFreshJob((context, current) =>
+      recordSignatureRefusal(context, current, { reason: refusalReason }),
     );
     if (refused === null) return;
     onChanged();
     onSigned(refused);
+  };
+
+  const onLastCorrectionStep = correcting && position === steps.length - 1;
+
+  /**
+   * Hands the corrected job card back to the customer.
+   *
+   * On any earlier step it is simply Continue; on the last one it runs the
+   * operation, which resolves the outstanding refusal and returns the job to
+   * Customer Signature carrying everything on it.
+   */
+  const resubmit = async (): Promise<void> => {
+    if (!onLastCorrectionStep) {
+      await forward();
+      return;
+    }
+    const returned = await runOnFreshJob((context, current) =>
+      returnToCustomerSignature(context, current, ''),
+    );
+    if (returned === null) return;
+    onChanged();
+    onSigned(returned);
   };
 
   const sign = async (): Promise<void> => {
@@ -222,19 +360,32 @@ export const CompleteJobWizard = ({
       next.surname = `The ${labels.surnameLabel.toLowerCase()} is required.`;
     }
     if (strokeData.length === 0) next.signature = 'A signature is required.';
+    // The same rule the operation applies, so the pad is never taken on a
+    // courier collection that would then be refused for want of a waybill.
+    const collection = checkCollectionDetails({
+      jobType: job.jobType,
+      courierCollection: courier,
+      waybillNumber: waybill,
+    });
+    if (!collection.allowed) {
+      next.waybill = collection.violations[0]?.message ?? 'A waybill number is required.';
+    }
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
-    const signed = await operation.runFor((context) =>
-      captureSignature(context, job, {
+    const signed = await runOnFreshJob((context, current) =>
+      captureSignature(context, current, {
         customerName: firstName.trim(),
         customerSurname: surname.trim(),
         strokeData,
       }),
     );
     if (signed === null) return;
+    setSignedJob(signed);
     onChanged();
-    onSigned(signed);
+    // Onto the signed document, not out of the wizard: the last thing the
+    // technician does is look at what the customer just put their name to.
+    setIndex(position + 1);
   };
 
   return (
@@ -265,9 +416,9 @@ export const CompleteJobWizard = ({
         </div>
 
         <ol className="eje-scrollbar mt-5 flex min-w-max items-center gap-1 overflow-x-auto pb-1">
-          {steps.map((candidate, position) => {
-            const done = position < index;
-            const active = position === index;
+          {steps.map((candidate, order) => {
+            const done = order < position;
+            const active = order === position;
             return (
               <li key={candidate.id} className="flex items-center gap-1">
                 <div
@@ -290,11 +441,11 @@ export const CompleteJobWizard = ({
                           : 'bg-surface text-steel-400',
                     )}
                   >
-                    {done ? <Icon name="check" className="size-3.5" /> : position + 1}
+                    {done ? <Icon name="check" className="size-3.5" /> : order + 1}
                   </span>
                   {candidate.title}
                 </div>
-                {position < steps.length - 1 && (
+                {order < steps.length - 1 && (
                   <span
                     className={cn('h-px w-5', done ? 'bg-verdant-300' : 'bg-steel-200')}
                     aria-hidden="true"
@@ -307,7 +458,7 @@ export const CompleteJobWizard = ({
 
         <p className="mt-4 text-sm text-steel-600">
           <span className="font-semibold text-steel-800">
-            Step {index + 1} of {steps.length} — {step.title}.
+            Step {position + 1} of {steps.length} — {step.title}.
           </span>{' '}
           {step.blurb}
         </p>
@@ -331,6 +482,11 @@ export const CompleteJobWizard = ({
             editable
             onChanged={onChanged}
           />
+          {/* The job's own photo panel, not a second one. Photographs belong
+              with the write-up they illustrate, and a technician who has to
+              leave the close-out to attach them is a technician who attaches
+              them from the car park, or not at all. */}
+          <JobMediaPanel job={job} users={view.users} editable onChanged={onChanged} />
         </div>
       )}
 
@@ -344,10 +500,22 @@ export const CompleteJobWizard = ({
       )}
 
       {step.id === 'review' && (
+        <Card className="mb-5">
+          <CardHeader
+            title="The job card"
+            description="Rendered by the same generator that produces the issued document, so this is the document itself rather than a drawing of it. Go back and correct anything before the customer signs."
+          />
+          <div className="mt-4">
+            <JobCardPdfPreview view={view} />
+          </div>
+        </Card>
+      )}
+
+      {step.id === 'review' && (
         <Card>
           <CardHeader
             title="Ready for the customer"
-            description="Everything captured on this job. Go back to correct anything before it is signed for."
+            description="Everything captured on this job, in summary."
           />
           <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
             {[
@@ -428,6 +596,67 @@ export const CompleteJobWizard = ({
         </Card>
       )}
 
+      {step.id === 'collection' && (
+        <Card>
+          <CardHeader
+            title="How is this being collected?"
+            description="It decides what the collection document shows. A courier has no reason to see what the customer paid, so their copy carries no prices."
+          />
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <CollectionChoice
+              selected={!courier}
+              title="Customer collection"
+              blurb="The customer, or somebody from the customer, is collecting. The document shows the prices."
+              icon="user"
+              onSelect={() => {
+                setCourier(false);
+                setWaybill('');
+                setErrors({});
+              }}
+            />
+            <CollectionChoice
+              selected={courier}
+              title="Courier collection"
+              blurb="A driver is collecting on the customer's behalf. Prices are withheld from their copy, and a waybill number is required."
+              icon="box"
+              onSelect={() => {
+                setCourier(true);
+                setErrors({});
+              }}
+            />
+          </div>
+
+          {courier && (
+            <div className="mt-5">
+              <TextField
+                label="Waybill number"
+                required
+                value={waybill}
+                error={errors.waybill}
+                onChange={(event) => setWaybill(event.target.value)}
+                hint="The courier’s own consignment number. It is what ties this document to the parcel."
+              />
+            </div>
+          )}
+        </Card>
+      )}
+
+      {step.id === 'issued' && (
+        <Card>
+          <CardHeader
+            title="Signed"
+            description="The document as it now stands, with the signature on it. Check it, then hand it on for submission — the customer is emailed their copy from there."
+          />
+          <div className="mt-4">
+            <JobCardPdfPreview
+              view={signedJob === null ? view : { ...view, job: signedJob }}
+              caption="This is the document that will be issued. Nothing further is captured."
+            />
+          </div>
+        </Card>
+      )}
+
       {step.id === 'signature' && (
         <Card>
           <CardHeader
@@ -464,6 +693,25 @@ export const CompleteJobWizard = ({
                   onChange={(event) => setSurname(event.target.value)}
                 />
               </div>
+
+              {/*
+                Immediately above the pad, and only for a courier.
+                It is the last thing read before the driver signs, which is the
+                one moment the number is actually in front of somebody who can
+                check it against the consignment in their hand.
+              */}
+              {definition.collectedOnCompletion && courier && (
+                <div className="mt-5">
+                  <TextField
+                    label="Waybill number"
+                    required
+                    value={waybill}
+                    error={errors.waybill}
+                    onChange={(event) => setWaybill(event.target.value)}
+                    hint="The courier’s own consignment number. Printed on the delivery note."
+                  />
+                </div>
+              )}
 
               <div className="mt-5">
                 <SignaturePad onChange={setStrokeData} />
@@ -534,18 +782,41 @@ export const CompleteJobWizard = ({
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button size="lg" variant="secondary" onClick={back} disabled={operation.running}>
-            {index === 0 ? 'Leave' : 'Back'}
-          </Button>
+          {!isIssuedStep && (
+            <Button size="lg" variant="secondary" onClick={back} disabled={operation.running}>
+              {position === 0 ? 'Leave' : 'Back'}
+            </Button>
+          )}
 
-          {isLast ? (
+          {correcting ? (
+            <Button
+              size="lg"
+              onClick={resubmit}
+              loading={operation.running}
+              disabled={blocks.length > 0}
+              leadingIcon={
+                <Icon name={onLastCorrectionStep ? 'signature' : 'chevronRight'} className="size-5" />
+              }
+            >
+              {onLastCorrectionStep ? 'Resubmit for customer signature' : 'Continue'}
+            </Button>
+          ) : isIssuedStep ? (
+            <Button
+              size="lg"
+              className="ml-auto"
+              onClick={() => onSigned(signedJob ?? job)}
+              leadingIcon={<Icon name="mail" className="size-5" />}
+            >
+              Continue to submission
+            </Button>
+          ) : isSignatureStep ? (
             <Button
               size="lg"
               onClick={sign}
               loading={operation.running}
-              /* Disabled until there is a reason, so "Continue" cannot be
-                 pressed on an empty refusal. The operation enforces the same
-                 rule, which is what makes this safe to be a convenience. */
+              /* Disabled until there is a reason, so it cannot be pressed on an
+                 empty refusal. The operation enforces the same rule, which is
+                 what makes this safe to be a convenience. */
               disabled={refusing && !checkRefusalReason(refusalReason).allowed}
               leadingIcon={
                 <Icon name={refusing ? 'warning' : 'signature'} className="size-5" />
@@ -568,6 +839,46 @@ export const CompleteJobWizard = ({
     </div>
   );
 };
+
+/** One of the two ways goods leave the counter. A deliberate, tappable choice. */
+const CollectionChoice = ({
+  selected,
+  title,
+  blurb,
+  icon,
+  onSelect,
+}: {
+  readonly selected: boolean;
+  readonly title: string;
+  readonly blurb: string;
+  readonly icon: 'user' | 'box';
+  readonly onSelect: () => void;
+}) => (
+  <button
+    type="button"
+    aria-pressed={selected}
+    onClick={onSelect}
+    className={cn(
+      'flex w-full items-start gap-3 rounded-[var(--radius-control)] border p-4 text-left transition-colors',
+      selected
+        ? 'border-action bg-eje-50/60 ring-1 ring-action'
+        : 'border-steel-200 bg-surface hover:border-steel-300',
+    )}
+  >
+    <span
+      className={cn(
+        'flex size-10 shrink-0 items-center justify-center rounded-full',
+        selected ? 'bg-action text-white' : 'bg-steel-100 text-steel-500',
+      )}
+    >
+      <Icon name={icon} className="size-5" />
+    </span>
+    <span className="min-w-0">
+      <span className="block text-sm font-semibold text-steel-900">{title}</span>
+      <span className="mt-0.5 block text-sm text-steel-600">{blurb}</span>
+    </span>
+  </button>
+);
 
 const ReviewLines = ({
   title,

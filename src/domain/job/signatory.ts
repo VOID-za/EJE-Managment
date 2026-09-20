@@ -1,8 +1,10 @@
 import {
   PARTS_COLLECTION_DECLARATION,
   SIGNATURE_DECLARATION,
+  TEST_REPAIR_COLLECTION_DECLARATION,
   type JobTypeCode,
 } from '../types/job';
+import { getJobTypeDefinition } from './job-types';
 
 /**
  * Who signs, and what they are signing for.
@@ -55,8 +57,32 @@ const COLLECTOR: SignatoryLabels = {
   refusalTitle: 'Collector refusal reason',
 };
 
-export const signatoryLabelsFor = (jobType: JobTypeCode): SignatoryLabels =>
-  jobType === 'parts' ? COLLECTOR : CUSTOMER;
+const REPAIR_COLLECTOR: SignatoryLabels = {
+  declaration: TEST_REPAIR_COLLECTION_DECLARATION,
+  sectionTitle: 'Collection acknowledgement',
+  sectionDescription:
+    'Hand the tablet to the person collecting the repaired items. For a courier collection this is the driver, not the customer.',
+  nameLabel: 'Collector name',
+  surnameLabel: 'Collector surname',
+  signatureLabel: 'Collector signature',
+  confirmLabel: 'Confirm collection',
+  pageTitle: 'Collector signature',
+  refusedLabel: 'Collector refused to sign',
+  refusalTitle: 'Collector refusal reason',
+};
+
+/**
+ * Who signs, by job type.
+ *
+ * Anything collected from the counter is signed for by whoever collects it —
+ * often a driver — and what they acknowledge is receipt. Everything else is
+ * signed by the customer, acknowledging that the work was done.
+ */
+export const signatoryLabelsFor = (jobType: JobTypeCode): SignatoryLabels => {
+  if (jobType === 'parts') return COLLECTOR;
+  if (getJobTypeDefinition(jobType).collectedOnCompletion) return REPAIR_COLLECTOR;
+  return CUSTOMER;
+};
 
 /** The declaration text stored against the signature for this job type. */
 export const signatureDeclarationFor = (jobType: JobTypeCode): string =>

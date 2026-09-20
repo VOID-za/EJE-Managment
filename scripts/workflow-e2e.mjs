@@ -170,6 +170,10 @@ await step('the customer signs, and the signature is captured', async () => {
   await page.getByLabel('Customer surname').fill('Smit');
   await drawSignature();
   await page.getByRole('button', { name: 'Confirm signature' }).click();
+  // The signed document is shown before anything is submitted.
+  await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 25000 });
+  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Continue to submission' }).click();
   await page.waitForURL('**/jobs/EJE-1065/review', { timeout: 20000 });
   await assertNot404('capturing the signature');
 });

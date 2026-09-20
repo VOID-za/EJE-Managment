@@ -122,7 +122,12 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   // straight to awaiting delivery. There is deliberately NO edge to
   // `submitted`: Master Review is retired, and a stage nothing can enter is the
   // only kind that cannot quietly come back.
-  review: ['awaiting_delivery', 'completion'],
+  //
+  // The edge back to `customer_signature` is the correction loop: a customer
+  // who refused is shown a corrected job card and asked again. It carries the
+  // whole job with it — nothing is re-captured — and only the office may take
+  // it; see `jobs.resubmitForSignature`.
+  review: ['awaiting_delivery', 'customer_signature', 'completion'],
   // Only a confirmed delivery closes a job. The self-edge is a retry.
   awaiting_delivery: ['closed', 'awaiting_delivery'],
   // Historical only. Nothing transitions INTO this state any more; the edges
@@ -203,9 +208,9 @@ export const isJobEditable = (status: JobStatus): boolean =>
 /**
  * Whether THIS ROLE may edit a job in this state.
  *
- * Technicians work a job up to the point they hand it over. Masters keep editing
- * through Master Review, which is the whole purpose of that stage: the office
- * corrects and completes the job card before the customer ever sees it.
+ * Technicians work a job up to the point they hand it over. The office keeps
+ * editing beyond it, which is what makes correcting a refused job card possible
+ * at all; see `canAdministrativelyEdit`.
  */
 export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
   if (status === 'closed' || status === 'cancelled') return false;
@@ -419,27 +424,46 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
  */
 export const checkReadyForSubmission = (job: Job): TransitionCheck => {
   const violations: RuleViolation[] = [];
+  const latest =
+    job.signatureRefusals.length === 0
+      ? null
+      : (job.signatureRefusals[job.signatureRefusals.length - 1] ?? null);
+  const outstanding = latest !== null && latest.resolvedAt === null ? latest : null;
 
-  if (job.signature === null && job.signatureRefusal === null) {
+  if (job.signature === null && latest === null) {
     violations.push({
       code: 'signature_required',
       message: 'A customer signature is required before submission.',
     });
   }
 
-  if (job.signature !== null && job.signatureRefusal !== null) {
+  if (job.signature !== null && outstanding !== null) {
     violations.push({
       code: 'conflicting_signature_outcome',
       message:
-        'This job records both a customer signature and a refusal to sign. It cannot be issued until the record says which happened.',
+        'This job records both a customer signature and an outstanding refusal to sign. It cannot be issued until the record says which happened.',
     });
   }
 
-  if (job.signatureRefusal !== null && job.signatureRefusal.acknowledgedAt === null) {
+  if (outstanding !== null) {
     violations.push({
       code: 'refusal_unresolved',
       message:
-        'The customer refused to sign. A Master must resolve the signature refusal before this job card is issued.',
+        'The customer refused to sign. The office must correct and resubmit the job card, or issue it without a signature, before it can go out.',
+    });
+  }
+
+  /*
+   * A refusal that was resolved by CORRECTING the job card releases nothing on
+   * its own: the corrected card went back to the customer, and either they
+   * signed it or they refused again. Only `issued_unsigned` says the office
+   * decided to issue the document that records the refusal.
+   */
+  if (job.signature === null && latest !== null && latest.resolution === 'resubmitted') {
+    violations.push({
+      code: 'signature_required',
+      message:
+        'The corrected job card was returned for signature and has not been signed yet.',
     });
   }
 

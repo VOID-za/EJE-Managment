@@ -67,7 +67,9 @@ const ReviewJobPage = ({
     delivery: DeliveryRecord;
   } | null>(null);
 
-  const viewQuery = useQuery(`job:${jobNumber}:review`, (repos) => loadJobView(repos, jobNumber));
+  const viewQuery = useQuery(`job:${jobNumber}:review`, (repos) =>
+    loadJobView(repos, jobNumber, currentUser),
+  );
   const view = viewQuery.data ?? null;
   const jobId = view?.job.id ?? null;
 
@@ -324,13 +326,13 @@ const ReviewJobPage = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title={refusalPending ? 'Awaiting Master resolution' : 'Ready to submit'}
+              title={refusalPending ? 'Awaiting resolution' : 'Ready to submit'}
               description={
                 refusalPending
-                  ? `The customer refused to sign ${job.jobNumber}. A Master resolves the signature refusal above, and the job card is then issued from here — nothing has to be signed again.`
+                  ? `The customer refused to sign ${job.jobNumber}. Correct whatever they objected to and resubmit it for signature from the panel above, or issue it without a signature — the technician captures nothing again.`
                   : customerEmail.length === 0
                     ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
-                    : `Submitting generates the ${job.signatureRefusal === null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
+                    : `Submitting generates the ${job.signature !== null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
               }
             />
             {canIssue && (

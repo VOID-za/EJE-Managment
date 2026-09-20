@@ -276,6 +276,20 @@ export interface CustomerSignature {
 }
 
 /**
+ * How the office dealt with a customer's refusal to sign.
+ *
+ * Two outcomes, and the difference is what the customer ends up holding:
+ *
+ * - `resubmitted` — the job card was corrected and put back in front of the
+ *   customer. This is the normal answer: a refusal usually means something on
+ *   the card was wrong or missing, and the fix is to correct it and ask again.
+ * - `issued_unsigned` — the office accepted the refusal and issued the job card
+ *   as it stands, which is the document that says the customer would not sign.
+ *   For the customer who will not sign whatever is put in front of them.
+ */
+export type RefusalResolution = 'resubmitted' | 'issued_unsigned';
+
+/**
  * The customer would not sign.
  *
  * A refusal is an OUTCOME of the signature stage, not a failure of it: the work
@@ -285,10 +299,10 @@ export interface CustomerSignature {
  * signed job card exists to prevent.
  *
  * It is a record rather than a flag because every question the office will ask
- * later needs an answer: why, who took it, and when. `acknowledged*` is the
- * Master's resolution of it, which is what allows the job card to be issued;
- * see `checkReadyForSubmission`. It is a condition ON the job — the job's
- * status stays `review`, and no stage is added anywhere for it.
+ * later needs an answer: why, who took it, and when. `resolved*` is what the
+ * office then did about it, which is what allows the job card to move on; see
+ * `checkReadyForSubmission`. It is a condition ON the job — the job's status
+ * stays `review`, and no stage is added anywhere for it.
  */
 export interface SignatureRefusal {
   /**
@@ -302,11 +316,13 @@ export interface SignatureRefusal {
   readonly reason: string;
   readonly recordedBy: UserId;
   readonly recordedAt: IsoDateTime;
-  /** The Master who resolved the refusal. Null until one has. */
-  readonly acknowledgedBy: UserId | null;
-  readonly acknowledgedAt: IsoDateTime | null;
-  /** What the Master decided. Optional — the acknowledgement itself is the act. */
-  readonly acknowledgementNote: string;
+  /** Who resolved the refusal — a Master or a Coordinator. Null until one has. */
+  readonly resolvedBy: UserId | null;
+  readonly resolvedAt: IsoDateTime | null;
+  /** What was done about it. Null while the refusal is still outstanding. */
+  readonly resolution: RefusalResolution | null;
+  /** What the office decided. Optional — the resolution itself is the act. */
+  readonly resolutionNote: string;
 }
 
 /** Free-text work write-up captured by the technician at completion. */
@@ -372,14 +388,22 @@ export interface Job {
   readonly signature: CustomerSignature | null;
 
   /**
-   * Set instead of `signature` when the customer refused to sign.
+   * Every time the customer would not sign, oldest first.
    *
-   * MUTUALLY EXCLUSIVE with `signature`: a job has one signature outcome, and
-   * the rule is enforced in `checkSignatureOutcome` and in the operations, not
-   * merely by the screens. Null on every job whose customer signed, and on
-   * every job that has not reached the signature stage.
+   * A LIST, because a refusal is not the end of the conversation: the office
+   * corrects the job card and puts it back in front of the customer, who may
+   * sign — or refuse again, for a different reason. Each attempt is its own
+   * record and none of them is ever overwritten, so "why did this take three
+   * visits" has an answer.
+   *
+   * The last entry is the current one; see `currentRefusal` and
+   * `outstandingRefusal`. An OUTSTANDING refusal (the last one, unresolved) is
+   * mutually exclusive with `signature` — `checkSignatureOutcome` enforces it
+   * in the domain, not merely on the screens. Empty on every job whose customer
+   * signed first time, and on every job that has not reached the signature
+   * stage.
    */
-  readonly signatureRefusal: SignatureRefusal | null;
+  readonly signatureRefusals: readonly SignatureRefusal[];
 
   /** Reason recorded when the job was last moved to `awaiting_spares`. */
   readonly awaitingSparesReason: string;
@@ -388,13 +412,35 @@ export interface Job {
   readonly calloutApplied: boolean;
 
   /**
-   * Parts jobs only: a courier is collecting rather than the customer.
+   * Collection jobs only: a courier is collecting rather than the customer.
    *
    * A courier has no reason to see what the customer paid, so prices are
    * withheld from the collection document. The prices remain on the job for EJE
-   * costing — nothing is deleted.
+   * costing — nothing is deleted. Set when the job is raised and confirmed
+   * again at the collection, because who actually turns up is not always who
+   * was expected.
    */
   readonly courierCollection: boolean;
+
+  /**
+   * The courier's waybill number. Required for a courier collection.
+   *
+   * It is the only thing that ties EJE's document to the consignment once the
+   * goods leave the counter: without it a query about a missing part has
+   * nowhere to start. Empty on a customer collection, which needs none.
+   */
+  readonly waybillNumber: string;
+
+  /**
+   * The customer's own delivery note reference, if they work by one.
+   *
+   * Optional everywhere. Some customers reconcile parts and workshop repairs
+   * against a delivery note number rather than an order number, and a document
+   * that cannot quote it back is a document their accounts department cannot
+   * match. Offered on the job types where it is actually used — see
+   * `JobTypeDefinition.capturesDeliveryNote`.
+   */
+  readonly deliveryNote: string;
 
   /**
    * The rates this job is priced at, frozen when the customer signed.
@@ -449,3 +495,14 @@ export const SIGNATURE_DECLARATION =
 /** Parts collection is an acknowledgement of receipt, not of work done. */
 export const PARTS_COLLECTION_DECLARATION =
   'I confirm that I have collected the parts listed above.';
+
+/**
+ * A repaired unit leaving the workshop.
+ *
+ * Distinct from the parts wording because what is handed over is the customer's
+ * own equipment back, not goods sold to them — and distinct from the work
+ * declaration because the person collecting is often a driver who did not watch
+ * the work and cannot confirm it was done.
+ */
+export const TEST_REPAIR_COLLECTION_DECLARATION =
+  'I confirm that I have collected the items listed above.';

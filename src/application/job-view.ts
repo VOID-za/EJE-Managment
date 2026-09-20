@@ -8,7 +8,11 @@ import type {
   SystemSettings,
   User,
 } from '@/domain';
-import { getJobTypeDefinition, machineLabel as machineLabelFor } from '@/domain';
+import {
+  getJobTypeDefinition,
+  machineLabel as machineLabelFor,
+  redactRefusalsForViewer,
+} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -45,12 +49,23 @@ export interface JobView {
   readonly checklistVersionMissing: boolean;
 }
 
+/**
+ * Loads a job for a PERSON to read.
+ *
+ * `viewer` is what makes this different from reading the record: a technician
+ * who may not see another technician's signature refusal is handed a job with
+ * no refusals on it, so there is nothing for a screen — or a hand-typed URL —
+ * to render. Omitting the viewer reads the whole record, which is what the
+ * operations themselves need: rules have to be enforced against the truth.
+ */
 export const loadJobView = async (
   repos: RepositoryBundle,
   jobNumber: string,
+  viewer: Pick<User, 'id' | 'role'> | null = null,
 ): Promise<JobView | null> => {
-  const job = await repos.jobs.findByJobNumber(jobNumber);
-  if (job === null) return null;
+  const stored = await repos.jobs.findByJobNumber(jobNumber);
+  if (stored === null) return null;
+  const job = redactRefusalsForViewer(stored, viewer);
 
   const [customer, machine, settings, sites, contacts, users] = await Promise.all([
     repos.customers.findById(job.customerId),
@@ -122,6 +137,7 @@ export interface JobListRow {
 export const loadJobRows = async (
   repos: RepositoryBundle,
   jobs: readonly Job[],
+  viewer: Pick<User, 'id' | 'role'> | null = null,
 ): Promise<readonly JobListRow[]> => {
   const [customers, sites, machines, users] = await Promise.all([
     repos.customers.list(),
@@ -131,7 +147,9 @@ export const loadJobRows = async (
     repos.users.list(),
   ]);
 
-  return jobs.map((job) => {
+  return jobs.map((stored) => {
+    // Redacted per row, so a refusal cannot reach a list a technician may read.
+    const job = redactRefusalsForViewer(stored, viewer);
     const machine =
       job.machineId === null
         ? undefined

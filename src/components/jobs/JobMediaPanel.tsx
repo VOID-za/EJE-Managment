@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { getJobTypeDefinition, type Attachment, type Job, type User } from '@/domain';
-import { addMedia } from '@/application/job-operations';
+import { addMedia, removeMedia } from '@/application/job-operations';
 import {
   Badge,
   Button,
@@ -41,6 +41,14 @@ export const JobMediaPanel = ({
 
   const definition = getJobTypeDefinition(job.jobType);
   const photosRequired = definition.photosRequired && job.photos.length === 0;
+
+  /** Takes an attachment off the job, through the operation that records it. */
+  const remove = async (kindToRemove: 'photo' | 'video', attachmentId: string) => {
+    const ok = await operation.run((context) =>
+      removeMedia(context, job, kindToRemove, attachmentId),
+    );
+    if (ok) onChanged();
+  };
 
   const submit = async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
@@ -95,8 +103,18 @@ export const JobMediaPanel = ({
         </div>
       )}
 
-      <MediaGrid title="Photos" items={job.photos} users={users} />
-      <MediaGrid title="Videos" items={job.videos} users={users} />
+      <MediaGrid
+        title="Photos"
+        items={job.photos}
+        users={users}
+        onRemove={editable ? (id) => remove('photo', id) : undefined}
+      />
+      <MediaGrid
+        title="Videos"
+        items={job.videos}
+        users={users}
+        onRemove={editable ? (id) => remove('video', id) : undefined}
+      />
 
       <Modal
         open={open}
@@ -141,10 +159,13 @@ const MediaGrid = ({
   title,
   items,
   users,
+  onRemove,
 }: {
   readonly title: string;
   readonly items: readonly Attachment[];
   readonly users: readonly User[];
+  /** Offered only where the job may still be changed. */
+  readonly onRemove?: (attachmentId: string) => void;
 }) => {
   if (items.length === 0) {
     if (title === 'Videos') return null;
@@ -167,11 +188,23 @@ const MediaGrid = ({
           const uploader = users.find((candidate) => candidate.id === item.uploadedBy);
           return (
             <li key={item.id}>
-              <div className="flex aspect-4/3 flex-col items-center justify-center rounded-[var(--radius-control)] border border-steel-200 bg-steel-100 text-steel-400">
+              <div className="relative flex aspect-4/3 flex-col items-center justify-center rounded-[var(--radius-control)] border border-steel-200 bg-steel-100 text-steel-400">
                 <Icon name="camera" className="size-7" />
                 <span className="mt-1 text-[10px] font-medium tracking-wide uppercase">
                   {item.kind}
                 </span>
+                {/* The obvious mistake, caught before the customer signs: the
+                    wrong machine, a thumb over the lens, a shot of the floor. */}
+                {onRemove !== undefined && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.caption.length > 0 ? item.caption : item.fileName}`}
+                    onClick={() => onRemove(item.id)}
+                    className="absolute top-1.5 right-1.5 flex size-8 items-center justify-center rounded-full bg-steel-900/70 text-white transition-colors hover:bg-signal-600"
+                  >
+                    <Icon name="close" className="size-4" />
+                  </button>
+                )}
               </div>
               <p className="mt-1.5 truncate text-xs font-medium text-steel-800">
                 {item.caption.length > 0 ? item.caption : item.fileName}

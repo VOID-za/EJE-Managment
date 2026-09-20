@@ -21,6 +21,7 @@ import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { SignaturePad } from '@/components/jobs/SignaturePad';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Signature capture.
@@ -38,13 +39,16 @@ const SignJobPage = ({
   const { jobNumber } = use(params);
   const router = useRouter();
   const operation = useOperation();
+  const currentUser = useCurrentUser();
 
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
   const [strokeData, setStrokeData] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const viewQuery = useQuery(`job:${jobNumber}:sign`, (repos) => loadJobView(repos, jobNumber));
+  const viewQuery = useQuery(`job:${jobNumber}:sign`, (repos) =>
+    loadJobView(repos, jobNumber, currentUser),
+  );
 
   if (viewQuery.error !== null) {
     return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;

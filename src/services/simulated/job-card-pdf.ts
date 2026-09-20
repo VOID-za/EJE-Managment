@@ -227,16 +227,15 @@ const header = (sheet: Sheet, model: JobCardModel): void => {
     model.jobNumber,
     { font: 'bold', size: SIZE.jobNumber, colour: INK },
   );
-  sheet.pdf.text(RIGHT - textWidth(model.jobMeta, SIZE.small), top - 36, model.jobMeta, {
-    size: SIZE.small,
-    colour: MUTED,
-  });
-  sheet.pdf.text(RIGHT - textWidth(model.statusLine, SIZE.small), top - 46, model.statusLine, {
-    size: SIZE.small,
-    colour: MUTED,
-  });
-
-  sheet.move(58);
+  /*
+   * The header is the document's name and its number. Nothing else.
+   *
+   * It used to carry "Breakdown · Urgent" and "Status: Review" as well — EJE's
+   * own workflow state, printed at the top of a page handed to a customer who
+   * has no idea what Review means and no reason to. The job type and priority
+   * are the job's own details and are printed with the rest of them.
+   */
+  sheet.move(48);
   sheet.rule(INK, 1.4);
   sheet.move(GAP.section);
 };

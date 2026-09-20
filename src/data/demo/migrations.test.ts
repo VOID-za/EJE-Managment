@@ -142,10 +142,10 @@ describe('migrating a persisted snapshot', () => {
     const migrated = migrateDatabase(8, v8Snapshot(), SCHEMA_VERSION)!;
     // Null, not false and not invented: no snapshot before v10 recorded a
     // refusal, so every job in one either was signed or never got that far.
-    expect(migrated.jobs[0]!.signatureRefusal).toBeNull();
+    expect(migrated.jobs[0]!.signatureRefusals).toEqual([]);
   });
 
-  it('keeps a refusal a v10 snapshot already carried', () => {
+  it('carries a refusal an older snapshot held into the refusal list', () => {
     const snapshot = v8Snapshot();
     const refusal = {
       refused: true,
@@ -156,12 +156,60 @@ describe('migrating a persisted snapshot', () => {
       acknowledgedAt: null,
       acknowledgementNote: '',
     };
-    const withRefusal = {
-      ...snapshot,
-      jobs: [{ ...snapshot.jobs[0]!, signatureRefusal: refusal }],
-    };
-    const migrated = migrateDatabase(8, withRefusal, SCHEMA_VERSION)!;
-    expect(migrated.jobs[0]!.signatureRefusal).toEqual(refusal);
+    const migrated = migrateDatabase(
+      8,
+      { ...snapshot, jobs: [{ ...snapshot.jobs[0]!, signatureRefusal: refusal }] },
+      SCHEMA_VERSION,
+    )!;
+
+    // One refusal, unchanged in substance, now the first entry of the history.
+    expect(migrated.jobs[0]!.signatureRefusals).toHaveLength(1);
+    const carried = migrated.jobs[0]!.signatureRefusals[0]!;
+    expect(carried.reason).toBe('Customer representative was not available to sign.');
+    expect(carried.recordedBy).toBe('user-tech-1');
+    expect(carried.recordedAt).toBe('2024-02-01T10:00:00.000Z');
+    // It was never resolved, so it is still outstanding.
+    expect(carried.resolvedAt).toBeNull();
+    expect(carried.resolution).toBeNull();
+  });
+
+  it('records a refusal that had already been resolved as issued unsigned', () => {
+    const snapshot = v8Snapshot();
+    const migrated = migrateDatabase(
+      8,
+      {
+        ...snapshot,
+        jobs: [
+          {
+            ...snapshot.jobs[0]!,
+            signatureRefusal: {
+              refused: true,
+              reason: 'Customer unavailable',
+              recordedBy: 'user-tech-1',
+              recordedAt: '2024-02-01T10:00:00.000Z',
+              acknowledgedBy: 'user-master-1',
+              acknowledgedAt: '2024-02-01T11:00:00.000Z',
+              acknowledgementNote: 'Invoice to proceed.',
+            },
+          },
+        ],
+      },
+      SCHEMA_VERSION,
+    )!;
+    const carried = migrated.jobs[0]!.signatureRefusals[0]!;
+
+    // Resolving used to mean exactly one thing — release the job card as it
+    // stands — so that is what it is recorded as, rather than guessed at.
+    expect(carried.resolution).toBe('issued_unsigned');
+    expect(carried.resolvedBy).toBe('user-master-1');
+    expect(carried.resolvedAt).toBe('2024-02-01T11:00:00.000Z');
+    expect(carried.resolutionNote).toBe('Invoice to proceed.');
+  });
+
+  it('gives every job an empty waybill and delivery note rather than inventing one', () => {
+    const migrated = migrateDatabase(8, v8Snapshot(), SCHEMA_VERSION)!;
+    expect(migrated.jobs[0]!.waybillNumber).toBe('');
+    expect(migrated.jobs[0]!.deliveryNote).toBe('');
   });
 
   it('renames a refusal resolution recorded as a review, keeping what people typed', () => {

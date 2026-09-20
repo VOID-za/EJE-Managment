@@ -12,6 +12,7 @@ import {
   JOB_TYPE_CODES,
   jobTypeLabel,
   PRIORITY_ORDER,
+  refusalAwaitingResolution,
   priorityLabel,
   priorityRank,
   type JobPriority,
@@ -83,13 +84,23 @@ const JobsPageContent = () => {
   const [jobType, setJobType] = useState<JobTypeCode | 'all'>('all');
   const [priority, setPriority] = useState<JobPriority | 'all'>('all');
   const [mineOnly, setMineOnly] = useState(params.get('mine') === '1');
+  /*
+   * The refusal queue, entered from the dashboard tile.
+   *
+   * A filter over the ordinary job list rather than a page of its own: these
+   * are normal jobs at Review with an exception on them, and the office needs
+   * the same columns, the same search and the same actions it always has.
+   */
+  const [refusalsOnly, setRefusalsOnly] = useState(
+    params.get('signatureRefusal') === 'unresolved',
+  );
   const [term, setTerm] = useState('');
   const [accepting, setAccepting] = useState<JobListRow | null>(null);
   const isMaster = can(user.role, 'jobs.viewAll');
 
   const query = useQuery('jobs:list', async (repos) => {
     const jobs = await repos.jobs.list();
-    return loadJobRows(repos, jobs);
+    return loadJobRows(repos, jobs, user);
   });
 
   const rows = useMemo(() => {
@@ -100,7 +111,12 @@ const JobsPageContent = () => {
       // A technician never sees cancelled work: it is history for the office,
       // and clutter on a tablet. Masters can still filter to it.
       .filter((row) => isMaster || row.job.status !== 'cancelled')
-      .filter((row) => matchesStatus(row.job.status, status, row.job.scheduledDate))
+      .filter((row) => (refusalsOnly ? refusalAwaitingResolution(row.job) : true))
+      .filter((row) =>
+        // The refusal queue is a queue, not a status: it ignores the status
+        // filter entirely rather than intersecting with whatever was selected.
+        refusalsOnly ? true : matchesStatus(row.job.status, status, row.job.scheduledDate),
+      )
       .filter((row) => jobType === 'all' || row.job.jobType === jobType)
       .filter((row) => priority === 'all' || row.job.priority === priority)
       .filter(
@@ -126,7 +142,7 @@ const JobsPageContent = () => {
         if (rank !== 0) return rank;
         return (a.job.scheduledDate ?? '9999').localeCompare(b.job.scheduledDate ?? '9999');
       });
-  }, [query.data, status, jobType, priority, mineOnly, term, user.id, isMaster]);
+  }, [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id, isMaster]);
 
   // Counted over everything this user may see, so a quick filter can say how
   // many are behind it before it is pressed.
@@ -137,6 +153,8 @@ const JobsPageContent = () => {
   const quickCount = (filter: StatusFilter): number =>
     visible.filter((row) => matchesStatus(row.job.status, filter, row.job.scheduledDate)).length;
   const closedCount = visible.filter((row) => row.job.status === 'closed').length;
+  const refusalCount = visible.filter((row) => refusalAwaitingResolution(row.job)).length;
+  const canSeeRefusalQueue = can(user.role, 'jobs.viewAnySignatureRefusal');
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;
@@ -156,16 +174,47 @@ const JobsPageContent = () => {
       />
 
       <div className="eje-scrollbar mb-4 flex flex-wrap items-center gap-2">
+        {/* The office's exception queue, beside the working lists it belongs
+            with. Hidden from technicians, who have no global view of other
+            people's refusals. */}
+        {canSeeRefusalQueue && (
+          <button
+            type="button"
+            onClick={() => setRefusalsOnly((current) => !current)}
+            aria-pressed={refusalsOnly}
+            className={cn(
+              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+              refusalsOnly
+                ? 'border-signal-500 bg-signal-600 text-white'
+                : 'border-signal-300 bg-signal-50 text-signal-700 hover:border-signal-400',
+            )}
+          >
+            <Icon name="warning" className="size-4" />
+            Signature refusals
+            <span
+              className={cn(
+                'tabular rounded-full px-1.5 text-xs',
+                refusalsOnly ? 'bg-white/20' : 'bg-white text-signal-700',
+              )}
+            >
+              {query.loading ? '—' : refusalCount}
+            </span>
+          </button>
+        )}
+
         {QUICK_FILTERS.filter((filter) => isMaster || filter.value !== 'cancelled').map(
           (filter) => (
             <button
               key={filter.value}
               type="button"
-              onClick={() => setStatus(filter.value)}
-              aria-pressed={status === filter.value}
+              onClick={() => {
+                setRefusalsOnly(false);
+                setStatus(filter.value);
+              }}
+              aria-pressed={!refusalsOnly && status === filter.value}
               className={cn(
                 'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
-                status === filter.value
+                !refusalsOnly && status === filter.value
                   ? 'border-eje-500 bg-eje-600 text-white'
                   : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
               )}
@@ -174,7 +223,9 @@ const JobsPageContent = () => {
               <span
                 className={cn(
                   'tabular rounded-full px-1.5 text-xs',
-                  status === filter.value ? 'bg-white/20' : 'bg-steel-100 text-steel-600',
+                  !refusalsOnly && status === filter.value
+                    ? 'bg-white/20'
+                    : 'bg-steel-100 text-steel-600',
                 )}
               >
                 {query.loading ? '—' : quickCount(filter.value)}
@@ -272,7 +323,7 @@ const JobsPageContent = () => {
       {query.loading ? (
         <LoadingPanel rows={6} label="Loading jobs" />
       ) : (
-        <JobListTable rows={rows} onAccept={setAccepting} />
+        <JobListTable rows={rows} onAccept={setAccepting} showRefusal={refusalsOnly} />
       )}
 
       {/* Accepting from the list uses the same flow as the job screen, so the

@@ -138,6 +138,13 @@ describe('nothing can enter Master Review', () => {
   });
 
   it('routes a signed job to issue instead', () => {
-    expect(allowedTransitions('review')).toEqual(['awaiting_delivery', 'completion']);
+    // And back to the customer's signature, which is the correction loop: a
+    // refused job card is put right and asked for again. Still no `submitted`.
+    expect(allowedTransitions('review')).toEqual([
+      'awaiting_delivery',
+      'customer_signature',
+      'completion',
+    ]);
+    expect(allowedTransitions('review')).not.toContain('submitted');
   });
 });

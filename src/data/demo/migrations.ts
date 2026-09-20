@@ -130,10 +130,60 @@ const v10ToV11 = (data: Loose): Loose => ({
   }),
 });
 
+/**
+ * v11 -> v12.
+ *
+ * Three additions, all of them carrying what the snapshot already knew:
+ *
+ * - A refusal becomes the first entry of a refusal LIST, because a customer can
+ *   refuse a corrected job card too and the office has to be able to see both.
+ *   Its `acknowledged*` fields become `resolved*`; a refusal that had been
+ *   resolved under the old shape is recorded as having been issued without a
+ *   signature, which is what resolving used to mean.
+ * - The courier's waybill number, empty: no snapshot before this recorded one.
+ * - The customer's delivery note reference, empty, for the same reason.
+ */
+const v11ToV12 = (data: Loose): Loose => ({
+  ...data,
+  jobs: rows(data, 'jobs').map((job) => {
+    const existing = job.signatureRefusal;
+    const carried =
+      existing === null || existing === undefined || typeof existing !== 'object'
+        ? []
+        : [
+            (() => {
+              const refusal = existing as Loose;
+              const resolvedAt = refusal.acknowledgedAt ?? null;
+              return {
+                refused: true,
+                reason: text(refusal.reason),
+                recordedBy: text(refusal.recordedBy),
+                recordedAt: text(refusal.recordedAt),
+                resolvedBy: refusal.acknowledgedBy ?? null,
+                resolvedAt,
+                // Resolving used to mean exactly one thing: release the job
+                // card as it stands. Recorded as that, rather than guessed at.
+                resolution: resolvedAt === null ? null : 'issued_unsigned',
+                resolutionNote: text(refusal.acknowledgementNote),
+              };
+            })(),
+          ];
+
+    const { signatureRefusal: _dropped, ...rest } = job;
+    return {
+      waybillNumber: '',
+      deliveryNote: '',
+      ...rest,
+      signatureRefusals: Array.isArray(job.signatureRefusals) ? job.signatureRefusals : carried,
+    };
+  }),
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
   10: v10ToV11,
+  11: v11ToV12,
 };
 
 /**

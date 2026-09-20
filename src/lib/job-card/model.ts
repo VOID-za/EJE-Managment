@@ -1,14 +1,15 @@
 import {
   calculateJobTotals,
   contactFullName,
+  currentRefusal,
   customerFacingNotes,
   evaluateChecklist,
   getJobTypeDefinition,
   jobScheduleWindow,
-  jobStatusLabel,
   labourRateLabel,
   machineDisplayName,
   priorityLabel,
+  showsPricesOnCollectionDocument,
   signatoryLabelsFor,
   userFullName,
   type ChecklistItem,
@@ -75,8 +76,6 @@ export interface JobCardModel {
     readonly registrationLine: string;
   };
   readonly jobNumber: string;
-  readonly jobMeta: string;
-  readonly statusLine: string;
 
   readonly customer: {
     readonly name: string;
@@ -181,6 +180,8 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
   const totals = calculateJobTotals(job, settings);
   const definition = getJobTypeDefinition(job.jobType);
   const scheduleWindow = jobScheduleWindow(job);
+  const showsPrices = showsPricesOnCollectionDocument(job);
+  const latestRefusal = currentRefusal(job);
   const technician = users.find((user) => user.id === job.primaryTechnicianId) ?? null;
 
   const authorName = (authorId: string): string => {
@@ -255,8 +256,6 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       registrationLine: `Reg. ${settings.companyRegistration} · VAT ${settings.companyVatNumber}`,
     },
     jobNumber: job.jobNumber,
-    jobMeta: `${definition.label} · ${priorityLabel(job.priority)}`,
-    statusLine: `Status: ${jobStatusLabel(job.status)}`,
 
     customer: {
       name: customer.name,
@@ -300,8 +299,29 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
             ? `${formatDate(scheduleWindow.start)} – ${formatDate(scheduleWindow.end)} (${scheduleWindow.days} days)`
             : formatDate(job.scheduledDate),
       },
+      // Job type and priority belong to the job, so they are printed HERE with
+      // the rest of its details. They were in the header until a customer read
+      // "Breakdown · Urgent · Status: Review" as something addressed to them —
+      // which it never was.
+      { label: 'Job type', value: definition.label },
+      { label: 'Priority', value: priorityLabel(job.priority) },
       { label: 'Order number', value: job.orderNumber.length > 0 ? job.orderNumber : '—' },
       { label: 'Reference', value: job.referenceNumber.length > 0 ? job.referenceNumber : '—' },
+      // Only where the customer works by one, and only when they gave us one.
+      ...(definition.capturesDeliveryNote && job.deliveryNote.length > 0
+        ? [{ label: 'Delivery note', value: job.deliveryNote }]
+        : []),
+      ...(definition.collectedOnCompletion
+        ? [
+            {
+              label: 'Collection',
+              value: job.courierCollection ? 'Courier collection' : 'Customer collection',
+            },
+            ...(job.courierCollection && job.waybillNumber.length > 0
+              ? [{ label: 'Waybill', value: job.waybillNumber }]
+              : []),
+          ]
+        : []),
       {
         label: 'Technician',
         value: technician === null ? 'Unassigned' : userFullName(technician),
@@ -333,8 +353,16 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       byline: `${authorName(note.authorId)} · ${formatDateTime(note.createdAt)}`,
     })),
 
+    /*
+     * Withheld from a courier's copy, in full.
+     *
+     * A driver collecting on the customer's behalf has no business knowing what
+     * the customer paid — not the labour rate, not a part price, not the total.
+     * The figures stay on the job for EJE costing; the DOCUMENT is what changes.
+     * `showsPricesOnCollectionDocument` is the one place that decides.
+     */
     charges:
-      chargeRows.length === 0
+      chargeRows.length === 0 || !showsPrices
         ? null
         : {
             rows: chargeRows,
@@ -390,18 +418,23 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
     // The customer's refusal, frozen onto the document exactly as a signature
     // would be. Drawn from the job's own stored record, so the issued PDF says
     // what was true when it was issued.
+    /*
+     * The LATEST refusal, and only when the customer never went on to sign.
+     *
+     * A job card the customer eventually signed carries their signature and
+     * nothing about the attempts before it: the earlier refusals are EJE's
+     * record of how the job went, not something to hand back to the customer
+     * on the document they just signed.
+     */
     refusal:
-      job.signatureRefusal === null
+      job.signature !== null || latestRefusal === null
         ? null
         : {
             heading: signatoryLabelsFor(job.jobType).refusedLabel,
-            reason: job.signatureRefusal.reason,
+            reason: latestRefusal.reason,
             rows: [
-              {
-                label: 'Recorded by',
-                value: authorName(job.signatureRefusal.recordedBy),
-              },
-              { label: 'Date', value: formatDateTime(job.signatureRefusal.recordedAt) },
+              { label: 'Recorded by', value: authorName(latestRefusal.recordedBy) },
+              { label: 'Date', value: formatDateTime(latestRefusal.recordedAt) },
             ],
           },
 
@@ -413,7 +446,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       ...(job.pricingSnapshot !== null
         ? [
             `Priced at the rates in force on ${formatDateTime(job.pricingSnapshot.capturedAt)}, ` +
-              (job.signatureRefusal === null
+              (job.signature !== null || latestRefusal === null
                 ? 'when the customer signed.'
                 : 'when the work was completed.'),
           ]

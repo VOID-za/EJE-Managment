@@ -34,8 +34,8 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
       repos.jobs.list(),
     ]);
     const [mineRows, allRows] = await Promise.all([
-      loadJobRows(repos, mine),
-      loadJobRows(repos, all),
+      loadJobRows(repos, mine, user),
+      loadJobRows(repos, all, user),
     ]);
     return { mineRows, allRows };
   });

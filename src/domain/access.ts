@@ -33,12 +33,36 @@ export type Capability =
   /** Hand a completed job card over / issue it. */
   | 'jobs.submit'
   /**
-   * Resolve a customer's refusal to sign, so the job card can be issued.
+   * Resolve a customer's refusal to sign, so the job card can move on.
    *
-   * Masters only. A refusal is an exception the office owns: the technician who
-   * was turned away is not the person to decide what EJE does about it.
+   * The office — Masters and Coordinators. A refusal is an exception the office
+   * owns: the technician who was turned away is not the person to decide what
+   * EJE does about it.
    */
   | 'jobs.resolveSignatureRefusal'
+  /**
+   * See any job's signature refusal, not only one's own.
+   *
+   * The office again. A technician sees refusals recorded against work they
+   * were sent to and nothing else; see `canSeeSignatureRefusal`.
+   */
+  | 'jobs.viewAnySignatureRefusal'
+  /**
+   * Correct a job card the technician has already submitted.
+   *
+   * Administrative, and distinct from `jobs.captureWork`: this is the office
+   * putting right what the customer objected to, on a job that has left the
+   * technician's hands. Every such edit is audited against the person who made
+   * it, so the technician's original submission stays legible underneath.
+   */
+  | 'jobs.editSubmittedJob'
+  /**
+   * Send a corrected job card back to the customer for signature.
+   *
+   * The action that closes the correction loop. Office only — a technician
+   * cannot put their own refused job back in front of the customer.
+   */
+  | 'jobs.resubmitForSignature'
   /**
    * Process a Parts collection end to end.
    *
@@ -79,6 +103,9 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.captureWork',
   'jobs.submit',
   'jobs.resolveSignatureRefusal',
+  'jobs.viewAnySignatureRefusal',
+  'jobs.editSubmittedJob',
+  'jobs.resubmitForSignature',
   'jobs.processParts',
   'jobs.captureAdministratively',
   'customers.view',
@@ -108,6 +135,13 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'jobs.assign',
   'jobs.captureWork',
   'jobs.submit',
+  // Handling a customer who would not sign is office work, and the Coordinator
+  // IS the office. Note what this still does not include: `jobs.acceptField`.
+  // Correcting a job card is administration; attending the machine is not.
+  'jobs.resolveSignatureRefusal',
+  'jobs.viewAnySignatureRefusal',
+  'jobs.editSubmittedJob',
+  'jobs.resubmitForSignature',
   'jobs.processParts',
   'jobs.captureAdministratively',
   'customers.view',

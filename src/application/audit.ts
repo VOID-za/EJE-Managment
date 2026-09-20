@@ -82,3 +82,26 @@ export const notifyMasters = async (
   );
   return Promise.all(masters.map((master) => notify(context, { ...input, recipientId: master.id })));
 };
+
+/**
+ * Everyone in the office — Masters and Coordinators — for work either can do.
+ *
+ * Distinct from `notifyMasters` on purpose. Some things are a Master's alone
+ * (another Master's account, the charge-out rates); handling a customer who
+ * would not sign is not one of them, and sending it only to Masters would
+ * leave the Coordinator to find out by chance about work she is expected to
+ * do. Disabled accounts and the acting user are skipped, as above.
+ */
+export const notifyOffice = async (
+  context: OperationContext,
+  input: Omit<NotifyInput, 'recipientId'>,
+): Promise<readonly AppNotification[]> => {
+  const users = await context.repos.users.list();
+  const office = users.filter(
+    (user) =>
+      (user.role === 'master' || user.role === 'coordinator') &&
+      user.active &&
+      user.id !== context.actor.id,
+  );
+  return Promise.all(office.map((person) => notify(context, { ...input, recipientId: person.id })));
+};
