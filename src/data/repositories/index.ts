@@ -50,6 +50,29 @@ export interface JobRepository {
   findById(id: JobId): Promise<Job | null>;
   findByJobNumber(jobNumber: string): Promise<Job | null>;
   save(job: Job): Promise<Job>;
+  /**
+   * Allocates the next job number.
+   *
+   * Optional because the browser demo has no concurrency to protect against and
+   * allocates from its settings snapshot. A production implementation MUST make
+   * this atomic — a PostgreSQL sequence — because two people raising a job in
+   * the same moment must not be handed the same number, and
+   * `max(job_number) + 1` cannot promise that.
+   *
+   * Returns the display number and the numeric value behind it.
+   */
+  allocateJobNumber?(): Promise<{ readonly jobNumber: string; readonly sequence: number }>;
+  /**
+   * Removes a job outright.
+   *
+   * Optional, and deliberately separate from `save`. The demo records a
+   * deletion by saving the job with its deletion fields set; production deletes
+   * the row, having first written the audit event that outlives it.
+   *
+   * NOT a general-purpose method: the workflow permits deletion only for a job
+   * nobody has accepted, and that rule stays in the application layer.
+   */
+  hardDelete?(id: JobId): Promise<void>;
 }
 
 /**
