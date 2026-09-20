@@ -9,6 +9,7 @@ import type {
   User,
 } from '@/domain';
 import {
+  can,
   getJobTypeDefinition,
   machineLabel as machineLabelFor,
   redactRefusalsForViewer,
@@ -133,6 +134,33 @@ export interface JobListRow {
   readonly technicianName: string;
   readonly technicianInitials: string;
 }
+
+/**
+ * The job list, as this person may read it.
+ *
+ * The rule it carries is the one the Jobs screen already applied and is
+ * unchanged: a technician is not shown cancelled work — it is history for the
+ * office and clutter on a tablet — while a role with `jobs.viewAll` sees it and
+ * can filter to it. What has changed is WHERE that rule runs. It used to be a
+ * `.filter()` in the screen, over a list that had already loaded every job in
+ * the business; now the read decides, which is what will still hold when this
+ * function is an API handler and there is no screen in the request path.
+ *
+ * Deliberately NOT changed: which live jobs a technician may see. Whether a
+ * technician may open a job they were not sent to is an open question for EJE,
+ * and narrowing it quietly inside a read would be answering it. Refusals are
+ * private either way — `loadJobRows` redacts them per viewer.
+ */
+export const loadJobList = async (
+  repos: RepositoryBundle,
+  actor: Pick<User, 'id' | 'role'>,
+): Promise<readonly JobListRow[]> => {
+  const jobs = await repos.jobs.list();
+  const readable = can(actor.role, 'jobs.viewAll')
+    ? jobs
+    : jobs.filter((job) => job.status !== 'cancelled');
+  return loadJobRows(repos, readable, actor);
+};
 
 export const loadJobRows = async (
   repos: RepositoryBundle,

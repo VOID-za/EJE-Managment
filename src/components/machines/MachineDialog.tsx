@@ -13,6 +13,7 @@ import { Button, Modal, SelectField, TextAreaField, TextField } from '@/componen
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
+import { businessToday } from '@/lib/business-time';
 
 const MACHINE_TYPES: readonly MachineType[] = [
   'CNC Milling Machine',
@@ -22,11 +23,6 @@ const MACHINE_TYPES: readonly MachineType[] = [
   'Press Brake',
   'Other',
 ];
-
-const todayIso = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
 
 interface PhotoDraft {
   readonly fileName: string;
@@ -55,7 +51,7 @@ const emptyDraft = (sites: readonly Site[]): Draft => ({
   machineNumber: '',
   machineType: 'CNC Milling Machine',
   year: `${new Date().getFullYear()}`,
-  installationDate: todayIso(),
+  installationDate: businessToday(),
   controlSystem: '',
   notes: '',
   active: true,

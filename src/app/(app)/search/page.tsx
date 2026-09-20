@@ -21,6 +21,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
 
 const CATEGORY_ICONS: Record<SearchCategory, IconName> = {
@@ -51,13 +52,17 @@ const EXAMPLES = [
 ];
 
 const SearchPageContent = () => {
+  const currentUser = useCurrentUser();
   const router = useRouter();
   const params = useSearchParams();
   const initial = params.get('q') ?? '';
   const [term, setTerm] = useState(initial);
   const [category, setCategory] = useState<SearchCategory | 'all'>('all');
 
-  const query = useQuery(`search:${initial}`, (repos) => runSearch(repos, initial));
+  // Scoped by the actor inside `runSearch`, not by anything on this screen.
+  const query = useQuery(`search:${currentUser.id}:${initial}`, (repos) =>
+    runSearch(repos, currentUser, initial),
+  );
 
   const grouped = useMemo(() => {
     const results = (query.data ?? []).filter(

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { userFullName, type User } from '@/domain';
+import { loadActivityFeed } from '@/application/activity-read';
 import { loadJobRows } from '@/application/job-view';
 import {
   Avatar,
@@ -43,13 +44,18 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
     return loadJobRows(repos, jobs, user);
   });
 
-  const supportQuery = useQuery('dashboard:master:support', async (repos) => {
-    const [users, activity, notifications] = await Promise.all([
-      repos.users.list(),
-      repos.activity.list(),
+  /*
+   * Recent activity comes through the authorised read, not straight from the
+   * repository. This dashboard is only rendered for the office, which holds
+   * `activity.viewAll` — routing it through `loadActivityFeed` anyway means the
+   * trail has exactly one way in, and no screen can become the exception.
+   */
+  const supportQuery = useQuery(`dashboard:master:support:${user.id}`, async (repos) => {
+    const [feed, notifications] = await Promise.all([
+      loadActivityFeed(repos, user),
       repos.notifications.list(user.id),
     ]);
-    return { users, activity: activity.slice(0, 8), notifications };
+    return { users: feed.users, activity: feed.events.slice(0, 8), notifications };
   });
 
   if (jobsQuery.error !== null) {

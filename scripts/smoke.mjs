@@ -693,12 +693,25 @@ await step('the refusal shows on the job as an exception, not a seventh stage', 
   await page.screenshot({ path: `${shots}/20-refusal-rail.png`, fullPage: false });
 });
 
-await step('the refusal is on the job activity trail', async () => {
+/*
+ * The FACT is on the trail. The REASON is not.
+ *
+ * The audit trail is a separate store with its own read path, and the refusal's
+ * viewer rule governs the refusal record — so while the reason was copied into
+ * the audit detail there were two copies under two sets of rules, and a
+ * technician who had correctly been handed a redacted job could read it on the
+ * activity feed. The trail still records that a refusal happened, on which job,
+ * by whom and when, which is what an audit trail is for.
+ */
+await step('the refusal is on the job activity trail, without the reason', async () => {
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
-  await page.getByText(`Reason: ${REFUSAL_REASON}`, { exact: false }).first().waitFor({
-    timeout: 8000,
-  });
+  await page.getByText('The reason is stored on the job.').first().waitFor({ timeout: 8000 });
+
+  const trail = await page.locator('main').innerText();
+  if (trail.includes(`Reason: ${REFUSAL_REASON}`)) {
+    throw new Error('the audit trail restated the customer’s reason');
+  }
 });
 
 await step('a technician cannot resolve or correct their own refusal', async () => {
@@ -742,6 +755,50 @@ await step('another technician cannot see the refusal at all', async () => {
   const dashboard = await page.locator('main').innerText();
   if (/Customer Signature Refusals/i.test(dashboard)) {
     throw new Error('a technician was given the global refusal count');
+  }
+});
+
+/*
+ * The activity trail was the way round the refusal rule.
+ *
+ * `redactRefusalsForViewer` correctly hid the refusal on the job screen and on
+ * the review screen, and the reason was then written verbatim into an audit
+ * event — a separate store, with its own read path and no viewer rule on it, on
+ * a screen with no role check at all. A live browser probe confirmed an
+ * unrelated technician reading another technician's refusal reason on
+ * `/activity` and on the job's Activity tab. Both are covered here because both
+ * were open.
+ */
+await step('another technician cannot reach the audit trail at all', async () => {
+  // Not offered it.
+  const sidebar = await page.locator('nav').first().innerText();
+  if (/\bActivity\b/.test(sidebar)) {
+    throw new Error('a technician was offered the company-wide Activity trail');
+  }
+
+  // And typing the URL is refused, which is the part that matters.
+  await page.goto(`${BASE}/activity`, { waitUntil: 'networkidle' });
+  await page.getByText('office record', { exact: false }).first().waitFor({ timeout: 10000 });
+
+  const body = await page.locator('main').innerText();
+  for (const leaked of [REFUSAL_REASON, 'Customer refused to sign']) {
+    if (body.includes(leaked)) {
+      throw new Error(`the activity trail showed a technician "${leaked}"`);
+    }
+  }
+});
+
+await step('nor through the Activity tab on somebody else’s job', async () => {
+  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: REFUSED_JOB }).waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.waitForTimeout(500);
+
+  const body = await page.locator('main').innerText();
+  for (const leaked of [REFUSAL_REASON, 'Customer refused to sign']) {
+    if (body.includes(leaked)) {
+      throw new Error(`the job's Activity tab showed another technician "${leaked}"`);
+    }
   }
 });
 
@@ -1329,8 +1386,13 @@ await step('a customer collection note SHOWS prices', async () => {
 await step('a COURIER collection note carries no prices at all', async () => {
   await page.goto(`${BASE}/jobs/EJE-1063/review`, { waitUntil: 'networkidle' });
   await page.getByText('Delivery Note').first().waitFor({ timeout: 10000 });
+  // The goods the driver is carrying — a delivery note with no delivery on it
+  // is no use to the driver or to the receiving store.
   await page.getByText('SIE-6SL3-0.75').first().waitFor({ timeout: 8000 });
-  await page.getByText('Prices are not shown on a courier collection note.').waitFor();
+  await page
+    .getByText('Prices are withheld from a courier collection.', { exact: false })
+    .first()
+    .waitFor({ timeout: 8000 });
 
   const note = await page.locator('article').first().innerText();
   if (/R\u00a0\d/.test(note)) {
@@ -1338,6 +1400,13 @@ await step('a COURIER collection note carries no prices at all', async () => {
   }
   if (note.includes('Unit price')) {
     throw new Error('the courier note kept its unit price column');
+  }
+  // And the waybill, which this screen used to leave off while the PDF printed it.
+  if (!note.includes('DSV-4471882')) {
+    throw new Error('the courier note does not carry the waybill');
+  }
+  if (!note.includes('Courier collection')) {
+    throw new Error('the courier note does not say who is collecting');
   }
   await page.screenshot({ path: `${shots}/15-parts-courier.png`, fullPage: false });
 });

@@ -44,7 +44,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
     group: 'records',
   },
   { href: '/library', label: 'Technical Library', icon: 'library', capability: 'library.view', group: 'records' },
-  { href: '/activity', label: 'Activity', icon: 'activity', group: 'system' },
+  /**
+   * The company-wide audit trail. Office only.
+   *
+   * The capability is what the READ enforces (`loadActivityFeed`); this keeps
+   * the item off a technician's sidebar so they are not offered a screen that
+   * would refuse them. The two are deliberately the same capability.
+   */
+  {
+    href: '/activity',
+    label: 'Activity',
+    icon: 'activity',
+    capability: 'activity.viewAll',
+    group: 'system',
+  },
   /** Chat. Separate from Notifications on purpose — see `types/message.ts`. */
   { href: '/messages', label: 'Messages', icon: 'note', group: 'system' },
   { href: '/notifications', label: 'Notifications', icon: 'bell', group: 'system' },

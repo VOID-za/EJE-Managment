@@ -19,7 +19,7 @@ import {
   type JobStatus,
   type JobTypeCode,
 } from '@/domain';
-import { loadJobRows, type JobListRow } from '@/application/job-view';
+import { loadJobList, type JobListRow } from '@/application/job-view';
 import { Button, Card, ErrorState, Icon, LoadingPanel, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
@@ -98,19 +98,16 @@ const JobsPageContent = () => {
   const [accepting, setAccepting] = useState<JobListRow | null>(null);
   const isMaster = can(user.role, 'jobs.viewAll');
 
-  const query = useQuery('jobs:list', async (repos) => {
-    const jobs = await repos.jobs.list();
-    return loadJobRows(repos, jobs, user);
-  });
+  // Scoped by the read, which decides what this person may see; the filters
+  // below are the user's own choices over what came back.
+  const query = useQuery(`jobs:list:${user.id}`, (repos) => loadJobList(repos, user));
 
   const rows = useMemo(() => {
     const all = query.data ?? [];
     const needle = term.trim().toLowerCase();
 
     return all
-      // A technician never sees cancelled work: it is history for the office,
-      // and clutter on a tablet. Masters can still filter to it.
-      .filter((row) => isMaster || row.job.status !== 'cancelled')
+      // Cancelled work is already excluded for a technician by `loadJobList`.
       .filter((row) => (refusalsOnly ? refusalAwaitingResolution(row.job) : true))
       .filter((row) =>
         // The refusal queue is a queue, not a status: it ignores the status
@@ -142,14 +139,11 @@ const JobsPageContent = () => {
         if (rank !== 0) return rank;
         return (a.job.scheduledDate ?? '9999').localeCompare(b.job.scheduledDate ?? '9999');
       });
-  }, [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id, isMaster]);
+  }, [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id]);
 
-  // Counted over everything this user may see, so a quick filter can say how
-  // many are behind it before it is pressed.
-  const visible = useMemo(
-    () => (query.data ?? []).filter((row) => isMaster || row.job.status !== 'cancelled'),
-    [query.data, isMaster],
-  );
+  // Counted over everything this user may see — which is what the read
+  // returned, so nothing has to be filtered out again here.
+  const visible = query.data ?? [];
   const quickCount = (filter: StatusFilter): number =>
     visible.filter((row) => matchesStatus(row.job.status, filter, row.job.scheduledDate)).length;
   const closedCount = visible.filter((row) => row.job.status === 'closed').length;

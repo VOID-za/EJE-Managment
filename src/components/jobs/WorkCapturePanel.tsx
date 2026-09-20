@@ -41,6 +41,7 @@ import {
 import { formatCurrency, formatDate } from '@/lib/format';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
+import { businessToday } from '@/lib/business-time';
 
 /**
  * Labour, travel and parts capture.
@@ -56,11 +57,6 @@ export interface WorkCapturePanelProps {
   readonly editable: boolean;
   readonly onChanged: () => void;
 }
-
-const todayIso = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
 
 export const WorkCapturePanel = ({
   job,
@@ -515,7 +511,7 @@ const LabourDialog = ({
   readonly pricing: PricingInputs;
   readonly existing: LabourEntry | null;
 }) => {
-  const [date, setDate] = useState(existing?.date ?? todayIso());
+  const [date, setDate] = useState(existing?.date ?? businessToday());
   const [rateType, setRateType] = useState<LabourRateType>(existing?.rateType ?? 'normal');
   const [hours, setHours] = useState(existing === null ? '1' : String(existing.hours));
   const [description, setDescription] = useState(existing?.description ?? '');
@@ -642,7 +638,7 @@ const TravelDialog = ({
   readonly pricing: PricingInputs;
   readonly existing: TravelEntry | null;
 }) => {
-  const [date, setDate] = useState(existing?.date ?? todayIso());
+  const [date, setDate] = useState(existing?.date ?? businessToday());
   const [kilometres, setKilometres] = useState(
     existing === null ? '' : String(existing.kilometres),
   );

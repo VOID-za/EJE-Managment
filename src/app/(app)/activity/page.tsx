@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import type { ActivityEventType } from '@/domain';
-import { userFullName } from '@/domain';
+import { canReadActivityFeed, userFullName } from '@/domain';
+import { loadActivityFeed } from '@/application/activity-read';
 import {
   Card,
+  EmptyState,
   ErrorState,
   Icon,
   LoadingPanel,
@@ -13,6 +15,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
 
 const TYPE_GROUPS: readonly { value: string; label: string; types: readonly ActivityEventType[] }[] =
   [
@@ -49,24 +52,26 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
   ];
 
 const ActivityPage = () => {
+  const currentUser = useCurrentUser();
   const [group, setGroup] = useState('all');
   const [actor, setActor] = useState('all');
 
-  const query = useQuery('activity:all', async (repos) => {
-    const [activity, users, jobs] = await Promise.all([
-      repos.activity.list(),
-      repos.users.list(),
-      repos.jobs.list(),
-    ]);
-    return {
-      activity,
-      users,
-      jobNumbers: new Map(jobs.map((job) => [job.id as string, job.jobNumber])),
-    };
-  });
+  /*
+   * Read through the application layer, which decides what comes back.
+   *
+   * `loadActivityFeed` refuses a role without `activity.viewAll` and filters
+   * per event for whoever passes. The check below is a courtesy — a sentence
+   * instead of an error panel — and never the thing that protects the trail:
+   * typing the URL, or calling the read some other way, hits the same refusal.
+   */
+  const permitted = canReadActivityFeed(currentUser.role);
+
+  const query = useQuery(`activity:all:${currentUser.id}`, async (repos) =>
+    canReadActivityFeed(currentUser.role) ? loadActivityFeed(repos, currentUser) : null,
+  );
 
   const events = useMemo(() => {
-    const all = query.data?.activity ?? [];
+    const all = query.data?.events ?? [];
     const selected = TYPE_GROUPS.find((candidate) => candidate.value === group);
     return all
       .filter(
@@ -76,7 +81,20 @@ const ActivityPage = () => {
           selected.types.includes(event.type),
       )
       .filter((event) => actor === 'all' || event.actorId === actor);
-  }, [query.data?.activity, group, actor]);
+  }, [query.data?.events, group, actor]);
+
+  if (!permitted) {
+    return (
+      <>
+        <PageHeader title="Activity" breadcrumbs={[{ label: 'Activity' }]} />
+        <EmptyState
+          title="The activity trail is an office record"
+          description="It carries every change made across the business, including other people's jobs and EJE's commercial settings. The history of a job you worked is on the job itself, under Activity."
+          icon={<Icon name="activity" />}
+        />
+      </>
+    );
+  }
 
   if (query.error !== null) {
     return <ErrorState message={query.error} onRetry={query.refetch} />;

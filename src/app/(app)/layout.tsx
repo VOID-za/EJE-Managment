@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { SignInGate } from '@/components/layout/SignInGate';
+import { StorageFailureBanner } from '@/components/layout/StorageFailureBanner';
 import { useApp } from '@/providers/AppProvider';
 import { useQuery } from '@/hooks/useQuery';
 import { cn } from '@/lib/cn';
@@ -82,6 +83,9 @@ const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
         <div className="print:hidden">
           <TopBar onOpenMenu={() => setMenuOpen(true)} unreadCount={unreadCount} />
         </div>
+        {/* Above everything, because it is about whether anything below it is
+            actually being kept. */}
+        <StorageFailureBanner />
         <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 lg:px-8 lg:py-8">
           {children}
         </main>

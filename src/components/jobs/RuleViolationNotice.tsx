@@ -31,8 +31,20 @@ export const RuleViolationNotice = ({
       )}
       {violations.length > 0 && (
         <ul className="mt-2 space-y-1">
-          {violations.map((violation) => (
-            <li key={violation.code} className="flex items-start gap-2 text-sm text-steel-700">
+          {/*
+            Keyed by position, not by code.
+
+            A rule check legitimately returns several violations that share a
+            code — the wizard groups its outstanding items under one — and
+            keying by code made React see duplicates, warn, and reconcile the
+            list wrongly. Position is the honest key here: this is an ordered
+            list of messages that is replaced wholesale, never reordered.
+          */}
+          {violations.map((violation, index) => (
+            <li
+              key={`${violation.code}-${index}`}
+              className="flex items-start gap-2 text-sm text-steel-700"
+            >
               <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-eje-500" />
               {violation.message}
             </li>

@@ -1245,11 +1245,26 @@ export const recordSignatureRefusal = async (
     signatureRefusals: [...job.signatureRefusals, refusal],
   });
 
+  /*
+   * The FACT, on the trail. The REASON, on the job.
+   *
+   * The reason used to be written into this detail, and the audit trail is a
+   * separate store that the refusal's own viewer rule does not reach — so a
+   * technician who was correctly handed a redacted job could read the reason
+   * verbatim on the activity feed. Keeping the reason on the refusal record,
+   * where `redactRefusalsForViewer` and `canSeeSignatureRefusal` already govern
+   * it, means there is ONE copy and ONE rule.
+   *
+   * Nothing is lost from the audit: it still says a refusal was recorded, on
+   * which job, by whom, at what moment, and which attempt it was. What it no
+   * longer does is restate a private note about a customer's conduct in a place
+   * with different access rules.
+   */
   await audit(context, {
     jobId: job.id,
     type: 'customer_refused_to_sign',
     summary: attempt === 1 ? 'Customer refused to sign' : `Customer refused to sign (attempt ${attempt})`,
-    detail: `Customer refused to sign. Reason: ${refusal.reason} Recorded by ${userFullName(context.actor)}.`,
+    detail: `Customer signature refusal recorded by ${userFullName(context.actor)}. The reason is stored on the job.`,
   });
 
   /*
@@ -1381,7 +1396,8 @@ export const returnToCustomerSignature = async (
       },
     ]);
   }
-  const outstanding = assertCanResolveRefusal(context, job);
+  // Called for the refusal it refuses to proceed without, not for its value.
+  assertCanResolveRefusal(context, job);
 
   // The corrected card still has to be a card the system would accept: a
   // correction that removed the write-up cannot go back to the customer.
@@ -1406,8 +1422,10 @@ export const returnToCustomerSignature = async (
     jobId: job.id,
     type: 'returned_for_customer_signature',
     summary: 'Corrected job card returned for customer signature',
+    // The reason stays on the refusal record, under its own viewer rule; the
+    // office's own note is what this event adds, and is written by the office.
     detail:
-      `Returned for signature by ${userFullName(context.actor)} after the customer refused: ${outstanding.reason}` +
+      `Returned for signature by ${userFullName(context.actor)} after the customer refused to sign.` +
       (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
   });
 
@@ -1431,7 +1449,8 @@ export const resolveSignatureRefusal = async (
   job: Job,
   note: string,
 ): Promise<Job> => {
-  const outstanding = assertCanResolveRefusal(context, job);
+  // Called for the refusal it refuses to proceed without, not for its value.
+  assertCanResolveRefusal(context, job);
 
   const now = context.services.clock.now();
   const saved = await context.repos.jobs.save({
@@ -1443,8 +1462,9 @@ export const resolveSignatureRefusal = async (
     jobId: job.id,
     type: 'signature_refusal_resolved',
     summary: 'Signature refusal resolved',
+    // As above: the fact and the office's decision, not the customer's reason.
     detail:
-      `Signature refusal resolved by ${userFullName(context.actor)}, to issue without a signature. The customer refused to sign: ${outstanding.reason}` +
+      `Signature refusal resolved by ${userFullName(context.actor)}, to issue without a signature.` +
       (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
   });
 

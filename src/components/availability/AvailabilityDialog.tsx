@@ -21,6 +21,7 @@ import { Badge, Button, Modal, SelectField, TextAreaField, TextField } from '@/c
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDate } from '@/lib/format';
+import { businessToday } from '@/lib/business-time';
 
 /**
  * Mark a technician unavailable.
@@ -33,11 +34,6 @@ import { formatDate } from '@/lib/format';
  * When a Master opens this from a technician's message, the resulting record is
  * linked back to that message so the thread shows what was done about it.
  */
-const todayIso = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
-
 export const AvailabilityDialog = ({
   technician,
   existing,
@@ -53,8 +49,8 @@ export const AvailabilityDialog = ({
 }) => {
   const operation = useOperation();
   const [type, setType] = useState<AvailabilityType>(existing?.type ?? 'appointment');
-  const [startDate, setStartDate] = useState(existing?.startDate ?? todayIso());
-  const [endDate, setEndDate] = useState(existing?.endDate ?? todayIso());
+  const [startDate, setStartDate] = useState(existing?.startDate ?? businessToday());
+  const [endDate, setEndDate] = useState(existing?.endDate ?? businessToday());
   const [allDay, setAllDay] = useState(existing?.allDay ?? false);
   const [startTime, setStartTime] = useState(existing?.startTime ?? '09:00');
   const [endTime, setEndTime] = useState(existing?.endTime ?? '11:00');

@@ -12,6 +12,7 @@ import {
 import type { User, UserId } from '@/domain';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore, SessionStore } from '@/data/demo/demo-store';
+import type { SnapshotFailure } from '@/data/demo/store';
 import type { RepositoryBundle } from '@/data/repositories';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
@@ -36,6 +37,15 @@ interface AppContextValue {
   readonly users: readonly User[];
   /** Changes on every write so queries re-run. Becomes cache invalidation in Phase 2. */
   readonly version: number;
+  /**
+   * Set when saved data could not be read, or a change could not be saved.
+   *
+   * Surfaced so the application can SAY so. The demo used to answer both by
+   * quietly falling back — unreadable data became the seed, and a failed write
+   * became nothing at all — which is how a day of captured work could vanish
+   * without anyone being told.
+   */
+  readonly storageFailure: SnapshotFailure | null;
   readonly outbox: readonly OutboxEntry[];
   /**
    * Records what the provider would have reported about a message it accepted.
@@ -118,6 +128,12 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     runtime.simulatedOutbox.listServer,
   );
 
+  const storageFailure = useSyncExternalStore(
+    runtime.store.subscribe,
+    runtime.store.getFailure,
+    runtime.store.getServerFailure,
+  );
+
   // Users are administered, so they come from the store rather than the seed
   // constants: a user a Master adds can sign in, and a rename shows up at once.
   const users = useMemo(() => {
@@ -163,6 +179,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       currentUser,
       users,
       version,
+      storageFailure,
       outbox,
       reportDelivery,
       signIn,
@@ -176,6 +193,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       currentUser,
       users,
       version,
+      storageFailure,
       outbox,
       reportDelivery,
       signIn,

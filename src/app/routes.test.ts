@@ -121,7 +121,6 @@ describe('the route tree', () => {
       '/jobs/new',
       '/jobs/closed',
       '/jobs/[jobNumber]',
-      '/jobs/[jobNumber]/sign',
       '/jobs/[jobNumber]/review',
       '/messages',
       '/notifications',
@@ -166,7 +165,6 @@ describe('every link in the source resolves', () => {
 
 describe('the workflow links specifically', () => {
   const cases: readonly { readonly link: string; readonly why: string }[] = [
-    { link: '/jobs/EJE-1065/sign', why: 'customer signature, reported 404' },
     { link: '/jobs/EJE-1056/review', why: 'Master Review, reported 404' },
     { link: '/jobs/EJE-1048', why: 'job detail' },
     { link: '/jobs/closed', why: 'closed-job archive' },
@@ -191,6 +189,30 @@ describe('the workflow links specifically', () => {
     expect(resolves('/jobs/EJE-1048/customer-signature')).toBe(false);
     expect(resolves('/jobs/closed/EJE-1044')).toBe(false);
     expect(resolves('/nonsense')).toBe(false);
+  });
+
+  /*
+   * There is ONE signature workflow, and it is the guided close-out.
+   *
+   * `/jobs/<n>/sign` was a second, independent implementation: a full signature
+   * screen that nothing linked to, with no refusal option, no collection-method
+   * step and no waybill. A bookmark from an earlier build reached it and could
+   * sign a courier collection out as a priced customer collection, because it
+   * never went past the step where that is decided. It is deleted rather than
+   * redirected — a route that does not exist is the only kind that cannot come
+   * back as a second way of doing this.
+   */
+  it('has no second signature route', () => {
+    expect(ROUTES).not.toContain('/jobs/[jobNumber]/sign');
+    expect(resolves('/jobs/EJE-1065/sign')).toBe(false);
+    expect(resolves('/jobs/EJE-1053/sign')).toBe(false);
+  });
+
+  it('has exactly one signature implementation in the source', () => {
+    // The wizard owns it. Anything else drawing a signature pad into a page of
+    // its own would be the same mistake with a different name.
+    const signaturePages = ROUTES.filter((route) => /\/sign$/.test(route));
+    expect(signaturePages).toEqual([]);
   });
 
   it('reads /jobs/open as a job number, not an Open Jobs screen', () => {

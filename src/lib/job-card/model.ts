@@ -1,4 +1,5 @@
 import {
+  buildPartsDocument,
   calculateJobTotals,
   contactFullName,
   currentRefusal,
@@ -110,6 +111,36 @@ export interface JobCardModel {
     }[];
   } | null;
 
+  /**
+   * What is being handed over, on a document that withholds prices.
+   *
+   * A courier's copy has no charges block at all — that is the commercial rule
+   * — and the PDF therefore used to print NOTHING about the goods on a courier
+   * Delivery Note: no part numbers, no quantities, nothing for the driver or
+   * the receiving store to check the load against. Meanwhile the on-screen
+   * collection note listed them, because it was a second renderer reading the
+   * job directly. One document, two answers.
+   *
+   * So the goods are part of the model, and both renderers read them from here.
+   * `buildPartsDocument` already draws exactly the line that matters: a
+   * quantity is not a price, and a courier needs it.
+   *
+   * Null for every document that shows its prices, where the charges block
+   * already lists the parts and a second table would simply repeat it.
+   */
+  readonly collection: {
+    readonly heading: string;
+    readonly lines: readonly {
+      readonly partNumber: string;
+      readonly description: string;
+      readonly quantity: string;
+    }[];
+    readonly totalLabel: string;
+    readonly totalQuantity: string;
+    /** Says, on the document, why there are no prices on it. */
+    readonly priceNote: string;
+  } | null;
+
   readonly photos: readonly { readonly caption: string }[];
 
   readonly acceptance: {
@@ -179,6 +210,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
   const { job, customer, site, contact, machine, settings, checklistTemplate, users } = input;
   const totals = calculateJobTotals(job, settings);
   const definition = getJobTypeDefinition(job.jobType);
+  const collectionDocument = buildPartsDocument(job);
   const scheduleWindow = jobScheduleWindow(job);
   const showsPrices = showsPricesOnCollectionDocument(job);
   const latestRefusal = currentRefusal(job);
@@ -396,6 +428,22 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
               }),
             })),
           },
+
+    collection:
+      definition.collectedOnCompletion && !showsPrices
+        ? {
+            heading: 'Goods collected',
+            lines: collectionDocument.lines.map((line) => ({
+              partNumber: line.partNumber,
+              description: line.description,
+              quantity: String(line.quantity),
+            })),
+            totalLabel: 'Items',
+            totalQuantity: String(collectionDocument.totalQuantity),
+            priceNote:
+              'Prices are withheld from a courier collection. They remain on the job for EJE costing.',
+          }
+        : null,
 
     photos: job.photos.map((photo) => ({ caption: photo.caption })),
 

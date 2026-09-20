@@ -210,7 +210,7 @@ describe('recording a refusal', () => {
     expect(codes).toContain('labour_required');
   });
 
-  it('writes one audit event naming the reason and the person', async () => {
+  it('writes one audit event naming the person, the moment and the fact', async () => {
     const job = await readyToSign();
     const refused = await recordSignatureRefusal(harness.as(technician), job, { reason: REASON });
 
@@ -218,10 +218,39 @@ describe('recording a refusal', () => {
     const event = events.find((entry) => entry.type === 'customer_refused_to_sign');
     expect(event).toBeDefined();
     expect(event?.summary).toBe('Customer refused to sign');
-    expect(event?.detail).toContain(`Reason: ${REASON}`);
     expect(event?.detail).toContain('Sipho');
     expect(event?.actorId).toBe(technician.id);
     expect(event?.occurredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  /*
+   * The reason belongs to the job, not to the trail.
+   *
+   * The audit trail is a SEPARATE store with its own read path, and the refusal
+   * viewer rule (`canSeeSignatureRefusal`) governs the refusal record. While the
+   * reason was copied into the audit detail there were two copies under two sets
+   * of rules, and the looser one won: a technician who had correctly been handed
+   * a redacted job read the reason verbatim on the activity feed.
+   *
+   * So this asserts the ABSENCE, which is the rule. The event still says a
+   * refusal happened, on which job, by whom and when — which is what an audit
+   * trail is for — and points at where the reason is kept.
+   */
+  it('keeps the customer’s reason OFF the audit trail', async () => {
+    const job = await readyToSign();
+    const refused = await recordSignatureRefusal(harness.as(technician), job, { reason: REASON });
+
+    const events = await harness.repos.activity.list(refused.id);
+    for (const event of events) {
+      expect(event.detail, `${event.type} detail`).not.toContain(REASON);
+      expect(event.summary, `${event.type} summary`).not.toContain(REASON);
+    }
+
+    const event = events.find((entry) => entry.type === 'customer_refused_to_sign');
+    expect(event?.detail).toContain('The reason is stored on the job.');
+
+    // And it is genuinely still recorded, where the redaction rules reach it.
+    expect(currentRefusal(refused)?.reason).toBe(REASON);
   });
 });
 
@@ -392,7 +421,9 @@ describe('a Master resolving the refusal', () => {
     expect(event?.summary).toBe('Signature refusal resolved');
     expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee');
     expect(event?.detail).toContain('to issue without a signature');
-    expect(event?.detail).toContain(REASON);
+    // The office's own decision and note, never the customer's reason: see
+    // "keeps the customer's reason OFF the audit trail" above.
+    expect(event?.detail).not.toContain(REASON);
     expect(event?.detail).toContain('Note: Invoice to proceed.');
   });
 

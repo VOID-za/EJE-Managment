@@ -1,4 +1,4 @@
-import { contactFullName, machineLabel, userFullName } from '@/domain';
+import { can, contactFullName, machineLabel, userFullName, type User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -7,6 +7,28 @@ import type { RepositoryBundle } from '@/data/repositories';
  * Runs across jobs, customers, sites, machines, technicians and library
  * documents, returning typed, categorised results. In Phase 2 the same result
  * shape is produced by a PostgreSQL full-text query; the UI is unaffected.
+ *
+ * THE ACTOR DECIDES WHAT COMES BACK. This used to take no actor at all, which
+ * made it the widest read in the system: one box that returned every user
+ * account in the business, and every soft-deleted job, to anybody signed in.
+ * Search is not a lesser read than a list screen — it is the same data reached
+ * a different way — so it is scoped by the same capabilities, here, where the
+ * query is, rather than by whichever page renders the results.
+ *
+ * What is scoped, and by which EXISTING capability:
+ *
+ *  - USER ACCOUNTS (`users.manageTechnicians`). People are administered by the
+ *    office. A technician looking up a colleague's email address and job title
+ *    through the search box is reading the staff register.
+ *  - SOFT-DELETED JOBS (`jobs.viewAll`). A deleted job is not live work; the
+ *    capability that means "see every job, not only your own" is what decides
+ *    whether the archive of mistakes is part of that.
+ *
+ * What is deliberately NOT changed: which live jobs a technician may find.
+ * Whether a technician may open a job they were not sent to is an open question
+ * for EJE, and quietly answering it inside a search function is not the way to
+ * settle it. Refusal detail is private regardless — search never matched on it
+ * and still does not.
  */
 export type SearchCategory =
   | 'job'
@@ -50,15 +72,22 @@ const firstMatch = (candidates: readonly Candidate[], needle: string): string | 
 
 export const runSearch = async (
   repos: RepositoryBundle,
+  actor: Pick<User, 'id' | 'role'>,
   term: string,
 ): Promise<readonly SearchResult[]> => {
   const needle = term.trim().toLowerCase();
   if (needle.length === 0) return [];
 
+  // Both decided before the reads, so a missing check is a missing variable
+  // rather than a filter somebody forgot to apply further down.
+  const mayReadEveryJob = can(actor.role, 'jobs.viewAll');
+  const mayReadStaffRegister = can(actor.role, 'users.manageTechnicians');
+
   const [jobs, customers, sites, contacts, machines, users, documents] = await Promise.all([
-    // Deleted jobs included: "where did EJE-1065 go?" must have an answer, and
-    // the result below is labelled so one can never be mistaken for live work.
-    repos.jobs.list({ includeDeleted: true }),
+    // Deleted jobs answer "where did EJE-1065 go?", and the result below is
+    // labelled so one can never be mistaken for live work — but only for the
+    // office, which is who asks that question.
+    repos.jobs.list({ includeDeleted: mayReadEveryJob }),
     repos.customers.list(),
     repos.customers.listSites(),
     repos.customers.listContacts(),
@@ -194,6 +223,8 @@ export const runSearch = async (
   }
 
   for (const user of users) {
+    // The staff register, not a directory. See the header.
+    if (!mayReadStaffRegister) break;
     const matched = firstMatch(
       [
         { field: 'Name', value: userFullName(user) },

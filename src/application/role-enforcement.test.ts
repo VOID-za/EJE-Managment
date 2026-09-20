@@ -14,6 +14,8 @@ import { createMachine } from './machine-operations';
 import { createUser, setUserActive } from './user-operations';
 import { updateSettings } from './settings-operations';
 import { loadClosedJobs, emptyClosedJobFilters } from './closed-jobs';
+import { loadActivityFeed } from './activity-read';
+import { runSearch } from './search';
 import { WorkflowError } from './errors';
 import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
 import { asCustomerId, asSiteId, type Job } from '@/domain';
@@ -21,10 +23,15 @@ import { asCustomerId, asSiteId, type Job } from '@/domain';
 /**
  * Authorisation, checked where it is actually enforced.
  *
- * Every assertion here calls an OPERATION, not a component. A screen that hides
- * a button proves nothing: the question is whether the system refuses the work
- * when the request arrives anyway, which is the only thing a production API
- * will be able to rely on.
+ * Every assertion here calls an OPERATION or a READ, not a component. A screen
+ * that hides a button proves nothing: the question is whether the system
+ * refuses the work when the request arrives anyway, which is the only thing a
+ * production API will be able to rely on.
+ *
+ * READS ARE COVERED TOO. They were not, and that was how the audit found four
+ * screens whose only protection was a `can()` call rendered after the data had
+ * already been loaded. A read that returns everything and trusts the caller to
+ * show less is not authorised, it is merely tidy.
  */
 
 const master = seedUser('user-master-elmarie');
@@ -186,7 +193,7 @@ describe('the Coordinator is an office role, not a field one', () => {
   });
 
   it('reads closed jobs, which is what she invoices from', async () => {
-    const page = await loadClosedJobs(harness.repos, emptyClosedJobFilters);
+    const page = await loadClosedJobs(harness.repos, coordinator, emptyClosedJobFilters);
     expect(page.rows.length).toBeGreaterThan(0);
   });
 });
@@ -293,5 +300,48 @@ describe('issuing a job card', () => {
 
     const closed = await confirmDelivery(harness, context, issued.job);
     expect(closed.status).toBe('closed');
+  });
+});
+
+describe('reads are refused too, not merely hidden', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  it('refuses a technician the company-wide audit trail', async () => {
+    const error = await loadActivityFeed(harness.repos, sipho).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(WorkflowError);
+    expect((error as WorkflowError).violations.map((violation) => violation.code)).toContain(
+      'not_permitted',
+    );
+  });
+
+  it('refuses a technician the closed-job archive', async () => {
+    const error = await loadClosedJobs(harness.repos, sipho, emptyClosedJobFilters).catch(
+      (cause: unknown) => cause,
+    );
+    expect(error).toBeInstanceOf(WorkflowError);
+    expect((error as WorkflowError).violations.map((violation) => violation.code)).toContain(
+      'not_permitted',
+    );
+  });
+
+  it('withholds the staff register from a technician’s search', async () => {
+    const results = await runSearch(harness.repos, sipho, 'Lerato');
+    expect(results.filter((result) => result.category === 'technician')).toHaveLength(0);
+  });
+
+  it('gives the office both, because both are office records', async () => {
+    for (const person of [master, coordinator]) {
+      const feed = await loadActivityFeed(harness.repos, person);
+      expect(feed.events.length).toBeGreaterThan(0);
+
+      const archive = await loadClosedJobs(harness.repos, person, emptyClosedJobFilters);
+      expect(archive.rows.length).toBeGreaterThan(0);
+
+      const people = await runSearch(harness.repos, person, 'Lerato');
+      expect(people.filter((result) => result.category === 'technician').length).toBeGreaterThan(0);
+    }
   });
 });

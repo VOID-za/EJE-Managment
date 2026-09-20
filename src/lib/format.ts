@@ -1,4 +1,5 @@
 import type { Cents, IsoDate, IsoDateTime } from '@/domain';
+import { businessParts, businessToday } from './business-time';
 
 /**
  * Presentation formatting.
@@ -12,6 +13,12 @@ import type { Cents, IsoDate, IsoDateTime } from '@/domain';
  * Money appears on a signed customer document, so the format is pinned here and
  * is identical everywhere. The separators below are the single place to change
  * if EJE prefers a different convention.
+ *
+ * Dates and times are pinned for the SAME reason and in the same spirit: they
+ * are read in EJE's own business zone rather than in the local zone of whatever
+ * machine is rendering, so a signature timestamp names one calendar date
+ * everywhere. See `business-time.ts` — the conversion lives there and nowhere
+ * else, and no formatter below touches a local `Date` getter.
  */
 
 /** South African convention: space as thousands separator, comma as decimal. */
@@ -70,36 +77,35 @@ export const formatHours = (hours: number): string => `${formatNumber(hours, 2)}
 
 export const formatKilometres = (km: number): string => `${formatNumber(km, 1)} km`;
 
-const parse = (value: IsoDate | IsoDateTime): Date =>
-  value.length === 10 ? new Date(`${value}T00:00:00`) : new Date(value);
-
 const pad = (value: number): string => `${value}`.padStart(2, '0');
 
 export const formatDate = (value: IsoDate | IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  const date = parse(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return `${pad(date.getDate())} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+  const parts = businessParts(value);
+  if (parts === null) return '—';
+  return `${pad(parts.day)} ${MONTHS[parts.month - 1]} ${parts.year}`;
 };
 
 export const formatTime = (value: IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  const date = parse(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const parts = businessParts(value);
+  if (parts === null) return '—';
+  return `${pad(parts.hours)}:${pad(parts.minutes)}`;
 };
 
 export const formatDateTime = (value: IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  const date = parse(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  const parts = businessParts(value);
+  if (parts === null) return '—';
   return `${formatDate(value)} ${formatTime(value)}`;
 };
 
 /** "3 hours ago", "Yesterday", "12 Mar 2026" — whichever reads best. */
 export const formatRelative = (value: IsoDateTime | null): string => {
   if (value === null || value.length === 0) return '—';
-  const then = parse(value).getTime();
+  // Elapsed time is an absolute quantity, so this one genuinely is zone-free:
+  // the instant is compared against now, not read as a wall clock.
+  const then = new Date(value).getTime();
   if (Number.isNaN(then)) return '—';
 
   const diffMinutes = Math.round((Date.now() - then) / 60000);
@@ -123,17 +129,19 @@ export const formatFileSize = (bytes: number): string => {
   return `${formatNumber(bytes / (1024 * 1024), 1)} MB`;
 };
 
-const startOfToday = (): number => {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-};
-
+/*
+ * "Today" is EJE's today.
+ *
+ * Compared as calendar strings rather than as instants: both sides are plain
+ * `YYYY-MM-DD` in the business zone, so a job scheduled for today does not
+ * become overdue because the rendering machine is a couple of hours behind.
+ */
 export const isOverdue = (scheduledDate: IsoDate | null): boolean => {
   if (scheduledDate === null) return false;
-  return parse(scheduledDate).getTime() < startOfToday();
+  return scheduledDate < businessToday();
 };
 
 export const isToday = (scheduledDate: IsoDate | null): boolean => {
   if (scheduledDate === null) return false;
-  return parse(scheduledDate).getTime() === startOfToday();
+  return scheduledDate === businessToday();
 };

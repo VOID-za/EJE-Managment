@@ -34,6 +34,7 @@ import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
+import { businessToday } from '@/lib/business-time';
 
 /**
  * Technician profile.
@@ -45,11 +46,6 @@ import { formatDate, formatDateTime } from '@/lib/format';
  * block job assignment on.
  */
 type TabId = 'availability' | 'jobs' | 'messages';
-
-const todayIso = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
 
 const TechnicianProfilePage = ({
   params,
@@ -64,7 +60,7 @@ const TechnicianProfilePage = ({
   const [editing, setEditing] = useState<AvailabilityRecord | null>(null);
   const [cancelling, setCancelling] = useState<AvailabilityRecord | null>(null);
 
-  const today = todayIso();
+  const today = businessToday();
   const canManage = can(currentUser.role, 'admin.access');
 
   const query = useQuery(`technician:${userId}`, async (repos) => {

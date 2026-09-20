@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useSyncExternalStore } from 'react';
 
 /**
  * The application's own 404.
@@ -14,9 +14,31 @@ import { usePathname } from 'next/navigation';
  * So this page names the path that failed, says plainly that the most common
  * cause is a stale build, and offers the routes that do exist. Client component
  * because it reads the path it was reached by.
+ *
+ * THE PATH IS READ AFTER MOUNT, on purpose. This page is prerendered at build
+ * time, when the path that will fail is not knowable — so reading it during
+ * render (`usePathname`, or `location` directly) makes the server's markup and
+ * the client's first render disagree about a text node, which is a hydration
+ * mismatch React reports as error #418. It went unnoticed because the route
+ * checks fetch this page over HTTP and never hydrate it.
+ *
+ * `useSyncExternalStore` is the primitive for exactly this — a value that
+ * legitimately differs between the server render and the browser. React uses
+ * the server snapshot for both the prerender AND the hydration pass, so the two
+ * agree by construction, and swaps to the real path immediately afterwards. It
+ * is the same pattern `AppProvider` uses for the persisted dataset.
  */
+
+/** The address the browser actually asked for. Null wherever there is no browser. */
+const subscribeToNothing = (): (() => void) => () => {};
+const readPath = (): string | null =>
+  typeof window === 'undefined'
+    ? null
+    : `${window.location.pathname}${window.location.search}`;
+const readServerPath = (): string | null => null;
+
 const NotFound = () => {
-  const pathname = usePathname();
+  const pathname = useSyncExternalStore(subscribeToNothing, readPath, readServerPath);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[42rem] flex-col justify-center px-6 py-16">
@@ -27,7 +49,7 @@ const NotFound = () => {
         Nothing in the EJE Job Card System is served at:
       </p>
       <p className="mt-2 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3.5 py-2.5 font-mono text-sm break-all text-steel-800">
-        {pathname}
+        {pathname ?? 'this address'}
       </p>
 
       <div className="mt-6 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-3.5">

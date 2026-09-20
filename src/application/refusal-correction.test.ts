@@ -131,7 +131,7 @@ describe('a refused job card is corrected and asked for again', () => {
     expect(returned.completedAt).toBe(refused.completedAt);
   });
 
-  it('audits the return, naming who did it and what the customer objected to', async () => {
+  it('audits the return, naming who did it and what they put right', async () => {
     await returnToCustomerSignature(harness.as(master), refused, 'Hours corrected to one.');
 
     const events = await harness.repos.activity.list(refused.id);
@@ -140,8 +140,25 @@ describe('a refused job card is corrected and asked for again', () => {
     expect(event?.actorId).toBe(master.id);
     expect(event?.summary).toBe('Corrected job card returned for customer signature');
     expect(event?.detail).toContain('Elmarie Coetzee');
-    expect(event?.detail).toContain(REASON);
     expect(event?.detail).toContain('Hours corrected to one.');
+  });
+
+  /*
+   * The correction loop must not leak the reason either.
+   *
+   * Every event this workflow writes goes on the same trail, under the same
+   * read rules, so the rule is asserted across all of them rather than on the
+   * one event that happened to carry the reason.
+   */
+  it('writes nothing about the customer’s reason onto the audit trail', async () => {
+    await returnToCustomerSignature(harness.as(master), refused, 'Hours corrected to one.');
+
+    const events = await harness.repos.activity.list(refused.id);
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      expect(event.detail, `${event.type} detail`).not.toContain(REASON);
+      expect(event.summary, `${event.type} summary`).not.toContain(REASON);
+    }
   });
 
   it('audits the office correcting the job card, keeping the technician’s original', async () => {

@@ -52,9 +52,14 @@ const ClosedJobsPage = () => {
 
   const canView = can(currentUser.role, 'jobs.viewAll');
 
-  const query = useQuery(
-    `closed-jobs:${JSON.stringify(filters)}`,
-    (repos) => loadClosedJobs(repos, filters),
+  /*
+   * Authorised inside `loadClosedJobs`, which refuses a role without
+   * `jobs.viewAll` rather than returning a page for the screen to hide. The
+   * `canView` branch below is the friendly wording for that refusal, and the
+   * query is not even run for somebody it would refuse.
+   */
+  const query = useQuery(`closed-jobs:${currentUser.id}:${JSON.stringify(filters)}`, (repos) =>
+    canView ? loadClosedJobs(repos, currentUser, filters) : Promise.resolve(null),
   );
 
   const set = <K extends keyof ClosedJobFilters>(key: K, value: ClosedJobFilters[K]): void =>

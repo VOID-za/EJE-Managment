@@ -28,7 +28,7 @@ const filters = (overrides: Partial<ClosedJobFilters> = {}): ClosedJobFilters =>
 });
 
 const jobNumbers = async (harness: Harness, overrides: Partial<ClosedJobFilters> = {}) => {
-  const page = await loadClosedJobs(harness.repos, filters(overrides));
+  const page = await loadClosedJobs(harness.repos, master, filters(overrides));
   return page.rows.map((row) => row.job.jobNumber);
 };
 
@@ -91,21 +91,21 @@ describe('what belongs in the archive', () => {
   });
 
   it('puts the most recently closed job first', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     const closedAts = page.rows.map((row) => row.job.closedAt ?? '');
     const descending = [...closedAts].sort((a, b) => b.localeCompare(a));
     expect(closedAts).toEqual(descending);
   });
 
   it('reports how many matched and whether the page was capped', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     expect(page.matched).toBe(page.rows.length);
     expect(page.truncated).toBe(false);
     expect(page.matched).toBeLessThan(CLOSED_JOBS_PAGE_SIZE);
 
     // A page smaller than the archive must say so rather than imply the rest
     // does not exist.
-    const capped = await loadClosedJobs(harness.repos, filters(), 2);
+    const capped = await loadClosedJobs(harness.repos, master, filters(), 2);
     expect(capped.rows).toHaveLength(2);
     expect(capped.matched).toBe(page.matched);
     expect(capped.truncated).toBe(true);
@@ -162,7 +162,7 @@ describe('finding a closed job again', () => {
   });
 
   it('returns nothing, rather than everything, for a term that matches nothing', async () => {
-    const page = await loadClosedJobs(harness.repos, filters({ term: 'no-such-thing' }));
+    const page = await loadClosedJobs(harness.repos, master, filters({ term: 'no-such-thing' }));
     expect(page.rows).toEqual([]);
     expect(page.matched).toBe(0);
   });
@@ -213,7 +213,7 @@ describe('narrowing the archive with filters', () => {
   });
 
   it('filters by closed date, inclusively at both ends', async () => {
-    const all = await loadClosedJobs(harness.repos, filters());
+    const all = await loadClosedJobs(harness.repos, master, filters());
     const target = all.rows.find((row) => row.job.jobNumber === 'EJE-1056');
     const day = (target?.job.closedAt ?? '').slice(0, 10);
     expect(day).not.toBe('');
@@ -241,7 +241,7 @@ describe('narrowing the archive with filters', () => {
   });
 
   it('offers the customers, sites and technicians the filters need', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     expect(page.customers.length).toBeGreaterThan(0);
     expect(page.sites.some((site) => site.customerId === 'cust-abc')).toBe(true);
     expect(page.technicians.every((user) => user.role === 'technician')).toBe(true);
@@ -309,7 +309,7 @@ describe('opening a closed job', () => {
   });
 
   it('every closed job carries the rates it was priced at', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     expect(page.rows.length).toBeGreaterThan(0);
     for (const row of page.rows) {
       // Without a snapshot an old job card would silently re-price at today's
@@ -363,7 +363,7 @@ describe('the final document on a closed job', () => {
   });
 
   it('is stored on every closed job, so it never has to be re-made', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     for (const row of page.rows) {
       expect(row.job.finalDocument, row.job.jobNumber).not.toBeNull();
     }
@@ -413,7 +413,7 @@ describe('history links', () => {
   });
 
   it('reaches the same closed job record from the customer, the site and the machine', async () => {
-    const archived = await loadClosedJobs(harness.repos, filters({ term: 'EJE-1044' }));
+    const archived = await loadClosedJobs(harness.repos, master, filters({ term: 'EJE-1044' }));
     const fromArchive = archived.rows[0]?.job;
     expect(fromArchive).toBeDefined();
 
@@ -439,7 +439,7 @@ describe('history links', () => {
   });
 
   it('holds one record per closed job across the whole archive', async () => {
-    const page = await loadClosedJobs(harness.repos, filters());
+    const page = await loadClosedJobs(harness.repos, master, filters());
     const numbers = page.rows.map((row) => row.job.jobNumber);
     expect(new Set(numbers).size).toBe(numbers.length);
     const ids = page.rows.map((row) => row.job.id);

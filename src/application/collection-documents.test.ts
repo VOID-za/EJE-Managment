@@ -151,8 +151,22 @@ describe('a test and repair collected from the counter', () => {
     harness = buildHarness();
   });
 
-  /** Raises a workshop repair, works it, and takes it to the signature step. */
-  const workshopJob = async (over: { courier: boolean; deliveryNote?: string }): Promise<Job> => {
+  /**
+   * Raises a workshop repair, works it, and takes it to the signature step.
+   *
+   * A courier collection has its waybill recorded on the way, exactly as the
+   * close-out wizard does it: the Collection step writes the answer and only
+   * then does the job move onto the signature. `checkReadyForSignature` refuses
+   * a courier collection with no waybill, which is the point of that rule, so a
+   * fixture that skipped the step would be building a state no screen can
+   * produce.
+   */
+  const workshopJob = async (over: {
+    courier: boolean;
+    deliveryNote?: string;
+    /** The waybill recorded at the Collection step. Ignored for a customer collection. */
+    waybill?: string;
+  }): Promise<Job> => {
     const context = harness.as(master);
     const [customer] = await harness.repos.customers.list();
     const sites = await harness.repos.customers.listSites(customer!.id);
@@ -196,6 +210,12 @@ describe('a test and repair collected from the counter', () => {
       unitPrice: 132000,
     });
     job = await startCompletion(tech, job);
+    if (over.courier) {
+      job = await setCollectionMethod(tech, job, {
+        courier: true,
+        waybillNumber: over.waybill ?? 'DAW-4471',
+      });
+    }
     return startSignature(tech, job);
   };
 

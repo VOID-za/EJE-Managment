@@ -183,7 +183,7 @@ describe('cancelling a job that will not happen', () => {
     const job = await openJob(harness);
     await cancelJob(harness.as(elmarie), job, { reason: 'customer_resolved', description: '' });
 
-    const results = await runSearch(harness.repos, 'EJE-1059');
+    const results = await runSearch(harness.repos, elmarie, 'EJE-1059');
     expect(results.some((result) => result.title.includes('EJE-1059'))).toBe(true);
   });
 

@@ -32,8 +32,6 @@ const MATRIX = [
   { url: '/jobs/new', role: 'Master', status: 'n/a', purpose: 'Raise a job' },
   { url: '/jobs/closed', role: 'Master', status: 'closed', purpose: 'Closed-job archive' },
   { url: '/jobs/EJE-1048', role: 'assigned user', status: 'open', purpose: 'Job detail' },
-  { url: '/jobs/EJE-1065/sign', role: 'Technician', status: 'customer_signature', purpose: 'Customer signature' },
-  { url: '/jobs/EJE-1053/sign', role: 'Technician', status: 'completion', purpose: 'Customer signature, checklist gate' },
   { url: '/jobs/EJE-1055/review', role: 'Master', status: 'submitted', purpose: 'Master Review' },
   { url: '/jobs/EJE-1056/review', role: 'Master', status: 'closed', purpose: 'Final job card, read-only' },
   { url: '/jobs/EJE-1044/review', role: 'Master', status: 'closed', purpose: 'View Final PDF' },
@@ -53,8 +51,23 @@ const MATRIX = [
   { url: '/schedule', role: 'any', status: 'any', purpose: 'Superseded — redirects to Calendar' },
 ];
 
-/** A path that must NOT be served, so a pass here means something. */
-const MUST_404 = ['/jobs/EJE-1048/master-review', '/jobs/EJE-1048/customer-signature', '/nonsense'];
+/**
+ * A path that must NOT be served, so a pass here means something.
+ *
+ * `/jobs/<n>/sign` is on this list deliberately. It was a SECOND signature
+ * implementation that nothing linked to — no refusal option, no collection
+ * step, no waybill — so a bookmark from an earlier build could sign a courier
+ * collection out as a priced customer collection. The guided close-out on the
+ * job screen is the one signature workflow, and this proves the old one is
+ * genuinely gone rather than merely unlinked.
+ */
+const MUST_404 = [
+  '/jobs/EJE-1048/master-review',
+  '/jobs/EJE-1048/customer-signature',
+  '/jobs/EJE-1065/sign',
+  '/jobs/EJE-1053/sign',
+  '/nonsense',
+];
 
 const NEXT_404 = 'This page could not be found';
 

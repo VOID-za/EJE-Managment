@@ -13,6 +13,7 @@ import {
   type ActivityEvent,
   type User,
 } from '@/domain';
+import { loadJobActivity } from '@/application/activity-read';
 import { loadJobView } from '@/application/job-view';
 import {
   Badge,
@@ -68,8 +69,22 @@ const JobDetailPage = ({
   const viewQuery = useQuery(`job:${jobNumber}`, (repos) =>
     loadJobView(repos, jobNumber, currentUser),
   );
-  const supportQuery = useQuery(`job:${jobNumber}:support`, async (repos) => {
-    const [users, activity] = await Promise.all([repos.users.list(), repos.activity.list()]);
+  /*
+   * The job's own history, read for THIS viewer.
+   *
+   * It used to load the whole company's trail and filter it by job id in the
+   * component — which meant the refusal the job record had correctly been
+   * redacted of was printed underneath, in the Activity tab, verbatim.
+   * `loadJobActivity` applies the same rule the job is redacted by.
+   */
+  const supportQuery = useQuery(`job:${jobNumber}:support:${currentUser.id}`, async (repos) => {
+    const stored = await repos.jobs.findByJobNumber(jobNumber);
+    const [users, activity] = await Promise.all([
+      repos.users.list(),
+      stored === null
+        ? Promise.resolve([] as readonly ActivityEvent[])
+        : loadJobActivity(repos, currentUser, stored.id),
+    ]);
     return { users, activity };
   });
 
@@ -98,9 +113,8 @@ const JobDetailPage = ({
 
   const { job } = view;
   const users: readonly User[] = supportQuery.data?.users ?? [];
-  const activity: readonly ActivityEvent[] = (supportQuery.data?.activity ?? []).filter(
-    (event) => event.jobId === job.id,
-  );
+  // Already scoped to this job and to this viewer by `loadJobActivity`.
+  const activity: readonly ActivityEvent[] = supportQuery.data?.activity ?? [];
 
   const editable = canEditJob(currentUser.role, job.status);
   const workable = isJobWorkable(currentUser.role, job.status);

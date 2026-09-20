@@ -1018,6 +1018,11 @@ export const seedJobs: readonly Job[] = [
     orderNumber: 'PO-51207',
     referenceNumber: 'KRU-PARTS-038',
     courierCollection: true,
+    // The consignment reference, on the job where the rule reads it. A courier
+    // collection cannot reach a signature without one — `checkReadyForSignature`
+    // refuses it — so a seeded courier job at Review has to carry it, exactly as
+    // the close-out would have recorded it at the Collection step.
+    waybillNumber: 'DSV-4471882',
     faultDescription:
       'Urgent spares dispatched to Nelspruit by courier. Driver collects from the Isando counter.',
     primaryTechnicianId: asUserId('user-tech-lerato'),

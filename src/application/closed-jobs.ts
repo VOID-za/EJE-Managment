@@ -1,5 +1,6 @@
-import { userFullName, type IsoDate, type Job, type JobTypeCode, type User } from '@/domain';
+import { can, userFullName, type IsoDate, type Job, type JobTypeCode, type User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { WorkflowError } from './errors';
 import { loadJobRows, type JobListRow } from './job-view';
 
 /**
@@ -15,6 +16,12 @@ import { loadJobRows, type JobListRow } from './job-view';
  * repository is unpaginated, so the result is capped and the caller is told how
  * many matched — a screen that assumed a handful of records would quietly
  * mislead once EJE has years of history.
+ *
+ * AUTHORISATION IS IN THIS FUNCTION. It used to be a `can()` call in the page
+ * component, evaluated after the whole archive had already been loaded — which
+ * is not a check, it is a curtain. The archive is the office's record of every
+ * job EJE has ever closed, so the capability that says who may see every job
+ * (`jobs.viewAll`) decides who may read it, and it decides here.
  */
 export interface ClosedJobFilters {
   /** Free text across job number, customer, site, machine, serial, order, ref. */
@@ -82,9 +89,20 @@ export const isArchivedJob = (job: Job): boolean =>
 
 export const loadClosedJobs = async (
   repos: RepositoryBundle,
+  actor: Pick<User, 'id' | 'role'>,
   filters: ClosedJobFilters,
   pageSize: number = CLOSED_JOBS_PAGE_SIZE,
 ): Promise<ClosedJobsPage> => {
+  if (!can(actor.role, 'jobs.viewAll')) {
+    throw new WorkflowError('The closed-job archive is an office screen.', [
+      {
+        code: 'not_permitted',
+        message:
+          'The archive is where the office finds a job card to invoice from. The historical jobs you worked are reached through the customer, site or machine.',
+      },
+    ]);
+  }
+
   const [jobs, customers, sites, users] = await Promise.all([
     repos.jobs.list({ statuses: ['closed'] }),
     repos.customers.list(),
@@ -94,7 +112,9 @@ export const loadClosedJobs = async (
   ]);
 
   const archived = jobs.filter(isArchivedJob);
-  const allRows = await loadJobRows(repos, archived);
+  // The viewer is passed on, so a refusal on an archived job is redacted here
+  // exactly as it is on the job screen.
+  const allRows = await loadJobRows(repos, archived, actor);
   const needle = filters.term.trim().toLowerCase();
 
   const matchedRows = allRows

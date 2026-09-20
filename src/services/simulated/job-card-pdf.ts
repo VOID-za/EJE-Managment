@@ -455,6 +455,94 @@ const charges = (sheet: Sheet, model: JobCardModel): void => {
   sheet.move(GAP.section + 4);
 };
 
+/**
+ * The goods, on a document that carries no prices.
+ *
+ * A courier Delivery Note used to list nothing at all: the whole parts table
+ * lived inside the charges block, and the charges block is withheld from a
+ * courier's copy in full — correctly, since none of the driver's business is
+ * what the customer paid. The consequence was a delivery note with no delivery
+ * on it, which neither the driver nor the receiving store could check a load
+ * against, and which disagreed with the note shown on screen.
+ *
+ * Part numbers and quantities, and nothing that is a price. The model decides
+ * whether this block exists at all, so no renderer can put it on the wrong copy.
+ */
+const collection = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.collection === null) return;
+  sheet.sectionTitle(model.collection.heading);
+
+  sheet.need(30);
+  sheet.pdf.rect(MARGIN, sheet.cursor - 5, CONTENT_WIDTH, 16, BAND);
+  sheet.rule(RULE, 0.6);
+  sheet.move(-1);
+  sheet.pdf.text(MARGIN, sheet.cursor, 'Part', {
+    font: 'bold',
+    size: SIZE.small,
+    colour: BODY,
+  });
+  sheet.pdf.text(
+    COL_AMOUNT - textWidth('Quantity', SIZE.small, 'bold'),
+    sheet.cursor,
+    'Quantity',
+    { font: 'bold', size: SIZE.small, colour: BODY },
+  );
+  sheet.move(11);
+  sheet.rule(RULE, 0.6);
+  sheet.move(GAP.line);
+
+  for (const line of model.collection.lines) {
+    const width = COL_AMOUNT - MARGIN - 80;
+    const text =
+      line.description.length > 0 ? `${line.partNumber} — ${line.description}` : line.partNumber;
+    const wrapped = PdfBuilder.wrap(text, width, SIZE.body);
+
+    sheet.need(wrapped.length * GAP.line + 8);
+    const rowTop = sheet.cursor;
+    wrapped.forEach((part, index) => {
+      sheet.pdf.text(MARGIN, sheet.cursor, part, {
+        size: SIZE.body,
+        colour: index === 0 ? BODY : MUTED,
+      });
+      if (index < wrapped.length - 1) sheet.move(GAP.line);
+    });
+    sheet.pdf.text(
+      COL_AMOUNT - textWidth(line.quantity, SIZE.body, 'bold'),
+      rowTop,
+      line.quantity,
+      { size: SIZE.body, font: 'bold', colour: INK },
+    );
+
+    sheet.move(7);
+    sheet.rule(RULE_SOFT, 0.5);
+    sheet.move(GAP.line - 2);
+  }
+
+  /*
+   * "Items", never "Total".
+   *
+   * A count of goods is not a figure of money, and the word "Total" on a
+   * document that deliberately carries no prices invites exactly the reading
+   * the suppression exists to prevent.
+   */
+  sheet.need(20);
+  sheet.pdf.text(MARGIN, sheet.cursor, model.collection.totalLabel, {
+    font: 'bold',
+    size: SIZE.body,
+    colour: INK,
+  });
+  sheet.pdf.text(
+    COL_AMOUNT - textWidth(model.collection.totalQuantity, SIZE.body, 'bold'),
+    sheet.cursor,
+    model.collection.totalQuantity,
+    { font: 'bold', size: SIZE.body, colour: INK },
+  );
+  sheet.move(GAP.line + 2);
+
+  sheet.paragraph(model.collection.priceNote, { size: SIZE.tiny, colour: MUTED });
+  sheet.move(GAP.section - 6);
+};
+
 const checklist = (sheet: Sheet, model: JobCardModel): void => {
   if (model.checklist === null) return;
 
@@ -695,6 +783,7 @@ export const renderJobCardPdf = (
   work(sheet, model);
   notes(sheet, model);
   charges(sheet, model);
+  collection(sheet, model);
   checklist(sheet, model);
   photographs(sheet, model);
   acceptance(sheet, model);

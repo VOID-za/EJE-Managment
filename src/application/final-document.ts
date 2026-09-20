@@ -28,8 +28,12 @@ export const FINAL_DOCUMENT_CONTENT_TYPE = 'application/pdf';
  * — otherwise a browser that downloaded a seeded job's card once keeps that
  * first render for good, faults included, which is exactly what happened when
  * the signature was missing from it.
+ *
+ * v3: dates and times are read in EJE's business zone rather than the local
+ * zone of whatever machine rendered them, and a courier's collection document
+ * now lists the goods it is a note for.
  */
-export const RENDERER_VERSION = 2;
+export const RENDERER_VERSION = 3;
 
 /**
  * Builds the renderer's input from the job's own stored record.

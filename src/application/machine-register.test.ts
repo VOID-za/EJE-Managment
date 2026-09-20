@@ -68,7 +68,7 @@ describe('the customer’s own machine number', () => {
   it('is searchable on its own', async () => {
     await createMachine(harness.as(master), { ...NEW_MACHINE, machineNumber: 'STM3' });
 
-    const results = await runSearch(harness.repos, 'STM3');
+    const results = await runSearch(harness.repos, master, 'STM3');
     const machines = results.filter((result) => result.category === 'machine');
 
     expect(machines).toHaveLength(1);

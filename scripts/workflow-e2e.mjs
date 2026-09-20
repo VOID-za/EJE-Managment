@@ -31,12 +31,20 @@ const browser = await chromium.launch(executablePath === undefined ? {} : { exec
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
 
 const pageErrors = [];
-page.on('pageerror', (error) => pageErrors.push(error.message));
+/**
+ * Which step the browser was in when an error was logged.
+ *
+ * "1 console error somewhere in 27 steps" is not something anybody can act on;
+ * the step name is what turns it into a place to look.
+ */
+let currentStep = 'before the first step';
+page.on('pageerror', (error) => pageErrors.push(`[${currentStep}] ${error.message}`));
 page.on('console', (message) => {
-  if (message.type() === 'error') pageErrors.push(message.text());
+  if (message.type() === 'error') pageErrors.push(`[${currentStep}] ${message.text()}`);
 });
 
 const step = async (name, fn) => {
+  currentStep = name;
   try {
     await fn();
     console.log(`PASS  ${name}`);
@@ -117,15 +125,28 @@ await step('EJE-1056 carries its real job data, not a placeholder', async () => 
   }
 });
 
-// ── PART 17: EJE-1065 signature route and workflow ───────────────────────────
-await step('EJE-1065 signature route loads rather than 404ing', async () => {
-  await visit('/jobs/EJE-1065/sign');
-  await page.getByRole('heading', { name: 'Customer signature' }).first().waitFor({ timeout: 15000 });
+// ── PART 17: EJE-1065 signature workflow ─────────────────────────────────────
+/*
+ * The old standalone signature route is gone, and must stay gone.
+ *
+ * It was a second implementation of the signature — no refusal option, no
+ * collection-method step, no waybill — that nothing linked to but that anybody
+ * with an old bookmark could still reach, and that could therefore sign a
+ * courier collection out as a priced customer collection. The guided close-out
+ * below is the one way to take a signature.
+ */
+await step('the old standalone signature route no longer exists', async () => {
+  const response = await page.goto(`${BASE}/jobs/EJE-1065/sign`, { waitUntil: 'networkidle' });
+  const body = await page.locator('body').innerText();
+  const gone = response.status() === 404 || body.includes('This page could not be found');
+  if (!gone) {
+    throw new Error(`/jobs/EJE-1065/sign is still served (HTTP ${response.status()})`);
+  }
 });
 
-await step('EJE-1065 is not ready, and the page says why instead of 404ing', async () => {
-  // An open job has no work captured, so signature is refused by the domain.
-  await page.getByText('not ready for signature', { exact: false }).waitFor({ timeout: 10000 });
+await step('EJE-1065 opens on its job screen, which is where the close-out lives', async () => {
+  await visit('/jobs/EJE-1065');
+  await page.getByRole('heading', { name: 'EJE-1065' }).first().waitFor({ timeout: 15000 });
 });
 
 await step('a technician drives EJE-1065 through the guided close-out', async () => {
@@ -208,8 +229,10 @@ await step('the signature persists on the job across a reload', async () => {
   if (!body.includes('Gerhard') || !body.includes('Smit')) {
     throw new Error('the signatory is not on the job after reload');
   }
-  await visit('/jobs/EJE-1065/sign');
-  await page.getByText('already been signed', { exact: false }).waitFor({ timeout: 10000 });
+  // And the signature is on the job screen itself, which is the only place it
+  // is ever shown or taken.
+  await visit('/jobs/EJE-1065');
+  await page.getByText('Gerhard', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
 // ── PART 19: the technician issues the job card themselves ───────────────────

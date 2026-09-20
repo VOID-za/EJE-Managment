@@ -1,6 +1,7 @@
 import type { Job, JobStatus } from '../types/job';
 import type { UserRole } from '../types/user';
 import { getJobTypeDefinition } from './job-types';
+import { checkCollectionDetails } from './parts-document';
 
 /**
  * The job workflow state machine.
@@ -348,6 +349,22 @@ const blocked = (violations: readonly RuleViolation[]): TransitionCheck => ({
 export const checkReadyForSignature = (job: Job): TransitionCheck => {
   const definition = getJobTypeDefinition(job.jobType);
   const violations: RuleViolation[] = [];
+
+  /*
+   * Collection details, checked HERE and not only where they are chosen.
+   *
+   * A courier collection needs a waybill, and that rule used to live solely in
+   * `setCollectionMethod` — the one screen that offers the choice. Any other
+   * caller that reached the signature by another route therefore skipped it and
+   * could hand a driver a document with no consignment reference on it at all.
+   * Readiness is where the workflow decides what a job still owes, so the rule
+   * belongs in it: every path to a signature now passes through this check, and
+   * `checkReadyForSubmission` inherits it by calling this function.
+   *
+   * It is a no-op for every job type that is not collected from the counter,
+   * and for a customer collection, which needs no waybill.
+   */
+  violations.push(...checkCollectionDetails(job).violations);
 
   // A parts collection records no work and no hours: it is a receipt for goods.
   if (!definition.capturesLabourAndTravel) {

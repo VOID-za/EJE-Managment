@@ -35,11 +35,23 @@ export const SIMULATED_CAPABILITIES: readonly SimulatedCapability[] = [
   },
   {
     id: 'pdf',
-    name: 'Job card PDF',
+    /*
+     * What is simulated here is WHERE the document is produced and kept, not
+     * whether it is produced.
+     *
+     * This entry used to say the job card was "rendered live from the job
+     * record rather than a generated PDF file", which stopped being true: the
+     * system writes real PDF bytes with its own writer, stores them against the
+     * job at the moment it is issued, and hands back those same bytes on every
+     * later download — a job card cannot be regenerated once the customer has
+     * it. Claiming otherwise understated the system, which is as misleading as
+     * overstating it and undermines every other entry in this list.
+     */
+    name: 'Job card PDF storage',
     explanation:
-      'The job card preview is rendered live from the job record rather than a generated PDF file.',
+      'The PDF itself is real: the document is rendered to genuine PDF bytes, written once when the job card is issued, and every later view or download returns those exact bytes — it is never re-rendered. What is simulated is where the file lives. It is rendered in the browser and kept inside the demonstration snapshot rather than on a server.',
     productionPlan:
-      'Server-side PDF rendering from the same job model, behind the PdfService interface.',
+      'The same renderer running server-side, writing to VPS storage and then to S3-compatible object storage, behind the PdfService and StorageService interfaces. The document, its immutability and its bytes do not change.',
   },
   {
     id: 'storage',
