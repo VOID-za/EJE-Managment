@@ -56,8 +56,8 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
   'customer_change_request',
   'machine_approval_request',
   'document_approval_request',
-  // A refusal is filed automatically once a Master reviews it on the job. It is
-  // actionable here too, so a Master who deals with it another way — a phone
+  // A refusal is filed automatically once a Master resolves it on the job. It
+  // is actionable here too, so a Master who deals with it another way — a phone
   // call to the customer — can still say so rather than leaving it open.
   'signature_refused',
 ];

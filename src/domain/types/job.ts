@@ -286,8 +286,9 @@ export interface CustomerSignature {
  *
  * It is a record rather than a flag because every question the office will ask
  * later needs an answer: why, who took it, and when. `acknowledged*` is the
- * Master's review of it, which is what allows the job card to be issued; see
- * `checkReadyForSubmission`.
+ * Master's resolution of it, which is what allows the job card to be issued;
+ * see `checkReadyForSubmission`. It is a condition ON the job — the job's
+ * status stays `review`, and no stage is added anywhere for it.
  */
 export interface SignatureRefusal {
   /**
@@ -301,7 +302,7 @@ export interface SignatureRefusal {
   readonly reason: string;
   readonly recordedBy: UserId;
   readonly recordedAt: IsoDateTime;
-  /** The Master who reviewed the refusal. Null until one has. */
+  /** The Master who resolved the refusal. Null until one has. */
   readonly acknowledgedBy: UserId | null;
   readonly acknowledgedAt: IsoDateTime | null;
   /** What the Master decided. Optional — the acknowledgement itself is the act. */

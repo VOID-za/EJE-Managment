@@ -16,16 +16,6 @@ import type { RuleViolation, TransitionCheck } from './workflow';
  * and `checkReadyForSubmission`. Nothing here adds a status.
  */
 
-/**
- * A reason has to say something.
- *
- * A single character satisfies "not empty" while telling the office nothing,
- * and this record is what a Master reads weeks later to decide whether the
- * customer should be invoiced. Short enough not to obstruct a technician
- * standing in a workshop; long enough to rule out "x", ".", "n/a" and "no".
- */
-export const REFUSAL_REASON_MIN_LENGTH = 10;
-
 /** What the job card, the rail and the job screen all call this exception. */
 export const SIGNATURE_REFUSED_LABEL = 'Customer refused to sign';
 
@@ -41,45 +31,41 @@ export const signatureOutcomeOf = (job: Job): SignatureOutcome => {
 export const isSignatureRefused = (job: Job): boolean => job.signatureRefusal !== null;
 
 /**
- * A refusal nobody in the office has looked at yet.
+ * A refusal the office has not resolved yet.
  *
  * This is what stops a refusal becoming a notification that sits unread
  * forever: it blocks the job card from being issued, so the exception has to be
- * dealt with rather than merely noticed.
+ * dealt with rather than merely noticed. It is a blocking CONDITION on the job,
+ * not a state the job is in — the job's status is `review`, exactly as it would
+ * be had the customer signed.
  */
-export const refusalAwaitingReview = (job: Job): boolean =>
+export const refusalAwaitingResolution = (job: Job): boolean =>
   job.signatureRefusal !== null && job.signatureRefusal.acknowledgedAt === null;
 
-/** Whether the refusal has been reviewed by a Master. */
-export const refusalReviewed = (refusal: SignatureRefusal): boolean =>
+/** Whether a Master has resolved the refusal. */
+export const refusalResolved = (refusal: SignatureRefusal): boolean =>
   refusal.acknowledgedAt !== null;
 
 /**
  * Validates the reason a technician typed.
  *
+ * PRESENCE, and nothing more. The rule is that a refusal must be explained, not
+ * that the system gets to decide whether the explanation is a good one: a
+ * technician standing in a workshop writing "Customer unavailable" has said
+ * what happened, and a length test cannot tell a terse answer from a useless
+ * one. The screen asks for something useful; this only refuses nothing at all.
+ *
  * Returns violations rather than throwing so the wizard can show them beside
  * the field while the operation refuses on exactly the same rule.
  */
 export const checkRefusalReason = (reason: string): TransitionCheck => {
-  const trimmed = reason.trim();
-  if (trimmed.length === 0) {
+  if (reason.trim().length === 0) {
     return {
       allowed: false,
       violations: [
         {
           code: 'refusal_reason_required',
           message: 'A reason is required when the customer refuses to sign.',
-        },
-      ],
-    };
-  }
-  if (trimmed.length < REFUSAL_REASON_MIN_LENGTH) {
-    return {
-      allowed: false,
-      violations: [
-        {
-          code: 'refusal_reason_too_short',
-          message: `Say why the customer would not sign, in at least ${REFUSAL_REASON_MIN_LENGTH} characters. The office has to be able to act on this.`,
         },
       ],
     };

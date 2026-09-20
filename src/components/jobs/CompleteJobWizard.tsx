@@ -484,7 +484,7 @@ export const CompleteJobWizard = ({
                 rows={5}
                 value={refusalReason}
                 error={errors.refusalReason}
-                hint="This reason is recorded against the job and sent to a Master."
+                hint="Say what happened. This is recorded against the job and sent to a Master."
                 onChange={(event) => setRefusalReason(event.target.value)}
               />
             </div>
@@ -517,7 +517,7 @@ export const CompleteJobWizard = ({
               </span>
               <span className="mt-0.5 block text-sm text-steel-600">
                 Tick this only if the customer would not sign. The job card is still issued, and a
-                Master reviews the refusal first.
+                Master resolves the refusal first.
               </span>
             </span>
           </label>

@@ -33,12 +33,12 @@ export type Capability =
   /** Hand a completed job card over / issue it. */
   | 'jobs.submit'
   /**
-   * Review a customer's refusal to sign, so the job card can be issued.
+   * Resolve a customer's refusal to sign, so the job card can be issued.
    *
    * Masters only. A refusal is an exception the office owns: the technician who
    * was turned away is not the person to decide what EJE does about it.
    */
-  | 'jobs.reviewSignatureRefusal'
+  | 'jobs.resolveSignatureRefusal'
   /**
    * Process a Parts collection end to end.
    *
@@ -78,7 +78,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.acceptField',
   'jobs.captureWork',
   'jobs.submit',
-  'jobs.reviewSignatureRefusal',
+  'jobs.resolveSignatureRefusal',
   'jobs.processParts',
   'jobs.captureAdministratively',
   'customers.view',

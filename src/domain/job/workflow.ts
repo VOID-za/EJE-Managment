@@ -409,13 +409,13 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
  * - The customer SIGNED. The technician issues the job card themselves, as
  *   they always have.
  * - The customer REFUSED. The job is not stuck and it is not finished: the
- *   work and the write-up are done, but the office has not yet seen why the
- *   customer would not put their name to it. So it waits — at Review, with an
- *   exception on the job rather than a stage of its own — until a Master has
- *   reviewed the refusal. Once reviewed it issues exactly as a signed job
- *   does: one document, generated once, emailed, closed on delivery. The
- *   technician never repeats the close-out and never collects a second
- *   signature.
+ *   work and the write-up are done, but the office has not yet dealt with why
+ *   the customer would not put their name to it. So it waits — at Review, held
+ *   by a blocking CONDITION on the job rather than by a stage or a status of
+ *   its own — until a Master resolves the signature refusal. Once resolved it
+ *   issues exactly as a signed job does: one document, generated once,
+ *   emailed, closed on delivery. The technician never repeats the close-out
+ *   and never collects a second signature.
  */
 export const checkReadyForSubmission = (job: Job): TransitionCheck => {
   const violations: RuleViolation[] = [];
@@ -437,9 +437,9 @@ export const checkReadyForSubmission = (job: Job): TransitionCheck => {
 
   if (job.signatureRefusal !== null && job.signatureRefusal.acknowledgedAt === null) {
     violations.push({
-      code: 'refusal_not_reviewed',
+      code: 'refusal_unresolved',
       message:
-        'The customer refused to sign. A Master must review the refusal before this job card is issued.',
+        'The customer refused to sign. A Master must resolve the signature refusal before this job card is issued.',
     });
   }
 

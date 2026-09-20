@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acceptJob,
-  acknowledgeSignatureRefusal,
+  resolveSignatureRefusal,
   addLabour,
   captureSignature,
   confirmJobCardDelivery,
@@ -19,9 +19,10 @@ import {
   checkSignatureOutcome,
   isSignatureRefused,
   JOB_PROGRESS_STAGES,
+  JOB_STATUS_ORDER,
   jobProgressPosition,
   jobStatusLabel,
-  refusalAwaitingReview,
+  refusalAwaitingResolution,
   signatureExceptionLabel,
   signatureOutcomeOf,
   type Job,
@@ -145,12 +146,16 @@ describe('recording a refusal', () => {
     ).toContain('refusal_reason_required');
   });
 
-  it('rejects a reason too short to act on', async () => {
-    const job = await readyToSign();
-    expect(
-      await refusalCodes(recordSignatureRefusal(harness.as(technician), job, { reason: 'no' })),
-    ).toContain('refusal_reason_too_short');
-  });
+  it.each(['no', 'n/a', 'x', '.', 'Customer unavailable', 'Customer refused'])(
+    'accepts a short but real reason: %s',
+    async (reason) => {
+      const job = await readyToSign();
+      const refused = await recordSignatureRefusal(harness.as(technician), job, { reason });
+      // Presence is the rule. The system does not get to decide whether a
+      // technician's explanation is a good one.
+      expect(refused.signatureRefusal?.reason).toBe(reason);
+    },
+  );
 
   it('trims the stored reason', async () => {
     const job = await readyToSign();
@@ -296,13 +301,13 @@ describe('the Master notification', () => {
     expect(inbox.some((notification) => notification.type === 'signature_refused')).toBe(false);
   });
 
-  it('is filed once a Master has reviewed the refusal on the job', async () => {
+  it('is filed once a Master has resolved the refusal on the job', async () => {
     const before = (await masterInbox()).filter(
       (entry) => entry.type === 'signature_refused' && entry.handledAt === null,
     );
     expect(before.length).toBeGreaterThan(0);
 
-    await acknowledgeSignatureRefusal(harness.as(master), refused, 'Spoke to the customer.');
+    await resolveSignatureRefusal(harness.as(master), refused, 'Spoke to the customer.');
 
     const after = (await masterInbox()).filter(
       (entry) => entry.type === 'signature_refused' && entry.handledAt === null,
@@ -311,7 +316,7 @@ describe('the Master notification', () => {
   });
 });
 
-describe('a Master handling the refusal', () => {
+describe('a Master resolving the refusal', () => {
   let harness: Harness;
   let refused: Job;
 
@@ -336,19 +341,19 @@ describe('a Master handling the refusal', () => {
   });
 
   it('belongs to the Master, and to nobody else', () => {
-    expect(can('master', 'jobs.reviewSignatureRefusal')).toBe(true);
-    expect(can('coordinator', 'jobs.reviewSignatureRefusal')).toBe(false);
-    expect(can('technician', 'jobs.reviewSignatureRefusal')).toBe(false);
+    expect(can('master', 'jobs.resolveSignatureRefusal')).toBe(true);
+    expect(can('coordinator', 'jobs.resolveSignatureRefusal')).toBe(false);
+    expect(can('technician', 'jobs.resolveSignatureRefusal')).toBe(false);
   });
 
   it('refuses a technician trying to clear their own refusal', async () => {
     expect(
-      await refusalCodes(acknowledgeSignatureRefusal(harness.as(technician), refused, '')),
+      await refusalCodes(resolveSignatureRefusal(harness.as(technician), refused, '')),
     ).toContain('not_permitted');
   });
 
-  it('records who reviewed it, when, and what they decided', async () => {
-    const reviewed = await acknowledgeSignatureRefusal(
+  it('records who resolved it, when, and what they decided', async () => {
+    const reviewed = await resolveSignatureRefusal(
       harness.as(master),
       refused,
       'Customer confirmed the work by telephone.',
@@ -359,34 +364,53 @@ describe('a Master handling the refusal', () => {
     expect(reviewed.signatureRefusal?.acknowledgementNote).toBe(
       'Customer confirmed the work by telephone.',
     );
-    // The refusal itself is never rewritten by the review.
+    // The refusal itself is never rewritten by the resolution.
     expect(reviewed.signatureRefusal?.reason).toBe(REASON);
     expect(reviewed.signature).toBeNull();
   });
 
-  it('audits the review', async () => {
-    await acknowledgeSignatureRefusal(harness.as(master), refused, 'Invoice to proceed.');
+  it('audits the resolution, in words that are about the refusal', async () => {
+    await resolveSignatureRefusal(harness.as(master), refused, 'Invoice to proceed.');
 
     const events = await harness.repos.activity.list(refused.id);
-    const event = events.find((entry) => entry.type === 'signature_refusal_reviewed');
+    const event = events.find((entry) => entry.type === 'signature_refusal_resolved');
     expect(event).toBeDefined();
     expect(event?.actorId).toBe(master.id);
-    expect(event?.detail).toContain('Elmarie');
+    expect(event?.summary).toBe('Signature refusal resolved');
+    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee.');
     expect(event?.detail).toContain(REASON);
-    expect(event?.detail).toContain('Invoice to proceed.');
+    expect(event?.detail).toContain('Master note: Invoice to proceed.');
   });
 
-  it('cannot be reviewed twice', async () => {
-    const reviewed = await acknowledgeSignatureRefusal(harness.as(master), refused, '');
+  it('audits a resolution with no note, without a dangling label', async () => {
+    await resolveSignatureRefusal(harness.as(master), refused, '   ');
+
+    const events = await harness.repos.activity.list(refused.id);
+    const event = events.find((entry) => entry.type === 'signature_refusal_resolved');
+    expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee.');
+    expect(event?.detail).not.toContain('Master note:');
+  });
+
+  it('never calls the resolution a review by the office', async () => {
+    await resolveSignatureRefusal(harness.as(master), refused, 'Invoice to proceed.');
+
+    const events = await harness.repos.activity.list(refused.id);
+    for (const event of events) {
+      expect(`${event.summary} ${event.detail}`, event.type).not.toMatch(/master review/i);
+    }
+  });
+
+  it('cannot be resolved twice', async () => {
+    const reviewed = await resolveSignatureRefusal(harness.as(master), refused, '');
     expect(
-      await refusalCodes(acknowledgeSignatureRefusal(harness.as(master), reviewed, '')),
-    ).toContain('already_reviewed');
+      await refusalCodes(resolveSignatureRefusal(harness.as(master), reviewed, '')),
+    ).toContain('already_resolved');
   });
 
-  it('refuses to review a job that has no refusal', async () => {
+  it('refuses to resolve a job that has no refusal', async () => {
     const other = await harness.repos.jobs.findByJobNumber('EJE-1058');
     expect(
-      await refusalCodes(acknowledgeSignatureRefusal(harness.as(master), other!, '')),
+      await refusalCodes(resolveSignatureRefusal(harness.as(master), other!, '')),
     ).toContain('no_refusal');
   });
 });
@@ -443,31 +467,57 @@ describe('what the refusal does to the workflow', () => {
     expect(jobStatusLabel(refused.status)).toBe('Review');
   });
 
+  it('adds no status to the workflow, and none to the status filter', () => {
+    // The refusal is a condition on the job. Nothing new is selectable, nothing
+    // new is countable, and nothing new is labelled.
+    expect(JOB_STATUS_ORDER).toContain('review');
+    for (const status of JOB_STATUS_ORDER) {
+      expect(jobStatusLabel(status), status).not.toMatch(/refus|master review/i);
+    }
+  });
+
+  it('keeps the job at Review through resolution and up to issue', async () => {
+    expect(refused.status).toBe('review');
+    const resolved = await resolveSignatureRefusal(harness.as(master), refused, 'Proceed.');
+    // The Master's action clears a condition. It does not move the job.
+    expect(resolved.status).toBe('review');
+    expect(jobProgressPosition(resolved.status).index).toBe(
+      JOB_PROGRESS_STAGES.indexOf('review'),
+    );
+  });
+
+  it('never calls the exception Master Review, anywhere it is named', () => {
+    expect(signatureExceptionLabel(refused)).not.toMatch(/master review/i);
+    expect(checkReadyForSubmission(refused).violations.map((v) => v.message).join(' ')).not.toMatch(
+      /master review/i,
+    );
+  });
+
   it('introduces no Master Review state', async () => {
     expect(refused.status).not.toBe('submitted');
     const reread = await harness.repos.jobs.findByJobNumber('EJE-1048');
     expect(reread?.status).toBe('review');
   });
 
-  it('holds the job card until a Master has reviewed it', () => {
-    expect(refusalAwaitingReview(refused)).toBe(true);
+  it('holds the job card until a Master has resolved it', () => {
+    expect(refusalAwaitingResolution(refused)).toBe(true);
     const readiness = checkReadyForSubmission(refused);
     expect(readiness.allowed).toBe(false);
     expect(readiness.violations.map((violation) => violation.code)).toContain(
-      'refusal_not_reviewed',
+      'refusal_unresolved',
     );
   });
 
-  it('refuses to issue the job card while the refusal is unreviewed', async () => {
+  it('refuses to issue the job card while the signature refusal is unresolved', async () => {
     expect(
       await refusalCodes(
         issueJobCard(harness.as(master), refused, 'accounts@example.com', 'ABC Engineering'),
       ),
-    ).toContain('refusal_not_reviewed');
+    ).toContain('refusal_unresolved');
   });
 
   it('issues normally once reviewed, and closes on confirmed delivery', async () => {
-    const reviewed = await acknowledgeSignatureRefusal(harness.as(master), refused, '');
+    const reviewed = await resolveSignatureRefusal(harness.as(master), refused, '');
     expect(checkReadyForSubmission(reviewed).allowed).toBe(true);
 
     const result = await issueJobCard(
@@ -491,7 +541,7 @@ describe('what the refusal does to the workflow', () => {
   });
 
   it('never asks the technician for a second signature', async () => {
-    const reviewed = await acknowledgeSignatureRefusal(harness.as(master), refused, '');
+    const reviewed = await resolveSignatureRefusal(harness.as(master), refused, '');
     // The job is past the signature stage and cannot be sent back to it by
     // recording another outcome.
     expect(checkSignatureOutcome(reviewed, 'signed').allowed).toBe(false);
@@ -554,26 +604,46 @@ describe('a normal signature is untouched by any of this', () => {
   });
 });
 
+/**
+ * Presence, and nothing beyond presence.
+ *
+ * There was briefly a minimum length here. It was invented rather than asked
+ * for, and it is the wrong kind of rule: the business requires a refusal to be
+ * explained, not that the system judge whether the explanation is good enough.
+ * These pin that down so it cannot creep back.
+ */
 describe('the reason rule itself', () => {
   it('rejects empty and whitespace', () => {
     expect(checkRefusalReason('').allowed).toBe(false);
     expect(checkRefusalReason('   ').allowed).toBe(false);
     expect(checkRefusalReason('\n\t').allowed).toBe(false);
+    expect(checkRefusalReason('\u00a0').allowed).toBe(false);
   });
 
-  it('rejects a token answer', () => {
-    expect(checkRefusalReason('x').allowed).toBe(false);
-    expect(checkRefusalReason('n/a').allowed).toBe(false);
-    expect(checkRefusalReason('no').allowed).toBe(false);
-  });
+  it.each(['no', 'n/a', 'x', '.', 'Customer refused', 'Customer unavailable'])(
+    'accepts any non-empty trimmed reason: %s',
+    (reason) => {
+      expect(checkRefusalReason(reason).allowed).toBe(true);
+    },
+  );
 
-  it('accepts a reason that says something', () => {
+  it('accepts a longer reason too', () => {
     expect(checkRefusalReason(REASON).allowed).toBe(true);
     expect(checkRefusalReason('  Site manager off ill today.  ').allowed).toBe(true);
   });
 
-  it('names the field it is about', () => {
+  it('has one violation, and it is about presence', () => {
+    expect(checkRefusalReason('').violations).toHaveLength(1);
     expect(checkRefusalReason('').violations[0]?.code).toBe('refusal_reason_required');
-    expect(checkRefusalReason('no').violations[0]?.code).toBe('refusal_reason_too_short');
+  });
+
+  it('imposes no minimum length', async () => {
+    // Asserted against the module itself: no length constant, and no rule that
+    // a one-character answer trips.
+    const refusalRules = await import('@/domain/job/signature-refusal');
+    expect(Object.keys(refusalRules)).not.toContain('REFUSAL_REASON_MIN_LENGTH');
+    for (let length = 1; length <= 12; length += 1) {
+      expect(checkRefusalReason('a'.repeat(length)).allowed, `length ${length}`).toBe(true);
+    }
   });
 });

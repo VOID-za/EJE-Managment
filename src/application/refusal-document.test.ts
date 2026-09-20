@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acceptJob,
-  acknowledgeSignatureRefusal,
+  resolveSignatureRefusal,
   addLabour,
   issueJobCard,
   recordSignatureRefusal,
@@ -56,7 +56,7 @@ describe('the issued document for a refused job card', () => {
     job = await startCompletion(context, job);
     job = await startSignature(context, job);
     job = await recordSignatureRefusal(context, job, { reason: REASON });
-    job = await acknowledgeSignatureRefusal(harness.as(master), job, 'Invoice to proceed.');
+    job = await resolveSignatureRefusal(harness.as(master), job, 'Invoice to proceed.');
 
     const result = await issueJobCard(
       harness.as(master),
@@ -102,6 +102,10 @@ describe('the issued document for a refused job card', () => {
     const text = await storedText();
     expect(text).toContain('when the work was completed.');
     expect(text).not.toContain('when the customer signed.');
+  });
+
+  it('says nothing about Master Review', async () => {
+    expect(await storedText()).not.toMatch(/master review/i);
   });
 
   it('does not print the acceptance declaration', async () => {

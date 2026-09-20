@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { can, signatoryLabelsFor, userFullName, type Job, type User } from '@/domain';
-import { acknowledgeSignatureRefusal } from '@/application/job-operations';
+import { resolveSignatureRefusal } from '@/application/job-operations';
 import { Badge, Button, Card, Icon, TextAreaField } from '@/components/ui';
 import { useOperation } from '@/hooks/useOperation';
 import { cn } from '@/lib/cn';
@@ -11,16 +11,16 @@ import { formatDateTime } from '@/lib/format';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
 /**
- * The customer's refusal to sign, and the Master's review of it.
+ * The customer's refusal to sign, and the Master's resolution of it.
  *
  * Shown wherever the job is being read, because a refused job card is the one
  * thing about the job that anyone opening it has to know first. It is an
- * exception panel, not a stage: the job is at Review like any other finished
- * job, and this says what happened at the signature.
+ * exception panel, not a stage and not a status: the job is at Review like any
+ * other finished job, and this says what happened at the signature.
  *
  * For a Master it is also where the exception is cleared. That is deliberately
- * the minimum — read it, optionally say what you decided, record that you saw
- * it — rather than an approval workflow of its own. Acknowledging is what
+ * the minimum — read it, optionally say what was decided, record the
+ * resolution — rather than an approval workflow of its own. Resolving is what
  * releases the job card for issue and files the notification, so a refusal
  * cannot sit unanswered.
  */
@@ -47,21 +47,21 @@ export const SignatureRefusalPanel = ({
     return user === undefined ? 'the office' : userFullName(user);
   };
 
-  const reviewed = refusal.acknowledgedAt !== null;
-  const canReview = can(currentUser.role, 'jobs.reviewSignatureRefusal');
+  const resolved = refusal.acknowledgedAt !== null;
+  const canResolve = can(currentUser.role, 'jobs.resolveSignatureRefusal');
 
   return (
     <Card
       className={cn(
         'mb-5',
-        reviewed ? 'border-steel-200' : 'border-amber-eje-300 bg-amber-eje-50',
+        resolved ? 'border-steel-200' : 'border-amber-eje-300 bg-amber-eje-50',
       )}
     >
       <div className="flex items-start gap-3">
         <span
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-full text-white',
-            reviewed ? 'bg-steel-400' : 'bg-amber-eje-500',
+            resolved ? 'bg-steel-400' : 'bg-amber-eje-500',
           )}
         >
           <Icon name="warning" className="size-5" />
@@ -72,8 +72,8 @@ export const SignatureRefusalPanel = ({
             <p className="text-sm font-bold tracking-wide text-steel-900 uppercase">
               {labels.refusedLabel}
             </p>
-            <Badge tone={reviewed ? 'green' : 'amber'} size="sm" dot>
-              {reviewed ? 'Reviewed' : 'Awaiting a Master'}
+            <Badge tone={resolved ? 'green' : 'amber'} size="sm" dot>
+              {resolved ? 'Resolved' : 'Awaiting Master resolution'}
             </Badge>
           </div>
 
@@ -84,31 +84,50 @@ export const SignatureRefusalPanel = ({
             {refusal.reason}
           </p>
 
-          <p className="mt-2 text-xs text-steel-600">
-            Recorded by {nameOf(refusal.recordedBy)} on {formatDateTime(refusal.recordedAt)}.
-          </p>
+          <dl className="mt-2 space-y-0.5 text-xs text-steel-600">
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-steel-500">Recorded by</dt>
+              <dd className="text-steel-800">{nameOf(refusal.recordedBy)}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-steel-500">Recorded</dt>
+              <dd className="text-steel-800">{formatDateTime(refusal.recordedAt)}</dd>
+            </div>
+            {resolved && refusal.acknowledgedAt !== null && (
+              <>
+                <div className="flex gap-2">
+                  <dt className="w-24 shrink-0 text-steel-500">Resolved by</dt>
+                  <dd className="text-steel-800">{nameOf(refusal.acknowledgedBy)}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-24 shrink-0 text-steel-500">Resolved</dt>
+                  <dd className="text-steel-800">{formatDateTime(refusal.acknowledgedAt)}</dd>
+                </div>
+                {refusal.acknowledgementNote.length > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-24 shrink-0 text-steel-500">Decision</dt>
+                    <dd className="whitespace-pre-wrap text-steel-800">
+                      {refusal.acknowledgementNote}
+                    </dd>
+                  </div>
+                )}
+              </>
+            )}
+          </dl>
 
-          {reviewed && refusal.acknowledgedAt !== null && (
-            <p className="mt-1 text-xs text-steel-600">
-              Reviewed by {nameOf(refusal.acknowledgedBy)} on{' '}
-              {formatDateTime(refusal.acknowledgedAt)}.
-              {refusal.acknowledgementNote.length > 0 && ` ${refusal.acknowledgementNote}`}
-            </p>
-          )}
-
-          {!reviewed && (
+          {!resolved && (
             <p className="mt-3 text-sm text-steel-700">
               The work and the write-up stand as recorded. The job card is not issued until a
-              Master has reviewed this refusal — nothing has to be signed again.
+              Master resolves this signature refusal — nothing has to be signed again.
             </p>
           )}
 
-          {!reviewed && canReview && (
+          {!resolved && canResolve && (
             <div className="mt-4">
               <TextAreaField
-                label="What was decided"
+                label="Master decision"
                 rows={3}
-                hint="Optional. Recorded on the job with your review."
+                hint="Optional. Recorded on the job with your resolution."
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -118,12 +137,12 @@ export const SignatureRefusalPanel = ({
                 leadingIcon={<Icon name="check" className="size-5" />}
                 onClick={async () => {
                   const ok = await operation.run((context) =>
-                    acknowledgeSignatureRefusal(context, job, note),
+                    resolveSignatureRefusal(context, job, note),
                   );
                   if (ok) onChanged();
                 }}
               >
-                Record my review
+                Record Resolution
               </Button>
             </div>
           )}
@@ -131,7 +150,7 @@ export const SignatureRefusalPanel = ({
           {operation.error !== null && (
             <div className="mt-4">
               <RuleViolationNotice
-                title="The refusal could not be reviewed"
+                title="The signature refusal could not be resolved"
                 message={operation.error}
                 violations={operation.violations}
               />

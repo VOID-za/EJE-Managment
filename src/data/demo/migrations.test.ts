@@ -164,6 +164,56 @@ describe('migrating a persisted snapshot', () => {
     expect(migrated.jobs[0]!.signatureRefusal).toEqual(refusal);
   });
 
+  it('renames a refusal resolution recorded as a review, keeping what people typed', () => {
+    const snapshot = v8Snapshot();
+    const withActivity = {
+      ...snapshot,
+      activity: [
+        {
+          id: 'act-1',
+          jobId: 'job-1',
+          type: 'signature_refusal_reviewed',
+          summary: 'Refusal to sign reviewed by a Master',
+          detail:
+            "Reviewed by Elmarie Coetzee. The customer refused to sign: Customer unavailable" +
+            " Master's note: Invoice to proceed.",
+          actorId: 'user-master-1',
+          occurredAt: '2024-02-01T11:00:00.000Z',
+        },
+      ],
+    };
+    const migrated = migrateDatabase(8, withActivity, SCHEMA_VERSION)!;
+    const event = migrated.activity[0]!;
+
+    expect(event.type).toBe('signature_refusal_resolved');
+    expect(event.summary).toBe('Signature refusal resolved');
+    expect(event.detail).toContain('Signature refusal resolved by Elmarie Coetzee.');
+    // The reason and the Master's own note are the words a person typed, and
+    // are carried through exactly.
+    expect(event.detail).toContain('Customer unavailable');
+    expect(event.detail).toContain('Master note: Invoice to proceed.');
+    expect(event.detail).not.toMatch(/reviewed by/i);
+    // And nothing else about the event moves.
+    expect(event.actorId).toBe('user-master-1');
+    expect(event.occurredAt).toBe('2024-02-01T11:00:00.000Z');
+    expect(event.jobId).toBe('job-1');
+  });
+
+  it('leaves every other audit event alone', () => {
+    const snapshot = v8Snapshot();
+    const other = {
+      id: 'act-2',
+      jobId: 'job-1',
+      type: 'customer_refused_to_sign',
+      summary: 'Customer refused to sign',
+      detail: 'Customer refused to sign. Reason: Customer unavailable Recorded by Sipho Mahlangu.',
+      actorId: 'user-tech-1',
+      occurredAt: '2024-02-01T10:00:00.000Z',
+    };
+    const migrated = migrateDatabase(8, { ...snapshot, activity: [other] }, SCHEMA_VERSION)!;
+    expect(migrated.activity[0]).toEqual(other);
+  });
+
   it('is a no-op path for a snapshot that is already current', () => {
     const migrated = migrateDatabase(SCHEMA_VERSION, v8Snapshot(), SCHEMA_VERSION);
     expect(migrated).not.toBeNull();

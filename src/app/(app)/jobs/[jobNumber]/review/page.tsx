@@ -8,7 +8,7 @@ import {
   deliveryMessage,
   deliveryStateLabel,
   isDelivered,
-  refusalAwaitingReview,
+  refusalAwaitingResolution,
   type DeliveryRecord,
 } from '@/domain';
 import {
@@ -163,14 +163,15 @@ const ReviewJobPage = ({
    * this changed, and a Master can still move those on.
    */
   /*
-   * A refusal the office has not looked at holds the job card here.
+   * An unresolved signature refusal holds the job card here.
    *
-   * Not a permission problem and not a missing signature — the work is done and
-   * the document is ready. It waits on a Master reading why the customer would
-   * not sign. `checkReadyForSubmission` refuses it either way; this is what
-   * stops the button offering something that would be refused.
+   * Not a permission problem, not a missing signature and not a different
+   * status — the work is done, the job is at Review and the document is ready.
+   * It waits on a Master resolving why the customer would not sign.
+   * `checkReadyForSubmission` refuses it either way; this is what stops the
+   * button offering something that would be refused.
    */
-  const refusalPending = refusalAwaitingReview(job);
+  const refusalPending = refusalAwaitingResolution(job);
 
   const canIssue =
     can(currentUser.role, 'jobs.submit') &&
@@ -323,10 +324,10 @@ const ReviewJobPage = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title={refusalPending ? 'Waiting on a Master' : 'Ready to submit'}
+              title={refusalPending ? 'Awaiting Master resolution' : 'Ready to submit'}
               description={
                 refusalPending
-                  ? `The customer refused to sign ${job.jobNumber}. A Master reviews the refusal above, and the job card is then issued from here — nothing has to be signed again.`
+                  ? `The customer refused to sign ${job.jobNumber}. A Master resolves the signature refusal above, and the job card is then issued from here — nothing has to be signed again.`
                   : customerEmail.length === 0
                     ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
                     : `Submitting generates the ${job.signatureRefusal === null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`

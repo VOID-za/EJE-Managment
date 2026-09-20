@@ -512,13 +512,23 @@ await step('choosing the refusal removes the signature capture entirely', async 
   await page.screenshot({ path: `${shots}/19-refusal.png`, fullPage: false });
 });
 
-await step('an empty or token reason will not submit', async () => {
+await step('an empty or whitespace-only reason will not submit', async () => {
   const submit = page.getByRole('button', { name: 'Record refusal' });
   await submit.waitFor({ timeout: 8000 });
   if (!(await submit.isDisabled())) throw new Error('an empty refusal could be submitted');
 
-  await page.getByLabel(/Customer refusal reason/).fill('no');
-  if (!(await submit.isDisabled())) throw new Error('a token reason could be submitted');
+  await page.getByLabel(/Customer refusal reason/).fill('   ');
+  if (!(await submit.isDisabled())) throw new Error('a whitespace-only reason could be submitted');
+});
+
+await step('a short but real reason is accepted', async () => {
+  // Presence is the rule. The system does not judge whether the technician's
+  // explanation is a good one, so "no" is as valid as a paragraph.
+  const submit = page.getByRole('button', { name: 'Record refusal' });
+  for (const reason of ['no', 'n/a', 'Customer unavailable']) {
+    await page.getByLabel(/Customer refusal reason/).fill(reason);
+    if (await submit.isDisabled()) throw new Error(`"${reason}" was rejected as a reason`);
+  }
 });
 
 await step('Back keeps the refusal and its reason', async () => {
@@ -558,19 +568,19 @@ await step('recording the refusal finishes the close-out', async () => {
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
 });
 
-await step('the job card is held until a Master has reviewed the refusal', async () => {
-  await page.getByText('Waiting on a Master').waitFor({ timeout: 10000 });
+await step('the job card is held until a Master resolves the refusal', async () => {
+  await page.getByText('Awaiting Master resolution').first().waitFor({ timeout: 10000 });
   if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
-    throw new Error('an unreviewed refusal could still be issued');
+    throw new Error('an unresolved refusal could still be issued');
   }
 
   // And the job screen does not promise a submission it cannot deliver.
   await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
   await page
-    .getByRole('button', { name: 'Refusal — waiting on a Master' })
+    .getByRole('button', { name: 'Signature refusal — awaiting Master resolution' })
     .waitFor({ timeout: 10000 });
   if ((await page.getByRole('button', { name: /Review & submit/ }).count()) !== 0) {
-    throw new Error('the job still offered to submit an unreviewed refusal');
+    throw new Error('the job still offered to submit an unresolved refusal');
   }
 });
 
@@ -602,9 +612,9 @@ await step('the refusal is on the job activity trail', async () => {
   });
 });
 
-await step('a technician cannot review their own refusal', async () => {
-  if ((await page.getByRole('button', { name: 'Record my review' }).count()) !== 0) {
-    throw new Error('a technician was offered the Master review');
+await step('a technician cannot resolve their own refusal', async () => {
+  if ((await page.getByRole('button', { name: 'Record Resolution' }).count()) !== 0) {
+    throw new Error('a technician was offered the Master resolution');
   }
 });
 
@@ -653,11 +663,8 @@ await step('the Master sees the refusal, the reason, who took it and when', asyn
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
   await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
   const panel = await page.locator('main').innerText();
-  if (!/Recorded by Sipho Mahlangu/.test(panel)) {
-    throw new Error('the refusal does not say who recorded it');
-  }
-  if (!/Awaiting a Master/.test(panel)) {
-    throw new Error('the refusal is not shown as outstanding');
+  for (const expected of ['Recorded by', 'Sipho Mahlangu', 'Recorded', 'Awaiting Master resolution']) {
+    if (!panel.includes(expected)) throw new Error(`the refusal panel omits "${expected}"`);
   }
 });
 
@@ -674,20 +681,20 @@ await step('the Master still sees the whole job behind the exception', async () 
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
 });
 
-await step('the Master records their review, and it is audited', async () => {
-  await page.getByLabel('What was decided').fill('Spoke to the customer, who confirmed the work.');
-  await page.getByRole('button', { name: 'Record my review' }).click();
-  await page.getByText('Reviewed').first().waitFor({ timeout: 10000 });
+await step('the Master records the resolution, and it is audited', async () => {
+  await page.getByLabel('Master decision').fill('Spoke to the customer, who confirmed the work.');
+  await page.getByRole('button', { name: 'Record Resolution' }).click();
+  await page.getByText('Resolved', { exact: true }).first().waitFor({ timeout: 10000 });
 
   await page.getByRole('tab', { name: 'Activity' }).click();
-  await page.getByText('Refusal to sign reviewed by a Master').first().waitFor({ timeout: 8000 });
+  await page.getByText('Signature refusal resolved').first().waitFor({ timeout: 8000 });
   await page
     .getByText('Spoke to the customer, who confirmed the work.', { exact: false })
     .first()
     .waitFor({ timeout: 8000 });
 });
 
-await step('the reviewed refusal is no longer outstanding in the inbox', async () => {
+await step('the resolved refusal is no longer outstanding in the inbox', async () => {
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
   const outstanding = await page
     .locator('main li')
@@ -705,7 +712,7 @@ await step('the reviewed refusal is no longer outstanding in the inbox', async (
     .waitFor({ timeout: 10000 });
 });
 
-await step('the reviewed job card can now be issued', async () => {
+await step('the resolved job card can now be issued', async () => {
   await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
   await page.getByText('Ready to submit').waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'Submit job card' }).click();

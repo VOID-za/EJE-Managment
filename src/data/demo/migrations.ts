@@ -103,9 +103,37 @@ const v9ToV10 = (data: Loose): Loose => ({
   jobs: rows(data, 'jobs').map((job) => ({ signatureRefusal: null, ...job })),
 });
 
+/**
+ * v10 -> v11.
+ *
+ * Renames the signature-refusal resolution audit event and the wording it was
+ * written with. A Master clearing a refusal was briefly recorded as a "review",
+ * which reads as the retired Master Review stage and is not what the action is:
+ * it resolves an exception on a job that never left Review.
+ *
+ * Only the system's own fixed wording is rewritten. The refusal reason and the
+ * Master's own note are the words people typed, and are carried through
+ * untouched — as are the actor, the timestamp and the job the event belongs to.
+ */
+const v10ToV11 = (data: Loose): Loose => ({
+  ...data,
+  activity: rows(data, 'activity').map((event) => {
+    if (event.type !== 'signature_refusal_reviewed') return event;
+    return {
+      ...event,
+      type: 'signature_refusal_resolved',
+      summary: 'Signature refusal resolved',
+      detail: text(event.detail)
+        .replace(/^Reviewed by /, 'Signature refusal resolved by ')
+        .replace(/ Master's note: /, ' Master note: '),
+    };
+  }),
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
+  10: v10ToV11,
 };
 
 /**

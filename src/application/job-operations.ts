@@ -1111,11 +1111,11 @@ export interface RefusalInput {
  *      who took it and when.
  *   2. The rates freeze, as they do at a signature. The work happened and the
  *      figure is the figure; a later rate change must not reach this job.
- *   3. The job moves to `review`, the same stage a signed job reaches. It does
- *      NOT get a stage of its own — the exception is attached to the job and
- *      shown against Customer Signature.
+ *   3. The job moves to `review`, the same stage a signed job reaches. It gets
+ *      no stage and no status of its own — the exception is a condition
+ *      attached to the job, shown against Customer Signature.
  *   4. Every active Master is notified, because issuing the job card now waits
- *      on one of them reviewing the refusal.
+ *      on one of them resolving the refusal.
  *
  * The technician is finished at this point. They never repeat the close-out and
  * are never asked for a second signature.
@@ -1231,39 +1231,40 @@ export const recordSignatureRefusal = async (
 };
 
 /**
- * A Master reviews the refusal, which releases the job card.
+ * A Master resolves the signature refusal, which releases the job card.
  *
- * The minimum the exception needs to stop being an open question: somebody in
- * the office looked at it, is recorded as having looked at it, and said so. It
- * is not an approval workflow and it does not change the job — the refusal
- * itself stands on the record unaltered.
+ * An administrative action on the job as it stands, and nothing more. It does
+ * not move the job — the status is `review` before and after — and it does not
+ * alter the refusal, which stands on the record exactly as the technician took
+ * it. All it clears is the blocking condition that stopped the job card being
+ * issued, and it records who cleared it.
  *
- * Handling the job also files the Masters' notifications about it, so a refusal
+ * Resolving also files the Masters' notifications about this job, so a refusal
  * that has been dealt with cannot sit in the inbox as though it had not.
  */
-export const acknowledgeSignatureRefusal = async (
+export const resolveSignatureRefusal = async (
   context: OperationContext,
   job: Job,
   note: string,
 ): Promise<Job> => {
-  if (!can(context.actor.role, 'jobs.reviewSignatureRefusal')) {
-    throw new WorkflowError(`${job.jobNumber} cannot be reviewed by you.`, [
+  if (!can(context.actor.role, 'jobs.resolveSignatureRefusal')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be resolved by you.`, [
       {
         code: 'not_permitted',
-        message: 'Only a Master can review a customer’s refusal to sign.',
+        message: 'Only a Master can resolve a customer’s refusal to sign.',
       },
     ]);
   }
   if (job.signatureRefusal === null) {
-    throw new WorkflowError(`${job.jobNumber} has no refusal to review.`, [
+    throw new WorkflowError(`${job.jobNumber} has no signature refusal to resolve.`, [
       { code: 'no_refusal', message: 'The customer did not refuse to sign this job card.' },
     ]);
   }
   if (job.signatureRefusal.acknowledgedAt !== null) {
-    throw new WorkflowError(`${job.jobNumber} has already been reviewed.`, [
+    throw new WorkflowError(`${job.jobNumber} has already been resolved.`, [
       {
-        code: 'already_reviewed',
-        message: 'This refusal has already been reviewed by a Master.',
+        code: 'already_resolved',
+        message: 'This signature refusal has already been resolved.',
       },
     ]);
   }
@@ -1281,11 +1282,11 @@ export const acknowledgeSignatureRefusal = async (
 
   await audit(context, {
     jobId: job.id,
-    type: 'signature_refusal_reviewed',
-    summary: 'Refusal to sign reviewed by a Master',
+    type: 'signature_refusal_resolved',
+    summary: 'Signature refusal resolved',
     detail:
-      `Reviewed by ${userFullName(context.actor)}. The customer refused to sign: ${job.signatureRefusal.reason}` +
-      (note.trim().length === 0 ? '' : ` Master's note: ${note.trim()}`),
+      `Signature refusal resolved by ${userFullName(context.actor)}. The customer refused to sign: ${job.signatureRefusal.reason}` +
+      (note.trim().length === 0 ? '' : ` Master note: ${note.trim()}`),
   });
 
   await fileRefusalNotifications(context, job);
