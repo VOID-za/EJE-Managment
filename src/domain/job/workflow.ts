@@ -261,9 +261,14 @@ export const cancelJobRefusal = (role: UserRole, status: JobStatus): string | nu
   return `A ${jobStatusLabel(status).toLowerCase()} job cannot be cancelled from here, because work has already been recorded against it.`;
 };
 
-/** A job that has left the active workflow, whichever way it left. */
-export const isJobInactive = (job: Pick<Job, 'status' | 'deletedAt'>): boolean =>
-  job.deletedAt !== null || job.status === 'cancelled';
+/**
+ * A job that has left the active workflow.
+ *
+ * Cancellation is the only way out that leaves a record: a deleted job is gone,
+ * so there is nothing to ask this about.
+ */
+export const isJobInactive = (job: Pick<Job, 'status'>): boolean =>
+  job.status === 'cancelled';
 
 /**
  * Whether this user may hand this job on.
@@ -275,9 +280,8 @@ export const isJobInactive = (job: Pick<Job, 'status' | 'deletedAt'>): boolean =
  */
 export const canTransferJob = (
   actor: { readonly id: string; readonly role: UserRole },
-  job: Pick<Job, 'status' | 'primaryTechnicianId' | 'deletedAt'>,
+  job: Pick<Job, 'status' | 'primaryTechnicianId'>,
 ): boolean => {
-  if (job.deletedAt !== null) return false;
   if (!TRANSFERABLE_STATUSES.includes(job.status)) return false;
   if (actor.role === 'master') return true;
   return job.primaryTechnicianId === actor.id;
@@ -292,10 +296,9 @@ const TRANSFERABLE_STATUSES: readonly JobStatus[] = [
 
 export const transferJobRefusal = (
   actor: { readonly id: string; readonly role: UserRole },
-  job: Pick<Job, 'status' | 'primaryTechnicianId' | 'deletedAt'>,
+  job: Pick<Job, 'status' | 'primaryTechnicianId'>,
 ): string | null => {
   if (canTransferJob(actor, job)) return null;
-  if (job.deletedAt !== null) return 'This job has been deleted.';
   if (!TRANSFERABLE_STATUSES.includes(job.status)) {
     return `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be transferred. The customer has already signed for this work.`;
   }

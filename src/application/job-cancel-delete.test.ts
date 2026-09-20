@@ -59,23 +59,47 @@ describe('deleting a job created by mistake', () => {
     expect(openOnly.some((candidate) => candidate.jobNumber === 'EJE-1059')).toBe(false);
   });
 
-  it('keeps the record and its audit trail', async () => {
+  /*
+   * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION.
+   *
+   * This test used to assert that a deleted job was still readable through
+   * `includeDeleted`, with `deletedBy` and `deletionReason` on it. Deletion is
+   * now permanent: the job goes, and the audit trail is what remains. The
+   * assertion is therefore inverted — the record must be GONE — and
+   * strengthened, because the property that actually matters is that the
+   * evidence survives the thing it describes.
+   */
+  it('removes the record entirely, and the audit trail survives it', async () => {
     const job = await openJob(harness);
     // Give it some history first, so the test proves the trail SURVIVES rather
     // than merely that the delete event was written.
     await addNote(harness.as(elmarie), job, 'Customer phoned to confirm access.', true);
     await deleteJob(harness.as(elmarie), job, 'Raised against the wrong customer.');
 
-    const withDeleted = await harness.repos.jobs.list({ includeDeleted: true });
-    const stored = withDeleted.find((candidate) => candidate.jobNumber === 'EJE-1059');
-    expect(stored).toBeDefined();
-    expect(stored?.deletedBy).toBe(elmarie.id);
-    expect(stored?.deletionReason).toContain('wrong customer');
-    expect(stored?.faultDescription).toBe(job.faultDescription);
+    // Gone. Not hidden, not marked — gone.
+    expect(await harness.repos.jobs.findById(job.id)).toBeNull();
+    expect(await harness.repos.jobs.findByJobNumber('EJE-1059')).toBeNull();
+    const everything = await harness.repos.jobs.list();
+    expect(everything.some((candidate) => candidate.jobNumber === 'EJE-1059')).toBe(false);
 
+    // And the evidence remains, naming who did it and why.
     const trail = await harness.repos.activity.list(job.id);
-    expect(trail.some((event) => event.type === 'job_deleted')).toBe(true);
+    const deletion = trail.find((event) => event.type === 'job_deleted');
+    expect(deletion).toBeDefined();
+    expect(deletion?.actorId).toBe(elmarie.id);
+    expect(deletion?.detail).toContain('wrong customer');
+    expect(deletion?.summary).toContain('EJE-1059');
+    // The history it had is still on the trail too.
     expect(trail.some((event) => event.type === 'note_added')).toBe(true);
+  });
+
+  it('does not appear in search once deleted', async () => {
+    const job = await openJob(harness);
+    await deleteJob(harness.as(elmarie), job, 'Raised against the wrong customer.');
+
+    // For the office, which is the role that could see a deleted job before.
+    const results = await runSearch(harness.repos, elmarie, 'EJE-1059');
+    expect(results.some((result) => result.title.includes('EJE-1059'))).toBe(false);
   });
 
   it('keeps it off the calendar', async () => {
@@ -173,7 +197,8 @@ describe('cancelling a job that will not happen', () => {
     expect(isJobInactive(cancelled)).toBe(true);
     expect(cancelled.faultDescription).toBe(job.faultDescription);
     expect(cancelled.customerId).toBe(job.customerId);
-    expect(cancelled.deletedAt).toBeNull();
+    // Cancellation is NOT deletion: the job is still there, and still findable.
+    expect(await harness.repos.jobs.findById(job.id)).not.toBeNull();
 
     const openOnly = await harness.repos.jobs.list({ statuses: ['open'] });
     expect(openOnly.some((candidate) => candidate.jobNumber === 'EJE-1059')).toBe(false);

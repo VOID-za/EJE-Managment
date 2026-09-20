@@ -291,7 +291,7 @@ export const removeContact = async (
 ): Promise<RemovalResult> => {
   assertManages(context);
 
-  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const jobs = await context.repos.jobs.list();
   const referencing = jobs.filter((job) => job.contactId === contact.id);
   const name = contactFullName(contact);
 
@@ -356,7 +356,7 @@ export const removeSite = async (
     await removeContact(context, contact);
   }
 
-  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const jobs = await context.repos.jobs.list();
   const referencing = jobs.filter((job) => job.siteId === site.id);
 
   if (referencing.length === 0) {

@@ -11,8 +11,14 @@ import type {
 import {
   can,
   getJobTypeDefinition,
+  jobVisibilityFor,
   machineLabel as machineLabelFor,
   redactRefusalsForViewer,
+  showsPricesAt,
+  technicianHistoryFrom,
+  visibleJobsFor,
+  withoutPrices,
+  type JobVisibility,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
@@ -51,13 +57,44 @@ export interface JobView {
 }
 
 /**
+ * Why this viewer may read this job, or null when they may not.
+ *
+ * A null viewer is an operation reading the record rather than a person reading
+ * a screen, and gets the whole truth: the workflow rules are enforced against
+ * what is actually stored, never against a redacted copy of it.
+ *
+ * The participation history is fetched only for someone the rule can actually
+ * turn away, so the office's read stays one query.
+ */
+const resolveVisibility = async (
+  repos: RepositoryBundle,
+  job: Job,
+  viewer: Pick<User, 'id' | 'role'> | null,
+): Promise<JobVisibility | null> => {
+  if (viewer === null) return 'office';
+  if (can(viewer.role, 'jobs.viewAll')) return 'office';
+  const participated = await repos.jobs.listParticipatedJobs(viewer.id);
+  return jobVisibilityFor(viewer, job, technicianHistoryFrom(participated));
+};
+
+/**
  * Loads a job for a PERSON to read.
  *
- * `viewer` is what makes this different from reading the record: a technician
- * who may not see another technician's signature refusal is handed a job with
- * no refusals on it, so there is nothing for a screen — or a hand-typed URL —
- * to render. Omitting the viewer reads the whole record, which is what the
- * operations themselves need: rules have to be enforced against the truth.
+ * `viewer` is what makes this different from reading the record. Two rules run
+ * here, both of them at the READ rather than on a screen, because in the next
+ * phase this function is the API handler and there is no screen in the request
+ * path:
+ *
+ *  - DECISION 5. A job this viewer may not see comes back as NULL — the same
+ *    answer a job number that does not exist gives, which is the only answer
+ *    that does not confirm the job exists. A job reached through machine
+ *    history comes back with its prices removed rather than hidden.
+ *  - The refusal rule. A technician who may not read another technician's
+ *    signature refusal is handed a job with no refusals on it, so there is
+ *    nothing for a screen — or a hand-typed URL — to render.
+ *
+ * Omitting the viewer reads the whole record, which is what the operations
+ * themselves need: rules have to be enforced against the truth.
  */
 export const loadJobView = async (
   repos: RepositoryBundle,
@@ -66,7 +103,14 @@ export const loadJobView = async (
 ): Promise<JobView | null> => {
   const stored = await repos.jobs.findByJobNumber(jobNumber);
   if (stored === null) return null;
-  const job = redactRefusalsForViewer(stored, viewer);
+
+  const visibility = await resolveVisibility(repos, stored, viewer);
+  if (visibility === null) return null;
+
+  const job = redactRefusalsForViewer(
+    showsPricesAt(visibility) ? stored : withoutPrices(stored),
+    viewer,
+  );
 
   const [customer, machine, settings, sites, contacts, users] = await Promise.all([
     repos.customers.findById(job.customerId),
@@ -146,20 +190,29 @@ export interface JobListRow {
  * the business; now the read decides, which is what will still hold when this
  * function is an API handler and there is no screen in the request path.
  *
- * Deliberately NOT changed: which live jobs a technician may see. Whether a
- * technician may open a job they were not sent to is an open question for EJE,
- * and narrowing it quietly inside a read would be answering it. Refusals are
- * private either way — `loadJobRows` redacts them per viewer.
+ * DECISION 5 now also decides WHICH jobs a technician is shown: the open pool,
+ * their own assignments, the work they have ever participated in, and the
+ * finished history of machines they have worked on. That was an open question
+ * when this function was written and it deliberately left it alone; EJE have
+ * settled it, so the read applies it. Refusals are private either way —
+ * `loadJobRows` redacts them per viewer.
  */
 export const loadJobList = async (
   repos: RepositoryBundle,
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly JobListRow[]> => {
   const jobs = await repos.jobs.list();
-  const readable = can(actor.role, 'jobs.viewAll')
-    ? jobs
-    : jobs.filter((job) => job.status !== 'cancelled');
-  return loadJobRows(repos, readable, actor);
+  if (can(actor.role, 'jobs.viewAll')) return loadJobRows(repos, jobs, actor);
+
+  const participated = await repos.jobs.listParticipatedJobs(actor.id);
+  const visible = visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
+  // Cancelled work is history for the office and clutter on a tablet. Applied
+  // after the visibility rule, not instead of it.
+  return loadJobRows(
+    repos,
+    visible.filter((job) => job.status !== 'cancelled'),
+    actor,
+  );
 };
 
 export const loadJobRows = async (

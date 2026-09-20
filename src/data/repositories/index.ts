@@ -8,6 +8,7 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  IsoDateTime,
   Job,
   JobId,
   AvailabilityRecord,
@@ -18,6 +19,7 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
+  TransferReason,
   ChatMessage,
   Conversation,
   User,
@@ -37,12 +39,31 @@ export interface JobFilter {
   readonly technicianId?: UserId;
   readonly customerId?: CustomerId;
   readonly machineId?: MachineId;
-  /**
-   * Include soft-deleted jobs. Off by default, so every existing caller keeps
-   * getting live jobs only and a deleted job cannot leak into a list by
-   * someone forgetting to filter. Search and audit pass it explicitly.
-   */
-  readonly includeDeleted?: boolean;
+}
+
+/**
+ * A handover, as a record rather than as prose.
+ *
+ * The reason and the description are captured by `returnJobToOpen` and
+ * `transferJobToTechnician` and would otherwise survive only inside an audit
+ * event's sentence. "How often does a job move because the vehicle broke down?"
+ * is a question the business will ask, and it cannot be answered by reading
+ * paragraphs.
+ *
+ * APPEND-ONLY. Nothing amends or removes a transfer; a handover that turned out
+ * to be a mistake is corrected by transferring the job back, which is another
+ * record.
+ */
+export interface JobTransferRecord {
+  readonly jobId: JobId;
+  /** Null when the job was in the office's hands rather than a technician's. */
+  readonly fromUserId: UserId | null;
+  /** Null when the job went back to the open pool rather than to a person. */
+  readonly toUserId: UserId | null;
+  readonly reason: TransferReason;
+  readonly description: string;
+  readonly transferredBy: UserId;
+  readonly transferredAt: IsoDateTime;
 }
 
 export interface JobRepository {
@@ -63,16 +84,35 @@ export interface JobRepository {
    */
   allocateJobNumber?(): Promise<{ readonly jobNumber: string; readonly sequence: number }>;
   /**
-   * Removes a job outright.
+   * Removes a job and its children outright.
    *
-   * Optional, and deliberately separate from `save`. The demo records a
-   * deletion by saving the job with its deletion fields set; production deletes
-   * the row, having first written the audit event that outlives it.
+   * There is no soft deletion. The caller must already have written the audit
+   * event that records who deleted it and why — that event outlives the job,
+   * which is why `audit_events.job_id` is deliberately not a foreign key.
    *
    * NOT a general-purpose method: the workflow permits deletion only for a job
-   * nobody has accepted, and that rule stays in the application layer.
+   * nobody has accepted, and that rule stays in the application layer
+   * (`deleteJobRefusal`), never here.
    */
-  hardDelete?(id: JobId): Promise<void>;
+  delete(id: JobId): Promise<void>;
+  /**
+   * Every job this person has ever been on, whether or not they still are.
+   *
+   * What the technician visibility rule is read from. It cannot be derived from
+   * the current assignment, because a reassignment is exactly what destroys
+   * that — a technician who captured half a job on Tuesday must not lose access
+   * to their own work on Wednesday.
+   */
+  listParticipatedJobs(userId: UserId): Promise<readonly Job[]>;
+  /**
+   * Records a handover.
+   *
+   * Optional for the same reason `allocateJobNumber` is: the browser demo keeps
+   * the handover as the audit event it writes alongside, which is all its store
+   * has. A production implementation writes the structured record, and the
+   * operations call this in addition to — never instead of — auditing it.
+   */
+  recordTransfer?(entry: JobTransferRecord): Promise<void>;
 }
 
 /**

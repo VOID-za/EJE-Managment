@@ -77,16 +77,23 @@ describe('what belongs in the archive', () => {
     expect(await jobNumbers(harness)).not.toContain('EJE-1058');
   });
 
-  it('does not list a soft-deleted job', async () => {
+  /*
+   * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION.
+   *
+   * This asserted that the archive excluded a job MARKED deleted. There is no
+   * such state any more: a deleted job is removed, so the property to hold is
+   * simply that a removed job is not in the archive.
+   *
+   * Deleting a closed job is refused by the workflow — only an unaccepted job
+   * may be deleted — so this drives the repository directly. The archive must
+   * not list what is not there.
+   */
+  it('does not list a job that has been removed', async () => {
     const closed = await seededJob(harness, 'EJE-1057');
-    // Deletion is refused through the operation for accepted work, so this
-    // drives the repository directly: the archive must still exclude it.
-    await harness.repos.jobs.save({
-      ...closed,
-      deletedAt: '2026-09-01T08:00:00.000Z',
-      deletedBy: master.id,
-      deletionReason: 'Raised against the wrong customer.',
-    });
+    expect(await jobNumbers(harness)).toContain('EJE-1057');
+
+    await harness.repos.jobs.delete(closed.id);
+
     expect(await jobNumbers(harness)).not.toContain('EJE-1057');
   });
 

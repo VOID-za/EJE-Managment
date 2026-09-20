@@ -1,5 +1,8 @@
 import {
+  can,
   canReadActivityFeed,
+  canSeeJob,
+  technicianHistoryFrom,
   visibleActivityEvents,
   type ActivityEvent,
   type JobId,
@@ -55,7 +58,7 @@ export const loadActivityFeed = async (
   const [events, users, jobs] = await Promise.all([
     repos.activity.list(),
     repos.users.list(),
-    repos.jobs.list({ includeDeleted: true }),
+    repos.jobs.list(),
   ]);
 
   const jobsById = new Map(jobs.map((job) => [job.id as string, job]));
@@ -81,10 +84,19 @@ export const loadActivityFeed = async (
  * One job's history, as this viewer may read it.
  *
  * Needs no capability: a job's own timeline is part of the job, and whoever may
- * open the job may read what happened on it. What it does enforce is the
- * refusal rule — the same `canSeeSignatureRefusal` the job record itself is
- * redacted by, so a technician handed a job with no refusals on it is not then
- * shown the refusal in the Activity tab underneath.
+ * open the job may read what happened on it. Which is exactly why it enforces
+ * DECISION 5 — "whoever may open the job" is now a rule with an answer, and a
+ * timeline is the job's history reached a different way. A viewer who may not
+ * see the job is handed nothing, rather than a filtered version of somebody
+ * else's work.
+ *
+ * It also enforces the refusal rule — the same `canSeeSignatureRefusal` the job
+ * record itself is redacted by, so a technician handed a job with no refusals
+ * on it is not then shown the refusal in the Activity tab underneath.
+ *
+ * A job that no longer exists returns nothing to anyone but the office. Its
+ * audit trail deliberately survives the deletion (DECISION 6), and the office
+ * reads that through `loadActivityFeed`, which is where the company record is.
  */
 export const loadJobActivity = async (
   repos: RepositoryBundle,
@@ -95,6 +107,12 @@ export const loadJobActivity = async (
     repos.activity.list(jobId),
     repos.jobs.findById(jobId),
   ]);
+
+  if (!can(actor.role, 'jobs.viewAll')) {
+    if (job === null) return [];
+    const participated = await repos.jobs.listParticipatedJobs(actor.id);
+    if (!canSeeJob(actor, job, technicianHistoryFrom(participated))) return [];
+  }
 
   const forThisJob = events.filter((event) => event.jobId === jobId);
   const jobsById = new Map(job === null ? [] : [[job.id as string, job] as const]);

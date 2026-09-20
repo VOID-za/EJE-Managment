@@ -469,17 +469,19 @@ export interface Job {
   /** Set when the job was cancelled. Never cleared. */
   readonly cancellation: JobCancellation | null;
 
-  /**
-   * Soft deletion, for a job created by mistake.
+  /*
+   * There is no soft deletion.
    *
-   * The record and its audit trail survive; the job simply stops appearing
-   * anywhere a live job would. Deletion is refused once a technician has
-   * accepted the job — at that point it is real work, and cancelling is the
-   * honest action.
+   * A job created by mistake is DELETED — the row and its children go, and the
+   * audit event recording who deleted it and why is written first and outlives
+   * it. Keeping a marked-deleted job would mean a record that is neither a job
+   * nor gone, appearing in exactly the lists somebody forgot to filter.
+   *
+   * Deletion is refused once a technician has accepted the job: at that point
+   * there is real work attached and CANCELLING is the honest action. A
+   * cancelled job keeps everything it recorded and stays searchable — that is a
+   * different thing from deletion and is unchanged.
    */
-  readonly deletedAt: IsoDateTime | null;
-  readonly deletedBy: UserId | null;
-  readonly deletionReason: string;
 
   readonly createdAt: IsoDateTime;
   readonly createdBy: UserId;

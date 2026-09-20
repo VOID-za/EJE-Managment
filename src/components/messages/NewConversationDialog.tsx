@@ -38,7 +38,6 @@ export const NewConversationDialog = ({
   const [body, setBody] = useState('');
 
   const linkable = jobs
-    .filter((job) => job.deletedAt === null)
     .slice()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 40);

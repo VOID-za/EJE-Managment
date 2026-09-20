@@ -72,7 +72,7 @@ const NotificationsPageContent = () => {
 
   const query = useQuery(`notifications:${user.id}`, (repos) => repos.notifications.list(user.id));
   const jobsQuery = useQuery('notifications:jobNumbers', async (repos) => {
-    const jobs = await repos.jobs.list({ includeDeleted: true });
+    const jobs = await repos.jobs.list();
     return new Map(jobs.map((job) => [job.id as string, job.jobNumber]));
   });
 

@@ -1,4 +1,12 @@
-import { can, contactFullName, machineLabel, userFullName, type User } from '@/domain';
+import {
+  can,
+  contactFullName,
+  machineLabel,
+  technicianHistoryFrom,
+  userFullName,
+  visibleJobsFor,
+  type User,
+} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -20,15 +28,17 @@ import type { RepositoryBundle } from '@/data/repositories';
  *  - USER ACCOUNTS (`users.manageTechnicians`). People are administered by the
  *    office. A technician looking up a colleague's email address and job title
  *    through the search box is reading the staff register.
- *  - SOFT-DELETED JOBS (`jobs.viewAll`). A deleted job is not live work; the
- *    capability that means "see every job, not only your own" is what decides
- *    whether the archive of mistakes is part of that.
+ *  - JOBS (`jobs.viewAll`, then DECISION 5). Whether a technician may find a
+ *    job they were not sent to was an open question when this was written, and
+ *    this function deliberately left it alone rather than settle it quietly.
+ *    EJE have now settled it: a technician sees the open pool, their current
+ *    assignments, the work they have ever participated in, and the finished
+ *    history of machines they have worked on. Nothing else. That rule lives in
+ *    `jobVisibilityFor` and is applied HERE, to the query's results, so the
+ *    same answer comes back however the read is reached.
  *
- * What is deliberately NOT changed: which live jobs a technician may find.
- * Whether a technician may open a job they were not sent to is an open question
- * for EJE, and quietly answering it inside a search function is not the way to
- * settle it. Refusal detail is private regardless — search never matched on it
- * and still does not.
+ * Refusal detail is private regardless — search never matched on it and still
+ * does not.
  */
 export type SearchCategory =
   | 'job'
@@ -83,22 +93,36 @@ export const runSearch = async (
   const mayReadEveryJob = can(actor.role, 'jobs.viewAll');
   const mayReadStaffRegister = can(actor.role, 'users.manageTechnicians');
 
-  const [jobs, customers, sites, contacts, machines, users, documents] = await Promise.all([
-    // Deleted jobs answer "where did EJE-1065 go?", and the result below is
-    // labelled so one can never be mistaken for live work — but only for the
-    // office, which is who asks that question.
-    repos.jobs.list({ includeDeleted: mayReadEveryJob }),
-    repos.customers.list(),
-    repos.customers.listSites(),
-    repos.customers.listContacts(),
-    repos.machines.list(),
-    repos.users.list(),
-    repos.documents.list(),
-  ]);
+  const [jobs, participated, customers, sites, contacts, machines, users, documents] =
+    await Promise.all([
+      repos.jobs.list(),
+      // Only asked for when it is going to decide something. The office reads
+      // every job by capability and has no participation history to consult.
+      mayReadEveryJob ? Promise.resolve([]) : repos.jobs.listParticipatedJobs(actor.id),
+      repos.customers.list(),
+      repos.customers.listSites(),
+      repos.customers.listContacts(),
+      repos.machines.list(),
+      repos.users.list(),
+      repos.documents.list(),
+    ]);
+
+  /*
+   * DECISION 5, applied before anything is matched.
+   *
+   * `visibleJobsFor` both filters and suppresses prices, in one call, so a
+   * caller cannot apply half the rule. A job reached through machine history
+   * comes back with no commercial figures on it at all — which matters here
+   * because search results carry the fault description and the job number, and
+   * the next click is the job screen.
+   */
+  const searchableJobs = mayReadEveryJob
+    ? jobs
+    : visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
 
   const results: SearchResult[] = [];
 
-  for (const job of jobs) {
+  for (const job of searchableJobs) {
     const customer = customers.find((candidate) => candidate.id === job.customerId);
     const machine = machines.find((candidate) => candidate.id === job.machineId);
     const site = sites.find((candidate) => candidate.id === job.siteId);
@@ -118,12 +142,9 @@ export const runSearch = async (
     );
 
     if (matched !== null) {
-      const inactive =
-        job.deletedAt !== null
-          ? 'Deleted'
-          : job.status === 'cancelled'
-            ? 'Cancelled'
-            : null;
+      // Cancellation is the only way a job leaves the workflow and stays
+      // findable; a deleted job is gone, so there is nothing here to label.
+      const inactive = job.status === 'cancelled' ? 'Cancelled' : null;
 
       results.push({
         id: job.id,

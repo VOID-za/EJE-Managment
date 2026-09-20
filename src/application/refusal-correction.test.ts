@@ -323,9 +323,21 @@ describe('who may see a signature refusal', () => {
     expect(asOther.labour).toEqual(refused.labour);
   });
 
-  it('redacts it when another technician loads the job by its number', async () => {
+  /*
+   * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION (DECISION 5).
+   *
+   * The redaction this asserted is still in force and is still tested, one case
+   * above, against `redactRefusalsForViewer` directly. What changed is the
+   * LOADER: a technician who is not on this job, has never been on it, and has
+   * not worked this machine is not handed the job at all now, so there are no
+   * refusals on it to redact. The assertion moves to the stronger fact.
+   *
+   * The second half is unchanged and is the point of the test: the technician
+   * whose job it is still reads her own refusal in full.
+   */
+  it('withholds the job entirely from another technician, refusal and all', async () => {
     const view = await loadJobView(harness.repos, 'EJE-1048', otherTechnician);
-    expect(view?.job.signatureRefusals).toEqual([]);
+    expect(view).toBeNull();
 
     // Which is the whole point: there is no screen, and no hand-typed URL,
     // that can show what the loader did not hand over.

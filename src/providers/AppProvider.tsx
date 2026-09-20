@@ -24,11 +24,19 @@ import type { AppServices, OperationContext } from '@/application/context';
 import type { DeliveryState, OutboxEntry } from '@/services/ports';
 
 /**
- * Application composition root.
+ * The BROWSER's composition root.
  *
- * This is the only module that knows which concrete adapters are in use.
- * Swapping the demo adapters for production HTTP clients and real integrations
- * is a change here and nowhere else.
+ * It builds the demonstration adapters, and it always will: PostgreSQL is never
+ * exposed to a client, so a page running in somebody's browser cannot be handed
+ * the production repositories. The server's choice is made in
+ * `src/data/backend.ts` — one module, reading the server's environment — and
+ * `createPostgresRepositories` is what it builds. What is missing between the
+ * two is the HTTP layer, which is the next phase.
+ *
+ * So this file is honest rather than aspirational: everything it assembles is
+ * simulated, the demonstration keeps working, and nothing here can be
+ * misconfigured into serving demonstration data to the business — because
+ * nothing here is what production will run.
  */
 interface AppContextValue {
   readonly repositories: RepositoryBundle;

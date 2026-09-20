@@ -277,19 +277,6 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     ),
     cancellation: cancellationFrom(rows.job),
 
-    /*
-     * DECISION 6: a deleted job is GONE.
-     *
-     * There is no `deleted_at` column, so these are always the "not deleted"
-     * values. They remain on the domain type because the browser demo — which
-     * still records a deletion by marking the job — has not been migrated yet,
-     * and removing them now would break it and its tests. See
-     * `docs/database.md`, "Known divergence".
-     */
-    deletedAt: null,
-    deletedBy: null,
-    deletionReason: '',
-
     createdAt: rows.job.createdAt,
     createdBy: asUserId(rows.job.createdBy ?? ''),
     acceptedAt: rows.job.acceptedAt,

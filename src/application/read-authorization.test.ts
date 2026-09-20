@@ -102,10 +102,25 @@ describe('a customer’s refusal reason, and who may read it', () => {
     await expect(loadActivityFeed(harness.repos, technicianB)).rejects.toThrow(/office record/i);
   });
 
+  /*
+   * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION (DECISION 5).
+   *
+   * This used to assert that another technician got the job back with its
+   * refusals stripped off. EJE have since settled which jobs a technician may
+   * read at all: the open pool, their own work, what they have participated in,
+   * and the finished history of machines they have worked. EJE-1048 is Sipho's
+   * live breakdown and is none of those for Lerato, so she is handed NOTHING —
+   * the same answer a job number that does not exist gives, which is the only
+   * answer that does not confirm the job exists.
+   *
+   * That is strictly stronger than the redaction it replaces, and the marker
+   * assertion is kept so a regression that starts returning the job again
+   * cannot pass by returning it redacted.
+   */
   it('does not reach another technician through the job record', async () => {
     const view = await loadJobView(harness.repos, REFUSED_JOB, technicianB);
-    expect(view?.job.signatureRefusals).toEqual([]);
-    expect(JSON.stringify(view?.job)).not.toContain(SECRET);
+    expect(view).toBeNull();
+    expect(JSON.stringify(view)).not.toContain(SECRET);
   });
 
   it('does not reach another technician through global search', async () => {
@@ -226,23 +241,23 @@ describe('global search, scoped by who is asking', () => {
     expect((await findPeople(coordinator)).length).toBeGreaterThan(0);
   });
 
-  it('does not hand a technician soft-deleted jobs', async () => {
-    const deleted = await harness.repos.jobs.findByJobNumber('EJE-1048');
-    await harness.repos.jobs.save({
-      ...deleted!,
-      deletedAt: '2026-09-18T09:00:00.000Z',
-      deletedBy: master.id,
-      deletionReason: 'Raised against the wrong machine.',
-    });
+  /*
+   * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION.
+   *
+   * This used to assert that a soft-deleted job was withheld from a technician
+   * and shown to the office labelled "Deleted". Deletion is now permanent, so
+   * there is no deleted job for anyone to be shown — and that is the stronger
+   * property: it holds for every role at once and cannot be got wrong by a
+   * caller forgetting a filter.
+   */
+  it('does not hand a deleted job to anyone, because there is none', async () => {
+    const removed = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    await harness.repos.jobs.delete(removed!.id);
 
-    const forTechnician = await runSearch(harness.repos, technicianA, 'EJE-1048');
-    expect(forTechnician.filter((result) => result.category === 'job')).toHaveLength(0);
-
-    // The office still gets the answer to "where did EJE-1048 go?", labelled.
-    const forMaster = await runSearch(harness.repos, master, 'EJE-1048');
-    const jobs = forMaster.filter((result) => result.category === 'job');
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]?.title).toContain('Deleted');
+    for (const actor of [technicianA, technicianB, coordinator, master]) {
+      const results = await runSearch(harness.repos, actor, 'EJE-1048');
+      expect(results.filter((result) => result.category === 'job')).toHaveLength(0);
+    }
   });
 
   it('still finds live work for a technician, which is not what changed', async () => {

@@ -1,5 +1,8 @@
 import type { JobPriority, JobTypeCode } from '../types/job';
 
+/** DECISION 2. See `JobTypeDefinition.orderNumberExpectation`. */
+export type OrderNumberExpectation = 'required' | 'expected' | 'optional';
+
 /**
  * Behavioural definition of a job type.
  *
@@ -34,6 +37,18 @@ export interface JobTypeDefinition {
    */
   readonly requiresOrderNumber: boolean;
   /**
+   * How the business treats the customer's order number on this job type.
+   * DECISION 2.
+   *
+   * Three values rather than a boolean, because EJE distinguish three cases:
+   * Parts cannot be handed over without one; an Installation or a Service is
+   * expected to carry one and may proceed past an explicit, recorded
+   * acknowledgement; a breakdown call-out has none and never will at the time
+   * of the visit. `requiresOrderNumber` is the hard half of this and stays as
+   * it is — the readiness gate reads it and its meaning has not changed.
+   */
+  readonly orderNumberExpectation: OrderNumberExpectation;
+  /**
    * The customer's own delivery note number may be recorded on this job type.
    *
    * Optional wherever it is offered. True for the job types whose customers
@@ -67,6 +82,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    orderNumberExpectation: 'optional',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
     defaultPriority: 'urgent',
@@ -82,6 +98,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
     defaultPriority: 'normal',
@@ -97,6 +114,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
     defaultPriority: 'normal',
@@ -114,6 +132,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: false,
     visitsSite: false,
     requiresOrderNumber: true,
+    orderNumberExpectation: 'required',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
     defaultPriority: 'normal',
@@ -130,6 +149,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesLabourAndTravel: true,
     visitsSite: true,
     requiresOrderNumber: false,
+    orderNumberExpectation: 'optional',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
     defaultPriority: 'normal',

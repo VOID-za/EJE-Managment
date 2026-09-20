@@ -321,7 +321,7 @@ describe('active and disabled users', () => {
     expect(stored).not.toBeNull();
     expect(stored!.active).toBe(false);
 
-    const jobs = await harness.repos.jobs.list({ includeDeleted: true });
+    const jobs = await harness.repos.jobs.list();
     const theirs = jobs.filter((job) => job.primaryTechnicianId === sipho.id);
     expect(theirs.length).toBeGreaterThan(0);
   });

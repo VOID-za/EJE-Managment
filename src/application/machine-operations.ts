@@ -252,7 +252,7 @@ export const removeMachine = async (
     ]);
   }
 
-  const jobs = await context.repos.jobs.list({ includeDeleted: true });
+  const jobs = await context.repos.jobs.list();
   const referencing = jobs.filter((job) => job.machineId === machine.id);
   const name = machineDisplayName(machine);
 

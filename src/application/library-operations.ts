@@ -45,6 +45,20 @@ export interface NewDocumentInput {
 const DEMO_FILE_SIZE_BYTES = 2_400_000;
 
 /**
+ * Where this revision's file lives.
+ *
+ * Keyed by the DOCUMENT ID, not by the file name. A new revision may legitimately
+ * keep the same file name — `addDocumentVersion` defaults to it — and
+ * `library/${fileName}` would then have two revisions of one manual pointing at
+ * a single file, so superseding a document would overwrite the revision it was
+ * supposed to preserve. The previous revision is archived rather than deleted
+ * precisely so it stays readable; its bytes have to stay separate for that to
+ * mean anything.
+ */
+const storageKeyFor = (documentId: string, fileName: string): string =>
+  `library/${documentId}/${fileName}`;
+
+/**
  * Adds a document.
  *
  * A Master's upload is current immediately; a technician's waits for approval.
@@ -70,8 +84,10 @@ export const addDocument = async (
       ? input.fileName.trim()
       : `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`;
 
+  const documentId = asDocumentId(context.services.ids.next('doc'));
+
   const document: TechnicalDocument = {
-    id: asDocumentId(context.services.ids.next('doc')),
+    id: documentId,
     name,
     description: input.description.trim(),
     documentType: input.documentType,
@@ -82,7 +98,7 @@ export const addDocument = async (
     fileName,
     fileSizeBytes: DEMO_FILE_SIZE_BYTES,
     pageCount: Math.max(1, Math.round(input.pageCount)),
-    storageKey: `library/${fileName}`,
+    storageKey: storageKeyFor(documentId, fileName),
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     tags: input.tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0),
@@ -185,14 +201,15 @@ export const addDocumentVersion = async (
   await context.repos.documents.save({ ...previous, status: 'archived' });
 
   const fileName = input.fileName.trim().length > 0 ? input.fileName.trim() : previous.fileName;
+  const revisionId = asDocumentId(context.services.ids.next('doc'));
   const revision: TechnicalDocument = {
     ...previous,
-    id: asDocumentId(context.services.ids.next('doc')),
+    id: revisionId,
     version,
     status: 'current',
     description: input.description.trim().length > 0 ? input.description.trim() : previous.description,
     fileName,
-    storageKey: `library/${fileName}`,
+    storageKey: storageKeyFor(revisionId, fileName),
     pageCount: Math.max(1, Math.round(input.pageCount)),
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,

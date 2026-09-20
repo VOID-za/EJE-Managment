@@ -98,7 +98,15 @@ export type ActivityEventType =
   | 'job_transferred_to_open'
   | 'job_transferred_to_technician'
   | 'job_cancelled'
-  | 'job_deleted';
+  | 'job_deleted'
+  /**
+   * A deletion that was recorded and then did not complete.
+   *
+   * Deletion writes its audit event first, so the evidence survives whatever
+   * happens next. When the destructive step then fails, this says so — because
+   * a trail that records a deletion which did not happen is worse than no trail.
+   */
+  | 'job_deletion_failed';
 
 export interface ActivityEvent {
   readonly id: ActivityId;

@@ -1,5 +1,16 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, date, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { archivedAt, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import { machineApproval } from './enums';
 import { customers, sites } from './customers';
@@ -107,4 +118,36 @@ export const machineApprovals = pgTable(
     createdAt: createdAt(),
   },
   (table) => [index('machine_approvals_machine_idx').on(table.machineId, table.requestedAt)],
+);
+
+/**
+ * Photographs of the machine itself.
+ *
+ * Separate from job media: a photo of the rating plate belongs to the MACHINE
+ * and stays useful across every job ever done on it, while a photo of a burnt
+ * contactor belongs to the job that found it. The demo held these inline on the
+ * machine record; they are a table here for the same reason job media is — each
+ * one has its own uploader, its own timestamp and its own file behind
+ * `StorageService`.
+ */
+export const machinePhotos = pgTable(
+  'machine_photos',
+  {
+    id: primaryId(),
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    caption: text('caption').notNull().default(''),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull().default(''),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull().default(0),
+    uploadedAt: instant('uploaded_at').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('machine_photos_machine_idx').on(table.machineId, table.uploadedAt),
+    uniqueIndex('machine_photos_storage_key_key').on(table.storageKey),
+  ],
 );

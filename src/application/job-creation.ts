@@ -12,6 +12,7 @@ import {
   type JobTypeCode,
   type MachineId,
   type SiteId,
+  type SystemSettings,
   type UserId,
 } from '@/domain';
 import type { OperationContext } from './context';
@@ -48,6 +49,32 @@ export interface NewJobInput {
   /** The customer's own delivery note reference. Optional, and often blank. */
   readonly deliveryNote: string;
 }
+
+/**
+ * The next job number, from whoever can allocate one safely.
+ *
+ * A repository that offers `allocateJobNumber` does it atomically — a
+ * PostgreSQL sequence — and has already consumed the value by the time this
+ * returns, so nothing afterwards may write the counter back: a settings save
+ * that moved the allocator would hand the same number out twice, or skip one.
+ * That is what `atomic` says.
+ *
+ * The demonstration store has no concurrency to protect against and allocates
+ * from its settings snapshot, so it still increments. Two Masters raising a job
+ * in the same moment is a production problem, and production is where the
+ * sequence is.
+ */
+const allocateJobNumber = async (
+  context: OperationContext,
+  settings: SystemSettings,
+): Promise<{ readonly jobNumber: string; readonly atomic: boolean }> => {
+  const repository = context.repos.jobs;
+  if (repository.allocateJobNumber === undefined) {
+    return { jobNumber: `${settings.jobNumberPrefix}${settings.nextJobSequence}`, atomic: false };
+  }
+  const allocated = await repository.allocateJobNumber();
+  return { jobNumber: allocated.jobNumber, atomic: true };
+};
 
 export const createJob = async (
   context: OperationContext,
@@ -92,12 +119,12 @@ export const createJob = async (
   }
 
   const settings = await context.repos.settings.get();
-  const jobNumber = `${settings.jobNumberPrefix}${settings.nextJobSequence}`;
+  const allocated = await allocateJobNumber(context, settings);
   const now = context.services.clock.now();
 
   const job: Job = {
-    id: asJobId(`job-${jobNumber.toLowerCase()}`),
-    jobNumber,
+    id: asJobId(context.services.ids.next('job')),
+    jobNumber: allocated.jobNumber,
     customerId: input.customerId,
     siteId: input.siteId,
     contactId: input.contactId,
@@ -139,9 +166,6 @@ export const createJob = async (
     finalDocument: null,
     delivery: null,
     cancellation: null,
-    deletedAt: null,
-    deletedBy: null,
-    deletionReason: '',
     createdAt: now,
     createdBy: context.actor.id,
     acceptedAt: null,
@@ -151,10 +175,12 @@ export const createJob = async (
   };
 
   const saved = await context.repos.jobs.save(job);
-  await context.repos.settings.save({
-    ...settings,
-    nextJobSequence: settings.nextJobSequence + 1,
-  });
+  if (!allocated.atomic) {
+    await context.repos.settings.save({
+      ...settings,
+      nextJobSequence: settings.nextJobSequence + 1,
+    });
+  }
 
   await audit(context, {
     jobId: saved.id,

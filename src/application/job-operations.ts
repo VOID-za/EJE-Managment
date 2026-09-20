@@ -2027,6 +2027,32 @@ const assertTransferable = (context: OperationContext, job: Job): void => {
   throw new WorkflowError(refusal, [{ code: 'transfer_not_permitted', message: refusal }]);
 };
 
+/**
+ * Records the handover as a structured record, where the store keeps one.
+ *
+ * Alongside the audit event, never instead of it: the trail is what a person
+ * reads, and this is what a report counts. The demonstration store has no
+ * transfer table, so it keeps the trail alone and says so at the interface.
+ */
+const recordTransfer = async (
+  context: OperationContext,
+  job: Job,
+  toUserId: UserId | null,
+  input: TransferInput,
+): Promise<void> => {
+  const record = context.repos.jobs.recordTransfer;
+  if (record === undefined) return;
+  await record.call(context.repos.jobs, {
+    jobId: job.id,
+    fromUserId: job.primaryTechnicianId,
+    toUserId,
+    reason: input.reason,
+    description: input.description.trim(),
+    transferredBy: context.actor.id,
+    transferredAt: context.services.clock.now(),
+  });
+};
+
 const transferDetail = (input: TransferInput): string =>
   input.description.trim().length > 0
     ? `${transferReasonLabel(input.reason)}. ${input.description.trim()}`
@@ -2055,6 +2081,10 @@ export const returnJobToOpen = async (
       : userFullName((await context.repos.users.findById(previousTechnician)) ?? context.actor);
 
   transition(job, 'open');
+
+  // Written before the job forgets who had it: `primaryTechnicianId` is about
+  // to become null, and it is the "from" side of the record.
+  await recordTransfer(context, job, null, input);
 
   const saved = await context.repos.jobs.save({
     ...job,
@@ -2119,6 +2149,8 @@ export const transferJobToTechnician = async (
     job.primaryTechnicianId === null
       ? 'The office'
       : userFullName((await context.repos.users.findById(job.primaryTechnicianId)) ?? context.actor);
+
+  await recordTransfer(context, job, technicianId, input);
 
   const saved = await context.repos.jobs.save({
     ...job,
@@ -2205,17 +2237,38 @@ export const cancelJob = async (
 };
 
 /**
- * Soft-deletes a job created by mistake.
+ * Deletes a job created by mistake. PERMANENTLY.
  *
- * Soft, not hard: the record and its audit trail survive, so "where did
- * EJE-1065 go?" has an answer. Refused once a technician has accepted the job —
- * at that point there is real work attached and cancelling is the right action.
+ * Not a soft delete. A job marked deleted is neither a job nor gone: it sits in
+ * the tables waiting to appear in whichever list somebody forgot to filter, and
+ * it makes "is this live work?" a question every read path has to remember to
+ * ask. So the row and its children go, and the only thing that remains is the
+ * audit event saying who deleted it and why.
+ *
+ * Refused once a technician has accepted the job. At that point there is real
+ * work attached and CANCELLING is the honest action — a cancelled job keeps
+ * everything it recorded and stays searchable, which is a different thing and
+ * is unchanged.
+ *
+ * ORDER MATTERS, AND IT IS THE POINT OF THIS FUNCTION.
+ *
+ *   1. The audit event is written FIRST and must be durable before anything is
+ *      destroyed. `audit_events.job_id` is deliberately not a foreign key so
+ *      the event can outlive the job it describes.
+ *   2. Only then is the job deleted.
+ *   3. If the deletion fails, a second audit event says so, and the error is
+ *      re-thrown. The system never reports a deletion that did not happen.
+ *
+ * In production these are two transactions, not one: an audit event written in
+ * the same transaction as the deletion would roll back with it, leaving no
+ * evidence that anything was attempted. The API layer is what will provide that
+ * boundary; this function establishes the ordering it has to honour.
  */
 export const deleteJob = async (
   context: OperationContext,
   job: Job,
   reason: string,
-): Promise<Job> => {
+): Promise<void> => {
   const refusal = deleteJobRefusal(context.actor.role, job);
   if (refusal !== null) {
     throw new WorkflowError(refusal, [{ code: 'delete_not_permitted', message: refusal }]);
@@ -2228,21 +2281,55 @@ export const deleteJob = async (
     ]);
   }
 
-  const saved = await context.repos.jobs.save({
-    ...job,
-    deletedAt: context.services.clock.now(),
-    deletedBy: context.actor.id,
-    deletionReason: trimmed,
-  });
-
+  /*
+   * PHASE ONE: THE EVIDENCE, BEFORE ANYTHING IS LOST.
+   *
+   * Written first, always, because the whole of Decision 6 rests on this event
+   * outliving the job it describes. It names the job by id AND by number, and
+   * `audit_events.job_id` is deliberately not a foreign key, so nothing about
+   * the deletion can take the record of it along.
+   *
+   * Where the caller opened a transaction, the two phases commit together:
+   * either the job is gone and the trail says so, or neither happened. What
+   * cannot occur in any ordering is the job being destroyed with no record of
+   * who destroyed it.
+   */
   await audit(context, {
     jobId: job.id,
     type: 'job_deleted',
     summary: `${job.jobNumber} deleted`,
-    detail: `${trimmed} Deleted by ${userFullName(context.actor)}. The record and this trail are retained.`,
+    detail: `${trimmed} Deleted by ${userFullName(context.actor)}. The job record was removed; this trail is what remains of it.`,
   });
 
-  return saved;
+  // PHASE TWO: THE DESTRUCTION.
+  try {
+    await context.repos.jobs.delete(job.id);
+  } catch (cause) {
+    /*
+     * The audit said it was deleted, and it was not.
+     *
+     * Say so in the same trail, so nothing is left claiming something untrue.
+     * Best effort, deliberately: inside a transaction the failed delete has
+     * already poisoned it and this write cannot land either — which is the
+     * correct outcome, because the rollback takes the claim with it. Either
+     * way the ORIGINAL cause is what the caller is told. Nobody is ever
+     * reassured that a deletion succeeded when it did not.
+     */
+    try {
+      await audit(context, {
+        jobId: job.id,
+        type: 'job_deletion_failed',
+        summary: `${job.jobNumber} could not be deleted`,
+        detail: `The deletion recorded above did not complete, so ${job.jobNumber} still exists. ${
+          cause instanceof Error ? cause.message : 'The database refused the deletion.'
+        }`,
+      });
+    } catch {
+      // Swallowed on purpose: reporting why the note could not be written
+      // would hide why the deletion failed, which is the thing that matters.
+    }
+    throw cause;
+  }
 };
 
 /**

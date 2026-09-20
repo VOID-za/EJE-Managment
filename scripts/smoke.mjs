@@ -161,8 +161,28 @@ await step('declining is recorded on the job activity trail', async () => {
   await page.getByText('Site location not requested').first().waitFor({ timeout: 8000 });
 });
 
+/*
+ * The other half of the site-location prompt: choosing to send it.
+ *
+ * AS LERATO, deliberately. EJE-1058 is seeded as HER job — she has the
+ * "New job assigned" notification for it — and under DECISION 5 a technician
+ * reads the open pool, their own work, what they have participated in and the
+ * finished history of machines they have worked, and nothing else. Sipho used
+ * to be able to open and accept somebody else's live job by typing its URL;
+ * that is precisely the hole the decision closes, so the step signs in as the
+ * technician whose job it actually is.
+ */
+await step('signing in as the technician whose second job it is', async () => {
+  await signOut();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
+  // Signing in returns you to the page you were on, which here is a job screen
+  // rather than the dashboard — so the greeting is asked for where it lives.
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: /Hello, Lerato/ }).waitFor({ timeout: 15000 });
+});
+
 await step('accepting a second job and choosing "Send Location" queues one message', async () => {
-  // EJE-1058 is seeded open; accept it to reach the prompt again.
   await page.goto(`${BASE}/jobs/EJE-1058`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Accept job' }).click();
   await page.getByRole('button', { name: 'Accept and start' }).click();
@@ -187,6 +207,12 @@ await step('the queued WhatsApp message appears in the Simulated Outbox', async 
 });
 
 await step('back to EJE-1048 to continue the main journey', async () => {
+  await signOut();
+  await page.getByRole('tab', { name: 'Technician' }).click();
+  await page.getByRole('button', { name: /Sipho Mahlangu/ }).click();
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: /Hello, Sipho/ }).waitFor({ timeout: 15000 });
+
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1048' }).waitFor({ timeout: 8000 });
 });
@@ -734,9 +760,16 @@ await step('another technician cannot see the refusal at all', async () => {
   await page.getByRole('button', { name: /Lerato Dlamini/ }).click();
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 
-  // Straight at the job by its URL, which is the only way she could get there.
+  /*
+   * Straight at the job by its URL, which is the only way she could get there.
+   *
+   * She is handed NOTHING. This used to hand her the job with its refusals
+   * stripped off; DECISION 5 now says another technician's live job is not
+   * hers to read at all, and the answer she gets is the one a job number that
+   * does not exist gives — the only answer that does not confirm it exists.
+   */
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: REFUSED_JOB }).waitFor({ timeout: 10000 });
+  await page.getByText('Job not found').first().waitFor({ timeout: 10000 });
   const body = await page.locator('main').innerText();
 
   for (const leaked of [REFUSAL_REASON, 'Customer refused to sign', 'Awaiting resolution']) {
@@ -744,11 +777,10 @@ await step('another technician cannot see the refusal at all', async () => {
       throw new Error(`another technician was shown "${leaked}" on somebody else's job`);
     }
   }
-  // Not a hidden panel: the rail itself carries no exception, because the job
-  // she was handed has no refusals on it.
-  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
-  const names = (await rail.locator('li').allInnerTexts()).join(' | ');
-  if (/refused/i.test(names)) throw new Error(`the rail leaked the refusal: ${names}`);
+  // Nor is there a job card underneath to leak one: no tabs, no rail, nothing.
+  if ((await page.getByRole('tab', { name: 'Activity' }).count()) !== 0) {
+    throw new Error('another technician was given the job screen for somebody else’s job');
+  }
 
   // And no global refusal count on her dashboard.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
@@ -788,16 +820,21 @@ await step('another technician cannot reach the audit trail at all', async () =>
   }
 });
 
-await step('nor through the Activity tab on somebody else’s job', async () => {
-  await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: REFUSED_JOB }).waitFor({ timeout: 10000 });
-  await page.getByRole('tab', { name: 'Activity' }).click();
-  await page.waitForTimeout(500);
+await step('nor through search, which is the same data reached another way', async () => {
+  await page.goto(`${BASE}/search?q=${REFUSED_JOB}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+
+  // The term itself is echoed back on the page, so the assertion is on the
+  // RESULTS: no link to the job, and nothing from it.
+  if ((await page.locator(`a[href="/jobs/${REFUSED_JOB}"]`).count()) !== 0) {
+    throw new Error(`search handed another technician ${REFUSED_JOB}`);
+  }
+  await page.getByText(`No results for "${REFUSED_JOB}"`).first().waitFor({ timeout: 8000 });
 
   const body = await page.locator('main').innerText();
   for (const leaked of [REFUSAL_REASON, 'Customer refused to sign']) {
     if (body.includes(leaked)) {
-      throw new Error(`the job's Activity tab showed another technician "${leaked}"`);
+      throw new Error(`search showed another technician "${leaked}"`);
     }
   }
 });
@@ -1665,12 +1702,37 @@ await step('a Master can delete a duplicate Open job', async () => {
   }
 });
 
-await step('the deleted job keeps its record and audit trail', async () => {
+/*
+ * REWRITTEN FOR THE CONFIRMED BUSINESS DECISION (DECISION 6).
+ *
+ * This used to assert that a deleted job was still there, labelled "Deleted",
+ * with its reason on the record — the soft deletion the demonstration used to
+ * perform. EJE have settled it: a deleted job is GONE, and what survives is the
+ * audit event that says who deleted it and why. So the assertion becomes the
+ * pair of facts the decision actually requires.
+ */
+await step('the deleted job is gone, and the audit trail outlives it', async () => {
   await page.goto(`${BASE}/jobs/EJE-1065`, { waitUntil: 'networkidle' });
-  await page.getByText('Deleted', { exact: false }).first().waitFor({ timeout: 10000 });
-  await page.getByText('Duplicate of EJE-1058.').first().waitFor({ timeout: 8000 });
-  await page.getByRole('tab', { name: 'Activity' }).click();
-  await page.getByText('deleted', { exact: false }).first().waitFor({ timeout: 8000 });
+  await page.getByText('Job not found').first().waitFor({ timeout: 10000 });
+
+  // Nor by searching for it, even for the Master who deleted it. The term is
+  // echoed back on the page, so the assertion is on the results.
+  await page.goto(`${BASE}/search?q=EJE-1065`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+  if ((await page.locator('a[href="/jobs/EJE-1065"]').count()) !== 0) {
+    throw new Error('a deleted job is still findable');
+  }
+
+  // And the evidence remains, on the office's own trail.
+  await page.goto(`${BASE}/activity`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+  const trail = await page.locator('main').innerText();
+  if (!trail.includes('EJE-1065')) {
+    throw new Error('the audit trail lost the job it recorded the deletion of');
+  }
+  if (!trail.includes('Duplicate of EJE-1058.')) {
+    throw new Error('the audit trail lost the reason the job was deleted');
+  }
 });
 
 await step('an accepted job can no longer be deleted, only cancelled', async () => {

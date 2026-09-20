@@ -62,12 +62,6 @@ class DemoJobRepository implements JobRepository {
   list(filter?: JobFilter): Promise<readonly Job[]> {
     let jobs = this.context.read().jobs;
 
-    // Soft-deleted jobs are invisible unless a caller explicitly asks, so a
-    // deleted job can never leak into a list by someone forgetting to filter.
-    if (filter?.includeDeleted !== true) {
-      jobs = jobs.filter((job) => job.deletedAt === null);
-    }
-
     if (filter?.statuses !== undefined) {
       const statuses = filter.statuses;
       jobs = jobs.filter((job) => statuses.includes(job.status));
@@ -111,6 +105,40 @@ class DemoJobRepository implements JobRepository {
       }
     });
     return Promise.resolve(job);
+  }
+
+  /**
+   * Removes the job outright.
+   *
+   * The same contract the PostgreSQL repository satisfies: there is no soft
+   * deletion, and the audit event that records the deletion is written by the
+   * caller BEFORE this runs, so it outlives the job.
+   */
+  delete(id: JobId): Promise<void> {
+    this.context.commit((draft) => {
+      draft.jobs = draft.jobs.filter((candidate) => candidate.id !== id);
+    });
+    return Promise.resolve();
+  }
+
+  /**
+   * Every job this person has ever been on.
+   *
+   * The demo store keeps no participation history — it is a fixture, not a
+   * system of record — so this answers from the CURRENT assignment, which is
+   * the closest true statement it can make. The PostgreSQL repository reads
+   * `job_participants`, which is what survives a reassignment, and the
+   * visibility tests that matter run against it.
+   */
+  listParticipatedJobs(userId: UserId): Promise<readonly Job[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .jobs.filter(
+          (job) =>
+            job.primaryTechnicianId === userId || job.additionalTechnicianIds.includes(userId),
+        ),
+    );
   }
 }
 

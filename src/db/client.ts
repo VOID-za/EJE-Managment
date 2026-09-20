@@ -31,24 +31,67 @@ export interface DatabaseOptions {
   readonly debug?: boolean;
 }
 
+/**
+ * PostgreSQL's timestamp text, as an ISO-8601 instant.
+ *
+ * The server sends `2026-09-20 12:00:00+00`, which is not ISO-8601. The domain
+ * treats `IsoDateTime` as a string it can SORT and COMPARE — the activity feed
+ * orders by `occurredAt.localeCompare`, the closed-job archive filters on
+ * `closedAt >= from` — and mixing the two notations breaks every one of those
+ * silently, because both are strings and both look like dates. So the driver
+ * normalises on the way out.
+ *
+ * Still no `Date` objects: building one would reintroduce exactly the
+ * local-timezone ambiguity `src/lib/business-time.ts` exists to remove. The
+ * instant is parsed, expressed in UTC, and handed back as text.
+ */
+const toIsoInstant = (value: string): string => {
+  const withT = value.replace(' ', 'T');
+  // `+02` is how PostgreSQL writes a whole-hour offset; ISO-8601 wants `+02:00`.
+  const zoned = /[+-]\d{2}$/.test(withT)
+    ? `${withT}:00`
+    : // No offset at all means a `timestamp without time zone`, which this
+      // schema does not use. Read as UTC rather than as the server's local
+      // time, which is the reading that cannot drift with a deployment.
+      /[+-]\d{2}:\d{2}$|Z$/.test(withT)
+      ? withT
+      : `${withT}Z`;
+
+  const parsed = new Date(zoned);
+  // Anything unparseable is handed back untouched rather than turned into
+  // "Invalid Date": a value nobody can read is better than a wrong one.
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+};
+
+/** `timestamp` and `timestamptz`, in the driver's own numbering. */
+const TIMESTAMP_OIDS = ['1114', '1184'] as const;
+
 export const createDatabase = (options: DatabaseOptions) => {
   const client = postgres(options.connectionString, {
     max: options.maxConnections ?? 10,
-    // The application reads and writes ISO strings; letting the driver build
-    // `Date` objects would reintroduce exactly the local-timezone ambiguity
-    // `src/lib/business-time.ts` exists to remove.
-    types: {
-      date: {
-        to: 1184,
-        from: [1082, 1114, 1184],
-        serialize: (value: string) => value,
-        parse: (value: string) => value,
-      },
-    },
     onnotice: () => {},
   });
 
-  return drizzle(client, { schema, logger: options.debug === true });
+  const db = drizzle(client, { schema, logger: options.debug === true });
+
+  /*
+   * Normalising the timestamps, AFTER drizzle has had the client.
+   *
+   * `drizzle()` installs a transparent parser for every date and timestamp oid,
+   * overwriting whatever the driver was configured with — which is why passing
+   * `types` to `postgres()` looks like it works and does nothing. Its intent is
+   * right: no `Date` objects, because building one would reintroduce exactly
+   * the local-timezone ambiguity `src/lib/business-time.ts` exists to remove.
+   * What it leaves behind is PostgreSQL's own text, and that is not ISO-8601.
+   *
+   * So the two timestamp oids are re-parsed here and nothing else is touched:
+   * `date` (1082) stays `YYYY-MM-DD` and `time` (1083) stays `HH:MM:SS`, both
+   * of which are already what the domain wants.
+   */
+  const parsers = client.options.parsers as Record<string, (value: string) => unknown>;
+  for (const oid of TIMESTAMP_OIDS) parsers[oid] = toIsoInstant;
+
+  return db;
 };
 
 /** Reads the connection string, and says plainly when it is missing. */

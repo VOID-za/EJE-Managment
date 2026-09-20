@@ -1,19 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
-import * as schema from '@/db/schema';
 import { PostgresJobRepository } from './job-repository';
 import { ConcurrencyError, withTransaction } from './transaction';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from './test-database';
-import {
-  asContactId,
-  asCustomerId,
-  asJobId,
-  asLineItemId,
-  asSiteId,
-  asUserId,
-  type Job,
-} from '@/domain';
+import { asUserId, asLineItemId, type Job } from '@/domain';
+import { IDS, jobFixture, seedBaseline } from './test-fixtures';
 
 /**
  * The PostgreSQL job repository, against a real PostgreSQL.
@@ -48,11 +40,7 @@ const postgresMessage = async (work: Promise<unknown>): Promise<string> => {
 const url = testDatabaseUrl();
 const describeDb = url === null ? describe.skip : describe;
 
-const MASTER = '00000000-0000-4000-8000-000000000001';
-const TECHNICIAN = '00000000-0000-4000-8000-000000000002';
-const CUSTOMER = '00000000-0000-4000-8000-000000000010';
-const SITE = '00000000-0000-4000-8000-000000000011';
-const CONTACT = '00000000-0000-4000-8000-000000000012';
+const { master: MASTER, technician: TECHNICIAN, customer: CUSTOMER } = IDS;
 
 describeDb('the PostgreSQL job repository', () => {
   let db: Database;
@@ -69,164 +57,13 @@ describeDb('the PostgreSQL job repository', () => {
   beforeEach(async () => {
     await truncateAll(db);
     repository = new PostgresJobRepository(db);
-
-    await db.insert(schema.jobTypes).values([
-      {
-        code: 'breakdown',
-        label: 'Breakdown',
-        checklistRequired: false,
-        photosRequired: false,
-        schedulesDateRange: false,
-        capturesLabourAndTravel: true,
-        visitsSite: true,
-        orderNumberExpectation: 'optional',
-        capturesDeliveryNote: false,
-        collectedOnCompletion: false,
-        defaultPriority: 'urgent',
-        accent: 'red',
-        position: 0,
-      },
-      {
-        code: 'service',
-        label: 'Service',
-        checklistRequired: true,
-        photosRequired: false,
-        schedulesDateRange: true,
-        capturesLabourAndTravel: true,
-        visitsSite: true,
-        // DECISION 2: expected, not required — an acknowledgement may stand in.
-        orderNumberExpectation: 'expected',
-        capturesDeliveryNote: false,
-        collectedOnCompletion: false,
-        defaultPriority: 'normal',
-        accent: 'green',
-        position: 1,
-      },
-      {
-        code: 'parts',
-        label: 'Parts',
-        checklistRequired: false,
-        photosRequired: false,
-        schedulesDateRange: false,
-        capturesLabourAndTravel: false,
-        visitsSite: false,
-        orderNumberExpectation: 'required',
-        capturesDeliveryNote: true,
-        collectedOnCompletion: true,
-        defaultPriority: 'normal',
-        accent: 'amber',
-        position: 2,
-      },
-    ]);
-
-    await db.insert(schema.machineTypes).values({
-      code: 'CNC Lathe',
-      label: 'CNC Lathe',
-      position: 0,
-    });
-
-    await db.insert(schema.users).values([
-      {
-        id: MASTER,
-        firstName: 'Elmarie',
-        lastName: 'Coetzee',
-        initials: 'EC',
-        email: 'elmarie@example-test.co.za',
-        role: 'master',
-      },
-      {
-        id: TECHNICIAN,
-        firstName: 'Sipho',
-        lastName: 'Mahlangu',
-        initials: 'SM',
-        email: 'sipho@example-test.co.za',
-        role: 'technician',
-      },
-    ]);
-
-    await db.insert(schema.customers).values({
-      id: CUSTOMER,
-      name: 'ABC Engineering',
-      accountNumber: 'ABC-001',
-    });
-    await db.insert(schema.sites).values({ id: SITE, customerId: CUSTOMER, name: 'Isando' });
-    await db.insert(schema.contacts).values({
-      id: CONTACT,
-      customerId: CUSTOMER,
-      firstName: 'Pieter',
-      lastName: 'Nel',
-      email: 'pieter@example-test.co.za',
-    });
-
-    await db.insert(schema.systemSettings).values({
-      id: 1,
-      companyName: 'EJE Industrial Electronics',
-      labourNormalCents: 95_000,
-      labourOvertimeCents: 142_500,
-      labourDoubleCents: 190_000,
-      calloutRateCents: 85_000,
-      kilometreRateCents: 1_850,
-      vatPercentBasisPoints: 1_500,
-    });
+    await seedBaseline(db);
   });
 
   /** A minimal, valid job, with its number allocated the way production does. */
   const newJob = async (over: Partial<Job> = {}): Promise<Job> => {
     const allocated = await repository.allocateJobNumber();
-    return {
-      id: asJobId(crypto.randomUUID()),
-      jobNumber: allocated.jobNumber,
-      customerId: asCustomerId(CUSTOMER),
-      siteId: asSiteId(SITE),
-      contactId: asContactId(CONTACT),
-      machineId: null,
-      jobType: 'breakdown',
-      priority: 'urgent',
-      status: 'open',
-      scheduledDate: null,
-      scheduledEndDate: null,
-      orderNumber: '',
-      referenceNumber: '',
-      faultDescription: 'Spindle drive alarm 750.',
-      attachments: [],
-      primaryTechnicianId: null,
-      additionalTechnicianIds: [],
-      labour: [],
-      travel: [],
-      parts: [],
-      photos: [],
-      videos: [],
-      notes: [],
-      completionReport: {
-        faultFindings: '',
-        diagnosis: '',
-        workPerformed: '',
-        recommendations: '',
-        generalNotes: '',
-      },
-      checklist: null,
-      signature: null,
-      signatureRefusals: [],
-      awaitingSparesReason: '',
-      calloutApplied: false,
-      courierCollection: false,
-      waybillNumber: '',
-      deliveryNote: '',
-      pricingSnapshot: null,
-      finalDocument: null,
-      delivery: null,
-      cancellation: null,
-      deletedAt: null,
-      deletedBy: null,
-      deletionReason: '',
-      createdAt: '2026-09-20T08:00:00.000Z',
-      createdBy: asUserId(MASTER),
-      acceptedAt: null,
-      completedAt: null,
-      submittedAt: null,
-      closedAt: null,
-      ...over,
-    };
+    return jobFixture(allocated.jobNumber, { machineId: null, ...over });
   };
 
   describe('round tripping the aggregate', () => {
@@ -532,7 +369,7 @@ describeDb('the PostgreSQL job repository', () => {
       const job = await newJob();
       await repository.save(job);
 
-      await repository.hardDelete(job.id);
+      await repository.delete(job.id);
 
       expect(await repository.findById(job.id)).toBeNull();
       expect(await repository.list()).toHaveLength(0);
@@ -548,7 +385,7 @@ describeDb('the PostgreSQL job repository', () => {
         values (gen_random_uuid(), now(), ${MASTER}, 'master', 'job_deleted',
                 ${'Deleted ' + job.jobNumber}, ${job.id}, ${job.jobNumber})
       `);
-      await repository.hardDelete(job.id);
+      await repository.delete(job.id);
 
       const events = await db.execute<{ job_number: string; summary: string }>(
         sql`select job_number, summary from audit_events where type = 'job_deleted'`,

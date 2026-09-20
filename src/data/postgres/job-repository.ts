@@ -1,10 +1,25 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import type { Job, JobId } from '@/domain';
-import type { JobFilter, JobRepository } from '@/data/repositories';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { materialisePricingSnapshot } from '@/domain';
+import type {
+  Job,
+  JobId,
+  PricingSnapshot,
+  PricingSnapshotTotals,
+  UserId,
+} from '@/domain';
+import type { JobFilter, JobRepository, JobTransferRecord } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
-import { toDomainJob, toJobRow, type JobRowSet } from './job-mapper';
-import { ConcurrencyError } from './transaction';
+import { loadChecklists, writeChecklist } from './job-checklist';
+import { toDomainJob, toJobRow, vatBasisPointsFromPercent, type JobRowSet } from './job-mapper';
+import { VersionLedger, requireWritten } from './versions';
+
+/** The three money columns a snapshot carries, named once. */
+const totalsOf = (totals: PricingSnapshotTotals) => ({
+  subtotalCents: totals.subtotal,
+  vatCents: totals.vat,
+  totalCents: totals.total,
+});
 
 /**
  * The numeric part of `EJE-1048`.
@@ -38,21 +53,8 @@ const sequenceFromJobNumber = (jobNumber: string): number => {
  * `src/application` imports Drizzle.
  */
 export class PostgresJobRepository implements JobRepository {
-  /**
-   * The version each job carried when THIS repository last read it.
-   *
-   * Optimistic concurrency needs the version the caller reasoned about, and the
-   * domain `Job` type deliberately carries no version — it is a persistence
-   * concern, not a business fact. A repository instance is one unit of work
-   * (one request, one transaction), and an operation always loads a job before
-   * it writes one, so what this instance read IS what the caller decided
-   * against.
-   *
-   * Re-reading the version inside `save` instead would defeat the whole thing:
-   * it would always match, and the second of two concurrent writers would
-   * silently overwrite the first.
-   */
-  private readonly seenVersions = new Map<string, number>();
+  /** What this unit of work last read. See `VersionLedger`. */
+  private readonly versions = new VersionLedger();
 
   constructor(private readonly db: DatabaseExecutor) {}
 
@@ -85,15 +87,6 @@ export class PostgresJobRepository implements JobRepository {
       );
     }
 
-    /*
-     * `filter.includeDeleted` is deliberately ignored.
-     *
-     * DECISION 6: a deleted job is deleted. There are no soft-deleted rows to
-     * include or exclude, so honouring the flag would mean pretending to offer
-     * a choice that no longer exists. The flag stays on the interface only
-     * while the browser demo, which still soft-deletes, is on the other side
-     * of it.
-     */
     const rows = await this.db
       .select()
       .from(schema.jobs)
@@ -179,7 +172,7 @@ export class PostgresJobRepository implements JobRepository {
        * read it is held to what it read, which is what makes the second of two
        * concurrent writers lose rather than win.
        */
-      const expected = this.seenVersions.get(job.id) ?? current.version;
+      const expected = this.versions.expected(job.id, current.version);
 
       const updated = await this.db
         .update(schema.jobs)
@@ -191,14 +184,12 @@ export class PostgresJobRepository implements JobRepository {
         .where(and(eq(schema.jobs.id, job.id), eq(schema.jobs.version, expected)))
         .returning({ version: schema.jobs.version });
 
-      const written = updated[0];
-      if (written === undefined) {
-        throw new ConcurrencyError('Job', job.jobNumber, expected);
-      }
-      this.seenVersions.set(job.id, written.version);
+      const written = requireWritten(updated, 'Job', job.jobNumber, expected);
+      this.versions.remember(job.id, written.version);
     }
 
     await this.replaceChildren(job);
+    await writeChecklist(this.db, job);
     await this.appendImmutableRecords(job);
 
     const saved = await this.findById(job.id);
@@ -207,18 +198,68 @@ export class PostgresJobRepository implements JobRepository {
   }
 
   /**
-   * Removes the job outright. DECISION 6.
+   * Removes the job and its children outright.
+   *
+   * Every child table cascades from `jobs`, so one delete takes the labour, the
+   * travel, the parts, the notes, the media, the participation rows and the
+   * historical records with it. That is correct for a job that should never
+   * have existed: there is nothing here worth keeping, which is exactly why the
+   * workflow refuses this once a technician has accepted it.
    *
    * The audit event recording the deletion is written by the application layer
-   * BEFORE this is called, and survives it — `audit_events.job_id` is
-   * deliberately not a foreign key so that the row can outlive the job it
-   * describes.
+   * BEFORE this runs and survives it — `audit_events.job_id` is deliberately
+   * not a foreign key so the row can outlive the job it describes.
    *
-   * The workflow permits this only for a job nobody has accepted; that rule is
-   * `deleteJobRefusal`, in the domain, and is not re-implemented here.
+   * `deleteJobRefusal`, in the domain, is what decides whether a job may be
+   * deleted at all. It is not re-implemented here.
    */
-  async hardDelete(id: JobId): Promise<void> {
+  /**
+   * Every job this person has ever been on, from `job_participants`.
+   *
+   * Not from `jobs.primary_technician_id`: a transfer overwrites that, and a
+   * technician must not lose access to work they captured because somebody
+   * else has it now.
+   */
+  async listParticipatedJobs(userId: UserId): Promise<readonly Job[]> {
+    const roots = await this.db
+      .select()
+      .from(schema.jobs)
+      .where(
+        sql`exists (
+          select 1 from ${schema.jobParticipants}
+           where ${schema.jobParticipants.jobId} = ${schema.jobs.id}
+             and ${schema.jobParticipants.userId} = ${userId}
+        )`,
+      )
+      .orderBy(desc(schema.jobs.jobNumberSeq));
+    return this.assemble(roots);
+  }
+
+  /**
+   * Writes a handover. APPEND-ONLY, enforced by a trigger.
+   *
+   * The repository decides nothing here: who may transfer a job, whether the
+   * receiving technician does field work, and whether a reason of "other"
+   * needs a description are all settled in `job-operations` before this is
+   * called. The CHECK constraint on the table is the second line, not the
+   * first.
+   */
+  async recordTransfer(entry: JobTransferRecord): Promise<void> {
+    await this.db.insert(schema.jobTransfers).values({
+      id: crypto.randomUUID(),
+      jobId: entry.jobId as string,
+      fromUserId: entry.fromUserId,
+      toUserId: entry.toUserId,
+      reason: entry.reason,
+      description: entry.description,
+      transferredBy: entry.transferredBy as string,
+      transferredAt: entry.transferredAt,
+    });
+  }
+
+  async delete(id: JobId): Promise<void> {
     await this.db.delete(schema.jobs).where(eq(schema.jobs.id, id));
+    this.versions.forget(id);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -234,6 +275,8 @@ export class PostgresJobRepository implements JobRepository {
         })),
       );
     }
+
+    await this.recordParticipation(job);
 
     await this.db.delete(schema.jobLabour).where(eq(schema.jobLabour.jobId, job.id));
     if (job.labour.length > 0) {
@@ -386,10 +429,21 @@ export class PostgresJobRepository implements JobRepository {
     }
 
     if (job.pricingSnapshot !== null) {
-      await this.db
+      /*
+       * The snapshot AND its lines, together.
+       *
+       * The rates on their own are not enough: the office may amend the job
+       * after the customer signed but before it is issued, and once they do,
+       * recomputing from "the job as it stands" no longer answers what the
+       * customer put their name to. The lines are written down so it always
+       * does. Both tables refuse an update at the database, so this happens
+       * once or not at all.
+       */
+      const snapshotId = crypto.randomUUID();
+      const inserted = await this.db
         .insert(schema.pricingSnapshots)
         .values({
-          id: crypto.randomUUID(),
+          id: snapshotId,
           jobId: job.id as string,
           attempt: 1,
           labourNormalCents: job.pricingSnapshot.labourRates.normal,
@@ -397,18 +451,21 @@ export class PostgresJobRepository implements JobRepository {
           labourDoubleCents: job.pricingSnapshot.labourRates.double,
           calloutRateCents: job.pricingSnapshot.calloutRate,
           kilometreRateCents: job.pricingSnapshot.kilometreRate,
-          vatPercentBasisPoints: Math.round(job.pricingSnapshot.vatPercentage * 100),
-          // Totals are materialised by the application when it freezes the
-          // snapshot; a repository must not compute a price.
-          subtotalCents: 0,
-          vatCents: 0,
-          totalCents: 0,
+          vatPercentBasisPoints: vatBasisPointsFromPercent(job.pricingSnapshot.vatPercentage),
+          ...totalsOf(materialisePricingSnapshot(job, job.pricingSnapshot).totals),
           capturedAt: job.pricingSnapshot.capturedAt,
           reason: job.pricingSnapshot.reason,
         })
         .onConflictDoNothing({
           target: [schema.pricingSnapshots.jobId, schema.pricingSnapshots.attempt],
-        });
+        })
+        .returning({ id: schema.pricingSnapshots.id });
+
+      // Only when the snapshot was genuinely new. A reread of an already-frozen
+      // job must not append a second set of lines to it.
+      if (inserted[0] !== undefined) {
+        await this.writeSnapshotLines(inserted[0].id, job, job.pricingSnapshot);
+      }
     }
 
     if (job.finalDocument !== null) {
@@ -429,6 +486,94 @@ export class PostgresJobRepository implements JobRepository {
     }
   }
 
+  /**
+   * Keeps `job_participants` in step with who is on the job.
+   *
+   * Append-and-close, never replace. Somebody currently on the job gets an open
+   * row if they have none; somebody no longer on it has their open row closed.
+   * Closed rows stay for ever — they are the history the visibility rule reads,
+   * and the whole reason this table exists separately from `job_technicians`.
+   *
+   * Derived from the job the caller is saving rather than decided here: who is
+   * on a job is a business fact the operations already establish. This only
+   * makes sure the record of it survives the next reassignment.
+   */
+  private async recordParticipation(job: Job): Promise<void> {
+    const now = sql`now()`;
+
+    const current = new Map<string, 'primary_technician' | 'additional_technician'>();
+    if (job.primaryTechnicianId !== null) {
+      current.set(job.primaryTechnicianId, 'primary_technician');
+    }
+    for (const userId of job.additionalTechnicianIds) {
+      if (!current.has(userId)) current.set(userId, 'additional_technician');
+    }
+
+    const open = await this.db
+      .select()
+      .from(schema.jobParticipants)
+      .where(and(eq(schema.jobParticipants.jobId, job.id), isNull(schema.jobParticipants.until)));
+
+    // Anyone no longer on the job has their participation closed, with a reason.
+    for (const row of open) {
+      if (current.get(row.userId) === row.role) continue;
+      await this.db
+        .update(schema.jobParticipants)
+        .set({ until: now, endedReason: 'no longer assigned' })
+        .where(eq(schema.jobParticipants.id, row.id));
+    }
+
+    // Anyone on it who has no open row gets one.
+    for (const [userId, role] of current) {
+      const alreadyOpen = open.some((row) => row.userId === userId && row.role === role);
+      if (alreadyOpen) continue;
+      await this.db.insert(schema.jobParticipants).values({
+        id: crypto.randomUUID(),
+        jobId: job.id as string,
+        userId,
+        role,
+        since: job.acceptedAt ?? job.createdAt,
+      });
+    }
+  }
+
+  /**
+   * Writes the priced lines that belong to a snapshot.
+   *
+   * The snapshot freezes the RATES; these freeze what those rates produced, so
+   * "what did the customer sign for?" survives the office amending the job
+   * afterwards. Computed by `materialisePricingSnapshot` in the domain — the
+   * repository labels nothing and prices nothing.
+   *
+   * Written once, with the snapshot, and never again: both tables refuse an
+   * update at the database.
+   */
+  private async writeSnapshotLines(
+    snapshotId: string,
+    job: Job,
+    snapshot: PricingSnapshot,
+  ): Promise<PricingSnapshotTotals> {
+    const materialised = materialisePricingSnapshot(job, snapshot);
+    if (materialised.lines.length > 0) {
+      await this.db.insert(schema.pricingSnapshotLines).values(
+        materialised.lines.map((line) => ({
+          id: crypto.randomUUID(),
+          snapshotId,
+          lineKind: line.kind,
+          sourceLineId: line.sourceLineId,
+          position: line.position,
+          description: line.description,
+          detail: line.detail,
+          quantity: String(line.quantity),
+          unitLabel: line.unit,
+          unitPriceCents: line.unitPrice,
+          lineTotalCents: line.lineTotal,
+        })),
+      );
+    }
+    return materialised.totals;
+  }
+
   /** Fetches every child collection for the given roots and assembles the jobs. */
   private async assemble(
     roots: readonly (typeof schema.jobs.$inferSelect)[],
@@ -436,33 +581,52 @@ export class PostgresJobRepository implements JobRepository {
     if (roots.length === 0) return [];
     const ids = roots.map((row) => row.id);
 
-    const [technicians, labour, travel, parts, notes, media, signatures, refusals, snapshots, documents, attempts] =
-      await Promise.all([
-        this.db.select().from(schema.jobTechnicians).where(inArray(schema.jobTechnicians.jobId, ids)),
-        this.db.select().from(schema.jobLabour).where(inArray(schema.jobLabour.jobId, ids)),
-        this.db.select().from(schema.jobTravel).where(inArray(schema.jobTravel.jobId, ids)),
-        this.db.select().from(schema.jobParts).where(inArray(schema.jobParts.jobId, ids)),
-        this.db.select().from(schema.jobNotes).where(inArray(schema.jobNotes.jobId, ids)),
-        this.db.select().from(schema.jobMedia).where(inArray(schema.jobMedia.jobId, ids)),
-        this.db.select().from(schema.jobSignatures).where(inArray(schema.jobSignatures.jobId, ids)),
-        this.db
-          .select()
-          .from(schema.signatureRefusals)
-          .where(inArray(schema.signatureRefusals.jobId, ids))
-          .orderBy(schema.signatureRefusals.attempt),
-        this.db.select().from(schema.pricingSnapshots).where(inArray(schema.pricingSnapshots.jobId, ids)),
-        this.db.select().from(schema.finalDocuments).where(inArray(schema.finalDocuments.jobId, ids)),
-        this.db
-          .select()
-          .from(schema.deliveryAttempts)
-          .where(inArray(schema.deliveryAttempts.jobId, ids))
-          .orderBy(desc(schema.deliveryAttempts.attemptNumber)),
-      ]);
+    const [
+      technicians,
+      labour,
+      travel,
+      parts,
+      notes,
+      media,
+      signatures,
+      refusals,
+      snapshots,
+      documents,
+      attempts,
+      checklists,
+    ] = await Promise.all([
+      this.db.select().from(schema.jobTechnicians).where(inArray(schema.jobTechnicians.jobId, ids)),
+      this.db.select().from(schema.jobLabour).where(inArray(schema.jobLabour.jobId, ids)),
+      this.db.select().from(schema.jobTravel).where(inArray(schema.jobTravel.jobId, ids)),
+      this.db.select().from(schema.jobParts).where(inArray(schema.jobParts.jobId, ids)),
+      this.db.select().from(schema.jobNotes).where(inArray(schema.jobNotes.jobId, ids)),
+      this.db.select().from(schema.jobMedia).where(inArray(schema.jobMedia.jobId, ids)),
+      this.db.select().from(schema.jobSignatures).where(inArray(schema.jobSignatures.jobId, ids)),
+      this.db
+        .select()
+        .from(schema.signatureRefusals)
+        .where(inArray(schema.signatureRefusals.jobId, ids))
+        .orderBy(schema.signatureRefusals.attempt),
+      this.db
+        .select()
+        .from(schema.pricingSnapshots)
+        .where(inArray(schema.pricingSnapshots.jobId, ids)),
+      this.db
+        .select()
+        .from(schema.finalDocuments)
+        .where(inArray(schema.finalDocuments.jobId, ids)),
+      this.db
+        .select()
+        .from(schema.deliveryAttempts)
+        .where(inArray(schema.deliveryAttempts.jobId, ids))
+        .orderBy(desc(schema.deliveryAttempts.attemptNumber)),
+      loadChecklists(this.db, ids),
+    ]);
 
     const by = <T extends { jobId: string }>(rows: readonly T[], id: string): readonly T[] =>
       rows.filter((row) => row.jobId === id);
 
-    for (const root of roots) this.seenVersions.set(root.id, root.version);
+    this.versions.rememberAll(roots);
 
     return roots.map((job) =>
       toDomainJob({
@@ -478,9 +642,7 @@ export class PostgresJobRepository implements JobRepository {
         snapshot: by(snapshots, job.id)[0] ?? null,
         finalDocument: by(documents, job.id)[0] ?? null,
         deliveryAttempts: by(attempts, job.id),
-        // Checklists are a separate aggregate with their own repository; this
-        // phase persists the job, and the checklist repository follows.
-        checklist: null,
+        checklist: checklists.get(job.id) ?? null,
       } satisfies JobRowSet),
     );
   }

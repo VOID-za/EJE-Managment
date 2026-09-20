@@ -213,25 +213,9 @@ const JobDetailPage = ({
         }
       />
 
-      {/* A job that has left the workflow must never look like live work, so
-          this states what happened, why, and who did it — before anything else
-          on the page. */}
-      {job.deletedAt !== null && (
-        <Card className="mb-5 border-signal-300 bg-signal-50">
-          <p className="text-sm font-bold tracking-wide text-signal-700 uppercase">Deleted</p>
-          <p className="mt-1 text-sm text-signal-800">{job.deletionReason}</p>
-          <p className="mt-1 text-xs text-signal-700">
-            Deleted by {userName(users, job.deletedBy)} on {formatDateTime(job.deletedAt)}. The
-            record and its history are retained.
-          </p>
-        </Card>
-      )}
-
       {/* A closed job's first business is its official job card, so the
           document and its actions come before the record itself. */}
-      {job.status === 'closed' && job.deletedAt === null && (
-        <FinalDocumentCard job={job} users={users} />
-      )}
+      {job.status === 'closed' && <FinalDocumentCard job={job} users={users} />}
 
       {job.status === 'cancelled' && job.cancellation !== null && (
         <Card className="mb-5 border-signal-300 bg-signal-50">

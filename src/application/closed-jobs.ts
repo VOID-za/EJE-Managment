@@ -80,12 +80,10 @@ const closedOn = (job: Job): IsoDate | null =>
 /**
  * Whether a job belongs in the archive.
  *
- * Only genuinely closed work: cancelled jobs never happened, and a job still in
- * Master Review has not been issued. Soft-deleted jobs are excluded by the
- * repository itself.
+ * Only genuinely closed work: a cancelled job never happened, and a job still
+ * in the retired Master Review stage has not been issued.
  */
-export const isArchivedJob = (job: Job): boolean =>
-  job.status === 'closed' && job.deletedAt === null;
+export const isArchivedJob = (job: Job): boolean => job.status === 'closed';
 
 export const loadClosedJobs = async (
   repos: RepositoryBundle,

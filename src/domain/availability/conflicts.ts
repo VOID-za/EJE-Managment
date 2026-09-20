@@ -146,7 +146,7 @@ export const jobsAffectedByAbsence = (
   absence: { readonly startDate: IsoDate; readonly endDate: IsoDate },
 ): readonly Job[] =>
   jobs.filter((job) => {
-    if (job.status === 'closed' || job.status === 'cancelled' || job.deletedAt !== null) {
+    if (job.status === 'closed' || job.status === 'cancelled') {
       return false;
     }
     const assigned =

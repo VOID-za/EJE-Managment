@@ -319,11 +319,16 @@ const NewChecklistDialog = ({
   );
 };
 
-let sequence = 0;
-const localId = (prefix: string): string => {
-  sequence += 1;
-  return `${prefix}-${Date.now().toString(36)}-${sequence}`;
-};
+/**
+ * An id for a section or an item the Master has just added.
+ *
+ * A UUID rather than a counter, because these ids are PERSISTED: a checklist
+ * answer references its question by id for the life of the job card, and the
+ * `checklist_sections` and `checklist_questions` primary keys are `uuid`. The
+ * prefix is kept in the signature so the call sites still read as they did; it
+ * is no longer part of the value, which is the point.
+ */
+const localId = (_prefix: string): string => crypto.randomUUID();
 
 /**
  * Section and item editor.
