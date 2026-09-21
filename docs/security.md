@@ -102,6 +102,26 @@ itself.
 | Coordinator | Technicians only. Cannot manage a Master or another Coordinator, and cannot promote a Technician to Coordinator |
 | Technician | Nobody |
 
+### Reading a record and changing it are different capabilities
+
+`customers.view` reads the customer register; `customers.manage` changes it. A
+Technician holds the first and not the second, which is the rule the system has
+always stated: `customer-operations.ts` refuses their edit with "Technicians can
+view customers and raise change requests, but not edit them", and the sidebar
+has always offered the screen on `customers.view`.
+
+**The capability a read enforces must be the one the navigation gates on.** When
+they disagree, a role is offered a screen the server then refuses — which is how
+`/customers` and `/calendar` came to show "Something went wrong" to a
+Technician. Adding a capability check to a read is not free: it has to be the
+same one the sidebar uses, or the sidebar has to change with it.
+
+Reading a customer is **not** reading their jobs. The record is the same for
+everybody; the work hanging off it goes through `loadVisibleJobRows`, which
+applies Decision 5 per viewer. The same applies to a machine's history, and to
+the open-job counts on the register — a count the viewer cannot account for is
+itself a disclosure.
+
 ### Reads are actor-aware, and non-disclosing
 
 A job this actor may not read answers **404, not 403**. Telling somebody "you
@@ -164,6 +184,24 @@ One shape, always:
 **What never crosses this boundary:** stack traces, SQL, connection strings,
 table names, password hashes, session tokens, and whether an email address
 belongs to an account.
+
+### What the browser does with each of them
+
+`describeFailure` (`src/components/ui/request-failure.ts`) turns the code into
+what the person is told, and `QueryFailure` draws it. The distinction that
+matters: **403 is an answer, 500 is a fault.**
+
+A refusal gets its own panel — steel, a lock, and no "Try again", because trying
+again will be refused again. It names nothing: not the capability, not the role
+that would have been enough, not whether the record exists. It does not repeat
+the server's own sentence either, so a message written for the API cannot leak
+through the screen.
+
+Everything the server could not do keeps the red panel and the retry. An
+unrecognised code falls back to a fault, never to an access answer.
+
+Nothing here decides access. The server has already refused; this is only its
+presentation, and no screen consults it before fetching.
 
 ---
 

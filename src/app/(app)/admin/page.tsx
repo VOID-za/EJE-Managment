@@ -18,9 +18,9 @@ import {
   CardHeader,
   ConfirmDialog,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   Tabs,
   TextField,
 } from '@/components/ui';
@@ -72,7 +72,7 @@ const AdminPage = () => {
   }
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   const data = query.data;

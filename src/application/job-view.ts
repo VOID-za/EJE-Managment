@@ -250,3 +250,41 @@ export const loadJobRows = async (
     };
   });
 };
+
+/**
+ * The jobs hanging off ONE record — a customer, a machine — as this viewer may
+ * read them.
+ *
+ * WHY THIS IS NOT `loadJobRows`. That function resolves names and redacts
+ * refusals; it does NOT decide who may see a job, because its callers hand it a
+ * list that has already been decided. `loadJobList` decides for the Jobs
+ * screen. A record screen has to decide too, and passing `repos.jobs.list({
+ * customerId })` straight into `loadJobRows` handed a technician every job on
+ * that customer — another technician's live work included, with the prices on
+ * it.
+ *
+ * DECISION 5, through `visibleJobsFor`, which filters and suppresses prices in
+ * one call so a caller cannot apply half the rule. The office is unaffected:
+ * `jobs.viewAll` returns everything, in full, exactly as before.
+ *
+ * Cancelled work is deliberately NOT dropped here, unlike `loadJobList`: on the
+ * Jobs screen it is clutter on a tablet, but on a machine's history "we were
+ * called out and the job was cancelled" is part of what happened to it.
+ */
+export const loadVisibleJobs = async (
+  repos: RepositoryBundle,
+  jobs: readonly Job[],
+  actor: Pick<User, 'id' | 'role'>,
+): Promise<readonly Job[]> => {
+  if (can(actor.role, 'jobs.viewAll')) return jobs;
+
+  const participated = await repos.jobs.listParticipatedJobs(actor.id);
+  return visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
+};
+
+export const loadVisibleJobRows = async (
+  repos: RepositoryBundle,
+  jobs: readonly Job[],
+  actor: Pick<User, 'id' | 'role'>,
+): Promise<readonly JobListRow[]> =>
+  loadJobRows(repos, await loadVisibleJobs(repos, jobs, actor), actor);

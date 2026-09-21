@@ -8,10 +8,10 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
   Modal,
+  QueryFailure,
   SectionHeading,
   SelectField,
   Tabs,
@@ -98,7 +98,7 @@ const LibraryPage = () => {
   };
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (

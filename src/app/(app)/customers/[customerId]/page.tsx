@@ -7,9 +7,9 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -43,7 +43,7 @@ const CustomerDetailPage = ({
   const query = useQuery(`customer:${customerId}`, () => reads.customer(customerId));
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
   if (query.loading) {
     return (

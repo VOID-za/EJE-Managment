@@ -20,9 +20,9 @@ import {
   Card,
   DataTable,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SelectField,
   TextField,
   type Column,
@@ -87,7 +87,7 @@ const ClosedJobsPage = () => {
   }
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   const columns: Column<JobListRow>[] = [

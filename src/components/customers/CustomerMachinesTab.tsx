@@ -80,6 +80,11 @@ export const CustomerMachinesTab = ({
           Machines are reached through the customer and their sites. Every job and its history
           hangs off the machine.
         </p>
+        {/* Deliberately NOT gated on `machines.manage`. A technician who finds
+            a machine on site that is not on the register adds it, and
+            `approvalForNewMachine` lands it as `pending_approval` for a Master
+            to confirm. Editing and removing an existing machine are the
+            office's, which is what the buttons below are gated on. */}
         <Button
           variant="secondary"
           leadingIcon={<Icon name="plus" className="size-4" />}

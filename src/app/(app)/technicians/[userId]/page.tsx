@@ -19,9 +19,9 @@ import {
   ConfirmDialog,
   DefinitionGrid,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -64,7 +64,7 @@ const TechnicianProfilePage = ({
   const query = useQuery(`technician:${userId}`, () => reads.technician(userId));
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
   if (query.loading) {
     return (

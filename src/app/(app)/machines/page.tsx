@@ -7,9 +7,9 @@ import {
   Badge,
   Card,
   DataTable,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SelectField,
   type Column,
 } from '@/components/ui';
@@ -124,7 +124,7 @@ const MachinesPage = () => {
   ];
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (

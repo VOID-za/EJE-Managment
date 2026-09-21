@@ -80,9 +80,15 @@ describe('office screens', () => {
     startTestServer();
   });
 
+  /*
+   * Screens a technician is not meant to reach at all.
+   *
+   * `/api/customers` is deliberately NOT in this list. Reading the customer
+   * register is a technician's, on `customers.view`; only CHANGING it is the
+   * office's. See `customer-access.test.ts`, which holds both halves.
+   */
   const officeOnly = [
     '/api/admin',
-    '/api/customers',
     '/api/machines',
     '/api/jobs/form',
     '/api/jobs/closed',
@@ -106,6 +112,53 @@ describe('office screens', () => {
     const coordinator = await signedInAs(DEMO_USERS.coordinator);
     expect((await coordinator.get('/api/customers')).status).toBe(200);
     expect((await coordinator.get('/api/machines')).status).toBe(200);
+  });
+});
+
+/**
+ * What a refusal tells the client.
+ *
+ * The server stays authoritative and the answer stays a refusal: this is about
+ * the response being HONEST about which kind of failure it is, so the browser
+ * can say "you do not have access to this" instead of "something went wrong".
+ * A refusal that arrives looking like a server fault is a refusal nobody can
+ * present correctly.
+ */
+describe('the shape of a refusal', () => {
+  beforeEach(() => {
+    startTestServer();
+  });
+
+  it('is a refusal, and never a server fault', async () => {
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const response = await technician.get('/api/admin');
+
+    expect(response.status).toBe(403);
+    expect(response.error?.code).toBe('forbidden');
+    // The distinction the screens now draw on. If these ever collapse into one
+    // code, a refusal becomes indistinguishable from a broken server again.
+    expect(response.error?.code).not.toBe('internal_error');
+    expect(response.status).not.toBe(500);
+  });
+
+  it('carries a violation the screens can read, and no internals', async () => {
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const response = await technician.get('/api/admin');
+
+    expect(response.error?.violations.some((v) => v.code === 'not_permitted')).toBe(true);
+
+    const body = JSON.stringify(response.raw).toLowerCase();
+    for (const leak of ['stack', 'select ', 'postgres', 'password', 'token', '.ts:']) {
+      expect(body).not.toContain(leak);
+    }
+  });
+
+  it('refuses the data as well as the screen', async () => {
+    // The point of all of this: the presentation changed, the answer did not.
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const response = await technician.get('/api/admin');
+
+    expect(response.data).toBeUndefined();
   });
 });
 

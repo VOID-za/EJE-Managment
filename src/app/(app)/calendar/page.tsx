@@ -13,9 +13,9 @@ import {
   Badge,
   Button,
   Card,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SelectField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -126,7 +126,7 @@ const CalendarPage = () => {
   };
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   const jobCount = entries.filter((entry) => entry.kind === 'job').length;

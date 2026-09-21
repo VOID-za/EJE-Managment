@@ -8,9 +8,9 @@ import {
   Button,
   Card,
   DataTable,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -107,7 +107,7 @@ const CustomersPage = () => {
   ];
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (

@@ -24,9 +24,9 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SelectField,
   TextAreaField,
   TextField,
@@ -99,7 +99,7 @@ const NewJobPage = () => {
   }
 
   if (dataQuery.error !== null) {
-    return <ErrorState message={dataQuery.error} onRetry={dataQuery.refetch} />;
+    return <QueryFailure code={dataQuery.errorCode} message={dataQuery.error} onRetry={dataQuery.refetch} />;
   }
   if (dataQuery.loading || data === null || data === undefined) {
     return (

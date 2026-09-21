@@ -21,9 +21,9 @@ import {
   CardHeader,
   ConfirmDialog,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/cn';
@@ -130,7 +130,7 @@ const ReviewJobPage = ({
   }, [operation, jobNumber]);
 
   if (viewQuery.error !== null) {
-    return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;
+    return <QueryFailure code={viewQuery.errorCode} message={viewQuery.error} onRetry={viewQuery.refetch} />;
   }
   if (viewQuery.loading) return <LoadingPanel rows={3} label="Loading job card" />;
 

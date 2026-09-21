@@ -24,6 +24,7 @@ import {
   JobStatusBadge,
   LoadingPanel,
   PriorityBadge,
+  QueryFailure,
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -86,7 +87,7 @@ const JobDetailPage = ({
   const supportQuery = { ...screenQuery, data: screenQuery.data ?? null };
 
   if (viewQuery.error !== null) {
-    return <ErrorState message={viewQuery.error} onRetry={viewQuery.refetch} />;
+    return <QueryFailure code={viewQuery.errorCode} message={viewQuery.error} onRetry={viewQuery.refetch} />;
   }
   if (viewQuery.loading) {
     return (

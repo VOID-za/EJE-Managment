@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ApiRequestError, type ApiErrorCode } from '@/api/client';
 import { useApp } from '@/providers/AppProvider';
 
 export interface QueryResult<T> {
@@ -10,6 +11,18 @@ export interface QueryResult<T> {
   /** True while a refresh is in flight but previous data is still on screen. */
   readonly refreshing: boolean;
   readonly error: string | null;
+  /**
+   * WHY the read failed, not merely that it did.
+   *
+   * Without this every failure reached the screen as a sentence, and a screen
+   * with only a sentence has one thing it can draw: "Something went wrong. Try
+   * again." A 403 is not a fault and retrying it will refuse again — see
+   * `describeFailure`, which is what turns this into what the person is told.
+   *
+   * Null when the failure was not an API refusal at all (a loader that threw on
+   * its own), which is a genuine fault and is presented as one.
+   */
+  readonly errorCode: ApiErrorCode | null;
   refetch(): void;
 }
 
@@ -18,6 +31,7 @@ interface Settled<T> {
   readonly token: string;
   readonly data: T | null;
   readonly error: string | null;
+  readonly errorCode: ApiErrorCode | null;
 }
 
 /**
@@ -48,6 +62,7 @@ export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult
     token: '',
     data: null,
     error: null,
+    errorCode: null,
   });
 
   // The loader is a fresh closure on every render. Keeping it in a ref that is
@@ -64,7 +79,7 @@ export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult
     loaderRef
       .current()
       .then((result) => {
-        if (!cancelled) setSettled({ key, token, data: result, error: null });
+        if (!cancelled) setSettled({ key, token, data: result, error: null, errorCode: null });
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
@@ -73,6 +88,7 @@ export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult
           token,
           data: null,
           error: cause instanceof Error ? cause.message : 'Unable to load this data.',
+          errorCode: cause instanceof ApiRequestError ? cause.code : null,
         });
       });
 
@@ -92,6 +108,7 @@ export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult
     loading: !sameKey,
     refreshing: sameKey && !current,
     error: sameKey && current ? settled.error : null,
+    errorCode: sameKey && current ? settled.errorCode : null,
     refetch,
   };
 };

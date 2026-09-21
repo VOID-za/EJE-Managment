@@ -9,11 +9,11 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   JobStatusBadge,
   LoadingPanel,
   PriorityBadge,
+  QueryFailure,
   SectionHeading,
   StatTile,
 } from '@/components/ui';
@@ -52,7 +52,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
   const supportQuery = jobsQuery;
 
   if (jobsQuery.error !== null) {
-    return <ErrorState message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
+    return <QueryFailure code={jobsQuery.errorCode} message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
   }
   if (jobsQuery.loading || supportQuery.loading) {
     return (

@@ -19,7 +19,7 @@ import {
   type JobStatus,
   type JobTypeCode,
 } from '@/domain';
-import { Button, Card, ErrorState, Icon, LoadingPanel, SelectField } from '@/components/ui';
+import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
@@ -152,7 +152,7 @@ const JobsPageContent = () => {
   const canSeeRefusalQueue = can(user.role, 'jobs.viewAnySignatureRefusal');
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (

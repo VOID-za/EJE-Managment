@@ -6,9 +6,9 @@ import { canReadActivityFeed, userFullName } from '@/domain';
 import {
   Card,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SelectField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -103,7 +103,7 @@ const ActivityPage = () => {
   }
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (

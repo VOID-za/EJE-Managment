@@ -11,9 +11,9 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   Tabs,
   type IconName,
 } from '@/components/ui';
@@ -79,7 +79,7 @@ const NotificationsPageContent = () => {
   const jobNumbers = new Map(query.data?.jobNumbers ?? []);
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   const notifications = query.data?.notifications ?? [];

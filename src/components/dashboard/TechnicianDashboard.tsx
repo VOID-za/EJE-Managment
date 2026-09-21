@@ -8,9 +8,9 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SectionHeading,
   StatTile,
 } from '@/components/ui';
@@ -42,7 +42,7 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
   });
 
   if (jobsQuery.error !== null) {
-    return <ErrorState message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
+    return <QueryFailure code={jobsQuery.errorCode} message={jobsQuery.error} onRetry={jobsQuery.refetch} />;
   }
   if (jobsQuery.loading) {
     return (

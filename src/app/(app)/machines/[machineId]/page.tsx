@@ -9,9 +9,9 @@ import {
   CardHeader,
   DefinitionGrid,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SectionHeading,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -30,7 +30,7 @@ const MachineDetailPage = ({
   const query = useQuery(`machine:${machineId}`, () => reads.machine(machineId));
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
   if (query.loading) {
     return (

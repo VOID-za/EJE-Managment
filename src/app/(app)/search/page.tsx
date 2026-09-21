@@ -12,9 +12,9 @@ import {
   Badge,
   Card,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
   SectionHeading,
   type IconName,
 } from '@/components/ui';
@@ -135,7 +135,7 @@ const SearchPageContent = () => {
           icon={<Icon name="search" />}
         />
       ) : query.error !== null ? (
-        <ErrorState message={query.error} onRetry={query.refetch} />
+        <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Searching" />
       ) : total === 0 ? (

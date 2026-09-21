@@ -15,7 +15,13 @@ import { loadActivityFeed, loadJobActivity } from '@/application/activity-read';
 import { loadCalendar } from '@/application/calendar';
 import { loadClosedJobs, type ClosedJobFilters } from '@/application/closed-jobs';
 import { loadConversations } from '@/application/chat-operations';
-import { loadJobList, loadJobRows, loadJobView } from '@/application/job-view';
+import {
+  loadJobList,
+  loadJobRows,
+  loadJobView,
+  loadVisibleJobRows,
+  loadVisibleJobs,
+} from '@/application/job-view';
 import { runSearch } from '@/application/search';
 import type { AppServices } from '@/application/context';
 import { forbidden, notFound } from './errors';
@@ -40,13 +46,29 @@ export interface ViewContext {
   readonly actor: User;
 }
 
-/** An office screen. Refused server-side, not merely hidden in the sidebar. */
-const requireOffice = (actor: User, capability: Parameters<typeof can>[1], what: string): void => {
+/**
+ * A screen this role may not open. Refused server-side, not merely hidden.
+ *
+ * The capability named here must be the one the SCREEN needs, which is not
+ * always the one its writes need: requiring `customers.manage` to READ the
+ * customer register is how a technician ended up being offered a screen that
+ * then refused them.
+ */
+const requireCapability = (
+  actor: User,
+  capability: Parameters<typeof can>[1],
+  message: string,
+): void => {
   if (!can(actor.role, capability)) {
-    throw forbidden(`${what} is an office screen.`, [
+    throw forbidden(message, [
       { code: 'not_permitted', message: 'Your role does not have access to this.' },
     ]);
   }
+};
+
+/** An office screen: not something a technician is meant to reach at all. */
+const requireOffice = (actor: User, capability: Parameters<typeof can>[1], what: string): void => {
+  requireCapability(actor, capability, `${what} is an office screen.`);
 };
 
 /* -------------------------------------------------------------------------- */
@@ -136,14 +158,37 @@ export const masterDashboardView = async ({ repos, actor }: ViewContext) => {
 /* Registers                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The customer register.
+ *
+ * READING it needs `customers.view`, which a technician holds; CHANGING it
+ * needs `customers.manage`, which only the office holds. That split is the
+ * rule the system has always stated — `customer-operations.ts` refuses an edit
+ * with "Technicians can view customers and raise change requests, but not edit
+ * them", and the sidebar has always offered this screen on `customers.view`.
+ *
+ * It was `customers.manage` here for one release, which is a narrower rule than
+ * anybody asked for: it left the navigation offering technicians a screen the
+ * read then refused.
+ */
 export const customersView = async ({ repos, actor }: ViewContext) => {
-  requireOffice(actor, 'customers.manage', 'The customer register');
-  const [customers, sites, machines, jobs] = await Promise.all([
+  requireCapability(actor, 'customers.view', 'The customer register is not available to your role.');
+  const [customers, sites, machines, allJobs] = await Promise.all([
     repos.customers.list(),
     repos.customers.listSites(),
     repos.machines.list(),
     repos.jobs.list(),
   ]);
+
+  /*
+   * The open-job count is counted over what this actor may OPEN.
+   *
+   * Otherwise the register tells a technician a customer has four open jobs and
+   * the screen behind it lists one — and the difference is itself a disclosure:
+   * it says three jobs exist that they may not read. The office's count is
+   * unchanged, because the office may read all four.
+   */
+  const jobs = await loadVisibleJobs(repos, allJobs, actor);
 
   return customers.map((customer) => ({
     id: customer.id,
@@ -158,8 +203,19 @@ export const customersView = async ({ repos, actor }: ViewContext) => {
   }));
 };
 
+/**
+ * One customer: their sites, their contacts, their machines and their work.
+ *
+ * `customers.view`, as above. What a technician is handed is NOT the office's
+ * copy of this screen: `loadVisibleJobRows` applies DECISION 5 to the job list,
+ * so another technician's live job on this customer is not in it and anything
+ * reached through machine history arrives with its prices removed. The register
+ * itself — who the customer is, where their sites are, what machines stand on
+ * them — is the same for everybody, which is the point of a technician being
+ * able to read it before driving out.
+ */
 export const customerView = async ({ repos, actor }: ViewContext, customerId: string) => {
-  requireOffice(actor, 'customers.manage', 'The customer record');
+  requireCapability(actor, 'customers.view', 'That customer record is not available to your role.');
   const id = asCustomerId(customerId);
   const customer = await repos.customers.findById(id);
   if (customer === null) return null;
@@ -177,7 +233,7 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     sites,
     contacts,
     machines: machines.filter((machine: Machine) => machine.customerId === id),
-    jobRows: await loadJobRows(repos, jobs, actor),
+    jobRows: await loadVisibleJobRows(repos, jobs, actor),
     users,
   };
 };
@@ -211,9 +267,15 @@ export const machinesView = async ({ repos, actor }: ViewContext) => {
 /**
  * One machine and its history.
  *
- * The job list is `loadJobRows` WITH the actor, so a technician reaching a
- * machine they have worked sees its finished history with the prices suppressed
- * — DECISION 5 — rather than the office's view of it.
+ * Deliberately not gated on `machines.manage`: the machine REGISTER is an
+ * office screen, but one machine's history is what DECISION 5 exists to give a
+ * technician before they drive out to it.
+ *
+ * The job list therefore goes through `loadVisibleJobRows`, which filters by
+ * visibility and suppresses prices in one call. It used to be `loadJobRows`,
+ * which does neither — so this screen handed any technician every job on any
+ * machine, with the commercial figures on them. The rule was documented here
+ * and not applied.
  */
 export const machineView = async ({ repos, actor }: ViewContext, machineId: string) => {
   const id = asMachineId(machineId);
@@ -232,7 +294,7 @@ export const machineView = async ({ repos, actor }: ViewContext, machineId: stri
     machine,
     customer,
     site: sites.find((candidate) => candidate.id === machine.siteId) ?? null,
-    jobRows: await loadJobRows(repos, jobs, actor),
+    jobRows: await loadVisibleJobRows(repos, jobs, actor),
   };
 };
 

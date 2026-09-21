@@ -98,3 +98,43 @@ export const ErrorState = ({
     )}
   </div>
 );
+
+/**
+ * A screen this person may not open.
+ *
+ * VISUALLY DIFFERENT FROM `ErrorState` ON PURPOSE. A refusal is an answer, not
+ * a fault: it is steel rather than red, it carries a lock rather than a warning
+ * triangle, and it offers no "Try again" — because trying again will be refused
+ * again, and a retry button is how a screen tells somebody their problem is
+ * intermittent when it is permanent.
+ *
+ * It names nothing. Not the capability, not the role that would have been
+ * enough, not whether the record exists. The server has already decided; this
+ * only says so.
+ */
+export const AccessDeniedState = ({
+  title = 'You do not have access to this',
+  message,
+}: {
+  readonly title?: string;
+  readonly message: string;
+}) => (
+  <div
+    role="status"
+    className="flex flex-col items-center justify-center rounded-[var(--radius-card)] border border-steel-200 bg-steel-50 px-6 py-10 text-center"
+  >
+    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-surface text-steel-500 ring-1 ring-steel-200">
+      <svg viewBox="0 0 24 24" className="size-6" fill="none" aria-hidden="true">
+        <path
+          d="M7 10V7a5 5 0 0 1 10 0v3M6 10h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Zm6 4v2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+    <p className="text-sm font-semibold text-steel-800">{title}</p>
+    <p className="mt-1 max-w-md text-sm text-steel-500">{message}</p>
+  </div>
+);

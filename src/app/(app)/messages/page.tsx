@@ -7,9 +7,9 @@ import {
   Button,
   Card,
   EmptyState,
-  ErrorState,
   Icon,
   LoadingPanel,
+  QueryFailure,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ConversationList } from '@/components/messages/ConversationList';
@@ -95,7 +95,7 @@ const MessagesPageContent = () => {
   }, [active, unreadHere, refresh]);
 
   if (query.error !== null) {
-    return <ErrorState message={query.error} onRetry={query.refetch} />;
+    return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
 
   return (
