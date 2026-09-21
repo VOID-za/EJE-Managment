@@ -51,19 +51,33 @@ describe('POST /api/dev/demo-users', () => {
     startTestServer();
   });
 
-  it('offers nothing on a database that was never seeded', async () => {
+  it('lists the development accounts even on a database nobody has seeded', async () => {
     /*
-     * The demonstration backend has its own people and none of the switcher's,
-     * so the list is empty — which is how the browser is told not to draw the
-     * control at all. A switcher that appears and then refuses every name is
-     * worse than no switcher.
+     * The demonstration backend holds none of these five. The list is served
+     * anyway, because a control that hides itself gives a developer no way to
+     * tell a missing feature from an unseeded database — the refusal below is
+     * where they are told which it is.
      */
     const response = await new ApiTestClient().get<{
       users: readonly { email: string; role: string }[];
     }>('/api/dev/demo-users');
 
     expect(response.status).toBe(200);
-    expect(response.data.users).toEqual([]);
+    expect(response.data.users.map((user) => user.email)).toEqual([
+      'master@eje-demo.local',
+      'coordinator@eje-demo.local',
+      'technician1@eje-demo.local',
+      'technician2@eje-demo.local',
+      'technician3@eje-demo.local',
+    ]);
+  });
+
+  it('refuses a listed account that is not in this database', async () => {
+    const response = await new ApiTestClient().post('/api/dev/demo-users', {
+      email: 'master@eje-demo.local',
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it('never puts a password in the list', async () => {

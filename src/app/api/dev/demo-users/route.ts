@@ -38,27 +38,22 @@ const switchTo = z.object({ email: z.string().trim().min(1).max(320) }).strict()
 const REFUSED = 'That development account cannot be switched into.';
 
 /**
- * The accounts that can actually be switched into.
+ * The development accounts, whenever the switcher exists at all.
  *
- * Filtered against the register, so the control is not offered on a database
- * that has never been seeded — an empty list is how the browser is told there
- * is nothing to draw. A switcher that appears and then refuses every name is
- * worse than no switcher.
+ * NOT filtered against the register. It was, briefly, so the control would not
+ * appear on a database nobody had seeded — and the cost was that the control
+ * vanished silently on `npm run dev`, which is the one place it is for. A
+ * developer who cannot see it has no way to tell a missing feature from an
+ * unseeded database.
+ *
+ * So the list is the five accounts, always, and a name that is not in this
+ * database is refused by `POST` with a message that says to run the seed.
+ * Telling somebody what to do beats hiding the control that would have told
+ * them.
  */
-export const GET = async (): Promise<NextResponse> => {
-  try {
-    if (!isDemoSwitcherEnabled()) throw notFound('Not found.');
-
-    const existing = await getServerRuntime().read(({ repos }) => repos.users.list());
-    const known = new Set(existing.map((user) => user.email.toLowerCase()));
-
-    return NextResponse.json({
-      data: { users: DEMO_ACCOUNTS.filter((account) => known.has(account.email)) },
-    });
-  } catch (cause) {
-    logUnexpected('dev.demo-users', cause);
-    return errorResponse(toApiError(cause));
-  }
+export const GET = (): NextResponse => {
+  if (!isDemoSwitcherEnabled()) return errorResponse(notFound('Not found.'));
+  return NextResponse.json({ data: { users: DEMO_ACCOUNTS } });
 };
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {

@@ -57,7 +57,10 @@ export const DemoUserSwitcher = ({ variant }: { readonly variant: 'header' | 'ga
       await adoptSession();
       setOpen(false);
     } catch {
-      setError('That account could not be switched into. Has the development seed been run?');
+      setError(
+        `${account.email} is not in this database. Run "npm run db:seed" against it, or set ` +
+          'DATABASE_URL to a seeded development database and restart.',
+      );
     } finally {
       setBusy(null);
     }
