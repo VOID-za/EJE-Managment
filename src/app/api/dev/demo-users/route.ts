@@ -11,7 +11,8 @@ import { verifyPassword } from '@/server/auth/passwords';
 import { issueSession, resolveSession } from '@/server/auth/sessions';
 import {
   DEMO_ACCOUNTS,
-  DEVELOPMENT_PASSWORD,
+  developmentPasswordFor,
+  ensureDemoAccounts,
   isDemoAccount,
   isDemoSwitcherEnabled,
 } from '@/server/dev/demo-switcher';
@@ -51,9 +52,28 @@ const REFUSED = 'That development account cannot be switched into.';
  * Telling somebody what to do beats hiding the control that would have told
  * them.
  */
-export const GET = (): NextResponse => {
-  if (!isDemoSwitcherEnabled()) return errorResponse(notFound('Not found.'));
-  return NextResponse.json({ data: { users: DEMO_ACCOUNTS } });
+export const GET = async (): Promise<NextResponse> => {
+  try {
+    if (!isDemoSwitcherEnabled()) throw notFound('Not found.');
+
+    /*
+     * On the in-memory demonstration store, put the five accounts there.
+     *
+     * That store is what `npm run dev` runs with no `DATABASE_URL`, and its
+     * people are EJE's fictional staff rather than these five. Requiring a
+     * PostgreSQL install before a developer can change role would defeat the
+     * switcher entirely.
+     */
+    const runtime = getServerRuntime();
+    if (runtime.backend === 'demo') {
+      await runtime.write(({ repos }) => ensureDemoAccounts(repos));
+    }
+
+    return NextResponse.json({ data: { users: DEMO_ACCOUNTS } });
+  } catch (cause) {
+    logUnexpected('dev.demo-users', cause);
+    return errorResponse(toApiError(cause));
+  }
 };
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
@@ -69,6 +89,11 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const runtime = getServerRuntime();
     const now = new Date();
 
+    // The in-memory store's register is built on demand; see `GET`.
+    if (runtime.backend === 'demo') {
+      await runtime.write(({ repos }) => ensureDemoAccounts(repos));
+    }
+
     const credentials = await runtime.auth.findCredentialsByEmail(input.email);
     if (credentials === null || !credentials.active) throw notFound(REFUSED);
 
@@ -77,11 +102,16 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
      *
      * This is what makes the switcher safe rather than merely hidden: an
      * account whose password is not the published development one cannot be
-     * switched into, however the environment is configured.
+     * switched into, however the environment is configured. Which password
+     * that is depends on which demonstration dataset is loaded — the two are
+     * not the same, and `developmentPasswordFor` is where that is decided.
      */
     const matches =
       credentials.passwordHash !== null &&
-      (await verifyPassword(credentials.passwordHash, DEVELOPMENT_PASSWORD));
+      (await verifyPassword(
+        credentials.passwordHash,
+        developmentPasswordFor(runtime.backend),
+      ));
     if (!matches) throw notFound(REFUSED);
 
     const user = await runtime.read(({ repos }) => repos.users.findById(credentials.userId));

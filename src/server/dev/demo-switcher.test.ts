@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ApiTestClient, DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
+import {
+  ApiTestClient,
+  DEMO_PASSWORD,
+  DEMO_USERS,
+  signedInAs,
+  startTestServer,
+} from '@/test/api-harness';
 import { isDemoAccount, isDemoSwitcherEnabled, DEMO_ACCOUNTS } from './demo-switcher';
 
 /**
@@ -72,12 +78,43 @@ describe('POST /api/dev/demo-users', () => {
     ]);
   });
 
-  it('refuses a listed account that is not in this database', async () => {
-    const response = await new ApiTestClient().post('/api/dev/demo-users', {
-      email: 'master@eje-demo.local',
+  it('switches into an account on the in-memory store, with no database at all', async () => {
+    /*
+     * `npm run dev` with no DATABASE_URL runs this store, and its people are
+     * EJE's fictional staff rather than these five — so the switcher puts them
+     * in the register on demand. Requiring a PostgreSQL install before a
+     * developer could change role would defeat the point of the control.
+     */
+    const client = new ApiTestClient();
+    const switched = await client.post('/api/dev/demo-users', {
+      email: 'technician1@eje-demo.local',
     });
 
-    expect(response.status).toBe(404);
+    expect(switched.status).toBe(200);
+    expect(client.token).not.toBeNull();
+
+    // An ordinary session, and the server decides the role.
+    const me = await client.get<{ user: { email: string; role: string } }>('/api/auth/me');
+    expect(me.status).toBe(200);
+    expect(me.data.user.email).toBe('technician1@eje-demo.local');
+    expect(me.data.user.role).toBe('technician');
+  });
+
+  it('applies the ordinary authorization rules to a switched session', async () => {
+    const technician = new ApiTestClient();
+    await technician.post('/api/dev/demo-users', { email: 'technician1@eje-demo.local' });
+    expect((await technician.get('/api/admin')).status).toBe(403);
+
+    const master = new ApiTestClient();
+    await master.post('/api/dev/demo-users', { email: 'master@eje-demo.local' });
+    expect((await master.get('/api/admin')).status).toBe(200);
+  });
+
+  it('leaves the demonstration store’s own people signing in as they always did', async () => {
+    await new ApiTestClient().post('/api/dev/demo-users', { email: 'master@eje-demo.local' });
+
+    const elmarie = await new ApiTestClient().signIn(DEMO_USERS.master, DEMO_PASSWORD);
+    expect(elmarie.status).toBe(200);
   });
 
   it('never puts a password in the list', async () => {
