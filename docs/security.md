@@ -122,6 +122,19 @@ applies Decision 5 per viewer. The same applies to a machine's history, and to
 the open-job counts on the register — a count the viewer cannot account for is
 itself a disclosure.
 
+**A technician reads the WHOLE customer record, commercial fields included.**
+Payment terms, the VAT number and the registration number are all readable by a
+Technician. EJE were asked and confirmed it as a business rule, so it is settled
+— not an open question, and not something to "tighten" later on the reasoning
+that Decision 5 withholds prices. Those are different things: Decision 5 is
+about what EJE charged on a JOB, and it is decided by `jobVisibilityFor`. What a
+customer's account terms are is not a job price.
+
+There is one customer record, not a redacted copy per role. `customerView`
+returns the same `customer` object to a Technician and to a Master, which is
+what `customer-access.test.ts` asserts — so nothing downstream has to know which
+version it was handed.
+
 ### Reads are actor-aware, and non-disclosing
 
 A job this actor may not read answers **404, not 403**. Telling somebody "you

@@ -42,7 +42,14 @@ interface JobRow {
 }
 
 interface CustomerRecord {
-  readonly customer: { readonly id: string; readonly name: string };
+  readonly customer: {
+    readonly id: string;
+    readonly name: string;
+    /** The commercial fields EJE confirmed a technician may read. */
+    readonly paymentTerms: string;
+    readonly vatNumber: string;
+    readonly registrationNumber: string;
+  };
   readonly sites: readonly unknown[];
   readonly machines: readonly unknown[];
   readonly jobRows: readonly JobRow[];
@@ -84,6 +91,36 @@ describe('reading the customer register', () => {
       expect((await client.get('/api/customers')).status).toBe(200);
       expect((await record(client, 'cust-abc')).status).toBe(200);
     }
+  });
+
+  /**
+   * A CONFIRMED BUSINESS RULE, not an oversight.
+   *
+   * EJE were asked directly whether a technician should see a customer's
+   * commercial and account information, and said yes: payment terms, the VAT
+   * number and the registration number are all readable. This test exists so
+   * that decision cannot be mistaken for an unresolved question and quietly
+   * reversed by somebody "tightening" the read later — reversing it means
+   * deleting this test, which is a conversation rather than a tidy-up.
+   */
+  it('serves a technician the commercial fields, which EJE confirmed they may read', async () => {
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const { customer } = (await record(technician, 'cust-abc')).data;
+
+    expect(customer.paymentTerms).toBe('30 days from statement');
+    expect(customer.vatNumber).toBe('4220156783');
+    expect(customer.registrationNumber).toBe('1998/004521/07');
+  });
+
+  it('serves them to the office identically, so there is one customer record', async () => {
+    // Not a redacted copy for one role and a full copy for another: the same
+    // record, so nothing downstream has to know which version it was handed.
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const master = await signedInAs(DEMO_USERS.master);
+
+    expect((await record(technician, 'cust-abc')).data.customer).toEqual(
+      (await record(master, 'cust-abc')).data.customer,
+    );
   });
 
   it('still answers 404 for a customer that does not exist', async () => {

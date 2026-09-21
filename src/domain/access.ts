@@ -79,7 +79,22 @@ export type Capability =
    */
   | 'jobs.captureAdministratively'
   // Records
+  /**
+   * Read the customer register: the company, its sites, its contacts and its
+   * machines. Held by every role, technicians included.
+   *
+   * THE WHOLE RECORD, COMMERCIAL FIELDS INCLUDED. Payment terms, the VAT
+   * number and the registration number are readable by a technician — EJE
+   * confirmed this as a business rule, so it is not an open question to be
+   * rediscovered and quietly "tightened" later. Do not suppress them.
+   *
+   * Note what this does NOT reach around: DECISION 5 still governs the JOBS
+   * hanging off a customer. Reading who the customer is and reading what EJE
+   * charged on another technician's job are different things, and the second
+   * is decided by `jobVisibilityFor`, not by this.
+   */
   | 'customers.view'
+  /** Create or change the official customer record. The office only. */
   | 'customers.manage'
   | 'machines.manage'
   | 'library.view'
