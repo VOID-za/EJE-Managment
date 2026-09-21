@@ -5,6 +5,7 @@ import { NextRequest, type NextResponse } from 'next/server';
 import { SESSION_COOKIE } from '@/server/auth/cookies';
 import { resetRateLimits } from '@/server/api/rate-limit';
 import { resetServerRuntime } from '@/server/runtime';
+import { forgetDemoAccounts } from '@/server/dev/demo-switcher';
 import { resetSharedDatabase } from '@/db/client';
 
 /**
@@ -260,6 +261,9 @@ export const startTestServer = (): void => {
   delete process.env.DATABASE_URL;
   resetServerRuntime();
   resetRateLimits();
+  // The new runtime has a new, empty register; the switcher must not think it
+  // has already put its accounts into the previous one.
+  forgetDemoAccounts();
 };
 
 /**

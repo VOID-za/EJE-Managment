@@ -20,6 +20,14 @@ import { useApp } from '@/providers/AppProvider';
  * same as on any other visit. Nothing here decides a role, and nothing here
  * holds a credential: this is the login form with the typing removed.
  */
+/**
+ * The answer, kept for as long as the tab is open.
+ *
+ * Module scope rather than component state, because the control unmounts and
+ * remounts on every full page load and the list it asks for never changes.
+ */
+let cachedAccounts: Promise<readonly DemoAccount[]> | null = null;
+
 export const DemoUserSwitcher = ({ variant }: { readonly variant: 'header' | 'gate' }) => {
   const { currentUser, adoptSession } = useApp();
   const [accounts, setAccounts] = useState<readonly DemoAccount[] | null>(null);
@@ -28,19 +36,26 @@ export const DemoUserSwitcher = ({ variant }: { readonly variant: 'header' | 'ga
   const [error, setError] = useState<string | null>(null);
 
   /*
-   * Asked once. A 404 is the ordinary answer in production and is not an error
-   * to report — it is how the server says this feature does not exist.
+   * Asked once per page load, and then remembered.
+   *
+   * This control is mounted in the top bar, so without the cache every single
+   * navigation spent two more round trips re-fetching a list of five names
+   * that cannot change while the tab is open — twice, because React's strict
+   * mode double-invokes effects in development, which is exactly where this
+   * runs. A 404 is the ordinary answer in production and is not an error to
+   * report: it is how the server says the feature does not exist.
    */
   useEffect(() => {
     let cancelled = false;
-    demoUsers
+    cachedAccounts ??= demoUsers
       .list()
-      .then((result) => {
-        if (!cancelled) setAccounts(result.users);
-      })
-      .catch(() => {
-        if (!cancelled) setAccounts([]);
-      });
+      .then((result) => result.users)
+      .catch(() => [] as readonly DemoAccount[]);
+
+    void cachedAccounts.then((users) => {
+      if (!cancelled) setAccounts(users);
+    });
+
     return () => {
       cancelled = true;
     };

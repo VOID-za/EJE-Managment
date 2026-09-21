@@ -80,7 +80,13 @@ export const developmentPasswordFor = (backend: PersistenceBackend): string =>
  * come from `npm run db:seed` and this is never called — nothing here writes to
  * a database.
  */
+let accountsEnsured = false;
+
 export const ensureDemoAccounts = async (repos: RepositoryBundle): Promise<void> => {
+  // Once per process. The in-memory register outlives the request, so redoing
+  // this on every call was work that could never find anything to do.
+  if (accountsEnsured) return;
+
   const existing = await repos.users.list();
   const known = new Set(existing.map((user) => user.email.toLowerCase()));
 
@@ -88,4 +94,11 @@ export const ensureDemoAccounts = async (repos: RepositoryBundle): Promise<void>
     if (known.has(user.email.toLowerCase())) continue;
     await repos.users.save(user);
   }
+
+  accountsEnsured = true;
+};
+
+/** Lets a test start from an empty register. */
+export const forgetDemoAccounts = (): void => {
+  accountsEnsured = false;
 };

@@ -21,7 +21,21 @@ export interface NavigationItem {
 export const NAVIGATION: readonly NavigationItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'work' },
   { href: '/jobs', label: 'Jobs', icon: 'jobs', group: 'work' },
-  { href: '/calendar', label: 'Calendar', icon: 'calendar', group: 'work' },
+  /**
+   * Scheduled work and technician availability. Office only.
+   *
+   * The capability is the one the READ enforces (`calendarView`), for the same
+   * reason Activity's is: offering a technician a screen that then refuses them
+   * is how "Something went wrong" ends up on a sidebar item they were invited
+   * to click. The two are deliberately the same capability.
+   */
+  {
+    href: '/calendar',
+    label: 'Calendar',
+    icon: 'calendar',
+    capability: 'availability.manage',
+    group: 'work',
+  },
   /**
    * The job card archive. A Master's obvious answer to "where do I find a
    * closed job?", which a status filter buried inside Jobs was not.
