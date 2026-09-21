@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { Badge, Button, Icon, TextField } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
 import { DEMO_PASSWORD_HINT } from '@/lib/demo-credentials';
+import { DemoUserSwitcher } from './DemoUserSwitcher';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -140,6 +141,12 @@ export const SignInGate = () => {
               Sign in
             </Button>
           </form>
+
+          {/* Development only, and gone entirely in production: the endpoint it
+              reads answers 404 there, so the control never appears. */}
+          <div className="mt-5">
+            <DemoUserSwitcher variant="gate" />
+          </div>
 
           {backend === 'demo' && (
             <p className="mt-5 rounded-[var(--radius-control)] bg-steel-100 px-3 py-2.5 text-xs leading-relaxed text-steel-600">

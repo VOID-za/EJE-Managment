@@ -50,6 +50,14 @@ interface AppContextValue {
   readonly connectionError: string | null;
   signIn(email: string, password: string): Promise<{ ok: boolean; message: string | null }>;
   signOut(): Promise<void>;
+  /**
+   * Takes on whichever session the browser now holds.
+   *
+   * For the development user switcher, which signs in on the SERVER and sends
+   * back a new cookie. The identity is then whatever `/api/auth/me` says, the
+   * same as on any other visit — the client is not told who it became, it asks.
+   */
+  adoptSession(): Promise<void>;
   /** Called by `useOperation` after a successful write. */
   invalidate(): void;
   reportConnectionError(message: string | null): void;
@@ -145,6 +153,15 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     setVersion((current) => current + 1);
   }, []);
 
+  const adoptSession = useCallback(async () => {
+    const result = await auth.me();
+    setCurrentUser(toUser(result.user));
+    setBackend(result.backend);
+    setConnectionError(null);
+    // Somebody else is signed in now, so everything on screen is theirs.
+    setVersion((current) => current + 1);
+  }, []);
+
   const invalidate = useCallback(() => setVersion((current) => current + 1), []);
   const reportConnectionError = useCallback(
     (message: string | null) => setConnectionError(message),
@@ -160,6 +177,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       connectionError,
       signIn,
       signOut,
+      adoptSession,
       invalidate,
       reportConnectionError,
     }),
@@ -171,6 +189,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       connectionError,
       signIn,
       signOut,
+      adoptSession,
       invalidate,
       reportConnectionError,
     ],

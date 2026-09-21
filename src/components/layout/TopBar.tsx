@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Avatar, Icon, Menu } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
+import { DemoUserSwitcher } from './DemoUserSwitcher';
 import { ThemeToggleButton } from './ThemeToggle';
 import { roleLabel, userFullName } from '@/domain';
 import { cn } from '@/lib/cn';
@@ -56,6 +57,11 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
       </form>
 
       <div className="ml-auto flex items-center gap-1.5">
+        {/* Development only. Renders nothing at all in production, because the
+            endpoint it reads does not exist there. */}
+        <span className="hidden sm:block">
+          <DemoUserSwitcher variant="header" />
+        </span>
         <ThemeToggleButton />
 
         <Link

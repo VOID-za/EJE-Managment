@@ -28,10 +28,21 @@ describe('authentication is required', () => {
    * swept the day it is added. Sign-in and sign-out are the two deliberate
    * exceptions: one is how a session is obtained, the other must work when
    * there is no longer a session to present.
+   *
+   * The development user switcher is a third, and it is only an exception at
+   * all because it is a way of SIGNING IN — it cannot require a session for the
+   * same reason the login route cannot. It does not exist in production, which
+   * `src/server/dev/demo-switcher.test.ts` holds it to, and it serves nothing
+   * on a database that has not been seeded.
    */
-  const PUBLIC = new Set(['POST /api/auth/login', 'POST /api/auth/logout']);
+  const PUBLIC = new Set([
+    'POST /api/auth/login',
+    'POST /api/auth/logout',
+    'GET /api/dev/demo-users',
+    'POST /api/dev/demo-users',
+  ]);
 
-  it('refuses every endpoint but sign-in and sign-out without a session', async () => {
+  it('refuses every endpoint but sign-in and the switcher without a session', async () => {
     const routes = await discoverRoutes();
     expect(routes.length).toBeGreaterThan(30);
 
@@ -43,6 +54,19 @@ describe('authentication is required', () => {
     }
 
     expect(allowed).toEqual([]);
+  });
+
+  it('keeps that list of exceptions to the ways of signing in', async () => {
+    // A new public endpoint has to be added above deliberately, and this says
+    // what the list is allowed to contain: nothing that reads business data.
+    const routes = await discoverRoutes();
+    const publicPaths = routes
+      .filter((route) => PUBLIC.has(`${route.method} ${route.path}`))
+      .map((route) => route.path);
+
+    for (const path of publicPaths) {
+      expect(path.startsWith('/api/auth/') || path.startsWith('/api/dev/')).toBe(true);
+    }
   });
 
   it('refuses a write without a session', async () => {

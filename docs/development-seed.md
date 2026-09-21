@@ -57,6 +57,41 @@ different one.
 
 ---
 
+## Switching between them — **DEMO ONLY · Switch user**
+
+Typing an email address and a password every time you change role is the wrong
+instrument for something you do forty times an hour, so a development build
+carries a **DEMO ONLY · Switch user** control: on the sign-in screen, and in the
+top bar once you are signed in. Open it, click a name, and you are that person.
+
+It is not a role picker. Clicking a name performs the **real** sign-in on the
+server: the account is looked up, the published development password is verified
+against its stored Argon2id hash, the session you were holding is revoked, and
+an ordinary session cookie is issued. There is only one kind of session in this
+application, so every permission, every visibility rule and every refusal
+behaves exactly as it does when you log in by hand.
+
+**Three things keep it out of production, and all three must hold:**
+
+1. `NODE_ENV=production` removes it. The endpoint answers **404** — not
+   "refused", because there it does not exist. `next build` and `next start` set
+   that variable, so **`npm run redeploy` has no switcher**. Use `npm run dev`
+   when you want one.
+2. The address must be one of the five accounts above. The list is read from the
+   seed, not restated.
+3. The account's password must be the published development one. An account
+   with a real password cannot be switched into, so even a misconfigured
+   deployment holding real people would hand it nothing.
+
+The control also draws nothing until the seed has been run: the list is filtered
+against the register, and an empty list is how the browser is told there is
+nothing to offer.
+
+The ordinary login form is untouched and still works — including refusing a
+wrong password.
+
+---
+
 ## What it will not do
 
 The seed writes fictional customers, fictional jobs and accounts whose password

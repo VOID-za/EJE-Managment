@@ -436,6 +436,25 @@ export const demo = {
   reset: () => command<{ reset: boolean }>('/api/demo/reset'),
 };
 
+/** One of the seeded development accounts, as the switcher lists them. */
+export interface DemoAccount {
+  readonly email: string;
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly role: User['role'];
+}
+
+/**
+ * The development user switcher.
+ *
+ * Both calls answer 404 in production, where the endpoint does not exist — so
+ * `list` failing is the signal that the control must not be drawn at all.
+ */
+export const demoUsers = {
+  list: () => query<{ users: readonly DemoAccount[] }>('/api/dev/demo-users'),
+  switchTo: (email: string) => apiPost<{ user: SafeUser }>('/api/dev/demo-users', { email }),
+};
+
 export const outbox = {
   reportDelivery: (messageId: string, state: string, failureReason?: string) =>
     command<{ reported: boolean; closed: number }>(`/api/outbox/${segment(messageId)}/delivery`, {
