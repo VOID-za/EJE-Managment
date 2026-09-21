@@ -58,21 +58,6 @@ const baseInput = (over: Record<string, unknown> = {}): NewJobInput =>
     ...over,
   }) as unknown as NewJobInput;
 
-/**
- * The same harness, with a WhatsApp that refuses.
- *
- * Built as a new context rather than by mutating `services`, which is readonly
- * for the reason this test relies on: the composition root decides the
- * adapters, and nothing at runtime swaps one out mid-operation.
- */
-const withWhatsApp = (harness: Harness, failure: string) => ({
-  ...harness.as(master),
-  services: {
-    ...harness.services,
-    whatsapp: { send: () => Promise.reject(new Error(failure)) },
-  },
-});
-
 /** The violation codes a refusal carried, which is what the screens render. */
 const codesFrom = async (run: () => Promise<unknown>): Promise<readonly string[]> => {
   try {
@@ -324,45 +309,75 @@ describe('who the job is given to', () => {
   });
 
   /**
-   * WHEN THE PROVIDER IS NOT THERE.
+   * THE TRANSACTION ENQUEUES. IT DOES NOT SEND.
    *
-   * A deployment with no WhatsApp configuration, an expired token, a Meta
-   * outage. None of these are a reason to refuse the office's assignment, and
-   * none of them may be recorded as a message that went.
+   * This is the architectural property, and it is worth a test of its own: a
+   * business transaction must not be waiting on Meta. What the assignment
+   * leaves behind is a row saying a message is owed; `outbox-dispatch` is what
+   * tries to pay it, after the commit.
    */
-  it('keeps the assignment when WhatsApp refuses, and says so on the trail', async () => {
-    const failing = buildHarness();
+  it('queues a WhatsApp message rather than sending one', async () => {
     const job = await createJob(
-      // The `UnconfiguredWhatsAppService` shape: refuses rather than pretending.
-      withWhatsApp(failing, 'WhatsApp is not configured on this deployment.'),
+      harness.as(master),
       baseInput({ primaryTechnicianId: sipho.id }),
     );
 
-    // The assignment stands. The office decided it; a provider cannot undo it.
-    expect(job.primaryTechnicianId).toBe(sipho.id);
+    const queued = await harness.repos.outbox.list();
+    const forJob = queued.filter((message) => message.jobId === job.id);
 
-    // The in-app notification still happened, because it is a row in this
-    // database rather than a thing that leaves the building.
-    const inbox = await failing.repos.notifications.list(sipho.id);
-    expect(inbox.some((item) => item.jobId === job.id)).toBe(true);
-
-    const types = (await failing.repos.activity.list(job.id)).map((event) => event.type);
-    expect(types).toContain('assignment_notification_failed');
-    // And emphatically NOT a claim that it was sent.
-    expect(types).not.toContain('assignment_notified');
+    expect(forJob).toHaveLength(1);
+    expect(forJob[0]?.state).toBe('pending');
+    expect(forJob[0]?.attempts).toBe(0);
+    expect(forJob[0]?.recipient).toBe(sipho.mobile);
+    expect(forJob[0]?.template).toBe('eje_job_assigned');
+    // Nothing has been handed to a provider, so there is no provider id yet.
+    expect(forJob[0]?.providerMessageId).toBeNull();
   });
 
-  it('says why, so somebody can pick up a phone', async () => {
-    const failing = buildHarness();
-    const job = await createJob(
-      withWhatsApp(failing, 'Template name does not exist'),
-      baseInput({ primaryTechnicianId: sipho.id }),
-    );
-    const events = await failing.repos.activity.list(job.id);
-    const failure = events.find((event) => event.type === 'assignment_notification_failed');
+  it('contacts nobody while the assignment is being recorded', async () => {
+    // A provider that throws on any call. If the operation touched it, this
+    // would fail — which is precisely the regression worth guarding.
+    let calls = 0;
+    const watched = {
+      ...harness.as(master),
+      services: {
+        ...harness.services,
+        whatsapp: {
+          send: () => {
+            calls += 1;
+            return Promise.reject(new Error('the transaction called the provider'));
+          },
+        },
+      },
+    };
 
-    expect(failure?.detail).toContain('Template name does not exist');
-    expect(failure?.detail).toContain('the assignment stands');
+    const job = await createJob(watched, baseInput({ primaryTechnicianId: sipho.id }));
+
+    expect(calls).toBe(0);
+    expect(job.primaryTechnicianId).toBe(sipho.id);
+    expect((await harness.repos.outbox.list()).some((m) => m.jobId === job.id)).toBe(true);
+  });
+
+  it('queues nothing, and says so, when the technician has no mobile number', async () => {
+    const noMobile = { ...sipho, mobile: '' };
+    await harness.repos.users.save(noMobile);
+
+    const job = await createJob(
+      harness.as(master),
+      baseInput({ primaryTechnicianId: noMobile.id }),
+    );
+
+    // Nothing to send to, so nothing is queued — and the trail says why, because
+    // a missing number is a thing the office can fix.
+    expect((await harness.repos.outbox.list()).filter((m) => m.jobId === job.id)).toHaveLength(0);
+
+    const types = (await harness.repos.activity.list(job.id)).map((event) => event.type);
+    expect(types).toContain('assignment_notification_failed');
+    expect(types).not.toContain('assignment_notified');
+
+    // And the in-app notification still happened: it is a row in this database.
+    expect((await harness.repos.notifications.list(noMobile.id)).some((n) => n.jobId === job.id))
+      .toBe(true);
   });
 
   it('records the notification attempt on the audit trail', async () => {
@@ -378,47 +393,6 @@ describe('who the job is given to', () => {
     // Telling them is a separate fact from assigning them, and is recorded as
     // one — including when it fails.
     expect(types).toContain('assignment_notified');
-  });
-});
-
-/**
- * Attachments.
- *
- * What is being held here is the HONEST part: the job records what the office
- * attached, and nothing claims the file itself was kept. See `storeAttachments`.
- */
-describe('documents attached when the job is raised', () => {
-  let harness: Harness;
-  beforeEach(() => {
-    harness = buildHarness();
-  });
-
-  it('records each one against the job, through the storage port', async () => {
-    const job = await createJob(
-      harness.as(master),
-      baseInput({
-        attachments: [
-          {
-            fileName: 'customer-order-88123.pdf',
-            contentType: 'application/pdf',
-            caption: 'Customer order',
-            sizeBytes: 48_221,
-          },
-        ],
-      }),
-    );
-
-    expect(job.attachments).toHaveLength(1);
-    const [file] = job.attachments;
-    expect(file?.fileName).toBe('customer-order-88123.pdf');
-    expect(file?.kind).toBe('document');
-    expect(file?.uploadedBy).toBe(master.id);
-    // A storage key was allocated by the port, not invented here.
-    expect(file?.storageKey.length).toBeGreaterThan(0);
-  });
-
-  it('creates a job with no attachments when none were sent', async () => {
-    expect((await createJob(harness.as(master), baseInput())).attachments).toEqual([]);
   });
 });
 

@@ -67,6 +67,10 @@ export const seedBaseline = async (db: Database): Promise<void> => {
     },
     {
       id: IDS.technician,
+      // A mobile number, because the assignment notification has somewhere to
+      // go only if the technician can be reached — which is the case the
+      // outbox exists for.
+      mobile: '082 555 0134',
       firstName: 'Sipho',
       lastName: 'Mahlangu',
       initials: 'SM',

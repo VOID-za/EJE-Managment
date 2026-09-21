@@ -7,6 +7,7 @@ import { requireAuthenticatedActor, type AuthenticatedActor } from './actor';
 import { assertSameOrigin } from './csrf';
 import { ApiError, errorResponse, logUnexpected, toApiError } from './errors';
 import { hashRequest, type IdempotencyScope } from './idempotency';
+import { drainOutboxQuietly } from './outbox-dispatch';
 
 /**
  * The shape every API route has.
@@ -163,8 +164,121 @@ export const writeRoute =
         }
       });
 
+      /*
+       * COMMITTED. NOW, and only now, anything leaves the building.
+       *
+       * The transaction above is closed: the assignment is recorded and so is
+       * the obligation to tell somebody about it. This drains that obligation
+       * outside any transaction, so a slow provider costs a moment of latency
+       * rather than a database connection — and a provider that is down costs
+       * nothing at all, because the row stays pending and the next mutation
+       * tries again.
+       *
+       * Awaited deliberately. Fire-and-forget would return sooner and would
+       * also be a promise nobody owns, which in a server that can be torn down
+       * between requests is how a message quietly never goes.
+       */
+      await drainOutboxQuietly(runtime);
+
       return NextResponse.json(
         { data: result.data },
         { headers: result.replayed ? { 'Idempotent-Replay': 'true' } : undefined },
       );
+    });
+
+/**
+ * A mutation that carries a FILE rather than JSON.
+ *
+ * Everything `writeRoute` does, in the same order, except that the body is
+ * multipart and the validation of it is the upload's own — see `uploads.ts`,
+ * which sniffs the bytes rather than believing the part's declared type.
+ *
+ * WHY A SEPARATE WRAPPER AND NOT A FLAG. The JSON path bounds the body at
+ * 256 KB and parses it before authorising; neither is right for a 20 MB PDF.
+ * Keeping them apart means the small, common path cannot accidentally inherit
+ * a large body limit, and the upload path cannot accidentally inherit a parser
+ * that would have to buffer the file as text first.
+ *
+ * NO IDEMPOTENCY KEY. A retried upload is a second attachment, which is what
+ * the person asked for both times; replaying the first would silently swallow
+ * a deliberate second copy of a document.
+ */
+export interface UploadContext extends ReadContext {
+  readonly file: File;
+  readonly caption: string;
+  readonly operation: OperationContext;
+}
+
+export const uploadRoute =
+  <TResult>({
+    operation,
+    maxBytes,
+    handler,
+  }: {
+    readonly operation: string;
+    readonly maxBytes: number;
+    readonly handler: (context: UploadContext) => Promise<TResult>;
+  }) =>
+  async (request: NextRequest, routeContext?: RouteParams): Promise<NextResponse> =>
+    run(operation, async () => {
+      assertSameOrigin(request);
+      const params = routeContext === undefined ? {} : await routeContext.params;
+      const actor = await requireAuthenticatedActor(request);
+
+      /*
+       * Refused on the declared length BEFORE the body is read.
+       *
+       * Not a substitute for measuring the bytes — `Content-Length` is a claim
+       * like any other and the real check is on what arrived — but it is what
+       * stops a deliberately oversized request being buffered into memory
+       * before anybody looks at it.
+       */
+      const declaredLength = Number(request.headers.get('content-length') ?? '0');
+      if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        throw new ApiError('validation_failed', 'That file is too large.', [
+          { code: 'file_too_large', message: 'The upload exceeds the size this accepts.' },
+        ]);
+      }
+
+      let form: FormData;
+      try {
+        form = await request.formData();
+      } catch {
+        throw new ApiError('validation_failed', 'That upload could not be read.', [
+          { code: 'malformed_upload', message: 'Send the file as multipart form data.' },
+        ]);
+      }
+
+      const file = form.get('file');
+      if (!(file instanceof File)) {
+        throw new ApiError('validation_failed', 'No file was attached to that request.', [
+          { code: 'file_missing', message: 'Choose a file to attach.' },
+        ]);
+      }
+      if (file.size > maxBytes) {
+        throw new ApiError('validation_failed', 'That file is too large.', [
+          { code: 'file_too_large', message: 'The upload exceeds the size this accepts.' },
+        ]);
+      }
+
+      const caption = form.get('caption');
+
+      const data = await getServerRuntime().write((unit) =>
+        handler({
+          ...unit,
+          actor,
+          request,
+          params,
+          file,
+          caption: typeof caption === 'string' ? caption.slice(0, 500) : '',
+          operation: {
+            repos: unit.repos,
+            services: unit.services,
+            // THE ACTOR COMES FROM THE SESSION, here as everywhere else.
+            actor: actor.user,
+          },
+        }),
+      );
+
+      return NextResponse.json({ data });
     });

@@ -23,3 +23,5 @@ next-env.d.ts
 .idea/
 .smoke/
 .pdf-check/
+
+.eje-storage/

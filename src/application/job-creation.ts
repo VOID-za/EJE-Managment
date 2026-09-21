@@ -1,5 +1,4 @@
 import {
-  asAttachmentId,
   asJobId,
   can,
   contactFullName,
@@ -8,7 +7,6 @@ import {
   machineDisplayName,
   roleLabel,
   userFullName,
-  type Attachment,
   type Contact,
   type ContactId,
   type Customer,
@@ -76,15 +74,6 @@ export interface NewJobInput {
   readonly courierCollection: boolean;
   /** The customer's own delivery note reference. Optional, and often blank. */
   readonly deliveryNote: string;
-  /** Documents the office attaches when raising the job. See `storeAttachments`. */
-  readonly attachments: readonly NewJobAttachment[];
-}
-
-export interface NewJobAttachment {
-  readonly fileName: string;
-  readonly contentType: string;
-  readonly caption: string;
-  readonly sizeBytes: number;
 }
 
 /**
@@ -257,41 +246,6 @@ const resolveTechnicians = async (
   return { primaryId: input.primaryTechnicianId, additionalIds };
 };
 
-/**
- * Documents the office attaches when raising the job.
- *
- * Goes through the storage PORT, which is the only way anything in this system
- * reaches a file. What that port does today is the honest part: the simulated
- * adapter records the file's name, size and a storage key against the job and
- * KEEPS NO BYTES — see `SimulatedStorageService.put`. So the job carries a
- * truthful record of what the office attached, and the document itself is
- * retrievable only once real object storage is configured behind the same
- * interface. Nothing here pretends otherwise, and no screen offers a download
- * that would fail.
- */
-const storeAttachments = async (
-  context: OperationContext,
-  input: NewJobInput,
-): Promise<readonly Attachment[]> => {
-  const now = context.services.clock.now();
-  const stored: Attachment[] = [];
-
-  for (const file of input.attachments) {
-    const put = await context.services.storage.put(file.fileName, file.contentType, null);
-    stored.push({
-      id: asAttachmentId(context.services.ids.next('att')),
-      kind: 'document',
-      fileName: file.fileName,
-      caption: file.caption.trim(),
-      storageKey: put.storageKey,
-      uploadedAt: now,
-      uploadedBy: context.actor.id,
-      sizeBytes: file.sizeBytes,
-    });
-  }
-  return stored;
-};
-
 export const createJob = async (
   context: OperationContext,
   input: NewJobInput,
@@ -339,8 +293,6 @@ export const createJob = async (
     ]);
   }
 
-  const attachments = await storeAttachments(context, input);
-
   const settings = await context.repos.settings.get();
   const allocated = await allocateJobNumber(context, settings);
   const now = context.services.clock.now();
@@ -367,7 +319,17 @@ export const createJob = async (
     orderNumber: input.orderNumber.trim(),
     referenceNumber: input.referenceNumber.trim(),
     faultDescription,
-    attachments,
+    /*
+     * A NEW JOB HAS NO ATTACHMENTS, and cannot be given one here.
+     *
+     * A document is bytes. This operation is handed none — a JSON creation
+     * request carries no file — so recording an attachment at this point could
+     * only ever be a row pointing at nothing, which is exactly the fiction that
+     * durable storage exists to end. The office attaches documents to the job
+     * once it exists, through `POST /api/jobs/:id/attachments`, which stores
+     * the bytes before it records anything.
+     */
+    attachments: [],
     primaryTechnicianId: primaryId,
     additionalTechnicianIds: [...additionalIds],
     labour: [],

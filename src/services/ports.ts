@@ -209,10 +209,49 @@ export interface StoredDocument {
   readonly backfilled?: boolean;
 }
 
+/** A file the office or a technician actually uploaded, bytes and all. */
+export interface UploadedFile {
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface StorageService {
-  /** Resolves a storage key to something the browser can display. */
+  /**
+   * Resolves a storage key to something the browser can display.
+   *
+   * NEVER A PUBLIC URL, in any implementation. A storage key is not a
+   * credential and must not become one: everything a browser can fetch goes
+   * through an authenticated route that checks who is asking first. The
+   * adapters return an inert reference, which is what makes an accidental
+   * `<a href>` fail loudly rather than leak a customer's document.
+   */
   resolveUrl(storageKey: string): string;
+  /**
+   * Allocates a key for a file whose BYTES ARE NOT SUPPLIED.
+   *
+   * The photo and machine-photo capture paths call this: the browser never
+   * sends the image, so what is recorded is a reference and the adapters say
+   * so. `getDocument` on such a key answers null, and no screen offers a
+   * download for one.
+   *
+   * For anything that genuinely carries bytes — a job attachment — use
+   * `storeUpload`, which cannot silently record a reference to nothing.
+   */
   put(fileName: string, contentType: string, data: Blob | null): Promise<StoredFile>;
+  /**
+   * Stores an uploaded file's bytes, durably, under a key IT chooses.
+   *
+   * SEPARATE FROM `put` ON PURPOSE. `put` may legitimately record a reference
+   * with no content behind it; this may not. An implementation either writes
+   * the bytes somewhere they survive a restart or it raises — there is no
+   * third answer, because the alternative is a database row claiming a
+   * document exists when nothing does.
+   *
+   * The key is generated, never derived from the file name: a name is
+   * user-controlled and a path built from one is a traversal waiting to happen.
+   */
+  storeUpload(file: UploadedFile): Promise<StoredFile>;
   /**
    * Writes a document at an explicit key, and reads it back.
    *

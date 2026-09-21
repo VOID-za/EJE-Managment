@@ -229,6 +229,78 @@ export class ApiTestClient {
     return this.send<T>('POST', path, { ...options, body: body ?? {} });
   }
 
+  /**
+   * A multipart upload, the way a browser makes one.
+   *
+   * Real `FormData` through the real route, so the size check, the sniffing and
+   * the authorisation all run. Nothing here shortcuts to the operation.
+   */
+  async upload<T = unknown>(
+    path: string,
+    file: { name: string; type: string; bytes: Uint8Array },
+    options: SendOptions = {},
+  ): Promise<ApiResponse<T>> {
+    const url = new URL(path, ORIGIN);
+    const { file: routeFile, params } = matchRoute(url.pathname);
+
+    const form = new FormData();
+    form.append(
+      'file',
+      new File([file.bytes as unknown as BlobPart], file.name, { type: file.type }),
+    );
+
+    const headers = new Headers({ host: new URL(ORIGIN).host, ...options.headers });
+    if (options.withoutFetchMetadata !== true) {
+      headers.set('sec-fetch-site', options.crossSite === true ? 'cross-site' : 'same-origin');
+    }
+    const token = options.token === undefined ? this.cookie : options.token;
+    if (token !== null) headers.set('cookie', `${SESSION_COOKIE}=${token}`);
+
+    const handler = await loadHandler(routeFile, 'POST');
+    const response = await handler(new NextRequest(url, { method: 'POST', headers, body: form }), {
+      params: Promise.resolve(params),
+    });
+
+    const raw = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return {
+      status: response.status,
+      headers: response.headers,
+      data: raw.data as T,
+      error: (raw.error ?? null) as ApiResponse<T>['error'],
+      raw,
+    };
+  }
+
+  /**
+   * A GET whose answer is NOT JSON.
+   *
+   * The attachment download hands back the file itself, so a test has to be
+   * able to read the bytes and the headers rather than a parsed envelope.
+   */
+  async download(
+    path: string,
+    options: SendOptions = {},
+  ): Promise<{ status: number; headers: Headers; bytes: Uint8Array }> {
+    const url = new URL(path, ORIGIN);
+    const { file, params } = matchRoute(url.pathname);
+
+    const headers = new Headers({ host: new URL(ORIGIN).host, ...options.headers });
+    headers.set('sec-fetch-site', 'same-origin');
+    const token = options.token === undefined ? this.cookie : options.token;
+    if (token !== null) headers.set('cookie', `${SESSION_COOKIE}=${token}`);
+
+    const handler = await loadHandler(file, 'GET');
+    const response = await handler(new NextRequest(url, { method: 'GET', headers }), {
+      params: Promise.resolve(params),
+    });
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      bytes: new Uint8Array(await response.arrayBuffer()),
+    };
+  }
+
   signIn(email: string, password: string) {
     return this.post<{ user: { id: string; email: string; role: string } }>('/api/auth/login', {
       email,

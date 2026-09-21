@@ -43,6 +43,13 @@
       "when": 1789928610285,
       "tag": "0005_api_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790018690210,
+      "tag": "0006_outbox_messages",
+      "breakpoints": true
     }
   ]
 }

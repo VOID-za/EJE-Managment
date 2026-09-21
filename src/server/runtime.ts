@@ -12,9 +12,13 @@ import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
 import {
   inMemoryFileStore,
-  SimulatedStorageService,
+  DemoStorageService,
   type FileStore,
 } from '@/services/simulated/storage';
+import {
+  FilesystemStorageService,
+  readStorageConfiguration,
+} from '@/services/production/file-storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { UuidGenerator } from '@/services/production/ids';
@@ -129,12 +133,19 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
   const outbox = new SimulatedOutbox();
 
   /*
-   * Where an issued document's bytes live.
+   * WHERE FILES ACTUALLY LIVE, and the two answers are not the same kind of
+   * answer.
    *
-   * The demonstration keeps them in its own snapshot, so a closed job's final
-   * document survives a reload the way the rest of its data does. PostgreSQL
-   * keeps them in process memory for now — production object storage is its own
-   * phase, and pretending otherwise would be worse than saying so.
+   * POSTGRESQL GETS A DISK. `FilesystemStorageService` writes bytes to
+   * `EJE_STORAGE_DIR` and reads them back, so a customer's order attached in
+   * March is still there in September, across every restart in between. This
+   * replaced an in-memory store that lost every issued job card when the
+   * process ended — which was fine to say out loud and not fine to run a
+   * business on.
+   *
+   * THE DEMONSTRATION GETS ITS SNAPSHOT, which survives a reload and not a
+   * restart, and whose class says so in its own name. That is what keeps
+   * `npm run dev` working end to end with nothing installed.
    */
   const files: FileStore =
     store === null
@@ -147,6 +158,11 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
             });
           },
         };
+
+  const storage =
+    backend === 'postgres'
+      ? new FilesystemStorageService(readStorageConfiguration())
+      : new DemoStorageService(files);
 
   const services: AppServices = {
     clock,
@@ -162,7 +178,7 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
     email: new SimulatedEmailService(outbox, clock, ids),
     whatsapp: buildWhatsApp(backend, outbox, clock, ids),
     pdf: new SimulatedPdfService(clock),
-    storage: new SimulatedStorageService(files),
+    storage,
   };
 
   return { services, outbox };

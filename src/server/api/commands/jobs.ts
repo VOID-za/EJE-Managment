@@ -42,7 +42,7 @@ import { command, type CommandContext, type CommandRegistry, type ErasedCommand 
  * to be enforced against the truth, and `assertEditable` cannot reason about a
  * job whose prices have been blanked.
  */
-const loadTarget = async (context: CommandContext, target: string): Promise<Job> => {
+export const loadVisibleJob = async (context: CommandContext, target: string): Promise<Job> => {
   // The URL may carry either the id or the number a person reads. Both resolve
   // to the same job, and neither is a secret — the visibility check below is
   // what decides whether this actor may know it exists.
@@ -68,7 +68,7 @@ const simple = (run: (context: CommandContext, job: Job) => Promise<Job>): Erase
   command({
     schema: z.object({}).strict(),
     async run(context, _input, target) {
-      const job = await loadTarget(context, target);
+      const job = await loadVisibleJob(context, target);
       return respond(await run(context, job), context.actor);
     },
   });
@@ -81,7 +81,7 @@ const withInput = <T>(
   command({
     schema,
     async run(context, input, target) {
-      const job = await loadTarget(context, target);
+      const job = await loadVisibleJob(context, target);
       const result = await run(context, job, input);
       // A `Job` comes back redacted for its reader; anything else — a removal
       // outcome, a delivery result — is already a plain answer.
@@ -434,7 +434,7 @@ export const JOB_COMMANDS: CommandRegistry = {
   generate_document: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {
-      const job = await loadTarget(context, target);
+      const job = await loadVisibleJob(context, target);
       return jobs.generateJobCardDocument(context.operation, job);
     },
   }),
@@ -450,7 +450,7 @@ export const JOB_COMMANDS: CommandRegistry = {
   issue: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {
-      const job = await loadTarget(context, target);
+      const job = await loadVisibleJob(context, target);
       const recipient = await resolveRecipient(context, job);
       return jobs.issueJobCard(
         context.operation,
@@ -466,7 +466,7 @@ export const JOB_COMMANDS: CommandRegistry = {
   retry_delivery: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {
-      const job = await loadTarget(context, target);
+      const job = await loadVisibleJob(context, target);
       const recipient = await resolveRecipient(context, job);
       return jobs.retryJobCardDelivery(context.operation, job, recipient.displayName);
     },
@@ -588,26 +588,15 @@ export const createJobSchema = z
     courierCollection: z.boolean(),
     deliveryNote: text(120),
     /*
-     * Attachment METADATA only.
+     * NO ATTACHMENTS HERE, deliberately.
      *
-     * The bytes never travel in this request: the office's browser has the
-     * file, and what is recorded against the job is its name, type and size.
-     * See `storeAttachments` — the storage port keeps no bytes until real
-     * object storage is configured behind it, and nothing here implies it does.
+     * A document is bytes, and this request carries none. Accepting a list of
+     * file names would record attachments pointing at nothing — which is the
+     * fiction durable storage exists to end. The office raises the job and then
+     * attaches to it through `POST /api/jobs/:id/attachments`, which stores the
+     * bytes before it records the row. A client that still sends `attachments`
+     * is refused by `.strict()` rather than quietly ignored.
      */
-    attachments: z
-      .array(
-        z
-          .object({
-            fileName: z.string().trim().min(1).max(260),
-            contentType: text(160),
-            caption: text(500),
-            sizeBytes: z.number().int().nonnegative().max(2_000_000_000),
-          })
-          .strict(),
-      )
-      .max(20)
-      .default([]),
   })
   .strict();
 

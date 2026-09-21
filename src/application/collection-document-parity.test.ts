@@ -81,7 +81,6 @@ const partsJob = async (
     primaryTechnicianId: technician.id,
     courierCollection: over.courier,
     additionalTechnicianIds: [],
-    attachments: [],
   });
 
   const tech = harness.as(technician);

@@ -24,7 +24,7 @@ import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
 import type { SearchResult } from '@/application/search';
 import type { GeneratedPdf, OutboxEntry } from '@/services/ports';
-import { apiGet, apiPatch, apiPost, newIdempotencyKey, segment } from './client';
+import { apiGet, apiPatch, apiPost, apiUpload, newIdempotencyKey, segment } from './client';
 
 /**
  * Every call the browser makes, named.
@@ -229,6 +229,16 @@ const jobAction = (jobId: string, action: string, body: unknown = {}) =>
 
 export const jobs = {
   create: (input: unknown) => command<Job>('/api/jobs', input),
+  /** Attaches a document to an existing job. The bytes go up; the server stores them. */
+  attach: (jobId: string, file: File, caption = '') =>
+    apiUpload<{ attachments: readonly { id: string; fileName: string }[] }>(
+      `/api/jobs/${segment(jobId)}/attachments`,
+      file,
+      caption,
+    ),
+  /** Where a job's attachment is downloaded from. Authorised on every request. */
+  attachmentUrl: (jobId: string, attachmentId: string) =>
+    `/api/jobs/${segment(jobId)}/attachments/${segment(attachmentId)}`,
   accept: (jobId: string) => jobAction(jobId, 'accept'),
   sendSiteLocation: (jobId: string, recipientMobile?: string) =>
     command<{ sent: boolean; navigationUrl: string; failureReason: string | null }>(

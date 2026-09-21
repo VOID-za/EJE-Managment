@@ -8,6 +8,7 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  OutboxMessage,
   IsoDateTime,
   Job,
   JobId,
@@ -255,6 +256,38 @@ export interface SettingsRepository {
   save(settings: SystemSettings): Promise<SystemSettings>;
 }
 
+/**
+ * Messages that must leave the building, and what became of them.
+ *
+ * THE POINT OF THE INTERFACE is `enqueue` and `claimSendable` being separate
+ * calls: the first runs inside the business transaction, the second runs after
+ * it has committed. A repository that offered "enqueue and send" would put the
+ * network call back where this exists to take it out of.
+ */
+export interface OutboxRepository {
+  /** Records the obligation. Called INSIDE the business transaction. */
+  enqueue(message: OutboxMessage): Promise<OutboxMessage>;
+  /**
+   * The messages still outstanding, oldest first.
+   *
+   * Reserves them by counting the attempt, so two requests draining at once do
+   * not both hand Meta the same message. On PostgreSQL that is a locking
+   * update; in memory there is no concurrency to protect against.
+   */
+  claimSendable(limit: number, now: IsoDateTime): Promise<readonly OutboxMessage[]>;
+  /** The provider accepted it, and gave this id. NOT a delivery confirmation. */
+  markSent(id: string, providerMessageId: string, now: IsoDateTime): Promise<void>;
+  /**
+   * An attempt failed.
+   *
+   * Stays `pending` while attempts remain, so the next drain picks it up; goes
+   * `failed` once there is no point trying again.
+   */
+  markFailed(id: string, reason: string, now: IsoDateTime): Promise<void>;
+  /** For the outbox screen and for tests. */
+  list(limit?: number): Promise<readonly OutboxMessage[]>;
+}
+
 /** The full set of repositories the application is wired against. */
 export interface RepositoryBundle {
   readonly jobs: JobRepository;
@@ -268,4 +301,5 @@ export interface RepositoryBundle {
   readonly settings: SettingsRepository;
   readonly availability: AvailabilityRepository;
   readonly chat: ChatRepository;
+  readonly outbox: OutboxRepository;
 }

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, instant, primaryId } from './columns';
 import { notificationChannel, notificationType } from './enums';
 import { availability } from './availability';
@@ -137,5 +137,54 @@ export const chatMessageReads = pgTable(
   (table) => [
     uniqueIndex('chat_message_reads_pkey').on(table.messageId, table.userId),
     index('chat_message_reads_user_idx').on(table.userId),
+  ],
+);
+
+/**
+ * Messages waiting to leave the building.
+ *
+ * WRITTEN INSIDE the transaction that creates the obligation — the assignment,
+ * the handover — and DRAINED AFTERWARDS, outside any transaction. That split is
+ * the whole point of the table: a PostgreSQL transaction must not be held open
+ * across a network call to Meta, and a commit must not be able to lose the fact
+ * that somebody still has to be told something.
+ *
+ * `state` is deliberately `sent` rather than `delivered`. The provider
+ * accepting a message is not a handset receiving it, and nothing in this system
+ * may claim the stronger thing without a delivery report to back it.
+ *
+ * NOT A JOB QUEUE. No scheduler, no worker, no broker: one table, and the
+ * partial index below is what makes "what is still outstanding" a cheap
+ * question for the request that asks it.
+ */
+export const outboxMessages = pgTable(
+  'outbox_messages',
+  {
+    id: primaryId(),
+    channel: text('channel').notNull(),
+    template: text('template').notNull(),
+    recipient: text('recipient').notNull(),
+    /** The template's body placeholders, in order. */
+    parameters: jsonb('parameters').$type<string[]>().notNull().default([]),
+    preview: text('preview').notNull().default(''),
+    /*
+     * By VALUE, not by constraint — the same reasoning as the audit trail.
+     * A job can be deleted permanently and a message about it that already
+     * went out is still a thing that happened.
+     */
+    jobId: uuid('job_id'),
+    state: text('state').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    providerMessageId: text('provider_message_id'),
+    failureReason: text('failure_reason').notNull().default(''),
+    createdAt: instant('created_at').notNull(),
+    lastAttemptAt: instant('last_attempt_at'),
+  },
+  (table) => [
+    // Only the outstanding ones are ever queried, so only they are indexed.
+    index('outbox_messages_pending_idx')
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'pending'`),
+    index('outbox_messages_job_idx').on(table.jobId),
   ],
 );

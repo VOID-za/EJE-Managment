@@ -164,6 +164,54 @@ export const apiPost = <T>(
 export const apiPatch = <T>(path: string, body: unknown = {}): Promise<T> =>
   request<T>(path, { method: 'PATCH', body });
 
+/**
+ * Uploads a file.
+ *
+ * Multipart rather than JSON: a 20 MB PDF base64-encoded into a JSON string is
+ * a third larger and has to be held as text at both ends. `FormData` sets its
+ * own `Content-Type` boundary, which is why this does not go through `request`
+ * — that function sets `content-type: application/json`, and overriding it
+ * here would be the one place a header had to be wrong on purpose.
+ *
+ * The declared type the browser puts on the part is sent and IGNORED: the
+ * server sniffs the bytes. See `uploads.ts`.
+ */
+export const apiUpload = async <T>(
+  path: string,
+  file: File,
+  caption = '',
+): Promise<T> => {
+  const form = new FormData();
+  form.append('file', file);
+  if (caption.length > 0) form.append('caption', caption);
+
+  let response: Response;
+  try {
+    response = await fetch(path, { method: 'POST', credentials: 'same-origin', body: form });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+    throw new ApiRequestError(
+      'network',
+      'No connection to the EJE server. The file has not been attached.',
+    );
+  }
+
+  const envelope = (await response.json().catch(() => ({}))) as Envelope<T>;
+  if (!response.ok || envelope.error !== undefined) {
+    const error = envelope.error;
+    const code: ApiErrorCode = error?.code ?? 'internal_error';
+    if (code === 'unauthenticated') {
+      for (const listener of sessionListeners) listener();
+    }
+    throw new ApiRequestError(
+      code,
+      error?.message ?? 'The file could not be attached.',
+      error?.violations ?? [],
+    );
+  }
+  return envelope.data as T;
+};
+
 /** A fresh key per attempt at a given action, so a retry of it replays. */
 export const newIdempotencyKey = (): string => crypto.randomUUID();
 

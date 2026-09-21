@@ -1,4 +1,13 @@
-import type { StorageService, StoredDocument, StoredFile } from '../ports';
+import type { StorageService, StoredDocument, StoredFile, UploadedFile } from '../ports';
+
+/**
+ * A storage key nobody chose.
+ *
+ * Random and opaque, with no part of it derived from a file name: a name is
+ * user-controlled, and a path built from one is a traversal waiting to happen.
+ * Shared by both adapters so they cannot disagree about that.
+ */
+export const generatedStorageKey = (): string => `uploads/${crypto.randomUUID()}`;
 
 /**
  * Where a stored file's bytes actually live.
@@ -68,26 +77,44 @@ export const base64ToBytes = (base64: string): Uint8Array => {
 };
 
 /**
- * Simulated storage adapter.
+ * DEMONSTRATION AND DEVELOPMENT STORAGE. NOT DURABLE.
  *
- * DEMO BEHAVIOUR: uploads (machine photos, technical documents) still resolve
- * to deterministic placeholders, so the demo ships no binary assets and fakes
- * no upload endpoint. Documents written with `putDocument` are DIFFERENT: their
- * bytes are genuinely kept, because a closed job's final job card has to be
- * handed back byte-for-byte months later.
+ * Bytes live in the demonstration snapshot — in this process, or in the demo
+ * store that resets with it. They survive a page reload, which is what makes
+ * `npm run dev` usable end to end without installing anything; they do NOT
+ * survive a restart, and this adapter is never what a real deployment gets.
+ * `src/server/runtime.ts` gives PostgreSQL `FilesystemStorageService`, whose
+ * bytes are on disk.
  *
- * Production swaps this for VPS disk and later S3-compatible object storage;
- * `getDocument` becomes a read or a signed GET and no caller changes.
+ * WHAT IS THE SAME IN BOTH: `storeUpload` genuinely keeps the bytes it is
+ * handed, so a job attachment uploaded here can be downloaded here. What
+ * differs is only how long that lasts, and this class says so rather than
+ * implying otherwise.
+ *
+ * `put` still allocates a key with no content behind it, because the photo
+ * capture paths call it without bytes — see the port.
  */
-export class SimulatedStorageService implements StorageService {
+export class DemoStorageService implements StorageService {
   constructor(private readonly files: FileStore) {}
 
   resolveUrl(storageKey: string): string {
+    // Inert on purpose: everything a browser fetches goes through an
+    // authenticated route, so this must never work as a public URL.
     return `#storage/${encodeURIComponent(storageKey)}`;
   }
 
   put(fileName: string, _contentType: string, _data: Blob | null): Promise<StoredFile> {
     const storageKey = `uploads/${Date.now()}-${fileName}`;
+    return Promise.resolve({ storageKey, url: this.resolveUrl(storageKey) });
+  }
+
+  storeUpload(file: UploadedFile): Promise<StoredFile> {
+    const storageKey = generatedStorageKey();
+    this.files.set(storageKey, {
+      fileName: file.fileName,
+      contentType: file.contentType,
+      base64: bytesToBase64(file.bytes),
+    });
     return Promise.resolve({ storageKey, url: this.resolveUrl(storageKey) });
   }
 

@@ -22,7 +22,10 @@ import type {
   Conversation,
   User,
   UserId,
+  OutboxMessage,
+  IsoDateTime,
 } from '@/domain';
+import { isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
 import type {
   ActivityRepository,
   ChecklistTemplateRepository,
@@ -35,6 +38,7 @@ import type {
   ChatRepository,
   MachineRepository,
   NotificationRepository,
+  OutboxRepository,
   RepositoryBundle,
   SettingsRepository,
   UserRepository,
@@ -425,6 +429,80 @@ class DemoActivityRepository implements ActivityRepository {
   }
 }
 
+/**
+ * The outbox, in the demonstration snapshot.
+ *
+ * Same contract as PostgreSQL's, same two-phase shape: `enqueue` during the
+ * business change, `claimSendable` after it. There is no transaction here and
+ * no concurrency to protect against, so claiming is just a read that counts the
+ * attempt — but the SEQUENCE the callers follow is identical, which is what
+ * keeps the demonstration an honest rehearsal of the real thing.
+ */
+class DemoOutboxRepository implements OutboxRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  enqueue(message: OutboxMessage): Promise<OutboxMessage> {
+    this.context.commit((draft) => {
+      draft.outbox = [...draft.outbox, message];
+    });
+    return Promise.resolve(message);
+  }
+
+  claimSendable(limit: number, now: IsoDateTime): Promise<readonly OutboxMessage[]> {
+    const claimed = this.context
+      .read()
+      .outbox.filter(isOutboxSendable)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, limit)
+      .map((message) => ({ ...message, attempts: message.attempts + 1, lastAttemptAt: now }));
+
+    const ids = new Set(claimed.map((message) => message.id));
+    this.context.commit((draft) => {
+      draft.outbox = draft.outbox.map(
+        (message) => claimed.find((entry) => entry.id === message.id) ?? message,
+      );
+    });
+    return Promise.resolve(claimed.filter((message) => ids.has(message.id)));
+  }
+
+  markSent(id: string, providerMessageId: string, now: IsoDateTime): Promise<void> {
+    this.context.commit((draft) => {
+      draft.outbox = draft.outbox.map((message) =>
+        message.id === id
+          ? { ...message, state: 'sent', providerMessageId, failureReason: '', lastAttemptAt: now }
+          : message,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  markFailed(id: string, reason: string, now: IsoDateTime): Promise<void> {
+    this.context.commit((draft) => {
+      draft.outbox = draft.outbox.map((message) =>
+        message.id === id
+          ? {
+              ...message,
+              // Still pending while there are attempts left: a failure is not
+              // the end of an obligation, only of one try at it.
+              state: message.attempts >= MAX_OUTBOX_ATTEMPTS ? 'failed' : 'pending',
+              failureReason: reason,
+              lastAttemptAt: now,
+            }
+          : message,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  list(limit = 100): Promise<readonly OutboxMessage[]> {
+    return Promise.resolve(
+      [...this.context.read().outbox]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, limit),
+    );
+  }
+}
+
 class DemoNotificationRepository implements NotificationRepository {
   constructor(private readonly context: DemoContext) {}
 
@@ -624,6 +702,7 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   documents: new DemoDocumentRepository(context),
   checklistTemplates: new DemoChecklistTemplateRepository(context),
   activity: new DemoActivityRepository(context),
+  outbox: new DemoOutboxRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),

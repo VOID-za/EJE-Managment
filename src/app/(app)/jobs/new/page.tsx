@@ -32,7 +32,6 @@ import {
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import type { NewJobAttachment } from '@/application/job-creation';
 import { jobs as api, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -64,7 +63,9 @@ const NewJobPage = () => {
   const [faultDescription, setFaultDescription] = useState('');
   const [technicianId, setTechnicianId] = useState('');
   const [additionalIds, setAdditionalIds] = useState<readonly string[]>([]);
-  const [attachments, setAttachments] = useState<readonly NewJobAttachment[]>([]);
+  /** The real files, held until the job exists to attach them to. */
+  const [attachments, setAttachments] = useState<readonly File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [courierCollection, setCourierCollection] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -171,14 +172,41 @@ const NewJobPage = () => {
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
         courierCollection,
         deliveryNote,
-        attachments: [...attachments],
       });
     });
 
-    setSaving(false);
-    if (!ok || created === null) return;
+    if (!ok || created === null) {
+      setSaving(false);
+      return;
+    }
 
-    router.push(`/jobs/${(created as Job).jobNumber}`);
+    /*
+     * The documents, now that there is a job to hang them on.
+     *
+     * A failure here is NOT a failed job: the job is raised and keeps its
+     * number. It is reported plainly and the person is still taken to the job,
+     * where they can attach the file again — which beats rolling back a job
+     * number over an upload.
+     */
+    const job = created as Job;
+    const failed: string[] = [];
+    for (const file of attachments) {
+      try {
+        await api.attach(job.id, file);
+      } catch {
+        failed.push(file.name);
+      }
+    }
+
+    setSaving(false);
+    if (failed.length > 0) {
+      setAttachmentError(
+        `${job.jobNumber} was raised, but ${failed.join(', ')} could not be attached. Open the job and try again.`,
+      );
+      return;
+    }
+
+    router.push(`/jobs/${job.jobNumber}`);
   };
 
   return (
@@ -501,17 +529,18 @@ const NewJobPage = () => {
               type="file"
               multiple
               className="mt-4 block w-full text-sm text-steel-700 file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-steel-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-steel-700 hover:file:bg-steel-200"
+              accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp"
               onChange={(event) => {
+                /*
+                 * READ THE FILES FIRST.
+                 *
+                 * `event.target.files` is live: clearing the input below empties
+                 * it. Reading it inside the state updater — which React runs
+                 * later — hands the updater a list that has already been reset,
+                 * and the file silently never appears.
+                 */
                 const chosen = Array.from(event.target.files ?? []);
-                setAttachments((current) => [
-                  ...current,
-                  ...chosen.map((file) => ({
-                    fileName: file.name,
-                    contentType: file.type,
-                    caption: '',
-                    sizeBytes: file.size,
-                  })),
-                ]);
+                setAttachments((current) => [...current, ...chosen]);
                 // Lets the same file be chosen again after being removed.
                 event.target.value = '';
               }}
@@ -521,12 +550,12 @@ const NewJobPage = () => {
               <ul className="mt-3 space-y-2">
                 {attachments.map((file, index) => (
                   <li
-                    key={`${file.fileName}-${index}`}
+                    key={`${file.name}-${index}`}
                     className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-steel-200 px-3 py-2 text-sm"
                   >
-                    <span className="min-w-0 flex-1 truncate text-steel-800">{file.fileName}</span>
+                    <span className="min-w-0 flex-1 truncate text-steel-800">{file.name}</span>
                     <span className="shrink-0 text-xs text-steel-500">
-                      {Math.max(1, Math.round(file.sizeBytes / 1024))} KB
+                      {Math.max(1, Math.round(file.size / 1024))} KB
                     </span>
                     <Button
                       size="sm"
@@ -544,18 +573,27 @@ const NewJobPage = () => {
               </ul>
             )}
 
-            {/*
-              SAID PLAINLY, because the alternative is a lie by omission.
+            {attachmentError !== null && (
+              <p
+                role="alert"
+                className="mt-3 rounded-[var(--radius-control)] bg-danger-50 px-3 py-2.5 text-sm font-medium text-danger-700"
+              >
+                {attachmentError}
+              </p>
+            )}
 
-              The file's name, type and size are recorded against the job and
-              are on the job card. The CONTENTS are not kept: the storage port
-              has no object storage behind it yet, so there is nothing to
-              download later, and no screen offers one. See docs/integrations.md.
+            {/*
+              The files go up AFTER the job exists, one request each.
+
+              A job is created by a JSON request that carries no bytes, so
+              there is nothing to attach to until it has an id. The server
+              stores each file before it records it, so a failure here leaves
+              the job raised and the document simply not attached — which is
+              what the message says, rather than leaving somebody to guess.
             */}
-            <p className="mt-3 rounded-[var(--radius-control)] border border-dashed border-amber-400 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
-              The file’s name and size are recorded against the job. The document itself is not
-              stored yet — EJE’s document storage is not configured on this deployment, so nothing
-              here can be downloaded later.
+            <p className="mt-3 text-xs leading-relaxed text-steel-500">
+              PDFs and images up to 25 MB. Uploaded once the job is raised, and available to the
+              technician on the job card.
             </p>
           </Card>
 

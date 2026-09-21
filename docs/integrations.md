@@ -12,7 +12,7 @@ that nobody has to read an adapter to find out whether a message was sent.
 | WhatsApp | `CloudApiWhatsAppService` **when configured**, otherwise `SimulatedWhatsAppService` (demonstration) or `UnconfiguredWhatsAppService` (real deployment) | **Yes, when configured** |
 | Email (Microsoft 365) | `SimulatedEmailService` | No |
 | PDF rendering | `SimulatedPdfService` | n/a — rendered in the browser |
-| File storage | `SimulatedStorageService` | No bytes are retained for uploads |
+| File storage | `FilesystemStorageService` on PostgreSQL, `DemoStorageService` in the demonstration | **Bytes are on disk in production** |
 
 ---
 
@@ -44,8 +44,36 @@ the dashboard.
    simulated adapter: a business running on real data would otherwise be shown an
    outbox full of messages nobody ever received.
 
-A refusal never fails the work in hand. An assignment stands and the audit trail
-records `assignment_notification_failed` with the reason.
+A refusal never fails the work in hand. The assignment stands, the outbox row
+stays `pending` with the reason on it, and the next mutation tries again.
+
+### Nothing is sent inside a database transaction
+
+The business transaction records the obligation and commits; the send happens
+afterwards. See `src/server/api/outbox-dispatch.ts` and the `outbox_messages`
+table.
+
+```
+validate → persist the assignment → record the outbox row → COMMIT → send
+```
+
+A PostgreSQL transaction is never held open across a call to Meta, and a commit
+cannot lose the fact that somebody still has to be told something. A message
+that could not be sent is a row that is still `pending`; the next mutation
+anybody makes drains it, up to four attempts, after which it is `failed` and
+somebody should pick up a telephone.
+
+Three words, three different facts, none borrowed for another:
+
+| | means |
+|---|---|
+| `pending` | recorded, not yet handed to the provider |
+| `sent` | the provider ACCEPTED it. No handset has confirmed anything |
+| `failed` | given up on, after the attempt limit. Carries the reason |
+
+Draining is retryable and never duplicates a business change: a retry is another
+attempt at the same row, and `for update skip locked` stops two concurrent
+requests handing Meta the same message.
 
 ### Accepted is not delivered
 
@@ -74,25 +102,81 @@ recorded failure, not a silent one.
 
 ---
 
-## File storage — the genuine gap
+## File storage — real on PostgreSQL
 
-`SimulatedStorageService.put` **keeps no bytes.** It allocates a storage key and
-returns it; the file's contents are discarded.
+`FilesystemStorageService` writes bytes to a directory and reads them back. A
+customer's order attached to a job in March is still there in September, across
+every restart and deployment in between.
 
-This is what a job attachment uses. So when the office attaches a customer order
-to a new job:
+### Configuration
 
-- the file's **name, type and size are recorded** against the job, persisted in
-  `job_media`, and shown on the job card;
-- the **document itself is not kept**, and no screen offers a download, because
-  a download button that always failed would be worse than the sentence that is
-  shown instead.
+| Variable | Required | Default |
+|---|---|---|
+| `EJE_STORAGE_DIR` | no, but set it | `<cwd>/.eje-storage` |
 
-**Still required for production:** S3-compatible object storage (or VPS disk)
-behind `StorageService`. `putDocument`/`getDocument` already keep bytes — the
-demonstration in its own snapshot, PostgreSQL in process memory — which is
-enough for an issued job card within one process lifetime and **not** enough for
-a business. Both are the same swap in `buildServices`.
+The default exists so a deployment cannot fail to store a document because
+nobody set a variable. **A real deployment should set an explicit path on a
+volume that is actually backed up** — that is the part a default cannot do for
+anybody.
+
+### What is stored, and where
+
+| | |
+|---|---|
+| The bytes | `<root>/<key>.bin` on disk |
+| Name and type | `<root>/<key>.json`, beside them |
+| The index | PostgreSQL `job_media`, which is authoritative |
+
+The database is the INDEX, not the store: the row says where the object is and
+does not contain it.
+
+### Keys and paths
+
+Storage keys are `uploads/<uuid>` — generated, never derived from a file name.
+A name is user-controlled and a path built from one is a traversal waiting to
+happen. Keys are additionally validated on the way to a path, and the resolved
+path is checked to be inside the root.
+
+### Nothing is public
+
+`resolveUrl` returns an inert reference in every adapter. There is no public
+path to a stored file. Retrieval goes through
+`GET /api/jobs/:jobId/attachments/:attachmentId`, which authorises the request
+against the JOB — the same visibility rule every job read uses — before it reads
+a byte. A storage key is not a credential and no route accepts one.
+
+### Validation
+
+Server-side, and the browser's declared type is ignored for deciding what a file
+is:
+
+| | |
+|---|---|
+| Size | 25 MB, checked on `Content-Length` and again on the bytes |
+| Type | **Sniffed** from the magic number: PDF, PNG, JPEG, TIFF, WebP |
+| Name | Path separators and control characters stripped; metadata only |
+| Empty | Refused |
+
+### Consistency
+
+Bytes first, row second. A failed write raises, so the database never claims an
+attachment exists when nothing was stored. The opposite failure — bytes written,
+transaction rolled back — leaves an object nothing points at, which costs disk
+and tells nobody anything false. Removal is a soft mark (`job_media.removed_at`)
+and never destroys bytes, so there is no delete-then-orphan case.
+
+### Demonstration storage is different, and says so
+
+`DemoStorageService` keeps bytes in the demonstration snapshot. They survive a
+page reload, which is what makes `npm run dev` usable end to end with nothing
+installed; they do **not** survive a restart, and that adapter is never what a
+PostgreSQL deployment gets.
+
+### Still required for production
+
+S3-compatible object storage, if EJE ever run more than one application server —
+a directory is durable but local. It is the same swap in `buildServices`:
+implement `StorageService` against the bucket and no caller changes.
 
 ---
 

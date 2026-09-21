@@ -83,16 +83,17 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     const created = await raise(master, {
       primaryTechnicianId: IDS.technician,
       additionalTechnicianIds: [IDS.otherTechnician],
-      attachments: [
-        {
-          fileName: 'order-77120.pdf',
-          contentType: 'application/pdf',
-          caption: 'Customer order',
-          sizeBytes: 9_400,
-        },
-      ],
     });
     expect(created.status).toBe(200);
+
+    // The document goes up separately, because a JSON creation request carries
+    // no bytes and an attachment with no bytes is the fiction being removed.
+    const uploaded = await master.upload(`/api/jobs/${created.data.id}/attachments`, {
+      name: 'order-77120.pdf',
+      type: 'application/pdf',
+      bytes: new TextEncoder().encode('%PDF-1.4 the order'),
+    });
+    expect(uploaded.status).toBe(200);
 
     const [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, created.data.id));
     expect(row?.status).toBe('open');
@@ -134,6 +135,8 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     expect(media[0]?.kind).toBe('document');
     expect(media[0]?.fileName).toBe('order-77120.pdf');
     expect(media[0]?.uploadedBy).toBe(IDS.master);
+    // The row locates the object; the bytes are not duplicated into PostgreSQL.
+    expect(media[0]?.storageKey).toMatch(/^uploads\//u);
   });
 
   it('writes the assignment notification as a row the technician can read', async () => {

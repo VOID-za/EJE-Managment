@@ -55,7 +55,7 @@ import {
   type UserId,
 } from '@/domain';
 import { formatHours, formatKilometres } from '@/lib/format';
-import type { PdfVariant } from '@/services/ports';
+import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment } from './assignment-notice';
 import { audit, notify, notifyOffice } from './audit';
@@ -836,6 +836,94 @@ export const addMedia = async (
   });
   await recordPostSignatureChange(context, saved, 'A photograph or video was added.');
   return saved;
+};
+
+/**
+ * Attaches a DOCUMENT to a job, bytes and all.
+ *
+ * SEPARATE FROM `addMedia`, which allocates a key for a photograph whose bytes
+ * the browser never sends. This one is handed real content and stores it
+ * through `storeUpload`, which writes it somewhere durable or raises.
+ *
+ * THE ORDER IS THE CONSISTENCY STORY, and it is deliberately this way round:
+ *
+ *   1. store the bytes   — raises if they did not land
+ *   2. record the row    — only reached when step 1 returned
+ *
+ * So the database cannot claim an attachment exists when nothing was written.
+ * The reverse failure — bytes written, transaction rolled back — leaves an
+ * object nothing points at, which costs disk and tells nobody anything false.
+ * Between a lie and some litter, this takes the litter.
+ *
+ * WHO MAY: whoever may change this job at its current stage. That is
+ * `assertEditable`, the same rule every other capture on a job goes through,
+ * rather than a new one invented here — the office attaches the customer's
+ * order when raising the work, and a technician attaches the delivery note they
+ * were handed on site.
+ */
+export const attachDocument = async (
+  context: OperationContext,
+  job: Job,
+  file: { fileName: string; contentType: string; bytes: Uint8Array; caption: string },
+): Promise<Job> => {
+  assertEditable(context, job);
+
+  const stored = await context.services.storage.storeUpload({
+    fileName: file.fileName,
+    contentType: file.contentType,
+    bytes: file.bytes,
+  });
+
+  const attachment: Attachment = {
+    id: asAttachmentId(context.services.ids.next('att')),
+    kind: 'document',
+    fileName: file.fileName,
+    caption: file.caption.trim(),
+    storageKey: stored.storageKey,
+    uploadedAt: context.services.clock.now(),
+    uploadedBy: context.actor.id,
+    sizeBytes: file.bytes.length,
+  };
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    attachments: [...job.attachments, attachment],
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_uploaded',
+    summary: 'Document attached',
+    detail: `${attachment.fileName} (${file.contentType}, ${Math.max(1, Math.round(file.bytes.length / 1024))} KB).`,
+  });
+
+  return saved;
+};
+
+/**
+ * One attachment's bytes, for a caller that has ALREADY established that this
+ * actor may read this job.
+ *
+ * The attachment must be on the job it was asked for. A key alone is not
+ * permission to read a file and this function will not treat it as one: it is
+ * handed the job, and it looks in that job's own list. Answering null for both
+ * "no such attachment" and "on another job" is what stops the endpoint above
+ * being used to ask which attachment ids exist.
+ */
+export const readJobAttachment = async (
+  context: OperationContext,
+  job: Job,
+  attachmentId: string,
+): Promise<{ attachment: Attachment; document: StoredDocument } | null> => {
+  const attachment = job.attachments.find((candidate) => candidate.id === attachmentId);
+  if (attachment === undefined) return null;
+
+  const document = await context.services.storage.getDocument(attachment.storageKey);
+  // A row with no bytes behind it. Historical rows from before uploads were
+  // stored look exactly like this, and a download must not invent a file.
+  if (document === null) return null;
+
+  return { attachment, document };
 };
 
 /**

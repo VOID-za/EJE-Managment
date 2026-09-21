@@ -10,4 +10,5 @@ export * from './delivery';
 export * from './library';
 export * from './activity';
 export * from './notification';
+export * from './outbox';
 export * from './settings';

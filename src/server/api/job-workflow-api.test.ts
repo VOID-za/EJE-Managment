@@ -285,21 +285,22 @@ describe('assignment and acceptance, over the API', () => {
     expect(retry.data.acceptedAt).toBe(first.data.acceptedAt);
   });
 
-  it('records the attachment metadata the office sent, and nothing more', async () => {
-    const created = await create(master, {
-      attachments: [
-        {
-          fileName: 'order-99500.pdf',
-          contentType: 'application/pdf',
-          caption: 'Customer order',
-          sizeBytes: 12_400,
-        },
-      ],
+  it('refuses a creation request that tries to name attachments', async () => {
+    /*
+     * A document is bytes, and this request carries none.
+     *
+     * Accepting a list of file names would record attachments pointing at
+     * nothing. The schema is strict, so a client still sending them is told so
+     * rather than having them quietly dropped — attachments go up to
+     * `POST /api/jobs/:id/attachments`, which stores the bytes first.
+     */
+    const response = await create(master, {
+      attachments: [{ fileName: 'order.pdf', contentType: 'application/pdf', sizeBytes: 10 }],
     });
 
-    expect(created.status).toBe(200);
-    expect(created.data.attachments.map((file) => file.fileName)).toEqual(['order-99500.pdf']);
+    expect(response.status).toBe(400);
   });
+
 });
 
 /**

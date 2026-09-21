@@ -95,10 +95,7 @@ await page.locator('input[type="file"]').setInputFiles({
 await page.waitForTimeout(400);
 let formHtml = await body();
 check(formHtml.includes('customer-order-99500.pdf'), 'an attached document is listed on the form');
-check(
-  formHtml.includes('document itself is not stored yet'),
-  'the form says plainly that the file contents are not kept',
-);
+check(formHtml.includes('up to 25 MB'), 'the form states the size and formats it accepts');
 
 await page.getByRole('button', { name: 'Create job' }).click();
 await page.waitForURL('**/jobs/EJE-**', { timeout: 20000 });
@@ -115,10 +112,36 @@ check(!t.includes('Something went wrong'), 'the new job screen loads');
 check(t.includes(FAULT), 'the fault description is on the job');
 check(t.includes('receives the job card'), 'the job names who receives the customer copy');
 check(t.includes('customer-order-99500.pdf'), 'the attachment is recorded on the job');
-check(
-  t.includes('not retrievable until'),
-  'the job screen says the attachment is not retrievable, rather than offering a download',
-);
+
+// THE ROUND TRIP. The file went up; it comes back, byte for byte, through an
+// authorised route — no storage key, no public URL.
+const attachment = await page.evaluate(async (number) => {
+  const view = await (await fetch(`/api/jobs/${number}`, { credentials: 'same-origin' })).json();
+  const file = view.data?.view?.job?.attachments?.[0];
+  if (file === undefined) return { found: false };
+
+  const jobId = view.data.view.job.id;
+  const download = await fetch(`/api/jobs/${jobId}/attachments/${file.id}`, {
+    credentials: 'same-origin',
+  });
+  const text = await download.text();
+  return {
+    found: true,
+    jobId,
+    attachmentId: file.id,
+    status: download.status,
+    disposition: download.headers.get('content-disposition'),
+    type: download.headers.get('content-type'),
+    body: text,
+    leaksKey: JSON.stringify(file).includes('uploads/'),
+  };
+}, jobNumber);
+
+check(attachment.found, 'the uploaded document is on the job');
+check(attachment.status === 200, `the document downloads (got ${attachment.status})`);
+check(attachment.body.startsWith('%PDF'), 'the bytes that come back are the bytes that went up');
+check(attachment.type === 'application/pdf', 'the server decided the content type');
+check((attachment.disposition ?? '').includes('attachment;'), 'it is served as a download');
 
 // The STATE, asked of the server rather than read off a progress rail that
 // names every stage including the ones the job has not reached.
@@ -165,6 +188,18 @@ const create = await page.evaluate(async () => {
   return response.status;
 });
 check(create === 403, `a technician cannot raise a job by direct API call (got ${create})`);
+
+// The attachment, from somebody who may not read the job.
+const stolen = await page.evaluate(
+  async ({ jobId, attachmentId }) => {
+    const direct = await fetch(`/api/jobs/${jobId}/attachments/${attachmentId}`, {
+      credentials: 'same-origin',
+    });
+    return direct.status;
+  },
+  { jobId: attachment.jobId, attachmentId: attachment.attachmentId },
+);
+check(stolen === 404, `an unauthorised technician cannot download the attachment (got ${stolen})`);
 
 // ---------- TECHNICIAN: see it, accept it ----------
 await signOut(page);

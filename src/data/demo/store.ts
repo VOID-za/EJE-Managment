@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  OutboxMessage,
   AppNotification,
   ChecklistTemplate,
   Customer,
@@ -57,6 +58,8 @@ export interface DemoDatabase {
   checklistTemplates: ChecklistTemplate[];
   activity: ActivityEvent[];
   notifications: AppNotification[];
+  /** Messages waiting to leave the building. See `types/outbox.ts`. */
+  outbox: OutboxMessage[];
   availability: AvailabilityRecord[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
@@ -130,6 +133,9 @@ export const createSeededDatabase = (): DemoDatabase => ({
   checklistTemplates: seedChecklistTemplates.map((template) => ({ ...template })),
   activity: seedActivity.map((entry) => ({ ...entry })),
   notifications: seedNotifications.map((notification) => ({ ...notification })),
+  // Nothing outstanding in a fresh demonstration: the seed's notifications
+  // describe messages that already happened, not ones still to be sent.
+  outbox: [],
   availability: seedAvailability.map((record) => ({ ...record })),
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at

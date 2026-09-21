@@ -186,7 +186,6 @@ describe('a test and repair collected from the counter', () => {
       scheduledDate: '2026-09-20',
       scheduledEndDate: null,
       additionalTechnicianIds: [],
-      attachments: [],
       orderNumber: 'PO-99001',
       referenceNumber: 'WS-114',
       deliveryNote: over.deliveryNote ?? '',

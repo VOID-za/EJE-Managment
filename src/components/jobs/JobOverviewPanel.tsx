@@ -200,24 +200,30 @@ export const JobOverviewPanel = ({
                   >
                     <Icon name="document" className="mt-0.5 size-4 shrink-0 text-steel-400" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-steel-900">
+                      {/*
+                        An ordinary link to an authorised route.
+                        
+                        No storage key, no signed URL, nothing that works for
+                        somebody who is not signed in: the server decides on
+                        every request whether this person may read this job
+                        before it reads a byte.
+                      */}
+                      <a
+                        href={jobs.attachmentUrl(job.id, file.id)}
+                        className="block truncate font-medium text-eje-700 underline-offset-2 hover:underline"
+                      >
                         {file.fileName}
-                      </span>
+                      </a>
                       {file.caption.length > 0 && (
                         <span className="block text-xs text-steel-500">{file.caption}</span>
                       )}
                     </span>
+                    <span className="shrink-0 text-xs text-steel-500">
+                      {Math.max(1, Math.round(file.sizeBytes / 1024))} KB
+                    </span>
                   </li>
                 ))}
               </ul>
-              {/* No download button, because there is nothing to download:
-                  the storage port keeps no bytes until object storage is
-                  configured. A button that always failed would be worse than
-                  this sentence. */}
-              <p className="mt-3 text-xs text-steel-500">
-                Recorded against the job. The files themselves are not retrievable until EJE’s
-                document storage is configured.
-              </p>
             </Card>
           )}
 
