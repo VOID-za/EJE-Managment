@@ -90,6 +90,15 @@ export const rateLimited = (message: string, retryAfterSeconds: number): ApiErro
  */
 const PERMISSION_CODES = new Set([
   'not_permitted',
+  /*
+   * Accepting a job you may not accept.
+   *
+   * A Coordinator who does not do field work, or a technician reaching for a
+   * job assigned to somebody else. Both are permanent for this actor on this
+   * job — no amount of finishing the work makes them true — which is what
+   * separates a 403 from the 422 that says "not yet".
+   */
+  'not_field_technician',
   'transfer_not_permitted',
   'delete_not_permitted',
   'master_not_editable',

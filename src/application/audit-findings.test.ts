@@ -177,6 +177,8 @@ describe('raising a job is an operation, not a screen', () => {
     primaryTechnicianId: null,
     courierCollection: false,
     deliveryNote: '',
+    additionalTechnicianIds: [],
+    attachments: [],
   };
 
   it('refuses a technician raising one, at the service layer', async () => {

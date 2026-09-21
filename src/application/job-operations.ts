@@ -18,6 +18,7 @@ import {
   deleteJobRefusal,
   describeAvailabilityConflict,
   findJobAvailabilityConflicts,
+  isAssignedTo,
   getJobTypeDefinition,
   isAdministrativeCapture,
   isAfterSignature,
@@ -56,6 +57,7 @@ import {
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant } from '@/services/ports';
 import type { OperationContext } from './context';
+import { assignmentDetails, notifyAssignment } from './assignment-notice';
 import { audit, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { loadJobView } from './job-view';
@@ -214,17 +216,34 @@ const transition = (job: Job, to: JobStatus): void => {
  * cannot take a breakdown as though she had gone out to it.
  */
 export const acceptJobRefusal = (
-  actor: Pick<User, 'role'>,
-  job: Pick<Job, 'jobType'>,
+  actor: Pick<User, 'id' | 'role'>,
+  job: Pick<Job, 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
 ): string | null => {
   if (job.jobType === 'parts') {
     return can(actor.role, 'jobs.processParts')
       ? null
       : 'You cannot process parts collections.';
   }
-  return can(actor.role, 'jobs.acceptField')
-    ? null
-    : 'Field work is accepted by the technician attending the job. Assign a technician instead.';
+  if (!can(actor.role, 'jobs.acceptField')) {
+    return 'Field work is accepted by the technician attending the job. Assign a technician instead.';
+  }
+
+  /*
+   * WHOSE JOB IT IS.
+   *
+   * An UNASSIGNED job is the open pool, and the pool is how a technician gets
+   * work in the first place — anybody who does field work may take one.
+   *
+   * An ASSIGNED job belongs to the people on it. Being able to SEE a job is not
+   * the same as being able to take it: a technician who worked a job and had it
+   * transferred away still reads it (Decision 5 calls that `participated`, and
+   * the read layer already treats it as read-only), and until now nothing
+   * stopped them accepting it back out from under the technician it had been
+   * given to. The office reassigns work; a technician does not take it.
+   */
+  if (job.primaryTechnicianId === null || isAssignedTo(job, actor.id)) return null;
+
+  return 'This job is assigned to another technician. Ask the office to reassign it if it should be yours.';
 };
 
 export const acceptJob = async (context: OperationContext, job: Job): Promise<Job> => {
@@ -402,6 +421,18 @@ export const assignPrimaryTechnician = async (
     summary: `Job assigned to ${technicianName}`,
     detail: 'Assigned as primary technician.',
   });
+
+  // Telling them is part of assigning them. See `assignment-notice.ts`.
+  const person = await context.repos.users.findById(technicianId);
+  if (person !== null) {
+    await notifyAssignment(
+      context,
+      saved,
+      person,
+      'primary',
+      await assignmentDetails(context, saved),
+    );
+  }
   return saved;
 };
 
@@ -426,6 +457,17 @@ export const addAdditionalTechnician = async (
     summary: `${technicianName} added to the job`,
     detail: 'Added as an additional technician.',
   });
+
+  const person = await context.repos.users.findById(technicianId);
+  if (person !== null) {
+    await notifyAssignment(
+      context,
+      saved,
+      person,
+      'additional',
+      await assignmentDetails(context, saved),
+    );
+  }
   return saved;
 };
 

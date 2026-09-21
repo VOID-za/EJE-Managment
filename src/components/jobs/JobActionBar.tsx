@@ -51,7 +51,7 @@ export const JobActionBar = ({
 
   const actions: React.ReactNode[] = [];
 
-  if (canAcceptJob(job)) {
+  if (canAcceptJob(job, currentUser)) {
     actions.push(
       <Button
         key="accept"

@@ -172,7 +172,9 @@ describe('a test and repair collected from the counter', () => {
     const sites = await harness.repos.customers.listSites(customer!.id);
     const contacts = await harness.repos.customers.listContacts(customer!.id);
     const machines = await harness.repos.machines.list();
-    const machine = machines.find((candidate) => candidate.customerId === customer!.id);
+    // At THIS site, not merely this customer: the job's site and machine have
+    // to agree, and `createJob` now checks that rather than assuming it.
+    const machine = machines.find((candidate) => candidate.siteId === sites[0]!.id);
 
     let job = await createJob(context, {
       customerId: customer!.id,
@@ -183,6 +185,8 @@ describe('a test and repair collected from the counter', () => {
       priority: 'normal',
       scheduledDate: '2026-09-20',
       scheduledEndDate: null,
+      additionalTechnicianIds: [],
+      attachments: [],
       orderNumber: 'PO-99001',
       referenceNumber: 'WS-114',
       deliveryNote: over.deliveryNote ?? '',

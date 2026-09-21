@@ -12,6 +12,17 @@ export type ActivityEventType =
   | 'site_location_sent'
   | 'site_location_declined'
   | 'site_location_failed'
+  /**
+   * The assignment notification reached the technician's channels.
+   *
+   * Recorded separately from `job_assigned`, because they are different facts:
+   * one says the office gave somebody the work, the other says the system
+   * managed to tell them. A business that uses WhatsApp to reach technicians
+   * needs to know when the second did not happen.
+   */
+  | 'assignment_notified'
+  /** The technician was assigned and could NOT be told. Says why. */
+  | 'assignment_notification_failed'
   | 'technician_added'
   | 'technician_removed'
   | 'note_added'

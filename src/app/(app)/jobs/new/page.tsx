@@ -32,6 +32,7 @@ import {
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import type { NewJobAttachment } from '@/application/job-creation';
 import { jobs as api, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -62,6 +63,8 @@ const NewJobPage = () => {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [faultDescription, setFaultDescription] = useState('');
   const [technicianId, setTechnicianId] = useState('');
+  const [additionalIds, setAdditionalIds] = useState<readonly string[]>([]);
+  const [attachments, setAttachments] = useState<readonly NewJobAttachment[]>([]);
   const [courierCollection, setCourierCollection] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -86,6 +89,11 @@ const NewJobPage = () => {
   const machines = useMemo(
     () => (data?.machines ?? []).filter((machine) => machine.siteId === siteId),
     [data?.machines, siteId],
+  );
+  /** Who may be given field work. The same rule the server enforces. */
+  const fieldTechnicians = useMemo(
+    () => (data?.users ?? []).filter((user) => user.role === 'technician' && user.active),
+    [data?.users],
   );
 
   if (!can(user.role, 'jobs.create')) {
@@ -160,8 +168,10 @@ const NewJobPage = () => {
         referenceNumber,
         faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? technicianId : null,
+        additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
         courierCollection,
         deliveryNote,
+        attachments: [...attachments],
       });
     });
 
@@ -218,17 +228,21 @@ const NewJobPage = () => {
                   label: `${site.name} — ${site.city}`,
                 }))}
               />
+              {/* The customer's copy goes HERE, and the office chooses it.
+                  Named for what it does rather than "Site contact": the address
+                  is shown because that is the fact being decided. */}
               <SelectField
-                label="Site contact"
+                label="Customer email recipient"
                 required
                 value={contactId}
                 error={errors.contactId}
+                hint="Who receives the signed job card. Changeable later, before it is issued."
                 placeholder={siteId.length === 0 ? 'Select a site first' : 'Select a contact'}
                 disabled={siteId.length === 0}
                 onChange={(event) => setContactId(event.target.value)}
                 options={contacts.map((contact) => ({
                   value: contact.id,
-                  label: `${contactFullName(contact)} — ${contact.position}`,
+                  label: `${contactFullName(contact)} — ${contact.position}${contact.email.length > 0 ? ` (${contact.email})` : ' (no email address)'}`,
                 }))}
               />
               <SelectField
@@ -409,14 +423,140 @@ const NewJobPage = () => {
               label="Primary technician"
               value={technicianId}
               placeholder="Leave unassigned"
-              onChange={(event) => setTechnicianId(event.target.value)}
-              options={data.users
-                .filter((candidate) => candidate.role === 'technician' && candidate.active)
-                .map((technician) => ({
-                  value: technician.id,
-                  label: `${userFullName(technician)} — ${technician.jobTitle}`,
-                }))}
+              hint="The person who attends the machine, and who is recorded as having attended it."
+              onChange={(event) => {
+                setTechnicianId(event.target.value);
+                // Somebody cannot assist themselves. Changing the primary drops
+                // them from the assistants rather than leaving a contradiction
+                // the server would have to refuse.
+                setAdditionalIds((current) =>
+                  current.filter((id) => id !== event.target.value),
+                );
+              }}
+              options={fieldTechnicians.map((technician) => ({
+                value: technician.id,
+                label: `${userFullName(technician)} — ${technician.jobTitle}`,
+              }))}
             />
+
+            {/* Assistants. Only offered once there is somebody to assist —
+                the server refuses additional technicians without a primary,
+                and a form that lets you build a refusal is a form that wastes
+                somebody's afternoon. */}
+            {technicianId.length > 0 && (
+              <fieldset className="mt-4">
+                <legend className="mb-1.5 text-sm font-semibold text-steel-700">
+                  Attending with them
+                </legend>
+                <p className="mb-2.5 text-xs text-steel-500">
+                  Optional. Additional technicians see the job and can capture work on it.
+                </p>
+                <div className="space-y-2">
+                  {fieldTechnicians
+                    .filter((candidate) => candidate.id !== technicianId)
+                    .map((candidate) => (
+                      <label
+                        key={candidate.id}
+                        className="flex cursor-pointer items-center gap-3 rounded-[var(--radius-control)] border border-steel-200 px-3 py-2.5 text-sm hover:border-steel-400 hover:bg-steel-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+                          checked={additionalIds.includes(candidate.id)}
+                          onChange={(event) =>
+                            setAdditionalIds((current) =>
+                              event.target.checked
+                                ? [...current, candidate.id]
+                                : current.filter((id) => id !== candidate.id),
+                            )
+                          }
+                        />
+                        <span className="text-steel-800">
+                          {userFullName(candidate)}
+                          <span className="text-steel-500"> — {candidate.jobTitle}</span>
+                        </span>
+                      </label>
+                    ))}
+                </div>
+              </fieldset>
+            )}
+
+            {/* What actually happens on Create. Stated, because "assigned" and
+                "started" are different things here and the office has to know
+                the technician is not on the clock yet. */}
+            <p className="mt-4 rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-xs leading-relaxed text-steel-600">
+              The job will be created <strong>Open</strong>
+              {technicianId.length > 0
+                ? ' and the technician will be notified. It starts — and moves to In Progress — when they accept it, not when it is assigned.'
+                : ' and unassigned, in the pool for any technician to accept.'}
+            </p>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Attachments"
+              description="Quotes, customer orders or drawings the technician needs on site."
+            />
+            <input
+              type="file"
+              multiple
+              className="mt-4 block w-full text-sm text-steel-700 file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-steel-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-steel-700 hover:file:bg-steel-200"
+              onChange={(event) => {
+                const chosen = Array.from(event.target.files ?? []);
+                setAttachments((current) => [
+                  ...current,
+                  ...chosen.map((file) => ({
+                    fileName: file.name,
+                    contentType: file.type,
+                    caption: '',
+                    sizeBytes: file.size,
+                  })),
+                ]);
+                // Lets the same file be chosen again after being removed.
+                event.target.value = '';
+              }}
+            />
+
+            {attachments.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {attachments.map((file, index) => (
+                  <li
+                    key={`${file.fileName}-${index}`}
+                    className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-steel-200 px-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-steel-800">{file.fileName}</span>
+                    <span className="shrink-0 text-xs text-steel-500">
+                      {Math.max(1, Math.round(file.sizeBytes / 1024))} KB
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        setAttachments((current) =>
+                          current.filter((_, position) => position !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/*
+              SAID PLAINLY, because the alternative is a lie by omission.
+
+              The file's name, type and size are recorded against the job and
+              are on the job card. The CONTENTS are not kept: the storage port
+              has no object storage behind it yet, so there is nothing to
+              download later, and no screen offers one. See docs/integrations.md.
+            */}
+            <p className="mt-3 rounded-[var(--radius-control)] border border-dashed border-amber-400 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
+              The file’s name and size are recorded against the job. The document itself is not
+              stored yet — EJE’s document storage is not configured on this deployment, so nothing
+              here can be downloaded later.
+            </p>
           </Card>
 
           {operation.error !== null && (

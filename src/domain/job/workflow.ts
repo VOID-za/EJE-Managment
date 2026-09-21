@@ -1,5 +1,5 @@
 import type { Job, JobStatus } from '../types/job';
-import type { UserRole } from '../types/user';
+import type { User, UserRole } from '../types/user';
 import { getJobTypeDefinition } from './job-types';
 import { checkCollectionDetails } from './parts-document';
 
@@ -494,7 +494,51 @@ export const checkReadyForSubmission = (job: Job): TransitionCheck => {
 };
 
 /**
+ * Whether this person is on the job: the primary, or attending with them.
+ *
+ * The domain's answer to "whose job is this", so the read layer, the action bar
+ * and the acceptance rule cannot drift apart by each deciding for themselves.
+ */
+export const isAssignedTo = (
+  job: Pick<Job, 'primaryTechnicianId' | 'additionalTechnicianIds'>,
+  userId: string,
+): boolean =>
+  job.primaryTechnicianId === userId ||
+  job.additionalTechnicianIds.some((candidate) => candidate === userId);
+
+/**
  * Whether the given user may accept this job. Technician acceptance is what
  * starts the job — there is deliberately no separate Start action.
+ *
+ * WITHOUT A VIEWER this answers the workflow question only — is the job at a
+ * stage where acceptance is the next step — which is the original contract and
+ * what a list that is not about one person still asks.
+ *
+ * WITH A VIEWER it also answers whose job it is, and that is the form a screen
+ * should use. An unassigned job is the open pool and anybody doing field work
+ * may take it; an assigned job belongs to the people on it. Offering "Accept"
+ * to somebody the server will refuse is how a button becomes an error message.
  */
-export const canAcceptJob = (job: Job): boolean => job.status === 'open';
+export const canAcceptJob = (
+  job: Job,
+  viewer?: Pick<User, 'id'>,
+): boolean => {
+  if (job.status !== 'open') return false;
+  if (viewer === undefined) return true;
+
+  /*
+   * A PARTS COLLECTION IS NOT ASSIGNED FIELD WORK.
+   *
+   * It happens at the EJE counter: whoever is there hands the goods over and
+   * takes the collector's signature, which is why `acceptJobRefusal` gates it
+   * on `jobs.processParts` rather than on who it is assigned to. A collection
+   * may carry a technician's name — the person who prepared it — and the
+   * office still processes it.
+   *
+   * This exception has to be here as well as in the operation, or the screen
+   * hides a button the server would have allowed.
+   */
+  if (job.jobType === 'parts') return true;
+
+  return job.primaryTechnicianId === null || isAssignedTo(job, viewer.id);
+};

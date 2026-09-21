@@ -34,6 +34,17 @@ export const IDS = {
   site: '00000000-0000-4000-8000-000000000011',
   contact: '00000000-0000-4000-8000-000000000012',
   machine: '00000000-0000-4000-8000-000000000013',
+  /*
+   * A SECOND customer, with its own site, contact and machine.
+   *
+   * Exists so a test can send a request in which every id is real and they do
+   * NOT belong together — which is the only way to prove that the server checks
+   * the relationships rather than merely that the records exist.
+   */
+  otherCustomer: '00000000-0000-4000-8000-000000000020',
+  otherSite: '00000000-0000-4000-8000-000000000021',
+  otherContact: '00000000-0000-4000-8000-000000000022',
+  otherMachine: '00000000-0000-4000-8000-000000000023',
 } as const;
 
 /**
@@ -102,6 +113,31 @@ export const seedBaseline = async (db: Database): Promise<void> => {
     serialNumber: 'LW-V40-88213',
     machineTypeCode: machineTypeCodeFor('CNC Lathe'),
     year: 2016,
+    approval: 'approved',
+  });
+
+  await db
+    .insert(schema.customers)
+    .values({ id: IDS.otherCustomer, name: 'Kruger Engineering', accountNumber: 'KRU-001' });
+  await db
+    .insert(schema.sites)
+    .values({ id: IDS.otherSite, customerId: IDS.otherCustomer, name: 'Benoni' });
+  await db.insert(schema.contacts).values({
+    id: IDS.otherContact,
+    customerId: IDS.otherCustomer,
+    firstName: 'Anna',
+    lastName: 'Kruger',
+    email: 'anna@example-test.co.za',
+  });
+  await db.insert(schema.machines).values({
+    id: IDS.otherMachine,
+    customerId: IDS.otherCustomer,
+    siteId: IDS.otherSite,
+    manufacturer: 'Haas',
+    model: 'VF-2',
+    serialNumber: 'HA-VF2-11904',
+    machineTypeCode: machineTypeCodeFor('CNC Milling Machine'),
+    year: 2018,
     approval: 'approved',
   });
 

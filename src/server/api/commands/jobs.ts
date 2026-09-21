@@ -573,10 +573,41 @@ export const createJobSchema = z
     scheduledEndDate: isoDate.nullable(),
     orderNumber: text(120),
     referenceNumber: text(120),
-    faultDescription: text(8000),
+    /*
+     * Required here as well as in the operation.
+     *
+     * Not duplication for its own sake: a blank body is a MALFORMED request and
+     * answers 400, while the operation's refusal is a business rule and answers
+     * 422 with a violation the screen renders. Both are true, and a client that
+     * omits the field entirely should be told so in the terms of the protocol.
+     */
+    faultDescription: z.string().trim().min(1).max(8000),
     primaryTechnicianId: userId.nullable(),
+    /** Assistants. Bounded because a van holds a crew, not a department. */
+    additionalTechnicianIds: z.array(userId).max(8).default([]),
     courierCollection: z.boolean(),
     deliveryNote: text(120),
+    /*
+     * Attachment METADATA only.
+     *
+     * The bytes never travel in this request: the office's browser has the
+     * file, and what is recorded against the job is its name, type and size.
+     * See `storeAttachments` — the storage port keeps no bytes until real
+     * object storage is configured behind it, and nothing here implies it does.
+     */
+    attachments: z
+      .array(
+        z
+          .object({
+            fileName: z.string().trim().min(1).max(260),
+            contentType: text(160),
+            caption: text(500),
+            sizeBytes: z.number().int().nonnegative().max(2_000_000_000),
+          })
+          .strict(),
+      )
+      .max(20)
+      .default([]),
   })
   .strict();
 
@@ -597,6 +628,7 @@ export const runCreateJob = async (
     machineId: input.machineId === null ? null : asMachineId(input.machineId),
     primaryTechnicianId:
       input.primaryTechnicianId === null ? null : asUserId(input.primaryTechnicianId),
+    additionalTechnicianIds: input.additionalTechnicianIds.map(asUserId),
   });
   return respond(created, context.actor);
 };

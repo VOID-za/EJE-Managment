@@ -166,8 +166,11 @@ export const JobOverviewPanel = ({
               </div>
               {contact !== null && (
                 <div>
+                  {/* Named for what it decides. This contact is not merely "the
+                      person at the site": they are who the signed job card is
+                      emailed to, chosen when the job was raised. */}
                   <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
-                    Contact
+                    Contact · receives the job card
                   </p>
                   <p className="mt-0.5 text-steel-700">
                     <span className="font-medium text-steel-900">{contactFullName(contact)}</span>
@@ -182,6 +185,41 @@ export const JobOverviewPanel = ({
               )}
             </div>
           </Card>
+
+          {job.attachments.length > 0 && (
+            <Card>
+              <CardHeader
+                title="Attachments"
+                description="Documents the office attached when the job was raised."
+              />
+              <ul className="mt-4 space-y-2">
+                {job.attachments.map((file) => (
+                  <li
+                    key={file.id}
+                    className="flex items-start gap-2.5 rounded-[var(--radius-control)] border border-steel-200 px-3 py-2.5 text-sm"
+                  >
+                    <Icon name="document" className="mt-0.5 size-4 shrink-0 text-steel-400" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-steel-900">
+                        {file.fileName}
+                      </span>
+                      {file.caption.length > 0 && (
+                        <span className="block text-xs text-steel-500">{file.caption}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {/* No download button, because there is nothing to download:
+                  the storage port keeps no bytes until object storage is
+                  configured. A button that always failed would be worse than
+                  this sentence. */}
+              <p className="mt-3 text-xs text-steel-500">
+                Recorded against the job. The files themselves are not retrievable until EJE’s
+                document storage is configured.
+              </p>
+            </Card>
+          )}
 
           {machine !== null && (
             <Card>

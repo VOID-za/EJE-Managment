@@ -19,6 +19,7 @@
     "db:seed": "tsx src/db/seed/run.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "smoke": "node scripts/smoke.mjs",
+    "workflow-check": "node scripts/job-workflow-check.mjs",
     "dev-check": "node scripts/dev-console-check.mjs",
     "check-routes": "node scripts/check-routes.mjs",
     "redeploy": "npm run clean && npm run build && npm run start",

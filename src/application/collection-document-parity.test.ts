@@ -80,6 +80,8 @@ const partsJob = async (
     faultDescription: 'Spares for the Leadwell turret.',
     primaryTechnicianId: technician.id,
     courierCollection: over.courier,
+    additionalTechnicianIds: [],
+    attachments: [],
   });
 
   const tech = harness.as(technician);

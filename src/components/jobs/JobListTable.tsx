@@ -18,6 +18,7 @@ import {
   jobScheduleWindow,
   refusalAwaitingResolution,
 } from '@/domain';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, isOverdue } from '@/lib/format';
 import { JobTypeChip } from './JobTypeChip';
 import { cn } from '@/lib/cn';
@@ -54,6 +55,7 @@ export const JobListTable = ({
   showRefusal = false,
 }: JobListTableProps) => {
   const router = useRouter();
+  const currentUser = useCurrentUser();
 
   const columns: Column<JobListRow>[] = [
     {
@@ -188,7 +190,9 @@ export const JobListTable = ({
             align: 'right' as const,
             width: '120px',
             render: (row: JobListRow) =>
-              canAcceptJob(row.job) ? (
+              // The viewer, so the list offers Accept exactly where the server
+              // allows it: the open pool, and this technician's own work.
+              canAcceptJob(row.job, currentUser) ? (
                 <Button
                   size="sm"
                   onClick={(event) => {

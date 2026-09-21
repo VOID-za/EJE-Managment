@@ -18,6 +18,11 @@ import {
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { UuidGenerator } from '@/services/production/ids';
+import {
+  CloudApiWhatsAppService,
+  readWhatsAppConfiguration,
+  UnconfiguredWhatsAppService,
+} from '@/services/production/whatsapp';
 import { DemoAuthStore } from './auth/demo-store';
 import { PostgresAuthStore } from './auth/postgres-store';
 import type { AuthStore } from './auth/store';
@@ -82,6 +87,37 @@ interface BuiltServices {
   readonly outbox: SimulatedOutbox;
 }
 
+/**
+ * Which WhatsApp this deployment actually has.
+ *
+ * THREE ANSWERS, and the third is the one that matters:
+ *
+ *  1. CONFIGURED — `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_ACCESS_TOKEN` are
+ *     set, so messages go to Meta's Cloud API for real.
+ *  2. THE DEMONSTRATION — no configuration and no database, so the simulated
+ *     adapter records what would have been sent into the visible outbox. That
+ *     is a demonstration telling the truth about itself.
+ *  3. A REAL DEPLOYMENT WITH NO CONFIGURATION — PostgreSQL, no credentials.
+ *     This REFUSES. It does not quietly fall back to the simulated adapter,
+ *     because a business running on real data would then be shown an outbox
+ *     full of messages nobody ever received.
+ *
+ * The refusal is not fatal to the work: the assignment notification catches it
+ * and records on the audit trail that the message did not go, and why.
+ */
+const buildWhatsApp = (
+  backend: PersistenceBackend,
+  outbox: SimulatedOutbox,
+  clock: SystemClock,
+  ids: UuidGenerator | SequentialIdGenerator,
+) => {
+  const configured = readWhatsAppConfiguration();
+  if (configured !== null) return new CloudApiWhatsAppService(configured, clock, ids);
+  return backend === 'demo'
+    ? new SimulatedWhatsAppService(outbox, clock, ids)
+    : new UnconfiguredWhatsAppService();
+};
+
 const buildServices = (backend: PersistenceBackend, store: DemoStore | null): BuiltServices => {
   const clock = new SystemClock();
   /*
@@ -116,15 +152,15 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
     clock,
     ids,
     /*
-     * STILL SIMULATED, deliberately and visibly.
-     *
-     * Microsoft Graph, WhatsApp Business and object storage are each their own
-     * phase. What matters here is that they are behind `src/services/ports.ts`
-     * and are now constructed on the SERVER, so the adapter swap is a change in
-     * this function and nowhere else.
+     * Microsoft Graph and object storage are still simulated, deliberately and
+     * visibly; WhatsApp is now real WHERE IT IS CONFIGURED — see
+     * `buildWhatsApp`. Every one of them sits behind `src/services/ports.ts`
+     * and is constructed here, so swapping an adapter is a change in this
+     * function and nowhere else. That is what made the WhatsApp swap a
+     * three-line change rather than a rewrite.
      */
     email: new SimulatedEmailService(outbox, clock, ids),
-    whatsapp: new SimulatedWhatsAppService(outbox, clock, ids),
+    whatsapp: buildWhatsApp(backend, outbox, clock, ids),
     pdf: new SimulatedPdfService(clock),
     storage: new SimulatedStorageService(files),
   };

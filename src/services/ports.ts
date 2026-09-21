@@ -33,8 +33,20 @@ export interface OutboxEntry {
   readonly body: string;
   readonly attachments: readonly string[];
   readonly createdAt: IsoDateTime;
-  /** Always true in the demo. A real adapter records a provider message id. */
-  readonly simulated: true;
+  /**
+   * Whether this entry records a message that was never transmitted.
+   *
+   * `true` for the demonstration adapters, which write to the visible outbox
+   * and contact nothing. `false` for a production adapter, whose `id` is the
+   * provider's own message id — which is what makes the entry reconcilable
+   * against a delivery report later.
+   *
+   * Widened from the literal `true` when the first real adapter arrived. Every
+   * reader of this field already treats it as a boolean, and the simulated
+   * adapters still set it to true, so nothing that displayed "simulated"
+   * changed its mind about a demonstration entry.
+   */
+  readonly simulated: boolean;
   /**
    * What the provider says became of it.
    *
