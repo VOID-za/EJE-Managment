@@ -175,6 +175,32 @@ describe('POST /api/auth/login', () => {
     expect(limited).toBeGreaterThan(0);
   });
 
+  it('does not count a sign-in that succeeds', async () => {
+    /*
+     * The flood this limit exists to stop is made of WRONG passwords. Counting
+     * the right ones refuses an office that switches between accounts during a
+     * review, which is the system working against the people it is for.
+     */
+    const client = new ApiTestClient();
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const response = await client.signIn(DEMO_USERS.master, DEMO_PASSWORD);
+      expect(response.status, `attempt ${attempt + 1}`).toBe(200);
+      await client.post('/api/auth/logout');
+    }
+  });
+
+  it('still refuses a flood of wrong passwords, and lets a genuine one through after', async () => {
+    const attacker = new ApiTestClient();
+    let refused = 0;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if ((await attacker.signIn(DEMO_USERS.coordinator, 'wrong')).status === 429) refused += 1;
+    }
+    expect(refused).toBeGreaterThan(0);
+
+    // Somebody else's correct password is unaffected.
+    expect((await new ApiTestClient().signIn(DEMO_USERS.master, DEMO_PASSWORD)).status).toBe(200);
+  });
+
   it('does not let one address rate limit a different one', async () => {
     const attacker = new ApiTestClient();
     for (let attempt = 0; attempt < 30; attempt += 1) {

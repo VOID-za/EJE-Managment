@@ -1,49 +1,17 @@
 import 'server-only';
-import { hash, verify } from '@node-rs/argon2';
+import { hashPassword, verifyPassword } from './hashing';
 
 /**
- * Password hashing.
+ * Password hashing, for the server.
  *
- * Argon2id, with OWASP's second recommended configuration: 19 MiB of memory,
- * two iterations, one lane. Memory-hard by design, which is the property that
- * makes a stolen hash expensive to attack on a GPU — and the reason bcrypt is
- * not used here.
- *
- * NOTHING ELSE IN THE APPLICATION HASHES A PASSWORD. The encoded hash carries
- * its own parameters, so raising them later re-hashes on next sign-in rather
- * than invalidating everybody's credentials.
+ * The implementation is in `hashing.ts` and is re-exported here; this module
+ * adds the `server-only` marker, so a client component that reaches for a
+ * password hash fails the build. The development seed imports `hashing.ts`
+ * directly — a command line is not a client — and therefore produces hashes
+ * this verifier accepts, with the same parameters, rather than a second
+ * implementation that could drift.
  */
-/**
- * `Algorithm.Argon2id` is an ambient const enum, which `verbatimModuleSyntax`
- * refuses to read at runtime. The value is part of the library's published
- * contract and is asserted by this module's own test.
- */
-const ARGON2ID = 2;
-
-const PARAMETERS = {
-  algorithm: ARGON2ID,
-  memoryCost: 19_456,
-  timeCost: 2,
-  parallelism: 1,
-} as const;
-
-export const hashPassword = (password: string): Promise<string> => hash(password, PARAMETERS);
-
-/**
- * Whether the password matches. Never throws for a malformed stored hash.
- *
- * A hash the library cannot parse is a corrupt record, not a correct password:
- * returning false is the only safe reading, and the alternative — an exception
- * escaping into the login route — would turn a bad row into a 500 that tells an
- * attacker the account exists.
- */
-export const verifyPassword = async (encoded: string, password: string): Promise<boolean> => {
-  try {
-    return await verify(encoded, password);
-  } catch {
-    return false;
-  }
-};
+export { hashPassword, verifyPassword, PARAMETERS } from './hashing';
 
 /**
  * A real hash of a value nobody knows, verified against when the account does

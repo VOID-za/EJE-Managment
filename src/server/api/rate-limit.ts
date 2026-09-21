@@ -61,11 +61,51 @@ export const consume = (
   return { allowed: true, retryAfterSeconds: 0 };
 };
 
-export const enforce = (key: string, limit: number, windowMs: number): void => {
-  const decision = consume(key, limit, windowMs);
-  if (!decision.allowed) {
-    throw rateLimited('Too many attempts. Wait a moment and try again.', decision.retryAfterSeconds);
+/**
+ * Whether this key is already over budget, WITHOUT spending any of it.
+ *
+ * For a caller that only wants to charge for the attempts worth counting —
+ * see `record`. Splitting the question from the charge is what lets the login
+ * route refuse a flood without counting the people who got their password
+ * right.
+ */
+export const check = (
+  key: string,
+  limit: number,
+  now: number = Date.now(),
+): RateLimitDecision => {
+  const existing = windows.get(key);
+  if (existing === undefined || existing.resetAt <= now) {
+    return { allowed: true, retryAfterSeconds: 0 };
   }
+  return existing.count >= limit
+    ? { allowed: false, retryAfterSeconds: (existing.resetAt - now) / 1000 }
+    : { allowed: true, retryAfterSeconds: 0 };
+};
+
+/** Charges one attempt against the key. */
+export const record = (key: string, windowMs: number, now: number = Date.now()): void => {
+  sweep(now);
+  const existing = windows.get(key);
+  if (existing === undefined || existing.resetAt <= now) {
+    windows.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  existing.count += 1;
+};
+
+const refuse = (decision: RateLimitDecision): void => {
+  if (decision.allowed) return;
+  throw rateLimited('Too many attempts. Wait a moment and try again.', decision.retryAfterSeconds);
+};
+
+export const enforce = (key: string, limit: number, windowMs: number): void => {
+  refuse(consume(key, limit, windowMs));
+};
+
+/** Refuses when the key is over budget, and spends nothing when it is not. */
+export const enforceWithoutCharging = (key: string, limit: number): void => {
+  refuse(check(key, limit));
 };
 
 /** For tests, which must not inherit another test's counters. */

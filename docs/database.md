@@ -32,6 +32,7 @@ it does not quietly serve fabricated data.
 | **Schema tests** | `src/db/schema.test.ts` — no database needed, part of `npm test` |
 | **Integration tests** | `src/data/postgres/*.db.test.ts` and `src/server/api/http-api.db.test.ts` — `npm run db:test` |
 | **Authentication store** | `src/server/auth/postgres-store.ts` — the only module that reads `users.password_hash` |
+| **Development seed** | `src/db/seed/` — `npm run db:seed`, see [development-seed.md](./development-seed.md) |
 
 The migrations:
 
@@ -63,6 +64,8 @@ nothing in `.env.example` is a real credential.
 | `DATABASE_URL` | `db:migrate`, `db:studio`, the repositories | |
 | `TEST_DATABASE_URL` | `db:test` | **The tests drop and rebuild the public schema.** The helper refuses any URL whose database name does not contain `test`. |
 | `DRIZZLE_DEBUG` | optional | `true` logs every statement |
+| `EJE_SEED_ALLOW` | `db:seed`, rarely | `i-understand` lets the development seed run against a host it would otherwise refuse. It can never override `NODE_ENV=production`. |
+| `EJE_DEMO_PASSWORD` | optional | The password `db:seed` gives the demonstration accounts |
 
 ---
 

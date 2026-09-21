@@ -44,7 +44,7 @@ it.
 | **Unknown address** | Charged a full verification against a hash of a value nobody knows, so the timing cannot be used to ask which addresses are real |
 | **Every failure** | One status, one sentence: *"That email address and password do not match."* Wrong password, unknown address, disabled account and locked account are indistinguishable |
 | **Lockout** | Five consecutive failures, fifteen minutes, counted per ACCOUNT and persisted. The lock is never disclosed to the client; the office sees it on the user record |
-| **Rate limit** | Twenty attempts per five minutes, counted against the client's address where a proxy header gives one — and against the email address where it does not, so one person mistyping cannot lock the whole business out of signing in |
+| **Rate limit** | Twenty FAILED attempts per five minutes, counted against the client's address where a proxy header gives one — and against the email address where it does not, so one person mistyping cannot lock the whole business out of signing in. A sign-in that succeeds costs nothing: the flood this exists to stop is made of wrong passwords, and charging the right ones refuses an office switching between accounts |
 
 `POST /api/auth/logout` is safe to call when already signed out — a client whose
 session has just expired still holds a stale cookie, and answering with 401

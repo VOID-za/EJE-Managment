@@ -5,7 +5,7 @@ import { toSafeUser } from '@/server/api/actor';
 import { assertSameOrigin } from '@/server/api/csrf';
 import { ApiError, errorResponse, logUnexpected, toApiError } from '@/server/api/errors';
 import { parseWith } from '@/server/api/handler';
-import { clientAddress, enforce } from '@/server/api/rate-limit';
+import { clientAddress, enforceWithoutCharging, record } from '@/server/api/rate-limit';
 import { recordSecurityEvent } from '@/server/api/security-audit';
 import { setSessionCookie } from '@/server/auth/cookies';
 import {
@@ -35,6 +35,13 @@ import { getServerRuntime } from '@/server/runtime';
  *    protects the ACCOUNT. It survives a restart and a second server.
  *  - THE PER-ADDRESS RATE LIMIT protects the SERVER from being made to perform
  *    thousands of deliberately expensive hashes. It is in memory and says so.
+ *
+ * ONLY FAILURES ARE COUNTED. The flood this limit exists to stop is made of
+ * wrong passwords; somebody who gets theirs right is not attacking anything.
+ * Counting successes as well cost nothing an attacker cares about and punished
+ * the people the system is for — an office switching between accounts during a
+ * review, or a technician signing in and out across a shift, would be refused
+ * for minutes at a time.
  */
 const LOGIN_ATTEMPTS_PER_WINDOW = 20;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
@@ -75,7 +82,12 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const input = parseWith(schema, await request.json().catch(() => ({})));
 
     const address = clientAddress(request.headers);
-    enforce(limitKey(address, input.email), LOGIN_ATTEMPTS_PER_WINDOW, LOGIN_WINDOW_MS);
+    const budget = limitKey(address, input.email);
+    // Refuses a flood; spends nothing on an attempt that turns out to be genuine.
+    enforceWithoutCharging(budget, LOGIN_ATTEMPTS_PER_WINDOW);
+
+    /** Charged for every refusal below, and for nothing else. */
+    const chargeFailure = (): void => record(budget, LOGIN_WINDOW_MS);
 
     const runtime = getServerRuntime();
     const now = new Date();
@@ -84,6 +96,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
 
     if (credentials === null) {
       await verifyAgainstDummy(input.password);
+      chargeFailure();
       await runtime.write(({ repos }) =>
         recordSecurityEvent(repos, {
           type: 'user_sign_in_failed',
@@ -105,6 +118,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
      */
     if (isLockedOut(credentials, now)) {
       await verifyAgainstDummy(input.password);
+      chargeFailure();
       throw REFUSED;
     }
 
@@ -113,6 +127,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
       (await verifyPassword(credentials.passwordHash, input.password));
 
     if (!matches || !credentials.active) {
+      chargeFailure();
       const lockUntil = credentials.active ? lockoutAfterFailure(credentials, now) : null;
       await runtime.auth.recordFailedLogin(credentials.userId, lockUntil);
 
@@ -132,7 +147,10 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     }
 
     const user = await runtime.read(({ repos }) => repos.users.findById(credentials.userId));
-    if (user === null || !user.active) throw REFUSED;
+    if (user === null || !user.active) {
+      chargeFailure();
+      throw REFUSED;
+    }
 
     await runtime.auth.recordSuccessfulLogin(credentials.userId, now.toISOString());
 

@@ -16,6 +16,7 @@
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
     "db:test": "vitest run --config vitest.db.config.mts",
+    "db:seed": "tsx src/db/seed/run.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "smoke": "node scripts/smoke.mjs",
     "dev-check": "node scripts/dev-console-check.mjs",
@@ -46,6 +47,7 @@
     "eslint-config-next": "16.3.5",
     "playwright": "^1.63.0",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "vitest": "^4.1.11"
   },
