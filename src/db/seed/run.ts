@@ -1,5 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
-import { createDatabase, type Database } from '@/db/client';
+import { eq, sql } from 'drizzle-orm';
+import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
+import { createDatabase, type Database, type DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { syncReferenceData } from '@/db/reference-data';
 import { createPostgresRepositories } from '@/data/postgres';
@@ -67,6 +68,52 @@ const count = (kind: string, created: boolean): void => {
   else entry.existing += 1;
 };
 
+/** A duration a person can read at a glance. */
+const took = (ms: number): string => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+
+/**
+ * One phase of the seed, announced BEFORE it runs.
+ *
+ * WHY IT IS WRITTEN IN TWO HALVES. The label goes out first and the timing
+ * completes the line afterwards, so a run that is still working shows the phase
+ * it is inside rather than nothing at all. The seed makes hundreds of
+ * round-trips; against a database on the other end of an SSH tunnel each one
+ * costs the better part of half a second, and a command that prints nothing for
+ * minutes is indistinguishable from a command that has hung. It was not hung.
+ */
+const phase = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+  process.stdout.write(`  ${name.padEnd(26)}`);
+  const at = Date.now();
+  try {
+    const result = await run();
+    process.stdout.write(`done in ${took(Date.now() - at)}\n`);
+    return result;
+  } catch (cause) {
+    process.stdout.write(`FAILED after ${took(Date.now() - at)}\n`);
+    throw cause;
+  }
+};
+
+/**
+ * The ids a table already holds, in ONE round-trip.
+ *
+ * The seed asks "have I written this already?" for every record it knows about.
+ * Asking the database that question once per record is a round-trip per record
+ * — nine hundred of them for a full seed, which is nothing locally and six
+ * minutes over a tunnel. The question is the same either way: is this id
+ * present. So it is asked once per collection and answered from a set.
+ *
+ * The rule is unchanged, and so is the safety: a record whose id is already
+ * there is left exactly as it is.
+ */
+const idsIn = async (
+  tx: DatabaseExecutor,
+  table: PgTable & { readonly id: AnyPgColumn },
+): Promise<ReadonlySet<string>> => {
+  const rows = await tx.select({ id: table.id }).from(table);
+  return new Set(rows.map((row) => String(row.id)));
+};
+
 /** True when the migrations have been applied. */
 const schemaIsReady = async (db: Database): Promise<boolean> => {
   const rows = await db.execute<{ ready: boolean }>(
@@ -76,165 +123,204 @@ const schemaIsReady = async (db: Database): Promise<boolean> => {
 };
 
 const seed = async (db: Database, options: { readonly resetPasswords: boolean }): Promise<void> => {
-  await syncReferenceData(db);
+  await phase('reference data', () => syncReferenceData(db));
 
   await withTransaction(db, async (tx) => {
     const repos = createPostgresRepositories(tx);
 
-    /*
-     * The rates everything is priced from.
-     *
-     * Read from the TABLE rather than through the repository, which refuses a
-     * database with no settings row — correctly, because rates are business
-     * data nothing should invent. Writing them is exactly what this seed is
-     * for, and only when they are absent: a developer who changes a rate on
-     * screen keeps their change.
-     */
-    const [settingsRow] = await tx
-      .select({ id: schema.systemSettings.id })
-      .from(schema.systemSettings)
-      .limit(1);
-    if (settingsRow === undefined) {
-      await repos.settings.save(seedSettings);
-    }
-
-    /* ---- people, with real Argon2id hashes ---- */
-    for (const { user, password } of seedPeople) {
-      const existing = await repos.users.findById(user.id);
-      if (existing === null) {
-        await repos.users.save(user);
-        count('users', true);
-      } else {
-        count('users', false);
-      }
-
-      const [row] = await tx
-        .select({ hash: schema.users.passwordHash })
-        .from(schema.users)
-        .where(eq(schema.users.id, user.id));
-
-      if (row?.hash == null || options.resetPasswords) {
-        await tx
-          .update(schema.users)
-          .set({
-            passwordHash: await hashPassword(password),
-            passwordSetAt: new Date().toISOString(),
-            failedLoginCount: 0,
-            lockedUntil: null,
-          })
-          .where(eq(schema.users.id, user.id));
-      }
-    }
-
-    /* ---- the register ---- */
-    for (const customer of seedCustomers) {
-      const existing = await repos.customers.findById(customer.id);
-      if (existing === null) await repos.customers.save(customer);
-      count('customers', existing === null);
-    }
-    for (const site of seedSites) {
-      const existing = await repos.customers.findSiteById(site.id);
-      if (existing === null) await repos.customers.saveSite(site);
-      count('sites', existing === null);
-    }
-    for (const contact of seedContacts) {
-      const existing = await repos.customers.findContactById(contact.id);
-      if (existing === null) await repos.customers.saveContact(contact);
-      count('contacts', existing === null);
-    }
-    for (const machine of seedMachines) {
-      const existing = await repos.machines.findById(machine.id);
-      if (existing === null) await repos.machines.save(machine);
-      count('machines', existing === null);
-    }
-
-    /* ---- checklists and the library ---- */
-    for (const template of seedChecklistTemplates) {
-      const existing = await repos.checklistTemplates.findByVersion(template.id, template.version);
-      if (existing === null) await repos.checklistTemplates.save(template);
-      count('checklist templates', existing === null);
-    }
-    for (const document of seedDocuments) {
-      const existing = await repos.documents.findById(document.id);
-      if (existing === null) await repos.documents.save(document);
-      count('library documents', existing === null);
-    }
-
-    /* ---- the jobs ---- */
-    for (const job of seedJobs) {
-      const existing = await repos.jobs.findById(job.id);
-      if (existing === null) await repos.jobs.save(job);
-      count('jobs', existing === null);
-    }
-    for (const transfer of seedTransfers) {
-      await repos.jobs.recordTransfer?.(transfer);
-    }
-
-    /*
-     * The participation a live transfer would have opened and closed.
-     *
-     * Written straight to the table because there is no operation for "this
-     * happened before the system existed" — which is what a seed is. It is an
-     * INSERT of a closed row; nothing is updated and nothing is removed, and
-     * the repository's own maintenance only ever touches OPEN rows, so this
-     * cannot collide with it.
-     */
-    for (const entry of seedParticipation) {
-      const [existing] = await tx
-        .select({ id: schema.jobParticipants.id })
-        .from(schema.jobParticipants)
-        .where(
-          and(
-            eq(schema.jobParticipants.jobId, entry.jobId as string),
-            eq(schema.jobParticipants.userId, entry.userId as string),
-            eq(schema.jobParticipants.role, entry.role),
-          ),
-        )
+    await phase('settings and people', async () => {
+      /*
+       * The rates everything is priced from.
+       *
+       * Read from the TABLE rather than through the repository, which refuses a
+       * database with no settings row — correctly, because rates are business
+       * data nothing should invent. Writing them is exactly what this seed is
+       * for, and only when they are absent: a developer who changes a rate on
+       * screen keeps their change.
+       */
+      const [settingsRow] = await tx
+        .select({ id: schema.systemSettings.id })
+        .from(schema.systemSettings)
         .limit(1);
-      if (existing !== undefined) continue;
+      if (settingsRow === undefined) {
+        await repos.settings.save(seedSettings);
+      }
 
-      await tx.insert(schema.jobParticipants).values({
-        id: crypto.randomUUID(),
-        jobId: entry.jobId as string,
-        userId: entry.userId as string,
-        role: entry.role,
-        since: entry.since,
-        until: entry.until,
-        endedReason: entry.endedReason,
-      });
-    }
+      /* ---- people, with real Argon2id hashes ---- */
+      // Both questions this loop asks — is the account there, does it have a
+      // hash — answered for everybody in one query.
+      const accounts = new Map(
+        (await tx.select({ id: schema.users.id, hash: schema.users.passwordHash }).from(schema.users))
+          .map((row) => [String(row.id), row.hash]),
+      );
 
-    /* ---- the trail ---- */
-    const trail = await repos.activity.list();
-    const seen = new Set(trail.map((entry) => entry.id as string));
-    for (const entry of seedActivity) {
-      const exists = seen.has(entry.id as string);
-      if (!exists) await repos.activity.append(entry);
-      count('audit events', !exists);
-    }
+      for (const { user, password } of seedPeople) {
+        const known = accounts.has(user.id);
+        if (!known) await repos.users.save(user);
+        count('users', !known);
 
-    /* ---- calendar, chat and the bell ---- */
-    for (const record of seedAvailability) {
-      const existing = await repos.availability.findById(record.id);
-      if (existing === null) await repos.availability.save(record);
-      count('availability', existing === null);
-    }
-    for (const conversation of seedConversations) {
-      const existing = await repos.chat.findConversation(conversation.id);
-      if (existing === null) await repos.chat.saveConversation(conversation);
-      count('conversations', existing === null);
-    }
-    for (const message of seedMessages) {
-      const existing = await repos.chat.findMessage(message.id);
-      if (existing === null) await repos.chat.saveMessage(message);
-      count('messages', existing === null);
-    }
-    for (const notification of seedNotifications) {
-      const mine = await repos.notifications.list(notification.recipientId);
-      const exists = mine.some((entry) => entry.id === notification.id);
-      if (!exists) await repos.notifications.create(notification);
-      count('notifications', !exists);
-    }
+        const hash = accounts.get(user.id) ?? null;
+
+        if (hash == null || options.resetPasswords) {
+          await tx
+            .update(schema.users)
+            .set({
+              passwordHash: await hashPassword(password),
+              passwordSetAt: new Date().toISOString(),
+              failedLoginCount: 0,
+              lockedUntil: null,
+            })
+            .where(eq(schema.users.id, user.id));
+        }
+      }
+
+    
+    });
+
+    await phase('customer register', async () => {
+      /* ---- the register ---- */
+      const knownCustomers = await idsIn(tx, schema.customers);
+      for (const customer of seedCustomers) {
+        const fresh = !knownCustomers.has(customer.id);
+        if (fresh) await repos.customers.save(customer);
+        count('customers', fresh);
+      }
+      const knownSites = await idsIn(tx, schema.sites);
+      for (const site of seedSites) {
+        const fresh = !knownSites.has(site.id);
+        if (fresh) await repos.customers.saveSite(site);
+        count('sites', fresh);
+      }
+      const knownContacts = await idsIn(tx, schema.contacts);
+      for (const contact of seedContacts) {
+        const fresh = !knownContacts.has(contact.id);
+        if (fresh) await repos.customers.saveContact(contact);
+        count('contacts', fresh);
+      }
+      const knownMachines = await idsIn(tx, schema.machines);
+      for (const machine of seedMachines) {
+        const fresh = !knownMachines.has(machine.id);
+        if (fresh) await repos.machines.save(machine);
+        count('machines', fresh);
+      }
+
+    
+    });
+
+    await phase('checklists and library', async () => {
+      /* ---- checklists and the library ---- */
+      for (const template of seedChecklistTemplates) {
+        const existing = await repos.checklistTemplates.findByVersion(template.id, template.version);
+        if (existing === null) await repos.checklistTemplates.save(template);
+        count('checklist templates', existing === null);
+      }
+      const knownDocuments = await idsIn(tx, schema.libraryDocuments);
+      for (const document of seedDocuments) {
+        const fresh = !knownDocuments.has(document.id);
+        if (fresh) await repos.documents.save(document);
+        count('library documents', fresh);
+      }
+
+    
+    });
+
+    await phase('jobs', async () => {
+      /* ---- the jobs ---- */
+      // `jobs.findById` assembles a whole job — technicians, parts, labour,
+      // signatures. Asking it thirty times only to discard the answer was the
+      // single most expensive thing the seed did.
+      const knownJobs = await idsIn(tx, schema.jobs);
+      for (const job of seedJobs) {
+        const fresh = !knownJobs.has(job.id);
+        if (fresh) await repos.jobs.save(job);
+        count('jobs', fresh);
+      }
+      for (const transfer of seedTransfers) {
+        await repos.jobs.recordTransfer?.(transfer);
+      }
+
+      /*
+       * The participation a live transfer would have opened and closed.
+       *
+       * Written straight to the table because there is no operation for "this
+       * happened before the system existed" — which is what a seed is. It is an
+       * INSERT of a closed row; nothing is updated and nothing is removed, and
+       * the repository's own maintenance only ever touches OPEN rows, so this
+       * cannot collide with it.
+       */
+      const knownParticipation = new Set(
+        (
+          await tx
+            .select({
+              jobId: schema.jobParticipants.jobId,
+              userId: schema.jobParticipants.userId,
+              role: schema.jobParticipants.role,
+            })
+            .from(schema.jobParticipants)
+        ).map((row) => `${String(row.jobId)}|${String(row.userId)}|${row.role}`),
+      );
+
+      for (const entry of seedParticipation) {
+        const key = `${entry.jobId as string}|${entry.userId as string}|${entry.role}`;
+        if (knownParticipation.has(key)) continue;
+
+        await tx.insert(schema.jobParticipants).values({
+          id: crypto.randomUUID(),
+          jobId: entry.jobId as string,
+          userId: entry.userId as string,
+          role: entry.role,
+          since: entry.since,
+          until: entry.until,
+          endedReason: entry.endedReason,
+        });
+      }
+
+    
+    });
+
+    await phase('audit trail', async () => {
+      /* ---- the trail ---- */
+      const trail = await repos.activity.list();
+      const seen = new Set(trail.map((entry) => entry.id as string));
+      for (const entry of seedActivity) {
+        const exists = seen.has(entry.id as string);
+        if (!exists) await repos.activity.append(entry);
+        count('audit events', !exists);
+      }
+
+    
+    });
+
+    await phase('calendar, chat, bell', async () => {
+      /* ---- calendar, chat and the bell ---- */
+      const knownAvailability = await idsIn(tx, schema.availability);
+      for (const record of seedAvailability) {
+        const fresh = !knownAvailability.has(record.id);
+        if (fresh) await repos.availability.save(record);
+        count('availability', fresh);
+      }
+      const knownConversations = await idsIn(tx, schema.chatConversations);
+      for (const conversation of seedConversations) {
+        const fresh = !knownConversations.has(conversation.id);
+        if (fresh) await repos.chat.saveConversation(conversation);
+        count('conversations', fresh);
+      }
+      const knownMessages = await idsIn(tx, schema.chatMessages);
+      for (const message of seedMessages) {
+        const fresh = !knownMessages.has(message.id);
+        if (fresh) await repos.chat.saveMessage(message);
+        count('messages', fresh);
+      }
+      // Was one `notifications.list(recipient)` PER notification, which read the
+      // same person's bell over and over.
+      const knownNotifications = await idsIn(tx, schema.notifications);
+      for (const notification of seedNotifications) {
+        const fresh = !knownNotifications.has(notification.id);
+        if (fresh) await repos.notifications.create(notification);
+        count('notifications', fresh);
+      }
+    });
+
   });
 
   /*
@@ -244,7 +330,9 @@ const seed = async (db: Database, options: { readonly resetPasswords: boolean })
    * the migration provides for exactly this — so running the seed against a
    * database that already has higher numbers cannot hand out a duplicate.
    */
-  await db.execute(sql`select advance_job_number_sequence(${HIGHEST_JOB_SEQUENCE + 1})`);
+  await phase('job-number sequence', () =>
+    db.execute(sql`select advance_job_number_sequence(${HIGHEST_JOB_SEQUENCE + 1})`),
+  );
 };
 
 const main = async (): Promise<void> => {
@@ -260,16 +348,19 @@ const main = async (): Promise<void> => {
   console.log('This writes fictional demonstration data. It never deletes anything.\n');
 
   const db = createDatabase({ connectionString: target.url, maxConnections: 2 });
+  const startedAt = Date.now();
   try {
-    if (!(await schemaIsReady(db))) {
-      throw new SeedRefused(
-        'That database has no EJE schema yet. Run `npm run db:migrate` against it first.',
-      );
-    }
+    await phase('checking the schema', async () => {
+      if (!(await schemaIsReady(db))) {
+        throw new SeedRefused(
+          'That database has no EJE schema yet. Run `npm run db:migrate` against it first.',
+        );
+      }
+    });
 
     await seed(db, { resetPasswords });
 
-    console.log('Seeded:');
+    console.log(`\nSeeded in ${took(Date.now() - startedAt)}:`);
     for (const [kind, counts] of Object.entries(report)) {
       const existing = counts.existing > 0 ? `, ${counts.existing} already present` : '';
       console.log(`  ${String(counts.created).padStart(3)} ${kind}${existing}`);
@@ -284,7 +375,16 @@ const main = async (): Promise<void> => {
         'Never create them on a production deployment.',
     );
   } finally {
+    /*
+     * The pool is closed on the way out, whether the seed finished or failed.
+     *
+     * Without it the process keeps a socket open and a person watching a
+     * terminal cannot tell "still working" from "finished and not exiting" —
+     * which is the same confusion the phase lines above exist to end.
+     */
+    process.stdout.write('  closing the connection    ');
     await db.$client.end({ timeout: 5 });
+    process.stdout.write('done\n');
   }
 };
 
