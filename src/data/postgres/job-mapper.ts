@@ -139,7 +139,7 @@ const signatureFrom = (row: SignatureRow): CustomerSignature => ({
  * audit trail, so `canSeeSignatureRefusal` and `redactRefusalsForViewer` govern
  * exactly one copy of it.
  */
-const refusalFrom = (row: RefusalRow): SignatureRefusal => ({
+export const refusalFrom = (row: RefusalRow): SignatureRefusal => ({
   refused: true,
   reason: row.reason,
   recordedBy: asUserId(row.recordedBy),
@@ -163,7 +163,7 @@ const snapshotFrom = (row: SnapshotRow): PricingSnapshot => ({
   reason: row.reason,
 });
 
-const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
+export const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
   fileName: row.fileName,
   storageKey: row.storageKey,
   pageCount: row.pageCount,

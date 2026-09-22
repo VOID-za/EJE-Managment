@@ -1,29 +1,30 @@
 import type {
   ActivityEvent,
   AppNotification,
+  AvailabilityRecord,
+  ChatMessage,
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
   ContactId,
+  Conversation,
   Customer,
   CustomerId,
   DocumentId,
+  IsoDateTime,
   Job,
   JobId,
-  AvailabilityRecord,
+  JobSummary,
   Machine,
   MachineId,
   NotificationId,
+  OutboxMessage,
   Site,
   SiteId,
   SystemSettings,
   TechnicalDocument,
-  ChatMessage,
-  Conversation,
   User,
   UserId,
-  OutboxMessage,
-  IsoDateTime,
 } from '@/domain';
 import { isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
 import type {
@@ -86,6 +87,42 @@ class DemoJobRepository implements JobRepository {
     }
 
     return Promise.resolve(jobs);
+  }
+
+  /**
+   * The same jobs, narrowed to what a list row needs.
+   *
+   * This store already holds whole jobs in memory, so nothing is saved by not
+   * reading them — but the narrowing is still done explicitly. A `Job`
+   * structurally satisfies `JobSummary`, and returning one unchanged would hand
+   * a list screen the parts and the pricing snapshot that the PostgreSQL path
+   * deliberately never selects.
+   */
+  async listSummaries(filter?: JobFilter): Promise<readonly JobSummary[]> {
+    const jobs = await this.list(filter);
+    return jobs.map((job) => ({
+      id: job.id,
+      jobNumber: job.jobNumber,
+      status: job.status,
+      jobType: job.jobType,
+      priority: job.priority,
+      scheduledDate: job.scheduledDate,
+      closedAt: job.closedAt,
+      submittedAt: job.submittedAt,
+      referenceNumber: job.referenceNumber,
+      orderNumber: job.orderNumber,
+      faultDescription: job.faultDescription,
+      customerId: job.customerId,
+      siteId: job.siteId,
+      machineId: job.machineId,
+      primaryTechnicianId: job.primaryTechnicianId,
+      additionalTechnicianIds: job.additionalTechnicianIds,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+      scheduledEndDate: job.scheduledEndDate,
+      signatureRefusals: job.signatureRefusals,
+      finalDocument: job.finalDocument,
+    }));
   }
 
   findById(id: JobId): Promise<Job | null> {

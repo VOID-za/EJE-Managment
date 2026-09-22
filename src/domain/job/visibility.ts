@@ -160,3 +160,109 @@ export const visibleJobsFor = <T extends Job>(
 /** The job ids a technician has ever been on, for a repository to resolve. */
 export const participantJobIds = (history: TechnicianHistory): readonly JobId[] =>
   [...history.participatedJobIds] as JobId[];
+
+/* -------------------------------------------------------------------------- */
+/* Summaries                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A job as a LIST row needs it, and no more.
+ *
+ * WHY THIS TYPE EXISTS. Rendering the Jobs screen was hydrating complete job
+ * aggregates — parts, labour, travel, media, notes, signatures, refusals,
+ * pricing snapshots, final documents, delivery attempts and checklists, twelve
+ * unbounded child reads — to display a job number, a customer and a status. At
+ * twenty-four jobs that is merely wasteful; at five thousand it returns every
+ * photograph and every labour line in the business to draw a table.
+ *
+ * It is a `Pick` of `Job` ON PURPOSE, so that every existing `Job` already IS a
+ * valid summary. Callers that legitimately hold a full job — the demonstration
+ * store, the tests, a detail screen — keep working untouched, and only the
+ * PostgreSQL list path produces a genuinely narrow row.
+ *
+ * WHAT IS NOT HERE IS THE POINT. A summary carries no parts, no pricing
+ * snapshot and no callout flag, so there is no price in it to suppress. That is
+ * a stronger guarantee than `withoutPrices` can give: a value that was never
+ * selected cannot leak. `summariesVisibleTo` below states it and
+ * `visibility.test.ts` proves it.
+ */
+export type JobSummary = Pick<
+  Job,
+  | 'id'
+  | 'jobNumber'
+  | 'status'
+  | 'jobType'
+  | 'priority'
+  | 'scheduledDate'
+  | 'closedAt'
+  | 'submittedAt'
+  | 'referenceNumber'
+  | 'orderNumber'
+  | 'faultDescription'
+  | 'customerId'
+  | 'siteId'
+  | 'machineId'
+  | 'primaryTechnicianId'
+  | 'additionalTechnicianIds'
+  /** Sorts the job history on a customer and on a machine. */
+  | 'createdAt'
+  /** The technician dashboard groups by what was finished. */
+  | 'completedAt'
+  /** The list shows a scheduled range, not a single date. */
+  | 'scheduledEndDate'
+  /** The refusal badge and the refusal queue. REDACTED PER VIEWER — see below. */
+  | 'signatureRefusals'
+  /** The closed-job archive shows whether the issued document exists. */
+  | 'finalDocument'
+>;
+
+/**
+ * The summaries this viewer may see.
+ *
+ * The visibility half of Decision 5, unchanged — `jobVisibilityFor` already
+ * asked only for `id`, `status`, `primaryTechnicianId`,
+ * `additionalTechnicianIds` and `machineId`, every one of which a summary
+ * carries. The price half needs nothing done, because a summary has no price
+ * on it; `visibleJobsFor` remains the function to use whenever a caller really
+ * is holding full jobs.
+ */
+export const summariesVisibleTo = <T extends JobSummary>(
+  viewer: Pick<User, 'id' | 'role'>,
+  jobs: readonly T[],
+  history: TechnicianHistory,
+): readonly T[] => jobs.filter((job) => jobVisibilityFor(viewer, job, history) !== null);
+
+/**
+ * Narrows anything job-shaped to a summary, dropping everything else.
+ *
+ * Callers that legitimately hold full jobs — a customer's job history, a
+ * machine's — still build list rows, and a `Job` structurally satisfies
+ * `JobSummary`, so handing one straight through would compile and would ship
+ * the parts, the pricing snapshot and the refusals to the browser inside a row
+ * that displays none of them. This makes the narrowing real at runtime, not
+ * only in the type, which is what makes `redactRefusalsForViewer` unnecessary
+ * on a list: there is no refusal left in the row to redact.
+ */
+export const toJobSummary = (job: JobSummary): JobSummary => ({
+  id: job.id,
+  jobNumber: job.jobNumber,
+  status: job.status,
+  jobType: job.jobType,
+  priority: job.priority,
+  scheduledDate: job.scheduledDate,
+  closedAt: job.closedAt,
+  submittedAt: job.submittedAt,
+  referenceNumber: job.referenceNumber,
+  orderNumber: job.orderNumber,
+  faultDescription: job.faultDescription,
+  customerId: job.customerId,
+  siteId: job.siteId,
+  machineId: job.machineId,
+  primaryTechnicianId: job.primaryTechnicianId,
+  additionalTechnicianIds: job.additionalTechnicianIds,
+  createdAt: job.createdAt,
+  completedAt: job.completedAt,
+  scheduledEndDate: job.scheduledEndDate,
+  signatureRefusals: job.signatureRefusals,
+  finalDocument: job.finalDocument,
+});

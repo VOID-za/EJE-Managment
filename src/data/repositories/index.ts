@@ -25,6 +25,7 @@ import type {
   Conversation,
   User,
   UserId,
+  JobSummary,
 } from '@/domain';
 
 /**
@@ -69,6 +70,19 @@ export interface JobTransferRecord {
 
 export interface JobRepository {
   list(filter?: JobFilter): Promise<readonly Job[]>;
+  /**
+   * The same jobs, as a LIST ROW needs them.
+   *
+   * A list screen renders a job number, a customer, a status — never a part, a
+   * labour line or a pricing snapshot. `list` assembles complete aggregates,
+   * which is right for a detail screen and ruinous for a table: it reads every
+   * child collection of every matching job. `listSummaries` reads the columns a
+   * row draws and the crew Decision 5 needs, and stops.
+   *
+   * A summary carries no price, so the price half of Decision 5 is satisfied by
+   * construction rather than by remembering to call `withoutPrices`.
+   */
+  listSummaries(filter?: JobFilter): Promise<readonly JobSummary[]>;
   findById(id: JobId): Promise<Job | null>;
   findByJobNumber(jobNumber: string): Promise<Job | null>;
   save(job: Job): Promise<Job>;

@@ -1,5 +1,13 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { materialisePricingSnapshot } from '@/domain';
+import {
+  asCustomerId,
+  asJobId,
+  asMachineId,
+  asSiteId,
+  asUserId,
+  type JobSummary,
+  materialisePricingSnapshot,
+} from '@/domain';
 import type {
   Job,
   JobId,
@@ -11,7 +19,14 @@ import type { JobFilter, JobRepository, JobTransferRecord } from '@/data/reposit
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { loadChecklists, writeChecklist } from './job-checklist';
-import { toDomainJob, toJobRow, vatBasisPointsFromPercent, type JobRowSet } from './job-mapper';
+import {
+  finalDocumentFrom,
+  refusalFrom,
+  toDomainJob,
+  toJobRow,
+  vatBasisPointsFromPercent,
+  type JobRowSet,
+} from './job-mapper';
 import { VersionLedger, requireWritten } from './versions';
 import { isUuid } from './identifiers';
 
@@ -66,7 +81,8 @@ export class PostgresJobRepository implements JobRepository {
    * query per collection over the resulting ids — eleven queries for any number
    * of jobs, rather than eleven per job.
    */
-  async list(filter?: JobFilter): Promise<readonly Job[]> {
+  /** The WHERE shared by `list` and `listSummaries`, so the two cannot drift. */
+  private conditionsFor(filter?: JobFilter) {
     const conditions = [];
     if (filter?.statuses !== undefined && filter.statuses.length > 0) {
       conditions.push(inArray(schema.jobs.status, [...filter.statuses]));
@@ -88,13 +104,116 @@ export class PostgresJobRepository implements JobRepository {
       );
     }
 
+    return conditions.length === 0 ? undefined : and(...conditions);
+  }
+
+  async list(filter?: JobFilter): Promise<readonly Job[]> {
     const rows = await this.db
       .select()
       .from(schema.jobs)
-      .where(conditions.length === 0 ? undefined : and(...conditions))
+      .where(this.conditionsFor(filter))
       .orderBy(desc(schema.jobs.jobNumberSeq));
 
     return this.assemble(rows);
+  }
+
+  /**
+   * The jobs matching a filter, as a LIST ROW needs them.
+   *
+   * TWO QUERIES, WHATEVER THE FILTER MATCHES. `list()` above assembles complete
+   * aggregates — twelve unbounded child reads for parts, labour, travel, media,
+   * notes, signatures, refusals, pricing snapshots, final documents, delivery
+   * attempts and checklists — which is right for a screen that shows a job and
+   * wrong for a screen that shows a table of them. This selects the columns a
+   * row renders, plus the one child collection Decision 5 genuinely needs
+   * (`job_technicians`, for `additionalTechnicianIds`), and nothing else.
+   *
+   * A summary carries no price, so there is nothing here for `withoutPrices` to
+   * remove — see `summariesVisibleTo` in the domain.
+   */
+  async listSummaries(filter?: JobFilter): Promise<readonly JobSummary[]> {
+    const rows = await this.db
+      .select({
+        id: schema.jobs.id,
+        jobNumber: schema.jobs.jobNumber,
+        status: schema.jobs.status,
+        jobTypeCode: schema.jobs.jobTypeCode,
+        priority: schema.jobs.priority,
+        scheduledDate: schema.jobs.scheduledDate,
+        closedAt: schema.jobs.closedAt,
+        submittedAt: schema.jobs.submittedAt,
+        referenceNumber: schema.jobs.referenceNumber,
+        orderNumber: schema.jobs.orderNumber,
+        faultDescription: schema.jobs.faultDescription,
+        customerId: schema.jobs.customerId,
+        siteId: schema.jobs.siteId,
+        machineId: schema.jobs.machineId,
+        primaryTechnicianId: schema.jobs.primaryTechnicianId,
+        createdAt: schema.jobs.createdAt,
+        completedAt: schema.jobs.completedAt,
+        scheduledEndDate: schema.jobs.scheduledEndDate,
+      })
+      .from(schema.jobs)
+      .where(this.conditionsFor(filter))
+      .orderBy(desc(schema.jobs.jobNumberSeq));
+
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((row) => row.id);
+    /*
+     * Three child reads, not twelve, and every one of them is something a list
+     * genuinely draws: the crew Decision 5 needs, the refusal badge, and
+     * whether the archive has an issued document.
+     */
+    const [crew, refusals, documents] = await Promise.all([
+      this.db
+        .select({ jobId: schema.jobTechnicians.jobId, userId: schema.jobTechnicians.userId })
+        .from(schema.jobTechnicians)
+        .where(inArray(schema.jobTechnicians.jobId, ids)),
+      this.db
+        .select()
+        .from(schema.signatureRefusals)
+        .where(inArray(schema.signatureRefusals.jobId, ids))
+        .orderBy(schema.signatureRefusals.attempt),
+      this.db
+        .select()
+        .from(schema.finalDocuments)
+        .where(inArray(schema.finalDocuments.jobId, ids)),
+    ]);
+
+    const additional = new Map<string, UserId[]>();
+    for (const row of crew) {
+      const existing = additional.get(row.jobId);
+      if (existing === undefined) additional.set(row.jobId, [asUserId(row.userId)]);
+      else existing.push(asUserId(row.userId));
+    }
+
+    return rows.map((row) => ({
+      id: asJobId(row.id),
+      jobNumber: row.jobNumber,
+      status: row.status,
+      jobType: row.jobTypeCode as JobSummary['jobType'],
+      priority: row.priority,
+      scheduledDate: row.scheduledDate,
+      closedAt: row.closedAt,
+      submittedAt: row.submittedAt,
+      referenceNumber: row.referenceNumber,
+      orderNumber: row.orderNumber,
+      faultDescription: row.faultDescription,
+      customerId: asCustomerId(row.customerId),
+      siteId: asSiteId(row.siteId),
+      machineId: row.machineId === null ? null : asMachineId(row.machineId),
+      primaryTechnicianId: row.primaryTechnicianId === null ? null : asUserId(row.primaryTechnicianId),
+      additionalTechnicianIds: additional.get(row.id) ?? [],
+      createdAt: row.createdAt,
+      completedAt: row.completedAt,
+      scheduledEndDate: row.scheduledEndDate,
+      signatureRefusals: refusals.filter((entry) => entry.jobId === row.id).map(refusalFrom),
+      finalDocument: (() => {
+        const found = documents.find((entry) => entry.jobId === row.id);
+        return found === undefined ? null : finalDocumentFrom(found);
+      })(),
+    }));
   }
 
   async findById(id: JobId): Promise<Job | null> {

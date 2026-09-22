@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  asCustomerId,
   asJobId,
   asMachineId,
+  asSiteId,
   asUserId,
   type Job,
   type PricingSnapshot,
@@ -15,8 +17,10 @@ import {
   participantJobIds,
   showsPricesAt,
   technicianHistoryFrom,
+  summariesVisibleTo,
   visibleJobsFor,
   withoutPrices,
+  type JobSummary,
 } from './visibility';
 
 /**
@@ -239,5 +243,99 @@ describe('the history a repository is asked to resolve', () => {
         emptyTechnicianHistory,
       ),
     ).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The same rule, applied to a LIST ROW instead of a whole job.
+ *
+ * `summariesVisibleTo` exists so the Jobs screen stops hydrating complete job
+ * aggregates to draw a table. It is Decision 5 on a narrower record, and the
+ * risk of a narrower record is that it quietly becomes a wider RULE — so the
+ * equivalence is asserted here rather than assumed.
+ */
+const summary = (over: Partial<JobSummary> = {}): JobSummary => ({
+  id: asJobId(`job-${Math.random().toString(36).slice(2)}`),
+  jobNumber: 'EJE-1000',
+  status: 'in_progress',
+  jobType: 'breakdown',
+  priority: 'normal',
+  scheduledDate: null,
+  closedAt: null,
+  submittedAt: null,
+  referenceNumber: '',
+  orderNumber: '',
+  faultDescription: 'Fictional fault',
+  customerId: asCustomerId('customer-1'),
+  siteId: asSiteId('site-1'),
+  machineId: MACHINE,
+  primaryTechnicianId: LERATO,
+  additionalTechnicianIds: [],
+  createdAt: '2026-01-05T08:00:00.000Z',
+  completedAt: null,
+  scheduledEndDate: null,
+  signatureRefusals: [],
+  finalDocument: null,
+  ...over,
+});
+
+describe('Decision 5 over summaries', () => {
+  it('shows the office every row', () => {
+    const rows = [summary(), summary({ status: 'cancelled' }), summary({ status: 'closed' })];
+    expect(summariesVisibleTo(master, rows, emptyTechnicianHistory)).toHaveLength(3);
+  });
+
+  it('shows a technician theirs, the pool, and nothing else', () => {
+    const mine = summary({ primaryTechnicianId: SIPHO });
+    const shared = summary({ primaryTechnicianId: LERATO, additionalTechnicianIds: [SIPHO] });
+    const pooled = summary({ status: 'open', primaryTechnicianId: null });
+    const somebodyElses = summary({ primaryTechnicianId: LERATO, machineId: null });
+
+    const visible = summariesVisibleTo(
+      technician(SIPHO),
+      [mine, shared, pooled, somebodyElses],
+      emptyTechnicianHistory,
+    );
+
+    expect(visible.map((row) => row.id)).toEqual([mine.id, shared.id, pooled.id]);
+  });
+
+  it('decides exactly as the full-job rule decides, row for row', () => {
+    // The guard that matters: a narrower record must not become a wider rule.
+    const rows = [
+      summary({ primaryTechnicianId: SIPHO }),
+      summary({ primaryTechnicianId: LERATO, additionalTechnicianIds: [SIPHO] }),
+      summary({ status: 'open', primaryTechnicianId: null }),
+      summary({ primaryTechnicianId: LERATO, machineId: null }),
+      summary({ status: 'closed', primaryTechnicianId: LERATO }),
+      summary({ status: 'cancelled', primaryTechnicianId: SIPHO }),
+    ];
+
+    for (const viewer of [master, coordinator, technician(SIPHO), technician(LERATO)]) {
+      for (const history of [emptyTechnicianHistory, technicianHistoryFrom([])]) {
+        const bySummary = summariesVisibleTo(viewer, rows, history).map((row) => row.id);
+        const byRule = rows
+          .filter((row) => jobVisibilityFor(viewer, row, history) !== null)
+          .map((row) => row.id);
+        expect(bySummary).toEqual(byRule);
+      }
+    }
+  });
+
+  it('carries no price to suppress', () => {
+    /*
+     * The price half of Decision 5, satisfied by construction rather than by
+     * remembering to call `withoutPrices`. If somebody widens `JobSummary` to
+     * include parts or a pricing snapshot, this fails — and it should, because
+     * the list would then be carrying prices a technician must not read.
+     */
+    const [row] = summariesVisibleTo(technician(SIPHO), [summary({ primaryTechnicianId: SIPHO })], emptyTechnicianHistory);
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty('parts');
+    expect(row).not.toHaveProperty('pricingSnapshot');
+    expect(row).not.toHaveProperty('calloutApplied');
+    expect(row).not.toHaveProperty('labour');
   });
 });
