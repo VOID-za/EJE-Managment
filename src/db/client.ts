@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
+import { assertDevelopmentDatabase } from './connection-guard';
 
 /**
  * The database connection.
@@ -94,7 +95,14 @@ export const createDatabase = (options: DatabaseOptions) => {
   return db;
 };
 
-/** Reads the connection string, and says plainly when it is missing. */
+/**
+ * Reads the connection string, says plainly when it is missing, and REFUSES a
+ * live database to a process that is not production.
+ *
+ * The check is here because this is the one place the application reads the
+ * variable — `getDatabase` is the only caller and there is no other door into
+ * the pool. See `connection-guard.ts` for the rule and for what it cannot do.
+ */
 export const databaseUrlFromEnv = (): string => {
   const url = process.env.DATABASE_URL;
   if (url === undefined || url.trim().length === 0) {
@@ -102,6 +110,7 @@ export const databaseUrlFromEnv = (): string => {
       'DATABASE_URL is not set. Copy .env.example to .env.local and point it at a PostgreSQL database. See docs/database.md.',
     );
   }
+  assertDevelopmentDatabase(url);
   return url;
 };
 

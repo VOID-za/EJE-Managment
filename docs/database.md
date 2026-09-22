@@ -66,10 +66,69 @@ nothing in `.env.example` is a real credential.
 | `DRIZZLE_DEBUG` | optional | `true` logs every statement |
 | `EJE_SEED_ALLOW` | `db:seed`, rarely | `i-understand` lets the development seed run against a host it would otherwise refuse. It can never override `NODE_ENV=production`. |
 | `EJE_DEMO_PASSWORD` | optional | The password `db:seed` gives the demonstration accounts |
+| `EJE_DATABASE_ALLOW` | rarely | `i-understand` lets a non-production process connect to a database the guard would refuse. See below. |
+| `EJE_RESET_CONFIRM` | `db:reset` | Must name the database being emptied, exactly. |
+| `EJE_STORAGE_DIR` | PostgreSQL deployments | Where attachment bytes live. **Development and production must not share one.** |
 
 ---
 
-## Setting up a local database
+## The three environments
+
+One variable decides which of the three you are in — `DATABASE_URL` — and
+`src/data/backend.ts` is the only module that reads it for this purpose.
+
+### DEMO — `npm run dev`, no `DATABASE_URL`
+
+```
+npm run dev
+NO DATABASE_URL
+   ↓  in-memory DemoStore
+   ↓  no PostgreSQL, no Docker, no local database, no setup
+   ↓  data resets when the server process restarts
+```
+
+Starts immediately on a machine with nothing installed. The demonstration
+switcher works, the seeded people and jobs are there, and the badge in the
+sidebar says the data resets. **This is not a fallback and must never become
+one** — it is chosen by the absence of a database, and a deployment that HAS a
+`DATABASE_URL` and cannot reach it raises rather than quietly serving
+fabricated data.
+
+### DEVELOPMENT — `npm run dev`, with a development `DATABASE_URL`
+
+```
+DATABASE_URL=postgres://<user>:<password>@<host>:5432/eje_dev
+   ↓  PostgreSQL + Drizzle
+   ↓  persistent EJE data, across restarts
+   ↓  PostgreSQL sessions (PostgresAuthStore)
+   ↓  real filesystem attachment storage (EJE_STORAGE_DIR)
+```
+
+Put the line in `.env.local`, which is git-ignored. **Never commit a real
+connection string**, and never put one in `.env.example`.
+
+Everything is real here: migrations, sessions, uploads, the outbox. This is
+where EJE workflows are developed from now on.
+
+### PRODUCTION
+
+```
+Separate database, separate credentials, separate storage directory
+   ↓  NODE_ENV=production (next build / next start)
+   ↓  never reset, never seeded, never pointed at from a developer's machine
+```
+
+Production configuration is **not** part of this repository and no production
+database name is established anywhere in it.
+
+> **Still to be configured.** The remote development database — host, PostgreSQL
+> user, network and firewall rules — is deployment-specific and does not exist
+> yet. Nothing in this repository assumes a host, and nothing should be added
+> here until that machine is actually configured.
+
+---
+
+## Creating a development database
 
 ```
 createdb eje_dev
@@ -80,12 +139,66 @@ Then, with `DATABASE_URL` pointing at `eje_dev`:
 
 ```
 npm run db:migrate
+npm run db:seed
 ```
 
 Both extensions (`citext`, `pgcrypto`) are created by the first migration and
-need no superuser action beyond what a database owner normally has.
+need no superuser action beyond what a database owner normally has. The
+application user does **not** need to be a superuser.
 
-### Commands
+Proven against **PostgreSQL 16**. Nothing used requires more than 13.
+
+---
+
+## Not connecting to production by accident
+
+`src/db/connection-guard.ts` refuses, at the one place the application reads
+`DATABASE_URL`:
+
+| Process | Target | Result |
+|---|---|---|
+| `NODE_ENV=production` | anything | **allowed** — this IS production |
+| development | local host | allowed |
+| development | name says `dev`/`test`/`local`/`staging`/`sandbox`/`demo` | allowed |
+| development | name or host says `prod`/`production`/`live` | **refused** |
+| development | remote host, unrevealing name | **refused** |
+| any | anything, with `EJE_DATABASE_ALLOW=i-understand` | allowed |
+
+The last row of the middle block is the one that matters: a remote database
+whose name says nothing is **refused rather than assumed safe**. Nothing in
+this repository establishes what EJE's production database will be called, so
+guessing would be worse than useless.
+
+**What this cannot do.** It works from names. The real separation is
+credentials a development machine never holds, and that is deployment
+configuration, not code.
+
+---
+
+## Resetting a development database
+
+`npm run db:seed` is additive and stays that way — there is no `DROP`,
+`TRUNCATE` or `DELETE` anywhere in `src/db/seed/`. To re-baseline instead:
+
+```
+EJE_RESET_CONFIRM=eje_dev npm run db:reset
+```
+
+It empties the database and rebuilds it by running `db:migrate` and `db:seed` —
+it adds no new mechanism of its own. **It is the only destructive command in
+this repository.** Four things must be true first:
+
+1. `NODE_ENV` is not `production`. No override, ever.
+2. The target is a local or development-named database. A production name, or
+   a remote host whose name says nothing, is refused.
+3. The target is **not** a test database — `npm run db:test` owns those.
+4. `EJE_RESET_CONFIRM` names the database exactly. Typing the name of the thing
+   being destroyed is the only confirmation that proves you know what you are
+   pointed at.
+
+---
+
+## Commands
 
 | Command | What it does |
 |---|---|
@@ -93,6 +206,8 @@ need no superuser action beyond what a database owner normally has.
 | `npm run db:migrate` | Applies pending migrations to `DATABASE_URL`. |
 | `npm run db:check` | Verifies the migrations and the journal agree. Needs no database. |
 | `npm run db:studio` | Opens Drizzle Studio against `DATABASE_URL`. |
+| `npm run db:seed` | Adds development data. Never deletes. Safe to re-run. |
+| `npm run db:reset` | **Destructive.** Empties a development database and rebuilds it from the migrations and the seed. |
 | `npm run db:test` | Runs the integration tests. **Skips cleanly when `TEST_DATABASE_URL` is unset**, so it is safe to run anywhere. |
 
 `db:test` rebuilds the public schema from the migrations on every run, so the

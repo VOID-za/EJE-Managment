@@ -119,6 +119,13 @@ nobody set a variable. **A real deployment should set an explicit path on a
 volume that is actually backed up** — that is the part a default cannot do for
 anybody.
 
+**Development and production must not share a directory.** They are separate
+databases; the rows in each locate objects by key, and one storage directory
+behind two databases means a development reset leaves production rows pointing
+at files that are still there but no longer indexed — or, worse, at somebody
+else's. Give each environment its own path, e.g. `/var/lib/eje/dev-storage` and
+`/var/lib/eje/storage`.
+
 ### What is stored, and where
 
 | | |

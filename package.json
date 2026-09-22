@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "db:test": "vitest run --config vitest.db.config.mts",
     "db:seed": "tsx src/db/seed/run.ts",
+    "db:reset": "tsx src/db/seed/reset.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "smoke": "node scripts/smoke.mjs",
     "workflow-check": "node scripts/job-workflow-check.mjs",

@@ -1,3 +1,10 @@
+import {
+  classifyDatabaseUrl,
+  DEVELOPMENT_NAMES,
+  LOCAL_HOSTS,
+  PRODUCTION_MARKERS,
+} from '@/db/connection-guard';
+
 /**
  * What stops this being run against EJE's real database.
  *
@@ -25,13 +32,13 @@ export class SeedRefused extends Error {
   }
 }
 
-/** Hosts a development database is actually likely to be on. */
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', 'host.docker.internal', 'db', 'postgres']);
-
-/** Names that say, in the URL itself, that this is not somebody's live data. */
-const DEVELOPMENT_NAMES = /(^|[-_])(dev|development|demo|local|test|sandbox|staging)([-_]|$)/iu;
-
-const PRODUCTION_MARKERS = /(^|[-_])(prod|production|live)([-_]|$)/iu;
+/*
+ * The same names the APPLICATION's connection guard uses.
+ *
+ * Imported rather than restated: two lists that are meant to agree and are
+ * written down twice are two lists that will one day disagree, and the one
+ * that is wrong will be whichever is protecting the live database that day.
+ */
 
 export interface SeedTarget {
   readonly url: string;
@@ -101,4 +108,79 @@ export const resolveSeedTarget = (env: SeedEnvironment): SeedTarget => {
   }
 
   return { url, databaseName, host };
+};
+
+const CONFIRM = 'EJE_RESET_CONFIRM';
+
+export interface ResetEnvironment {
+  readonly NODE_ENV?: string | undefined;
+  readonly DATABASE_URL?: string | undefined;
+  readonly EJE_RESET_CONFIRM?: string | undefined;
+}
+
+export interface ResetTarget {
+  readonly url: string;
+  readonly databaseName: string;
+  readonly host: string;
+}
+
+/** Decides whether this database may be destroyed, and says exactly why not. */
+export const resolveResetTarget = (env: ResetEnvironment): ResetTarget => {
+  if ((env.NODE_ENV ?? '').toLowerCase() === 'production') {
+    throw new SeedRefused(
+      'NODE_ENV is "production". This command empties a database and rebuilds it with fictional ' +
+        'demonstration data. It will not run here, and there is no override.',
+    );
+  }
+
+  const url = (env.DATABASE_URL ?? '').trim();
+  if (url.length === 0) {
+    throw new SeedRefused(
+      'DATABASE_URL is not set. Point it at your DEVELOPMENT database — see docs/database.md — ' +
+        'and run this again.',
+    );
+  }
+
+  const target = classifyDatabaseUrl(url);
+
+  if (target.kind === 'production') {
+    throw new SeedRefused(
+      `"${target.databaseName}" on ${target.host} names itself as production. Refusing to empty it. ` +
+        'There is no override for this command.',
+    );
+  }
+  if (target.kind === 'unknown') {
+    throw new SeedRefused(
+      `DATABASE_URL points at "${target.databaseName}" on ${target.host}, which is neither a local ` +
+        'host nor named as a development database. This command empties the database, so it will ' +
+        'not assume that is safe. Rename it so it says development, or use a local one.',
+    );
+  }
+
+  /*
+   * The test database belongs to `db:test`.
+   *
+   * That suite rebuilds the public schema on every run, so two things would be
+   * tearing down the same database on their own schedules. Refused outright
+   * rather than overridable: there is no reason to reset a test database by
+   * hand, because running the tests already does it.
+   */
+  if (/test/iu.test(target.databaseName)) {
+    throw new SeedRefused(
+      `"${target.databaseName}" is a TEST database. \`npm run db:test\` rebuilds it on every run ` +
+        'and owns it; this command will not touch it. Point DATABASE_URL at your development database.',
+    );
+  }
+
+  const confirmed = (env.EJE_RESET_CONFIRM ?? '').trim();
+  if (confirmed !== target.databaseName) {
+    throw new SeedRefused(
+      `This will PERMANENTLY DELETE everything in "${target.databaseName}" on ${target.host} and ` +
+        `rebuild it from the migrations and the development seed.\n\n` +
+        `  To go ahead, name the database you mean to empty:\n\n` +
+        `    ${CONFIRM}=${target.databaseName} npm run db:reset\n`,
+    );
+  }
+
+  return { url, databaseName: target.databaseName, host: target.host };
 };
