@@ -15,6 +15,8 @@ import {
   ensureDemoAccounts,
   isDemoAccount,
   isDemoSwitcherEnabled,
+  SWITCH_NOT_SEEDED,
+  SWITCH_REFUSED,
 } from '@/server/dev/demo-switcher';
 import { getServerRuntime } from '@/server/runtime';
 
@@ -34,9 +36,6 @@ import { getServerRuntime } from '@/server/runtime';
  * deployment can reach.
  */
 const switchTo = z.object({ email: z.string().trim().min(1).max(320) }).strict();
-
-/** One sentence, whatever went wrong. This is a development tool, not an oracle. */
-const REFUSED = 'That development account cannot be switched into.';
 
 /**
  * The development accounts, whenever the switcher exists at all.
@@ -84,7 +83,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const input = parseWith(switchTo, await request.json().catch(() => ({})));
 
     // Only the seeded development accounts, read from the seed itself.
-    if (!isDemoAccount(input.email)) throw notFound(REFUSED);
+    if (!isDemoAccount(input.email)) throw notFound(SWITCH_REFUSED);
 
     const runtime = getServerRuntime();
     const now = new Date();
@@ -95,7 +94,10 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     }
 
     const credentials = await runtime.auth.findCredentialsByEmail(input.email);
-    if (credentials === null || !credentials.active) throw notFound(REFUSED);
+    // A known development account that is not in the register means the seed
+    // has not been run; anything else stays the single unhelpful sentence.
+    if (credentials === null) throw notFound(SWITCH_NOT_SEEDED);
+    if (!credentials.active) throw notFound(SWITCH_REFUSED);
 
     /*
      * THE REAL VERIFICATION, against the real hash.
@@ -112,10 +114,11 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
         credentials.passwordHash,
         developmentPasswordFor(runtime.backend),
       ));
-    if (!matches) throw notFound(REFUSED);
+    if (!matches) throw notFound(SWITCH_REFUSED);
 
     const user = await runtime.read(({ repos }) => repos.users.findById(credentials.userId));
-    if (user === null || !user.active) throw notFound(REFUSED);
+    if (user === null) throw notFound(SWITCH_NOT_SEEDED);
+    if (!user.active) throw notFound(SWITCH_REFUSED);
 
     // The session being left is ended server-side, not merely replaced in the
     // browser — the same as signing out.

@@ -6,7 +6,13 @@ import {
   signedInAs,
   startTestServer,
 } from '@/test/api-harness';
-import { isDemoAccount, isDemoSwitcherEnabled, DEMO_ACCOUNTS } from './demo-switcher';
+import {
+  isDemoAccount,
+  isDemoSwitcherEnabled,
+  DEMO_ACCOUNTS,
+  SWITCH_NOT_SEEDED,
+  SWITCH_REFUSED,
+} from './demo-switcher';
 
 /**
  * The development user switcher.
@@ -140,6 +146,28 @@ describe('POST /api/dev/demo-users', () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  /**
+   * A MIGRATED BUT UNSEEDED DATABASE used to be a dead end.
+   *
+   * `db:migrate` builds all 49 tables and creates nobody. The list endpoint
+   * still draws the control, every switch answers 404, and a 404 on a route
+   * that plainly exists reads as a routing fault — which is exactly how a day
+   * goes into looking for a missing route that was never missing.
+   */
+  it('tells an unseeded database to run the seed, rather than only refusing', () => {
+    expect(SWITCH_NOT_SEEDED).toContain('npm run db:seed');
+    expect(SWITCH_NOT_SEEDED).not.toBe(SWITCH_REFUSED);
+  });
+
+  it('still says nothing at all about an address it will not switch into', () => {
+    // The generic refusal covers a wrong password, a disabled account and an
+    // address that is not one of the five. It must not distinguish them, and it
+    // must not offer the seed as an explanation for any of them.
+    expect(SWITCH_REFUSED).not.toContain('db:seed');
+    expect(SWITCH_REFUSED).not.toContain('password');
+    expect(SWITCH_REFUSED).not.toContain('@');
   });
 
   it('refuses a cross-site switch', async () => {

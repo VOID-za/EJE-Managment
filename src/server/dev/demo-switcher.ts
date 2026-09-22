@@ -45,6 +45,27 @@ export const DEMO_ACCOUNTS = seedPeople.map(({ user }) => ({
   role: user.role,
 }));
 
+/**
+ * One sentence, whatever went wrong. This is a development tool, not an oracle.
+ */
+export const SWITCH_REFUSED = 'That development account cannot be switched into.';
+
+/**
+ * The one refusal worth explaining, because it is not really a refusal.
+ *
+ * A database that has been MIGRATED BUT NOT SEEDED has the whole schema and no
+ * people in it. The list endpoint still returns the five accounts — deliberately,
+ * so the control does not vanish on an unseeded database — and then every switch
+ * answers 404, which reads as a missing route rather than an empty register.
+ * That is precisely the dead end this sentence exists to end.
+ *
+ * Nothing is disclosed by saying it. These five addresses are what the list
+ * endpoint just returned, and the endpoint does not exist in production at all.
+ */
+export const SWITCH_NOT_SEEDED =
+  'That development account is not in this database. Run `npm run db:seed` to create the ' +
+  'development accounts — see docs/development-seed.md.';
+
 export const isDemoAccount = (email: string): boolean =>
   DEMO_ACCOUNTS.some((account) => account.email === email.trim().toLowerCase());
 

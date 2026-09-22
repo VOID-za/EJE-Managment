@@ -37,7 +37,34 @@ import { apiGet, apiPatch, apiPost, apiUpload, newIdempotencyKey, segment } from
  * idempotency key automatically, because the field device this is for is a
  * tablet on an industrial estate and a retry is normal.
  */
-const query = <T>(path: string) => apiGet<T>(path);
+/**
+ * Every read in this file goes through here.
+ *
+ * CONCURRENT IDENTICAL READS SHARE ONE REQUEST. React's strict mode runs each
+ * effect twice in development, so the bootstrap asked `/api/auth/me` twice and
+ * every screen asked for its data twice — two round-trips for an answer that
+ * cannot differ between them. On a database reached over an SSH tunnel that is
+ * seconds of waiting rather than milliseconds, and the same doubling reaches
+ * any build where two components mount asking for the same thing.
+ *
+ * NOTHING IS CACHED. The entry is dropped the moment the request settles, so a
+ * read issued after one finishes is a fresh question — which is exactly what
+ * `invalidate()` relies on after a write, and what identity relies on after
+ * signing in, switching user, or a session being revoked. Sharing an answer
+ * that is still in flight is not the same as remembering one.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+const query = <T>(path: string): Promise<T> => {
+  const existing = inFlight.get(path);
+  if (existing !== undefined) return existing as Promise<T>;
+
+  const started = apiGet<T>(path).finally(() => {
+    inFlight.delete(path);
+  });
+  inFlight.set(path, started);
+  return started;
+};
 const command = <T>(path: string, body: unknown = {}) =>
   apiPost<T>(path, body, newIdempotencyKey());
 
