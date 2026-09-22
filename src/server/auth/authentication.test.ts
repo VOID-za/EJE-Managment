@@ -366,4 +366,21 @@ describe('the session', () => {
     expect(me.data.user.role).toBe('technician');
     expect(me.data.user.id).not.toBe(masterMe.data.user.id);
   });
+
+  /**
+   * WHICH BACKEND THIS IS, from the server.
+   *
+   * The Demo Mode badge says "Data resets when the server restarts" on the
+   * strength of this field, and that sentence is true of the in-memory store
+   * and false of PostgreSQL. So it is the SERVER that answers, never the
+   * client guessing from a build flag — the same discipline as everything
+   * else it is told. The PostgreSQL half of this pair lives in
+   * `http-api.db.test.ts`.
+   */
+  it('reports the in-memory demonstration backend', async () => {
+    const client = await signedInAs(DEMO_USERS.master);
+    const me = await client.get<{ backend: string }>('/api/auth/me');
+
+    expect(me.data.backend).toBe('demo');
+  });
 });
