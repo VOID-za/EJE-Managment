@@ -125,6 +125,10 @@ database name is established anywhere in it.
 > user, network and firewall rules — is deployment-specific and does not exist
 > yet. Nothing in this repository assumes a host, and nothing should be added
 > here until that machine is actually configured.
+>
+> [`vps-development-database.md`](./vps-development-database.md) is the runbook
+> for creating it when that machine is available: the commands to run there, in
+> order, with every host and credential left as a placeholder.
 
 ---
 
