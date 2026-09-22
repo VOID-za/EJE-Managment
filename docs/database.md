@@ -207,12 +207,41 @@ this repository.** Four things must be true first:
 | Command | What it does |
 |---|---|
 | `npm run db:generate` | Diffs the schema against the journal and writes a new migration. Needs no database. |
-| `npm run db:migrate` | Applies pending migrations to `DATABASE_URL`. |
+| `npm run db:migrate` | Applies pending migrations to `DATABASE_URL`. Says which database answered, and prints the error if one fails — see below. |
 | `npm run db:check` | Verifies the migrations and the journal agree. Needs no database. |
 | `npm run db:studio` | Opens Drizzle Studio against `DATABASE_URL`. |
 | `npm run db:seed` | Adds development data. Never deletes. Safe to re-run. |
 | `npm run db:reset` | **Destructive.** Empties a development database and rebuilds it from the migrations and the seed. |
 | `npm run db:test` | Runs the integration tests. **Skips cleanly when `TEST_DATABASE_URL` is unset**, so it is safe to run anywhere. |
+
+### Why `db:migrate` is a script and not `drizzle-kit migrate`
+
+`src/db/migrate.ts` runs `drizzle-kit migrate` — the migrating is still
+drizzle-kit's, with the same configuration and the same driver. It exists
+because the CLI cannot report two things that matter.
+
+**It never prints the error.** In drizzle-kit 0.31.10, `MigrateProgress.render`
+takes only `status`; hanji calls it as `render('rejected', err)` and the
+exception is discarded, then `renderWithTask` calls `process.exit(1)` before the
+handler's own `catch` can log anything. The command exits 1 having printed
+nothing — no message, no SQLSTATE, no statement. Nothing is written, so no
+redirection or output capture can recover it. The script catches the same
+exception one layer lower, at `PgDialect.prototype.migrate`, patched in memory
+for that one process. Nothing on disk is modified and `npx drizzle-kit migrate`
+is unchanged.
+
+**It never says where it went.** A migration that succeeds against the wrong
+database looks exactly like one that worked. So the script announces the target
+before connecting, asks the server itself for `current_database()` and
+`current_user`, and afterwards counts the journal rows and public tables **on
+the connection that did the work** — 7 and 49 for a complete schema.
+
+Everything it prints goes through `writeSync`, because `process.exit` discards
+whatever is still queued on a piped stdout.
+
+`NOTICE: schema "drizzle" already exists, skipping` on a re-run is PostgreSQL
+being accurate, not an error: the migrator creates its journal table with
+`IF NOT EXISTS` every time.
 
 `db:test` rebuilds the public schema from the migrations on every run, so the
 migrations themselves are exercised each time rather than assumed to work.
