@@ -26,6 +26,7 @@ import type {
   User,
   UserId,
   JobSummary,
+  PricingSnapshot,
 } from '@/domain';
 
 /**
@@ -83,6 +84,27 @@ export interface JobRepository {
    * construction rather than by remembering to call `withoutPrices`.
    */
   listSummaries(filter?: JobFilter): Promise<readonly JobSummary[]>;
+  /**
+   * The immutable pricing snapshots for these jobs.
+   *
+   * SEPARATE FROM `listSummaries` ON PURPOSE. A summary is structurally
+   * price-free, which is what makes it safe to hand to any list without
+   * remembering to suppress anything. The closed-job archive is an office
+   * screen and legitimately shows what a job was priced at when it was issued,
+   * so it asks for the snapshots explicitly — by a call the authorization
+   * check upstream has already gated.
+   */
+  listPricingSnapshots(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, PricingSnapshot | null>>;
+  /**
+   * How many jobs match, without reading any of them.
+   *
+   * The Jobs screen tells the office how much sits in the closed archive. It
+   * used to arrive at that number by hydrating every closed job in the
+   * business and calling `.length` on the result.
+   */
+  count(filter?: JobFilter): Promise<number>;
   findById(id: JobId): Promise<Job | null>;
   findByJobNumber(jobNumber: string): Promise<Job | null>;
   save(job: Job): Promise<Job>;

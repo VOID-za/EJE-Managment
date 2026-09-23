@@ -19,6 +19,9 @@ import {
   visibleJobsFor,
   withoutPrices,
   type JobVisibility,
+  summariesVisibleTo,
+  toJobSummary,
+  type JobSummary,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
@@ -170,7 +173,8 @@ export const loadJobView = async (
 
 /** Lightweight row used by every job list in the system. */
 export interface JobListRow {
-  readonly job: Job;
+  /** A SUMMARY, not a job: a list row shows no part, no labour and no price. */
+  readonly job: JobSummary;
   readonly customerName: string;
   readonly siteName: string;
   readonly machineLabel: string;
@@ -201,11 +205,11 @@ export const loadJobList = async (
   repos: RepositoryBundle,
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly JobListRow[]> => {
-  const jobs = await repos.jobs.list();
+  const jobs = await repos.jobs.listSummaries();
   if (can(actor.role, 'jobs.viewAll')) return loadJobRows(repos, jobs, actor);
 
   const participated = await repos.jobs.listParticipatedJobs(actor.id);
-  const visible = visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
+  const visible = summariesVisibleTo(actor, jobs, technicianHistoryFrom(participated));
   // Cancelled work is history for the office and clutter on a tablet. Applied
   // after the visibility rule, not instead of it.
   return loadJobRows(
@@ -217,7 +221,7 @@ export const loadJobList = async (
 
 export const loadJobRows = async (
   repos: RepositoryBundle,
-  jobs: readonly Job[],
+  jobs: readonly JobSummary[],
   viewer: Pick<User, 'id' | 'role'> | null = null,
 ): Promise<readonly JobListRow[]> => {
   const [customers, sites, machines, users] = await Promise.all([
@@ -229,8 +233,22 @@ export const loadJobRows = async (
   ]);
 
   return jobs.map((stored) => {
-    // Redacted per row, so a refusal cannot reach a list a technician may read.
-    const job = redactRefusalsForViewer(stored, viewer);
+    /*
+     * NARROWED, then redacted.
+     *
+     * The narrowing is what keeps money out of a list: a summary has no parts,
+     * no labour and no pricing snapshot, so there is nothing for
+     * `withoutPrices` to remove and nothing to forget to remove. It is done at
+     * RUNTIME and not only in the type, because a `Job` structurally satisfies
+     * `JobSummary` — a caller handing one straight through would compile and
+     * would ship every price to the browser inside a row that renders none of
+     * them.
+     *
+     * The refusals survive the narrowing, because the office refusal queue and
+     * the row badge both read them, so they are still redacted per viewer.
+     * That is the one part of Decision 5 that narrowing cannot do for us.
+     */
+    const job = redactRefusalsForViewer(toJobSummary(stored), viewer);
     const machine =
       job.machineId === null
         ? undefined

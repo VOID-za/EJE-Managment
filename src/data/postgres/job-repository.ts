@@ -22,6 +22,7 @@ import { loadChecklists, writeChecklist } from './job-checklist';
 import {
   finalDocumentFrom,
   refusalFrom,
+  snapshotFrom,
   toDomainJob,
   toJobRow,
   vatBasisPointsFromPercent,
@@ -214,6 +215,30 @@ export class PostgresJobRepository implements JobRepository {
         return found === undefined ? null : finalDocumentFrom(found);
       })(),
     }));
+  }
+
+  /** One query. The archive asks for these; no other list ever does. */
+  async listPricingSnapshots(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, PricingSnapshot | null>> {
+    const found = new Map<JobId, PricingSnapshot | null>();
+    if (jobIds.length === 0) return found;
+
+    const rows = await this.db
+      .select()
+      .from(schema.pricingSnapshots)
+      .where(inArray(schema.pricingSnapshots.jobId, [...jobIds] as string[]));
+
+    for (const row of rows) found.set(asJobId(row.jobId), snapshotFrom(row));
+    return found;
+  }
+
+  async count(filter?: JobFilter): Promise<number> {
+    const [row] = await this.db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.jobs)
+      .where(this.conditionsFor(filter));
+    return row?.total ?? 0;
   }
 
   async findById(id: JobId): Promise<Job | null> {

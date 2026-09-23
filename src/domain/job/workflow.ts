@@ -520,7 +520,7 @@ export const isAssignedTo = (
  * to somebody the server will refuse is how a button becomes an error message.
  */
 export const canAcceptJob = (
-  job: Job,
+  job: Pick<Job, 'status' | 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
   viewer?: Pick<User, 'id'>,
 ): boolean => {
   if (job.status !== 'open') return false;

@@ -150,7 +150,7 @@ export const refusalFrom = (row: RefusalRow): SignatureRefusal => ({
   resolutionNote: row.resolutionNote,
 });
 
-const snapshotFrom = (row: SnapshotRow): PricingSnapshot => ({
+export const snapshotFrom = (row: SnapshotRow): PricingSnapshot => ({
   labourRates: {
     normal: row.labourNormalCents,
     overtime: row.labourOvertimeCents,

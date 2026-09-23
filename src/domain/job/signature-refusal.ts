@@ -192,7 +192,9 @@ export const canSeeSignatureRefusal = (
  * loaded FOR A PERSON; the operations themselves work on the whole record,
  * because the rules have to be enforced against the truth.
  */
-export const redactRefusalsForViewer = <T extends Job>(
+export const redactRefusalsForViewer = <
+  T extends Pick<Job, 'primaryTechnicianId' | 'signatureRefusals'>,
+>(
   job: T,
   viewer: Pick<User, 'id' | 'role'> | null,
 ): T => {

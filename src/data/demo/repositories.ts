@@ -15,6 +15,7 @@ import type {
   Job,
   JobId,
   JobSummary,
+  PricingSnapshot,
   Machine,
   MachineId,
   NotificationId,
@@ -87,6 +88,22 @@ class DemoJobRepository implements JobRepository {
     }
 
     return Promise.resolve(jobs);
+  }
+
+  /** The archive's snapshots, read from the jobs this store already holds. */
+  async listPricingSnapshots(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, PricingSnapshot | null>> {
+    const wanted = new Set<string>(jobIds as readonly string[]);
+    const found = new Map<JobId, PricingSnapshot | null>();
+    for (const job of this.context.read().jobs) {
+      if (wanted.has(job.id as string)) found.set(job.id, job.pricingSnapshot);
+    }
+    return Promise.resolve(found);
+  }
+
+  async count(filter?: JobFilter): Promise<number> {
+    return (await this.list(filter)).length;
   }
 
   /**

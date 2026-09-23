@@ -1,4 +1,12 @@
-import { can, userFullName, type IsoDate, type Job, type JobTypeCode, type User } from '@/domain';
+import {
+  can,
+  userFullName,
+  type IsoDate,
+  type Job,
+  type JobTypeCode,
+  type PricingSnapshot,
+  type User,
+} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { WorkflowError } from './errors';
 import { loadJobRows, type JobListRow } from './job-view';
@@ -45,8 +53,28 @@ export const emptyClosedJobFilters: ClosedJobFilters = {
   closedTo: '',
 };
 
+/**
+ * An archive row: the list row, plus the price the job was ISSUED at.
+ *
+ * WHY THE SNAPSHOT TRAVELS BESIDE THE ROW AND NOT INSIDE IT. `JobSummary` is
+ * structurally price-free, which is what makes every other list safe by
+ * construction — a value that was never selected cannot leak. The archive
+ * genuinely needs the snapshot: a job card issued in March must always
+ * re-render at March's rates, never at today's, or an invoice already sent to
+ * a customer silently changes. Those two truths do not fit in one type, so
+ * they are two.
+ *
+ * The archive is an OFFICE screen. `loadClosedJobs` refuses anybody without
+ * `jobs.viewAll` before it reads a row, so the snapshots are fetched only
+ * after that check has passed.
+ */
+export interface ClosedJobRow extends JobListRow {
+  /** What this job was priced at when it was issued. Never recalculated. */
+  readonly pricingSnapshot: PricingSnapshot | null;
+}
+
 export interface ClosedJobsPage {
-  readonly rows: readonly JobListRow[];
+  readonly rows: readonly ClosedJobRow[];
   /** How many matched the filters in total, before the cap. */
   readonly matched: number;
   /** True when `rows` is a capped slice of `matched`. */
@@ -74,7 +102,7 @@ const matchesTerm = (row: JobListRow, needle: string): boolean => {
   return haystack.some((value) => value.toLowerCase().includes(needle));
 };
 
-const closedOn = (job: Job): IsoDate | null =>
+const closedOn = (job: Pick<Job, 'closedAt'>): IsoDate | null =>
   job.closedAt === null ? null : job.closedAt.slice(0, 10);
 
 /**
@@ -83,7 +111,7 @@ const closedOn = (job: Job): IsoDate | null =>
  * Only genuinely closed work: a cancelled job never happened, and a job still
  * in the retired Master Review stage has not been issued.
  */
-export const isArchivedJob = (job: Job): boolean => job.status === 'closed';
+export const isArchivedJob = (job: Pick<Job, 'status'>): boolean => job.status === 'closed';
 
 export const loadClosedJobs = async (
   repos: RepositoryBundle,
@@ -102,7 +130,7 @@ export const loadClosedJobs = async (
   }
 
   const [jobs, customers, sites, users] = await Promise.all([
-    repos.jobs.list({ statuses: ['closed'] }),
+    repos.jobs.listSummaries({ statuses: ['closed'] }),
     repos.customers.list(),
     // Closed jobs resolve their site even where it has since been withdrawn.
     repos.customers.listSites(undefined, { includeArchived: true }),
@@ -112,7 +140,18 @@ export const loadClosedJobs = async (
   const archived = jobs.filter(isArchivedJob);
   // The viewer is passed on, so a refusal on an archived job is redacted here
   // exactly as it is on the job screen.
-  const allRows = await loadJobRows(repos, archived, actor);
+  const [baseRows, snapshots] = await Promise.all([
+    loadJobRows(repos, archived, actor),
+    repos.jobs.listPricingSnapshots(archived.map((job) => job.id)),
+  ]);
+  /*
+   * The snapshot is attached HERE — after the office check at the top of this
+   * function — and nowhere else in the read path.
+   */
+  const allRows: readonly ClosedJobRow[] = baseRows.map((row) => ({
+    ...row,
+    pricingSnapshot: snapshots.get(row.job.id) ?? null,
+  }));
   const needle = filters.term.trim().toLowerCase();
 
   const matchedRows = allRows

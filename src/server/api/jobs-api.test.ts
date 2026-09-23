@@ -186,9 +186,21 @@ describe('reading a job', () => {
       if (price > 0) expect(body).not.toContain(`"unitPrice":${price}`);
     }
 
-    // The rows the technician lists carry the same suppression as the record.
+    /*
+     * The rows the technician lists carry the suppression MORE strongly than
+     * the record does: a list row is a summary, which has no price fields at
+     * all, so there is no suppressed value that could be un-suppressed by
+     * accident.
+     *
+     * Asserted as ABSENCE rather than as null. `expect(undefined).not.toBeNull()`
+     * passes for a property that no longer exists, which is how a rule gets
+     * deleted with a green suite.
+     */
     const listed = (await jobsFor(technician)).find((row) => row.job.jobNumber === jobNumber);
-    expect(listed?.job.pricingSnapshot ?? null).toBeNull();
+    expect(listed, 'the technician must still see this job in their list').toBeDefined();
+    expect(listed?.job).not.toHaveProperty('pricingSnapshot');
+    expect(listed?.job).not.toHaveProperty('parts');
+    expect(listed?.job).not.toHaveProperty('labour');
   });
 
   it('refuses the closed-job archive to a technician entirely', async () => {

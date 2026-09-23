@@ -10,7 +10,7 @@ import { loadJobView } from './job-view';
 import { publishTemplate, startNewVersion } from './checklist-admin';
 import { cancelJob } from './job-operations';
 import { buildHarness, seedUser, type Harness } from './test-harness';
-import { calculateJobTotals, canEditJob, type Job } from '@/domain';
+import { calculateJobTotals, canEditJob, toJobSummary, type Job } from '@/domain';
 
 /**
  * The closed-job archive.
@@ -319,9 +319,16 @@ describe('opening a closed job', () => {
     const page = await loadClosedJobs(harness.repos, master, filters());
     expect(page.rows.length).toBeGreaterThan(0);
     for (const row of page.rows) {
-      // Without a snapshot an old job card would silently re-price at today's
-      // rates, changing an invoice that has already been issued.
-      expect(row.job.pricingSnapshot, row.job.jobNumber).not.toBeNull();
+      /*
+       * Without a snapshot an old job card would silently re-price at today's
+       * rates, changing an invoice that has already been issued.
+       *
+       * The snapshot now travels on the ARCHIVE ROW rather than inside the job
+       * summary — a summary is structurally price-free, and this screen is
+       * office-only. The requirement is word for word the same: every closed
+       * row carries the price the job was issued at.
+       */
+      expect(row.pricingSnapshot, row.job.jobNumber).not.toBeNull();
     }
   });
 
@@ -441,7 +448,12 @@ describe('history links', () => {
       // record living alongside the original.
       expect(matches, label).toHaveLength(1);
       expect(matches[0]!.id, label).toBe(fromArchive!.id);
-      expect(matches[0]!, label).toEqual(fromArchive);
+      /*
+       * The archive row is a SUMMARY of the stored job, so narrowing the
+       * stored job must reproduce it exactly. Comparing the two shapes
+       * directly would only prove they have different numbers of keys.
+       */
+      expect(toJobSummary(matches[0]!), label).toEqual(fromArchive);
     }
   });
 

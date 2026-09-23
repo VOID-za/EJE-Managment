@@ -287,34 +287,65 @@ describe('the jobs on a customer a technician may read', () => {
     expect(numbers).toContain('EJE-1061');
   });
 
-  it('keeps the history of a machine they have worked, with no prices on it', async () => {
+  /*
+   * A HISTORY LIST CARRIES NO MONEY. Not suppressed money, not zeroed money —
+   * none. These rows are summaries, and a summary has no price field to fill
+   * in, so nothing here can be un-suppressed by a later change.
+   *
+   * ASSERTED AS ABSENCE, DELIBERATELY. The previous versions of these three
+   * tests checked `pricingSnapshot` against null, and two of them kept passing
+   * once the property stopped existing: `expect(undefined).not.toBeNull()` is
+   * true. A rule can be deleted under a green suite that way.
+   *
+   * The rules those two tests protected still hold and are still tested, on
+   * the DETAIL view where prices legitimately live — `jobs-api.test.ts` covers
+   * a technician's own finished job keeping its prices, and another
+   * technician's machine-history job losing them — and in the office archive,
+   * where `closed-jobs.test.ts` requires every row to carry its issued price.
+   */
+  const PRICE_FIELDS = ['pricingSnapshot', 'parts', 'labour', 'travel'] as const;
+
+  it('gives a technician the history of a machine they have worked, with no money in it', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const rows = (await record(technician, 'cust-abc')).data.jobRows;
 
     // Riaan's closed service on the machine Sipho has worked: useful history,
     // and none of EJE's business what it was charged at.
     const history = rows.find((row) => row.job.jobNumber === 'EJE-1044');
-    expect(history).toBeDefined();
-    expect(history?.job.pricingSnapshot).toBeNull();
-    expect(history?.job.parts.every((part) => part.unitPrice === 0)).toBe(true);
+    expect(history, 'the machine history must still reach this job').toBeDefined();
+    for (const field of PRICE_FIELDS) expect(history?.job).not.toHaveProperty(field);
   });
 
-  it('keeps the prices on the technician’s own closed job', async () => {
+  it('gives a technician their OWN closed job with no money in it either', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const rows = (await record(technician, 'cust-abc')).data.jobRows;
 
-    // Suppression is per visibility, not per role: his own work still prices.
+    // The row is still here — the visibility rule is untouched. What has gone
+    // is the money, which this screen never rendered.
     const own = rows.find((row) => row.job.jobNumber === 'EJE-1056');
-    expect(own?.job.pricingSnapshot).not.toBeNull();
+    expect(own, 'their own closed work must still be listed').toBeDefined();
+    for (const field of PRICE_FIELDS) expect(own?.job).not.toHaveProperty(field);
   });
 
-  it('serves the office the prices on both, which is unchanged', async () => {
+  it('gives the OFFICE the same rows, and no money in those either', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const rows = (await record(master, 'cust-abc')).data.jobRows;
 
     for (const number of ['EJE-1044', 'EJE-1056']) {
-      expect(rows.find((row) => row.job.jobNumber === number)?.job.pricingSnapshot).not.toBeNull();
+      const row = rows.find((entry) => entry.job.jobNumber === number);
+      expect(row, number).toBeDefined();
+      for (const field of PRICE_FIELDS) expect(row?.job, number).not.toHaveProperty(field);
     }
+  });
+
+  it('serves no price anywhere in a customer record response', async () => {
+    // The whole payload, not a property at a time: a price that reached the
+    // browser through some other field would be just as much a leak.
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const body = JSON.stringify((await record(technician, 'cust-abc')).data.jobRows);
+
+    expect(body).not.toContain('pricingSnapshot');
+    expect(body).not.toContain('unitPrice');
   });
 
   it('counts only the open jobs the viewer may actually open', async () => {
@@ -348,14 +379,22 @@ describe('a machine a technician opens', () => {
   const machine = async (client: ApiTestClient) =>
     client.get<{ readonly jobRows: readonly JobRow[] }>('/api/machines/machine-abc-lv40');
 
-  it('shows its finished history with the prices removed', async () => {
+  it('shows its finished history, reachable and with no money in it', async () => {
+    /*
+     * THIS IS THE PATH a technician reaches historical work by, now that the
+     * operational Jobs list is for current work: Machines -> machine ->
+     * history -> job. It has to stay reachable, so the row being present is
+     * asserted as firmly as the absence of money on it.
+     */
     const technician = await signedInAs(DEMO_USERS.technician);
     const response = await machine(technician);
 
     expect(response.status).toBe(200);
     const history = response.data.jobRows.find((row) => row.job.jobNumber === 'EJE-1044');
-    expect(history).toBeDefined();
-    expect(history?.job.pricingSnapshot).toBeNull();
+    expect(history, 'machine history must reach the closed job').toBeDefined();
+    for (const field of ['pricingSnapshot', 'parts', 'labour', 'travel'] as const) {
+      expect(history?.job).not.toHaveProperty(field);
+    }
   });
 
   it('shows the office the same machine in full, which is unchanged', async () => {
