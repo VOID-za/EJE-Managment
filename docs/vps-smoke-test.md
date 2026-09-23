@@ -24,6 +24,12 @@ PostgreSQL and back. Want
 `{"status":"ok","backend":"postgres","database":"reachable",...}`, and a `308`
 to HTTPS from the second.
 
+`"demoSwitcher"` says whether this deployment offers one-click sign-in as the
+published demonstration accounts. On `eje.syncza.co.za` that is `true` and
+intended; **on the live EJE deployment it must be `false`**, and if it is not,
+remove `EJE_DEMO_SWITCHER` from `/etc/eje/eje.env` and restart before doing
+anything else.
+
 `"backend":"demo"` means `DATABASE_URL` did not reach the process — check
 `/etc/eje/eje.env` and `systemctl show eje -p EnvironmentFile`.
 `503` with `"database":"unreachable"` means the app is up and PostgreSQL is not:

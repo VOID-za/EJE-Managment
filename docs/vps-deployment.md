@@ -228,8 +228,33 @@ It never deletes and it is safe to re-run — a second run writes nothing, and a
 password changed on the site stays changed. See `docs/database.md` for the
 accounts and the rule that they are never created on a live deployment.
 
-**When EJE goes live, the live database gets `db:migrate` and nothing else.**
-Real accounts are created through the administration screen by a Master.
+### The one-click user switcher
+
+Demonstration data is only half of a usable test site; the other half is being
+able to BE each of those people without a password. Add to `/etc/eje/eje.env`:
+
+```
+EJE_DEMO_SWITCHER=eje_production
+```
+
+then `sudo systemctl restart eje`. The value must equal the database in
+`DATABASE_URL`. A **DEMO ONLY · Switch user** control then appears on the
+sign-in screen and in the top bar, offering the five seeded accounts; clicking
+one performs the real server-side sign-in — the published password is verified
+against the stored Argon2id hash and an ordinary session is issued — so every
+permission and visibility rule behaves exactly as it does after a manual login.
+
+Confirm which deployment has it on, from outside, in one request:
+
+```bash
+curl -s https://eje.syncza.co.za/api/health
+```
+
+Want `"demoSwitcher": true` here and **`false` on the live deployment**.
+
+**When EJE goes live, the live database gets `db:migrate` and nothing else** —
+no demo seed, and no `EJE_DEMO_SWITCHER` line. Real accounts are created through
+the administration screen by a Master.
 
 ---
 

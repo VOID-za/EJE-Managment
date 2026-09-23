@@ -9,10 +9,14 @@ import { useApp } from '@/providers/AppProvider';
 /**
  * Switching between the seeded development accounts, in one click.
  *
- * DEVELOPMENT ONLY, and it says so on every surface it draws. The list comes
- * from `GET /api/dev/demo-users`, which answers 404 in production — so this
- * component renders NOTHING there. There is no flag to get wrong on the client:
- * if the server has no switcher, the browser never learns of one.
+ * DEMONSTRATION DEPLOYMENTS ONLY, and it says so on every surface it draws.
+ *
+ * THE CLIENT HAS NO OPINION ABOUT WHETHER IT SHOULD EXIST. The list comes from
+ * `GET /api/dev/demo-users`, which answers 404 unless the server's own gate is
+ * open — a development build, or a production build whose `EJE_DEMO_SWITCHER`
+ * names its database. An empty list renders nothing, so there is no flag here
+ * to get wrong, no build-time constant that could disagree with the server, and
+ * nothing a browser can set to make the control appear.
  *
  * WHAT HAPPENS ON A CLICK: the server performs the real sign-in — it verifies
  * the published development password against the account's stored Argon2id hash

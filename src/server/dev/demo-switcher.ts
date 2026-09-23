@@ -1,6 +1,7 @@
 import 'server-only';
 import type { PersistenceBackend } from '@/data/backend';
 import type { RepositoryBundle } from '@/data/repositories';
+import { classifyDatabaseUrl } from '@/db/connection-guard';
 import { DEMO_PASSWORD, seedPeople } from '@/db/seed/people';
 import { DEMO_PASSWORD as IN_MEMORY_DEMO_PASSWORD } from '@/server/auth/demo-store';
 
@@ -20,22 +21,76 @@ import { DEMO_PASSWORD as IN_MEMORY_DEMO_PASSWORD } from '@/server/auth/demo-sto
  * authorization rule then applies exactly as it always does, because there is
  * only one kind of session.
  *
- * THREE THINGS KEEP IT OUT OF PRODUCTION, and all three must hold:
+ * THREE THINGS KEEP IT OUT OF A LIVE DEPLOYMENT, and all three must hold:
  *
- *  1. `NODE_ENV=production` switches it off completely. The route answers 404 —
- *     not "refused", because in production the endpoint genuinely does not
- *     exist. `next build` and `next start` set that variable, so a production
- *     deployment has no switcher even before anything is configured.
+ *  1. The deployment must not be running as production — OR must have named
+ *     its own database in `EJE_DEMO_SWITCHER`. See below; that second door
+ *     exists for the staging site and nothing else.
  *  2. The email must be one of the five accounts the development seed creates.
  *     A name is not enough: the list is read from the seed itself.
  *  3. The account's password must be the one published in
  *     `docs/development-seed.md`. An account with a real password cannot be
  *     switched into, so even a misconfigured deployment holding real people
  *     would hand this nothing.
+ *
+ * (3) IS THE ONE THAT ACTUALLY PROTECTS EJE'S LIVE SYSTEM, and it is worth
+ * being plain about why. (1) and (2) are configuration, and configuration can
+ * be copied to the wrong machine. (3) cannot: the live database's accounts
+ * belong to real people whose passwords are not in this repository, so a
+ * switcher turned on there by mistake would find five addresses that do not
+ * exist and, if they somehow did, hashes that do not match. It fails closed on
+ * the only thing an attacker cannot change from outside.
  */
-export const isDemoSwitcherEnabled = (
-  env: { readonly NODE_ENV?: string | undefined } = process.env,
-): boolean => (env.NODE_ENV ?? '').toLowerCase() !== 'production';
+
+/**
+ * WHY `NODE_ENV` ALONE WAS NOT THE RIGHT CONDITION.
+ *
+ * It was, while "not production" meant "somebody's laptop". It stopped being
+ * right the day EJE got a STAGING DEPLOYMENT: eje.syncza.co.za is a real
+ * server, started by systemd, built by `next build` — so `NODE_ENV` is
+ * `production` there and always will be, because that is what makes Next serve
+ * a production build. The switcher therefore vanished from the one deployment
+ * whose entire purpose is people trying the application out, and the only ways
+ * back were to run a development build in production or to weaken the check.
+ * Neither is acceptable.
+ *
+ * So the condition is no longer "which build is this" but "which database is
+ * this", and it is asked in the shape the rest of this repository already uses
+ * for a deliberate act — `EJE_PRODUCTION_MIGRATION`, `EJE_PRODUCTION_DEMO_SEED`,
+ * `EJE_RESET_CONFIRM`: NAME IT. `EJE_DEMO_SWITCHER` must equal the database in
+ * `DATABASE_URL`, so the line cannot be a `true` somebody pasted, cannot be
+ * inherited from another machine's environment file without being wrong, and
+ * reads in `/etc/eje/eje.env` as a sentence about one named database.
+ *
+ * It is deliberately the same database the demo seed filled. A deployment that
+ * has demonstration accounts in it is a deployment where switching between them
+ * is the point; a deployment that does not is one where this finds nothing.
+ */
+export const DEMO_SWITCHER = 'EJE_DEMO_SWITCHER';
+
+export interface SwitcherEnvironment {
+  readonly NODE_ENV?: string | undefined;
+  readonly EJE_DEMO_SWITCHER?: string | undefined;
+  readonly DATABASE_URL?: string | undefined;
+}
+
+export const isDemoSwitcherEnabled = (env: SwitcherEnvironment = process.env): boolean => {
+  // Not a production build: a developer's own machine, and `npm test`.
+  if ((env.NODE_ENV ?? '').toLowerCase() !== 'production') return true;
+
+  const declared = (env.EJE_DEMO_SWITCHER ?? '').trim();
+  if (declared.length === 0) return false;
+
+  /*
+   * It has to name THIS deployment's database.
+   *
+   * `classifyDatabaseUrl` is borrowed rather than re-parsed: it is the same
+   * reader the connection guard and both seeds use, so "what is this database
+   * called" has one answer in this repository rather than four.
+   */
+  const { databaseName } = classifyDatabaseUrl(env.DATABASE_URL ?? '');
+  return databaseName.length > 0 && declared === databaseName;
+};
 
 /** The accounts it may switch into, read from the seed rather than restated. */
 export const DEMO_ACCOUNTS = seedPeople.map(({ user }) => ({
@@ -60,7 +115,8 @@ export const SWITCH_REFUSED = 'That development account cannot be switched into.
  * That is precisely the dead end this sentence exists to end.
  *
  * Nothing is disclosed by saying it. These five addresses are what the list
- * endpoint just returned, and the endpoint does not exist in production at all.
+ * endpoint just returned, and that endpoint answers 404 unless the deployment
+ * has named its own database — see `isDemoSwitcherEnabled`.
  */
 export const SWITCH_NOT_SEEDED =
   'That development account is not in this database. Run `npm run db:seed` to create the ' +

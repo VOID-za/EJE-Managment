@@ -70,6 +70,7 @@ nothing in `.env.example` is a real credential.
 | `EJE_PRODUCTION_MIGRATION` | `db:migrate` against production | Must name the database being migrated, exactly. |
 | `EJE_PRODUCTION_DEMO_SEED` | `db:seed:demo` against production | Must name the database being filled, exactly. **Test deployments only** — see "Seeding a test deployment". |
 | `EJE_RESET_CONFIRM` | `db:reset` | Must name the database being emptied, exactly. |
+| `EJE_DEMO_SWITCHER` | demonstration deployments | Must name the database in `DATABASE_URL`, exactly. Turns the **DEMO ONLY · Switch user** control on in a production build. **Test deployments only** — see `docs/development-seed.md`. |
 | `EJE_STORAGE_DIR` | PostgreSQL deployments | Where attachment bytes live. **Development and production must not share one.** |
 
 ---

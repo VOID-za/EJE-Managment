@@ -71,21 +71,50 @@ an ordinary session cookie is issued. There is only one kind of session in this
 application, so every permission, every visibility rule and every refusal
 behaves exactly as it does when you log in by hand.
 
-**Three things keep it out of production, and all three must hold:**
+**Three things keep it out of the live deployment, and all three must hold:**
 
-1. `NODE_ENV=production` removes it. The endpoint answers **404** — not
-   "refused", because there it does not exist. `next build` and `next start` set
-   that variable, so **`npm run redeploy` has no switcher**. Use `npm run dev`
-   when you want one.
+1. The deployment must not be a production build — **or** must have named its
+   own database in `EJE_DEMO_SWITCHER`. `npm run dev` satisfies the first;
+   nothing else does, because `next build` and `next start` set
+   `NODE_ENV=production`. Where neither holds, the endpoint answers **404** —
+   not "refused", because there it does not exist.
 2. The address must be one of the five accounts above. The list is read from the
    seed, not restated.
 3. The account's password must be the published development one. An account
    with a real password cannot be switched into, so even a misconfigured
    deployment holding real people would hand it nothing.
 
-The control also draws nothing until the seed has been run: the list is filtered
-against the register, and an empty list is how the browser is told there is
-nothing to offer.
+**(3) is the one that actually protects EJE's live system**, and it is worth
+being plain about why. (1) and (2) are configuration, and configuration can be
+copied to the wrong machine. (3) cannot: a live database's accounts belong to
+real people whose passwords are not in this repository, so a switcher turned on
+there by mistake would find five addresses that do not exist and, if they
+somehow did, hashes that do not match.
+
+### On the test deployment
+
+`eje.syncza.co.za` is a real server running a production build, so `NODE_ENV`
+is `production` there and always will be — that is what makes Next serve a
+production build at all. Condition (1) is therefore satisfied the other way,
+by naming the database:
+
+```
+EJE_DEMO_SWITCHER=eje_production
+```
+
+in `/etc/eje/eje.env`, then `sudo systemctl restart eje`. It must EQUAL the
+database in `DATABASE_URL`; a `true` does nothing, and the same line copied to a
+machine serving a differently-named database is simply wrong, which is exactly
+when being wrong is useful. `GET /api/health` reports `"demoSwitcher": true`, so
+whether a deployment has it on is one request away rather than a file on a
+server. **Never add that line to the live EJE deployment.**
+
+### On an unseeded database
+
+The control still appears and the list still shows five names, deliberately: a
+control that hides itself gives you no way to tell a missing feature from an
+unseeded database. Clicking a name you have not seeded says so, and tells you to
+run the seed.
 
 The ordinary login form is untouched and still works — including refusing a
 wrong password.

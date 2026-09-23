@@ -22,15 +22,74 @@ import {
  * cannot reach it however hard it tries.
  */
 describe('when the switcher exists at all', () => {
-  it('is off in production, and no flag turns it back on', () => {
-    expect(isDemoSwitcherEnabled({ NODE_ENV: 'production' })).toBe(false);
-    expect(isDemoSwitcherEnabled({ NODE_ENV: 'PRODUCTION' })).toBe(false);
-  });
+  const STAGING = 'postgresql://eje_app:pw@localhost:5432/eje_production';
 
   it('is on in development and in test', () => {
     expect(isDemoSwitcherEnabled({ NODE_ENV: 'development' })).toBe(true);
     expect(isDemoSwitcherEnabled({ NODE_ENV: 'test' })).toBe(true);
     expect(isDemoSwitcherEnabled({ NODE_ENV: undefined })).toBe(true);
+  });
+
+  it('is OFF in a production build that has not said otherwise', () => {
+    // Which is every deployment by default, including the live one: the flag
+    // below has to be added on purpose, to one machine, naming one database.
+    expect(isDemoSwitcherEnabled({ NODE_ENV: 'production', DATABASE_URL: STAGING })).toBe(false);
+    expect(isDemoSwitcherEnabled({ NODE_ENV: 'PRODUCTION', DATABASE_URL: STAGING })).toBe(false);
+  });
+
+  it('is on in a production build that names its own database', () => {
+    // The staging deployment. `next build` makes NODE_ENV production there and
+    // always will, so the question this asks is which DATABASE, not which build.
+    expect(
+      isDemoSwitcherEnabled({
+        NODE_ENV: 'production',
+        DATABASE_URL: STAGING,
+        EJE_DEMO_SWITCHER: 'eje_production',
+      }),
+    ).toBe(true);
+  });
+
+  it('is not turned on by a word that merely means yes', () => {
+    for (const vague of ['true', 'yes', '1', 'on', 'enabled', 'i-understand', '']) {
+      expect(
+        isDemoSwitcherEnabled({
+          NODE_ENV: 'production',
+          DATABASE_URL: STAGING,
+          EJE_DEMO_SWITCHER: vague,
+        }),
+        vague,
+      ).toBe(false);
+    }
+  });
+
+  it('is not turned on by a flag that names some OTHER database', () => {
+    /*
+     * The case this shape exists for. An environment file copied from the
+     * staging machine to the live one carries `EJE_DEMO_SWITCHER=eje_production`
+     * — and against a live database called anything else it is simply wrong,
+     * which is exactly when being wrong is useful.
+     */
+    expect(
+      isDemoSwitcherEnabled({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://eje_app:pw@localhost:5432/eje_live',
+        EJE_DEMO_SWITCHER: 'eje_production',
+      }),
+    ).toBe(false);
+  });
+
+  it('is off when there is no readable database to name', () => {
+    // Fails closed rather than matching an empty name against an empty flag.
+    expect(
+      isDemoSwitcherEnabled({ NODE_ENV: 'production', EJE_DEMO_SWITCHER: 'eje_production' }),
+    ).toBe(false);
+    expect(
+      isDemoSwitcherEnabled({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'not a url',
+        EJE_DEMO_SWITCHER: '',
+      }),
+    ).toBe(false);
   });
 
   it('names only the accounts the development seed creates', () => {
@@ -104,6 +163,47 @@ describe('POST /api/dev/demo-users', () => {
     expect(me.status).toBe(200);
     expect(me.data.user.email).toBe('technician1@eje-demo.local');
     expect(me.data.user.role).toBe('technician');
+  });
+
+  it('switches into every one of the five, with the role the seed gave them', async () => {
+    // The control offers five buttons. Each of them has to work, and each has
+    // to arrive at the role the seed says — not the role the browser asked for.
+    for (const account of DEMO_ACCOUNTS) {
+      const client = new ApiTestClient();
+      const switched = await client.post('/api/dev/demo-users', { email: account.email });
+      expect(switched.status, account.email).toBe(200);
+
+      const me = await client.get<{ user: { email: string; role: string } }>('/api/auth/me');
+      expect(me.data.user.email, account.email).toBe(account.email);
+      expect(me.data.user.role, account.email).toBe(account.role);
+    }
+  });
+
+  it('is gone entirely — both verbs — when the gate is shut', async () => {
+    /*
+     * The route reads the gate on every request rather than at module load, so
+     * this is the real thing rather than a stand-in: a production build with no
+     * `EJE_DEMO_SWITCHER` has no switcher, and knowing the URL does not help.
+     */
+    const env = process.env as Record<string, string | undefined>;
+    const saved = { NODE_ENV: env.NODE_ENV, EJE_DEMO_SWITCHER: env.EJE_DEMO_SWITCHER };
+    env.NODE_ENV = 'production';
+    delete env.EJE_DEMO_SWITCHER;
+    try {
+      expect((await new ApiTestClient().get('/api/dev/demo-users')).status).toBe(404);
+
+      const attempt = await new ApiTestClient().post('/api/dev/demo-users', {
+        email: 'master@eje-demo.local',
+      });
+      expect(attempt.status).toBe(404);
+      // And it issued nothing: a 404 must not hand out a session.
+      expect(JSON.stringify(attempt.raw)).not.toContain('user');
+    } finally {
+      if (saved.NODE_ENV === undefined) delete env.NODE_ENV;
+      else env.NODE_ENV = saved.NODE_ENV;
+      if (saved.EJE_DEMO_SWITCHER === undefined) delete env.EJE_DEMO_SWITCHER;
+      else env.EJE_DEMO_SWITCHER = saved.EJE_DEMO_SWITCHER;
+    }
   });
 
   it('applies the ordinary authorization rules to a switched session', async () => {

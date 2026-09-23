@@ -57,8 +57,8 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
       </form>
 
       <div className="ml-auto flex items-center gap-1.5">
-        {/* Development only. Renders nothing at all in production, because the
-            endpoint it reads does not exist there. */}
+        {/* Demonstration deployments only. Renders nothing at all unless the
+            server says the switcher exists — see DemoUserSwitcher. */}
         <span className="hidden sm:block">
           <DemoUserSwitcher variant="header" />
         </span>

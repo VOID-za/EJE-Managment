@@ -31,9 +31,12 @@ describe('authentication is required', () => {
    *
    * The development user switcher is a third, and it is only an exception at
    * all because it is a way of SIGNING IN — it cannot require a session for the
-   * same reason the login route cannot. It does not exist in production, which
-   * `src/server/dev/demo-switcher.test.ts` holds it to, and it serves nothing
-   * on a database that has not been seeded.
+   * same reason the login route cannot. It answers 404 in a production build
+   * unless that deployment has named its own database in `EJE_DEMO_SWITCHER`,
+   * which `src/server/dev/demo-switcher.test.ts` holds it to; and even where it
+   * does exist it signs in only as the five seeded accounts, only against the
+   * published demonstration password, so a database holding real people offers
+   * it nothing.
    *
    * THE HEALTH CHECK IS THE FOURTH, and it is an exception because the thing
    * asking is a process manager or a reverse proxy, neither of which can hold
@@ -64,7 +67,22 @@ describe('authentication is required', () => {
     // Read from the raw body: the health check answers a proxy, so it is not
     // wrapped in the `{ data }` envelope the rest of the API uses.
     const payload = response.raw as Record<string, unknown>;
-    expect(Object.keys(payload).sort()).toEqual(['backend', 'build', 'database', 'status']);
+    /*
+     * FIVE KEYS, AND THE LIST IS THE POINT. Pinned exactly so that adding a
+     * sixth is a decision somebody makes here, in front of this comment, rather
+     * than a field that arrives with a feature. `demoSwitcher` was added that
+     * way: it is a boolean about this deployment's own configuration, it names
+     * no database and carries no credential, and it says strictly less than
+     * `GET /api/dev/demo-users` — which answers 200 with the five addresses
+     * whenever it is true.
+     */
+    expect(Object.keys(payload).sort()).toEqual([
+      'backend',
+      'build',
+      'database',
+      'demoSwitcher',
+      'status',
+    ]);
 
     const body = JSON.stringify(payload).toLowerCase();
     for (const secret of ['postgres://', 'postgresql://', 'password', 'localhost', '5432', 'error']) {
