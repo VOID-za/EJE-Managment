@@ -219,6 +219,51 @@ export const loadJobList = async (
   );
 };
 
+/**
+ * The statuses the OPERATIONAL Jobs screen is for.
+ *
+ * Everything except the two terminal states. Closed work has its own screen and
+ * cancelled work never happened; neither belongs in a list of what the business
+ * is currently doing, and hydrating both to draw it was most of what the jobs
+ * read spent its queries on.
+ *
+ * THIS NARROWS ONE SCREEN, NOT A RULE. A technician's access to the finished
+ * work on a machine they have serviced is Decision 5's `machine_history`, it is
+ * reached through Customers -> customer -> machine -> history, and it is
+ * untouched here. That path was verified against the running application before
+ * this filter was switched on: machine detail answers 200 to a technician, its
+ * history carries the closed jobs, and those jobs open.
+ */
+export const ACTIVE_JOB_STATUSES = [
+  'draft',
+  'open',
+  'in_progress',
+  'awaiting_spares',
+  'completion',
+  'customer_signature',
+  'review',
+  'awaiting_delivery',
+  'submitted',
+] as const satisfies readonly Job['status'][];
+
+/**
+ * The operational Jobs screen: current work, as this person may read it.
+ *
+ * The same visibility rule as `loadJobList`, asked of a narrower set of rows —
+ * and asked of the DATABASE, not of JavaScript afterwards.
+ */
+export const loadActiveJobList = async (
+  repos: RepositoryBundle,
+  actor: Pick<User, 'id' | 'role'>,
+): Promise<readonly JobListRow[]> => {
+  const jobs = await repos.jobs.listSummaries({ statuses: ACTIVE_JOB_STATUSES });
+  if (can(actor.role, 'jobs.viewAll')) return loadJobRows(repos, jobs, actor);
+
+  const participated = await repos.jobs.listParticipatedJobs(actor.id);
+  const visible = summariesVisibleTo(actor, jobs, technicianHistoryFrom(participated));
+  return loadJobRows(repos, visible, actor);
+};
+
 export const loadJobRows = async (
   repos: RepositoryBundle,
   jobs: readonly JobSummary[],

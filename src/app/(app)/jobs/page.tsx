@@ -101,14 +101,14 @@ const JobsPageContent = () => {
 
   // Scoped by the read, which decides what this person may see; the filters
   // below are the user's own choices over what came back.
-  const query = useQuery(`jobs:list:${user.id}`, async () => (await reads.jobs()).rows);
+  const query = useQuery(`jobs:list:${user.id}`, () => reads.jobs());
 
   const rows = useMemo(() => {
-    const all = query.data ?? [];
+    const all = query.data?.rows ?? [];
     const needle = term.trim().toLowerCase();
 
     return all
-      // Cancelled work is already excluded for a technician by `loadJobList`.
+      // Closed and cancelled work is excluded by `loadActiveJobList`.
       .filter((row) => (refusalsOnly ? refusalAwaitingResolution(row.job) : true))
       .filter((row) =>
         // The refusal queue is a queue, not a status: it ignores the status
@@ -144,10 +144,11 @@ const JobsPageContent = () => {
 
   // Counted over everything this user may see — which is what the read
   // returned, so nothing has to be filtered out again here.
-  const visible = query.data ?? [];
+  const visible = query.data?.rows ?? [];
   const quickCount = (filter: StatusFilter): number =>
     visible.filter((row) => matchesStatus(row.job.status, filter, row.job.scheduledDate)).length;
-  const closedCount = visible.filter((row) => row.job.status === 'closed').length;
+  // Counted by the server: the operational list no longer carries closed work.
+  const closedCount = query.data?.closedCount ?? 0;
   const refusalCount = visible.filter((row) => refusalAwaitingResolution(row.job)).length;
   const canSeeRefusalQueue = can(user.role, 'jobs.viewAnySignatureRefusal');
 

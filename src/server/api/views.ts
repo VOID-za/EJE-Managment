@@ -16,6 +16,7 @@ import { loadCalendar } from '@/application/calendar';
 import { loadClosedJobs, type ClosedJobFilters } from '@/application/closed-jobs';
 import { loadConversations } from '@/application/chat-operations';
 import {
+  loadActiveJobList,
   loadJobList,
   loadJobRows,
   loadJobView,
@@ -75,9 +76,26 @@ const requireOffice = (actor: User, capability: Parameters<typeof can>[1], what:
 /* Jobs                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export const jobsView = async ({ repos, actor }: ViewContext) => ({
-  rows: await loadJobList(repos, actor),
-});
+/**
+ * The OPERATIONAL Jobs screen.
+ *
+ * Active work only. Closed work has its own screen and cancelled work never
+ * happened; a technician still reaches the finished work on a machine they have
+ * serviced through Customers -> customer -> machine -> history, which is where
+ * Decision 5 puts it.
+ *
+ * The office tile that links to the archive still says how much is in there —
+ * now a `count(*)`, where it used to hydrate every closed job in the business
+ * and take `.length`. Office-only, because the tile is.
+ */
+export const jobsView = async ({ repos, actor }: ViewContext) => {
+  const office = can(actor.role, 'jobs.viewAll');
+  const [rows, closedCount] = await Promise.all([
+    loadActiveJobList(repos, actor),
+    office ? repos.jobs.count({ statuses: ['closed'] }) : Promise.resolve(0),
+  ]);
+  return { rows, closedCount };
+};
 
 /**
  * One job, everything its screen needs.

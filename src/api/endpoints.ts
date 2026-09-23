@@ -201,7 +201,7 @@ export interface MessagesScreen {
 export const reads = {
   shell: () => query<{ unreadNotifications: number; unreadMessages: number }>('/api/shell'),
   dashboard: () => query<DashboardScreen>('/api/dashboard'),
-  jobs: () => query<{ rows: readonly JobListRow[] }>('/api/jobs'),
+  jobs: () => query<{ rows: readonly JobListRow[]; closedCount: number }>('/api/jobs'),
   job: (jobNumber: string) => query<JobScreen>(`/api/jobs/${segment(jobNumber)}`),
   jobForm: () => query<JobFormData>('/api/jobs/form'),
   closedJobs: (filters: ClosedJobFilters) =>

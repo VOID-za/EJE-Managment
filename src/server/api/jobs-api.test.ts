@@ -21,6 +21,38 @@ const jobsFor = async (client: ApiTestClient): Promise<readonly JobListRow[]> =>
   (await client.get<JobsPayload>('/api/jobs')).data.rows;
 
 /**
+ * The finished work a technician can reach, by the route they actually reach it.
+ *
+ * The operational Jobs list is CURRENT work — closed and cancelled jobs are not
+ * in it. Historical work is reached the way Decision 5 describes it:
+ * Customers -> customer -> machine -> history. These tests used to discover a
+ * closed job through `/api/jobs`, which worked only because that list carried
+ * every job ever raised; discovering it here keeps the tests honest about the
+ * path a technician has.
+ */
+const historyFor = async (client: ApiTestClient): Promise<readonly JobListRow[]> => {
+  type CustomerEntry = { readonly customer?: { readonly id: string }; readonly id?: string };
+  const customers = (await client.get<readonly CustomerEntry[]>('/api/customers')).data;
+
+  const rows: JobListRow[] = [];
+  for (const entry of customers) {
+    const customerId = entry.customer?.id ?? entry.id;
+    if (customerId === undefined) continue;
+    const record = await client.get<{ readonly machines: readonly { readonly id: string }[] }>(
+      `/api/customers/${customerId}`,
+    );
+    if (record.status !== 200) continue;
+    for (const machine of record.data.machines) {
+      const detail = await client.get<{ readonly jobRows: readonly JobListRow[] }>(
+        `/api/machines/${machine.id}`,
+      );
+      if (detail.status === 200) rows.push(...detail.data.jobRows);
+    }
+  }
+  return rows;
+};
+
+/**
  * DECISION 5 over HTTP.
  *
  * The visibility rule was already proven at the application layer. What is
@@ -111,7 +143,7 @@ describe('reading a job', () => {
   it('serves a technician the history of a machine they have worked, without prices', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const me = await technician.get<{ user: { id: string } }>('/api/auth/me');
-    const visible = await jobsFor(technician);
+    const visible = await historyFor(technician);
 
     // A FINISHED job on a machine they have worked, which was somebody else's:
     // reached through the machine rather than through the assignment, so the
@@ -138,7 +170,8 @@ describe('reading a job', () => {
   it('serves a technician their OWN finished job with its prices intact', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const me = await technician.get<{ user: { id: string } }>('/api/auth/me');
-    const own = (await jobsFor(technician)).find(
+    // Finished work, reached the way a technician reaches it: machine history.
+    const own = (await historyFor(technician)).find(
       (row) => row.job.status === 'closed' && row.job.primaryTechnicianId === me.data.user.id,
     );
     expect(own).toBeDefined();
@@ -157,7 +190,7 @@ describe('reading a job', () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const me = await technician.get<{ user: { id: string } }>('/api/auth/me');
 
-    const closed = (await jobsFor(technician)).find(
+    const closed = (await historyFor(technician)).find(
       (row) =>
         row.job.status === 'closed' &&
         row.job.primaryTechnicianId !== me.data.user.id &&
@@ -196,8 +229,8 @@ describe('reading a job', () => {
      * passes for a property that no longer exists, which is how a rule gets
      * deleted with a green suite.
      */
-    const listed = (await jobsFor(technician)).find((row) => row.job.jobNumber === jobNumber);
-    expect(listed, 'the technician must still see this job in their list').toBeDefined();
+    const listed = (await historyFor(technician)).find((row) => row.job.jobNumber === jobNumber);
+    expect(listed, 'the technician must still reach this job through machine history').toBeDefined();
     expect(listed?.job).not.toHaveProperty('pricingSnapshot');
     expect(listed?.job).not.toHaveProperty('parts');
     expect(listed?.job).not.toHaveProperty('labour');
