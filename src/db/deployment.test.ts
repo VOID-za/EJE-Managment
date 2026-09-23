@@ -9,7 +9,12 @@ import {
   ProductionMigrationRefused,
 } from './connection-guard';
 import { loadEnvFiles } from './seed/env';
-import { resolveResetTarget, resolveSeedTarget, SeedRefused } from './seed/guards';
+import {
+  resolveDemoSeedTarget,
+  resolveResetTarget,
+  resolveSeedTarget,
+  SeedRefused,
+} from './seed/guards';
 
 /**
  * THE VPS, WRITTEN DOWN.
@@ -189,6 +194,63 @@ describe('a normal development command', () => {
     expect(
       resolveResetTarget({ DATABASE_URL: DEVELOPMENT, EJE_RESET_CONFIRM: 'eje_dev' }).databaseName,
     ).toBe('eje_dev');
+  });
+});
+
+describe('filling the TEST deployment with demonstration data', () => {
+  /*
+   * eje.syncza.co.za is staging, its database is called `eje_production`, and
+   * it is useless empty. `npm run db:seed:demo` is how it is filled — and the
+   * contract is that nothing about it makes `npm run db:seed` any weaker.
+   */
+  it('needs the database named, and says so with the line to type', () => {
+    expect(() => resolveDemoSeedTarget({ DATABASE_URL: PRODUCTION })).toThrow(
+      /EJE_PRODUCTION_DEMO_SEED=eje_production npm run db:seed:demo/u,
+    );
+  });
+
+  it('proceeds when it is named', () => {
+    expect(
+      resolveDemoSeedTarget({
+        DATABASE_URL: PRODUCTION,
+        EJE_PRODUCTION_DEMO_SEED: 'eje_production',
+      }).databaseName,
+    ).toBe('eje_production');
+  });
+
+  it('still needs it under the VPS environment, which sets NODE_ENV=production', () => {
+    expect(() =>
+      resolveDemoSeedTarget({ NODE_ENV: 'production', DATABASE_URL: PRODUCTION }),
+    ).toThrow(SeedRefused);
+    expect(
+      resolveDemoSeedTarget({
+        NODE_ENV: 'production',
+        DATABASE_URL: PRODUCTION,
+        EJE_PRODUCTION_DEMO_SEED: 'eje_production',
+      }).host,
+    ).toBe('localhost');
+  });
+
+  it('leaves db:seed, db:reset and db:migrate exactly as they were', () => {
+    const acknowledged = {
+      DATABASE_URL: PRODUCTION,
+      EJE_PRODUCTION_DEMO_SEED: 'eje_production',
+    };
+    // The demo acknowledgement opens ONE door. It is not a key to the building.
+    expect(() => resolveSeedTarget(acknowledged)).toThrow(SeedRefused);
+    expect(() => resolveResetTarget(acknowledged)).toThrow(SeedRefused);
+    expect(() =>
+      assertProductionMigrationIntent(PRODUCTION, {
+        NODE_ENV: 'production',
+        ...(acknowledged as Record<string, string>),
+      }),
+    ).toThrow(ProductionMigrationRefused);
+  });
+
+  it('is the ordinary seed against eje_dev, with nothing extra to say', () => {
+    expect(resolveDemoSeedTarget({ DATABASE_URL: DEVELOPMENT })).toEqual(
+      resolveSeedTarget({ DATABASE_URL: DEVELOPMENT }),
+    );
   });
 });
 

@@ -64,9 +64,11 @@ nothing in `.env.example` is a real credential.
 | `DATABASE_URL` | `db:migrate`, `db:studio`, the repositories | |
 | `TEST_DATABASE_URL` | `db:test` | **The tests drop and rebuild the public schema.** The helper refuses any URL whose database name does not contain `test`. |
 | `DRIZZLE_DEBUG` | optional | `true` logs every statement |
-| `EJE_SEED_ALLOW` | `db:seed`, rarely | `i-understand` lets the development seed run against a host it would otherwise refuse. It can never override `NODE_ENV=production`. |
-| `EJE_DEMO_PASSWORD` | optional | The password `db:seed` gives the demonstration accounts |
-| `EJE_DATABASE_ALLOW` | rarely | `i-understand` lets a non-production process connect to a database the guard would refuse. See below. |
+| `EJE_SEED_ALLOW` | `db:seed`, rarely | `i-understand` lets the development seed run against an UNFAMILIAR REMOTE HOST it would otherwise refuse. It can never override `NODE_ENV=production` and it can never override a production NAME. |
+| `EJE_DEMO_PASSWORD` | optional | The password the seeds give the demonstration accounts |
+| `EJE_DATABASE_ALLOW` | rarely | `i-understand` lets a non-production process connect to a database the guard would refuse. It does **not** open `db:migrate` against a production database. See below. |
+| `EJE_PRODUCTION_MIGRATION` | `db:migrate` against production | Must name the database being migrated, exactly. |
+| `EJE_PRODUCTION_DEMO_SEED` | `db:seed:demo` against production | Must name the database being filled, exactly. **Test deployments only** — see "Seeding a test deployment". |
 | `EJE_RESET_CONFIRM` | `db:reset` | Must name the database being emptied, exactly. |
 | `EJE_STORAGE_DIR` | PostgreSQL deployments | Where attachment bytes live. **Development and production must not share one.** |
 
@@ -173,9 +175,85 @@ whose name says nothing is **refused rather than assumed safe**. Nothing in
 this repository establishes what EJE's production database will be called, so
 guessing would be worse than useless.
 
+**The first row is why there is a second gate.** `NODE_ENV=production` is right
+for the serving process — it is not a safety check's job to argue with a
+deployment about its own database — but it is ambient: the VPS environment file
+carries it, so sourcing that file for any purpose would otherwise put the live
+schema one command away. `assertProductionMigrationIntent` therefore requires
+`EJE_PRODUCTION_MIGRATION` to **name the database** before `db:migrate` will
+touch a production one, and it holds even where `EJE_DATABASE_ALLOW` is set.
+
 **What this cannot do.** It works from names. The real separation is
 credentials a development machine never holds, and that is deployment
 configuration, not code.
+
+---
+
+## The two seeds, and why there are two
+
+Both write the SAME fictional dataset from the same code (`src/db/seed/apply.ts`).
+They differ only in which database each will accept.
+
+| | `npm run db:seed` | `npm run db:seed:demo` |
+|---|---|---|
+| Local or development-named database | yes | yes — identical, it delegates |
+| Unfamiliar remote host | `EJE_SEED_ALLOW=i-understand` | the same |
+| Production-named database | **refused, no override** | `EJE_PRODUCTION_DEMO_SEED=<that name>` |
+| `NODE_ENV=production` | **refused, no override** | `EJE_PRODUCTION_DEMO_SEED=<that name>` |
+
+### Seeding a test deployment
+
+EJE's staging site is a real server whose database is called `eje_production`,
+and a staging site nobody can sign into is not a staging site. The ordinary
+seed will not fill it and **must not be taught how**: `db:seed` is the command
+somebody types without thinking, and the day EJE has a live system that refusal
+is the only thing between published credentials and real customers.
+
+So the refusal stays and `db:seed:demo` is a second door with its own lock:
+
+```
+set -a; . /etc/eje/eje.env; set +a
+cd /srv/eje/app
+sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE \
+  EJE_PRODUCTION_DEMO_SEED=eje_production npm run db:seed:demo
+```
+
+`EJE_PRODUCTION_DEMO_SEED` must EQUAL the database's own name. A word meaning
+yes would survive being exported once in a shell profile and then be
+permanently on; a value that has to match the database in front of it is wrong
+the moment it is reused somewhere else, which is exactly when it needs to be.
+The acknowledgements are not interchangeable — `EJE_PRODUCTION_MIGRATION`,
+`EJE_SEED_ALLOW` and `EJE_DATABASE_ALLOW` do not open this door, and this one
+does not open theirs.
+
+### The demo credentials, and the one rule about them
+
+| Email | Role | Password |
+|---|---|---|
+| `master@eje-demo.local` | master | `EjeDemo#2026` |
+| `coordinator@eje-demo.local` | coordinator | `EjeDemo#2026` |
+| `technician1@eje-demo.local` | technician | `EjeDemo#2026` |
+| `technician2@eje-demo.local` | technician | `EjeDemo#2026` |
+| `technician3@eje-demo.local` | technician | `EjeDemo#2026` |
+
+**These are DEMO ONLY and this password is published in this repository.** They
+exist so a development machine or a test deployment can be signed into. They
+must never be created on the live EJE deployment, and the live deployment must
+never reuse this password for anything. Real accounts are created through the
+administration screen by a Master, with passwords nobody has written down.
+
+Change the password for a test deployment with `EJE_DEMO_PASSWORD`; it is still
+a demo credential and the rule above still applies.
+
+### Re-running it
+
+Both seeds are idempotent: every record is looked up by a derived id
+(`src/db/seed/ids.ts`) before it is written, and one already there is left
+exactly as it is — including a password somebody changed on the staging site.
+`--reset-passwords` is the flag that asks for the demo passwords back.
+
+`src/db/seed/apply.db.test.ts` asserts this against a real PostgreSQL by
+applying the seed twice and comparing a census of every table it writes.
 
 ---
 
@@ -210,7 +288,8 @@ this repository.** Four things must be true first:
 | `npm run db:migrate` | Applies pending migrations to `DATABASE_URL`. Says which database answered, and prints the error if one fails — see below. |
 | `npm run db:check` | Verifies the migrations and the journal agree. Needs no database. |
 | `npm run db:studio` | Opens Drizzle Studio against `DATABASE_URL`. |
-| `npm run db:seed` | Adds development data. Never deletes. Safe to re-run. |
+| `npm run db:seed` | Adds development data. Never deletes. Safe to re-run. **Refuses a production-named database outright.** |
+| `npm run db:seed:demo` | The same data, for a TEST DEPLOYMENT. Needs `EJE_PRODUCTION_DEMO_SEED` to name the database. Never deletes. Safe to re-run. |
 | `npm run db:reset` | **Destructive.** Empties a development database and rebuilds it from the migrations and the seed. |
 | `npm run db:test` | Runs the integration tests. **Skips cleanly when `TEST_DATABASE_URL` is unset**, so it is safe to run anywhere. |
 

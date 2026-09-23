@@ -180,21 +180,56 @@ sudo -u postgres psql -d eje_production -c \
 sudo -u postgres psql -d eje_production -c "select count(*) from drizzle.__drizzle_migrations;"
 ```
 
-### Migration is not seeding, and production has neither seed nor reset
+### Migration is not seeding
 
 `npm run db:seed` writes fictional customers, fictional jobs and accounts whose
-password is printed in this repository's documentation. `npm run db:reset`
-empties a database first. **Neither runs here and neither can be made to:**
+password is published in this repository. `npm run db:reset` empties a database
+first. **Neither runs here and neither can be made to:**
 
 | | against `eje_production` | under `NODE_ENV=production` |
 |---|---|---|
 | `db:migrate` | needs `EJE_PRODUCTION_MIGRATION=eje_production` | required |
 | `db:seed` | refused, no override | refused, no override |
 | `db:reset` | refused, no override | refused, no override |
+| `db:seed:demo` | needs `EJE_PRODUCTION_DEMO_SEED=eje_production` | the same |
 
 Those refusals are `src/db/seed/guards.ts` and are asserted in
 `src/db/deployment.test.ts`. Nothing in a deployment, a restart or a reboot
-calls either command.
+calls any of them: every one is a command somebody types.
+
+---
+
+## 4a. Demonstration data — TEST DEPLOYMENTS ONLY
+
+**Skip this entirely for the live EJE deployment.** Everything below puts
+fictional companies and accounts whose password is in this repository into the
+database it is pointed at.
+
+`eje.syncza.co.za` is staging, and a staging site nobody can sign into is
+useless. `npm run db:seed:demo` fills it with the same dataset a developer's own
+machine runs on — five people, five customers, nine sites, eleven machines,
+twenty-four jobs across every job type and status:
+
+```bash
+cd /srv/eje/app
+set -a
+. /etc/eje/eje.env
+set +a
+sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE \
+  EJE_PRODUCTION_DEMO_SEED=eje_production npm run db:seed:demo
+```
+
+The acknowledgement must EQUAL the database name, for the same reason
+`EJE_PRODUCTION_MIGRATION` must: a word meaning yes survives being pasted into
+an environment file and is then permanently on. Do not put
+`EJE_PRODUCTION_DEMO_SEED` in `/etc/eje/eje.env`.
+
+It never deletes and it is safe to re-run — a second run writes nothing, and a
+password changed on the site stays changed. See `docs/database.md` for the
+accounts and the rule that they are never created on a live deployment.
+
+**When EJE goes live, the live database gets `db:migrate` and nothing else.**
+Real accounts are created through the administration screen by a Master.
 
 ---
 

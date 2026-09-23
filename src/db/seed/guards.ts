@@ -194,3 +194,77 @@ export const resolveResetTarget = (env: ResetEnvironment): ResetTarget => {
 
   return { url, databaseName: target.databaseName, host: target.host };
 };
+
+const PRODUCTION_DEMO_SEED = 'EJE_PRODUCTION_DEMO_SEED';
+
+export interface DemoSeedEnvironment extends SeedEnvironment {
+  readonly EJE_PRODUCTION_DEMO_SEED?: string | undefined;
+}
+
+/**
+ * Decides whether this URL may receive the DEMO seed — `npm run db:seed:demo`.
+ *
+ * THE PROBLEM IT SOLVES. EJE's test deployment is a real server with a database
+ * called `eje_production`, and a staging site nobody can sign into is not a
+ * staging site. `resolveSeedTarget` refuses that database and MUST GO ON
+ * refusing it: `npm run db:seed` is the command a developer types without
+ * thinking, and the day EJE has a live system is the day that refusal is the
+ * only thing between published credentials and real customers.
+ *
+ * So this does not relax that rule. It is a different door, and the key has to
+ * be cut for one lock:
+ *
+ *  1. Production — by database name, by host name, or because `NODE_ENV` says
+ *     so — requires `EJE_PRODUCTION_DEMO_SEED` to EQUAL the database's own
+ *     name. Not a flag, not a word meaning yes; the name. Anything else is
+ *     refused and told the exact line to type.
+ *  2. Everywhere else is `resolveSeedTarget`, unchanged and delegated to rather
+ *     than restated, so the two commands cannot drift apart about what a
+ *     development database is.
+ *
+ * WHY NAMING IT IS THE WHOLE MECHANISM. A boolean survives being exported once
+ * in a shell profile or pasted into `/etc/eje/eje.env`, and then it is
+ * permanently on and nobody remembers. A value that must match the database in
+ * front of it is wrong the moment it is reused somewhere else — which is
+ * exactly when it needs to be.
+ */
+export const resolveDemoSeedTarget = (env: DemoSeedEnvironment): SeedTarget => {
+  const url = (env.DATABASE_URL ?? '').trim();
+  if (url.length === 0) {
+    throw new SeedRefused(
+      'DATABASE_URL is not set. Point it at the database you mean to fill with demonstration ' +
+        'data — see docs/database.md — and run this again.',
+    );
+  }
+
+  const target = classifyDatabaseUrl(url);
+  const productionByName = target.kind === 'production';
+  const productionByEnvironment = (env.NODE_ENV ?? '').toLowerCase() === 'production';
+
+  if (!productionByName && !productionByEnvironment) {
+    // Not production by any reading. The ordinary seed's rules apply, and they
+    // are that command's to define.
+    return resolveSeedTarget(env);
+  }
+
+  if (target.databaseName.length === 0) {
+    throw new SeedRefused('DATABASE_URL could not be read as a URL.');
+  }
+
+  const acknowledged = (env.EJE_PRODUCTION_DEMO_SEED ?? '').trim();
+  if (acknowledged !== target.databaseName) {
+    const because = productionByName
+      ? `"${target.databaseName}" on ${target.host} names itself as production`
+      : `NODE_ENV is "production" and this would fill "${target.databaseName}" on ${target.host}`;
+
+    throw new SeedRefused(
+      `${because}. This seed writes fictional customers and accounts whose password is published ` +
+        `in this repository, so it is refused unless somebody names the database out loud.\n\n` +
+        `  If "${target.databaseName}" is a TEST deployment and you mean to do this:\n\n` +
+        `    ${PRODUCTION_DEMO_SEED}=${target.databaseName} npm run db:seed:demo\n\n` +
+        `  If it is the LIVE EJE database, there is nothing to type. Do not run this command.\n`,
+    );
+  }
+
+  return { url, databaseName: target.databaseName, host: target.host };
+};

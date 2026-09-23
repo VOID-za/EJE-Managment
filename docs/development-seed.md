@@ -100,10 +100,17 @@ is published in this file. None of that belongs anywhere near production, so:
 | Situation | What happens |
 |---|---|
 | `NODE_ENV=production` | **Refuses. No override exists.** |
-| A database or host named `prod`, `production` or `live` | Refuses, unless `EJE_SEED_ALLOW=i-understand` |
+| A database or host named `prod`, `production` or `live` | **Refuses. No override exists.** |
 | A remote host that is neither local nor named as development | Refuses, unless `EJE_SEED_ALLOW=i-understand` — it will not guess |
 | No `DATABASE_URL` | Refuses and says so |
 | A database with no EJE schema | Refuses and tells you to run `npm run db:migrate` |
+
+The second row used to take `EJE_SEED_ALLOW=i-understand`, for a developer
+whose own copy happened to carry the word. It no longer does. EJE has a real
+`eje_production` on a real server now, and one remembered incantation would
+write the accounts below into it. A test deployment that genuinely needs this
+data has its own command — see below — and a development copy that carries a
+production word should simply be renamed.
 
 **Nothing in `src/db/seed` drops, truncates or deletes.** There is no such
 statement in the directory. The worst a misdirected run can do is ADD
@@ -187,10 +194,34 @@ database that already holds higher numbers is left alone.
 
 ---
 
+## A test deployment — `npm run db:seed:demo`
+
+EJE's staging site (`eje.syncza.co.za`) runs against a database called
+`eje_production`, so `npm run db:seed` refuses it and will go on refusing it.
+`npm run db:seed:demo` writes **exactly this dataset** — the same
+`src/db/seed/apply.ts`, the same records, the same accounts — to a database
+somebody has named out loud:
+
+```
+EJE_PRODUCTION_DEMO_SEED=eje_production npm run db:seed:demo
+```
+
+Everywhere that is not production it behaves identically to `npm run db:seed`,
+because it delegates to the same guard. The only thing it adds is a way to say
+yes to ONE database, and the acknowledgement has to be that database's own
+name — not a flag, not a word meaning yes. `docs/database.md` has the full
+runbook and the reasoning.
+
+**Never run it against the live EJE deployment.**
+
+---
+
 ## Production
 
-A production deployment is never seeded. It starts empty and EJE's own data is
-captured through the application, or imported deliberately. The one thing it
-does need before a job can be raised is a settings row — rates, VAT and the
-company details — which is business data, so nothing invents it: the settings
-repository says plainly that it is missing rather than fabricating one.
+A live deployment is never seeded — not by `db:seed`, not by `db:seed:demo`. It
+starts empty and EJE's own data is captured through the application, or
+imported deliberately. The accounts above are never created there and that
+password is never reused. The one thing a live database does need before a job
+can be raised is a settings row — rates, VAT and the company details — which is
+business data, so nothing invents it: the settings repository says plainly that
+it is missing rather than fabricating one.
