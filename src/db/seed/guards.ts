@@ -52,12 +52,12 @@ export interface SeedTarget {
  * The rule, in order:
  *
  *  1. `NODE_ENV=production` refuses outright. No override.
- *  2. A database or host that NAMES itself production refuses unless
- *     `EJE_SEED_ALLOW=i-understand` is set, which is a deliberate act.
+ *  2. A database or host that NAMES itself production refuses outright. No
+ *     override — see the comment at that check.
  *  3. A local host, or a database whose name says development, proceeds.
  *  4. Anything else — a remote host with an unrevealing name — is treated as
- *     possibly production and needs the same explicit override. Refusing to
- *     guess is the point.
+ *     possibly production and needs `EJE_SEED_ALLOW=i-understand`, which is a
+ *     deliberate act. Refusing to guess is the point.
  */
 export const resolveSeedTarget = (env: SeedEnvironment): SeedTarget => {
   if ((env.NODE_ENV ?? '').toLowerCase() === 'production') {
@@ -86,13 +86,23 @@ export const resolveSeedTarget = (env: SeedEnvironment): SeedTarget => {
   const allowed = (env.EJE_SEED_ALLOW ?? '').trim().toLowerCase() === 'i-understand';
 
   if (PRODUCTION_MARKERS.test(databaseName) || PRODUCTION_MARKERS.test(host)) {
-    if (!allowed) {
-      throw new SeedRefused(
-        `"${databaseName}" on ${host} names itself as production. Refusing. ` +
-          'If this really is a development copy, re-run with EJE_SEED_ALLOW=i-understand.',
-      );
-    }
-    return { url, databaseName, host };
+    /*
+     * NO OVERRIDE, and `db:reset` has never had one for this case either.
+     *
+     * It used to take `EJE_SEED_ALLOW=i-understand`, for the developer whose
+     * own copy happened to carry the word. That reading is not worth what it
+     * costs now: EJE has a real `eje_production` on a real VPS, the deployment
+     * runbook tells an operator to source an environment file that names it,
+     * and one remembered incantation would write fictional customers and
+     * accounts whose password is published in `docs/` straight into it. Rename
+     * the copy instead — that is a second of typing, and it is reversible.
+     */
+    throw new SeedRefused(
+      `"${databaseName}" on ${host} names itself as production. The development seed writes ` +
+        'fictional customers and accounts whose password is published in the documentation, and ' +
+        'it will not run here. There is no override. If this really is a development copy, give ' +
+        'it a name that says so.',
+    );
   }
 
   if (LOCAL_HOSTS.has(host) || DEVELOPMENT_NAMES.test(databaseName)) {

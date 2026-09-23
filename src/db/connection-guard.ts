@@ -30,6 +30,10 @@
  * protection is still separate credentials that a development machine never
  * holds, which is deployment configuration and is documented as such in
  * `docs/database.md`.
+ *
+ * MIGRATING THE REAL DATABASE is the one thing rule 1 is too permissive for.
+ * `assertProductionMigrationIntent`, at the bottom of this file, is the second
+ * gate `npm run db:migrate` puts in front of it.
  */
 
 /** Hosts a development database is actually likely to be on. */
@@ -141,4 +145,78 @@ export const assertDevelopmentDatabase = (
       'docs/database.md — or, if you genuinely mean to do this, re-run with ' +
       `EJE_DATABASE_ALLOW=${OVERRIDE}.`,
   );
+};
+
+/**
+ * THE ONE WAY TO MIGRATE THE REAL DATABASE, and it has to be typed out.
+ *
+ * `assertDevelopmentDatabase` steps aside for `NODE_ENV=production` because it
+ * is not its job to argue with a deployment about its own database. That is
+ * right for the SERVING process — it starts under systemd, with
+ * `NODE_ENV=production` in its unit, and it must simply run.
+ *
+ * It is not enough for a MIGRATION. On the VPS `/etc/eje/eje.env` carries both
+ * `NODE_ENV=production` and the production `DATABASE_URL`, so the moment an
+ * operator sources that file to run anything at all, `npm run db:migrate` would
+ * silently have the live schema in its hands. The deployment's own ambient
+ * configuration would be standing in for a decision nobody made.
+ *
+ * So a second gate, and deliberately the shape `EJE_RESET_CONFIRM` already
+ * uses: NAME THE DATABASE. A value that must match the database being migrated
+ * cannot be set once in a profile and forgotten, cannot be carried in from an
+ * environment file written for something else, and reads in `history` and in a
+ * deployment log as exactly what it is.
+ *
+ * NOT A BYPASS, and the difference is the whole point. This adds a requirement
+ * to the one case — a database that names itself production — that previously
+ * had none beyond `NODE_ENV`. Nothing it does lets a development command reach
+ * production: that is still `assertDevelopmentDatabase`'s refusal, and it still
+ * runs first. This gate also holds where that one is overridden, so
+ * `EJE_DATABASE_ALLOW=i-understand` no longer opens the live schema either.
+ */
+export const PRODUCTION_MIGRATION = 'EJE_PRODUCTION_MIGRATION';
+
+export class ProductionMigrationRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProductionMigrationRefused';
+  }
+}
+
+export interface MigrationEnvironment {
+  readonly NODE_ENV?: string | undefined;
+  readonly EJE_PRODUCTION_MIGRATION?: string | undefined;
+}
+
+/**
+ * Refuses to migrate a production database that nobody has named.
+ *
+ * Says nothing at all for any other database: development, local and unknown
+ * targets are `assertDevelopmentDatabase`'s business, and this must not become
+ * a second opinion about them.
+ */
+export const assertProductionMigrationIntent = (
+  url: string,
+  env: MigrationEnvironment = process.env,
+): void => {
+  const target = classifyDatabaseUrl(url);
+  if (target.kind !== 'production') return;
+
+  const where = `"${target.databaseName}"${target.host.length > 0 ? ` on ${target.host}` : ''}`;
+
+  if ((env.NODE_ENV ?? '').toLowerCase() !== 'production') {
+    throw new ProductionMigrationRefused(
+      `${where} names itself as production, and this process is not running as production ` +
+        `(NODE_ENV=${env.NODE_ENV ?? 'undefined'}). A production migration is run BY the deployment, ` +
+        'on the machine that serves it — see docs/vps-deployment.md. Refusing.',
+    );
+  }
+
+  if ((env.EJE_PRODUCTION_MIGRATION ?? '').trim() !== target.databaseName) {
+    throw new ProductionMigrationRefused(
+      `This will change the schema of ${where}, which is the live database.\n\n` +
+        `  To go ahead, name the database you mean to migrate:\n\n` +
+        `    ${PRODUCTION_MIGRATION}=${target.databaseName} npm run db:migrate\n`,
+    );
+  }
 };

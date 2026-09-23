@@ -25,6 +25,19 @@ describe('what the development seed refuses to run against', () => {
     );
   });
 
+  it('refuses a production name even to somebody claiming to understand', () => {
+    // There is no EJE_SEED_ALLOW for this case any more. `eje_production` is a
+    // real database on a real VPS now, and the seed writes accounts whose
+    // password is published in docs/. Rename the development copy instead.
+    refuses(
+      {
+        DATABASE_URL: 'postgres://eje@localhost:5432/eje_production',
+        EJE_SEED_ALLOW: 'i-understand',
+      },
+      /There is no override/u,
+    );
+  });
+
   it('refuses a host that names itself production', () => {
     refuses(
       { DATABASE_URL: 'postgres://eje@prod-db.example.com:5432/eje' },

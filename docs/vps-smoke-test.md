@@ -3,24 +3,42 @@
 Run after deploying. Every step is an API call or a workflow, not a page load —
 a screen that renders is not a screen that works.
 
-Replace `https://eje.example.com` with the real host. `-c/-b jar` keeps the
-session cookie, which is the only thing carrying identity.
+`-c/-b jar` keeps the session cookie, which is the only thing carrying identity.
 
 ```bash
-HOST=https://eje.example.com
+HOST=https://eje.syncza.co.za
 ```
 
 ## 1. The deployment itself
 
+Infrastructure before anything else — a failing workflow means nothing until
+this section passes.
+
 ```bash
 curl -s $HOST/api/health
+curl -sI http://eje.syncza.co.za | head -1
 ```
 
-Want `{"status":"ok","backend":"postgres","database":"reachable",...}`.
+The first goes through Cloudflare, through Caddy, into the Node process, out to
+PostgreSQL and back. Want
+`{"status":"ok","backend":"postgres","database":"reachable",...}`, and a `308`
+to HTTPS from the second.
+
 `"backend":"demo"` means `DATABASE_URL` did not reach the process — check
 `/etc/eje/eje.env` and `systemctl show eje -p EnvironmentFile`.
 `503` with `"database":"unreachable"` means the app is up and PostgreSQL is not:
 `journalctl -u eje -n 50`.
+
+Then the two things a health check cannot tell you, from a shell **on the VPS**:
+
+```bash
+sudo ss -lntp | grep 3000        # want 127.0.0.1:3000 — NOT 0.0.0.0:3000
+sudo ss -lntp | grep 5432        # want 127.0.0.1:5432
+```
+
+`0.0.0.0:3000` means the Node port is published to the internet and Caddy is
+decorative. From your own machine, a connection test to 3000 and to 5432 must
+both **fail** while 443 succeeds; that is the check, not the `ss` output alone.
 
 ## 2. Authentication, for real
 

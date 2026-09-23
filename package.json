@@ -23,6 +23,7 @@
     "workflow-check": "node scripts/job-workflow-check.mjs",
     "dev-check": "node scripts/dev-console-check.mjs",
     "check-routes": "node scripts/check-routes.mjs",
+    "cloudflare-ips": "node scripts/cloudflare-ips.mjs",
     "redeploy": "npm run clean && npm run build && npm run start",
     "clean": "node scripts/clean.mjs",
     "e2e": "node scripts/workflow-e2e.mjs",
@@ -54,6 +55,6 @@
     "vitest": "^4.1.11"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.11.0"
   }
 }

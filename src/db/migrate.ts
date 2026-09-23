@@ -1,7 +1,7 @@
 import { writeSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { classifyDatabaseUrl } from './connection-guard';
+import { assertProductionMigrationIntent, classifyDatabaseUrl } from './connection-guard';
 import { databaseUrlFromEnv } from './client';
 import { loadEnvFiles } from './seed/env';
 
@@ -157,6 +157,15 @@ const main = async (): Promise<void> => {
   const url = databaseUrlFromEnv();
   const target = classifyDatabaseUrl(url);
   say(`EJE migrations → ${target.databaseName} on ${target.host} (${target.kind})`);
+
+  /*
+   * The second gate, and the only one that applies to the live database.
+   *
+   * Announced first, deliberately: an operator who is refused here should be
+   * able to read the line above and see that the refusal is about the database
+   * it names. See `assertProductionMigrationIntent`.
+   */
+  assertProductionMigrationIntent(url);
 
   /*
    * The reporter, installed before drizzle-kit loads.

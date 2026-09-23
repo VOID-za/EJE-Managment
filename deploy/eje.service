@@ -10,10 +10,19 @@
 [Unit]
 Description=EJE Job Card Management
 Documentation=https://github.com/VOID-za/EJE-Managment
-# The database is on this machine. Do not start before it is accepting.
 After=network-online.target postgresql.service
 Wants=network-online.target
-Requires=postgresql.service
+
+# WANTS, NOT REQUIRES, and the difference is a maintenance window.
+#
+# Both order EJE after PostgreSQL, which is all that is actually needed at boot.
+# `Requires=` adds that PostgreSQL going away takes EJE down with it — so
+# `systemctl restart postgresql` for a minor upgrade stops the application and
+# does not bring it back, and the site is down until somebody notices and starts
+# it by hand. With `Wants=`, EJE stays up, its own `Restart=always` handles the
+# seconds where the database is not answering, and `/api/health` reports
+# `"database":"unreachable"` for exactly as long as that is true.
+Wants=postgresql.service
 
 [Service]
 Type=simple
@@ -26,10 +35,25 @@ WorkingDirectory=/srv/eje/app
 EnvironmentFile=/etc/eje/eje.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
-# Bind to loopback only: Caddy is what faces the internet.
-Environment=HOSTNAME=127.0.0.1
 
-ExecStart=/usr/bin/npm run start
+# NODE, NOT npm, AND THE HOSTNAME IS AN ARGUMENT. Two corrections, both load-bearing:
+#
+#  1. `npm run start` makes npm the main process. npm does not forward SIGTERM
+#     to the Next.js child it spawned, so `systemctl restart eje` would wait out
+#     TimeoutStopSec and then SIGKILL the server mid-request. Exec'ing node
+#     directly makes the server this unit's MainPID, so a restart is a graceful
+#     one.
+#  2. `next start` reads PORT from the environment but NOT HOSTNAME — in
+#     next 16.3.5, `-p/--port` is declared with `.env('PORT')` and `-H/--hostname`
+#     is not, so the flag is the only way to say it and the default is 0.0.0.0.
+#     An `Environment=HOSTNAME=` line here looks like it binds the server to
+#     loopback and does nothing at all, which would publish port 3000 to the
+#     internet with Caddy in front of it — see docs/vps-deployment.md step 20,
+#     which checks the binding rather than trusting this comment.
+#
+# /usr/bin/node is where the NodeSource package puts it. `which node` on the VPS
+# must agree with this line; systemd needs an absolute path and will not search.
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
 
 Restart=always
 RestartSec=5
@@ -48,6 +72,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+# .next covers the runtime cache (.next/cache) that the server writes to.
 ReadWritePaths=/srv/eje/app/.next /var/lib/eje/storage
 ProtectKernelTunables=true
 ProtectControlGroups=true
