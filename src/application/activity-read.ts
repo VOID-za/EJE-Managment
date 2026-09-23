@@ -58,7 +58,14 @@ export const loadActivityFeed = async (
   const [events, users, jobs] = await Promise.all([
     repos.activity.list(),
     repos.users.list(),
-    repos.jobs.list(),
+    /*
+     * Summaries. The feed needs three fields off a job — the id, who it belongs
+     * to and whether it carries a signature refusal, which is what decides
+     * whether an event about it may be read — plus the job number to label the
+     * entry with. It was reading every job in the business as a complete
+     * aggregate to get them.
+     */
+    repos.jobs.listSummaries(),
   ]);
 
   const jobsById = new Map(jobs.map((job) => [job.id as string, job]));

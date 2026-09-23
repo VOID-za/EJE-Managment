@@ -21,7 +21,7 @@ import {
   loadJobRows,
   loadJobView,
   loadVisibleJobRows,
-  loadVisibleJobs,
+  loadVisibleSummaries,
 } from '@/application/job-view';
 import { runSearch } from '@/application/search';
 import type { AppServices } from '@/application/context';
@@ -195,7 +195,9 @@ export const customersView = async ({ repos, actor }: ViewContext) => {
     repos.customers.list(),
     repos.customers.listSites(),
     repos.machines.list(),
-    repos.jobs.list(),
+    // Summaries: this screen compares a status and a foreign key, and used to
+    // read every job in the business as a complete aggregate to do it.
+    repos.jobs.listSummaries(),
   ]);
 
   /*
@@ -206,7 +208,7 @@ export const customersView = async ({ repos, actor }: ViewContext) => {
    * it says three jobs exist that they may not read. The office's count is
    * unchanged, because the office may read all four.
    */
-  const jobs = await loadVisibleJobs(repos, allJobs, actor);
+  const jobs = await loadVisibleSummaries(repos, allJobs, actor);
 
   return customers.map((customer) => ({
     id: customer.id,
@@ -262,7 +264,8 @@ export const machinesView = async ({ repos, actor }: ViewContext) => {
     repos.machines.list(),
     repos.customers.list(),
     repos.customers.listSites(),
-    repos.jobs.list(),
+    // As in `customersView`: a tally needs a status, not an aggregate.
+    repos.jobs.listSummaries(),
   ]);
 
   return machines.map((machine) => ({

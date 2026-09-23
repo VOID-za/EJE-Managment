@@ -34,13 +34,43 @@ describe('authentication is required', () => {
    * same reason the login route cannot. It does not exist in production, which
    * `src/server/dev/demo-switcher.test.ts` holds it to, and it serves nothing
    * on a database that has not been seeded.
+   *
+   * THE HEALTH CHECK IS THE FOURTH, and it is an exception because the thing
+   * asking is a process manager or a reverse proxy, neither of which can hold
+   * a session. It is safe to leave open only because it is deliberately dull:
+   * it reports the build stamp, which backend is configured and whether a
+   * `select 1` came back — never the database name, host, user, version, a
+   * connection string, a row count, or the driver's error, which goes to the
+   * journal where the operator is. If that ever stops being true, this
+   * exemption stops being justified.
    */
   const PUBLIC = new Set([
     'POST /api/auth/login',
     'POST /api/auth/logout',
     'GET /api/dev/demo-users',
     'POST /api/dev/demo-users',
+    'GET /api/health',
   ]);
+
+  it('lets the health check say only what a proxy needs', async () => {
+    /*
+     * The exemption above is only safe while this stays true. An unauthenticated
+     * caller learns that the deployment is up and which backend it runs; it must
+     * not learn where the database is, what it is called, who connects to it or
+     * why a failure failed.
+     */
+    const response = await new ApiTestClient().get<Record<string, unknown>>('/api/health');
+    expect(response.status).toBe(200);
+    // Read from the raw body: the health check answers a proxy, so it is not
+    // wrapped in the `{ data }` envelope the rest of the API uses.
+    const payload = response.raw as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual(['backend', 'build', 'database', 'status']);
+
+    const body = JSON.stringify(payload).toLowerCase();
+    for (const secret of ['postgres://', 'postgresql://', 'password', 'localhost', '5432', 'error']) {
+      expect(body, secret).not.toContain(secret);
+    }
+  });
 
   it('refuses every endpoint but sign-in and the switcher without a session', async () => {
     const routes = await discoverRoutes();
@@ -65,7 +95,18 @@ describe('authentication is required', () => {
       .map((route) => route.path);
 
     for (const path of publicPaths) {
-      expect(path.startsWith('/api/auth/') || path.startsWith('/api/dev/')).toBe(true);
+      /*
+       * Ways of signing in, and the health check.
+       *
+       * The health check is the one public route that is not an authentication
+       * route, and it earns that by disclosing nothing — the test above pins
+       * exactly which four keys it may return. Anything else added here has to
+       * clear the same bar.
+       */
+      expect(
+        path.startsWith('/api/auth/') || path.startsWith('/api/dev/') || path === '/api/health',
+        path,
+      ).toBe(true);
     }
   });
 

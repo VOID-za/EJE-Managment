@@ -345,6 +345,30 @@ export const loadVisibleJobs = async (
   return visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
 };
 
+/**
+ * The summaries this viewer may see, for a screen that COUNTS jobs.
+ *
+ * The customer and machine registers show an open-job tally per row. They were
+ * reading every job in the business as a complete aggregate — parts, labour,
+ * media, signatures, pricing snapshots — to compare a status and a foreign key.
+ * `loadVisibleJobs` is still the function for a caller that genuinely holds
+ * full jobs; this is the one for a caller that only needs to count them.
+ *
+ * The visibility rule is identical: a technician's tally counts what a
+ * technician may OPEN, so the register cannot tell them a customer has four
+ * open jobs when the screen behind it lists one.
+ */
+export const loadVisibleSummaries = async (
+  repos: RepositoryBundle,
+  jobs: readonly JobSummary[],
+  actor: Pick<User, 'id' | 'role'>,
+): Promise<readonly JobSummary[]> => {
+  if (can(actor.role, 'jobs.viewAll')) return jobs;
+
+  const participated = await repos.jobs.listParticipatedJobs(actor.id);
+  return summariesVisibleTo(actor, jobs, technicianHistoryFrom(participated));
+};
+
 export const loadVisibleJobRows = async (
   repos: RepositoryBundle,
   jobs: readonly Job[],

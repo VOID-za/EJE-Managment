@@ -1,0 +1,23 @@
+# EJE Job Card Management — Caddy site file
+#
+# Install to /etc/caddy/Caddyfile on the VPS (or include it from there).
+# Replace eje.example.com with the real hostname before reloading.
+#
+# Caddy obtains and renews the certificate itself, so the application speaks
+# plain HTTP on loopback and never holds a private key.
+eje.example.com {
+	encode zstd gzip
+
+	# The application listens on loopback only — see HOSTNAME in eje.service.
+	reverse_proxy 127.0.0.1:3000
+
+	# Uploads: a job card photograph from a tablet is bigger than the default.
+	request_body {
+		max_size 30MB
+	}
+
+	log {
+		output file /var/log/caddy/eje.log
+		format json
+	}
+}

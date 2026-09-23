@@ -1,0 +1,57 @@
+# EJE Job Card Management — systemd unit
+#
+# Install to /etc/systemd/system/eje.service on the VPS.
+#
+# WHY systemd AND NOT A PROCESS MANAGER. The VPS already runs one init system
+# and it already restarts things after a reboot. Adding pm2 or a container
+# runtime would add a second supervisor, its own logs and its own upgrade path,
+# to run one Node process next to one PostgreSQL. `journalctl -u eje` is where
+# an operator already looks.
+[Unit]
+Description=EJE Job Card Management
+Documentation=https://github.com/VOID-za/EJE-Managment
+# The database is on this machine. Do not start before it is accepting.
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=eje
+Group=eje
+WorkingDirectory=/srv/eje/app
+
+# Secrets live in a file root owns and `eje` may read. NOT in this unit, NOT in
+# the repository, and never in a command line where `ps` would show them.
+EnvironmentFile=/etc/eje/eje.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Bind to loopback only: Caddy is what faces the internet.
+Environment=HOSTNAME=127.0.0.1
+
+ExecStart=/usr/bin/npm run start
+
+Restart=always
+RestartSec=5
+# Give a slow first request room before systemd calls it dead.
+TimeoutStartSec=90
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eje
+
+# Ordinary hardening, not the security phase: this process needs to read its
+# code, write its uploads, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/eje/app/.next /var/lib/eje/storage
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
