@@ -320,6 +320,61 @@ export const isJobWorkable = (role: UserRole, status: JobStatus): boolean => {
 export const isAfterSignature = (status: JobStatus): boolean =>
   status === 'review' || status === 'submitted' || status === 'closed';
 
+/**
+ * THE JOB IS FINAL. Nobody may change it. MASTER SCOPE CR-01 / IMMUT-1…7.
+ *
+ * "A customer-signed job card is legally final. Once a customer has signed:
+ * NOTHING on the signed job card may be edited" — not by a Master, not by a
+ * Coordinator, not by the technician who did the work.
+ *
+ * WHY THE SIGNATURE AND NOT THE STATUS. A refusal and a signature land in the
+ * SAME status: `recordSignatureRefusal` and `captureSignature` both leave the
+ * job at `review`. They differ in exactly one thing — a refusal sets
+ * `signature: null`, a signature fills it in — and that difference is the whole
+ * business rule. A refused job card is explicitly still editable: the office
+ * reviews it, corrects it and resubmits it under one of the two outcomes. A
+ * signed one is evidence of what a customer agreed to, and evidence that can be
+ * edited afterwards is not evidence.
+ *
+ * So this asks the question the rule actually asks, and no new status was
+ * invented to carry an answer the data already had.
+ *
+ * THE TWO LATER STATES ARE FINAL TOO, and for a different reason: once the job
+ * card has been issued the customer is holding a document, so the record has to
+ * keep matching it whether or not a signature was ever obtained. That covers
+ * the "Without Customer Signature" outcome, which closes with `signature` still
+ * null and must be every bit as immutable.
+ */
+export const isFinalized = (job: Pick<Job, 'signature' | 'status'>): boolean =>
+  job.signature !== null || job.status === 'awaiting_delivery' || job.status === 'closed';
+
+/**
+ * Whether this role may change this job's RECORD, signature included.
+ *
+ * `canEditJob` answers only the status half and is kept for the places that ask
+ * about a status alone. This is the question every mutation must ask, because
+ * status alone cannot tell a signed job from a refused one.
+ */
+export const canEditJobRecord = (
+  role: UserRole,
+  job: Pick<Job, 'signature' | 'status'>,
+): boolean => {
+  if (isFinalized(job)) return false;
+  return canEditJob(role, job.status);
+};
+
+/** Why the record is closed to changes, in a sentence a person can act on. */
+export const finalizedRefusal = (job: Pick<Job, 'signature' | 'status'>): string | null => {
+  if (!isFinalized(job)) return null;
+  if (job.signature !== null) {
+    return (
+      'The customer has signed this job card, so it is final and cannot be changed by anyone. ' +
+      'If something on it is wrong, raise it with the office — the signed record stays as it is.'
+    );
+  }
+  return 'This job card has been issued to the customer, so the record must keep matching it.';
+};
+
 export const isJobOpenWork = (status: JobStatus): boolean =>
   status === 'open' ||
   status === 'in_progress' ||

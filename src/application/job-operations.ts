@@ -27,6 +27,7 @@ import {
   transferJobRefusal,
   transferReasonLabel,
   canEditJob,
+  finalizedRefusal,
   labourRateLabel,
   siteAddressLine,
   siteNavigationUrl,
@@ -76,6 +77,28 @@ import { WorkflowError } from './errors';
  */
 
 const assertEditable = (context: OperationContext, job: Job): void => {
+  /*
+   * THE SIGNED RECORD IS FINAL. MASTER SCOPE CR-01 / IMMUT-1…7.
+   *
+   * Asked FIRST, and asked of the job rather than its status, because a signed
+   * job and a refused job sit in the same status and only the signature tells
+   * them apart. Every mutation in this module passes through here, so this one
+   * check is what makes "nobody may edit a signed job card" true of all sixteen
+   * of them rather than of whichever ones remembered.
+   *
+   * It used to be absent entirely: the audit proved a Master could add labour
+   * to a signed job, a Coordinator could add a part at any price, the
+   * technician could amend their own, a signed labour line could be DELETED and
+   * the signed write-up rewritten. Each was recorded on the trail — which was
+   * the old requirement, honestly implemented — and each is now refused.
+   */
+  const final = finalizedRefusal(job);
+  if (final !== null) {
+    throw new WorkflowError(`${job.jobNumber} is final and cannot be changed.`, [
+      { code: 'job_finalized', message: final },
+    ]);
+  }
+
   if (canEditJob(context.actor.role, job.status)) return;
 
   throw new WorkflowError(
@@ -1782,21 +1805,31 @@ export const recordPostSignatureChange = async (
 ): Promise<void> => {
   if (!isAfterSignature(job.status)) return;
 
-  if (outstandingRefusal(job) !== null) {
-    await audit(context, {
-      jobId: job.id,
-      type: 'job_card_corrected',
-      summary: 'Job card corrected by the office',
-      detail: `${description} Corrected by ${userFullName(context.actor)} after the customer refused to sign. The technician's original submission is unchanged in the history above.`,
-    });
-    return;
-  }
+  /*
+   * ONLY THE REFUSAL CASE REACHES HERE NOW. MASTER SCOPE CR-01.
+   *
+   * There used to be a second branch, for a job the customer had SIGNED and
+   * the office amended afterwards, writing `master_amended_after_signature`.
+   * That branch was honest about something the business has since ruled out:
+   * a signed job card is legally final, so there is no such change to record.
+   * `assertEditable` refuses it before any operation gets this far.
+   *
+   * The event TYPE is deliberately left in `ActivityEventType`. Jobs amended
+   * under the old rule carry it, and deleting the type would make their
+   * history unreadable — §17 wants historical records to stay traceable, not
+   * tidy. Nothing can produce it any more, and a test holds that.
+   *
+   * What remains is the correction loop working exactly as the Scope intends:
+   * the customer REFUSED, so the job card is unsigned, the office may put it
+   * right, and every correction is attributed.
+   */
+  if (outstandingRefusal(job) === null) return;
 
   await audit(context, {
     jobId: job.id,
-    type: 'master_amended_after_signature',
-    summary: 'Job amended after customer signature',
-    detail: `${description} Changed by ${userFullName(context.actor)} after the customer signed. Rates remain those frozen at signature.`,
+    type: 'job_card_corrected',
+    summary: 'Job card corrected by the office',
+    detail: `${description} Corrected by ${userFullName(context.actor)} after the customer refused to sign. The technician's original submission is unchanged in the history above.`,
   });
 };
 

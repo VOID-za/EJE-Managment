@@ -50,6 +50,13 @@
       "when": 1790018690210,
       "tag": "0006_outbox_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790018690211,
+      "tag": "0007_signed_job_immutability",
+      "breakpoints": true
     }
   ]
 }

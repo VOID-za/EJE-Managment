@@ -344,17 +344,52 @@ describeDb('what a job leaves behind', () => {
       expect(snapshots[0]?.jobId).toBe(job.id);
     });
 
-    it('survives the office amending the job after the customer signed', async () => {
-      const job = await jobs.save(await priced());
-
-      // A Master corrects the job card before issuing it. Legitimate — and the
-      // question "what did the customer put their name to?" must still have an
-      // answer afterwards.
-      await jobs.save({
-        ...job,
-        parts: [{ ...job.parts[0]!, quantity: 4 }],
-        completionReport: { ...job.completionReport, generalNotes: 'Corrected part count.' },
+    it('REFUSES the office amending the job after the customer signed', async () => {
+      /*
+       * MASTER SCOPE CR-01. This asserted that such an amendment was
+       * legitimate and that the snapshot survived it — true under the old rule,
+       * where the office corrected a signed card before issuing it. A
+       * customer-signed job card is now legally final, and `0007` enforces it
+       * at the database as well as in `assertEditable`, so the repository
+       * write itself is refused.
+       *
+       * The snapshot question this case has always asked — "what did the
+       * customer put their name to?" — is still answered below, from the
+       * untouched record.
+       */
+      /*
+       * A SIGNATURE, not merely a price. `priced()` freezes a snapshot without
+       * one — the snapshot is taken at signature OR refusal OR issue — and the
+       * rule is written against the signature, so the fixture has to carry one
+       * for this to be the case it claims to be.
+       */
+      const job = await jobs.save({
+        ...(await priced()),
+        status: 'review',
+        signature: {
+          customerName: 'Pieter',
+          customerSurname: 'Nel',
+          strokeData: 'M0,0 L1,1',
+          signedAt: '2026-09-20T15:00:00.000Z',
+          declaration: 'I confirm that the work described above has been completed.',
+        },
       });
+
+      const refusal = await jobs
+        .save({
+          ...job,
+          parts: [{ ...job.parts[0]!, quantity: 4 }],
+          completionReport: { ...job.completionReport, generalNotes: 'Corrected part count.' },
+        })
+        .then(() => null)
+        .catch((cause: unknown) => cause);
+
+      expect(refusal).not.toBeNull();
+      // drizzle wraps the driver error, so the trigger's own sentence — and
+      // its SQLSTATE — are on `cause` rather than on the message.
+      const driver = (refusal as { cause?: { message?: string; code?: string } }).cause;
+      expect(driver?.message).toMatch(/signed by the customer/i);
+      expect(driver?.code).toBe('23001');
 
       const lines = await db
         .select()
@@ -366,7 +401,7 @@ describeDb('what a job leaves behind', () => {
       expect(lines[3]?.lineTotalCents).toBe(128_000);
 
       const read = await jobs.findById(job.id);
-      expect(read?.parts[0]?.quantity).toBe(4);
+      expect(read?.parts[0]?.quantity).toBe(1);
     });
 
     it('refuses to rewrite a priced line, at the database', async () => {

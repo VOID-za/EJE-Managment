@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { use, useState } from 'react';
 import {
   getJobTypeDefinition,
-  canEditJob,
+  canEditJobRecord,
   cancellationReasonLabel,
   isJobWorkable,
   refusalAwaitingResolution,
@@ -114,7 +114,16 @@ const JobDetailPage = ({
   // Already scoped to this job and to this viewer by `loadJobActivity`.
   const activity: readonly ActivityEvent[] = supportQuery.data?.activity ?? [];
 
-  const editable = canEditJob(currentUser.role, job.status);
+  /*
+   * MASTER SCOPE CR-01 — a signed job card is final.
+   *
+   * `canEditJobRecord` rather than `canEditJob`: status alone cannot tell a
+   * SIGNED job at Review from a REFUSED one, and the two are opposites here —
+   * the refused card is the office's to correct, the signed one is nobody's.
+   * The server refuses either way; this stops the screen offering fields that
+   * would be rejected on save.
+   */
+  const editable = canEditJobRecord(currentUser.role, job);
   const workable = isJobWorkable(currentUser.role, job.status);
   const definition = getJobTypeDefinition(job.jobType);
   const refresh = () => viewQuery.refetch();

@@ -24,7 +24,14 @@ import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system'
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { historicalMasterReview } from './test-harness';
 import { seedUsers } from '@/data/seed';
-import { calculateJobTotals, canEditJob, type Job, type User } from '@/domain';
+import {
+  calculateJobTotals,
+  canEditJob,
+  canEditJobRecord,
+  isFinalized,
+  type Job,
+  type User,
+} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
@@ -113,40 +120,70 @@ const confirmDelivery = async (harness: Harness, job: Job): Promise<Job> => {
 const emails = (harness: Harness) =>
   harness.outbox.listSync().filter((entry) => entry.channel === 'email');
 
-describe('a Master can still edit a job left in Master Review', () => {
+/**
+ * A JOB LEFT IN MASTER REVIEW IS STILL A SIGNED JOB. MASTER SCOPE CR-01.
+ *
+ * This block asserted the opposite — that a Master could keep editing one —
+ * because that was the requirement when the retired stage was built: the whole
+ * point of Master Review was that the office corrected the card before issuing
+ * it. The business has since ruled that a customer-signed job card is legally
+ * final, so the historical stage no longer carries an editing right. Being old
+ * data does not make it less signed.
+ *
+ * What is preserved, and still asserted below, is everything else about
+ * compatibility: such a job stays readable, keeps the rates it was signed at,
+ * and can still be issued, sent and closed.
+ */
+describe('a job left in Master Review is final, because the customer signed it', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = build();
   });
 
-  it('permits Master edits and refuses technician edits', () => {
+  it('still answers the STATUS question the same way', () => {
+    // `canEditJob` is the status half of the rule and is unchanged. It is no
+    // longer the whole rule: `canEditJobRecord` adds the signature.
     expect(canEditJob('master', 'submitted')).toBe(true);
     expect(canEditJob('technician', 'submitted')).toBe(false);
     expect(canEditJob('master', 'closed')).toBe(false);
     expect(canEditJob('technician', 'in_progress')).toBe(true);
   });
 
-  it('lets a Master add a part that the technician missed', async () => {
+  it('is closed to editing once the signature is taken into account', async () => {
     const signed = await workAndSign(harness);
     const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
-    const amended = await addPart(harness.master, handed, {
-      partNumber: 'FAN-24V-80',
-      description: 'Spindle drive cooling fan',
-      quantity: 1,
-      unitPrice: 48500,
-    });
-
-    expect(amended.parts).toHaveLength(1);
-    expect(amended.status).toBe('submitted');
+    expect(isFinalized(handed)).toBe(true);
+    expect(canEditJobRecord('master', handed)).toBe(false);
+    expect(canEditJobRecord('coordinator', handed)).toBe(false);
+    expect(canEditJobRecord('technician', handed)).toBe(false);
   });
 
-  it('lets a Master add a note during review', async () => {
+  it('REFUSES a Master adding a part the technician missed', async () => {
     const signed = await workAndSign(harness);
     const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
-    const amended = await addNote(harness.master, handed, 'Checked against the PO.', true);
-    expect(amended.notes.some((note) => note.body === 'Checked against the PO.')).toBe(true);
+    await expect(
+      addPart(harness.master, handed, {
+        partNumber: 'FAN-24V-80',
+        description: 'Spindle drive cooling fan',
+        quantity: 1,
+        unitPrice: 48500,
+      }),
+    ).rejects.toThrow(/final and cannot be changed/i);
+
+    // Refused, and nothing was written.
+    const reloaded = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    expect(reloaded?.parts).toHaveLength(0);
+  });
+
+  it('REFUSES a Master adding a note during review', async () => {
+    const signed = await workAndSign(harness);
+    const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
+
+    await expect(
+      addNote(harness.master, handed, 'Checked against the PO.', true),
+    ).rejects.toThrow(/final and cannot be changed/i);
   });
 
   it('refuses the same edit from a technician', async () => {
@@ -158,28 +195,26 @@ describe('a Master can still edit a job left in Master Review', () => {
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('prices a Master amendment at the rates frozen at signature', async () => {
+  it('keeps the rates it was signed at when the office raises them', async () => {
+    /*
+     * The pricing rule this case has always been about is unchanged and still
+     * matters — it is what stops a rate rise re-pricing a job the customer has
+     * already agreed to. What changed is that it is no longer demonstrated by
+     * AMENDING the signed job, because that is now refused. The frozen
+     * snapshot is asserted directly instead.
+     */
     const signed = await workAndSign(harness);
     const rates = await harness.repos.settings.get();
     const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
 
-    // The office raises rates between signature and issue.
     await harness.repos.settings.save({
       ...rates,
       labourRates: { normal: 500000, overtime: 500000, double: 500000 },
     });
 
-    const amended = await addLabour(harness.master, handed, {
-      date: '2026-09-17',
-      rateType: 'normal',
-      hours: 1,
-      description: 'Master correction',
-    });
-
-    const totals = calculateJobTotals(amended, await harness.repos.settings.get());
-    // 4 hours total, all at the ORIGINAL frozen rate, not the new one.
+    const totals = calculateJobTotals(handed, await harness.repos.settings.get());
     expect(totals.pricing.labourRates.normal).toBe(rates.labourRates.normal);
-    expect(totals.labourTotal).toBe(rates.labourRates.normal * 4);
+    expect(totals.labourTotal).toBe(rates.labourRates.normal * 3);
   });
 
   it('does not let a Master overwrite the customer signature', async () => {
@@ -289,23 +324,34 @@ describe('issuing a job left in Master Review', () => {
     expect(emails(harness)).toHaveLength(0);
   });
 
-  it('includes a Master amendment in the issued document', async () => {
+  it('issues exactly what the customer signed, with nothing added to it', async () => {
+    /*
+     * This asserted that a Master's amendment reached the issued document —
+     * which was right while the office could amend a signed card, and is the
+     * precise thing CR-01 now prohibits. Inverted: the amendment is refused,
+     * and the document that goes to the customer carries the work they signed
+     * for and no more.
+     */
     const signed = await workAndSign(harness);
     const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
-    const amended = await addPart(harness.master, handed, {
-      partNumber: 'FAN-24V-80',
-      description: 'Spindle drive cooling fan',
-      quantity: 1,
-      unitPrice: 48500,
-    });
+
+    await expect(
+      addPart(harness.master, handed, {
+        partNumber: 'FAN-24V-80',
+        description: 'Spindle drive cooling fan',
+        quantity: 1,
+        unitPrice: 48500,
+      }),
+    ).rejects.toThrow(/final and cannot be changed/i);
 
     const result = await submitJobCard(
       harness.master,
-      amended,
+      handed,
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
 
-    expect(result.job.parts).toHaveLength(1);
+    expect(result.job.parts).toHaveLength(0);
+    expect(result.job.labour).toHaveLength(1);
   });
 });

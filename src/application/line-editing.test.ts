@@ -268,19 +268,38 @@ describe('amending does not disturb historical pricing', () => {
 
     const master = seedUsers.find((user) => user.role === 'master')!;
     const masterContext: OperationContext = { ...harness.context, actor: master };
-    const amended = await updateLabour(masterContext, handed, handed.labour[0]!.id, {
-      date: '2026-09-17',
-      rateType: 'normal',
-      hours: 4,
-      description: 'Work, corrected',
-    });
 
-    const totals = await totalsOf(harness, amended);
+    /*
+     * MASTER SCOPE CR-01. This case amended the SIGNED job to show that the
+     * amendment priced at the frozen rates. The amendment itself is now
+     * refused — a customer-signed job card is legally final — so the rule it
+     * was demonstrating is asserted where it actually lives: on the snapshot.
+     */
+    await expect(
+      updateLabour(masterContext, handed, handed.labour[0]!.id, {
+        date: '2026-09-17',
+        rateType: 'normal',
+        hours: 4,
+        description: 'Work, corrected',
+      }),
+    ).rejects.toThrow(/final and cannot be changed/i);
+
+    const totals = await totalsOf(harness, handed);
     expect(totals.pricing.labourRates.normal).toBe(rates.labourRates.normal);
-    expect(totals.labourTotal).toBe(rates.labourRates.normal * 4);
+    expect(totals.labourTotal).toBe(rates.labourRates.normal * 2);
   });
 
-  it('records a post-signature amendment on the audit trail', async () => {
+  it('can no longer produce a post-signature amendment event', async () => {
+    /*
+     * MASTER SCOPE CR-01. This asserted the opposite: that amending a job the
+     * customer had signed was recorded as `master_amended_after_signature`.
+     * That event was an honest record of something the business now prohibits,
+     * so nothing produces it any more.
+     *
+     * The TYPE stays in `ActivityEventType` on purpose — jobs amended under
+     * the old rule carry it, and removing it would make their history
+     * unreadable. This holds it unreachable rather than deleted.
+     */
     const harness = build();
     const master = seedUsers.find((user) => user.role === 'master')!;
     const masterContext: OperationContext = { ...harness.context, actor: master };
@@ -304,6 +323,6 @@ describe('amending does not disturb historical pricing', () => {
     });
 
     const trail = await harness.repos.activity.list(job.id);
-    expect(trail.some((event) => event.type === 'master_amended_after_signature')).toBe(true);
+    expect(trail.some((event) => event.type === 'master_amended_after_signature')).toBe(false);
   });
 });

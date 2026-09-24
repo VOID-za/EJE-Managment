@@ -1120,6 +1120,154 @@ export const seedJobs: readonly Job[] = [
     acceptedAt: timeAgo(0, 9),
     createdAt: timeAgo(5, 9),
   }),
+
+  /* ---------------------------------------------------------------- */
+  /* THE OFFICE REVIEW QUEUE — the two jobs that sit at Review, and    */
+  /* the whole of MASTER SCOPE CR-01 in two records.                   */
+  /*                                                                   */
+  /* Both are at `review`. They are told apart by ONE field, which is  */
+  /* the entire business rule: EJE-2025 carries a signature and is     */
+  /* therefore final and untouchable; EJE-2026 does not, and is the    */
+  /* office's to correct and resubmit. Without these two the seed      */
+  /* could not demonstrate immutability, the refusal correction loop,  */
+  /* or the Master's final submission at all — the register held NO    */
+  /* job at Review.                                                    */
+  /* ---------------------------------------------------------------- */
+
+  // SIGNED. Waiting on a Master's final submission, and immutable to everyone.
+  job('EJE-2025', {
+    jobType: 'breakdown',
+    priority: 'high',
+    status: 'review',
+    customerId: REGISTER.acme.id,
+    siteId: REGISTER.acme.factory,
+    contactId: REGISTER.acme.maintenance,
+    machineId: REGISTER.acme.stm1,
+    scheduledDate: dayOffset(-1),
+    orderNumber: 'PO-ACME-7781',
+    referenceNumber: 'ACME-BRK-207',
+    faultDescription: 'Spindle drive tripping under load on the STM-1.',
+    primaryTechnicianId: TECH1,
+    acceptedAt: timeAgo(1, 7, 15),
+    completedAt: timeAgo(1, 14, 40),
+    createdAt: timeAgo(2, 8),
+    calloutApplied: true,
+    labour: [
+      {
+        id: lineId('2025-lab-1'),
+        technicianId: TECH1,
+        date: dayOffset(-1),
+        rateType: 'normal',
+        hours: 4,
+        description: 'Spindle drive fault finding and cooling fan replacement',
+        capturedAt: timeAgo(1, 14),
+        capturedBy: TECH1,
+      },
+    ],
+    travel: [
+      {
+        id: lineId('2025-trv-1'),
+        technicianId: TECH1,
+        date: dayOffset(-1),
+        kilometres: 48,
+        description: 'Workshop to site and back',
+        capturedAt: timeAgo(1, 14),
+        capturedBy: TECH1,
+      },
+    ],
+    parts: [
+      {
+        id: lineId('2025-prt-1'),
+        partNumber: 'FAN-24V-80',
+        description: 'Spindle drive cooling fan, 24V 80mm',
+        quantity: 1,
+        unitPrice: 48500,
+        capturedAt: timeAgo(1, 14),
+        capturedBy: TECH1,
+      },
+    ],
+    completionReport: {
+      faultFindings: 'Spindle drive cooling fan seized; drive tripping on over-temperature.',
+      diagnosis: 'Bearing failure in the cooling fan after roughly nine years in service.',
+      workPerformed:
+        'Replaced the spindle drive cooling fan, cleaned the heatsink and ran the spindle to full speed for twenty minutes without a trip.',
+      recommendations: 'Replace the second drive fan at the next service; it is the same age.',
+      generalNotes: '',
+    },
+    // THE FIELD THAT MAKES IT FINAL.
+    signature: {
+      customerName: 'Pieter',
+      customerSurname: 'Nel',
+      strokeData: 'M0.10,0.60 L0.30,0.20 L0.50,0.70 L0.80,0.30',
+      signedAt: timeAgo(1, 15),
+      declaration: 'I confirm that the work described above has been completed.',
+    },
+    pricingSnapshot: ratesAt(timeAgo(1, 15)),
+  }),
+
+  // REFUSED. Same status, no signature — the office's to correct and resubmit
+  // under one of the two outcomes.
+  job('EJE-2026', {
+    jobType: 'service',
+    priority: 'normal',
+    status: 'review',
+    customerId: REGISTER.jia.id,
+    siteId: REGISTER.jia.plant,
+    contactId: REGISTER.jia.planner,
+    machineId: REGISTER.jia.cnc02,
+    scheduledDate: dayOffset(-2),
+    orderNumber: 'PO-JIA-9971',
+    referenceNumber: 'JIA-SVC-118',
+    faultDescription: 'Six-monthly service on the CNC-02 machining centre.',
+    primaryTechnicianId: TECH2,
+    acceptedAt: timeAgo(2, 7, 30),
+    completedAt: timeAgo(2, 15, 10),
+    createdAt: timeAgo(4, 9),
+    labour: [
+      {
+        id: lineId('2026-lab-1'),
+        technicianId: TECH2,
+        date: dayOffset(-2),
+        rateType: 'normal',
+        hours: 5,
+        description: 'Six-monthly service',
+        capturedAt: timeAgo(2, 15),
+        capturedBy: TECH2,
+      },
+      {
+        id: lineId('2026-lab-2'),
+        technicianId: TECH2,
+        date: dayOffset(-2),
+        rateType: 'overtime',
+        hours: 2,
+        description: 'Overtime to finish the same day',
+        capturedAt: timeAgo(2, 15),
+        capturedBy: TECH2,
+      },
+    ],
+    completionReport: {
+      faultFindings: 'Service intervals reached; no faults found.',
+      diagnosis: 'Routine service.',
+      workPerformed:
+        'Completed the six-monthly service schedule, replaced the way-lube filter and re-tensioned the spindle belt.',
+      recommendations: 'Book the twelve-monthly service in six months.',
+      generalNotes: '',
+    },
+    signatureRefusals: [
+      {
+        refused: true,
+        reason:
+          'The planner disputes the two overtime hours and will not sign until the office confirms them against the order.',
+        recordedBy: TECH2,
+        recordedAt: timeAgo(2, 15, 25),
+        resolvedBy: null,
+        resolvedAt: null,
+        resolution: null,
+        resolutionNote: '',
+      },
+    ],
+    pricingSnapshot: ratesAt(timeAgo(2, 15, 25)),
+  }),
 ];
 
 /** The handover on EJE-2023, written as the structured record the schema keeps. */
@@ -1159,4 +1307,4 @@ export const seedParticipation = [
 ];
 
 /** The highest sequence number the seed uses, so allocation continues past it. */
-export const HIGHEST_JOB_SEQUENCE = 2024;
+export const HIGHEST_JOB_SEQUENCE = 2026;
