@@ -20,7 +20,7 @@ Statuses: **DONE** · **PARTIAL** · **NOT IMPLEMENTED** · **UNVERIFIED** ·
 Business-rule changes confirmed after v2.0. Each one records what it replaced.
 
 ### CR-01 — A customer-signed job card is legally final
-*Confirmed 24 September 2026. Implemented `c29dc1b`.*
+*Confirmed 24 September 2026. Implemented `947ef4f`.*
 
 Once the customer has signed, nothing on the job card may be edited — not by a
 Master, not by a Coordinator, not by the technician who did the work. No reopen
@@ -65,11 +65,11 @@ recovery after interruption. A native application remains out of scope for V1.
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| IMMUT-1 | The signed record is final | **DONE** | `c29dc1b` | `isFinalized()`; `signed-job-immutability.test.ts` |
-| IMMUT-2 | No Master may edit | **DONE** | `c29dc1b` | refusal test, all mutations |
-| IMMUT-3 | No Coordinator may edit | **DONE** | `c29dc1b` | refusal test |
-| IMMUT-4 | No Technician may edit | **DONE** | `c29dc1b` | refusal test |
-| IMMUT-5 | No reopen path exists | **DONE** | `c29dc1b` | no reopen operation; `canEditJobRecord` false for signed/issued/closed |
+| IMMUT-1 | The signed record is final | **DONE** | `947ef4f` | `isFinalized()`; `signed-job-immutability.test.ts` |
+| IMMUT-2 | No Master may edit | **DONE** | `947ef4f` | refusal test, all mutations |
+| IMMUT-3 | No Coordinator may edit | **DONE** | `947ef4f` | refusal test |
+| IMMUT-4 | No Technician may edit | **DONE** | `947ef4f` | refusal test |
+| IMMUT-5 | No reopen path exists | **DONE** | `947ef4f` | no reopen operation; `canEditJobRecord` false for signed/issued/closed |
 | IMMUT-6 | Original PDF unchanged | **DONE** | `0002` | `final_documents_immutable` trigger |
 | IMMUT-7 | Signature, labour, travel, parts, charges, checklist, notes, media unchanged | **DONE** | `0002` + `0007` | six new triggers + column guard on `jobs`; proven at SQLSTATE `23001` |
 | IMMUT-8 | Audit history immutable | **DONE** | `0002` | `audit_events_append_only` |
@@ -84,11 +84,11 @@ recovery after interruption. A native application remains out of scope for V1.
 | REF-3 | Job moves to office review | **DONE** | pre-existing |
 | REF-4 | **Both** Master and Coordinator notified | **DONE** | `d979aa9` |
 | REF-5 | Office may review the job card | **DONE** | pre-existing |
-| REF-6 | Office may correct the **unsigned** card | **DONE** | `c29dc1b` — held open deliberately by CR-01 |
+| REF-6 | Office may correct the **unsigned** card | **DONE** | `947ef4f` — held open deliberately by CR-01 |
 | REF-7 | Resubmit → Customer Signature | **DONE** | `returnToCustomerSignature` |
 | REF-8 | Resubmit → Without Customer Signature | **DONE** | `resolveSignatureRefusal` |
 | REF-9 | Final submission/closure/delivery stays Master-controlled | **DONE** | `d979aa9` — `jobs.issueFinal` |
-| REF-10 | The refusal workflow never modifies a signed record | **DONE** | `c29dc1b` |
+| REF-10 | The refusal workflow never modifies a signed record | **DONE** | `947ef4f` |
 
 ### Roles, calendar, notifications (completed earlier — retained)
 
@@ -108,7 +108,7 @@ recovery after interruption. A native application remains out of scope for V1.
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
 | TRANS-1..4 | Transfers | **DONE** | pre-existing |
 | DEMO-1..4 | Demo users, switcher, idempotent seed | **DONE** | `202e1fe`, `95e9848` |
-| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `c29dc1b` — EJE-2025 signed, EJE-2026 refused |
+| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused |
 
 ### Offline and tablet (CR-02, CR-03) — none implemented
 
