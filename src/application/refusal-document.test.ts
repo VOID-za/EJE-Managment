@@ -3,7 +3,6 @@ import {
   acceptJob,
   resolveSignatureRefusal,
   addLabour,
-  issueJobCard,
   recordSignatureRefusal,
   saveCompletionReport,
   startCompletion,
@@ -11,7 +10,7 @@ import {
 } from './job-operations';
 import { loadFinalDocumentFile } from './final-document';
 import { loadJobView } from './job-view';
-import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { buildHarness, seedUser, type Harness } from './test-harness';
 import { buildJobCardModel } from '@/lib/job-card/model';
 import { inspectPdf, pdfPlainText } from '@/lib/pdf/inspect';
 import { currentRefusal, type Job } from '@/domain';
@@ -56,15 +55,18 @@ describe('the issued document for a refused job card', () => {
     job = await startCompletion(context, job);
     job = await startSignature(context, job);
     job = await recordSignatureRefusal(context, job, { reason: REASON });
-    job = await resolveSignatureRefusal(harness.as(master), job, 'Invoice to proceed.');
 
-    const result = await issueJobCard(
-      harness.as(master),
-      job,
-      'accounts@example.com',
-      'ABC Engineering',
-    );
-    issued = await confirmDelivery(harness, harness.as(master), result.job);
+    /*
+     * "WITHOUT CUSTOMER SIGNATURE" NOW CLOSES THE JOB ITSELF.
+     *
+     * This used to resolve the refusal, then issue, then wait for a delivery
+     * confirmation — three steps for an outcome the office has already
+     * decided. The confirmed rule is that resolving this way closes the job
+     * immediately, and the unsigned document is produced as part of it. The
+     * document itself is unchanged, which is what every case below checks.
+     */
+    issued = await resolveSignatureRefusal(harness.as(master), job, 'Invoice to proceed.');
+    expect(issued.status).toBe('closed');
   });
 
   const storedText = async (): Promise<string> =>
@@ -161,14 +163,30 @@ describe('the issued document for a refused job card', () => {
     expect(currentRefusal(issued)?.reason).toBe(REASON);
   });
 
-  it('emailed the customer once, with the stored document', async () => {
+  it('does NOT email the customer on this path — BD-06, an open decision', async () => {
+    /*
+     * This asserted one email, because the old route reached the customer
+     * through `issueJobCard`, which sends. Closing on resolution takes that
+     * route away, and whether the unsigned copy should be EMAILED is a
+     * question nobody has answered:
+     *
+     *   §15 puts customer delivery after the final MASTER submission, and this
+     *   resolution is open to a Coordinator. Sending here would hand her an
+     *   outward-facing act the Scope reserves.
+     *
+     * So the document is rendered, stored and downloadable — every case above
+     * reads it back — and nothing is sent. This pins that deliberate silence
+     * so it cannot become an accident, and it is the case to invert when
+     * BD-06 is decided.
+     */
     const sent = await harness.outbox.list();
     const forThisJob = sent.filter(
       (entry) => entry.channel === 'email' && entry.subject.includes('EJE-1048'),
     );
-    expect(forThisJob).toHaveLength(1);
-    // And what went out is the stored document, by name.
-    expect(forThisJob[0]?.attachments).toContain('EJE-1048-Final-Job-Card.pdf');
+    expect(forThisJob).toHaveLength(0);
+
+    // The document exists regardless: it is what the cases above read.
+    expect(issued.finalDocument?.fileName).toBe('EJE-1048-Final-Job-Card.pdf');
   });
 });
 

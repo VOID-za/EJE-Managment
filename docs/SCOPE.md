@@ -57,6 +57,43 @@ Extends v2.0 §20, which already names IndexedDB and a PWA service worker.
 Installable to the home screen, standalone operation, camera access, touch UI,
 recovery after interruption. A native application remains out of scope for V1.
 
+### CR-04 — The refusal review belongs to the office, and has exactly two ends
+*Confirmed 24 September 2026. Implemented in this batch (see REF-11…REF-18).*
+
+Three defects found in VPS acceptance testing all came from the same unstated
+rule. Confirming it settles all three.
+
+**(a) The technician is read-only from the moment the refusal is submitted.**
+Recording the refusal is the technician's last act on that job card. From then
+on the technician may **view** the card and the refusal information and nothing
+else: no edit, no return-for-signature, no second signature attempt, no
+resolution, no resubmission, and no choice of either outcome. The card is the
+office's.
+
+**(b) The office review has exactly two outcomes, and no third.**
+
+| | Outcome | Result |
+|---|---|---|
+| **A** | **Customer Signature** | The card returns to the customer-signature step and then follows the normal route — signature, review, final Master submission, closure. |
+| **B** | **Without Customer Signature** | The refusal is resolved and the job is **CLOSED immediately**. No customer-signature step follows, no review step follows, no Capture Signature button is offered, no return-for-signature action remains. The final state is `closed`. |
+
+**(c) Both outcomes are real state transitions.** Outcome A is
+`review → customer_signature`, not `customer_signature → customer_signature`.
+Outcome B is `review → closed`, not "resolve the refusal and leave the job
+where it was". A job whose refusal is resolved without a signature is finished,
+and the state machine must say so.
+
+> **Superseded — the implementation as at `83b6754`:** outcome B resolved the
+> refusal, left the job at `review`, and expected a separate `issueJobCard` and
+> a delivery confirmation to close it — so the card still advertised "5 Review /
+> 6 Closed" and a Capture Signature button after the office had decided it would
+> never be signed. Outcome A was reachable from `customer_signature`, a state a
+> refusal never produces.
+
+**Unchanged by this.** CR-01 stands in full: once the customer has signed,
+nothing may be edited and there is no reopen path. CR-04 governs the **unsigned**
+card only.
+
 ---
 
 ## Requirement register
@@ -85,10 +122,23 @@ recovery after interruption. A native application remains out of scope for V1.
 | REF-4 | **Both** Master and Coordinator notified | **DONE** | `d979aa9` |
 | REF-5 | Office may review the job card | **DONE** | pre-existing |
 | REF-6 | Office may correct the **unsigned** card | **DONE** | `947ef4f` — held open deliberately by CR-01 |
-| REF-7 | Resubmit → Customer Signature | **DONE** | `returnToCustomerSignature` |
-| REF-8 | Resubmit → Without Customer Signature | **DONE** | `resolveSignatureRefusal` |
+| REF-7 | Resubmit → Customer Signature | **DONE** | `returnToCustomerSignature` — corrected by REF-13 |
+| REF-8 | Resubmit → Without Customer Signature | **DONE** | `resolveSignatureRefusal` — corrected by REF-14 |
 | REF-9 | Final submission/closure/delivery stays Master-controlled | **DONE** | `d979aa9` — `jobs.issueFinal` |
 | REF-10 | The refusal workflow never modifies a signed record | **DONE** | `947ef4f` |
+
+#### CR-04 — office ownership and the two outcomes
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| REF-11 | The technician may submit the refusal, and may still **read** the job card and refusal afterwards | **DONE** | this batch | `refusal-review-roles.test.ts` |
+| REF-12 | The technician is **read-only** from that moment: no edit, no return for signature, no signature capture, no resolution, no resubmission — refused server-side, not merely hidden | **DONE** | this batch | `canEditJob` at `review` now asks `jobs.editSubmittedJob`; `refusal-review-roles.test.ts`, `signed-job-immutability.test.ts` |
+| REF-13 | Outcome A is the transition `review → customer_signature`, and is rejected from any other state | **DONE** | this batch | `returnToCustomerSignature` status guard; `refusal-review-roles.test.ts` |
+| REF-14 | Outcome B is the transition `review → closed`, applied in one act | **DONE** | this batch | `resolveSignatureRefusal` now calls `transition(job, 'closed')`; `signature-refusal.test.ts` |
+| REF-15 | After outcome B the job offers **no** signature step, review step, Capture Signature button, return-for-signature action or further resolution — to any role | **DONE** | this batch | `refusal-review-roles.test.ts`; `JobActionBar.tsx` |
+| REF-16 | Outcome B still produces the unsigned customer document, stored and immutable | **DONE** | this batch | `renderAndStoreFinalDocument`; `refusal-document.test.ts` (12 cases) |
+| REF-17 | `customer_signature → customer_signature`, `closed → customer_signature`, `closed → review` and `closed → any editable state` are all illegal | **DONE** | this batch | `progress.test.ts` |
+| REF-18 | The seed demonstrates the refusal review from a state the application can actually produce | **DONE** | this batch | EJE-2018 seeded at `review`, not `customer_signature` |
 
 ### Roles, calendar, notifications (completed earlier — retained)
 
@@ -108,7 +158,7 @@ recovery after interruption. A native application remains out of scope for V1.
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
 | TRANS-1..4 | Transfers | **DONE** | pre-existing |
 | DEMO-1..4 | Demo users, switcher, idempotent seed | **DONE** | `202e1fe`, `95e9848` |
-| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused |
+| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused; EJE-2018 corrected to `review` in this batch (REF-18) |
 
 ### Offline and tablet (CR-02, CR-03) — none implemented
 
@@ -160,6 +210,8 @@ recovery after interruption. A native application remains out of scope for V1.
 | **BD-03** | `jobs.editSubmittedJob` now applies only to refused cards. Re-scope its name, or retire it? | cosmetic |
 | **BD-04** | v2.0 §6 says the Order Number is mandatory; the code implements the three-valued DECISION 2 waiver. Which stands? | JOB-5 |
 | **BD-05** | v2.0 §20 specifies Redis queues; the implementation uses a durable PostgreSQL outbox. Accept the substitution, or build Redis? | ARCH-2 |
+| **BD-06** | Outcome B closes the job without **emailing** the unsigned copy to the customer. The old route emailed, because it went through `issueJobCard`; §15 puts customer delivery after the final **Master** submission, and outcome B is open to a Coordinator. Should closing without a signature send the customer their copy, and if so, under whose authority? The document is rendered, stored and downloadable either way. | REF-16 |
+| **BD-07** | After outcome A returns the card to `customer_signature`, **who** captures the signature? The technician is read-only on that job under CR-04(a), so the card is back at the customer step with no field user permitted to act on it. Either the office captures it, or the read-only rule needs a stated exception for exactly this step. | REF-13 |
 
 ---
 

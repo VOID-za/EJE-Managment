@@ -89,9 +89,41 @@ describe('the state machine agrees with the rail', () => {
     expect(canTransition('review', 'awaiting_delivery')).toBe(true);
   });
 
-  it('closes only from awaiting delivery, never straight from Review', () => {
-    expect(canTransition('review', 'closed')).toBe(false);
+  it('closes from awaiting delivery, and from Review only for a refusal', () => {
+    /*
+     * MASTER SCOPE REF-8. `review -> closed` is the "Without Customer
+     * Signature" outcome and is the ONLY reason that edge exists: nobody
+     * signed, so there is no customer copy in transit and no delivery to wait
+     * for. The SIGNED route is unchanged and still closes only on a confirmed
+     * delivery — `resolveSignatureRefusal` is the one operation that takes
+     * this edge, and it refuses a job with no outstanding refusal.
+     */
+    expect(canTransition('review', 'closed')).toBe(true);
     expect(canTransition('awaiting_delivery', 'closed')).toBe(true);
+  });
+
+  it('never lets a closed job go back anywhere', () => {
+    // The finality rule, at the state machine. A job that has closed — signed,
+    // or closed without a signature — has no way out.
+    for (const target of [
+      'customer_signature',
+      'review',
+      'in_progress',
+      'completion',
+      'awaiting_delivery',
+      'open',
+    ] as const) {
+      expect(canTransition('closed', target), target).toBe(false);
+    }
+    expect(allowedTransitions('closed')).toEqual([]);
+  });
+
+  it('never lets customer_signature loop back to itself', () => {
+    // The transition acceptance testing hit: "cannot move from
+    // customer_signature to customer_signature". Returning a refused card for
+    // signature starts at `review`, which is where a refusal actually lands.
+    expect(canTransition('customer_signature', 'customer_signature')).toBe(false);
+    expect(canTransition('review', 'customer_signature')).toBe(true);
   });
 
   it('keeps the historical Master Review edges so old jobs can still move on', () => {
@@ -144,6 +176,8 @@ describe('nothing can enter Master Review', () => {
       'awaiting_delivery',
       'customer_signature',
       'completion',
+      // "Without Customer Signature" — see the state-machine block above.
+      'closed',
     ]);
     expect(allowedTransitions('review')).not.toContain('submitted');
   });

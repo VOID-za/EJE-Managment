@@ -152,7 +152,21 @@ export const JobActionBar = ({
     const awaitingResolution = refusalAwaitingResolution(job);
     const canCorrect = can(currentUser.role, 'jobs.editSubmittedJob');
 
-    if (awaitingResolution && canCorrect) {
+    /*
+     * THE TECHNICIAN IS READ-ONLY HERE. MASTER SCOPE REF-11.
+     *
+     * "The technician may ONLY view the submitted job card and its refusal
+     * information." Acceptance testing found a technician being offered the
+     * way back into a refused job card — an action the server refuses, so the
+     * button existed only to fail. The server is the control; this stops the
+     * screen advertising something it will not honour.
+     *
+     * The office keeps both actions: correcting the card IS the refusal
+     * workflow.
+     */
+    if (!canCorrect) return actions;
+
+    if (awaitingResolution) {
       /*
        * The office's way into a refused job card.
        *

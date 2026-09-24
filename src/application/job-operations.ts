@@ -1582,6 +1582,31 @@ export const returnToCustomerSignature = async (
   // Called for the refusal it refuses to proceed without, not for its value.
   assertCanResolveRefusal(context, job);
 
+  /*
+   * OUTCOME A STARTS AT REVIEW. MASTER SCOPE REF-7.
+   *
+   * A refusal puts the job at `review` — that is what `recordSignatureRefusal`
+   * does — and this sends it back to `customer_signature`. Acceptance testing
+   * hit "EJE-2018 cannot move from customer_signature to customer_signature",
+   * which is what a job sitting in the WRONG state produces: the generic
+   * transition error names two identical statuses and explains nothing.
+   *
+   * Said here, before the transition, so a job that is not in office review is
+   * refused in words that identify the problem.
+   */
+  if (job.status !== 'review') {
+    throw new WorkflowError(
+      `${job.jobNumber} is not in office review, so it cannot be returned for signature.`,
+      [
+        {
+          code: 'not_in_office_review',
+          message:
+            'Only a job card the customer refused to sign, sitting with the office, can be returned for signature.',
+        },
+      ],
+    );
+  }
+
   // The corrected card still has to be a card the system would accept: a
   // correction that removed the write-up cannot go back to the customer.
   const readiness = checkReadyForSignature(job);
@@ -1635,9 +1660,65 @@ export const resolveSignatureRefusal = async (
   // Called for the refusal it refuses to proceed without, not for its value.
   assertCanResolveRefusal(context, job);
 
+  /*
+   * OUTCOME B CLOSES THE JOB. MASTER SCOPE REF-8.
+   *
+   * "The refusal is resolved. The job is CLOSED immediately. There must be NO
+   * subsequent Customer Signature step. There must be NO Review step after
+   * this. There must be NO Capture Signature button. The final state must be
+   * CLOSED."
+   *
+   * This recorded the outcome and moved nothing, so acceptance testing saw the
+   * job card correctly say "Issued without a signature" while still showing
+   * steps 5 Review and 6 Closed and offering Capture Signature. Recording a
+   * decision is not making it: the office has decided this job ends here, and
+   * the state has to agree.
+   *
+   * Straight to `closed`, not through `awaiting_delivery` — see the transition
+   * table. Nobody signed, so there is no customer copy in transit and no
+   * delivery to confirm.
+   */
+  if (job.status !== 'review') {
+    throw new WorkflowError(
+      `${job.jobNumber} is not in office review, so its refusal cannot be resolved.`,
+      [
+        {
+          code: 'not_in_office_review',
+          message:
+            'Only a job card the customer refused to sign, sitting with the office, can be resolved.',
+        },
+      ],
+    );
+  }
+
+  transition(job, 'closed');
+
   const now = context.services.clock.now();
+
+  /*
+   * THE CUSTOMER STILL GETS A JOB CARD — one that records that they declined.
+   *
+   * Closing the job is not the same as producing nothing. The unsigned
+   * document is an existing, tested artefact: it names the refusal, prints the
+   * reason and who recorded it, and carries no signature mark of any kind. It
+   * is rendered through the SAME pipeline the signed copy uses, so the two
+   * cannot drift.
+   *
+   * WHAT IS DELIBERATELY NOT DONE HERE IS THE EMAIL. Master Scope §15 puts
+   * customer delivery after the final MASTER submission, and this resolution
+   * is open to a Coordinator. Sending would be an outward-facing act nobody has
+   * asked for on this path, so the document is stored and downloadable and the
+   * send is left as an explicit business decision — BD-06 in docs/SCOPE.md.
+   */
+  const { job: priced, finalDocument } = await renderAndStoreFinalDocument(context, job, now);
+
   const saved = await context.repos.jobs.save({
-    ...job,
+    ...priced,
+    status: 'closed',
+    closedAt: now,
+    completedAt: job.completedAt ?? now,
+    submittedAt: job.submittedAt ?? now,
+    finalDocument,
     signatureRefusals: withResolvedRefusal(job, 'issued_unsigned', context.actor.id, now, note),
   });
 
@@ -1647,8 +1728,17 @@ export const resolveSignatureRefusal = async (
     summary: 'Signature refusal resolved',
     // As above: the fact and the office's decision, not the customer's reason.
     detail:
-      `Signature refusal resolved by ${userFullName(context.actor)}, to issue without a signature.` +
+      `Signature refusal resolved by ${userFullName(context.actor)}, to close without a signature.` +
       (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_closed',
+    summary: 'Job closed without a customer signature',
+    detail:
+      `${job.jobNumber} was closed by ${userFullName(context.actor)} without a customer signature, ` +
+      'because the customer refused to sign and the office resolved it that way.',
   });
 
   await fileRefusalNotifications(context, job);
@@ -1831,6 +1921,88 @@ export const recordPostSignatureChange = async (
     summary: 'Job card corrected by the office',
     detail: `${description} Corrected by ${userFullName(context.actor)} after the customer refused to sign. The technician's original submission is unchanged in the history above.`,
   });
+};
+
+/**
+ * Renders the customer's copy, writes it to storage and proves it is readable.
+ *
+ * EXTRACTED so the two ways a job card leaves EJE share one implementation.
+ * `issueJobCard` produces the signed copy; resolving a refusal "Without
+ * Customer Signature" produces the unsigned one that records the customer
+ * declined. They differ in what happens NEXT — one waits on delivery, one
+ * closes — and in nothing about the document, so there is one renderer, one
+ * storage write and one readback check rather than two that could drift.
+ *
+ * The readback is not ceremony: a job card nobody can produce again is not a
+ * job card, so the bytes are proved before the job is allowed to move on.
+ */
+const renderAndStoreFinalDocument = async (
+  context: OperationContext,
+  job: Job,
+  now: string,
+): Promise<{ readonly job: Job; readonly finalDocument: NonNullable<Job['finalDocument']> }> => {
+  const settings = await context.repos.settings.get();
+  const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
+    ...pricingInputsFrom(settings),
+    capturedAt: now,
+    reason: 'submission',
+  };
+  const finalJob: Job = { ...job, pricingSnapshot: snapshot };
+
+  const document = await generateCustomerDocument(context, finalJob, 'final');
+  const view = await loadJobView(context.repos, job.jobNumber);
+  if (view === null) {
+    throw new WorkflowError(`${job.jobNumber} could not be read for issue.`, []);
+  }
+  const pageCount = await storeFinalDocument(
+    context,
+    finalJob,
+    {
+      storageKey: document.storageKey,
+      fileName: document.fileName,
+      generatedAt: document.generatedAt,
+    },
+    {
+      job: finalJob,
+      customer: view.customer,
+      site: view.site,
+      contact: view.contact,
+      machine: view.machine,
+      settings: view.settings,
+      checklistTemplate: view.checklistTemplate,
+      users: view.users,
+    },
+  );
+
+  const stored = await context.services.storage.getDocument(document.storageKey);
+  if (stored === null || stored.bytes.byteLength === 0) {
+    throw new WorkflowError(`${job.jobNumber} could not be issued.`, [
+      {
+        code: 'document_not_stored',
+        message: 'The final job card could not be stored, so it was not sent. Try again.',
+      },
+    ]);
+  }
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'pdf_generated',
+    summary: 'Final job card document generated',
+    detail: `${document.fileName} (${pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
+  });
+
+  return {
+    job: finalJob,
+    finalDocument: {
+      fileName: document.fileName,
+      storageKey: document.storageKey,
+      pageCount,
+      generatedAt: document.generatedAt,
+      generatedBy: context.actor.id,
+      simulated: document.simulated,
+      issuedTo: '',
+    },
+  };
 };
 
 export interface SubmitResult {

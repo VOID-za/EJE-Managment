@@ -1,5 +1,6 @@
 import type { Job, JobStatus } from '../types/job';
 import type { User, UserRole } from '../types/user';
+import { can } from '../access';
 import { getJobTypeDefinition } from './job-types';
 import { checkCollectionDetails } from './parts-document';
 
@@ -128,7 +129,23 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   // who refused is shown a corrected job card and asked again. It carries the
   // whole job with it — nothing is re-captured — and only the office may take
   // it; see `jobs.resubmitForSignature`.
-  review: ['awaiting_delivery', 'customer_signature', 'completion'],
+  /*
+   * `closed` IS AN EDGE FROM HERE, and it is the second refusal outcome.
+   *
+   * "WITHOUT CUSTOMER SIGNATURE — the refusal is resolved, the job is CLOSED
+   * immediately. There must be NO subsequent Customer Signature step, NO Review
+   * step after this, NO Capture Signature button." Acceptance testing found the
+   * office resolving a refusal that way and the job carrying on displaying the
+   * signature workflow, because resolving recorded the OUTCOME and moved
+   * nothing: the job sat where it was with a Capture Signature button on it.
+   *
+   * It is deliberately NOT routed through `awaiting_delivery`. That state means
+   * "a customer's copy is in transit and we are waiting on the provider", and
+   * there is no copy to wait for — nobody signed, so nothing is issued. Closing
+   * through a delivery handshake that will never arrive would leave the job
+   * stuck for ever.
+   */
+  review: ['awaiting_delivery', 'customer_signature', 'completion', 'closed'],
   // Only a confirmed delivery closes a job. The self-edge is a retry.
   awaiting_delivery: ['closed', 'awaiting_delivery'],
   // Historical only. Nothing transitions INTO this state any more; the edges
@@ -219,6 +236,20 @@ export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
   // matching it, whether or not delivery has been confirmed yet.
   if (status === 'awaiting_delivery') return false;
   if (status === 'submitted') return role === 'master';
+  /*
+   * THE JOB IS WITH THE OFFICE. THE TECHNICIAN IS READ-ONLY.
+   *
+   * "From that point onward the technician is READ-ONLY on that job… The
+   * technician may ONLY view the submitted job card and its refusal
+   * information."
+   *
+   * This returned true for every role, so a technician whose customer had
+   * refused to sign was still offered — and still granted — edits on a job they
+   * had already handed over. Handing it over is the point at which it stops
+   * being theirs. The office keeps editing, because correcting a refused job
+   * card is the whole of the refusal workflow.
+   */
+  if (status === 'review') return can(role, 'jobs.editSubmittedJob');
   return true;
 };
 

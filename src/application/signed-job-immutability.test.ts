@@ -197,12 +197,21 @@ describe('a REFUSED job card is not finalized, and the office may correct it', (
     expect(isFinalized(refused)).toBe(false);
   });
 
-  it('is open to the office and closed to the technician', () => {
+  it('is open to the office and READ-ONLY to the technician', () => {
+    /*
+     * MASTER SCOPE REF-11. "From that point onward the technician is READ-ONLY
+     * on that job… The technician may ONLY view the submitted job card and its
+     * refusal information."
+     *
+     * This asserted `true` for the technician, and said so confidently: a job
+     * at Review is the office's and `canEditJob` "has always said so". It did
+     * not — it returned true for every role, which is exactly the defect
+     * acceptance testing found. Handing the job over is the point at which it
+     * stops being the technician's.
+     */
     expect(canEditJobRecord('master', refused)).toBe(true);
     expect(canEditJobRecord('coordinator', refused)).toBe(true);
-    // Not the signature rule — the ordinary one: a job at Review is the
-    // office's, and `canEditJob` has always said so.
-    expect(canEditJobRecord('technician', refused)).toBe(true);
+    expect(canEditJobRecord('technician', refused)).toBe(false);
   });
 
   it('lets a MASTER correct the disputed hours', async () => {

@@ -764,11 +764,23 @@ export const seedJobs: readonly Job[] = [
   /* The refusal workflow, in both of its states.                      */
   /* ---------------------------------------------------------------- */
 
-  // Outstanding: the office has to deal with this one.
+  /*
+   * Outstanding: the office has to deal with this one.
+   *
+   * AT `review`, WHICH IS WHERE A REFUSAL ACTUALLY LANDS. This was seeded at
+   * `customer_signature`, a state `recordSignatureRefusal` never produces — it
+   * records the refusal AND moves the job to office review. The fixture was
+   * therefore a job that could not exist, and acceptance testing found exactly
+   * the failure that implies: returning it for signature asked the state
+   * machine to move it from `customer_signature` to `customer_signature`.
+   *
+   * A seed that cannot be reached by the application is not a demonstration of
+   * the application.
+   */
   job('EJE-2018', {
     jobType: 'breakdown',
     priority: 'high',
-    status: 'customer_signature',
+    status: 'review',
     customerId: REGISTER.pmg.id,
     siteId: REGISTER.pmg.plant,
     contactId: REGISTER.pmg.engineer,
