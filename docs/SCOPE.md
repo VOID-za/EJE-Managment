@@ -58,7 +58,7 @@ Installable to the home screen, standalone operation, camera access, touch UI,
 recovery after interruption. A native application remains out of scope for V1.
 
 ### CR-04 — The refusal review belongs to the office, and has exactly two ends
-*Confirmed 24 September 2026. Implemented in this batch (see REF-11…REF-18).*
+*Confirmed 24 September 2026. Implemented `b4e6140` (see REF-11…REF-18).*
 
 Three defects found in VPS acceptance testing all came from the same unstated
 rule. Confirming it settles all three.
@@ -131,14 +131,14 @@ card only.
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| REF-11 | The technician may submit the refusal, and may still **read** the job card and refusal afterwards | **DONE** | this batch | `refusal-review-roles.test.ts` |
-| REF-12 | The technician is **read-only** from that moment: no edit, no return for signature, no signature capture, no resolution, no resubmission — refused server-side, not merely hidden | **DONE** | this batch | `canEditJob` at `review` now asks `jobs.editSubmittedJob`; `refusal-review-roles.test.ts`, `signed-job-immutability.test.ts` |
-| REF-13 | Outcome A is the transition `review → customer_signature`, and is rejected from any other state | **DONE** | this batch | `returnToCustomerSignature` status guard; `refusal-review-roles.test.ts` |
-| REF-14 | Outcome B is the transition `review → closed`, applied in one act | **DONE** | this batch | `resolveSignatureRefusal` now calls `transition(job, 'closed')`; `signature-refusal.test.ts` |
-| REF-15 | After outcome B the job offers **no** signature step, review step, Capture Signature button, return-for-signature action or further resolution — to any role | **DONE** | this batch | `refusal-review-roles.test.ts`; `JobActionBar.tsx` |
-| REF-16 | Outcome B still produces the unsigned customer document, stored and immutable | **DONE** | this batch | `renderAndStoreFinalDocument`; `refusal-document.test.ts` (12 cases) |
-| REF-17 | `customer_signature → customer_signature`, `closed → customer_signature`, `closed → review` and `closed → any editable state` are all illegal | **DONE** | this batch | `progress.test.ts` |
-| REF-18 | The seed demonstrates the refusal review from a state the application can actually produce | **DONE** | this batch | EJE-2018 seeded at `review`, not `customer_signature` |
+| REF-11 | The technician may submit the refusal, and may still **read** the job card and refusal afterwards | **DONE** | `b4e6140` | `refusal-review-roles.test.ts` |
+| REF-12 | The technician is **read-only** from that moment: no edit, no return for signature, no signature capture, no resolution, no resubmission — refused server-side, not merely hidden | **DONE** | `b4e6140` | `canEditJob` at `review` now asks `jobs.editSubmittedJob`; `refusal-review-roles.test.ts`, `signed-job-immutability.test.ts` |
+| REF-13 | Outcome A is the transition `review → customer_signature`, and is rejected from any other state | **DONE** | `b4e6140` | `returnToCustomerSignature` status guard; `refusal-review-roles.test.ts` |
+| REF-14 | Outcome B is the transition `review → closed`, applied in one act | **DONE** | `b4e6140` | `resolveSignatureRefusal` now calls `transition(job, 'closed')`; `signature-refusal.test.ts` |
+| REF-15 | After outcome B the job offers **no** signature step, review step, Capture Signature button, return-for-signature action or further resolution — to any role | **DONE** | `b4e6140` | `refusal-review-roles.test.ts`; `JobActionBar.tsx` |
+| REF-16 | Outcome B still produces the unsigned customer document, stored and immutable | **DONE** | `b4e6140` | `renderAndStoreFinalDocument`; `refusal-document.test.ts` (12 cases) |
+| REF-17 | `customer_signature → customer_signature`, `closed → customer_signature`, `closed → review` and `closed → any editable state` are all illegal | **DONE** | `b4e6140` | `progress.test.ts` |
+| REF-18 | The seed demonstrates the refusal review from a state the application can actually produce | **DONE** | `b4e6140` | EJE-2018 seeded at `review`, not `customer_signature` |
 
 ### Roles, calendar, notifications (completed earlier — retained)
 
@@ -158,7 +158,7 @@ card only.
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
 | TRANS-1..4 | Transfers | **DONE** | pre-existing |
 | DEMO-1..4 | Demo users, switcher, idempotent seed | **DONE** | `202e1fe`, `95e9848` |
-| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused; EJE-2018 corrected to `review` in this batch (REF-18) |
+| DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused; EJE-2018 corrected to `review` in `b4e6140` (REF-18) |
 
 ### Offline and tablet (CR-02, CR-03) — none implemented
 
