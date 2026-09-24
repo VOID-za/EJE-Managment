@@ -62,15 +62,21 @@ const closeJob = async (harness: Harness): Promise<Job> => {
     customerSurname: 'Nel',
     strokeData: 'M0.100,0.600 L0.300,0.200 L0.500,0.700 L0.800,0.300',
   });
-  // The technician's submission issues the job card itself now — no Master
-  // Review. It closes only once the provider confirms the customer's copy.
+  /*
+   * THE MASTER ISSUES IT. MASTER SCOPE §3.1, §7, §15.
+   *
+   * The technician's part ends at the signature: the job reaches the office at
+   * Review and waits. Only `jobs.issueFinal` — the Master's alone — renders the
+   * customer's copy and sends it, and the job closes only once the provider
+   * confirms delivery.
+   */
   const result = await issueJobCard(
-    tech,
+    harness.as(master),
     job,
     'pieter.nel@abc-engineering-demo.co.za',
     'Pieter Nel',
   );
-  return confirmDelivery(harness, tech, result.job);
+  return confirmDelivery(harness, harness.as(master), result.job);
 };
 
 describe('a closed job has a downloadable final document', () => {

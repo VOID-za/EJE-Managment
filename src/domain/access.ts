@@ -30,8 +30,34 @@ export type Capability =
   | 'jobs.acceptField'
   /** Capture work on a job — hours, travel, parts, the write-up. */
   | 'jobs.captureWork'
-  /** Hand a completed job card over / issue it. */
+  /**
+   * Hand a completed job card to the OFFICE for review. MASTER SCOPE §7.
+   *
+   * This is what a technician does at the end of a job, and it is where their
+   * authority over it ends. It does not generate the final document, does not
+   * email the customer and does not close anything — §7: "Technician submission
+   * means Submit for Master Review; it does not email the customer or finalise
+   * closure."
+   */
   | 'jobs.submit'
+  /**
+   * THE FINAL OFFICIAL SUBMISSION. MASTER ONLY, and the reason this capability
+   * exists separately at all.
+   *
+   * §3.1 gives the Master "final authority over official job submission/closure
+   * and customer delivery"; §7 says the final Master submission "locks the job,
+   * creates/stores final PDF, queues customer email and closes it"; §15 says
+   * only that submission emails the customer. One capability held by one role
+   * is how those three sentences are enforced in one place.
+   *
+   * It was `jobs.submit` — which technicians hold — so a technician could issue
+   * the final job card and email the customer with no office involvement at
+   * all. The audit against `95e9848` proved it: a technician calling
+   * `POST /api/jobs/:id/issue` was refused only by the job's STATUS, never by
+   * permission. Splitting the capability is the fix; nothing else in the issue
+   * path changed.
+   */
+  | 'jobs.issueFinal'
   /**
    * Resolve a customer's refusal to sign, so the job card can move on.
    *
@@ -100,6 +126,17 @@ export type Capability =
   | 'library.view'
   | 'library.manage'
   // Scheduling
+  /**
+   * READ the calendar: scheduled work and who is unavailable. MASTER SCOPE
+   * §3.3 and §16 — "Technicians MUST be able to view the Calendar."
+   *
+   * Deliberately separate from `availability.manage`. Reading the schedule and
+   * deciding who is on leave are different acts, and conflating them is what
+   * made the calendar an office-only screen: the technician who needs to know
+   * when they are booked was refused because they may not book anybody else.
+   */
+  | 'calendar.view'
+  /** WRITE the calendar: record, change or cancel an absence. The office. */
   | 'availability.manage'
   // Administration
   | 'admin.access'
@@ -117,6 +154,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.acceptField',
   'jobs.captureWork',
   'jobs.submit',
+  'jobs.issueFinal',
   'jobs.resolveSignatureRefusal',
   'jobs.viewAnySignatureRefusal',
   'jobs.editSubmittedJob',
@@ -128,6 +166,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'machines.manage',
   'library.view',
   'library.manage',
+  'calendar.view',
   'availability.manage',
   'admin.access',
   'users.manageTechnicians',
@@ -143,6 +182,15 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
  * Note what is absent: `jobs.acceptField`, so she cannot take a breakdown as
  * though she attended it; `users.manageMasters`, so she cannot make herself
  * one; and `settings.manage`, so the charge-out rates stay with a Master.
+ *
+ * `jobs.issueFinal` IS ALSO ABSENT, and that is the boundary the confirmed
+ * refusal decision draws. She is the office: she reviews, she edits, she
+ * resolves a customer's refusal either way — Customer Signature or Without
+ * Customer Signature — and she is notified of it. What she does not do is the
+ * final official submission, because §3.1 keeps "final authority over official
+ * job submission/closure and customer delivery" with the Master, and the
+ * decision restates it: "MASTER retains final authority… COORDINATOR must NOT
+ * gain Master-only powers accidentally."
  */
 const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -164,12 +212,21 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'machines.manage',
   'library.view',
   'library.manage',
+  'calendar.view',
   'availability.manage',
   'admin.access',
   'users.manageTechnicians',
   'activity.viewAll',
 ];
 
+/**
+ * The field.
+ *
+ * `jobs.submit` here means SUBMIT FOR OFFICE REVIEW and nothing more — see the
+ * capability's own note. `calendar.view` without `availability.manage` is
+ * §3.3's "Technicians MUST be able to view the Calendar" without also handing
+ * them the leave register: they read the schedule, they do not write it.
+ */
 const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
   'jobs.acceptField',
   'jobs.captureWork',
@@ -177,6 +234,7 @@ const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
   'jobs.processParts',
   'customers.view',
   'library.view',
+  'calendar.view',
 ];
 
 const BY_ROLE: Record<UserRole, readonly Capability[]> = {

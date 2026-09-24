@@ -22,18 +22,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'work' },
   { href: '/jobs', label: 'Jobs', icon: 'jobs', group: 'work' },
   /**
-   * Scheduled work and technician availability. Office only.
+   * Scheduled work and availability. EVERY ROLE. MASTER SCOPE §3.3, §16.
    *
    * The capability is the one the READ enforces (`calendarView`), for the same
    * reason Activity's is: offering a technician a screen that then refuses them
    * is how "Something went wrong" ends up on a sidebar item they were invited
-   * to click. The two are deliberately the same capability.
+   * to click. The two are deliberately the same capability — which is why this
+   * said `availability.manage` and hid the calendar from the field. Both moved
+   * together to `calendar.view`.
    */
   {
     href: '/calendar',
     label: 'Calendar',
     icon: 'calendar',
-    capability: 'availability.manage',
+    capability: 'calendar.view',
     group: 'work',
   },
   /**

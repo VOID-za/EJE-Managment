@@ -2,6 +2,7 @@ import {
   AVAILABILITY_TYPES,
   availabilityTimeLabel,
   availabilityTypeLabel,
+  can,
   jobsAffectedByAbsence,
   summariseAvailability,
   userFullName,
@@ -39,9 +40,23 @@ export interface AvailabilityInput {
   readonly fromMessageId?: string | null;
 }
 
-const assertMaster = (context: OperationContext): void => {
-  if (context.actor.role === 'master') return;
-  throw new WorkflowError('Only a Master can record technician availability.', [
+/**
+ * Who may write the calendar. MASTER SCOPE §3.2, §8.
+ *
+ * THE OFFICE, by capability — not `role === 'master'`, which is what this said
+ * and which contradicted the permission matrix it was supposed to enforce.
+ * `availability.manage` is held by Masters AND Coordinators; §3.2 makes the
+ * Coordinator the office administrator who "runs … scheduling … day to day".
+ * The result was a Coordinator who could open the calendar and was refused
+ * every action on it.
+ *
+ * A technician still cannot: §8 says "Technician availability messages do not
+ * automatically create official availability records", and that separation is
+ * the whole point — they tell the office, the office decides.
+ */
+const assertMayManageAvailability = (context: OperationContext): void => {
+  if (can(context.actor.role, 'availability.manage')) return;
+  throw new WorkflowError('Only the office can record technician availability.', [
     {
       code: 'not_permitted',
       message:
@@ -139,7 +154,7 @@ export const createAvailability = async (
   context: OperationContext,
   input: AvailabilityInput,
 ): Promise<AvailabilityResult> => {
-  assertMaster(context);
+  assertMayManageAvailability(context);
 
   const violations = checkAvailabilityInput(input);
   if (violations.length > 0) {
@@ -189,7 +204,7 @@ export const updateAvailability = async (
   existing: AvailabilityRecord,
   input: AvailabilityInput,
 ): Promise<AvailabilityResult> => {
-  assertMaster(context);
+  assertMayManageAvailability(context);
 
   const violations = checkAvailabilityInput(input);
   if (violations.length > 0) {
@@ -238,7 +253,7 @@ export const cancelAvailability = async (
   context: OperationContext,
   record: AvailabilityRecord,
 ): Promise<AvailabilityRecord> => {
-  assertMaster(context);
+  assertMayManageAvailability(context);
   if (record.status === 'cancelled') return record;
 
   const saved = await context.repos.availability.save({

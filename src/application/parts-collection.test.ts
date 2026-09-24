@@ -228,13 +228,13 @@ describe('the courier collection document', () => {
     );
   });
 
-  it('is issued by whoever submits it, and closes only on confirmed delivery', async () => {
+  it('is issued by a Master, never by the counter staff, and closes only on confirmed delivery', async () => {
     const courier = await loadJob(harness, 'EJE-1063');
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(0);
 
     // No Master Review: the submission issues the collection note itself.
     const issued = await issueJobCard(
-      harness.tech,
+      harness.master,
       courier,
       'buyer@kruger-demo.co.za',
       'Kruger Engineering',
@@ -245,7 +245,7 @@ describe('the courier collection document', () => {
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(1);
 
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.tech, issued.job);
+    const closed = await confirmJobCardDelivery(harness.master, issued.job);
     expect(closed.status).toBe('closed');
   });
 });

@@ -4,6 +4,7 @@ import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { rangeOfDays, toIso } from '@/components/calendar/calendar-grid';
 import type { RepositoryBundle } from '@/data/repositories';
+import { asUserId, type User } from '@/domain';
 
 /**
  * Calendar assembly.
@@ -25,9 +26,31 @@ const offset = (days: number): string => {
 
 const wideRange = { from: offset(-60), to: offset(60) };
 
+/**
+ * The office viewer these assertions are written from.
+ *
+ * `loadCalendar` now takes the person looking, because MASTER SCOPE §3.3 gives
+ * technicians the calendar and DECISION 5 decides which jobs are theirs. These
+ * cases are about ASSEMBLY — do jobs and absences come out as entries — so they
+ * look with the role that sees everything. What each role sees is a different
+ * question and is asserted in `calendar-access.test.ts`.
+ */
+const office: User = {
+  id: asUserId('11111111-1111-4111-8111-111111111111'),
+  firstName: 'Office',
+  lastName: 'Viewer',
+  initials: 'OV',
+  email: 'office@eje-demo.local',
+  mobile: '',
+  role: 'master',
+  jobTitle: 'Master',
+  active: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
 describe('loadCalendar', () => {
   it('includes scheduled jobs', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const jobs = data.entries.filter((entry) => entry.kind === 'job');
 
     expect(jobs.length).toBeGreaterThan(0);
@@ -37,7 +60,7 @@ describe('loadCalendar', () => {
   });
 
   it('includes technician unavailability', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const absences = data.entries.filter((entry) => entry.kind === 'availability');
 
     expect(absences.length).toBeGreaterThan(0);
@@ -49,7 +72,7 @@ describe('loadCalendar', () => {
   });
 
   it('includes sick leave specifically', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const sick = data.entries.filter(
       (entry) => entry.kind === 'availability' && entry.availabilityType === 'sick_leave',
     );
@@ -57,7 +80,7 @@ describe('loadCalendar', () => {
   });
 
   it('carries the time window of a part-day absence, not just the date', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const appointment = data.entries.find(
       (entry) => entry.kind === 'availability' && entry.availabilityType === 'appointment',
     );
@@ -69,7 +92,7 @@ describe('loadCalendar', () => {
   });
 
   it('spans a multi-day service job across its whole booking', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const service = data.entries.find(
       (entry) => entry.kind === 'job' && entry.jobNumber === 'EJE-1049',
     );
@@ -80,7 +103,7 @@ describe('loadCalendar', () => {
   });
 
   it('keeps single-day jobs to one day', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const breakdown = data.entries.find(
       (entry) => entry.kind === 'job' && entry.jobNumber === 'EJE-1048',
     );
@@ -89,7 +112,7 @@ describe('loadCalendar', () => {
 
   it('excludes jobs with no scheduled date', async () => {
     const repos = buildRepos();
-    const data = await loadCalendar(repos, wideRange);
+    const data = await loadCalendar(repos, wideRange, office);
     const jobs = await repos.jobs.list();
 
     const unscheduled = jobs.filter((job) => job.scheduledDate === null);
@@ -100,7 +123,7 @@ describe('loadCalendar', () => {
 
   it('only returns entries overlapping the requested window', async () => {
     const narrow = { from: offset(3), to: offset(5) };
-    const data = await loadCalendar(buildRepos(), narrow);
+    const data = await loadCalendar(buildRepos(), narrow, office);
 
     for (const entry of data.entries) {
       expect(entry.start <= narrow.to).toBe(true);
@@ -111,13 +134,13 @@ describe('loadCalendar', () => {
   it('includes an entry that starts before the window but runs into it', async () => {
     const repos = buildRepos();
     // The seeded sick leave straddles today.
-    const data = await loadCalendar(repos, { from: today, to: today });
+    const data = await loadCalendar(repos, { from: today, to: today }, office);
     const straddling = data.entries.filter((entry) => entry.start < today);
     expect(straddling.length).toBeGreaterThan(0);
   });
 
   it('carries the technicians assigned to a job', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const withTechnicians = data.entries.find(
       (entry) => entry.kind === 'job' && entry.technicianIds.length > 0,
     );
@@ -125,13 +148,13 @@ describe('loadCalendar', () => {
   });
 
   it('returns the active technicians for filtering', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     expect(data.technicians.length).toBeGreaterThan(0);
     expect(data.technicians.every((user) => user.role === 'technician' && user.active)).toBe(true);
   });
 
   it('sorts longest entries first so bars pack cleanly', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const lengths = data.entries.map((entry) => entry.days);
     expect(lengths).toEqual([...lengths].sort((a, b) => b - a));
   });
@@ -139,7 +162,7 @@ describe('loadCalendar', () => {
 
 describe('entriesOn', () => {
   it('returns every entry touching a day, including mid-range days', async () => {
-    const data = await loadCalendar(buildRepos(), wideRange);
+    const data = await loadCalendar(buildRepos(), wideRange, office);
     const multiDay = data.entries.find((entry) => entry.days > 2);
     expect(multiDay).toBeDefined();
 

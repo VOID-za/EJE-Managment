@@ -107,10 +107,11 @@ describe('deleting a job created by mistake', () => {
     const scheduled = await harness.repos.jobs.save({ ...job, scheduledDate: dayOffset(1) });
     await deleteJob(harness.as(elmarie), scheduled, 'Duplicate.');
 
-    const calendar = await loadCalendar(harness.repos, {
-      from: dayOffset(-30),
-      to: dayOffset(30),
-    });
+    const calendar = await loadCalendar(
+      harness.repos,
+      { from: dayOffset(-30), to: dayOffset(30) },
+      elmarie,
+    );
     expect(
       calendar.entries.some(
         (entry) => entry.kind === 'job' && entry.jobNumber === 'EJE-1059',
@@ -220,10 +221,11 @@ describe('cancelling a job that will not happen', () => {
       description: '',
     });
 
-    const calendar = await loadCalendar(harness.repos, {
-      from: dayOffset(-30),
-      to: dayOffset(30),
-    });
+    const calendar = await loadCalendar(
+      harness.repos,
+      { from: dayOffset(-30), to: dayOffset(30) },
+      elmarie,
+    );
     expect(
       calendar.entries.some(
         (entry) => entry.kind === 'job' && entry.jobNumber === 'EJE-1059',

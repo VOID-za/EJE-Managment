@@ -391,9 +391,26 @@ export const activityView = ({ repos, actor }: ViewContext) => loadActivityFeed(
 export const searchView = ({ repos, actor }: ViewContext, term: string) =>
   runSearch(repos, actor, term);
 
+/**
+ * The calendar. MASTER SCOPE §3.3, §16, §24-CAL.
+ *
+ * "Technicians MUST be able to view the Calendar." It was gated on
+ * `availability.manage` — the capability for WRITING the leave register — so
+ * the one role that most needs to know when it is booked was refused, and the
+ * sidebar hid the item to match. Reading the schedule and deciding who is on
+ * leave are different acts and now have different capabilities.
+ *
+ * WHAT A TECHNICIAN SEES IS NARROWER THAN WHAT THE OFFICE SEES, and it has to
+ * be. The office plans, so it sees every job and everybody's absence. A
+ * technician sees the jobs DECISION 5 already lets them read and THEIR OWN
+ * availability — because another technician's sick leave is that person's
+ * business, and §16 asks for a calendar the technician can work from, not a
+ * staff absence register. `loadCalendar` takes the viewer and applies it while
+ * building, rather than a screen filtering afterwards.
+ */
 export const calendarView = ({ repos, actor }: ViewContext, from: string, to: string) => {
-  requireOffice(actor, 'availability.manage', 'The calendar');
-  return loadCalendar(repos, { from, to });
+  requireCapability(actor, 'calendar.view', 'The calendar is not available to your role.');
+  return loadCalendar(repos, { from, to }, actor);
 };
 
 /**

@@ -306,13 +306,15 @@ describe('a test and repair collected from the counter', () => {
       customerSurname: 'Dlamini',
       strokeData: 'M0,0 L1,1',
     });
+    // §3.1 — the Coordinator runs the counter and the paperwork; the final
+    // submission that sends the customer their copy is the Master's.
     const result = await issueJobCard(
-      harness.as(coordinator),
+      harness.as(master),
       signed,
       'accounts@example.com',
       'ABC Engineering',
     );
-    await confirmDelivery(harness, harness.as(coordinator), result.job);
+    await confirmDelivery(harness, harness.as(master), result.job);
     return pdfPlainText(
       (await loadFinalDocumentFile(harness.as(coordinator), job.jobNumber)).bytes,
     );

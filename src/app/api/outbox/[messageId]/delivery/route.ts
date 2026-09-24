@@ -26,8 +26,8 @@ export const POST = writeRoute({
     })
     .strict(),
   handler: async (context) => {
-    if (!can(context.actor.user.role, 'jobs.submit')) {
-      throw forbidden('Only the office reports on a customer’s copy.', [
+    if (!can(context.actor.user.role, 'jobs.issueFinal')) {
+      throw forbidden('Only a Master reports on a customer’s copy.', [
         { code: 'not_permitted', message: 'Your role does not issue job cards.' },
       ]);
     }

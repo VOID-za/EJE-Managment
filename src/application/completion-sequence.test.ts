@@ -30,6 +30,8 @@ import {
  */
 
 const technician = seedUser('user-tech-sipho');
+/** MASTER SCOPE §3.1 — the final submission and every re-send are his. */
+const master = seedUser('user-master-elmarie');
 
 describe('which steps a job type gets', () => {
   it('requires a checklist for installation and service', () => {
@@ -178,8 +180,7 @@ describe('the close-out the wizard drives, end to end', () => {
 
   it('issues, stores the document and waits on delivery rather than closing', async () => {
     const signed = await throughTheWizard();
-    const issued = await issueJobCard(
-      harness.as(technician),
+    const issued = await issueJobCard(harness.as(master),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
@@ -195,14 +196,13 @@ describe('the close-out the wizard drives, end to end', () => {
 
   it('closes on confirmed delivery, and never enters Master Review on the way', async () => {
     const signed = await throughTheWizard();
-    const issued = await issueJobCard(
-      harness.as(technician),
+    const issued = await issueJobCard(harness.as(master),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.as(technician), issued.job);
+    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
 
     expect(closed.status).toBe('closed');
 
@@ -218,11 +218,11 @@ describe('the close-out the wizard drives, end to end', () => {
 
   it('does not ask for the signature again when delivery fails, and re-sends the same file', async () => {
     const signed = await throughTheWizard();
-    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
     expect(issued.delivery.state).toBe('failed');
 
     const signatureBefore = issued.job.signature;
-    const retried = await retryJobCardDelivery(harness.as(technician), issued.job, 'Pieter Nel');
+    const retried = await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel');
 
     // Same document, same signature, one more attempt.
     expect(retried.job.finalDocument?.storageKey).toBe(issued.job.finalDocument?.storageKey);

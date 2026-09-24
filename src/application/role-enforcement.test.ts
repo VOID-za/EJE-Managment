@@ -291,9 +291,38 @@ describe('issuing a job card', () => {
     });
   };
 
-  it('is done by the Coordinator without a Master ever touching it', async () => {
+  it('is REFUSED to the Coordinator: the final submission is the Master’s', async () => {
+    /*
+     * MASTER SCOPE §3.1, §7, §15 — and the confirmed refusal decision, which
+     * restates it: "MASTER retains final authority over official job
+     * submission/closure/customer delivery… COORDINATOR must NOT gain
+     * Master-only powers accidentally."
+     *
+     * This case asserted the opposite — that a Coordinator could issue a job
+     * card "without a Master ever touching it" — which is how the capability
+     * came to be shared with the field as well. She runs the office right up
+     * to this point; this one act is not hers.
+     */
     const signed = await workAndSign('EJE-1048');
-    const context = harness.as(coordinator);
+
+    await expect(
+      issueJobCard(
+        harness.as(coordinator),
+        signed,
+        'customer@example-demo.co.za',
+        'Pieter Nel',
+      ),
+    ).rejects.toThrow(/cannot be issued by you/i);
+
+    // Refused, and nothing happened: no document, no send, no status change.
+    const after = await harness.repos.jobs.findById(signed.id);
+    expect(after?.status).toBe('review');
+    expect(after?.finalDocument).toBeNull();
+  });
+
+  it('is done by a Master, and closes only on confirmed delivery', async () => {
+    const signed = await workAndSign('EJE-1048');
+    const context = harness.as(master);
 
     const issued = await issueJobCard(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
     expect(issued.job.status).toBe('awaiting_delivery');

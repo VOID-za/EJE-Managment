@@ -24,10 +24,17 @@ import { WorkflowError } from './errors';
  *    recipients and does nothing else — no job status change, no job note, no
  *    availability record. Those remain deliberate acts by someone authorised to
  *    perform them.
- * 2. A technician writing to "the office" reaches every active Master, because
- *    the point is that whoever is at a desk can pick it up. A Master writing to
- *    a technician is a direct thread.
+ * 2. A technician writing to "the office" reaches EVERY ACTIVE MASTER AND
+ *    COORDINATOR, because the point is that whoever is at a desk can pick it
+ *    up — and MASTER SCOPE §3.2 puts the Coordinator at that desk. It reached
+ *    Masters only, which left the role defined as "the office administrator"
+ *    unable to be written to by the field at all, and §8's "technicians tell
+ *    the office by message" unreachable for her. A Master or Coordinator
+ *    writing to a technician is a direct thread.
  */
+
+/** The office, as §3.2 defines it: the people who run EJE from a desk. */
+const isOffice = (role: User['role']): boolean => role === 'master' || role === 'coordinator';
 
 /** Who this user is allowed to start a conversation with. */
 export const permittedRecipients = (
@@ -39,7 +46,16 @@ export const permittedRecipients = (
     // recipient would be a dead end. Existing threads with them stay readable.
     if (!candidate.active) return false;
     if (candidate.id === actor.id) return false;
-    return actor.role === 'master' ? candidate.role === 'technician' : candidate.role === 'master';
+    /*
+     * The field talks to the office; the office talks to the field.
+     *
+     * Asked as "is this person the office?" rather than "is this person a
+     * Master?", so the Coordinator is on both sides of it: reachable by a
+     * technician, and able to reach one. Office-to-office threads are not
+     * offered — §8 is about the field telling the office things.
+     */
+    const candidateIsOffice = isOffice(candidate.role);
+    return isOffice(actor.role) ? !candidateIsOffice : candidateIsOffice;
   });
 
 const assertParticipant = (conversation: Conversation, actor: User): void => {
@@ -50,7 +66,7 @@ const assertParticipant = (conversation: Conversation, actor: User): void => {
 };
 
 export interface StartConversationInput {
-  /** Empty means "the office": every active Master. */
+  /** Empty means "the office": every active Master and Coordinator. */
   readonly recipientIds: readonly UserId[];
   readonly body: string;
   readonly job?: Pick<Job, 'id' | 'jobNumber'> | null;
@@ -61,10 +77,11 @@ export interface SendResult {
   readonly message: ChatMessage;
 }
 
-const activeMasterIds = async (context: OperationContext): Promise<readonly UserId[]> => {
+/** "The office" as a set of recipients. Masters and Coordinators, §3.2. */
+const activeOfficeIds = async (context: OperationContext): Promise<readonly UserId[]> => {
   const users = await context.repos.users.list();
   return users
-    .filter((user) => user.role === 'master' && user.active && user.id !== context.actor.id)
+    .filter((user) => isOffice(user.role) && user.active && user.id !== context.actor.id)
     .map((user) => user.id);
 };
 
@@ -88,7 +105,7 @@ export const startConversation = async (
   }
 
   const recipientIds =
-    input.recipientIds.length > 0 ? input.recipientIds : await activeMasterIds(context);
+    input.recipientIds.length > 0 ? input.recipientIds : await activeOfficeIds(context);
   if (recipientIds.length === 0) {
     throw new WorkflowError('There is nobody to send this to.', [
       { code: 'no_recipients', message: 'Choose at least one recipient.' },

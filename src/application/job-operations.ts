@@ -1275,6 +1275,36 @@ export const captureSignature = async (
         : 'Customer signed the job card',
     detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.`,
   });
+
+  /*
+   * THE HAND-OVER TO THE OFFICE. MASTER SCOPE §7, §15, §22.
+   *
+   * The signature is where the technician's authority over the job ends and
+   * the office's begins: the job sits at Review until a Master makes the final
+   * submission. A review queue nobody is told about is not a workflow, and the
+   * demo finding in §22 was exactly this — a technician finished a job and the
+   * Coordinator learned nothing.
+   *
+   * `notifyOffice`, not `notifyMasters`: §3.2 puts the Coordinator in the
+   * office, and the confirmed refusal decision has both roles receiving the
+   * refusal notification. The two halves of the same hand-over — signed and
+   * refused — now reach the same people. The refusal half is below, in
+   * `recordSignatureRefusal`.
+   *
+   * It links to the REVIEW screen rather than the job, because what the office
+   * is being asked to do is review it.
+   */
+  await notifyOffice(context, {
+    type: 'job_submitted',
+    title: `${job.jobNumber} — ready for office review`,
+    body:
+      `${userFullName(context.actor)} completed ${job.jobNumber} and ` +
+      `${input.customerName} ${input.customerSurname} signed for it. ` +
+      'It is waiting for a Master to make the final submission.',
+    jobId: job.id,
+    link: `/jobs/${job.jobNumber}/review`,
+  });
+
   return saved;
 };
 
@@ -1822,17 +1852,36 @@ export const issueJobCard = async (
   customerEmail: string,
   customerDisplayName: string,
 ): Promise<SubmitResult> => {
+  /*
+   * WHO, BEFORE WHAT. MASTER SCOPE §3.1, §7, §15.
+   *
+   * Asked first, and deliberately before the status check that used to come
+   * ahead of it. A technician calling this was previously refused by the JOB'S
+   * STATUS — "not ready to be issued" — which is not a refusal at all: it says
+   * come back when the job is further along, and on a job at Review it would
+   * have let them through to generate the final document and email the
+   * customer. Permission is not a fallback for state.
+   *
+   * `jobs.issueFinal` is held by the Master alone. This one call is the final
+   * official submission: it freezes the price, renders and stores the customer's
+   * copy, queues the email and moves the job to closure.
+   */
+  if (!can(context.actor.role, 'jobs.issueFinal')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be issued by you.`, [
+      {
+        code: 'not_permitted',
+        message:
+          'Only a Master can make the final submission, send the customer their job card and close the job.',
+      },
+    ]);
+  }
+
   if (job.status !== 'review' && job.status !== 'submitted') {
     throw new WorkflowError(`${job.jobNumber} is not ready to be issued.`, [
       {
         code: 'not_ready_to_issue',
         message: 'The work must be completed and the customer signature captured first.',
       },
-    ]);
-  }
-  if (!can(context.actor.role, 'jobs.submit')) {
-    throw new WorkflowError(`${job.jobNumber} cannot be issued by you.`, [
-      { code: 'not_permitted', message: 'You cannot issue job cards.' },
     ]);
   }
 
@@ -2105,13 +2154,18 @@ export const retryJobCardDelivery = async (
   job: Job,
   customerDisplayName: string,
 ): Promise<SubmitResult> => {
+  // Re-sending is the same act as sending: it puts EJE's document in the
+  // customer's hands. Same capability, same order — who before what.
+  if (!can(context.actor.role, 'jobs.issueFinal')) {
+    throw new WorkflowError(`${job.jobNumber} cannot be re-sent by you.`, [
+      {
+        code: 'not_permitted',
+        message: 'Only a Master sends a customer their job card.',
+      },
+    ]);
+  }
   if (job.status !== 'awaiting_delivery') {
     throw new WorkflowError(`${job.jobNumber} is not awaiting delivery.`, []);
-  }
-  if (!can(context.actor.role, 'jobs.submit')) {
-    throw new WorkflowError(`${job.jobNumber} cannot be re-sent by you.`, [
-      { code: 'not_permitted', message: 'You cannot issue job cards.' },
-    ]);
   }
   return sendFinalDocument(context, job, customerDisplayName);
 };

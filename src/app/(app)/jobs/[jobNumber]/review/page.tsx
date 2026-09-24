@@ -181,8 +181,16 @@ const ReviewJobPage = ({
    */
   const refusalPending = refusalAwaitingResolution(job);
 
+  /*
+   * MASTER SCOPE §3.1, §7, §15 — the final submission is the Master's.
+   *
+   * `jobs.issueFinal`, not `jobs.submit`: a technician submits FOR REVIEW, and
+   * this button is the act that generates the customer's copy and emails it.
+   * The server refuses it either way; this stops the screen offering a
+   * technician a button that would be refused.
+   */
   const canIssue =
-    can(currentUser.role, 'jobs.submit') &&
+    can(currentUser.role, 'jobs.issueFinal') &&
     !refusalPending &&
     (job.status === 'review' || (inMasterReview && isMaster));
 
@@ -369,7 +377,7 @@ const ReviewJobPage = ({
             The signed job card is stored against the job. Re-sending uses that same document — the
             customer is never sent two different job cards, and nothing has to be signed again.
           </p>
-          {can(currentUser.role, 'jobs.submit') && (
+          {can(currentUser.role, 'jobs.issueFinal') && (
             <Button
               className="mt-4"
               variant="secondary"

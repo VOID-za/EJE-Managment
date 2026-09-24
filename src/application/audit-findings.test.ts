@@ -75,7 +75,7 @@ describe('the job card goes to a contact, never to a company mailbox', () => {
     await harness.repos.customers.saveContact({ ...contact!, email: '' });
 
     const signed = await workAndSign(harness);
-    await expect(issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel')).rejects.toThrow(
+    await expect(issueJobCard(harness.as(master), signed, '', 'Pieter Nel')).rejects.toThrow(
       /nobody to send the job card to/i,
     );
 
@@ -275,13 +275,14 @@ describe('the issued document does not move, whatever the register does after', 
       strokeData: 'M0,0 L1,1',
     });
 
+    // The technician worked and signed it; the Master issues it. §3.1, §7.
     const issued = await issueJobCard(
-      context,
+      harness.as(master),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
-    const closed = await confirmDelivery(harness, context, issued.job);
+    const closed = await confirmDelivery(harness, harness.as(master), issued.job);
     expect(closed.status).toBe('closed');
 
     const before = await loadFinalDocumentFile(harness.as(master), closed.jobNumber);

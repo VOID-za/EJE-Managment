@@ -151,8 +151,25 @@ describe('office screens', () => {
     '/api/machines',
     '/api/jobs/form',
     '/api/jobs/closed',
-    '/api/calendar?from=2025-01-01&to=2025-01-31',
+    /*
+     * MASTER SCOPE §17 — customer correspondence.
+     *
+     * Every row carries a customer's address and a preview of what EJE said to
+     * them, on every job. It was authenticated-only, which served a technician
+     * the correspondence on jobs DECISION 5 says they may not even see.
+     */
+    '/api/outbox',
   ];
+
+  /*
+   * `/api/calendar` IS NOT ON THAT LIST, and used to be.
+   *
+   * MASTER SCOPE §3.3 and §16: "Technicians MUST be able to view the Calendar."
+   * It was gated on `availability.manage` — the capability for WRITING the
+   * leave register — so the role that most needs to know when it is booked was
+   * refused. Viewing and managing are now different capabilities, and the two
+   * halves are asserted in `calendar-access.test.ts`.
+   */
 
   it.each(officeOnly)('refuses a technician at %s', async (path) => {
     const technician = await signedInAs(DEMO_USERS.technician);

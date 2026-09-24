@@ -42,13 +42,27 @@ describe('who you may message', () => {
     expect(allowed.some((user) => user.id === sipho.id)).toBe(true);
   });
 
-  it('lets a technician write to active Masters', async () => {
+  it('lets a technician write to the office — Masters AND Coordinators', async () => {
+    /*
+     * MASTER SCOPE §3.2, §8.
+     *
+     * This asserted Masters only, which is what left the Coordinator — the
+     * role §3.2 calls the office administrator — unable to be written to by
+     * the field at all, while §8 tells technicians to "tell the office by
+     * message". The office is both roles, so both are offered.
+     */
     const harness = buildHarness();
     const users = await harness.repos.users.list();
     const allowed = permittedRecipients(sipho, users);
 
-    expect(allowed.every((user) => user.role === 'master')).toBe(true);
+    expect(allowed.length).toBeGreaterThan(0);
+    expect(allowed.every((user) => user.role === 'master' || user.role === 'coordinator')).toBe(
+      true,
+    );
     expect(allowed.some((user) => user.id === elmarie.id)).toBe(true);
+    expect(allowed.some((user) => user.role === 'coordinator')).toBe(true);
+    // And never another technician: this is the field talking to the office.
+    expect(allowed.some((user) => user.role === 'technician')).toBe(false);
   });
 
   it('never offers a disabled account as a recipient', async () => {

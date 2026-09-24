@@ -17,6 +17,8 @@ import {
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { can } from '@/domain';
+import { loadVisibleJobs } from './job-view';
 
 /**
  * Calendar data.
@@ -97,11 +99,21 @@ const daysInclusive = (start: IsoDate, end: IsoDate): number => {
 };
 
 /** Scheduled jobs and technician absence for a date range. */
+/**
+ * Who is looking, and therefore how much of the calendar there is.
+ *
+ * MASTER SCOPE §3.3/§16 give the technician the calendar; DECISION 5 decides
+ * which jobs are theirs to see. Passing the viewer in means the two rules meet
+ * HERE, while the entries are being built, rather than a screen loading
+ * everybody's work and hiding most of it.
+ */
 export const loadCalendar = async (
   repos: RepositoryBundle,
   range: CalendarRange,
+  viewer: User,
 ): Promise<CalendarData> => {
-  const [jobs, customers, sites, machines, users, availability] = await Promise.all([
+  const office = can(viewer.role, 'jobs.viewAll');
+  const [allJobs, customers, sites, machines, users, availability] = await Promise.all([
     repos.jobs.list(),
     repos.customers.list(),
     // Resolution: a scheduled job keeps naming its site and machine.
@@ -110,6 +122,15 @@ export const loadCalendar = async (
     repos.users.list(),
     repos.availability.list(range.from, range.to),
   ]);
+
+  /*
+   * The office plans, so it sees everything. The field sees its own work.
+   *
+   * `loadVisibleJobs` is the same DECISION 5 reader every other job list uses
+   * — not a second opinion written for the calendar — so a technician's
+   * calendar and their Jobs screen can never disagree about which jobs exist.
+   */
+  const jobs = await loadVisibleJobs(repos, allJobs, viewer);
 
   const jobEntries: JobCalendarEntry[] = [];
 
@@ -156,7 +177,18 @@ export const loadCalendar = async (
     });
   }
 
-  const availabilityEntries: AvailabilityCalendarEntry[] = availability
+  /*
+   * Another technician's sick leave is that person's business.
+   *
+   * §16 asks for a calendar a technician can work from — their bookings and
+   * their own absences — not the staff absence register, which is what the
+   * office plans from and `availability.manage` is the capability for.
+   */
+  const visibleAvailability = office
+    ? availability
+    : availability.filter((record) => record.userId === viewer.id);
+
+  const availabilityEntries: AvailabilityCalendarEntry[] = visibleAvailability
     .filter((record) => overlapsRange(record.startDate, record.endDate, range))
     .map((record: AvailabilityRecord) => {
       const user = users.find((candidate) => candidate.id === record.userId);
