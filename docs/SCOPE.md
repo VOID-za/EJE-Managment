@@ -557,7 +557,7 @@ collection, and a technician is not part of it at any point.
 > signed job card, and no field-service journey changed in any respect.
 
 ### CR-13 — A collection is not raised on a description, and the old workflow is gone from the repository
-*Confirmed 25 September 2026, resolving **BD-13**. Implemented `PENDING`
+*Confirmed 25 September 2026, resolving **BD-13**. Implemented `dba332d`
 (see PARTS-17…PARTS-22).*
 
 Two things, from one instruction.
@@ -824,12 +824,12 @@ for every other one.*
 | PARTS-15 | A **technician** can do none of it: no acceptance, no processing, no submission | **DONE** | `9c0e303` | `access.test.ts`; `technician-submission.test.ts`; API refusals |
 | PARTS-16 | **Field service is unchanged.** Breakdown, Installation, Service and Test & Repair keep their schedule, priority, assignment, acceptance, labour, travel, call-out, signature, submission, delivery, refusal and takeover behaviour | **DONE** | `9c0e303` | `parts-workflow.test.ts` drives a breakdown end to end; the whole existing suite is unchanged and green |
 
-| PARTS-17 | The creation form keeps **customer, site, contact, customer order number (required), reference number, delivery note and attachments** — and **no description field of any kind** | **DONE** | `PENDING` | `jobs/new/page.tsx`; `workflow-e2e.mjs` asserts every field's presence and every removed field's absence |
-| PARTS-18 | The server **collects no description on a collection and does not keep one a request carries** | **DONE** | `PENDING` | `createJob`; `parts-workflow.test.ts`; `parts-workflow-api.test.ts` |
-| PARTS-19 | A **field job still requires one**, now refused as a business rule (422, `fault_description_required`) rather than as a malformed request (400), because the rule is per job type and belongs where the job type is known | **DONE** | `PENDING` | `createJob`; `job-workflow-api.test.ts`; `parts-workflow.test.ts` |
-| PARTS-20 | The document **omits the description section entirely** when there is none — no heading, no "No fault description recorded." DOC-1, applied to the same field | **DONE** | `PENDING` | `model.ts` (`string \| null`); `job-card-pdf.ts`; `JobCardDocument.tsx`; `PartsCollectionNote.tsx`; `collection-document-parity.test.ts` |
-| PARTS-21 | **A collection raised before CR-13 keeps its description and still prints it** — the model asks the record, not the job type | **DONE** | `PENDING` | `collection-document-parity.test.ts`; seeded `EJE-1062` |
-| PARTS-22 | **No migration was required**, and the existing schema is proven to support the collection shape against real PostgreSQL | **DONE** | `PENDING` | `job-workflow.db.test.ts` — raises a collection, reads the row back, and asserts acceptance is refused |
+| PARTS-17 | The creation form keeps **customer, site, contact, customer order number (required), reference number, delivery note and attachments** — and **no description field of any kind** | **DONE** | `dba332d` | `jobs/new/page.tsx`; `workflow-e2e.mjs` asserts every field's presence and every removed field's absence |
+| PARTS-18 | The server **collects no description on a collection and does not keep one a request carries** | **DONE** | `dba332d` | `createJob`; `parts-workflow.test.ts`; `parts-workflow-api.test.ts` |
+| PARTS-19 | A **field job still requires one**, now refused as a business rule (422, `fault_description_required`) rather than as a malformed request (400), because the rule is per job type and belongs where the job type is known | **DONE** | `dba332d` | `createJob`; `job-workflow-api.test.ts`; `parts-workflow.test.ts` |
+| PARTS-20 | The document **omits the description section entirely** when there is none — no heading, no "No fault description recorded." DOC-1, applied to the same field | **DONE** | `dba332d` | `model.ts` (`string \| null`); `job-card-pdf.ts`; `JobCardDocument.tsx`; `PartsCollectionNote.tsx`; `collection-document-parity.test.ts` |
+| PARTS-21 | **A collection raised before CR-13 keeps its description and still prints it** — the model asks the record, not the job type | **DONE** | `dba332d` | `collection-document-parity.test.ts`; seeded `EJE-1062` |
+| PARTS-22 | **No migration was required**, and the existing schema is proven to support the collection shape against real PostgreSQL | **DONE** | `dba332d` | `job-workflow.db.test.ts` — raises a collection, reads the row back, and asserts acceptance is refused |
 
 > **The document is unchanged.** A collection note still carries the customer,
 > contact, order number, reference, delivery note, the goods with quantities,
