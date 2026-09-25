@@ -56,8 +56,7 @@ const issue = async (harness: Harness): Promise<Job> => {
    * The Master issues it. MASTER SCOPE §3.1/§7/§15: the technician's authority
    * ends at the signature; `jobs.issueFinal` is the Master's alone.
    */
-  const result = await issueJobCard(
-    harness.as(master),
+  const result = await issueJobCard(harness.as(technician),
     signed,
     'customer@example-demo.co.za',
     'Pieter Nel',

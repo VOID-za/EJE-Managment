@@ -328,7 +328,9 @@ await step('Master opens a closed job and its final document', async () => {
   await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });
   await page.getByText('Final signed job card').waitFor({ timeout: 20000 });
   await page.getByRole('button', { name: 'View Final PDF' }).click();
-  await page.getByRole('heading', { name: 'Review job card' }).waitFor({ timeout: 20000 });
+  // "Job card", not "Review job card": the job is CLOSED, so there is nothing
+  // to review and nobody to submit it. MASTER SCOPE CR-07.
+  await page.getByRole('heading', { name: 'Job card', exact: true }).waitFor({ timeout: 20000 });
   await page.getByText('Issued and closed').waitFor({ timeout: 20000 });
   // The stored descriptor is derived, not written from an effect; a regression
   // here shows up as a setState-during-effect warning.

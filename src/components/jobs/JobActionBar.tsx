@@ -7,8 +7,10 @@ import {
   canAcceptJob,
   canCancelJob,
   canDeleteJob,
+  canSubmitJobCard,
   canTransferJob,
   checkReadyForSignature,
+  checkReadyForSubmission,
   refusalAwaitingResolution,
 } from '@/domain';
 import type { JobView } from '@/application/job-view';
@@ -18,6 +20,7 @@ import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { AcceptJobFlow } from './AcceptJobFlow';
+import { SubmitJobCardDialog, submissionBlocker } from './SubmitJobCardDialog';
 import { CancelJobDialog } from './CancelJobDialog';
 import { TransferJobDialog } from './TransferJobDialog';
 
@@ -45,6 +48,7 @@ export const JobActionBar = ({
   const [sparesReason, setSparesReason] = useState('');
   const [confirmResume, setConfirmResume] = useState(false);
   const [transferring, setTransferring] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [ending, setEnding] = useState<'cancel' | 'delete' | null>(null);
 
   const signatureReadiness = checkReadyForSignature(job);
@@ -196,33 +200,48 @@ export const JobActionBar = ({
       }
     } else {
       /*
-       * A SIGNED JOB CARD, WAITING TO BE ISSUED.
+       * A SIGNED JOB CARD, WAITING FOR ITS OWN TECHNICIAN TO SUBMIT IT.
+       * MASTER SCOPE CR-07.
        *
-       * THE FINAL SUBMISSION IS THE MASTER'S — `jobs.issueFinal`, §3.1 and
-       * §15 — and only a Master is offered it. Everyone else on the job gets
-       * the way IN to the job card and nothing that claims to submit it:
+       * THE SUBMISSION HAPPENS HERE, not on the review screen. The normal
+       * signed journey used to read "Review & submit job card" → office review
+       * page → a MASTER submits, and there is no office step in it any more:
+       * the person who did the work and took the signature submits it, and
+       * they do it from the job they are standing on.
        *
-       * - The TECHNICIAN is not stranded. Acceptance testing found exactly
-       *   that: a technician who had taken the signature was left with no
-       *   action at all on their own job, because the read-only rule written
-       *   for REFUSED cards was being applied to signed ones too. They have
-       *   handed the job over, so they may look at what they handed over.
-       * - The COORDINATOR does NOT get a generic "Review & submit job card".
-       *   She is the office for a REFUSAL and nothing more; a normal signed
-       *   job card is submitted by a Master. The button used to read Review &
-       *   submit for her, and the server then refused the submission it had
-       *   just offered.
+       * The office is offered nothing on an ordinary signed job card, because
+       * there is nothing for them to do with it. `canSubmitJobCard` is the
+       * same rule the server applies, so the button and the operation cannot
+       * disagree — including on its two exceptions, a parts collection and a
+       * job stranded in the retired Master Review stage.
        */
-      const isSubmitter = can(currentUser.role, 'jobs.issueFinal');
+      const readiness = checkReadyForSubmission(job);
+      const blocked = submissionBlocker(view);
+
+      if (canSubmitJobCard(currentUser, job) && readiness.allowed && blocked === null) {
+        actions.push(
+          <Button
+            key="submit"
+            size="lg"
+            onClick={() => setSubmitting(true)}
+            leadingIcon={<Icon name="mail" className="size-5" />}
+          >
+            {job.jobType === 'parts' ? 'Submit collection note' : 'Submit job card'}
+          </Button>,
+        );
+      }
+
+      // The document itself, for whoever is looking — including the office,
+      // who may read a signed job card without having anything to do to it.
       actions.push(
         <Button
           key="review"
           size="lg"
-          variant={isSubmitter ? 'primary' : 'secondary'}
+          variant="secondary"
           onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
           leadingIcon={<Icon name="document" className="size-5" />}
         >
-          {isSubmitter ? 'Review & submit job card' : 'View job card — with the office'}
+          View job card
         </Button>,
       );
     }
@@ -251,18 +270,25 @@ export const JobActionBar = ({
     );
   }
 
-  // Historical Master Review: the office corrects the job card, then issues it.
+  /*
+   * THE RETIRED MASTER REVIEW STAGE, and the ONE place that phrase still
+   * legitimately appears. Nothing can enter `submitted` any more; the jobs
+   * sitting in it entered before it was retired and still have to be able to
+   * leave, which under CR-07 only a Master can do for them — there is nobody
+   * else, and stranding them is not an option.
+   */
   if (job.status === 'submitted') {
+    const master = canSubmitJobCard(currentUser, job);
     actions.push(
       <Button
         key="master-review"
         size="lg"
-        variant={currentUser.role === 'master' ? 'primary' : 'secondary'}
-        disabled={currentUser.role !== 'master'}
+        variant={master ? 'primary' : 'secondary'}
+        disabled={!master}
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
         leadingIcon={<Icon name="document" className="size-5" />}
       >
-        {currentUser.role === 'master' ? 'Review & submit job card' : 'With the office for review'}
+        {master ? 'Issue this historical job card' : 'Held in the retired review stage'}
       </Button>,
     );
   }
@@ -335,6 +361,16 @@ export const JobActionBar = ({
       )}
 
       {actions.length > 0 && <div className="flex flex-wrap gap-2">{actions}</div>}
+
+      {/* The final submission, in the one component every screen that offers
+          it uses. CR-07: the technician submits from the job, not from an
+          office review page. */}
+      <SubmitJobCardDialog
+        view={view}
+        open={submitting}
+        onClose={() => setSubmitting(false)}
+        onSubmitted={onChanged}
+      />
 
       {/* Acceptance and the site-location offer live in one component used by
           every acceptance action, so the prompt appears exactly once and

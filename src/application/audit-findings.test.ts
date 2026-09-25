@@ -75,7 +75,7 @@ describe('the job card goes to a contact, never to a company mailbox', () => {
     await harness.repos.customers.saveContact({ ...contact!, email: '' });
 
     const signed = await workAndSign(harness);
-    await expect(issueJobCard(harness.as(master), signed, '', 'Pieter Nel')).rejects.toThrow(
+    await expect(issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel')).rejects.toThrow(
       /nobody to send the job card to/i,
     );
 
@@ -100,7 +100,7 @@ describe('the job card goes to a contact, never to a company mailbox', () => {
 
     // …and a fully worked, signed job with no contact address is refused rather
     // than quietly redirected to it. Nothing was sent.
-    await expect(issueJobCard(harness.as(master), signed, '', 'Pieter Nel')).rejects.toThrow(
+    await expect(issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel')).rejects.toThrow(
       /nobody to send the job card to/i,
     );
     expect(await harness.outbox.list()).toHaveLength(0);
@@ -275,9 +275,10 @@ describe('the issued document does not move, whatever the register does after', 
       strokeData: 'M0,0 L1,1',
     });
 
-    // The technician worked and signed it; the Master issues it. §3.1, §7.
+    // The technician worked it, signed it and submits it. MASTER SCOPE CR-07:
+    // there is no office step in the normal signed journey.
     const issued = await issueJobCard(
-      harness.as(master),
+      harness.as(sipho),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',

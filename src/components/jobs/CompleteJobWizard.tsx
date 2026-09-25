@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  canSubmitJobCard,
   checkCollectionDetails,
   checkReadyForSignature,
   checkRefusalReason,
@@ -26,9 +27,11 @@ import { JobCardPdfPreview } from './JobCardPdfPreview';
 import { JobMediaPanel } from './JobMediaPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { SignaturePad } from './SignaturePad';
+import { SubmitJobCardDialog } from './SubmitJobCardDialog';
 import { WorkCapturePanel } from './WorkCapturePanel';
 import { jobs as api } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/format';
 
@@ -93,6 +96,7 @@ export const CompleteJobWizard = ({
 }) => {
   const { job } = view;
   const operation = useOperation();
+  const currentUser = useCurrentUser();
   const definition = getJobTypeDefinition(job.jobType);
   const labels = signatoryLabelsFor(job.jobType);
   const correcting = mode === 'correct';
@@ -174,6 +178,7 @@ export const CompleteJobWizard = ({
    * parent has got round to loading.
    */
   const [signedJob, setSignedJob] = useState<Job | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
@@ -321,6 +326,16 @@ export const CompleteJobWizard = ({
     onSigned(refused);
   };
 
+  /*
+   * WHETHER THIS PERSON SUBMITS IT. MASTER SCOPE CR-07.
+   *
+   * The same rule the server applies, so the last step of the close-out cannot
+   * offer a submission the operation would refuse. The job is at `review` by
+   * the time this step is reached — the signature put it there — so the rule
+   * is asked about that, not about the status the wizard opened on.
+   */
+  const maySubmit = canSubmitJobCard(currentUser, { ...job, status: 'review' });
+
   const onLastCorrectionStep = correcting && position === steps.length - 1;
 
   /**
@@ -384,6 +399,20 @@ export const CompleteJobWizard = ({
 
   return (
     <div className="space-y-5">
+      {/* The final submission, in the one component every screen that offers
+          it uses. It is the last act of the close-out, so it happens here
+          rather than by sending the technician to an office review page. */}
+      <SubmitJobCardDialog
+        view={signedJob === null ? view : { ...view, job: signedJob }}
+        open={submitting}
+        onClose={() => setSubmitting(false)}
+        onSubmitted={() => {
+          setSubmitting(false);
+          onChanged();
+          onSigned(signedJob ?? job);
+        }}
+      />
+
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -659,7 +688,19 @@ export const CompleteJobWizard = ({
         <Card>
           <CardHeader
             title="Signed"
-            description="The document as it now stands, with the signature on it. Check it, then hand it on for submission — the customer is emailed their copy from there."
+            /*
+             * IT NO LONGER SAYS "hand it on". MASTER SCOPE CR-07.
+             *
+             * It used to read "hand it on for submission — the customer is
+             * emailed their copy from there", which described handing the job
+             * to an office that has no step in this journey. The technician
+             * checks the signed document and submits it, from here.
+             */
+            description={
+              maySubmit
+                ? 'The document the customer signed. Check it, then submit it — that sends them their copy and starts the delivery.'
+                : 'The document the customer signed. The technician on this job submits it from their own job screen.'
+            }
           />
           <div className="mt-4">
             <JobCardPdfPreview
@@ -818,10 +859,14 @@ export const CompleteJobWizard = ({
             <Button
               size="lg"
               className="ml-auto"
-              onClick={() => onSigned(signedJob ?? job)}
-              leadingIcon={<Icon name="mail" className="size-5" />}
+              onClick={() => (maySubmit ? setSubmitting(true) : onSigned(signedJob ?? job))}
+              leadingIcon={<Icon name={maySubmit ? 'mail' : 'check'} className="size-5" />}
             >
-              Continue to submission
+              {maySubmit
+                ? job.jobType === 'parts'
+                  ? 'Submit collection note'
+                  : 'Submit job card'
+                : 'Done'}
             </Button>
           ) : isSignatureStep ? (
             <Button

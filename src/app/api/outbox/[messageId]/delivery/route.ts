@@ -26,9 +26,22 @@ export const POST = writeRoute({
     })
     .strict(),
   handler: async (context) => {
-    if (!can(context.actor.user.role, 'jobs.issueFinal')) {
-      throw forbidden('Only a Master reports on a customer’s copy.', [
-        { code: 'not_permitted', message: 'Your role does not issue job cards.' },
+    /*
+     * THE SAME RULE THE OUTBOX SCREEN ITSELF USES. CR-07.
+     *
+     * This gated on `jobs.issueFinal`, which under CR-07 is the TECHNICIAN's —
+     * and a technician cannot even read the outbox (SEC-1), so the gate would
+     * have let in exactly the people who cannot see the thing they are
+     * reporting on, and kept out the office who can. It is the provider's
+     * delivery webhook, stood in for by hand in the demonstration, and the
+     * people who work that screen are the people who may report on it.
+     */
+    if (!can(context.actor.user.role, 'jobs.viewAll')) {
+      throw forbidden('The outbox is an office screen.', [
+        {
+          code: 'not_permitted',
+          message: 'Your role does not have access to customer correspondence.',
+        },
       ]);
     }
     const messageId = context.params.messageId ?? '';

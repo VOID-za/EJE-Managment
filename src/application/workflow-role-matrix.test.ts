@@ -109,23 +109,61 @@ describe('A — a normal job, accepted to closed', () => {
     harness = buildHarness();
   });
 
-  it('runs: accept, work, write-up, review, signature, signed, Master submission, closed', async () => {
+  it('runs: accept, work, write-up, review, signature, signed, TECHNICIAN submission, delivery, closed', async () => {
+    const tech = harness.as(technician);
     let job = await readyForSignature(harness, 'EJE-1048');
     expect(job.status).toBe('customer_signature');
 
     job = await sign(harness, job);
-    // Signed lands at Review, which is the office's queue. Not closed, not
-    // issued: the Master has not submitted it yet.
+    /*
+     * Signed lands at Review, and Review is NOT an office queue any more.
+     * MASTER SCOPE CR-07: it is where a signed job card waits for the
+     * technician who completed it to check the document and submit it. The
+     * office is not told, is not asked and has no step.
+     */
     expect(job.status).toBe('review');
     expect(job.signature).not.toBeNull();
     expect(refusalAwaitingResolution(job)).toBe(false);
 
-    const issued = await issueJobCard(harness.as(master), job, EMAIL, RECIPIENT);
+    // One act, by the person who did the work: the customer's copy is
+    // rendered, stored and emailed, and the delivery handshake begins.
+    const issued = await issueJobCard(tech, job, EMAIL, RECIPIENT);
     expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.finalDocument).not.toBeNull();
 
-    const closed = await confirmDelivery(harness, harness.as(master), issued.job);
+    const sent = await harness.outbox.list();
+    expect(sent.filter((entry) => entry.to.includes(EMAIL))).toHaveLength(1);
+
+    // And only a CONFIRMED delivery closes it.
+    const closed = await confirmDelivery(harness, tech, issued.job);
     expect(closed.status).toBe('closed');
     expect(closed.finalDocument).not.toBeNull();
+  });
+
+  it('needed nobody in the office, at any point', async () => {
+    /*
+     * The whole of CR-07 in one case. The journey above runs end to end with a
+     * single actor — the technician — and the office inbox learns of it only
+     * once the customer has already been emailed.
+     */
+    const tech = harness.as(technician);
+    const signed = await sign(harness, await readyForSignature(harness, 'EJE-1048'));
+
+    for (const office of [master, coordinator]) {
+      const inbox = await harness.repos.notifications.list(office.id);
+      expect(inbox.filter((entry) => entry.jobId === signed.id)).toHaveLength(0);
+    }
+
+    const issued = await issueJobCard(tech, signed, EMAIL, RECIPIENT);
+    await confirmDelivery(harness, tech, issued.job);
+
+    for (const office of [master, coordinator]) {
+      const inbox = await harness.repos.notifications.list(office.id);
+      const about = inbox.filter((entry) => entry.jobId === signed.id);
+      expect(about).toHaveLength(1);
+      // Told, not asked: it points at the job, not at a review screen.
+      expect(about[0]?.link).toBe(`/jobs/${signed.jobNumber}`);
+    }
   });
 
   it('leaves the technician an action at Review — they are not stranded', async () => {
@@ -148,11 +186,26 @@ describe('A — a normal job, accepted to closed', () => {
     expect(canEditJobRecord('technician', job)).toBe(false);
   });
 
-  it('does not let the technician issue it — the final submission is the Master’s', async () => {
+  it('does not let the OFFICE submit it — CR-07 inverted this case', async () => {
+    /*
+     * This asserted that the technician could not issue it, under §3.1/§7/§15.
+     * EJE confirmed the opposite on 25 September 2026: the submission belongs
+     * to the person who attended the machine, and the office — Master and
+     * Coordinator alike — has no step in a normal signed job.
+     */
     const job = await sign(harness, await readyForSignature(harness, 'EJE-1048'));
-    expect(await codesFrom(() => issueJobCard(harness.as(technician), job, EMAIL, RECIPIENT))).toContain(
-      'not_permitted',
-    );
+
+    for (const office of [master, coordinator]) {
+      expect(
+        await codesFrom(() => issueJobCard(harness.as(office), job, EMAIL, RECIPIENT)),
+        office.id,
+      ).toContain('not_permitted');
+    }
+
+    // And nothing happened on the way past: no document, no send.
+    const after = await harness.repos.jobs.findById(job.id);
+    expect(after?.status).toBe('review');
+    expect(after?.finalDocument).toBeNull();
   });
 });
 
@@ -223,9 +276,10 @@ describe('B — customer refuses, the office corrects it, Customer Signature', (
     expect(signed.status).toBe('review');
     expect(signed.signature).not.toBeNull();
 
-    // And from there it is an ordinary signed job: the Master submits it.
-    const issued = await issueJobCard(harness.as(master), signed, EMAIL, RECIPIENT);
-    const closed = await confirmDelivery(harness, harness.as(master), issued.job);
+    // And from there it is an ordinary signed job, which means the TECHNICIAN
+    // submits it — CR-07. The office's part ended when it handed the card back.
+    const issued = await issueJobCard(harness.as(technician), signed, EMAIL, RECIPIENT);
+    const closed = await confirmDelivery(harness, harness.as(technician), issued.job);
     expect(closed.status).toBe('closed');
   });
 
@@ -467,10 +521,16 @@ describe('the confirmed role matrix', () => {
     readonly resolvesRefusals: boolean;
     readonly editsRefusedCard: boolean;
   }[] = [
+    /*
+     * `finalSubmission` MOVED FROM THE MASTER TO THE TECHNICIAN on
+     * 25 September 2026 — CR-07. The table is the confirmed matrix, so it is
+     * restated rather than relaxed: exactly one role holds it, and it is the
+     * one that attends the machine.
+     */
     {
       role: 'master',
       acceptsFieldWork: true,
-      finalSubmission: true,
+      finalSubmission: false,
       resolvesRefusals: true,
       editsRefusedCard: true,
     },
@@ -484,7 +544,7 @@ describe('the confirmed role matrix', () => {
     {
       role: 'technician',
       acceptsFieldWork: true,
-      finalSubmission: false,
+      finalSubmission: true,
       resolvesRefusals: false,
       editsRefusedCard: false,
     },

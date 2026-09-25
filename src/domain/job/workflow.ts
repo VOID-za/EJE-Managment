@@ -254,6 +254,71 @@ export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
 };
 
 /**
+ * Whether this person may make the FINAL SUBMISSION of this job card. CR-07.
+ *
+ * The normal signed journey has no office step. The technician who accepted
+ * the job, did the work and took the customer's signature submits it — that
+ * one act generates the customer's copy, emails it and starts the delivery
+ * handshake. A Master and a Coordinator are not offered it and are refused it,
+ * on an ordinary job, however senior.
+ *
+ * TWO EXCEPTIONS, and both are about somebody who is NOT in a normal signed
+ * journey:
+ *
+ * - A PARTS COLLECTION is handed over at the EJE counter, not on a customer's
+ *   site. Whoever processed it issues it, which is `jobs.processParts` — the
+ *   same exception, in the same shape, as `acceptJobRefusal` and
+ *   `canAcceptJob` already carry.
+ * - THE RETIRED MASTER REVIEW STAGE. Nothing can enter `submitted` any more,
+ *   but jobs that entered it before it was retired still exist and still have
+ *   to be able to leave. A Master can move those on, because otherwise they
+ *   are stranded for ever and there is nobody else who could.
+ *
+ * The screen and the server ask this same function, so a button cannot be
+ * offered that the operation would refuse.
+ */
+export const canSubmitJobCard = (
+  actor: Pick<User, 'id' | 'role'>,
+  job: Pick<Job, 'status' | 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
+): boolean => {
+  if (job.jobType === 'parts') return can(actor.role, 'jobs.processParts');
+  if (job.status === 'submitted') return actor.role === 'master';
+
+  // The technician's own capability: the field holds it and the office does not.
+  if (can(actor.role, 'jobs.issueFinal')) return true;
+
+  /*
+   * WHOEVER ACTUALLY ATTENDED THE MACHINE, whatever their role.
+   *
+   * A MASTER MAY ACCEPT FIELD WORK — `jobs.acceptField` is his, deliberately,
+   * and only the Coordinator is kept out of it. So a Master can be the person
+   * who drove out, did the work and took the customer's signature, and without
+   * this he could not then submit his own job: the rule would have offered him
+   * Accept and then refused him the last step of the thing he accepted.
+   *
+   * This is not a way back in for the office. It asks whether the person is ON
+   * the job, which is the same question `acceptJobRefusal` asks, so it cannot
+   * reach a job they did not attend — and the Coordinator cannot reach it at
+   * all, because she cannot be on one.
+   */
+  return can(actor.role, 'jobs.acceptField') && isAssignedTo(job, actor.id);
+};
+
+/**
+ * Whether this person may send the customer their copy AGAIN. CR-07.
+ *
+ * Deliberately wider than `canSubmitJobCard`, and deliberately not the same
+ * question. A re-send is a DELIVERY problem on a job that has already been
+ * issued: the document exists, the record is already read-only, and nothing
+ * about the job changes. What must not happen is that a bounced email sits
+ * unsent because the one technician who submitted it is on leave — so the
+ * office, who are the only people who can see the outbox and the failure in
+ * the first place, can re-send it too.
+ */
+export const canResendCustomerCopy = (role: UserRole): boolean =>
+  can(role, 'jobs.issueFinal') || can(role, 'jobs.viewAll');
+
+/**
  * Deletion is for an administrative mistake — a duplicate, the wrong customer,
  * a job that should never have existed. Once a technician has accepted it there
  * is real work attached, and the honest action is to CANCEL, which keeps

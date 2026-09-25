@@ -28,9 +28,24 @@ import { deliveryMessage, isDelivered, type Job } from '@/domain';
  * reachable without anybody faking a success.
  */
 
+/*
+ * WHO SUBMITS, AND WHO MAY RE-SEND. MASTER SCOPE CR-07.
+ *
+ * Every fixture here used to issue as the MASTER, because §3.1 put the final
+ * submission with him. EJE confirmed on 25 September 2026 that the normal
+ * signed journey has no office step at all: the technician who did the work
+ * submits it. The fixtures follow the rule rather than the rule following the
+ * fixtures.
+ *
+ * A RE-SEND IS A DIFFERENT QUESTION and is deliberately wider — see
+ * `canResendCustomerCopy`. The document already exists and the job is already
+ * read-only, so re-sending changes nothing about the job; what it must not do
+ * is wait for one person. The office sees the failure in the outbox, so the
+ * office can re-send it too. The three negative cases below are rewritten to
+ * that rule, not deleted.
+ */
 const technician = seedUser('user-tech-sipho');
 const coordinator = seedUser('user-coord-christene');
-/** MASTER SCOPE §3.1 — the final submission and every re-send are his. */
 const master = seedUser('user-master-elmarie');
 
 const workAndSign = async (harness: Harness, jobNumber: string): Promise<Job> => {
@@ -66,7 +81,7 @@ describe('a send the provider has merely accepted', () => {
 
   it('does not close the job, and does not claim delivery', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const result = await issueJobCard(harness.as(master),
+    const result = await issueJobCard(harness.as(technician),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
@@ -85,7 +100,7 @@ describe('a send the provider has merely accepted', () => {
 
   it('still says pending when nothing has confirmed it since', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master),
+    const issued = await issueJobCard(harness.as(technician),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
@@ -100,7 +115,7 @@ describe('a send the provider has merely accepted', () => {
 
   it('has already written the customer’s copy to storage', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master),
+    const issued = await issueJobCard(harness.as(technician),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
@@ -122,7 +137,7 @@ describe('a confirmed delivery', () => {
 
   it('is the only thing that closes the job', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master),
+    const issued = await issueJobCard(harness.as(technician),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
@@ -153,7 +168,7 @@ describe('a failed delivery', () => {
   it('is reported as a failure, leaves the job open, and keeps the document', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
     // A recipient the provider rejects outright.
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
 
     expect(issued.delivery.state).toBe('failed');
     expect(issued.delivery.failureReason.length).toBeGreaterThan(0);
@@ -172,7 +187,7 @@ describe('a failed delivery', () => {
 
   it('can be retried, and the retry sends the SAME document', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
     expect(issued.delivery.state).toBe('failed');
 
     // Re-sending puts EJE's document in the customer's hands again, so it is
@@ -193,7 +208,7 @@ describe('a failed delivery', () => {
 
   it('records every attempt on the audit trail', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
     await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel');
 
     const events = await harness.repos.activity.list(issued.job.id);
@@ -201,32 +216,52 @@ describe('a failed delivery', () => {
     expect(deliveryEvents.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('refuses a retry to the office short of a Master — §3.1', async () => {
+  it('LETS the office re-send, because the office is who sees the failure', async () => {
     /*
-     * Re-sending puts EJE's document in the customer's hands again, so it is
-     * the same act as sending it and the same capability guards it. The
-     * Coordinator reviews and edits; customer delivery is the Master's.
+     * THIS CASE IS INVERTED, AND DELIBERATELY. MASTER SCOPE CR-07.
+     *
+     * It asserted that a Coordinator may not re-send, because §3.1 made every
+     * customer delivery the Master's. Under CR-07 the submission is the
+     * technician's — which would have left a bounced customer copy waiting for
+     * one field technician to come back off leave, while the office stared at
+     * the failure in an outbox only they can read. Re-sending changes nothing
+     * about the job: the document is already written and the record is already
+     * final. So it is the one thing here that is wider than submitting.
      */
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
 
-    await expect(
-      retryJobCardDelivery(harness.as(coordinator), issued.job, 'Pieter Nel'),
-    ).rejects.toThrow(/cannot be re-sent by you/i);
+    const again = await retryJobCardDelivery(harness.as(coordinator), issued.job, 'Pieter Nel');
+    expect(again.job.status).toBe('awaiting_delivery');
+    expect(again.documentFileName).toBe(issued.documentFileName);
   });
 
-  it('refuses a retry to a technician, who never delivers to a customer', async () => {
+  it('lets a Master re-send too, for the same reason', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
 
-    await expect(
-      retryJobCardDelivery(harness.as(technician), issued.job, 'Pieter Nel'),
-    ).rejects.toBeInstanceOf(WorkflowError);
+    expect(
+      (await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel')).job.status,
+    ).toBe('awaiting_delivery');
+  });
+
+  it('lets the technician who submitted it re-send it', async () => {
+    /*
+     * ALSO INVERTED. It read "a technician never delivers to a customer",
+     * which stopped being true the moment CR-07 made the submission — the act
+     * that emails the customer in the first place — the technician's own.
+     */
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+
+    expect(
+      (await retryJobCardDelivery(harness.as(technician), issued.job, 'Pieter Nel')).job.status,
+    ).toBe('awaiting_delivery');
   });
 
   it('refuses a retry from an account whose role grants nothing', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(master), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
 
     // A corrupt or unrecognised role must grant nothing rather than everything.
     const outsider = { ...technician, role: 'nobody' as never };

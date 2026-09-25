@@ -27,6 +27,8 @@ import {
   transferJobRefusal,
   transferReasonLabel,
   canEditJob,
+  canResendCustomerCopy,
+  canSubmitJobCard,
   finalizedRefusal,
   labourRateLabel,
   siteAddressLine,
@@ -1300,34 +1302,22 @@ export const captureSignature = async (
   });
 
   /*
-   * THE HAND-OVER TO THE OFFICE. MASTER SCOPE §7, §15, §22.
+   * THERE IS NO HAND-OVER TO THE OFFICE ANY MORE. CR-07.
    *
-   * The signature is where the technician's authority over the job ends and
-   * the office's begins: the job sits at Review until a Master makes the final
-   * submission. A review queue nobody is told about is not a workflow, and the
-   * demo finding in §22 was exactly this — a technician finished a job and the
-   * Coordinator learned nothing.
+   * A signature used to file an office notification — "EJE-nnnn — ready for
+   * office review… It is waiting for a Master to make the final submission" —
+   * and that sentence was the whole of the superseded workflow in one line.
+   * The office is not waiting for anything: the technician checks the signed
+   * document and submits it themselves.
    *
-   * `notifyOffice`, not `notifyMasters`: §3.2 puts the Coordinator in the
-   * office, and the confirmed refusal decision has both roles receiving the
-   * refusal notification. The two halves of the same hand-over — signed and
-   * refused — now reach the same people. The refusal half is below, in
+   * The office IS still told, once, when the submission actually happens and
+   * the customer has been emailed — see `issueJobCard`. That is information
+   * about an outward-facing act, not a queue of work.
+   *
+   * A REFUSAL still notifies both the Master and the Coordinator immediately,
+   * because a refusal IS work for the office and always was. See
    * `recordSignatureRefusal`.
-   *
-   * It links to the REVIEW screen rather than the job, because what the office
-   * is being asked to do is review it.
    */
-  await notifyOffice(context, {
-    type: 'job_submitted',
-    title: `${job.jobNumber} — ready for office review`,
-    body:
-      `${userFullName(context.actor)} completed ${job.jobNumber} and ` +
-      `${input.customerName} ${input.customerSurname} signed for it. ` +
-      'It is waiting for a Master to make the final submission.',
-    jobId: job.id,
-    link: `/jobs/${job.jobNumber}/review`,
-  });
-
   return saved;
 };
 
@@ -2060,25 +2050,29 @@ export const issueJobCard = async (
   customerDisplayName: string,
 ): Promise<SubmitResult> => {
   /*
-   * WHO, BEFORE WHAT. MASTER SCOPE §3.1, §7, §15.
+   * WHO, BEFORE WHAT.
    *
-   * Asked first, and deliberately before the status check that used to come
-   * ahead of it. A technician calling this was previously refused by the JOB'S
-   * STATUS — "not ready to be issued" — which is not a refusal at all: it says
-   * come back when the job is further along, and on a job at Review it would
-   * have let them through to generate the final document and email the
-   * customer. Permission is not a fallback for state.
+   * Asked first, and deliberately before the status check. Being refused by a
+   * job's STATUS is not a refusal at all — it says come back when the job is
+   * further along — so permission is never a fallback for state.
    *
-   * `jobs.issueFinal` is held by the Master alone. This one call is the final
-   * official submission: it freezes the price, renders and stores the customer's
-   * copy, queues the email and moves the job to closure.
+   * WHO CHANGED, AND IT IS A BUSINESS DECISION. CR-07, confirmed 25 September
+   * 2026. This was `jobs.issueFinal` held by the MASTER alone, and the normal
+   * journey therefore ran signature → office review → Master submission. There
+   * is no office step any more: the technician who did the work submits it.
+   * `canSubmitJobCard` is the single rule, and it carries the two exceptions —
+   * a parts collection is issued by whoever processed it at the counter, and a
+   * job stranded in the retired Master Review stage can still be moved on by a
+   * Master.
    */
-  if (!can(context.actor.role, 'jobs.issueFinal')) {
-    throw new WorkflowError(`${job.jobNumber} cannot be issued by you.`, [
+  if (!canSubmitJobCard(context.actor, job)) {
+    throw new WorkflowError(`${job.jobNumber} cannot be submitted by you.`, [
       {
         code: 'not_permitted',
         message:
-          'Only a Master can make the final submission, send the customer their job card and close the job.',
+          job.jobType === 'parts'
+            ? 'Only somebody who processes parts collections can issue this collection note.'
+            : 'The technician who completed the job submits it. The office does not submit an ordinary signed job card.',
       },
     ]);
   }
@@ -2193,6 +2187,27 @@ export const issueJobCard = async (
     type: 'job_submitted',
     summary: 'Job card submitted and issued',
     detail: `Submitted by ${userFullName(context.actor)}. The signed job card was generated and sent to ${customerEmail}.`,
+  });
+
+  /*
+   * THE OFFICE IS TOLD WHAT HAPPENED, not asked to do something. CR-07.
+   *
+   * Moved here from `captureSignature`, where it described a review step that
+   * no longer exists. What the office genuinely needs to know is that a
+   * customer has been emailed their job card — they invoice from it — and by
+   * then the work is finished and there is nothing for them to act on.
+   *
+   * It links to the JOB, not to the review screen: there is nothing to review.
+   */
+  await notifyOffice(context, {
+    type: 'job_submitted',
+    title: `${job.jobNumber} — job card submitted`,
+    body:
+      `${userFullName(context.actor)} submitted the signed job card for ${job.jobNumber}. ` +
+      `The customer's copy was sent to ${customerEmail}. ` +
+      'The job closes once delivery is confirmed.',
+    jobId: job.id,
+    link: `/jobs/${job.jobNumber}`,
   });
 
   return sendFinalDocument(context, issued, customerDisplayName);
@@ -2361,13 +2376,21 @@ export const retryJobCardDelivery = async (
   job: Job,
   customerDisplayName: string,
 ): Promise<SubmitResult> => {
-  // Re-sending is the same act as sending: it puts EJE's document in the
-  // customer's hands. Same capability, same order — who before what.
-  if (!can(context.actor.role, 'jobs.issueFinal')) {
+  /*
+   * WIDER THAN SUBMITTING, AND ON PURPOSE. CR-07.
+   *
+   * A re-send is a delivery problem on a job that has already been issued: the
+   * document exists and the record is already read-only, so nothing about the
+   * job changes. The office can do it as well as the technician who submitted
+   * it, because the office is who SEES the failure — the outbox is their
+   * screen — and a bounced customer copy must not wait for one person to come
+   * back off leave.
+   */
+  if (!canResendCustomerCopy(context.actor.role)) {
     throw new WorkflowError(`${job.jobNumber} cannot be re-sent by you.`, [
       {
         code: 'not_permitted',
-        message: 'Only a Master sends a customer their job card.',
+        message: 'Your role does not send a customer their job card.',
       },
     ]);
   }

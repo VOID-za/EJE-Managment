@@ -74,7 +74,7 @@ office's.
 
 | | Outcome | Result |
 |---|---|---|
-| **A** | **Customer Signature** | The card returns to the customer-signature step and then follows the normal route — signature, review, final Master submission, closure. |
+| **A** | **Customer Signature** | The card returns to the customer-signature step and then follows the normal route — signature, then the **technician's** submission, delivery, closure. *(Read "final Master submission" here until CR-07 replaced it on 25 September 2026.)* |
 | **B** | **Without Customer Signature** | The refusal is resolved and the job is **CLOSED immediately**. No customer-signature step follows, no review step follows, no Capture Signature button is offered, no return-for-signature action remains. The final state is `closed`. |
 
 **(c) Both outcomes are real state transitions.** Outcome A is
@@ -112,10 +112,17 @@ as a tech"*.
 **(b) The Coordinator's extra authority is the REFUSAL and only the refusal.**
 She was being offered *Review & submit job card* on ordinary signed jobs and
 *Accept job* on field work, both of which the server then refused. She does not
-get the final submission (`jobs.issueFinal` stays with the Master, §3.1/§15) and
-she does not accept field work (`jobs.acceptField`, which she has never held).
-The Parts exception is unchanged: a parts collection happens at the EJE counter
-and the office does process it, under `jobs.processParts`.
+get the final submission and she does not accept field work
+(`jobs.acceptField`, which she has never held). The Parts exception is
+unchanged: a parts collection happens at the EJE counter and the office does
+process it, under `jobs.processParts`.
+
+> **Amended by CR-07, 25 September 2026.** This paragraph read "she does not
+> get the final submission (`jobs.issueFinal` stays with the Master,
+> §3.1/§15)". The boundary it draws around the Coordinator is unchanged and
+> still holds; what changed is the other side of it. `jobs.issueFinal` did not
+> stay with the Master — it went to the TECHNICIAN, and the Master does not
+> have it either.
 
 **(c) The screen and the server must give the same answer.** Every rule above
 is enforced in the application layer and *then* reflected in what is drawn. A
@@ -127,7 +134,8 @@ only by hiding a button.
 > withheld every action from a technician at `review` on a signed job card too;
 > `canAcceptJob` was never told the viewer's role, so the screen offered a
 > Coordinator work the server would refuse; and the Review action read *Review
-> & submit job card* for every office role, not only the Master.
+> & submit job card* for every office role, not only the Master. (CR-07 then
+> removed that action from the office entirely.)
 >
 > `canEditJob` itself is unchanged and stays capability-gated at `review`: a
 > signed job card is final for everyone under CR-01, and a refused one is the
@@ -151,6 +159,75 @@ price, a permission or a state.
 
 The labour **field** is not removed from the record: lines captured before this
 keep what was written on them, and the document still prints it.
+
+### CR-07 — The normal signed job card is submitted by its technician
+*Confirmed 25 September 2026. Implemented `PENDING` (see SUBMIT-1…SUBMIT-16).*
+*This REVERSES a rule confirmed on 24 September 2026 and implemented in
+`d979aa9`. It is a business decision, recorded here in full so the reversal is
+legible rather than mysterious.*
+
+**The authoritative normal journey.** No office step exists in it at any point:
+
+| | Step | Who |
+|---|---|---|
+| 1 | Accept the job | Technician |
+| 2 | Do the work; capture labour, travel, parts, call-out | Technician |
+| 3 | Completion write-up | Technician |
+| 4 | Customer signs | Technician takes the signature |
+| 5 | Check the signed document | Technician |
+| 6 | **Submit the signed job card** | **Technician** |
+| 7 | The customer's copy is generated and emailed | the submission does it |
+| 8 | Delivery pending | the provider |
+| 9 | Delivery confirmed → **CLOSED** | the provider's report |
+
+**The office review is for a REFUSAL, and for nothing else.** CR-04 and CR-05
+are unchanged and remain in force: a customer who will not sign puts the job
+card with the Master and the Coordinator, the technician becomes read-only, and
+the office chooses Customer Signature or Without Customer Signature. After
+outcome A the card rejoins the journey above at step 4 and is submitted by the
+technician like any other.
+
+> **Superseded — v2.0 §3.1, §7, §15, and CR-05's ROLE-6, implemented
+> `d979aa9`:** *"final authority over official job submission/closure and
+> customer delivery"* with the Master; *"the final Master submission locks the
+> job, creates/stores final PDF, queues customer email and closes it"*; and
+> *"only that submission emails the customer."* In practice that made the
+> office a mandatory participant in every completed job it had not attended,
+> left signed job cards sitting in a queue, and produced on screen: *"Review
+> job card… With the office for submission… EJE-2028 is signed and with the
+> office. A Master makes the final submission."* All of it is removed, not
+> hidden.
+>
+> **What §15 still governs** is that the customer is emailed ONCE, by the
+> submission and by nothing else. That is unchanged; only the person who makes
+> it has changed.
+
+**The rule is "whoever attended the machine", not "whoever holds a role".**
+`jobs.issueFinal` is the technician's, and that covers every ordinary case. It
+is not the whole rule, because **a Master may accept field work** — that has
+always been true, and only the Coordinator is kept out of it. A Master who
+drove out, did the work and took the customer's signature is the person who
+completed that job, and submits it. The rule therefore also admits anybody who
+holds `jobs.acceptField` **and is on the job**, which is the same question
+acceptance itself asks, so it can never reach a job they did not attend. The
+Coordinator cannot reach it at all, because she cannot be on a field job.
+
+*Discovered at implementation: without this a Master could be offered Accept on
+a breakdown and then refused the last step of the job he had just done.*
+
+**Two further exceptions, both about somebody not in a normal signed journey.**
+
+- **A parts collection** is handed over at the EJE counter, not on a customer's
+  site, so whoever processed it issues it — `jobs.processParts`. Identical in
+  shape to the exception `canAcceptJob` and `acceptJobRefusal` already carry.
+- **The retired Master Review stage.** Nothing can enter `submitted`; the jobs
+  in it entered before it was retired, and a Master is the only person who can
+  move them on. There is no technician journey to return them to, and
+  stranding a real customer's job card for ever is not an option.
+
+**Signed-job immutability is untouched.** CR-01 stands in full: once the
+customer has signed, nothing on the job card may be edited by anyone, and no
+reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 
 ---
 
@@ -182,7 +259,7 @@ keep what was written on them, and the document still prints it.
 | REF-6 | Office may correct the **unsigned** card | **DONE** | `947ef4f` — held open deliberately by CR-01 |
 | REF-7 | Resubmit → Customer Signature | **DONE** | `returnToCustomerSignature` — corrected by REF-13 |
 | REF-8 | Resubmit → Without Customer Signature | **DONE** | `resolveSignatureRefusal` — corrected by REF-14 |
-| REF-9 | Final submission/closure/delivery stays Master-controlled | **DONE** | `d979aa9` — `jobs.issueFinal` |
+| REF-9 | ~~Final submission/closure/delivery stays Master-controlled~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9`, reversed `PENDING` — see CR-07 |
 | REF-10 | The refusal workflow never modifies a signed record | **DONE** | `947ef4f` |
 
 #### CR-04 — office ownership and the two outcomes
@@ -210,8 +287,30 @@ keep what was written on them, and the document still prints it.
 | ROLE-3 | A technician is read-only on a **refused** job card, and sees no action on it at all | **DONE** | `b4e6140` + `901e579` | `workflow-role-matrix.test.ts` B; `workflow-e2e.mjs` |
 | ROLE-4 | The Coordinator gets **no** generic Review & submit on an ordinary signed job | **DONE** | `901e579` | `JobActionBar.tsx`, review page; `workflow-role-matrix.test.ts` D; `workflow-e2e.mjs` |
 | ROLE-5 | The Coordinator is **not** offered Accept on field work, and is refused it if she asks. The Parts exception is preserved | **DONE** | `901e579` | `canAcceptJob`; `job-creation-assignment.test.ts`; `workflow-e2e.mjs` |
-| ROLE-6 | The final submission stays the Master's; the screen and the server agree on that for every role | **DONE** | `d979aa9` + `901e579` | `jobs.issueFinal`; `workflow-role-matrix.test.ts` |
+| ROLE-6 | ~~The final submission stays the Master's~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9` + `901e579`, reversed `PENDING` | Kept for the history. The requirement it replaced — that the screen and the server give the same answer for every role — survives unchanged as ROLE-7 and SUBMIT-8. |
 | ROLE-7 | Every rule above is enforced in the application layer first; the UI only reflects it | **DONE** | `901e579` | every negative case in `workflow-role-matrix.test.ts` is an operation refusing, not a button missing |
+
+### CR-07 — the technician's submission
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| SUBMIT-1 | The technician submits the signed job card; `jobs.issueFinal` is theirs | **DONE** | `PENDING` | `access.ts`; `access.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-2 | The Coordinator CANNOT submit an ordinary signed job card, and nothing happens when she tries | **DONE** | `PENDING` | `technician-submission.test.ts`; `role-enforcement.test.ts`; `scope-authorization.test.ts` (403) |
+| SUBMIT-3 | The Master CANNOT either, on a job he did not attend, however senior — the capability table is no longer a seniority ladder | **DONE** | `PENDING` | same, plus `access.test.ts` |
+| SUBMIT-3a | **Whoever ATTENDED the machine submits it**, which includes a Master who accepted and worked the job himself. Anyone with `jobs.acceptField` who is ON the job may submit it; nobody may submit a job they did not attend | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts` — both the positive case and "does NOT let a Master submit a job somebody ELSE attended" |
+| SUBMIT-4 | The submission generates the customer's copy, emails it once, and moves the job to delivery-pending | **DONE** | pre-existing + `PENDING` | `issueJobCard`; `technician-submission.test.ts` |
+| SUBMIT-5 | The job closes only on a CONFIRMED delivery, never on an accepted send | **DONE** | pre-existing | `delivery-handshake.test.ts` |
+| SUBMIT-6 | A signature asks the office for NOTHING: no notification, no queue, no link to a review screen | **DONE** | `PENDING` | `captureSignature`; `office-notifications.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-7 | The office IS told, once, when the submission has happened and the customer has been emailed — information, not work, linked to the job | **DONE** | `PENDING` | `issueJobCard`; `office-notifications.test.ts` |
+| SUBMIT-8 | The normal journey does not route through `/jobs/:n/review`; the submission is taken in the close-out and on the job | **DONE** | `PENDING` | `SubmitJobCardDialog.tsx`; `CompleteJobWizard.tsx`; `JobActionBar.tsx`; `workflow-e2e.mjs` |
+| SUBMIT-9 | The superseded wording is gone from every screen, not hidden: no *Review & submit job card*, *With the office for submission* or *A Master makes the final submission* on an ordinary signed job | **DONE** | `PENDING` | `workflow-e2e.mjs`, `smoke.mjs` assert the exact strings are absent |
+| SUBMIT-10 | A parts collection is still issued by whoever processed it at the counter | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts`; `smoke.mjs` |
+| SUBMIT-11 | A job stranded in the retired Master Review stage can still be issued by a Master | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts`; `master-review.test.ts` |
+| SUBMIT-12 | Re-sending a customer's copy is open to the technician who submitted it AND to the office, because the office sees the failure | **DONE** | `PENDING` | `canResendCustomerCopy`; `delivery-handshake.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-13 | Reporting a delivery outcome is gated as the outbox screen is — the office — rather than on `jobs.issueFinal` | **DONE** | `PENDING` | `/api/outbox/[messageId]/delivery` |
+| SUBMIT-14 | `jobs.submit` is retired: it guarded nothing and named a hand-over to an office review that no longer exists | **DONE** | `PENDING` | removed from `access.ts` and `access.test.ts` |
+| SUBMIT-15 | After refusal outcome A, the card rejoins the normal journey and is submitted by the technician | **DONE** | `PENDING` | `technician-submission.test.ts`; `refusal-correction.test.ts`; `workflow-e2e.mjs`, `smoke.mjs` |
+| SUBMIT-16 | Signed-job immutability is unaffected: no role may edit a signed job, and no reopen path was added | **DONE** | `947ef4f` + `PENDING` | `technician-submission.test.ts`; `signed-job-immutability.test.ts` |
 
 ### CR-06 — capture screen and customer document
 
@@ -241,7 +340,7 @@ keep what was written on them, and the document still prints it.
 | NOTIF-1 | Coordinator receives operational notifications | **DONE** | `d979aa9` |
 | MSG-1 | "The office" is Master + Coordinator | **DONE** | `d979aa9` |
 | SEC-1 | Technicians cannot access customer correspondence | **DONE** | `d979aa9` |
-| EMAIL-1 | Only the final Master submission emails the customer | **DONE** | `d979aa9` |
+| EMAIL-1 | Only the final submission emails the customer — once, and by nothing else | **DONE** | `d979aa9`, actor corrected `PENDING` | The rule is unchanged by CR-07; only WHO makes that submission changed (the technician). |
 | CHK-1 | Installation/Service checklists mandatory | **DONE** | pre-existing |
 | CHK-HIST | Exact historical checklist version retrieved | **DONE** | pre-existing |
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
@@ -302,6 +401,8 @@ keep what was written on them, and the document still prints it.
 | **BD-06** | Outcome B closes the job without **emailing** the unsigned copy to the customer. The old route emailed, because it went through `issueJobCard`; §15 puts customer delivery after the final **Master** submission, and outcome B is open to a Coordinator. Should closing without a signature send the customer their copy, and if so, under whose authority? The document is rendered, stored and downloadable either way. | REF-16 |
 | **BD-07** | ~~After outcome A returns the card to `customer_signature`, **who** captures the signature?~~ **ANSWERED 25 September 2026 by CR-05(a).** The read-only rule is about a REFUSED job card, not about the technician. Once outcome A returns the card to the signature step there is no outstanding refusal, so the ordinary signature workflow resumes and the technician captures it exactly as they would have the first time. Held as ROLE-1 and proved end to end in `workflow-e2e.mjs`. | closed |
 | **BD-08** | Should a technician be able to see that a colleague is *editing* a job card they handed over, or is "with the office" enough? Raised by CR-05(a): the technician now has a way back INTO a signed job card and may find it changed under them. | cosmetic |
+| **BD-09** | **There is no office fallback for a signed job whose technician cannot submit it.** CR-07 gives `jobs.issueFinal` to the technician alone, so a job signed by somebody who then goes on leave, leaves EJE or loses their device sits signed and unsubmitted with nobody able to send the customer their copy. Options: leave it (the technician submits on their return), let a Master submit on their behalf with the act audited against both, or let the office transfer a signed job to another technician. Raised at implementation; no answer assumed. | SUBMIT-1 |
+| **BD-10** | The `review` STATUS keeps its name although it is no longer an office review — it is where a signed job card waits for its own technician to submit it, and where a refused one waits for the office. Renaming it would touch stored history and would misdescribe the refusal case, so it was left; the rail therefore still reads *Review* between Customer Signature and Closed. Rename, or accept? | cosmetic |
 
 ---
 

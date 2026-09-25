@@ -70,8 +70,7 @@ const closeJob = async (harness: Harness): Promise<Job> => {
    * customer's copy and sends it, and the job closes only once the provider
    * confirms delivery.
    */
-  const result = await issueJobCard(
-    harness.as(master),
+  const result = await issueJobCard(harness.as(technician),
     job,
     'pieter.nel@abc-engineering-demo.co.za',
     'Pieter Nel',

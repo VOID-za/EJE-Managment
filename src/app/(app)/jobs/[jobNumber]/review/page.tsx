@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { use, useCallback, useEffect, useState } from 'react';
 import {
-  can,
+  canResendCustomerCopy,
+  canSubmitJobCard,
   contactFullName,
   deliveryMessage,
   deliveryStateLabel,
@@ -37,11 +38,22 @@ import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
- * Review and submit.
+ * The job card, read.
  *
- * The preview below is the actual job card content, rendered from the job
- * record. Submission is confirmed explicitly and, in this demonstration, the
- * customer email is recorded in the simulated outbox rather than sent.
+ * NOT A STEP OF THE NORMAL JOURNEY ANY MORE. MASTER SCOPE CR-07. A signed job
+ * card used to be routed here so that a MASTER could submit it; the technician
+ * submits it themselves now, from the close-out or from the job. What this
+ * screen is for:
+ *
+ * - READING the job card as the customer will receive it, at any stage;
+ * - the REFUSAL panel, where the office resolves a customer's refusal to sign;
+ * - a job awaiting delivery, where the customer's copy can be re-sent;
+ * - a closed job's final document;
+ * - and the retired Master Review stage, which only a Master can move on.
+ *
+ * The submission is still OFFERED here to whoever the server would allow, so
+ * that somebody who navigated here is not sent back round the houses — but
+ * nothing routes them here to do it.
  */
 const ReviewJobPage = ({
   params,
@@ -157,7 +169,6 @@ const ReviewJobPage = ({
   const customerEmail = contact?.email.trim() ?? '';
   const customerDisplayName = contact === null ? customer.name : contactFullName(contact);
 
-  const isMaster = currentUser.role === 'master';
   const inMasterReview = job.status === 'submitted';
   const awaitingDelivery = job.status === 'awaiting_delivery';
   const closed = job.status === 'closed';
@@ -182,28 +193,45 @@ const ReviewJobPage = ({
   const refusalPending = refusalAwaitingResolution(job);
 
   /*
-   * MASTER SCOPE §3.1, §7, §15 — the final submission is the Master's.
+   * WHO MAY SUBMIT. MASTER SCOPE CR-07.
    *
-   * `jobs.issueFinal`, not `jobs.submit`: a technician submits FOR REVIEW, and
-   * this button is the act that generates the customer's copy and emails it.
-   * The server refuses it either way; this stops the screen offering a
-   * technician a button that would be refused.
+   * `canSubmitJobCard` is the domain rule the server applies, so this screen
+   * cannot offer a submission the operation would refuse — and it carries the
+   * two exceptions with it: a parts collection is issued by whoever processed
+   * it at the counter, and a job stranded in the retired Master Review stage
+   * can still be moved on by a Master.
+   *
+   * It was `can(role, 'jobs.issueFinal')` read as "only a Master". That
+   * capability is the TECHNICIAN's now, and the office has no step in the
+   * normal signed journey at all.
    */
   const canIssue =
-    can(currentUser.role, 'jobs.issueFinal') &&
+    canSubmitJobCard(currentUser, job) &&
     !refusalPending &&
-    (job.status === 'review' || (inMasterReview && isMaster));
+    (job.status === 'review' || inMasterReview);
 
   return (
     <>
       <PageHeader
-        title={view?.job.jobType === "parts" ? "Review collection note" : "Review job card"}
+        title={
+          view?.job.jobType === 'parts'
+            ? canIssue
+              ? 'Review collection note'
+              : 'Collection note'
+            : canIssue
+              ? 'Review job card'
+              : 'Job card'
+        }
         breadcrumbs={[
           { label: 'Jobs', href: '/jobs' },
           { label: job.jobNumber, href: `/jobs/${job.jobNumber}` },
           { label: 'Review' },
         ]}
-        description="Check the job card as the customer will receive it, then submit."
+        description={
+          canIssue
+            ? 'Check the job card as the customer will receive it, then submit.'
+            : 'The job card as the customer will receive it.'
+        }
         meta={
           document !== null ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -345,22 +373,22 @@ const ReviewJobPage = ({
                   ? 'Awaiting resolution'
                   : canIssue
                     ? 'Ready to submit'
-                    : 'With the office for submission'
+                    : 'Signed, waiting to be submitted'
               }
               /*
-               * SAID DIFFERENTLY TO SOMEBODY WHO CANNOT SUBMIT. §3.1, §15.
+               * NO OFFICE, AND NO MASTER. MASTER SCOPE CR-07.
                *
-               * The final submission is the Master's, and this card used to
-               * tell a technician or a Coordinator that "Submitting generates
-               * the job card and emails it" beside no button to do it with.
-               * They have handed the job over; what they need to read is that
-               * it is now with a Master, not an instruction they cannot follow.
+               * This card read "With the office for submission — a Master
+               * makes the final submission", which described a step the
+               * workflow no longer has. There is nothing with the office: a
+               * signed job card is waiting for the technician who completed
+               * it, and they submit it from the job itself.
                */
               description={
                 refusalPending
                   ? `The customer refused to sign ${job.jobNumber}. Correct whatever they objected to and return it for the customer's signature from the panel above, or close it without a signature — the technician captures nothing again.`
                   : !canIssue
-                    ? `${job.jobNumber} is signed and with the office. A Master makes the final submission, which generates the customer's copy and emails it.`
+                    ? `${job.jobNumber} is signed. The technician who completed it submits it from the job, which sends the customer their copy — there is no office step.`
                     : customerEmail.length === 0
                       ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
                       : `Submitting generates the ${job.signature !== null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
@@ -394,7 +422,10 @@ const ReviewJobPage = ({
             The signed job card is stored against the job. Re-sending uses that same document — the
             customer is never sent two different job cards, and nothing has to be signed again.
           </p>
-          {can(currentUser.role, 'jobs.issueFinal') && (
+          {/* Re-sending is a DELIVERY problem, not a submission — the office
+              can do it as well as the technician who submitted it, because
+              the office is who sees the failure. CR-07. */}
+          {canResendCustomerCopy(currentUser.role) && (
             <Button
               className="mt-4"
               variant="secondary"
@@ -427,11 +458,18 @@ const ReviewJobPage = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title={canIssue ? 'Ready to issue' : 'With the office'}
+              title={canIssue ? 'Ready to issue' : 'Held in the retired review stage'}
+              /*
+               * The ONE place "a Master reviews it" is still true, and only
+               * because nothing can enter this stage any more: these are jobs
+               * that were in Master Review before it was retired, and a Master
+               * is the only person who can move them on. CR-07 did not change
+               * that, because there is no technician journey to return them to.
+               */
               description={
                 canIssue
                   ? `Correct anything that needs it on the job, then issue it. The job card will be emailed to ${customerDisplayName} at ${customerEmail} and the job closed.`
-                  : 'A Master is reviewing this job card. The customer has not been emailed yet.'
+                  : `${job.jobNumber} stopped in the retired Master Review stage before that stage was removed. Only a Master can issue it from here. The customer has not been emailed yet.`
               }
             />
             {canIssue && (

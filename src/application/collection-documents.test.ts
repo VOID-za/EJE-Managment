@@ -308,8 +308,7 @@ describe('a test and repair collected from the counter', () => {
     });
     // §3.1 — the Coordinator runs the counter and the paperwork; the final
     // submission that sends the customer their copy is the Master's.
-    const result = await issueJobCard(
-      harness.as(master),
+    const result = await issueJobCard(harness.as(technician),
       signed,
       'accounts@example.com',
       'ABC Engineering',

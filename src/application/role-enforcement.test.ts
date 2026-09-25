@@ -291,18 +291,20 @@ describe('issuing a job card', () => {
     });
   };
 
-  it('is REFUSED to the Coordinator: the final submission is the Master’s', async () => {
-    /*
-     * MASTER SCOPE §3.1, §7, §15 — and the confirmed refusal decision, which
-     * restates it: "MASTER retains final authority over official job
-     * submission/closure/customer delivery… COORDINATOR must NOT gain
-     * Master-only powers accidentally."
-     *
-     * This case asserted the opposite — that a Coordinator could issue a job
-     * card "without a Master ever touching it" — which is how the capability
-     * came to be shared with the field as well. She runs the office right up
-     * to this point; this one act is not hers.
-     */
+  /*
+   * WHO MAKES THE FINAL SUBMISSION, AND THE ANSWER HAS CHANGED TWICE.
+   *
+   * It was shared by everybody, which let a technician email a customer with
+   * no office involvement at all — the `95e9848` audit finding. It was then
+   * narrowed to the MASTER under §3.1/§7/§15. EJE confirmed on 25 September
+   * 2026 (CR-07) that the normal signed journey has no office step at all: the
+   * technician who attended the machine and took the signature submits it.
+   *
+   * So both office cases below are inverted, and the technician case is the
+   * positive one. The SHAPE of the assertion is unchanged — refused, and
+   * nothing happened — which is the part that was never about who.
+   */
+  it('is REFUSED to the Coordinator — the office has no step in a signed job', async () => {
     const signed = await workAndSign('EJE-1048');
 
     await expect(
@@ -312,7 +314,7 @@ describe('issuing a job card', () => {
         'customer@example-demo.co.za',
         'Pieter Nel',
       ),
-    ).rejects.toThrow(/cannot be issued by you/i);
+    ).rejects.toThrow(/cannot be submitted by you/i);
 
     // Refused, and nothing happened: no document, no send, no status change.
     const after = await harness.repos.jobs.findById(signed.id);
@@ -320,9 +322,21 @@ describe('issuing a job card', () => {
     expect(after?.finalDocument).toBeNull();
   });
 
-  it('is done by a Master, and closes only on confirmed delivery', async () => {
+  it('is REFUSED to the Master too, however senior — CR-07', async () => {
     const signed = await workAndSign('EJE-1048');
-    const context = harness.as(master);
+
+    await expect(
+      issueJobCard(harness.as(master), signed, 'customer@example-demo.co.za', 'Pieter Nel'),
+    ).rejects.toThrow(/cannot be submitted by you/i);
+
+    const after = await harness.repos.jobs.findById(signed.id);
+    expect(after?.status).toBe('review');
+    expect(after?.finalDocument).toBeNull();
+  });
+
+  it('is done by the technician, and closes only on confirmed delivery', async () => {
+    const signed = await workAndSign('EJE-1048');
+    const context = harness.as(sipho);
 
     const issued = await issueJobCard(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
     expect(issued.job.status).toBe('awaiting_delivery');

@@ -34,7 +34,6 @@ import type { RepositoryBundle } from '@/data/repositories';
  */
 
 const actor: User = seedUsers.find((user) => user.role === 'technician' && user.active)!;
-const master: User = seedUsers.find((user) => user.role === 'master' && user.active)!;
 
 /** The whole close: the person who took the signature issues it, then delivery. */
 const handOverAndIssue = async (
@@ -44,13 +43,20 @@ const handOverAndIssue = async (
   email = 'customer@example-demo.co.za',
   name = 'Pieter Nel',
 ) => {
-  // Straight from Review. There is no Master Review in between any more.
-  const masterContext: OperationContext = { ...context, actor: master };
-  const issued = await submitJobCard(masterContext, job, email, name);
+  /*
+   * SUBMITTED BY THE TECHNICIAN WHO DID THE WORK. MASTER SCOPE CR-07.
+   *
+   * This built a MASTER context to issue from, because §3.1 put the final
+   * submission with him. There is no office step in the normal signed journey
+   * any more, so the fixture submits as the actor who worked the job — which
+   * is also what makes the pricing assertions below mean anything: the rates
+   * are frozen by the SIGNATURE, whoever submits afterwards.
+   */
+  const issued = await submitJobCard(context, job, email, name);
   // Issuing hands the mail to the provider; the job closes when delivery is
   // confirmed, which in production is the provider's delivery report.
   outbox.setDelivery(issued.delivery.messageId, 'delivered');
-  const closed = await confirmJobCardDelivery(masterContext, issued.job);
+  const closed = await confirmJobCardDelivery(context, issued.job);
   return { ...issued, job: closed };
 };
 

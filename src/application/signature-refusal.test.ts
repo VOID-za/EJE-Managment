@@ -592,7 +592,7 @@ describe('what the refusal does to the workflow', () => {
   it('refuses to issue the job card while the signature refusal is unresolved', async () => {
     expect(
       await refusalCodes(
-        issueJobCard(harness.as(master), refused, 'accounts@example.com', 'ABC Engineering'),
+        issueJobCard(harness.as(technician), refused, 'accounts@example.com', 'ABC Engineering'),
       ),
     ).toContain('refusal_unresolved');
   });
@@ -614,7 +614,7 @@ describe('what the refusal does to the workflow', () => {
     expect(closed.finalDocument?.pageCount).toBeGreaterThan(0);
 
     await expect(
-      issueJobCard(harness.as(master), closed, 'accounts@example.com', 'ABC Engineering'),
+      issueJobCard(harness.as(technician), closed, 'accounts@example.com', 'ABC Engineering'),
     ).rejects.toBeInstanceOf(WorkflowError);
 
     // And the refusal is still exactly what the technician recorded.
@@ -669,8 +669,7 @@ describe('a normal signature is untouched by any of this', () => {
     expect(signatureExceptionLabel(signed)).toBeNull();
     expect(checkReadyForSubmission(signed).allowed).toBe(true);
 
-    const result = await issueJobCard(
-      harness.as(master),
+    const result = await issueJobCard(harness.as(technician),
       signed,
       'accounts@example.com',
       'ABC Engineering',

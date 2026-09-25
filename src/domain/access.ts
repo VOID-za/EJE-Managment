@@ -20,6 +20,10 @@ import type { UserRole } from './types/user';
  * cannot accept or execute a field job, because the person who attended the
  * machine has to be the person recorded as having attended it. She can do
  * everything around that.
+ *
+ * AND THE MASTER IS NOT A SUPERSET OF EVERYONE. `jobs.issueFinal` is the
+ * technician's and no one else's on field work — see CR-07. Seniority is not
+ * the axis this table turns on; WHERE THE PERSON WORKS is.
  */
 export type Capability =
   // Jobs
@@ -31,31 +35,29 @@ export type Capability =
   /** Capture work on a job — hours, travel, parts, the write-up. */
   | 'jobs.captureWork'
   /**
-   * Hand a completed job card to the OFFICE for review. MASTER SCOPE §7.
+   * THE FINAL SUBMISSION OF A SIGNED JOB CARD. THE TECHNICIAN'S. CR-07.
    *
-   * This is what a technician does at the end of a job, and it is where their
-   * authority over it ends. It does not generate the final document, does not
-   * email the customer and does not close anything — §7: "Technician submission
-   * means Submit for Master Review; it does not email the customer or finalise
-   * closure."
-   */
-  | 'jobs.submit'
-  /**
-   * THE FINAL OFFICIAL SUBMISSION. MASTER ONLY, and the reason this capability
-   * exists separately at all.
+   * One call that freezes the price, renders and stores the customer's copy,
+   * emails it and moves the job into the delivery handshake. It is the last
+   * act of the job, and it belongs to the person who did the work.
    *
-   * §3.1 gives the Master "final authority over official job submission/closure
-   * and customer delivery"; §7 says the final Master submission "locks the job,
-   * creates/stores final PDF, queues customer email and closes it"; §15 says
-   * only that submission emails the customer. One capability held by one role
-   * is how those three sentences are enforced in one place.
+   * THIS USED TO BE THE MASTER'S, and the change is a business decision, not a
+   * refactor. The normal signed journey ran
+   * `technician signs → office review → Master submits`, which made the office
+   * a mandatory participant in every completed job it had not attended and
+   * left a signed job card sitting in someone else's queue. EJE confirmed on
+   * 25 September 2026 that there is no office step in the normal journey:
+   * the technician signs, checks the signed document and submits it.
    *
-   * It was `jobs.submit` — which technicians hold — so a technician could issue
-   * the final job card and email the customer with no office involvement at
-   * all. The audit against `95e9848` proved it: a technician calling
-   * `POST /api/jobs/:id/issue` was refused only by the job's STATUS, never by
-   * permission. Splitting the capability is the fix; nothing else in the issue
-   * path changed.
+   * WHAT DID NOT MOVE WITH IT: the OFFICE review of a job the customer
+   * REFUSED to sign. That is a genuine exception the office owns, and it is
+   * `jobs.resolveSignatureRefusal`, which is a different capability held by
+   * different people for a different reason.
+   *
+   * A PARTS COLLECTION IS NOT FIELD WORK and does not go through this: it is
+   * handed over at the EJE counter by whoever is there, so `issueJobCard`
+   * gates a collection on `jobs.processParts` instead. Same exception, same
+   * shape, as `acceptJobRefusal`.
    */
   | 'jobs.issueFinal'
   /**
@@ -153,8 +155,10 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.assign',
   'jobs.acceptField',
   'jobs.captureWork',
-  'jobs.submit',
-  'jobs.issueFinal',
+  // `jobs.issueFinal` IS DELIBERATELY ABSENT — see CR-07 and the capability's
+  // own note. The Master no longer submits a signed job card somebody else
+  // completed; the technician who did the work does. What the Master keeps is
+  // the REFUSAL, below, which is the one case where the office is needed.
   'jobs.resolveSignatureRefusal',
   'jobs.viewAnySignatureRefusal',
   'jobs.editSubmittedJob',
@@ -183,21 +187,17 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
  * though she attended it; `users.manageMasters`, so she cannot make herself
  * one; and `settings.manage`, so the charge-out rates stay with a Master.
  *
- * `jobs.issueFinal` IS ALSO ABSENT, and that is the boundary the confirmed
- * refusal decision draws. She is the office: she reviews, she edits, she
- * resolves a customer's refusal either way — Customer Signature or Without
- * Customer Signature — and she is notified of it. What she does not do is the
- * final official submission, because §3.1 keeps "final authority over official
- * job submission/closure and customer delivery" with the Master, and the
- * decision restates it: "MASTER retains final authority… COORDINATOR must NOT
- * gain Master-only powers accidentally."
+ * `jobs.issueFinal` IS ALSO ABSENT, and it is now absent from the MASTER too.
+ * She is the office: she reviews, she edits, she resolves a customer's refusal
+ * either way — Customer Signature or Without Customer Signature — and she is
+ * notified of it. What she does not do is submit an ordinary signed job card,
+ * because under CR-07 nobody in the office does: that is the technician's.
  */
 const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
   'jobs.create',
   'jobs.assign',
   'jobs.captureWork',
-  'jobs.submit',
   // Handling a customer who would not sign is office work, and the Coordinator
   // IS the office. Note what this still does not include: `jobs.acceptField`.
   // Correcting a job card is administration; attending the machine is not.
@@ -222,15 +222,18 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
 /**
  * The field.
  *
- * `jobs.submit` here means SUBMIT FOR OFFICE REVIEW and nothing more — see the
- * capability's own note. `calendar.view` without `availability.manage` is
- * §3.3's "Technicians MUST be able to view the Calendar" without also handing
- * them the leave register: they read the schedule, they do not write it.
+ * `jobs.issueFinal` IS HERE, and this is the whole of CR-07: the technician
+ * who accepted the job, did the work and took the customer's signature is the
+ * person who submits it. No office step, no queue, no hand-over.
+ *
+ * `calendar.view` without `availability.manage` is §3.3's "Technicians MUST be
+ * able to view the Calendar" without also handing them the leave register:
+ * they read the schedule, they do not write it.
  */
 const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
   'jobs.acceptField',
   'jobs.captureWork',
-  'jobs.submit',
+  'jobs.issueFinal',
   'jobs.processParts',
   'customers.view',
   'library.view',

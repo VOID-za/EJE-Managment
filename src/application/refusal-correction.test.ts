@@ -196,13 +196,20 @@ describe('a refused job card is corrected and asked for again', () => {
     expect(signed.signatureRefusals).toHaveLength(1);
     expect(checkReadyForSubmission(signed).allowed).toBe(true);
 
+    /*
+     * AND FROM HERE IT IS AN ORDINARY SIGNED JOB. MASTER SCOPE CR-07.
+     *
+     * The office resolved the refusal and handed the card back; once the
+     * customer signs it the normal journey resumes, which means the TECHNICIAN
+     * submits it. This issued as the Master, under the superseded rule.
+     */
     const result = await issueJobCard(
-      harness.as(master),
+      harness.as(technician),
       signed,
       'accounts@example.com',
       'ABC Engineering',
     );
-    const closed = await confirmDelivery(harness, harness.as(master), result.job);
+    const closed = await confirmDelivery(harness, harness.as(technician), result.job);
     expect(closed.status).toBe('closed');
     expect(closed.finalDocument).not.toBeNull();
   });

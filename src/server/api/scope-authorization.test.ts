@@ -15,21 +15,27 @@ describe('the final official submission — §3.1, §7, §15', () => {
   });
 
   /*
-   * The audit's critical finding, at the layer it matters.
+   * WHO IS ASKED FIRST, AT THE LAYER IT MATTERS.
    *
-   * A technician calling `issue` was refused by the job's STATUS — "not ready
-   * to be issued" — never by permission, so on a job that HAD reached Review
-   * they would have generated the final PDF and emailed the customer. The
-   * capability is now asked first, so the refusal is about who is asking.
+   * The thing being held here has never been who exactly may submit — it is
+   * that `issue` refuses on PERMISSION before it refuses on the job's state.
+   * Calling it used to be refused only by the status ("not ready to be
+   * issued"), so on a job that HAD reached Review the wrong person would have
+   * generated the final PDF and emailed the customer.
+   *
+   * WHO changed on 25 September 2026 (CR-07): the normal signed journey has no
+   * office step, so the technician who did the work submits it and the office
+   * does not. The three cases below are the same three questions with their
+   * actors swapped, not new or weaker ones.
    */
   const issue = async (client: ApiTestClient) =>
     client.post('/api/jobs/EJE-1048/issue', {});
 
-  it('refuses a technician, on permission rather than on state', async () => {
-    const response = await issue(await signedInAs(DEMO_USERS.technician));
+  it('refuses a Master, on permission rather than on state', async () => {
+    const response = await issue(await signedInAs(DEMO_USERS.master));
 
     expect(response.status).toBe(403);
-    expect(JSON.stringify(response.raw)).toMatch(/cannot be issued by you/i);
+    expect(JSON.stringify(response.raw)).toMatch(/cannot be submitted by you/i);
     expect(JSON.stringify(response.raw)).not.toMatch(/not ready to be issued/i);
   });
 
@@ -37,16 +43,16 @@ describe('the final official submission — §3.1, §7, §15', () => {
     const response = await issue(await signedInAs(DEMO_USERS.coordinator));
 
     expect(response.status).toBe(403);
-    expect(JSON.stringify(response.raw)).toMatch(/cannot be issued by you/i);
+    expect(JSON.stringify(response.raw)).toMatch(/cannot be submitted by you/i);
   });
 
-  it('gets a Master past the permission check, and on to the job’s state', async () => {
-    // The Master is not refused for WHO they are. EJE-1048 is not at Review in
-    // the fixture, so state refuses it — which is the correct second question,
-    // and proves the first one passed.
-    const response = await issue(await signedInAs(DEMO_USERS.master));
+  it('gets the technician past the permission check, and on to the job’s state', async () => {
+    // Not refused for WHO they are. EJE-1048 is not at Review in the fixture,
+    // so state refuses it — which is the correct second question, and proves
+    // the first one passed.
+    const response = await issue(await signedInAs(DEMO_USERS.technician));
 
-    expect(JSON.stringify(response.raw)).not.toMatch(/cannot be issued by you/i);
+    expect(JSON.stringify(response.raw)).not.toMatch(/cannot be submitted by you/i);
   });
 });
 

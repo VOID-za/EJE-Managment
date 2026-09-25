@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { use, useState } from 'react';
 import {
   getJobTypeDefinition,
@@ -65,7 +64,6 @@ const JobDetailPage = ({
   // The guided close-out, opened from the action bar and owned here so it can
   // take the screen and hand over to the review page once the customer signs.
   const [completing, setCompleting] = useState(false);
-  const router = useRouter();
 
   /*
    * The job, the people on it and its own history — one read, for THIS viewer.
@@ -256,15 +254,23 @@ const JobDetailPage = ({
           mode={refusalAwaitingResolution(job) ? 'correct' : 'complete'}
           onClose={() => setCompleting(false)}
           onChanged={refresh}
-          onSigned={(signed) => {
+          onSigned={() => {
+            /*
+             * THE CLOSE-OUT ENDS ON THE JOB. MASTER SCOPE CR-07.
+             *
+             * It used to push a signed job to `/jobs/<n>/review`, which is how
+             * the office review screen got inserted into the normal journey:
+             * the technician finished, was sent to a page they could not act
+             * on, and a Master submitted from there. The submission now
+             * happens inside the wizard, so there is nowhere to send anybody —
+             * the technician lands back on their own job, which by then reads
+             * Awaiting Delivery.
+             *
+             * A corrected job card goes back to Customer Signature and stays
+             * here too, where whoever is with the customer picks it up.
+             */
             setCompleting(false);
             refresh();
-            // A corrected job card goes back to Customer Signature and stays
-            // here, where whoever is with the customer picks it up. A signed
-            // one goes on to be issued.
-            if (signed.status !== 'customer_signature') {
-              router.push(`/jobs/${signed.jobNumber}/review`);
-            }
           }}
         />
       ) : (

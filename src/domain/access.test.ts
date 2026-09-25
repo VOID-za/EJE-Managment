@@ -13,11 +13,33 @@ import type { UserRole } from './types/user';
 const ROLES: readonly UserRole[] = ['master', 'coordinator', 'technician'];
 
 describe('the Master', () => {
-  it('has every capability there is', () => {
+  /*
+   * THE MASTER IS NO LONGER A SUPERSET OF EVERYONE, AND THAT IS THE POINT.
+   *
+   * This asserted that the Master holds every capability any role holds. It
+   * was true, and it encoded seniority as the axis the table turns on. CR-07
+   * (confirmed 25 September 2026) replaced that with WHERE THE PERSON WORKS:
+   * the final submission of a signed job card is the technician's, because
+   * they are the person who attended the machine and took the signature, and
+   * the office has no step in the normal journey at all.
+   *
+   * So the assertion is now the honest one — everything EXCEPT the field
+   * capabilities, named individually — and the exceptions are asserted in
+   * their own case below rather than quietly dropped.
+   */
+  const field: readonly Capability[] = ['jobs.issueFinal'];
+
+  it('has every capability that is not the field technician’s own', () => {
     const everything = new Set<Capability>(ROLES.flatMap((role) => capabilitiesFor(role)));
     for (const capability of everything) {
+      if (field.includes(capability)) continue;
       expect(can('master', capability)).toBe(true);
     }
+  });
+
+  it.each(field)('does NOT hold %s — the technician submits their own job', (capability) => {
+    expect(can('master', capability)).toBe(false);
+    expect(can('technician', capability)).toBe(true);
   });
 });
 
@@ -27,7 +49,6 @@ describe('the Coordinator', () => {
     'jobs.create',
     'jobs.assign',
     'jobs.captureWork',
-    'jobs.submit',
     'jobs.processParts',
     'jobs.captureAdministratively',
     'customers.view',
@@ -49,6 +70,10 @@ describe('the Coordinator', () => {
     expect(can('coordinator', 'jobs.acceptField')).toBe(false);
   });
 
+  it('cannot submit an ordinary signed job card — CR-07', () => {
+    expect(can('coordinator', 'jobs.issueFinal')).toBe(false);
+  });
+
   it('cannot administer Masters, so she cannot promote herself', () => {
     expect(can('coordinator', 'users.manageMasters')).toBe(false);
   });
@@ -62,7 +87,8 @@ describe('the technician', () => {
   const allowed: readonly Capability[] = [
     'jobs.acceptField',
     'jobs.captureWork',
-    'jobs.submit',
+    // CR-07: the person who did the work makes the final submission.
+    'jobs.issueFinal',
     'jobs.processParts',
     'customers.view',
     'library.view',
