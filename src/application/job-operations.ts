@@ -155,6 +155,30 @@ const assertCanCapture = (context: OperationContext, job: Job): void => {
 };
 
 /**
+ * WHAT THIS JOB TYPE CAN BE CHARGED FOR. CR-12.
+ *
+ * Labour, travel and the call-out fee all price a technician going somewhere.
+ * A parts collection is a counter transaction — nobody went anywhere — so the
+ * job type says `capturesLabourAndTravel: false` and, from here, the SERVER
+ * says so too.
+ *
+ * The screens have hidden these controls on a collection since they were
+ * built. Hiding is not refusing: until now a request made by hand, or by a
+ * client that had not been updated, would have put labour hours on a document
+ * that has no labour section to print them in.
+ */
+const assertCapturesLabourAndTravel = (context: OperationContext, job: Job, what: string): void => {
+  const definition = getJobTypeDefinition(job.jobType);
+  if (definition.capturesLabourAndTravel) return;
+  throw new WorkflowError(`${what} cannot be captured on ${job.jobNumber}.`, [
+    {
+      code: 'not_applicable_to_job_type',
+      message: `A ${definition.label.toLowerCase()} job carries no labour, travel or call-out fee. It is a collection of goods, not work on a machine.`,
+    },
+  ]);
+};
+
+/**
  * The line-item fields that say whose work it is and who wrote it down.
  *
  * Every captured line carries both, so a job card can credit the technician who
@@ -196,6 +220,24 @@ const assertAssignable = async (
   job: Job,
   technicianId: UserId,
 ): Promise<void> => {
+  /*
+   * AN OFFICE-PROCESSED JOB IS ASSIGNED TO NOBODY. CR-12.
+   *
+   * Asked before the actor's own permission, because this is not about who is
+   * asking: a parts collection has no technician at any point, so naming one
+   * would put a person's name on a document they had nothing to do with and
+   * would send them a notification about work that does not exist.
+   */
+  const definition = getJobTypeDefinition(job.jobType);
+  if (definition.officeProcessed) {
+    throw new WorkflowError(`${job.jobNumber} is not assigned to a technician.`, [
+      {
+        code: 'not_applicable_to_job_type',
+        message: `A ${definition.label.toLowerCase()} collection is processed by the office at the counter. There is nobody to assign it to.`,
+      },
+    ]);
+  }
+
   if (!can(context.actor.role, 'jobs.assign')) {
     throw new WorkflowError(`${job.jobNumber} cannot be assigned by you.`, [
       { code: 'not_permitted', message: 'Assigning work to a technician is an office function.' },
@@ -250,10 +292,16 @@ export const acceptJobRefusal = (
   actor: Pick<User, 'id' | 'role'>,
   job: Pick<Job, 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
 ): string | null => {
-  if (job.jobType === 'parts') {
-    return can(actor.role, 'jobs.processParts')
-      ? null
-      : 'You cannot process parts collections.';
+  /*
+   * THERE IS NO ACCEPTANCE ON AN OFFICE-PROCESSED JOB. CR-12.
+   *
+   * Refused for everybody, including the office. A parts collection is raised
+   * straight into its own close-out by whoever raised it, so being asked to
+   * "accept" one means a client is still driving the old field-service
+   * sequence — and being told so is more use than being let through.
+   */
+  if (getJobTypeDefinition(job.jobType).officeProcessed) {
+    return 'A parts collection is not accepted: it is raised and processed in one go by the office. Open the job and continue the collection.';
   }
   if (!can(actor.role, 'jobs.acceptField')) {
     return 'Field work is accepted by the technician attending the job. Assign a technician instead.';
@@ -536,6 +584,7 @@ export const addLabour = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertCapturesLabourAndTravel(context, job, 'Labour');
   const entry = {
     id: asLineItemId(context.services.ids.next('lab')),
     ...captureAttribution(context, job),
@@ -572,6 +621,7 @@ export const addTravel = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertCapturesLabourAndTravel(context, job, 'Travel');
   const entry = {
     id: asLineItemId(context.services.ids.next('trv')),
     ...captureAttribution(context, job),
@@ -790,6 +840,9 @@ export const setCalloutApplied = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  // Turning it OFF is always allowed: it is how a job wrongly charged a
+  // call-out is put right, and it takes money off rather than adding it.
+  if (applied) assertCapturesLabourAndTravel(context, job, 'A call-out fee');
   if (job.calloutApplied === applied) return job;
   return context.repos.jobs.save({ ...job, calloutApplied: applied });
 };

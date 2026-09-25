@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  acceptJob,
   addPart,
   captureSignature,
-  startCompletion,
   startSignature,
   submitJobCard,
   issueJobCard,
@@ -163,27 +161,31 @@ describe('collecting parts', () => {
 
   it('stores the collection declaration when a collector signs', async () => {
     let job = await loadJob(harness, 'EJE-1048');
-    // Turn the flagship job into a parts collection to prove the declaration is
-    // chosen from the job type rather than hard-coded at the signature step.
-    // Unassigned, because a collection is taken by whoever is at the counter —
-    // and because capturing work on somebody else's job is now refused, which
-    // is a separate rule with its own tests.
+    /*
+     * Turned into a parts collection to prove the declaration is chosen from
+     * the job type rather than hard-coded at the signature step.
+     *
+     * Unassigned and already at `completion`, which is where MASTER SCOPE
+     * CR-12 puts a collection: there is no technician on one and no acceptance
+     * step to walk through. Driven by the OFFICE for the same reason — a
+     * collection is counter work, and the technician no longer holds
+     * `jobs.processParts`.
+     */
     job = await harness.repos.jobs.save({
       ...job,
       jobType: 'parts',
       machineId: null,
       primaryTechnicianId: null,
+      status: 'completion',
     });
-    job = await acceptJob(harness.tech, job);
-    job = await addPart(harness.tech, job, {
+    job = await addPart(harness.master, job, {
       partNumber: 'FAN-24V-80',
       description: 'Spindle drive cooling fan',
       quantity: 1,
       unitPrice: 48500,
     });
-    job = await startCompletion(harness.tech, job);
-    job = await startSignature(harness.tech, job);
-    const signed = await captureSignature(harness.tech, job, {
+    job = await startSignature(harness.master, job);
+    const signed = await captureSignature(harness.master, job, {
       customerName: 'Johan',
       customerSurname: 'Mokoena',
       strokeData: 'M0,0 L1,1',

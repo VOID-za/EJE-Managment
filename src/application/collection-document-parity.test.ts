@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  acceptJob,
   addPart,
   captureSignature,
   confirmJobCardDelivery,
   issueJobCard,
   setCollectionMethod,
-  startCompletion,
   startSignature,
 } from './job-operations';
 import { createJob } from './job-creation';
@@ -49,7 +47,6 @@ const refusalCodes = async (run: Promise<unknown>): Promise<readonly string[]> =
  */
 
 const master = seedUser('user-master-elmarie');
-const technician = seedUser('user-tech-sipho');
 
 const WAYBILL = 'DAW-4471882';
 const DELIVERY_NOTE = 'DN-55012';
@@ -78,21 +75,31 @@ const partsJob = async (
     referenceNumber: 'REF-77',
     deliveryNote: DELIVERY_NOTE,
     faultDescription: 'Spares for the Leadwell turret.',
-    primaryTechnicianId: technician.id,
-    courierCollection: over.courier,
+    /*
+     * RAISED TO NOBODY, AND NOT ACCEPTED BY ANYBODY. MASTER SCOPE CR-12.
+     *
+     * This used to name a technician, have that technician accept the job and
+     * then capture against it. A parts collection has no technician and no
+     * acceptance step: the office raises it at `completion` and works straight
+     * through. The document under test is unchanged — which is the point of
+     * keeping every assertion below exactly as it was.
+     */
+    primaryTechnicianId: null,
+    // Who is collecting is decided at the COLLECTION step, below, not here.
+    courierCollection: false,
     additionalTechnicianIds: [],
   });
 
-  const tech = harness.as(technician);
-  job = await acceptJob(tech, job);
-  job = await addPart(tech, job, {
+  expect(job.status).toBe('completion');
+  expect(job.primaryTechnicianId).toBeNull();
+
+  job = await addPart(context, job, {
     partNumber: 'ENC-INC-1024',
     description: 'Incremental encoder, 1024 ppr',
     quantity: 2,
     unitPrice: 386_000,
   });
-  job = await startCompletion(tech, job);
-  return setCollectionMethod(tech, job, {
+  return setCollectionMethod(context, job, {
     courier: over.courier,
     waybillNumber: over.waybill ?? (over.courier ? WAYBILL : ''),
   });
@@ -115,7 +122,7 @@ const modelFor = async (harness: Harness, job: Job) => {
 
 /** Signs, issues and closes, returning the stored document's text. */
 const issuedText = async (harness: Harness, job: Job): Promise<string> => {
-  const signed = await captureSignature(harness.as(technician), job, {
+  const signed = await captureSignature(harness.as(master), job, {
     customerName: 'Thabo',
     customerSurname: 'Dlamini',
     strokeData: 'M0,0 L1,1',
@@ -264,7 +271,7 @@ describe('the waybill, enforced by the workflow rather than by a screen', () => 
 
   it('refuses to move such a job onto the signature step', async () => {
     const job = await courierWithoutWaybill();
-    expect(await refusalCodes(startSignature(harness.as(technician), job))).toContain(
+    expect(await refusalCodes(startSignature(harness.as(master), job))).toContain(
       'waybill_required',
     );
   });
@@ -273,7 +280,7 @@ describe('the waybill, enforced by the workflow rather than by a screen', () => 
     const job = await courierWithoutWaybill();
     expect(
       await refusalCodes(
-        captureSignature(harness.as(technician), job, {
+        captureSignature(harness.as(master), job, {
           customerName: 'Thabo',
           customerSurname: 'Dlamini',
           strokeData: 'M0,0 L1,1',
@@ -293,8 +300,8 @@ describe('the waybill, enforced by the workflow rather than by a screen', () => 
      * got the job this far must have been valid.
      */
     const valid = await partsJob(harness, { courier: true });
-    const atSignature = await startSignature(harness.as(technician), valid);
-    const signed = await captureSignature(harness.as(technician), atSignature, {
+    const atSignature = await startSignature(harness.as(master), valid);
+    const signed = await captureSignature(harness.as(master), atSignature, {
       customerName: 'Thabo',
       customerSurname: 'Dlamini',
       strokeData: 'M0,0 L1,1',
@@ -316,7 +323,7 @@ describe('the waybill, enforced by the workflow rather than by a screen', () => 
   it('lets a courier collection through once it has one', async () => {
     const job = await partsJob(harness, { courier: true });
     expect(checkReadyForSignature(job).allowed).toBe(true);
-    await expect(startSignature(harness.as(technician), job)).resolves.toBeDefined();
+    await expect(startSignature(harness.as(master), job)).resolves.toBeDefined();
   });
 
   it('asks a customer collection for no waybill at all', async () => {

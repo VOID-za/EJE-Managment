@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useState } from 'react';
+import { Suspense, use, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   getJobTypeDefinition,
   canEditJobRecord,
@@ -62,9 +63,19 @@ const JobDetailPage = ({
   const { jobNumber } = use(params);
   const currentUser = useCurrentUser();
   const [tab, setTab] = useState<TabId>('overview');
-  // The guided close-out, opened from the action bar and owned here so it can
-  // take the screen and hand over to the review page once the customer signs.
-  const [completing, setCompleting] = useState(false);
+  /*
+   * The guided close-out, opened from the action bar and owned here so it can
+   * take the screen and hand over to the review page once the customer signs.
+   *
+   * `?continue=1` OPENS IT ON ARRIVAL. CR-12: raising a parts collection and
+   * processing it are one act at the counter, so the creation screen sends the
+   * office straight into the close-out rather than dropping them on a job they
+   * would have to find their way into. Read once, as the initial state — not
+   * as an effect — so that closing the wizard closes it and does not fight a
+   * query string that is still in the address bar.
+   */
+  const searchParams = useSearchParams();
+  const [completing, setCompleting] = useState(() => searchParams.get('continue') === '1');
 
   /*
    * The job, the people on it and its own history — one read, for THIS viewer.
@@ -376,4 +387,21 @@ const JobDetailPage = ({
   );
 };
 
-export default JobDetailPage;
+/*
+ * Suspense, because `useSearchParams` needs one.
+ *
+ * The same shape the Jobs list page already uses. `?continue=1` is what the
+ * creation screen sends a parts collection in on — see CR-12 — and reading a
+ * query string is a client-side act Next.js requires a boundary for.
+ */
+const JobDetailRoute = ({
+  params,
+}: {
+  readonly params: Promise<{ readonly jobNumber: string }>;
+}) => (
+  <Suspense fallback={<LoadingPanel rows={5} label="Loading job" />}>
+    <JobDetailPage params={params} />
+  </Suspense>
+);
+
+export default JobDetailRoute;

@@ -894,20 +894,20 @@ export const canAcceptJob = (
   if (viewer === undefined) return true;
 
   /*
-   * A PARTS COLLECTION IS NOT ASSIGNED FIELD WORK.
+   * AN OFFICE-PROCESSED JOB HAS NO ACCEPTANCE STEP AT ALL. CR-12.
    *
-   * It happens at the EJE counter: whoever is there hands the goods over and
-   * takes the collector's signature, which is why `acceptJobRefusal` gates it
-   * on `jobs.processParts` rather than on who it is assigned to. A collection
-   * may carry a technician's name — the person who prepared it — and the
-   * office still processes it.
+   * A parts collection is raised and processed in one sitting by the office:
+   * it is never assigned, never lands in the open pool and is never accepted
+   * by anybody. So the answer here is NO, to everyone — including the office,
+   * which does not accept a job it is already holding.
    *
-   * This exception has to be here as well as in the operation, or the screen
-   * hides a button the server would have allowed. THE RULE IS UNCHANGED: the
-   * office does process parts collections, deliberately, and that is not the
-   * same thing as the office accepting field work.
+   * > **Superseded, 25 September 2026:** this read
+   * > `if (job.jobType === 'parts') return can(viewer.role, 'jobs.processParts')`
+   * > — the counter exception to field acceptance. There is nothing left for
+   * > it to permit, because a parts job is created at `completion` and the
+   * > status check above has already refused it.
    */
-  if (job.jobType === 'parts') return can(viewer.role, 'jobs.processParts');
+  if (getJobTypeDefinition(job.jobType).officeProcessed) return false;
 
   /*
    * EVERY OTHER JOB TYPE IS FIELD WORK, AND THE OFFICE DOES NOT ACCEPT IT.

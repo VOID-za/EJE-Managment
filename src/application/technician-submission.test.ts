@@ -231,12 +231,19 @@ describe('the exceptions to "the technician submits it"', () => {
     harness = buildHarness();
   });
 
-  it('a PARTS collection is issued by whoever processed it at the counter', () => {
+  it('a PARTS collection is issued by the OFFICE, which is who processed it', () => {
     /*
-     * Unchanged, and it has to be: a parts collection is handed over at the
-     * EJE counter, not on a customer's site, so the office processes it AND
-     * issues it. The same exception `canAcceptJob` and `acceptJobRefusal`
-     * already carry, in the same shape.
+     * A parts collection is handed over at the EJE counter, so whoever
+     * processed it issues it — and under MASTER SCOPE CR-12 that is the office
+     * and only the office. The exception `canSubmitJobCard` carries is
+     * unchanged in shape: it still asks `jobs.processParts` rather than who
+     * attended the machine. What changed is who holds that capability.
+     *
+     * > **Superseded, 25 September 2026:** the last line read
+     * > `expect(canSubmitJobCard(technician, parts)).toBe(true)` — a
+     * > technician could issue a collection note, because the capability was
+     * > theirs too. CR-12 answered BD-12: a collection is counter work the
+     * > office does, start to finish.
      */
     const parts = {
       status: 'review',
@@ -246,7 +253,7 @@ describe('the exceptions to "the technician submits it"', () => {
     } as const;
     expect(canSubmitJobCard(master, parts)).toBe(true);
     expect(canSubmitJobCard(coordinator, parts)).toBe(true);
-    expect(canSubmitJobCard(technician, parts)).toBe(true);
+    expect(canSubmitJobCard(technician, parts)).toBe(false);
   });
 
   it('whoever ATTENDED the machine submits it, even when that is a Master', async () => {

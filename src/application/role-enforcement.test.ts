@@ -86,21 +86,26 @@ describe('the Coordinator is an office role, not a field one', () => {
   });
 
   it('lets her process a parts collection end to end', async () => {
-    const jobs = await harness.repos.jobs.list({ statuses: ['open'] });
+    /*
+     * FOUND AT `completion`, NOT AT `open`, AND NOT ACCEPTED. MASTER SCOPE CR-12.
+     *
+     * The collection used to be found in the open pool and accepted by her
+     * first. A parts job is now raised straight into its own close-out, so the
+     * fixture looks for it where the application now puts it — and the rest of
+     * this case, which is the part that matters, is unchanged: she captures the
+     * goods and takes the collector's signature herself.
+     */
+    const jobs = await harness.repos.jobs.list({ statuses: ['completion'] });
     const parts = jobs.find((candidate) => candidate.jobType === 'parts');
     expect(parts).toBeDefined();
+    expect(parts!.primaryTechnicianId).toBeNull();
 
-    let job = await acceptJob(harness.as(coordinator), {
-      ...parts!,
-      primaryTechnicianId: null,
-    });
-    job = await addPart(harness.as(coordinator), job, {
+    let job = await addPart(harness.as(coordinator), parts!, {
       partNumber: 'FAN-24V-80',
       description: 'Spindle drive cooling fan',
       quantity: 1,
       unitPrice: 48500,
     });
-    job = await startCompletion(harness.as(coordinator), job);
     job = await startSignature(harness.as(coordinator), job);
     const signed = await captureSignature(harness.as(coordinator), job, {
       customerName: 'Pieter',

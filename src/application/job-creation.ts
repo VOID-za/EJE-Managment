@@ -259,6 +259,28 @@ export const createJob = async (
     ]);
   }
 
+  /*
+   * AN OFFICE-PROCESSED JOB IS RAISED TO NOBODY. CR-12.
+   *
+   * Checked before the technicians are resolved, so a parts collection that
+   * names one is refused rather than quietly stripped: a client sending a
+   * technician on a collection is a client still driving the field-service
+   * form, and it should be told.
+   */
+  const definition = getJobTypeDefinition(input.jobType);
+  if (
+    definition.officeProcessed &&
+    (input.primaryTechnicianId !== null || input.additionalTechnicianIds.length > 0)
+  ) {
+    throw new WorkflowError(`A ${definition.label.toLowerCase()} collection has no technician.`, [
+      {
+        code: 'not_applicable_to_job_type',
+        message:
+          'A parts collection is handed over at the counter by the office. It is not assigned to anybody.',
+      },
+    ]);
+  }
+
   // Assigning at creation is the same act as assigning afterwards, so it is
   // held to the same rule: work goes to somebody who attends machines.
   const { primaryId, additionalIds } = await resolveTechnicians(context, input);
@@ -283,7 +305,6 @@ export const createJob = async (
     ]);
   }
 
-  const definition = getJobTypeDefinition(input.jobType);
   if (definition.capturesLabourAndTravel && input.machineId === null) {
     throw new WorkflowError('A machine is required for this job type.', [
       {
@@ -312,9 +333,31 @@ export const createJob = async (
     contactId: contact.id,
     machineId: machine === null ? null : machine.id,
     jobType: input.jobType,
-    priority: input.priority,
-    status: 'open',
-    scheduledDate: input.scheduledDate,
+    /*
+     * A COLLECTION IS NOT PRIORITISED OR SCHEDULED. CR-12.
+     *
+     * Both describe when a technician is sent somewhere. The counter serves
+     * whoever is standing at it, so the job type's own default is recorded and
+     * the date stays empty — whatever the request said. Forced here rather
+     * than trusted from the client, because this is the rule and the form is
+     * only its reflection.
+     */
+    priority: definition.officeProcessed ? definition.defaultPriority : input.priority,
+    /*
+     * OFFICE-PROCESSED JOBS OPEN IN THEIR OWN CLOSE-OUT. CR-12.
+     *
+     * Not `open`, because the open pool is where field work waits to be
+     * accepted and a collection is never accepted by anybody. `completion` is
+     * the existing stage whose next legal move is the customer signature —
+     * which is exactly what a collection does next — so the workflow needs no
+     * new status and no new transition: the job is raised at the step the
+     * person raising it is about to work through.
+     *
+     * `acceptedAt` stays null, deliberately. Nobody accepted it; saying
+     * somebody did would put a fact in the record that never happened.
+     */
+    status: definition.officeProcessed ? 'completion' : 'open',
+    scheduledDate: definition.officeProcessed ? null : input.scheduledDate,
     scheduledEndDate: definition.schedulesDateRange ? input.scheduledEndDate : null,
     orderNumber: input.orderNumber.trim(),
     referenceNumber: input.referenceNumber.trim(),
@@ -347,9 +390,20 @@ export const createJob = async (
     calloutApplied: false,
     // Offered on the job types whose work is collected from the counter; false
     // everywhere else, where nobody collects anything.
-    courierCollection: getJobTypeDefinition(input.jobType).collectedOnCompletion
-      ? input.courierCollection
-      : false,
+    /*
+     * WHO IS COLLECTING IS ASKED AT THE COLLECTION STEP, NOT HERE. CR-12.
+     *
+     * On a parts collection it is false whatever the request said: the person
+     * raising the job does not yet know whether the customer will come in or
+     * send a driver, and `setCollectionMethod` is where the answer is recorded
+     * — at the counter, with whoever turned up standing there. A workshop
+     * repair still carries the expectation from creation, because it is booked
+     * in advance and the office plans the return leg.
+     */
+    courierCollection:
+      getJobTypeDefinition(input.jobType).collectedOnCompletion && !definition.officeProcessed
+        ? input.courierCollection
+        : false,
     waybillNumber: '',
     deliveryNote: getJobTypeDefinition(input.jobType).capturesDeliveryNote
       ? input.deliveryNote.trim()

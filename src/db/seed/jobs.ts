@@ -233,10 +233,13 @@ export const seedJobs: readonly Job[] = [
     createdAt: timeAgo(1, 11),
   }),
 
+  // A collection waiting at the counter: `completion`, unassigned, unscheduled
+  // — the state CR-12 creates a parts job in. It was seeded `open`, which is
+  // the accept-then-process sequence that no longer exists.
   job('EJE-2005', {
     jobType: 'parts',
     priority: 'normal',
-    status: 'open',
+    status: 'completion',
     customerId: REGISTER.sic.id,
     siteId: REGISTER.sic.factory,
     contactId: REGISTER.sic.buyer,

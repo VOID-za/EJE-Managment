@@ -58,6 +58,29 @@ export interface JobTypeDefinition {
    */
   readonly capturesDeliveryNote: boolean;
   /**
+   * THE OFFICE PROCESSES THIS JOB FROM START TO FINISH. NO TECHNICIAN. CR-12.
+   *
+   * A parts collection is a counter transaction: somebody arrives, the office
+   * hands over goods and takes a signature for them. There is no site to
+   * travel to, no machine to work on, nobody to assign it to and nothing for a
+   * technician to accept — so the job is raised and processed in one sitting
+   * by whoever raised it, and it never passes through the open pool.
+   *
+   * What this flag turns off, everywhere and on the server:
+   *
+   *  - assignment, at creation and afterwards;
+   *  - acceptance — there is no acceptance step to offer or to refuse;
+   *  - a scheduled date and a priority, which describe when a technician is
+   *    sent somewhere;
+   *  - labour, travel and the call-out fee, which price a visit that did not
+   *    happen (`capturesLabourAndTravel` already says this and now bites).
+   *
+   * It does NOT change the document, the signature, the submission, the
+   * delivery handshake or the closing rule: a collection note is issued,
+   * emailed and closed on a confirmed delivery exactly as a job card is.
+   */
+  readonly officeProcessed: boolean;
+  /**
    * The job ends with somebody collecting goods from the EJE counter, rather
    * than with the customer signing on their own site.
    *
@@ -74,6 +97,7 @@ export interface JobTypeDefinition {
 const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   breakdown: {
     code: 'breakdown',
+    officeProcessed: false,
     label: 'Breakdown',
     description: 'Unplanned machine failure requiring a reactive site visit.',
     checklistRequired: false,
@@ -90,6 +114,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   installation: {
     code: 'installation',
+    officeProcessed: false,
     label: 'Installation',
     description: 'Commissioning and hand-over of a machine at a customer site.',
     checklistRequired: true,
@@ -106,6 +131,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   service: {
     code: 'service',
+    officeProcessed: false,
     label: 'Service',
     description: 'Planned preventative maintenance against the service schedule.',
     checklistRequired: true,
@@ -122,6 +148,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   parts: {
     code: 'parts',
+    officeProcessed: true,
     label: 'Parts',
     description:
       'Parts collection or delivery note. The customer or a courier collects parts from the office.',
@@ -141,6 +168,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
 
   test_and_repair: {
     code: 'test_and_repair',
+    officeProcessed: false,
     label: 'Test & Repair',
     description: 'Workshop or on-site testing and repair of a unit or assembly.',
     checklistRequired: false,

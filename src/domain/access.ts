@@ -115,6 +115,13 @@ export type Capability =
    * Separate from `jobs.acceptField` because a parts collection happens at the
    * counter, not on a customer's site: the office hands over the goods and takes
    * the collector's signature itself.
+   *
+   * **THE OFFICE'S ALONE, from 25 September 2026 (CR-12).** It was also the
+   * technician's, which made a collection something either the counter or the
+   * field could pick up — and left the question of who really owns one open
+   * (BD-12). EJE answered it: a parts job is raised and processed by a Master
+   * or a Coordinator, start to finish, and a technician is not part of the
+   * collection workflow at any point.
    */
   | 'jobs.processParts'
   /**
@@ -275,7 +282,9 @@ const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
   'jobs.acceptField',
   'jobs.captureWork',
   'jobs.issueFinal',
-  'jobs.processParts',
+  // `jobs.processParts` IS DELIBERATELY ABSENT — CR-12, answering BD-12. A
+  // parts collection is counter work the office does; a technician neither
+  // accepts one, processes one nor issues its collection note.
   'customers.view',
   'library.view',
   'calendar.view',

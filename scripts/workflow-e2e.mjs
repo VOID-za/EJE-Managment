@@ -981,6 +981,186 @@ await step('a technician is never offered a takeover', async () => {
   }
 });
 
+/* -------------------------------------------------------------------------- */
+/* PART 23 — A PARTS COLLECTION, FROM RAISING IT TO CLOSED. CR-12.            */
+/*                                                                            */
+/* The counter journey, in one sitting and by one person: raise → Parts →     */
+/* Review → Collection → Collector signature → Signed → Submit collection     */
+/* note → delivery → closed. No technician, no assignment, no acceptance.     */
+/* -------------------------------------------------------------------------- */
+
+let collectionNumber = '';
+
+await step('the office raises a Parts job, and is asked for none of the field-service fields', async () => {
+  await signInAs('Coordinator', 'Christene van Niekerk', /Christene/);
+  await visit('/jobs/new');
+
+  await page.getByLabel('Job type').selectOption('parts');
+  await page.getByText('Collection details').first().waitFor({ timeout: 10000 });
+
+  // The five fields a collection does not have. CR-12.
+  for (const [label, what] of [
+    ['Priority', 'a priority'],
+    ['Scheduled date', 'a scheduled date'],
+    ['Primary technician', 'a technician'],
+    ['Scheduled start date', 'a scheduled start date'],
+  ]) {
+    if ((await page.getByLabel(new RegExp(`^${label}`)).count()) !== 0) {
+      throw new Error(`a parts collection was asked for ${what}`);
+    }
+  }
+  if ((await page.getByText('Who is doing the work?').count()) !== 0) {
+    throw new Error('a parts collection was asked who is doing the work');
+  }
+  if ((await page.getByText('Courier Collection').count()) !== 0) {
+    throw new Error('a parts collection was asked about a courier at creation');
+  }
+  // And it keeps what the counter reconciles by.
+  await page.getByLabel(/^Customer order number/).waitFor({ timeout: 8000 });
+  await page.getByLabel(/^Delivery note/).waitFor({ timeout: 8000 });
+});
+
+await step('raising it goes straight into the collection, not back to the Jobs list', async () => {
+  await page.getByLabel(/^Customer\s*\*/).selectOption({ index: 1 });
+  // The sites and contacts of THAT customer are fetched before either select
+  // is usable, so the script waits for the server the way a person waits.
+  const site = page.getByLabel(/^Site\s*\*/);
+  await site.waitFor({ timeout: 15000 });
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('select')].some(
+        (node) =>
+          (node.labels?.[0]?.textContent ?? '').trim().startsWith('Site') &&
+          !node.disabled &&
+          node.options.length > 1,
+      ),
+    null,
+    { timeout: 20000 },
+  );
+  await site.selectOption({ index: 1 });
+  await page.getByLabel(/^Customer email recipient/).selectOption({ index: 1 });
+  await page.getByLabel(/^Customer order number/).fill('PO-CR12-001');
+  await page.getByLabel(/^Reference number/).fill('REF-CR12');
+  await page.getByLabel(/^Delivery note/).fill('DN-CR12');
+  await page.getByLabel(/^Collection details/).fill('Spindle drive spares, collected at the counter.');
+
+  await page.getByRole('button', { name: 'Create job' }).click();
+
+  // Straight into the close-out, on the job that was just raised.
+  await page.waitForURL(/\/jobs\/EJE-\d+/, { timeout: 30000 });
+  const url = page.url();
+  collectionNumber = url.slice(url.lastIndexOf('/') + 1).split('?')[0];
+  await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 25000 });
+  await assertNot404('raising a parts collection');
+});
+
+await step('STEP 1 — Parts: the goods, and nothing about labour or travel', async () => {
+  const rail = page.locator('ol').filter({ hasText: 'Parts' }).last();
+  const names = (await rail.locator('li').allInnerTexts()).map((line) =>
+    line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
+  );
+  const expected = ['Parts', 'Review', 'Collection', 'Collector signature', 'Signed'];
+  for (const [index, name] of expected.entries()) {
+    if (names[index] !== name) {
+      throw new Error(`the collection's steps are ${names.join(' | ')}`);
+    }
+  }
+
+  for (const name of ['Add labour', 'Add travel']) {
+    if ((await page.getByRole('button', { name }).count()) !== 0) {
+      throw new Error(`the Parts step offered "${name}"`);
+    }
+  }
+  if ((await page.getByText('Charge the call-out fee').count()) !== 0) {
+    throw new Error('the Parts step offered a call-out fee');
+  }
+  if ((await page.getByLabel(/Work performed/).count()) !== 0) {
+    throw new Error('the Parts step asked for a completion write-up');
+  }
+
+  await page.getByRole('button', { name: 'Add part' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByLabel('Part number').fill('ENC-INC-1024');
+  await dialog.getByLabel('Description').fill('Incremental encoder, 1024 ppr');
+  await dialog.getByLabel(/Quantity/).fill('2');
+  await dialog.getByLabel(/Unit price/).fill('3860');
+  await dialog.getByRole('button', { name: 'Add part' }).click();
+  await page.getByText('ENC-INC-1024').first().waitFor({ timeout: 15000 });
+});
+
+await step('STEP 2 — Review carries the goods that were captured', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 2 of 5', { exact: false }).waitFor({ timeout: 20000 });
+  const body = await page.locator('main').innerText();
+  for (const fragment of ['ENC-INC-1024', 'PO-CR12-001']) {
+    if (!body.includes(fragment)) throw new Error(`the review does not show ${fragment}`);
+  }
+});
+
+await step('STEP 3 — Collection is where the courier question is asked, and only here', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of 5', { exact: false }).waitFor({ timeout: 20000 });
+  await page.getByRole('heading', { name: 'How is this being collected?' }).waitFor({
+    timeout: 10000,
+  });
+  await page.getByRole('button', { name: /Customer collection/ }).waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: /Courier collection/ }).waitFor({ timeout: 8000 });
+});
+
+await step('STEP 4 — the collector signs, on a collection declaration', async () => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 4 of 5', { exact: false }).waitFor({ timeout: 20000 });
+  await page.getByRole('heading', { name: 'Collector acknowledgement' }).waitFor({ timeout: 10000 });
+
+  await page.getByLabel('Collector name').fill('Marlene');
+  await page.getByLabel('Collector surname').fill('du Toit');
+  await drawSignature();
+  await page.getByRole('button', { name: 'Confirm collection' }).click();
+  await page.getByText('Step 5 of 5', { exact: false }).waitFor({ timeout: 30000 });
+});
+
+await step('STEP 5 — Signed, then Submit collection note', async () => {
+  await page.getByRole('button', { name: 'Submit collection note' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByRole('button', { name: 'Submit collection note' }).click();
+  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+});
+
+await step('the submission does NOT close it — the confirmed delivery does', async () => {
+  await visit(`/jobs/${collectionNumber}`);
+  const body = await page.locator('main').innerText();
+  if (/Closed/.test(body) && !/Awaiting Delivery/.test(body)) {
+    throw new Error('the collection closed on submission rather than on delivery');
+  }
+
+  // The office confirms the delivery from the outbox, exactly as it does for a
+  // job card — the same screen, the same control, the same handshake.
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
+  await visit('/notifications?tab=outbox');
+  const deliver = page.getByRole('button', { name: 'Confirm delivered' }).first();
+  await deliver.waitFor({ timeout: 15000 });
+  await deliver.click();
+  await page.getByText('Delivered').first().waitFor({ timeout: 15000 });
+
+  await visit(`/jobs/${collectionNumber}`);
+  await page
+    .getByText('Read-only — this job is closed', { exact: false })
+    .first()
+    .waitFor({ timeout: 25000 });
+});
+
+await step('the whole collection journey works at tablet size', async () => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await visit(`/jobs/${collectionNumber}`);
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 1,
+  );
+  if (overflow) throw new Error('the collection overflows horizontally at 820px');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+});
+
 await browser.close();
 
 console.log('\n=== WORKFLOW E2E SUMMARY ===');

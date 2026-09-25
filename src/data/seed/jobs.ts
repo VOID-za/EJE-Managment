@@ -901,21 +901,30 @@ export const seedJobs: readonly Job[] = [
 
   // Parts — waiting to be collected. Gives the walkthrough a live parts job to
   // accept, capture and have signed for at the counter.
+  /*
+   * A COLLECTION WAITING AT THE COUNTER. MASTER SCOPE CR-12.
+   *
+   * At `completion`, unassigned and unscheduled — which is the state the
+   * application now creates a parts job in. It used to be seeded `open` and
+   * assigned to a technician, describing the accept-then-process sequence CR-12
+   * removed: a state nothing can produce any more, and a demonstration of a
+   * workflow that no longer exists.
+   */
   job('EJE-1064', {
     jobType: 'parts',
     priority: 'normal',
-    status: 'open',
+    status: 'completion',
     customerId: asCustomerId('cust-highveld'),
     siteId: asSiteId('site-highveld-centurion'),
     contactId: asContactId('contact-highveld-main'),
     machineId: null,
-    scheduledDate: dateOffset(0),
+    scheduledDate: null,
     orderNumber: 'PO-77501',
     referenceNumber: 'HAC-PARTS-042',
     courierCollection: false,
     faultDescription:
       'Way wipers and filters for the Okamoto grinder. Customer collecting from the Isando counter this afternoon.',
-    primaryTechnicianId: asUserId('user-tech-sipho'),
+    primaryTechnicianId: null,
     createdAt: timeOffset(-1, 9, 20),
     createdBy: asUserId('user-master-elmarie'),
     parts: [
@@ -926,7 +935,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 214_000,
         capturedAt: timeOffset(-1, 9, 25),
-        capturedBy: asUserId('user-tech-sipho'),
+        capturedBy: asUserId('user-master-elmarie'),
       },
       {
         id: asLineItemId('prt-1064-2'),
@@ -935,7 +944,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 2,
         unitPrice: 67_500,
         capturedAt: timeOffset(-1, 9, 30),
-        capturedBy: asUserId('user-tech-sipho'),
+        capturedBy: asUserId('user-master-elmarie'),
       },
     ],
   }),

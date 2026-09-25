@@ -486,6 +486,76 @@ renderer consumes — so the two cannot drift. **No PDF library was added**, whi
 also matters for CR-02: an offline tablet must not depend on a renderer fetched
 from a CDN.
 
+### CR-12 — A parts collection is counter work, raised and processed in one go
+*Confirmed 25 September 2026, resolving **BD-12**. Implemented `PENDING`
+(see PARTS-1…PARTS-16).*
+
+A parts collection was being driven through the field-service workflow because
+that is how every job worked: raise it, find it in the Jobs list, accept it,
+process it, close it. Every one of those steps was somebody standing at the
+counter waiting while the office clicked through a sequence built for a
+technician driving to a site — and the form asked, before any of it, for a
+priority, a date, a technician and a courier answer that nobody could know yet.
+
+**The collection journey, and it is one sitting.**
+
+| | Step | Who |
+|---|---|---|
+| 1 | Raise the collection — customer, contact, order number, reference, delivery note, attachments | Master **or** Coordinator |
+| 2 | **Parts** — the goods, quantities and prices | the same person |
+| 3 | **Review** — everything captured, checked before anybody signs | the same person |
+| 4 | **Collection** — customer or courier, and the waybill if it is a courier | the same person |
+| 5 | **Collector signature** — the person collecting signs for the goods | the collector |
+| 6 | **Signed** — the collection note as it now stands | the same person |
+| 7 | **Submit collection note** — the customer's copy is generated and emailed | the same person |
+| 8 | Delivery pending → **confirmed delivery → CLOSED** | the provider's report |
+
+**What a collection does not have, refused on the SERVER and not merely hidden:**
+a technician, an assignment, an acceptance step, a scheduled date, a priority,
+labour, travel and a call-out fee.
+
+**No new status and no new transition.** A collection is created at
+`completion` — the existing stage whose next legal move is the customer
+signature, which is exactly what a collection does next. Everything after that
+is the machinery every other job already uses: the same signature, the same
+document renderer, the same submission, the same delivery handshake, and the
+same rule that only a confirmed delivery closes a job.
+
+**It is the OFFICE's, start to finish.** This answers BD-12, which had been
+open since the CR-11 audit: `jobs.processParts` was held by the technician as
+well, so a collection was something either the counter or the field could pick
+up, while the prose had always described it as counter work. EJE chose option
+(b): a Master or a Coordinator raises, processes, signs off and submits a
+collection, and a technician is not part of it at any point.
+
+> **Superseded — the parts workflow as at `2e4f774`:**
+>
+> - *A parts job is created at `open`, like every other job, and must be
+>   ACCEPTED before it can be processed.* Accepting one was the counter
+>   exception in `canAcceptJob` and `acceptJobRefusal`. There is nothing left
+>   to accept: a collection is created at `completion`, and acceptance is
+>   refused to everybody, the office included.
+> - *`jobs.processParts` is held by the Master, the Coordinator AND the
+>   technician* (SUBMIT-10's "whoever processed it at the counter"). The
+>   capability and SUBMIT-10 both stand; the technician no longer holds it.
+> - *The creation form asks for a priority, a scheduled date, a technician and
+>   the Courier Collection answer on a parts job.* All four are gone from it.
+>   The first three do not exist on a collection at all; the fourth is asked at
+>   the Collection step, where the person collecting is standing in front of
+>   whoever is asking.
+> - *The close-out's first step is "Completion", with the completion write-up
+>   on it.* It is called **Parts**, and the write-up is not asked for: nothing
+>   was worked on, and the goods are the record. The FIELD is untouched — a
+>   collection raised before this keeps whatever was written on it and the
+>   document still prints it.
+> - *`EJE-1064` (demonstration) and `EJE-2005` (PostgreSQL) are seeded `open`
+>   and assigned to a technician.* Both are seeded at `completion` and
+>   unassigned, because a seed must demonstrate a state the application can
+>   actually produce — the same rule REF-18 applied to the refusal review.
+>
+> **CR-01 and CR-07 are untouched.** A signed collection note is as final as a
+> signed job card, and no field-service journey changed in any respect.
+
 ---
 
 ## Requirement register
@@ -667,6 +737,39 @@ together and tested separately. Nothing outside these rows changed.*
 > parts and the call-out; the generated PDF and its content; the signature; the
 > technician's submission; the delivery handshake; the refusal workflow and its
 > two outcomes; the CR-08 takeover; and signed-job immutability.
+
+### CR-12 — the parts collection workflow
+
+*Added 25 September 2026. Scoped to `jobType === 'parts'` throughout: the flag
+the rules ask is `officeProcessed`, which is true for that job type and false
+for every other one.*
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| PARTS-1 | A parts collection is created **at `completion`**, not `open` — no new status and no new transition; `completion` is the existing stage whose next legal move is the signature | **DONE** | `PENDING` | `job-creation.ts`; `parts-workflow.test.ts`; `parts-workflow-api.test.ts` |
+| PARTS-2 | Creating one **continues straight into its close-out**, rather than returning to the Jobs list | **DONE** | `PENDING` | `?continue=1`; `workflow-e2e.mjs` Part 23 |
+| PARTS-3 | **No technician**: a request naming one is refused, and assignment afterwards is refused too | **DONE** | `PENDING` | `assertAssignable`; `createJob`; both test files |
+| PARTS-4 | **No acceptance step** — refused to the office and to a technician alike, because there is nothing to accept | **DONE** | `PENDING` | `canAcceptJob`, `acceptJobRefusal`; 403 over HTTP |
+| PARTS-5 | **No scheduled date and no priority**: both are forced by the server whatever the request carries, and neither is asked for on the form | **DONE** | `PENDING` | `createJob`; `parts-workflow-api.test.ts` |
+| PARTS-6 | **No labour, travel or call-out fee — refused on the server**, not merely hidden on the screen | **DONE** | `PENDING` | `assertCapturesLabourAndTravel`; 422 over HTTP for all three |
+| PARTS-7 | The creation form keeps **customer, site, contact, customer order number (required), reference number, delivery note, collection details and attachments** | **DONE** | `PENDING` | `jobs/new/page.tsx`; `workflow-e2e.mjs` asserts each |
+| PARTS-8 | The close-out's first step is **Parts** — the goods, their quantities and their prices — with no completion write-up | **DONE** | `PENDING` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs`, `smoke.mjs` |
+| PARTS-9 | The steps are **Parts → Review → Collection → Collector signature → Signed**, and Review is unchanged | **DONE** | `PENDING` | `workflow-e2e.mjs` asserts the rail in order |
+| PARTS-10 | **Courier or customer is asked at the Collection step, and nowhere else** | **DONE** | `PENDING` | `setCollectionMethod`; creation forces `courierCollection: false` |
+| PARTS-11 | The collector signs, on the collection declaration — unchanged | **DONE** | pre-existing | `parts-collection.test.ts` |
+| PARTS-12 | **Submit collection note** issues the stored document and emails the customer once, through the existing outbox | **DONE** | pre-existing + `PENDING` | `issueJobCard`; `parts-workflow.test.ts` |
+| PARTS-13 | **Submission does NOT close the job.** It moves to `awaiting_delivery`, and only a CONFIRMED delivery closes it — the same rule as SUBMIT-5, and no second closed state | **DONE** | `PENDING` | `parts-workflow.test.ts`; `workflow-e2e.mjs` |
+| PARTS-14 | Both a **Master and a Coordinator** can do all of it, alone | **DONE** | `PENDING` | `parts-workflow.test.ts`; `role-enforcement.test.ts` |
+| PARTS-15 | A **technician** can do none of it: no acceptance, no processing, no submission | **DONE** | `PENDING` | `access.test.ts`; `technician-submission.test.ts`; API refusals |
+| PARTS-16 | **Field service is unchanged.** Breakdown, Installation, Service and Test & Repair keep their schedule, priority, assignment, acceptance, labour, travel, call-out, signature, submission, delivery, refusal and takeover behaviour | **DONE** | `PENDING` | `parts-workflow.test.ts` drives a breakdown end to end; the whole existing suite is unchanged and green |
+
+> **The document is unchanged.** A collection note still carries the customer,
+> contact, order number, reference, delivery note, the goods with quantities,
+> descriptions and prices, the total, the collection method, the collector's
+> signature and the dates — rendered by `buildJobCardModel` through the same
+> pipeline as every other document. Nothing was added to it and no second
+> document system exists. DOC-1 governs the write-up it no longer collects: an
+> empty section is not printed.
 
 ### CR-10 — verification record at `ca1cda7`
 
@@ -919,7 +1022,8 @@ behaviour, not the decision. Answered questions stay, struck through, with the
 answer and its date.*
 
 **Open at 25 September 2026:** BD-02, BD-03, BD-04, BD-05, BD-06, BD-08, BD-10,
-BD-11, BD-12. **Answered and retained:** BD-07 (by CR-05), BD-09 (by CR-08).
+BD-11, BD-13. **Answered and retained:** BD-07 (by CR-05), BD-09 (by CR-08),
+BD-12 (by CR-12).
 
 | ID | Question | Blocks |
 |---|---|---|
@@ -932,7 +1036,8 @@ BD-11, BD-12. **Answered and retained:** BD-07 (by CR-05), BD-09 (by CR-08).
 | **BD-08** | Should a technician be able to see that a colleague is *editing* a job card they handed over, or is "with the office" enough? Raised by CR-05(a): the technician now has a way back INTO a signed job card and may find it changed under them. | cosmetic |
 | **BD-09** | ~~**There is no office fallback for a signed job whose technician cannot submit it.**~~ **RESOLVED 25 September 2026 by CR-08.** EJE chose the second option: the office may submit on the technician's behalf, audited against both, and ONLY when the technician is provably unavailable — a disabled account, or a whole-day absence on the availability register. It is an explicit exceptional action labelled *Take over submission*, it does not go through the office review workflow, and it cannot edit the signed job card. Held as TAKEOVER-1…14. | resolved |
 | **BD-11** | **A technician who is present but cannot reach the system** — a lost, broken or flat tablet — is not modelled anywhere, so CR-08's condition cannot see it. Today the office's remedy is to put an absence on the calendar, which is deliberate and audited but describes the situation loosely. Is that acceptable, or should there be an explicit "cannot submit" state a Master can set on a job with its own reason? | TAKEOVER-1 |
-| **BD-12** | **MAY A TECHNICIAN ISSUE A PARTS COLLECTION?** Raised by the audit at `ca1cda7`, and **not decided here.** `jobs.processParts` is held by the Master, the Coordinator **and the technician**, so a technician can today accept a parts job and issue its collection note — while the prose of CR-05, CR-07 and SUBMIT-10 consistently describes a parts collection as counter work the OFFICE processes ("handed over at the EJE counter, not on a customer's site"). One of the two is wrong, and which one is a business question, not an implementation detail. **Current behaviour: a technician may.** Options: **(a)** confirm it — a technician at the counter is exactly who hands the goods over, and the prose is amended to say "whoever is at the counter"; **(b)** remove `jobs.processParts` from `TECHNICIAN_CAPABILITIES`, making parts strictly office work, which also removes a technician's ability to accept a parts job; **(c)** split the capability so a technician may process a collection they prepared but not one they did not | ROLE-5, SUBMIT-10, MOD-11 |
+| **BD-12** | ~~**MAY A TECHNICIAN ISSUE A PARTS COLLECTION?**~~ **ANSWERED 25 September 2026 by CR-12.** EJE chose option (b): a parts collection is counter work the OFFICE does, start to finish. `jobs.processParts` is held by the Master and the Coordinator and no longer by the technician, who is not part of the collection workflow at any point — not to accept one, not to process one, not to issue its note. The original question and its three options are kept below. Held as PARTS-14 and PARTS-15. Raised by the audit at `ca1cda7`, and **not decided here.** `jobs.processParts` is held by the Master, the Coordinator **and the technician**, so a technician can today accept a parts job and issue its collection note — while the prose of CR-05, CR-07 and SUBMIT-10 consistently describes a parts collection as counter work the OFFICE processes ("handed over at the EJE counter, not on a customer's site"). One of the two is wrong, and which one is a business question, not an implementation detail. **Current behaviour: a technician may.** Options: **(a)** confirm it — a technician at the counter is exactly who hands the goods over, and the prose is amended to say "whoever is at the counter"; **(b)** remove `jobs.processParts` from `TECHNICIAN_CAPABILITIES`, making parts strictly office work, which also removes a technician's ability to accept a parts job; **(c)** split the capability so a technician may process a collection they prepared but not one they did not | ROLE-5, SUBMIT-10, MOD-11 |
+| **BD-13** | **DOES A PARTS COLLECTION KEEP ITS "COLLECTION DETAILS" FIELD?** Raised by CR-12 and **deliberately not decided**. The instruction listed five fields to remove from parts creation: *scheduled date, priority, assignment, Courier Collection, collection details*. Items 4 and 5 read as one subject — the courier answer and the courier information that goes with it, both of which moved to the Collection step — but "Collection details" is also the on-screen label the fault-description field takes on a parts job, and that field is printed on the collection note as **Notes**. The two readings differ in what the customer's document says. **Current behaviour: the field is KEPT and still required**, because removing a field that carries printed customer-facing content on an ambiguous reading is not a change to make silently — and because the document section of the same instruction lists what a collection note must contain without mentioning a description either way. Options: **(a)** keep it as it is; **(b)** remove it from creation and print no Notes section on a collection (the empty-section rule DOC-1 already handles that); **(c)** keep it but make it optional | PARTS-7 |
 | **BD-10** | The `review` STATUS keeps its name although it is no longer an office review — it is where a signed job card waits for its own technician to submit it, and where a refused one waits for the office. Renaming it would touch stored history and would misdescribe the refusal case, so it was left; the rail therefore still reads *Review* between Customer Signature and Closed. Rename, or accept? | cosmetic |
 
 ---

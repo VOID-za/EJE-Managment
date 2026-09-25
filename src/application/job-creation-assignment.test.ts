@@ -454,26 +454,54 @@ describe('a technician accepting the job', () => {
   });
 
   /**
-   * The exception, held in both places at once.
+   * A PARTS COLLECTION IS NOT ACCEPTED BY ANYBODY. MASTER SCOPE CR-12.
    *
-   * A parts collection happens at the EJE counter, so the office processes it
-   * whoever it names — and the SCREEN has to agree with the server about that,
-   * or a Master is shown no Accept button on a job they are entitled to
-   * process. Getting this wrong is how the button and the rule drift apart.
+   * > **Superseded, 25 September 2026.** This case read *"lets the office
+   * > accept a parts collection assigned to a technician"*: a collection could
+   * > name a technician, and the office could accept it on their behalf,
+   * > because acceptance was how any job started. A collection is now raised
+   * > straight into its own close-out at `completion` and has no technician at
+   * > any point — so both halves of the old case are gone, and what replaces
+   * > it asserts their absence in the same two places: the screen's predicate
+   * > and the operation.
    */
-  it('lets the office accept a parts collection assigned to a technician', async () => {
+  it('refuses to raise a parts collection with a technician on it', async () => {
+    await expect(
+      createJob(
+        harness.as(master),
+        baseInput({
+          jobType: 'parts',
+          machineId: null,
+          orderNumber: 'PO-99004',
+          primaryTechnicianId: sipho.id,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WorkflowError);
+  });
+
+  it('raises a parts collection at its own close-out, and offers NOBODY Accept', async () => {
     const parts = await createJob(
       harness.as(master),
       baseInput({
         jobType: 'parts',
         machineId: null,
         orderNumber: 'PO-99004',
-        primaryTechnicianId: sipho.id,
+        primaryTechnicianId: null,
       }),
     );
 
-    expect(canAcceptJob(parts, master)).toBe(true);
-    expect((await acceptJob(harness.as(master), parts)).status).toBe('in_progress');
+    // Straight into the step the person raising it is about to work through.
+    expect(parts.status).toBe('completion');
+    expect(parts.primaryTechnicianId).toBeNull();
+    expect(parts.acceptedAt).toBeNull();
+    expect(parts.scheduledDate).toBeNull();
+
+    // The screen and the server give the same answer, to every role.
+    for (const person of [master, coordinator, sipho]) {
+      expect(canAcceptJob(parts, person), person.role).toBe(false);
+      expect(acceptJobRefusal(person, parts), person.role).not.toBeNull();
+      await expect(acceptJob(harness.as(person), parts)).rejects.toBeInstanceOf(WorkflowError);
+    }
   });
 
   it('agrees with the server about who is offered Accept on field work', async () => {
@@ -512,21 +540,27 @@ describe('a technician accepting the job', () => {
     expect(canAcceptJob(pooled, master)).toBe(true);
   });
 
-  it('still offers a Coordinator a PARTS collection — the counter is hers', async () => {
+  /*
+   * > **Superseded, 25 September 2026 (CR-12).** This read *"still offers a
+   * > Coordinator a PARTS collection — the counter is hers"*, and asserted that
+   * > she could ACCEPT one. The counter is still hers — more so, since a
+   * > technician no longer processes collections at all — but there is nothing
+   * > to accept: she raises the job and it opens in her own close-out.
+   */
+  it('gives a Coordinator her parts collection with no acceptance step at all', async () => {
     const parts = await createJob(
-      harness.as(master),
+      harness.as(coordinator),
       baseInput({
         jobType: 'parts',
         machineId: null,
         orderNumber: 'PO-99005',
-        primaryTechnicianId: sipho.id,
+        primaryTechnicianId: null,
       }),
     );
 
-    // The exception EJE confirmed, and the reason this function has to ask the
-    // role rather than simply refusing the office outright.
-    expect(canAcceptJob(parts, coordinator)).toBe(true);
-    expect((await acceptJob(harness.as(coordinator), parts)).status).toBe('in_progress');
+    expect(parts.status).toBe('completion');
+    expect(canAcceptJob(parts, coordinator)).toBe(false);
+    await expect(acceptJob(harness.as(coordinator), parts)).rejects.toBeInstanceOf(WorkflowError);
   });
 
   it('refuses a second acceptance rather than repeating the side effects', async () => {

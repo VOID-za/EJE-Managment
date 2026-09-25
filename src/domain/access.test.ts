@@ -92,7 +92,6 @@ describe('the technician', () => {
     'jobs.captureWork',
     // CR-07: the person who did the work makes the final submission.
     'jobs.issueFinal',
-    'jobs.processParts',
     'customers.view',
     'library.view',
   ];
@@ -105,6 +104,17 @@ describe('the technician', () => {
     'jobs.viewAll',
     'jobs.create',
     'jobs.assign',
+    /*
+     * A PARTS COLLECTION IS COUNTER WORK. MASTER SCOPE CR-12, answering BD-12.
+     *
+     * > **Superseded, 25 September 2026:** `jobs.processParts` was listed
+     * > among the technician's capabilities above. It let a technician accept,
+     * > process and issue a collection — which is what left BD-12 open, since
+     * > the prose had always described a collection as something the office
+     * > hands over at the counter. EJE answered it: a parts job is raised and
+     * > processed by a Master or a Coordinator, start to finish.
+     */
+    'jobs.processParts',
     // The CR-08 takeover is the OFFICE's exception. No calendar entry and no
     // amount of seniority in the field makes it a technician's.
     'jobs.takeOverSubmission',

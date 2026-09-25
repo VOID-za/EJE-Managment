@@ -102,13 +102,28 @@ export const CompleteJobWizard = ({
   const correcting = mode === 'correct';
 
   const steps = useMemo<readonly Step[]>(() => {
+    /*
+     * THE FIRST STEP IS WHAT THE JOB ACTUALLY CAPTURES. CR-12.
+     *
+     * On a field job it is the completion write-up, the hours, the travel and
+     * the photographs. On a parts collection none of that exists: the whole
+     * capture is the goods being handed over, so the step is called what it
+     * is — Parts — and the sequence reads Parts → Review → Collection →
+     * Collector signature → Signed.
+     */
     const all: Step[] = [
-      {
-        id: 'completion',
-        title: 'Completion',
-        blurb:
-          'What was found, what was done, the time, travel and parts it took — and the photographs.',
-      },
+      definition.officeProcessed
+        ? {
+            id: 'completion',
+            title: 'Parts',
+            blurb: 'The goods being collected, their quantities and what they are charged at.',
+          }
+        : {
+            id: 'completion',
+            title: 'Completion',
+            blurb:
+              'What was found, what was done, the time, travel and parts it took — and the photographs.',
+          },
     ];
     // Only where the job type actually requires one. A breakdown or a test and
     // repair has no checklist, so it is not given an empty step to walk past.
@@ -497,7 +512,18 @@ export const CompleteJobWizard = ({
 
       {step.id === 'completion' && (
         <div className="space-y-5">
-          <CompletionReportPanel job={job} editable onChanged={onChanged} />
+          {/*
+            NO WRITE-UP ON A COLLECTION. CR-12.
+
+            "What was found, what was done" describes work on a machine, and
+            nothing was worked on: the goods and their prices ARE the record.
+            The field is not removed from the job — a collection raised before
+            this keeps whatever was written on it, and the document still
+            prints it — it is simply not asked for here.
+          */}
+          {!definition.officeProcessed && (
+            <CompletionReportPanel job={job} editable onChanged={onChanged} />
+          )}
           <WorkCapturePanel
             job={job}
             settings={view.settings}

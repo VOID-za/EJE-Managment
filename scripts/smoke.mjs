@@ -1497,29 +1497,45 @@ await step('a Parts job offers no labour, travel or call-out capture', async () 
   }
 });
 
-await step('accepting a Parts job does NOT offer the site location', async () => {
-  await page.getByRole('button', { name: 'Accept job' }).click();
-  await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  await page.getByRole('button', { name: 'Accept and start' }).click();
-  await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
+await step('a Parts job is NOT accepted by anybody — MASTER SCOPE CR-12', async () => {
+  /*
+   * > **Superseded:** this step used to click *Accept job*, confirm it, and
+   * > assert only that no site location was offered afterwards. A collection is
+   * > raised straight into its own close-out now: there is no acceptance step
+   * > to click, for the office or for anyone else.
+   */
+  if ((await page.getByRole('button', { name: 'Accept job' }).count()) !== 0) {
+    throw new Error('a parts collection was offered an Accept action');
+  }
   // Parts leave the EJE counter, so there is no site to send anyone to.
-  if (await page.getByText('Send Site Location?').count() > 0) {
+  if ((await page.getByText('Send Site Location?').count()) > 0) {
     throw new Error('a parts collection offered to send a site location');
   }
+  // And it is waiting at the counter, not in the open pool.
+  await page.getByText('Completion', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
 await step('the collector, not the customer, signs for parts', async () => {
-  await page.getByRole('button', { name: 'Complete job' }).click();
+  // Already at its close-out, so the action is to carry on rather than to
+  // start one. CR-12: raising a collection and processing it are one act.
+  await page.getByRole('button', { name: 'Continue completing' }).click();
   await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 15000 });
 
   // A collection has no checklist, but it IS asked who is collecting.
-  const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
+  const rail = page.locator('ol').filter({ hasText: 'Parts' }).last();
   const names = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
   );
   if (names.length !== 5) throw new Error(`${names.length} steps: ${names.join(' | ')}`);
+  if (names[0] !== 'Parts') {
+    throw new Error(`the collection's first step is not Parts: ${names.join(' | ')}`);
+  }
   if (!names.includes('Collection')) {
     throw new Error(`the collection was given no collection step: ${names.join(' | ')}`);
+  }
+  // Nothing was worked on, so there is no write-up to fill in. CR-12.
+  if ((await page.getByLabel(/Work performed/).count()) !== 0) {
+    throw new Error('a parts collection was asked for a completion write-up');
   }
   if (!names.includes('Collector signature')) {
     throw new Error(`the collection was sent to the wrong signatory: ${names.join(' | ')}`);

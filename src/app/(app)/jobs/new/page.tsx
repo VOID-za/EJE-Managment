@@ -206,7 +206,22 @@ const NewJobPage = () => {
       return;
     }
 
-    router.push(`/jobs/${job.jobNumber}`);
+    /*
+     * A COLLECTION CONTINUES STRAIGHT INTO ITS CLOSE-OUT. CR-12.
+     *
+     * Raising a parts job and processing it are one act at the counter: the
+     * customer is standing there. Sending the office back to the Jobs list to
+     * find the job it had just raised — and then to accept it — was the whole
+     * of the old sequence, and there is nothing left of it to return to.
+     *
+     * A field job still lands on the job, because the work is somebody else's
+     * and happens later.
+     */
+    router.push(
+      definition.officeProcessed
+        ? `/jobs/${job.jobNumber}?continue=1`
+        : `/jobs/${job.jobNumber}`,
+    );
   };
 
   return (
@@ -294,7 +309,22 @@ const NewJobPage = () => {
           <Card>
             <CardHeader title="What is the job?" />
             <div className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {/*
+                PRIORITY AND A DATE DESCRIBE SENDING SOMEBODY SOMEWHERE. CR-12.
+
+                A parts collection is served at the counter by whoever raised
+                it, in the same sitting — there is no queue to prioritise and no
+                day to book — so neither field is asked for. The server forces
+                both regardless of what a client sends, so this is the rule
+                being reflected rather than the rule itself.
+              */}
+              <div
+                className={
+                  definition.officeProcessed
+                    ? 'grid grid-cols-1 gap-4'
+                    : 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                }
+              >
                 <SelectField
                   label="Job type"
                   required
@@ -305,28 +335,47 @@ const NewJobPage = () => {
                     setPriority(getJobTypeDefinition(code).defaultPriority);
                     // Only service work is booked across a range.
                     if (!getJobTypeDefinition(code).schedulesDateRange) setScheduledEndDate('');
+                    /*
+                     * Nothing a collection does not carry survives the switch.
+                     *
+                     * Left behind, these would be sent on the request and
+                     * refused by the server — or worse, silently dropped, and
+                     * the office would go on believing it had booked a date.
+                     */
+                    if (getJobTypeDefinition(code).officeProcessed) {
+                      setScheduledDate('');
+                      setTechnicianId('');
+                      setAdditionalIds([]);
+                      setCourierCollection(false);
+                    }
                   }}
                   options={JOB_TYPE_CODES.map((code) => ({
                     value: code,
                     label: jobTypeLabel(code),
                   }))}
                 />
-                <SelectField
-                  label="Priority"
-                  required
-                  value={priority}
-                  onChange={(event) => setPriority(event.target.value as JobPriority)}
-                  options={PRIORITY_ORDER.map((value) => ({
-                    value,
-                    label: priorityLabel(value),
-                  }))}
-                />
-                <TextField
-                  label={definition.schedulesDateRange ? 'Scheduled start date' : 'Scheduled date'}
-                  type="date"
-                  value={scheduledDate}
-                  onChange={(event) => setScheduledDate(event.target.value)}
-                />
+                {!definition.officeProcessed && (
+                  <>
+                    <SelectField
+                      label="Priority"
+                      required
+                      value={priority}
+                      onChange={(event) => setPriority(event.target.value as JobPriority)}
+                      options={PRIORITY_ORDER.map((value) => ({
+                        value,
+                        label: priorityLabel(value),
+                      }))}
+                    />
+                    <TextField
+                      label={
+                        definition.schedulesDateRange ? 'Scheduled start date' : 'Scheduled date'
+                      }
+                      type="date"
+                      value={scheduledDate}
+                      onChange={(event) => setScheduledDate(event.target.value)}
+                    />
+                  </>
+                )}
               </div>
 
               {definition.schedulesDateRange && (
@@ -358,11 +407,20 @@ const NewJobPage = () => {
                 </div>
               )}
 
-              {/* Offered wherever the work is collected from the counter: a
-                  repaired unit leaves on the same kind of trip a box of parts
-                  does, and a courier must not see the customer's prices on
-                  either document. */}
-              {definition.collectedOnCompletion && (
+              {/*
+                Offered wherever the work is collected from the counter: a
+                repaired unit leaves on the same kind of trip a box of parts
+                does, and a courier must not see the customer's prices on
+                either document.
+
+                NOT ON A PARTS COLLECTION. CR-12: who is collecting is asked at
+                the COLLECTION step, with whoever actually turned up standing at
+                the counter — asking it days earlier only records a guess, and
+                asking it twice is how the two answers come to disagree. A
+                workshop repair keeps it here, because it is booked in advance
+                and the office plans the return leg when it takes the job in.
+              */}
+              {definition.collectedOnCompletion && !definition.officeProcessed && (
                 <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4">
                   <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-semibold text-amber-eje-700">
                     <input
@@ -441,6 +499,14 @@ const NewJobPage = () => {
             </div>
           </Card>
 
+          {/*
+            NOBODY IS "DOING THE WORK" ON A COLLECTION. CR-12.
+
+            A parts collection is handed over at the counter by whoever raised
+            it. There is no technician on it at any point — the server refuses
+            a request that names one — so the office is not asked to pick one.
+          */}
+          {!definition.officeProcessed && (
           <Card>
             <CardHeader
               title="Who is doing the work?"
@@ -519,6 +585,7 @@ const NewJobPage = () => {
                 : ' and unassigned, in the pool for any technician to accept.'}
             </p>
           </Card>
+          )}
 
           <Card>
             <CardHeader
