@@ -148,9 +148,12 @@ export const WorkCapturePanel = ({
                     </span>
                     <span className="text-xs text-steel-400">{formatDate(entry.date)}</span>
                   </div>
-                  <p className="mt-1 text-sm text-steel-600">
-                    {entry.description.length > 0 ? entry.description : 'No description'}
-                  </p>
+                  {/* Only where a line actually carries one — which now means
+                      lines captured before the description was dropped. An
+                      empty "No description" under every entry is noise. */}
+                  {entry.description.length > 0 && (
+                    <p className="mt-1 text-sm text-steel-600">{entry.description}</p>
+                  )}
                   <p className="mt-0.5 text-xs text-steel-400">
                     {technicianName(entry.technicianId)}
                     {/* Said out loud when the office wrote it up for them, so
@@ -182,37 +185,6 @@ export const WorkCapturePanel = ({
             ))}
           </ul>
         )}
-      </Card>
-
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <CardHeader
-            title="Call-out fee"
-            description={
-              job.calloutApplied
-                ? `Applied — ${formatCurrency(totals.pricing.calloutRate)}`
-                : 'Not applied to this job'
-            }
-          />
-          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
-            <input
-              type="checkbox"
-              checked={job.calloutApplied}
-              disabled={!editable || operation.running}
-              onChange={async (event) => {
-                const applied = event.target.checked;
-                const ok = await operation.run(() => jobs.setCallout(job.id, applied));
-                if (ok) onChanged();
-              }}
-              className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-            />
-            Charge the call-out fee
-          </label>
-        </div>
-        <p className="mt-2 text-xs text-steel-500">
-          Whether a call-out is charged is a commercial decision per job, so it is set here rather
-          than assumed from the job type.
-        </p>
       </Card>
 
       <Card padded={false}>
@@ -354,6 +326,52 @@ export const WorkCapturePanel = ({
           </div>
         )}
       </Card>
+
+      {/*
+        THE CALL-OUT FEE SITS UNDER PARTS, not up beside Labour.
+
+        It is the last commercial decision taken on a job — what was fitted,
+        then whether the visit itself is charged — and it belongs beside the
+        other charge the office adds rather than in the middle of the hours the
+        technician is capturing. Nothing about the fee itself changed: it is
+        still off unless somebody turns it on, still never inferred from the
+        job type, and still priced by the same rate.
+
+        It is inside the labour-and-travel guard for the same reason as before:
+        a parts collection carries no call-out.
+      */}
+      {capturesLabourAndTravel && (
+        <Card>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <CardHeader
+              title="Call-out fee"
+              description={
+                job.calloutApplied
+                  ? `Applied — ${formatCurrency(totals.pricing.calloutRate)}`
+                  : 'Not applied to this job'
+              }
+            />
+            <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
+              <input
+                type="checkbox"
+                checked={job.calloutApplied}
+                disabled={!editable || operation.running}
+                onChange={async (event) => {
+                  const applied = event.target.checked;
+                  const ok = await operation.run(() => jobs.setCallout(job.id, applied));
+                  if (ok) onChanged();
+                }}
+                className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+              />
+              Charge the call-out fee
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-steel-500">
+            Whether a call-out is charged is a commercial decision per job, so it is set here
+            rather than assumed from the job type.
+          </p>
+        </Card>
+      )}
 
       {/*
         One dialog per kind, used for BOTH adding and amending. `editingId`
@@ -504,7 +522,6 @@ const LabourDialog = ({
   const [date, setDate] = useState(existing?.date ?? businessToday());
   const [rateType, setRateType] = useState<LabourRateType>(existing?.rateType ?? 'normal');
   const [hours, setHours] = useState(existing === null ? '1' : String(existing.hours));
-  const [description, setDescription] = useState(existing?.description ?? '');
   const [error, setError] = useState<string | undefined>(undefined);
 
   const parsedHours = Number.parseFloat(hours);
@@ -516,7 +533,25 @@ const LabourDialog = ({
       return;
     }
     setError(undefined);
-    onSubmit({ date, rateType, hours: parsedHours, description: description.trim() });
+    /*
+     * NO DESCRIPTION IS ASKED FOR ANY MORE. MASTER SCOPE LAB-1.
+     *
+     * What was done is the COMPLETION WRITE-UP — the formal, customer-facing
+     * technical record — and asking for it again per labour line got the same
+     * work described twice, differently, on one document. A labour line is
+     * hours at a rate.
+     *
+     * The field itself stays on the record and is passed straight through, so
+     * amending the hours on a line captured under the old form keeps what that
+     * technician wrote rather than silently erasing it. Historical job cards
+     * print exactly as they did.
+     */
+    onSubmit({
+      date,
+      rateType,
+      hours: parsedHours,
+      description: existing?.description ?? '',
+    });
   };
 
   return (
@@ -588,13 +623,11 @@ const LabourDialog = ({
           />
         </div>
 
-        <TextAreaField
-          label="Description of work"
-          rows={3}
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="e.g. Fault finding on the spindle drive and control cabinet"
-        />
+        <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-xs text-steel-600">
+          What was done goes in the <span className="font-semibold">Completion write-up</span> —
+          it is the technical record printed on the customer&rsquo;s job card. A labour line
+          records the hours only.
+        </p>
 
         {Number.isFinite(parsedHours) && parsedHours > 0 && (
           <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-600">

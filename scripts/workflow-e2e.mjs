@@ -182,19 +182,67 @@ await step('a technician drives EJE-1065 through the guided close-out', async ()
   await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 20000 });
   await assertNot404('the completion wizard');
 
+  /*
+   * NOTHING IS PRESSED TO SAVE THIS. MASTER SCOPE WRITEUP-1.
+   *
+   * There is no Save write-up button any more. The step used to click one;
+   * now it types and waits for the panel to say Saved on its own, which is
+   * the behaviour rather than the button. If autosave ever stops firing, this
+   * is where it is caught — the badge never appears.
+   */
   await page.getByLabel(/Work performed/).fill('Replaced the faulty contactor and retested the line.');
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 15000 });
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 
   await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  // LAB-1: hours and a rate, and no second place to describe the work.
+  const labourForm = await page.getByRole('dialog').innerText();
+  if (/description of work/i.test(labourForm)) {
+    throw new Error('the labour dialog still asks for a description of work');
+  }
   await page.getByRole('button', { name: '2', exact: true }).click();
   await page.getByRole('button', { name: 'Add labour' }).last().click();
   await page.getByText('Normal Time').first().waitFor({ timeout: 15000 });
 });
 
+await step('the call-out fee sits under Parts, not up beside Labour', async () => {
+  const sections = await page.evaluate(() =>
+    [...document.querySelectorAll('main h2, main h3')].map((node) => node.textContent.trim()),
+  );
+  const parts = sections.indexOf('Parts');
+  const callout = sections.indexOf('Call-out fee');
+  if (parts === -1 || callout === -1) {
+    throw new Error(`Parts and Call-out fee are not both on the capture screen: ${sections}`);
+  }
+  if (callout < parts) {
+    throw new Error(`Call-out fee is above Parts (${sections.join(' → ')})`);
+  }
+});
+
 await step('the wizard reaches its review and then the signature step', async () => {
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Ready for the customer').waitFor({ timeout: 20000 });
+
+  /*
+   * NO DOCUMENT PREVIEW HERE. MASTER SCOPE REV-1.
+   *
+   * The Review step is a verification summary; the PDF belongs on the Signed
+   * step, which is asserted a few steps below. Counting iframes is the whole
+   * check, because the preview is the only one on the screen.
+   */
+  const previews = await page.locator('iframe').count();
+  if (previews !== 0) {
+    throw new Error(`the Review step still embeds ${previews} document preview(s)`);
+  }
+  // And the summary it was hiding is the thing that IS there.
+  const summary = await page.locator('main').innerText();
+  // The summary sets its labels in capitals, so they are asserted as drawn.
+  for (const heading of ['CUSTOMER', 'SITE', 'MACHINE', 'JOB TYPE', 'WORK PERFORMED']) {
+    if (!summary.includes(heading)) {
+      throw new Error(`the Review summary is missing ${heading}`);
+    }
+  }
+
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 20000 });
   await assertNot404('the signature step');
@@ -213,7 +261,32 @@ await step('the customer signs, and the signature is captured', async () => {
   await page.getByRole('button', { name: 'Confirm signature' }).click();
   // The signed document is shown before anything is submitted.
   await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 25000 });
-  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 25000 });
+  const preview = page.locator('iframe[title$="job card preview"]');
+  await preview.waitFor({ timeout: 25000 });
+
+  /*
+   * THE PREVIEW IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1.
+   *
+   * It was a 60vh letterbox holding a portrait A4 document, so the viewer
+   * shrank the page into a squeezed strip. The frame now carries A4's own
+   * proportions and is capped so it never outgrows the viewport. Measured
+   * rather than described: a ratio is the only honest way to assert "not
+   * squeezed".
+   */
+  const box = await preview.boundingBox();
+  if (box === null) throw new Error('the signed preview is not on screen');
+  const ratio = box.height / box.width;
+  const a4 = 841.89 / 595.28;
+  if (Math.abs(ratio - a4) > 0.02) {
+    throw new Error(
+      `the signed preview is ${ratio.toFixed(3)}:1, not A4's ${a4.toFixed(3)}:1 — the page is distorted`,
+    );
+  }
+  const viewport = page.viewportSize();
+  if (box.height > viewport.height) {
+    throw new Error(`the signed preview is ${box.height}px tall in a ${viewport.height}px viewport`);
+  }
+
   await page.getByRole('button', { name: 'Continue to submission' }).click();
   await page.waitForURL('**/jobs/EJE-1065/review', { timeout: 20000 });
   await assertNot404('capturing the signature');
@@ -255,13 +328,69 @@ await step('the signature persists on the job across a reload', async () => {
   await page.getByText('Gerhard', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
-// ── PART 19: the technician issues the job card themselves ───────────────────
-await step('the technician submits EJE-1065 — nothing in the way', async () => {
+/*
+ * ── PART 19: the technician hands over; the MASTER submits ───────────────────
+ *
+ * THIS STEP USED TO HAVE THE TECHNICIAN SUBMIT, and it was wrong. Master Scope
+ * §3.1, §7 and §15 keep "final authority over official job submission/closure
+ * and customer delivery" with the Master: the technician's submission means
+ * hand it to the office, and it is the Master's that generates the customer's
+ * copy and emails it. `jobs.issueFinal` has been Master-only since `d979aa9`,
+ * so the server had been refusing what this step described; the step is
+ * corrected to the rule rather than the rule loosened to the step.
+ */
+await step('the technician is not stranded at Review, but cannot submit', async () => {
+  await visit('/jobs/EJE-1065');
+
+  /*
+   * THE BUG THIS EXISTS FOR: "now i went back page... now i cant do anything
+   * as a tech". A read-only rule written for REFUSED job cards was being
+   * applied to signed ones, so the technician who had just taken the
+   * signature was left with no action at all on their own job.
+   */
+  await page
+    .getByRole('button', { name: 'View job card — with the office' })
+    .waitFor({ timeout: 20000 });
+
   await visit('/jobs/EJE-1065/review');
   const body = await page.locator('main').innerText();
   if (/master review/i.test(body)) {
     throw new Error('the review screen still mentions the retired stage');
   }
+  if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
+    throw new Error('a technician was offered the final submission');
+  }
+  if (!body.includes('With the office for submission')) {
+    throw new Error('the review screen does not say who the job card is now with');
+  }
+});
+
+await step('a Coordinator gets no generic Review & submit on a signed job', async () => {
+  await signInAs('Coordinator', 'Christene van Niekerk', /Christene/);
+  await visit('/jobs/EJE-1065');
+
+  // Her authority is the REFUSAL workflow. A signed job card is submitted by a
+  // Master, and offering her a button the server refuses is how the two drift.
+  if ((await page.getByRole('button', { name: 'Review & submit job card' }).count()) !== 0) {
+    throw new Error('the Coordinator was offered Review & submit on an ordinary signed job');
+  }
+  await visit('/jobs/EJE-1065/review');
+  if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
+    throw new Error('the Coordinator was offered the final submission');
+  }
+});
+
+await step('a Coordinator is not offered Accept on field work', async () => {
+  await visit('/jobs');
+  const accepts = await page.getByRole('button', { name: 'Accept job' }).count();
+  if (accepts !== 0) {
+    throw new Error(`the Coordinator was offered Accept on ${accepts} field job(s)`);
+  }
+});
+
+await step('the Master makes the final submission on EJE-1065', async () => {
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
+  await visit('/jobs/EJE-1065/review');
   await page.getByRole('button', { name: 'Submit job card' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'Submit job card' }).last().click();
@@ -299,10 +428,6 @@ await step('closing did not send the customer a second copy', async () => {
   await visit('/notifications?tab=outbox');
   const emails = await page.getByText('EJE-1065-Final-Job-Card.pdf').count();
   if (emails !== 1) throw new Error(`the final job card was sent ${emails} times, expected 1`);
-});
-
-await step('the office picks the closed job up from here', async () => {
-  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
 });
 
 await step('EJE-1065 now appears in the Closed Jobs archive', async () => {
@@ -476,6 +601,173 @@ await step('the two-way chat is still intact', async () => {
   await visit('/messages');
   await page.getByRole('heading', { name: 'Messages', exact: true }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'New message' }).waitFor({ timeout: 10000 });
+});
+
+/*
+ * ── PART 21: CUSTOMER REFUSED TO SIGN ────────────────────────────────────────
+ *
+ * The workflow VPS acceptance testing broke on, walked in a browser rather
+ * than only asserted in the application tests. All three defects it found show
+ * up here or not at all:
+ *
+ *  - the technician kept actions on a job card they had handed over;
+ *  - Customer Signature asked the state machine to move a job to the state it
+ *    was already in;
+ *  - Without Customer Signature recorded the outcome and left the job showing
+ *    Review, Closed and a Capture Signature button.
+ */
+
+/** Drives an open job to the point where the customer refuses to sign. */
+const refuseOnSite = async (jobNumber, reason) => {
+  await visit(`/jobs/${jobNumber}`);
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByRole('button', { name: 'No, Thanks' }).click({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 20000 });
+  await page
+    .getByLabel(/Work performed/)
+    .fill('Replaced the contactor and proved the circuit under load.');
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await page.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByText('Normal Time').first().waitFor({ timeout: 15000 });
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Ready for the customer').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 20000 });
+
+  // The two outcomes of the signature step are ONE choice, so refusing is a
+  // tick rather than a second button: ticking it puts the pad away and asks
+  // for a reason instead.
+  await page.getByRole('checkbox').last().check();
+  await page.getByLabel('Customer refusal reason').fill(reason);
+  await page.getByRole('button', { name: 'Record refusal' }).click();
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 25000 });
+};
+
+await step('a technician records a customer refusal on EJE-1048', async () => {
+  await signInAs('Technician', 'Sipho Mahlangu', /Hello, Sipho/);
+  await refuseOnSite('EJE-1048', 'The planner disputes the hours and will not sign for them.');
+});
+
+await step('the technician is READ-ONLY on it from that moment', async () => {
+  await visit('/jobs/EJE-1048');
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 20000 });
+
+  // The reason IS theirs to see. Everything that acts on it is not.
+  const body = await page.locator('main').innerText();
+  if (!body.includes('disputes the hours')) {
+    throw new Error('the technician cannot see the refusal they recorded');
+  }
+  if (!/Read-only/i.test(body)) {
+    throw new Error('the job does not tell the technician it is read-only');
+  }
+
+  for (const name of [
+    'Capture signature',
+    'Correct & resubmit',
+    'Customer Signature',
+    'Without Customer Signature',
+    'Submit job card',
+    'Review & submit job card',
+  ]) {
+    const count = await page.getByRole('button', { name, exact: true }).count();
+    if (count !== 0) {
+      throw new Error(`the technician was offered "${name}" on a refused job card`);
+    }
+  }
+});
+
+await step('the office is notified, and the Coordinator can open it', async () => {
+  await signInAs('Coordinator', 'Christene van Niekerk', /Christene/);
+  await visit('/notifications');
+  await page
+    .getByText('EJE-1048 — customer refused to sign', { exact: false })
+    .first()
+    .waitFor({ timeout: 20000 });
+
+  await visit('/jobs/EJE-1048');
+  const body = await page.locator('main').innerText();
+  if (!body.includes('Customer Signature') || !body.includes('Without Customer Signature')) {
+    throw new Error('the Coordinator is not offered both refusal outcomes');
+  }
+});
+
+await step('OUTCOME A — Customer Signature returns EJE-1048 to the signature step', async () => {
+  await page.getByRole('button', { name: 'Customer Signature', exact: true }).click();
+  // The bug this replaces: "EJE-1048 cannot move from customer_signature to
+  // customer_signature". review -> customer_signature is a real transition.
+  await page.getByText('Customer Signature').first().waitFor({ timeout: 25000 });
+  await visit('/jobs/EJE-1048');
+  const body = await page.locator('main').innerText();
+  if (/could not be resolved|cannot move from/i.test(body)) {
+    throw new Error(`the resolution was refused: ${body.slice(0, 400)}`);
+  }
+  if (!body.includes('Corrected and returned for signature')) {
+    throw new Error('the refusal does not record the outcome that was chosen');
+  }
+});
+
+await step('and the technician can take the signature again, once', async () => {
+  await signInAs('Technician', 'Sipho Mahlangu', /Hello, Sipho/);
+  await visit('/jobs/EJE-1048');
+  await page.getByRole('button', { name: 'Capture signature' }).waitFor({ timeout: 20000 });
+});
+
+await step('OUTCOME B — Without Customer Signature CLOSES EJE-1066', async () => {
+  await refuseOnSite('EJE-1066', 'The customer will not sign anything without head office.');
+
+  await signInAs('Coordinator', 'Christene van Niekerk', /Christene/);
+  await visit('/jobs/EJE-1066');
+  await page.getByRole('button', { name: 'Without Customer Signature', exact: true }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Close without a signature' }).click();
+
+  // Closed, said on the job screen itself — the document card names the
+  // outcome rather than calling an unsigned job card "signed".
+  await page
+    .getByText('Issued without a customer signature', { exact: false })
+    .first()
+    .waitFor({ timeout: 30000 });
+});
+
+await step('and nothing about EJE-1066 offers a signature step afterwards', async () => {
+  await visit('/jobs/EJE-1066');
+  const body = await page.locator('main').innerText();
+
+  if (!/Read-only — this job is closed/i.test(body)) {
+    throw new Error(`EJE-1066 is not closed after Without Customer Signature: ${body.slice(0, 400)}`);
+  }
+  if (!body.includes('Issued without a signature')) {
+    throw new Error('the refusal does not record the outcome that was chosen');
+  }
+
+  for (const name of [
+    'Capture signature',
+    'Correct & resubmit',
+    'Customer Signature',
+    'Without Customer Signature',
+    'Submit job card',
+    'Review & submit job card',
+  ]) {
+    if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
+      throw new Error(`a closed, unsigned job card still offers "${name}"`);
+    }
+  }
+
+  // And not for a Master either — closed is closed for the whole office.
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
+  await visit('/jobs/EJE-1066');
+  for (const name of ['Capture signature', 'Submit job card', 'Review & submit job card']) {
+    if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
+      throw new Error(`a Master is still offered "${name}" on a closed job`);
+    }
+  }
 });
 
 await browser.close();

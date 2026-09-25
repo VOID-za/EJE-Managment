@@ -188,8 +188,6 @@ export interface JobCardModelInput {
   readonly generatedAt: IsoDateTime;
 }
 
-const NOT_RECORDED = 'Not recorded';
-
 const answerFor = (item: ChecklistItem, response: ChecklistResponse | undefined): string => {
   if (response === undefined) return '—';
   switch (item.responseType) {
@@ -265,14 +263,6 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
     checklistTemplate === null || job.checklist === null
       ? null
       : evaluateChecklist(checklistTemplate, job.checklist);
-
-  const hasWriteUp = [
-    job.completionReport.faultFindings,
-    job.completionReport.diagnosis,
-    job.completionReport.workPerformed,
-    job.completionReport.recommendations,
-    job.completionReport.generalNotes,
-  ].some((value) => value.trim().length > 0);
 
   return {
     documentTitle:
@@ -362,23 +352,33 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
 
     faultDescription:
       job.faultDescription.length > 0 ? job.faultDescription : 'No fault description recorded.',
-    // A write-up with nothing in any field is not worth a section: a parts
-    // collection has no work to describe, and four "Not recorded" lines are
-    // noise on the document rather than information.
-    workBlocks: hasWriteUp
-      ? [
-          { label: 'Fault findings', value: job.completionReport.faultFindings },
-          { label: 'Diagnosis', value: job.completionReport.diagnosis },
-          { label: 'Work performed', value: job.completionReport.workPerformed },
-          { label: 'Recommendations', value: job.completionReport.recommendations },
-          ...(job.completionReport.generalNotes.trim().length > 0
-            ? [{ label: 'General notes', value: job.completionReport.generalNotes }]
-            : []),
-        ].map((block) => ({
-          label: block.label,
-          value: block.value.trim().length > 0 ? block.value : NOT_RECORDED,
-        }))
-      : [],
+    /*
+     * ONLY WHAT WAS ACTUALLY WRITTEN. MASTER SCOPE DOC-1.
+     *
+     * An empty optional field is not printed at all — no heading, no "Not
+     * recorded" line. A job where the technician wrote up the work and had no
+     * recommendations to make should not hand the customer a document with a
+     * Recommendations heading and nothing under it; a blank heading reads as a
+     * section somebody forgot to fill in rather than as one that did not
+     * apply.
+     *
+     * Work performed is the exception, and it is not really an exception: it
+     * is mandatory before the customer can sign, so it always has a value by
+     * the time any document is produced. It is still listed conditionally
+     * rather than forced, because a PREVIEW can legitimately be rendered
+     * mid-capture and "Work performed:" with nothing after it would be the
+     * same empty heading on a screen.
+     *
+     * A write-up with nothing in any field carries no section at all: a parts
+     * collection has no work to describe.
+     */
+    workBlocks: [
+      { label: 'Fault findings', value: job.completionReport.faultFindings },
+      { label: 'Diagnosis', value: job.completionReport.diagnosis },
+      { label: 'Work performed', value: job.completionReport.workPerformed },
+      { label: 'Recommendations', value: job.completionReport.recommendations },
+      { label: 'General notes', value: job.completionReport.generalNotes },
+    ].filter((block) => block.value.trim().length > 0),
     // Internal notes are EJE-only; the domain decides which reach a customer.
     notes: customerFacingNotes(job.notes).map((note) => ({
       body: note.body,

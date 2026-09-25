@@ -132,13 +132,10 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
               <p className="text-xs font-bold tracking-wide text-steel-600 uppercase">
                 {block.label}
               </p>
-              <p className="mt-1 whitespace-pre-line text-steel-700">
-                {block.value === "Not recorded" ? (
-                  <span className="text-steel-400 italic">{block.value}</span>
-                ) : (
-                  block.value
-                )}
-              </p>
+              {/* Every block here was written by somebody: the model drops an
+                  empty field rather than printing a faint "Not recorded" under
+                  its heading (DOC-1), so there is no second case to style. */}
+              <p className="mt-1 whitespace-pre-line text-steel-700">{block.value}</p>
             </div>
           ))}
         </section>

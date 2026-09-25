@@ -87,8 +87,9 @@ await step('drive a job through to the signature screen', async () => {
 
   await page.getByRole('tab', { name: 'Completion' }).click();
   await page.getByLabel(/Work performed/).fill('Replaced the light curtain controller.');
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 20000 });
+  // The write-up saves itself (WRITEUP-1): there is no Save write-up button,
+  // so this waits for the panel to say so rather than pressing anything.
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 
   await page.getByRole('tab', { name: 'Overview' }).click();
   // Complete job opens the guided close-out, and the signature is its last step.

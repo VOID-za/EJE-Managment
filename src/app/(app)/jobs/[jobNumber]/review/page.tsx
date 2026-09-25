@@ -340,13 +340,30 @@ const ReviewJobPage = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardHeader
-              title={refusalPending ? 'Awaiting resolution' : 'Ready to submit'}
+              title={
+                refusalPending
+                  ? 'Awaiting resolution'
+                  : canIssue
+                    ? 'Ready to submit'
+                    : 'With the office for submission'
+              }
+              /*
+               * SAID DIFFERENTLY TO SOMEBODY WHO CANNOT SUBMIT. §3.1, §15.
+               *
+               * The final submission is the Master's, and this card used to
+               * tell a technician or a Coordinator that "Submitting generates
+               * the job card and emails it" beside no button to do it with.
+               * They have handed the job over; what they need to read is that
+               * it is now with a Master, not an instruction they cannot follow.
+               */
               description={
                 refusalPending
-                  ? `The customer refused to sign ${job.jobNumber}. Correct whatever they objected to and resubmit it for signature from the panel above, or issue it without a signature — the technician captures nothing again.`
-                  : customerEmail.length === 0
-                    ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
-                    : `Submitting generates the ${job.signature !== null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
+                  ? `The customer refused to sign ${job.jobNumber}. Correct whatever they objected to and return it for the customer's signature from the panel above, or close it without a signature — the technician captures nothing again.`
+                  : !canIssue
+                    ? `${job.jobNumber} is signed and with the office. A Master makes the final submission, which generates the customer's copy and emails it.`
+                    : customerEmail.length === 0
+                      ? `No email address is recorded for ${customerDisplayName}. Capture one on the customer's contact before issuing this job card.`
+                      : `Submitting generates the ${job.signature !== null ? 'signed ' : ''}job card and emails it to ${customerDisplayName} at ${customerEmail}. ${job.jobNumber} closes once the customer's copy is confirmed delivered.`
               }
             />
             {canIssue && (

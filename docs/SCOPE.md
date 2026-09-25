@@ -94,6 +94,64 @@ and the state machine must say so.
 nothing may be edited and there is no reopen path. CR-04 governs the **unsigned**
 card only.
 
+### CR-05 — The roles are three different journeys, not one with switches
+*Confirmed 25 September 2026. Implemented `PENDING` (see ROLE-1…ROLE-6,
+REV-1, PDF-1, WRITEUP-1, DOC-1, LAB-1, COST-CALLOUT).*
+
+A second round of VPS acceptance testing found the refusal rules leaking into
+the ordinary signed workflow and back. Each defect below was one journey's rule
+applied to another's, so they are settled together.
+
+**(a) The technician keeps the whole NORMAL workflow.** Accept, capture, write
+up, review, take the customer's signature, hand over. CR-04(a)'s read-only rule
+applies to a **refused** job card and to nothing else. It was applied to the
+status instead, so a technician who had just taken a signature was left with no
+action at all on their own job — *"now i went back page… now i cant do anything
+as a tech"*.
+
+**(b) The Coordinator's extra authority is the REFUSAL and only the refusal.**
+She was being offered *Review & submit job card* on ordinary signed jobs and
+*Accept job* on field work, both of which the server then refused. She does not
+get the final submission (`jobs.issueFinal` stays with the Master, §3.1/§15) and
+she does not accept field work (`jobs.acceptField`, which she has never held).
+The Parts exception is unchanged: a parts collection happens at the EJE counter
+and the office does process it, under `jobs.processParts`.
+
+**(c) The screen and the server must give the same answer.** Every rule above
+is enforced in the application layer and *then* reflected in what is drawn. A
+button that exists only to be refused is a defect, and so is a rule enforced
+only by hiding a button.
+
+> **Superseded — the implementation as at `3f2ef5b`:** the action bar applied
+> the refusal read-only rule to the STATUS rather than to the refusal, so it
+> withheld every action from a technician at `review` on a signed job card too;
+> `canAcceptJob` was never told the viewer's role, so the screen offered a
+> Coordinator work the server would refuse; and the Review action read *Review
+> & submit job card* for every office role, not only the Master.
+>
+> `canEditJob` itself is unchanged and stays capability-gated at `review`: a
+> signed job card is final for everyone under CR-01, and a refused one is the
+> office's under CR-04, so neither is a technician's to edit. What changed is
+> that having no EDIT right is no longer treated as having no way in.
+
+### CR-06 — Capture-screen and document corrections
+*Confirmed 25 September 2026. Implemented `PENDING`.*
+
+Six changes to what is asked for and what is printed. None of them changes a
+price, a permission or a state.
+
+| | Change | Why |
+|---|---|---|
+| **(a)** | The completion write-up **autosaves** | A tablet that locks, runs out of battery or is handed to a customer must not cost the technician a paragraph. Explicit *Save now* and *Discard* both remain, because both still mean something. |
+| **(b)** | Empty write-up sections are **not printed** | A heading with nothing under it reads as something forgotten. Work performed is mandatory, so it is always there. |
+| **(c)** | Labour drops *Description of work* | It asked the technician to describe the job twice, in two places, on one document. The write-up is the formal technical record. |
+| **(d)** | Call-out fee moves **under Parts** | It is the last commercial decision on a job and belongs beside the other charge the office adds. Per-job, never inferred from the job type — unchanged. |
+| **(e)** | The wizard's **Review step drops the PDF preview** | Review is a verification summary; on a tablet the document buried the thing being verified. |
+| **(f)** | The **Signed step keeps** its preview, at A4 proportions | It is the one place the document is wanted. The frame was a 60vh letterbox holding a portrait page, so the viewer squeezed it. |
+
+The labour **field** is not removed from the record: lines captured before this
+keep what was written on them, and the document still prints it.
+
 ---
 
 ## Requirement register
@@ -139,6 +197,37 @@ card only.
 | REF-16 | Outcome B still produces the unsigned customer document, stored and immutable | **DONE** | `b4e6140` | `renderAndStoreFinalDocument`; `refusal-document.test.ts` (12 cases) |
 | REF-17 | `customer_signature → customer_signature`, `closed → customer_signature`, `closed → review` and `closed → any editable state` are all illegal | **DONE** | `b4e6140` | `progress.test.ts` |
 | REF-18 | The seed demonstrates the refusal review from a state the application can actually produce | **DONE** | `b4e6140` | EJE-2018 seeded at `review`, not `customer_signature` |
+| REF-19 | The two outcomes are named on screen exactly as the business names them — **Customer Signature** and **Without Customer Signature** | **DONE** | `PENDING` | `SignatureRefusalPanel.tsx`; `workflow-e2e.mjs` |
+| REF-20 | A job closed without a signature says so: the document card reads *Issued without a customer signature*, never *Final signed job card* | **DONE** | `PENDING` | `FinalDocumentCard.tsx`; `workflow-e2e.mjs` |
+| REF-21 | The refusal record shows reason, recorded by, recorded at, outcome, resolved by, resolved at | **DONE** | pre-existing + `PENDING` | `SignatureRefusalPanel.tsx`; `workflow-role-matrix.test.ts` |
+
+### CR-05 — the role matrix, enforced on the server and drawn on the screen
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| ROLE-1 | The technician keeps the whole normal workflow: accept, capture, write up, review, signature, hand over | **DONE** | `PENDING` | `workflow-role-matrix.test.ts` A, E |
+| ROLE-2 | A technician at Review on a **signed** job has an action and is not stranded | **DONE** | `PENDING` | `JobActionBar.tsx`; `workflow-e2e.mjs` |
+| ROLE-3 | A technician is read-only on a **refused** job card, and sees no action on it at all | **DONE** | `b4e6140` + `PENDING` | `workflow-role-matrix.test.ts` B; `workflow-e2e.mjs` |
+| ROLE-4 | The Coordinator gets **no** generic Review & submit on an ordinary signed job | **DONE** | `PENDING` | `JobActionBar.tsx`, review page; `workflow-role-matrix.test.ts` D; `workflow-e2e.mjs` |
+| ROLE-5 | The Coordinator is **not** offered Accept on field work, and is refused it if she asks. The Parts exception is preserved | **DONE** | `PENDING` | `canAcceptJob`; `job-creation-assignment.test.ts`; `workflow-e2e.mjs` |
+| ROLE-6 | The final submission stays the Master's; the screen and the server agree on that for every role | **DONE** | `d979aa9` + `PENDING` | `jobs.issueFinal`; `workflow-role-matrix.test.ts` |
+| ROLE-7 | Every rule above is enforced in the application layer first; the UI only reflects it | **DONE** | `PENDING` | every negative case in `workflow-role-matrix.test.ts` is an operation refusing, not a button missing |
+
+### CR-06 — capture screen and customer document
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| WRITEUP-1 | The completion write-up autosaves: debounced, a ceiling for continuous typing, one write at a time, the text survives a failed save | **DONE** | `PENDING` | `src/lib/autosave.ts`; `autosave.test.ts` (11 cases); `workflow-e2e.mjs` |
+| WRITEUP-2 | Saving/saved/error is shown, and explicit *Save now* and *Discard* are both kept | **DONE** | `PENDING` | `CompletionReportPanel.tsx` |
+| WRITEUP-3 | Work performed stays mandatory before the customer signs | **DONE** | pre-existing | `checkReadyForSignature` |
+| DOC-1 | Empty write-up fields are omitted from the customer document — no empty headings, no "Not recorded" | **DONE** | `PENDING` | `write-up-sections.test.ts` (8 cases, model and PDF bytes) |
+| LAB-1 | Labour captures hours and a rate; *Description of work* is removed from the UI | **DONE** | `PENDING` | `WorkCapturePanel.tsx`; `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
+| LAB-2 | Historical labour descriptions are preserved and still printed | **DONE** | `PENDING` | `labour-and-callout.test.ts` |
+| COST-CALLOUT | The call-out fee sits under Parts, is per-job, is never inferred from the job type, and prices exactly as before | **DONE** | `PENDING` | `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
+| REV-1 | The wizard's Review step is a summary with **no** embedded PDF | **DONE** | `PENDING` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs` |
+| REV-2 | The final submission page keeps its presentation | **DONE** | unchanged | review page; only the card's wording for a non-submitter changed |
+| PDF-1 | The Signed step keeps the PDF preview, at A4 proportions and inside the viewport | **DONE** | `PENDING` | `JobCardPdfPreview.tsx`; `workflow-e2e.mjs` measures the frame |
+| PDF-2 | Document GENERATION is untouched by the viewer change | **DONE** | unchanged | `final-document-pixels.browser.test.ts`, `final-document-layout.test.ts` still pass |
 
 ### Roles, calendar, notifications (completed earlier — retained)
 
@@ -211,7 +300,8 @@ card only.
 | **BD-04** | v2.0 §6 says the Order Number is mandatory; the code implements the three-valued DECISION 2 waiver. Which stands? | JOB-5 |
 | **BD-05** | v2.0 §20 specifies Redis queues; the implementation uses a durable PostgreSQL outbox. Accept the substitution, or build Redis? | ARCH-2 |
 | **BD-06** | Outcome B closes the job without **emailing** the unsigned copy to the customer. The old route emailed, because it went through `issueJobCard`; §15 puts customer delivery after the final **Master** submission, and outcome B is open to a Coordinator. Should closing without a signature send the customer their copy, and if so, under whose authority? The document is rendered, stored and downloadable either way. | REF-16 |
-| **BD-07** | After outcome A returns the card to `customer_signature`, **who** captures the signature? The technician is read-only on that job under CR-04(a), so the card is back at the customer step with no field user permitted to act on it. Either the office captures it, or the read-only rule needs a stated exception for exactly this step. | REF-13 |
+| **BD-07** | ~~After outcome A returns the card to `customer_signature`, **who** captures the signature?~~ **ANSWERED 25 September 2026 by CR-05(a).** The read-only rule is about a REFUSED job card, not about the technician. Once outcome A returns the card to the signature step there is no outstanding refusal, so the ordinary signature workflow resumes and the technician captures it exactly as they would have the first time. Held as ROLE-1 and proved end to end in `workflow-e2e.mjs`. | closed |
+| **BD-08** | Should a technician be able to see that a colleague is *editing* a job card they handed over, or is "with the office" enough? Raised by CR-05(a): the technician now has a way back INTO a signed job card and may find it changed under them. | cosmetic |
 
 ---
 

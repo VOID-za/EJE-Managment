@@ -337,10 +337,9 @@ const work = (sheet: Sheet, model: JobCardModel): void => {
       tracking: 0.45,
     });
     sheet.move(GAP.line);
-    sheet.paragraph(block.value, {
-      colour: block.value === 'Not recorded' ? FAINT : BODY,
-      font: block.value === 'Not recorded' ? 'italic' : 'regular',
-    });
+    // As in `JobCardDocument`: an unwritten field is not a block at all
+    // (DOC-1), so there is no faint "Not recorded" variant left to render.
+    sheet.paragraph(block.value, { colour: BODY, font: 'regular' });
     sheet.move(7);
   }
   sheet.move(GAP.section - 7);

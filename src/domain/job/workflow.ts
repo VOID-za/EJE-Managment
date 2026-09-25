@@ -607,7 +607,7 @@ export const isAssignedTo = (
  */
 export const canAcceptJob = (
   job: Pick<Job, 'status' | 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
-  viewer?: Pick<User, 'id'>,
+  viewer?: Pick<User, 'id' | 'role'>,
 ): boolean => {
   if (job.status !== 'open') return false;
   if (viewer === undefined) return true;
@@ -622,9 +622,22 @@ export const canAcceptJob = (
    * office still processes it.
    *
    * This exception has to be here as well as in the operation, or the screen
-   * hides a button the server would have allowed.
+   * hides a button the server would have allowed. THE RULE IS UNCHANGED: the
+   * office does process parts collections, deliberately, and that is not the
+   * same thing as the office accepting field work.
    */
-  if (job.jobType === 'parts') return true;
+  if (job.jobType === 'parts') return can(viewer.role, 'jobs.processParts');
+
+  /*
+   * EVERY OTHER JOB TYPE IS FIELD WORK, AND THE OFFICE DOES NOT ACCEPT IT.
+   *
+   * `acceptJobRefusal` has always refused a Coordinator here — "Field work is
+   * accepted by the technician attending the job" — but this function was not
+   * asked WHO was looking, so the Coordinator was shown an Accept job button on
+   * every unassigned job and the server then refused it. The person recorded as
+   * having attended the machine has to be the person who attended it.
+   */
+  if (!can(viewer.role, 'jobs.acceptField')) return false;
 
   return job.primaryTechnicianId === null || isAssignedTo(job, viewer.id);
 };

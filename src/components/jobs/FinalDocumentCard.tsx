@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react';
 import { getJobTypeDefinition, userFullName, type Job, type User } from '@/domain';
 import { Badge, Button, Card, CardHeader, DefinitionGrid, Icon } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { cn } from '@/lib/cn';
 import { downloadBytes } from '@/lib/download';
 import { formatDateTime } from '@/lib/format';
 import { jobs } from '@/api/endpoints';
@@ -79,14 +80,34 @@ export const FinalDocumentCard = ({
     );
   }
 
+  /*
+   * A CLOSED JOB CARD IS NOT ALWAYS A SIGNED ONE. MASTER SCOPE REF-15.
+   *
+   * "Without Customer Signature" closes the job and produces a document that
+   * records the refusal instead of carrying a signature. Calling that "Final
+   * signed job card" would be the system asserting a signature that was never
+   * given, on the one screen somebody goes to in order to find out what
+   * happened. The document is equally final either way; what it says is not.
+   */
+  const unsigned = job.signature === null;
+
   return (
-    <Card className="mb-5 border-verdant-300 bg-verdant-50/40">
+    <Card
+      className={cn(
+        'mb-5',
+        unsigned ? 'border-amber-eje-300 bg-amber-eje-50/50' : 'border-verdant-300 bg-verdant-50/40',
+      )}
+    >
       <CardHeader
-        title="Final signed job card"
-        description="The official document issued to the customer. Held as issued — later rate, price or checklist changes cannot alter it."
+        title={unsigned ? 'Issued without a customer signature' : 'Final signed job card'}
+        description={
+          unsigned
+            ? 'The customer refused to sign, and the office closed the job without a signature. This is the document they were issued: it records the refusal and carries no signature. Held as issued — later rate, price or checklist changes cannot alter it.'
+            : 'The official document issued to the customer. Held as issued — later rate, price or checklist changes cannot alter it.'
+        }
         action={
-          <Badge tone="green" size="sm" dot>
-            On file
+          <Badge tone={unsigned ? 'amber' : 'green'} size="sm" dot>
+            {unsigned ? 'Closed — unsigned' : 'On file'}
           </Badge>
         }
       />

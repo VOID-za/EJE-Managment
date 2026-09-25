@@ -326,7 +326,23 @@ await step('accepting a second job and choosing "Send Location" queues one messa
   await page.getByText('Site location requested via WhatsApp').first().waitFor({ timeout: 8000 });
 });
 
-await step('the queued WhatsApp message appears in the Simulated Outbox', async () => {
+/*
+ * THIS STEP USED TO READ THE OUTBOX AS THE TECHNICIAN, and the server refuses
+ * that: Master Scope SEC-1 — "Technicians cannot access customer
+ * correspondence" — and `/api/outbox` answers 403 with "The outbox is an
+ * office screen." The queued message is still the thing being checked; the
+ * office is who checks it.
+ */
+await step('a technician cannot read the outbox at all', async () => {
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  if ((await page.getByText('Template: eje_site_location').count()) !== 0) {
+    throw new Error('a technician was shown customer correspondence');
+  }
+});
+
+await step('the queued WhatsApp message appears in the office Simulated Outbox', async () => {
+  await signOut();
+  await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
   await page.getByText('Template: eje_site_location').first().waitFor({ timeout: 8000 });
   await page.getByText('Nothing in this list was sent').waitFor({ timeout: 5000 });
@@ -348,9 +364,18 @@ await step('add labour to EJE-1048', async () => {
   await page.getByRole('button', { name: 'Add labour' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: '2', exact: true }).click();
-  await page.getByLabel('Description of work').fill('Replaced spindle drive cooling fan');
+  /*
+   * NO DESCRIPTION IS ASKED FOR. MASTER SCOPE LAB-1.
+   *
+   * A labour line is hours at a rate; what was done is the completion
+   * write-up, which is the formal record printed on the customer's job card.
+   * Asking twice put two accounts of the same work on one document.
+   */
+  if ((await page.getByLabel('Description of work').count()) !== 0) {
+    throw new Error('the labour dialog still asks for a description of work');
+  }
   await page.getByRole('button', { name: 'Add labour' }).last().click();
-  await page.getByText('Replaced spindle drive cooling fan').waitFor({ timeout: 8000 });
+  await page.getByText('Normal Time').first().waitFor({ timeout: 8000 });
 });
 
 await step('the technician adds the part they fitted', async () => {
@@ -374,8 +399,9 @@ await step('write completion report', async () => {
   await page.getByLabel(/Work performed/).fill(
     'Replaced the seized spindle drive cooling fan, cleared alarm 750 and test ran the machine.',
   );
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+  // THE WRITE-UP SAVES ITSELF. MASTER SCOPE WRITEUP-1 — there is no Save
+  // write-up button; the panel says Saved on its own once the typing stops.
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 });
 
 await step('Complete job opens the guided close-out, not just a status change', async () => {
@@ -492,17 +518,22 @@ await step('Back keeps everything that was entered', async () => {
   await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
 });
 
-await step('the review step shows the real job card PDF', async () => {
-  // The same renderer that produces the issued document, in the browser's own
-  // PDF viewer — not an HTML lookalike.
-  const frame = page.locator('iframe[title$="job card preview"]');
-  await frame.waitFor({ timeout: 20000 });
-  await page.getByText('Preview — not yet issued').first().waitFor({ timeout: 8000 });
-  const src = await frame.getAttribute('src');
-  if (src === null || !src.startsWith('blob:')) {
-    throw new Error(`the preview is not a rendered document (src=${src})`);
+/*
+ * THIS STEP USED TO ASSERT A PDF PREVIEW ON THE REVIEW STEP, and it is now the
+ * opposite. Master Scope REV-1: the Review step is a VERIFICATION summary, and
+ * on a tablet the embedded document buried the very thing being verified. The
+ * renderer and the document are untouched — the SIGNED step still shows the
+ * real PDF, which is asserted a few steps below.
+ */
+await step('the review step is a summary, with no embedded document', async () => {
+  const previews = await page.locator('iframe').count();
+  if (previews !== 0) {
+    throw new Error(`the Review step still embeds ${previews} document preview(s)`);
   }
-  await page.screenshot({ path: `${shots}/23-review-pdf.png`, fullPage: false });
+  if ((await page.getByText('Preview — not yet issued').count()) !== 0) {
+    throw new Error('the Review step still carries the preview header');
+  }
+  await page.screenshot({ path: `${shots}/23-review-summary.png`, fullPage: false });
 });
 
 await step('the signature step carries the declaration exactly once', async () => {
@@ -613,11 +644,37 @@ await step('the captured signature is rendered in solid black', async () => {
   }
 });
 
-await step('the technician submits the job card — there is no Master Review', async () => {
+/*
+ * THIS STEP USED TO HAVE THE TECHNICIAN SUBMIT. Master Scope §3.1, §7 and §15
+ * keep the final official submission with the MASTER: the technician's
+ * submission means hand it to the office, and it is the Master's that
+ * generates the customer's copy and emails it. `jobs.issueFinal` has been
+ * Master-only since `d979aa9`, so the server was refusing what this step
+ * described. The step is corrected to the rule, not the rule to the step.
+ */
+await step('the technician hands the signed job card over, and cannot submit it', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
-  if (await page.getByRole('button', { name: 'Submit for Master Review' }).count() !== 0) {
+  if ((await page.getByRole('button', { name: 'Submit for Master Review' }).count()) !== 0) {
     throw new Error('Master Review is still offered for a breakdown job');
   }
+  if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
+    throw new Error('a technician was offered the final submission');
+  }
+  const waiting = await page.locator('main').innerText();
+  if (!waiting.includes('With the office for submission')) {
+    throw new Error('the review screen does not say who the job card is now with');
+  }
+
+  // And the technician is NOT stranded on their own job: there is a way in.
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page
+    .getByRole('button', { name: 'View job card — with the office' })
+    .waitFor({ timeout: 15000 });
+});
+
+await step('the Master makes the final submission — there is no Master Review', async () => {
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Submit job card' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByText('closes when the customer', { exact: false }).waitFor();
@@ -694,16 +751,16 @@ await step(`a second job is taken to the signature step (${REFUSED_JOB})`, async
   await page.getByRole('button', { name: 'Add labour' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: '2', exact: true }).click();
-  await page.getByLabel('Description of work').fill('Traced and repaired the axis fault');
   await page.getByRole('button', { name: 'Add labour' }).last().click();
-  await page.getByText('Traced and repaired the axis fault').waitFor({ timeout: 8000 });
+  await page.getByText('Normal Time').first().waitFor({ timeout: 8000 });
 
   await page.getByRole('tab', { name: 'Completion' }).click();
   await page.getByLabel(/Work performed/).fill(
     'Traced the axis fault to a failed contactor, replaced it and re-ran the machine.',
   );
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+  // THE WRITE-UP SAVES ITSELF. MASTER SCOPE WRITEUP-1 — there is no Save
+  // write-up button; the panel says Saved on its own once the typing stops.
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 
   await page.getByRole('tab', { name: 'Overview' }).click();
   await page.getByRole('button', { name: 'Complete job' }).click();
@@ -808,17 +865,40 @@ await step('recording the refusal finishes the close-out', async () => {
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
 });
 
+/*
+ * THIS STEP USED TO EXPECT THE TECHNICIAN TO STILL HAVE A BUTTON on the job
+ * card they had just handed over — "Signature refusal — awaiting resolution".
+ * Master Scope CR-04(a) and REF-11/REF-12 settle it the other way: recording
+ * the refusal is the technician's last act, and from that moment they may VIEW
+ * the job card and its refusal and do nothing else. The office's own action is
+ * asserted a few steps below, where a Master opens the same job.
+ */
 await step('the job card is held until the office resolves the refusal', async () => {
   await page.getByText('Awaiting resolution').first().waitFor({ timeout: 10000 });
   if ((await page.getByRole('button', { name: 'Submit job card' }).count()) !== 0) {
     throw new Error('an unresolved refusal could still be issued');
   }
 
-  // And the job screen does not promise a submission it cannot deliver.
+  // And the technician who recorded it is read-only on it from here.
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
-  await page
-    .getByRole('button', { name: 'Signature refusal — awaiting resolution' })
-    .waitFor({ timeout: 10000 });
+  await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
+
+  const body = await page.locator('main').innerText();
+  if (!body.includes(REFUSAL_REASON)) {
+    throw new Error('the technician cannot see the refusal they recorded');
+  }
+  for (const name of [
+    'Capture signature',
+    'Correct & resubmit',
+    'Customer Signature',
+    'Without Customer Signature',
+    'Submit job card',
+    'Signature refusal — awaiting resolution',
+  ]) {
+    if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
+      throw new Error(`the technician was offered "${name}" on a refused job card`);
+    }
+  }
   if ((await page.getByRole('button', { name: /Review & submit/ }).count()) !== 0) {
     throw new Error('the job still offered to submit an unresolved refusal');
   }
@@ -1031,7 +1111,9 @@ await step('the Master still sees the whole job behind the exception', async () 
     timeout: 8000,
   });
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
-  await page.getByText('Traced and repaired the axis fault').first().waitFor({ timeout: 8000 });
+  // The hours, not a second description of the work: LAB-1 removed that field
+  // from the labour line, and the write-up above is where the work is set out.
+  await page.getByText('2.00 hrs').first().waitFor({ timeout: 8000 });
   await page.getByRole('tab', { name: 'Photos' }).click();
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 8000 });
@@ -1063,15 +1145,30 @@ await step('the Master corrects the job card through the same panels', async () 
   await page.getByLabel(/Work performed/).fill(
     'Traced the axis fault to a failed contactor, replaced it and re-ran the machine. One hour on site.',
   );
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+  // THE WRITE-UP SAVES ITSELF. MASTER SCOPE WRITEUP-1 — there is no Save
+  // write-up button; the panel says Saved on its own once the typing stops.
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
   await page.screenshot({ path: `${shots}/26-correct-and-resubmit.png`, fullPage: false });
 });
 
-await step('the corrected job card is previewed, then returned for signature', async () => {
+await step('the corrected job card is reviewed, then returned for signature', async () => {
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Step 2 of 2', { exact: false }).waitFor({ timeout: 15000 });
-  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+
+  /*
+   * A SUMMARY, NOT AN EMBEDDED DOCUMENT. MASTER SCOPE REV-1 — the office's
+   * correction ends on the same Review step the technician uses, and that step
+   * no longer carries a PDF. This asserted the iframe; it now asserts the
+   * summary, and the corrected write-up in it.
+   */
+  await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
+  if ((await page.locator('iframe').count()) !== 0) {
+    throw new Error('the correction Review step still embeds a document preview');
+  }
+  const summary = await page.locator('main').innerText();
+  if (!summary.includes('One hour on site')) {
+    throw new Error('the corrected write-up is not on the Review step');
+  }
 
   await page.getByRole('button', { name: 'Resubmit for customer signature' }).click();
   await page.getByText('Customer Signature').first().waitFor({ timeout: 15000 });
@@ -1449,16 +1546,16 @@ await step('a Test & Repair is worked and taken to its collection step', async (
   await page.getByRole('button', { name: 'Add labour' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: '2', exact: true }).click();
-  await page.getByLabel('Description of work').fill('Bench tested the spindle drive');
   await page.getByRole('button', { name: 'Add labour' }).last().click();
-  await page.getByText('Bench tested the spindle drive').waitFor({ timeout: 8000 });
+  await page.getByText('Normal Time').first().waitFor({ timeout: 8000 });
 
   await page.getByRole('tab', { name: 'Completion' }).click();
   await page.getByLabel(/Work performed/).fill(
     'Bench tested the spindle drive and replaced the encoder coupling.',
   );
-  await page.getByRole('button', { name: 'Save write-up' }).click();
-  await page.getByText('Saved').first().waitFor({ timeout: 8000 });
+  // THE WRITE-UP SAVES ITSELF. MASTER SCOPE WRITEUP-1 — there is no Save
+  // write-up button; the panel says Saved on its own once the typing stops.
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 
   await page.getByRole('tab', { name: 'Overview' }).click();
   await page.getByRole('button', { name: 'Complete job' }).click();
@@ -1956,6 +2053,11 @@ await step('accepting from the Open Jobs list also offers the site location', as
 });
 
 await step('the site location message carries job, customer, machine, site and a map link', async () => {
+  // READ AS THE OFFICE. SEC-1: technicians cannot reach customer
+  // correspondence, and `/api/outbox` answers 403 — so the message the
+  // technician just queued is checked by the people entitled to see it.
+  await signOut();
+  await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
   const outbox = await page.locator('main').innerText();
   for (const fragment of ['EJE-', 'google.com/maps']) {
@@ -1966,9 +2068,9 @@ await step('the site location message carries job, customer, machine, site and a
 });
 
 await step('master dashboard and admin', async () => {
+  // Already the Master by the step above, which had to be to read the outbox.
+  await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await signOut();
-  await signInAs(page, 'Elmarie Coetzee');
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
   await page.getByText('Total Open Jobs').waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/07-master-dashboard.png`, fullPage: false });

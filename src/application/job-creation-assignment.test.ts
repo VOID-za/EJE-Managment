@@ -493,6 +493,42 @@ describe('a technician accepting the job', () => {
     );
   });
 
+  /**
+   * AND THE SCREEN MUST NOT OFFER IT EITHER. MASTER SCOPE ROLE-5.
+   *
+   * `canAcceptJob` was not told WHO was looking, so it answered the workflow
+   * question alone — is this job at a stage where acceptance is next — and the
+   * action bar drew Accept job for a Coordinator on every unassigned field job.
+   * The operation refused it, as the case above proves, which is the worst of
+   * both: a button whose only outcome is an error.
+   */
+  it('does not OFFER a Coordinator field work she would then be refused', async () => {
+    expect(canAcceptJob(pooled, coordinator)).toBe(false);
+    expect(canAcceptJob(assigned, coordinator)).toBe(false);
+    expect(acceptJobRefusal(coordinator, pooled)).not.toBeNull();
+
+    // Unchanged for the people who do go out to machines.
+    expect(canAcceptJob(pooled, sipho)).toBe(true);
+    expect(canAcceptJob(pooled, master)).toBe(true);
+  });
+
+  it('still offers a Coordinator a PARTS collection — the counter is hers', async () => {
+    const parts = await createJob(
+      harness.as(master),
+      baseInput({
+        jobType: 'parts',
+        machineId: null,
+        orderNumber: 'PO-99005',
+        primaryTechnicianId: sipho.id,
+      }),
+    );
+
+    // The exception EJE confirmed, and the reason this function has to ask the
+    // role rather than simply refusing the office outright.
+    expect(canAcceptJob(parts, coordinator)).toBe(true);
+    expect((await acceptJob(harness.as(coordinator), parts)).status).toBe('in_progress');
+  });
+
   it('refuses a second acceptance rather than repeating the side effects', async () => {
     const accepted = await acceptJob(harness.as(sipho), assigned);
     // The state machine answers this: in_progress has no edge back to itself.

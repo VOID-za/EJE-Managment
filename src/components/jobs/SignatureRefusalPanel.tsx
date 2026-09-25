@@ -30,11 +30,12 @@ import { RuleViolationNotice } from './RuleViolationNotice';
  * For the office it is also where the exception is cleared, and there are two
  * honest ways to do that:
  *
- * - CORRECT & RESUBMIT — the normal one. Put right whatever the customer
+ * - CUSTOMER SIGNATURE — the normal one. Put right whatever the customer
  *   objected to and ask them again. The job goes back to Customer Signature
  *   carrying everything on it; nothing is captured twice.
- * - ISSUE WITHOUT A SIGNATURE — for the customer who will not sign whatever is
- *   put in front of them. The job card goes out recording the refusal.
+ * - WITHOUT CUSTOMER SIGNATURE — for the customer who will not sign whatever is
+ *   put in front of them. The job card goes out recording the refusal and the
+ *   job CLOSES there and then: no second signature step, no review after it.
  *
  * Every refusal stays listed, including ones already dealt with, so a job that
  * took three attempts says so.
@@ -116,11 +117,30 @@ export const SignatureRefusalPanel = ({
           </ol>
 
           {outstanding !== null && (
-            <p className="mt-4 text-sm text-steel-700">
-              The work and the write-up stand as recorded. Correct whatever the customer objected
-              to, then send the job card back for signature — the technician captures nothing
-              again, and only the signature is asked for.
-            </p>
+            <div className="mt-4 space-y-2 text-sm text-steel-700">
+              <p>
+                The work and the write-up stand as recorded, and this job card is now the
+                office&rsquo;s. There are two ways it can end:
+              </p>
+              {/* Named and explained, because the two outcomes are not
+                  symmetrical: one asks the customer again, the other finishes
+                  the job for good. */}
+              <ul className="list-disc space-y-1 pl-5">
+                <li>
+                  <span className="font-semibold text-steel-900">Customer Signature</span> —
+                  correct whatever the customer objected to, then send the job card back to the
+                  signature step. The technician captures nothing again; only the signature is
+                  asked for.
+                </li>
+                <li>
+                  <span className="font-semibold text-steel-900">Without Customer Signature</span>{' '}
+                  — the customer will not sign whatever is put in front of them. The job card is
+                  produced recording the refusal and{' '}
+                  <span className="font-semibold text-steel-900">the job closes immediately</span>.
+                  There is no further signature step and nothing can be changed afterwards.
+                </li>
+              </ul>
+            </div>
           )}
 
           {outstanding !== null && (canResubmit || canResolve) && (
@@ -145,7 +165,7 @@ export const SignatureRefusalPanel = ({
                       if (ok) onChanged();
                     }}
                   >
-                    Resubmit for customer signature
+                    Customer Signature
                   </Button>
                 )}
                 {canResolve && (
@@ -155,7 +175,7 @@ export const SignatureRefusalPanel = ({
                     leadingIcon={<Icon name="document" className="size-5" />}
                     onClick={() => setConfirmIssue(true)}
                   >
-                    Issue without a signature
+                    Without Customer Signature
                   </Button>
                 )}
               </div>
@@ -181,9 +201,9 @@ export const SignatureRefusalPanel = ({
       */}
       <ConfirmDialog
         open={confirmIssue}
-        title="Issue without a signature?"
-        message={`${job.jobNumber} will be issued as it stands. The job card the customer receives will record that they refused to sign, rather than carrying a signature. Correct and resubmit instead if anything on it can still be put right.`}
-        confirmLabel="Issue without a signature"
+        title="Close without a customer signature?"
+        message={`${job.jobNumber} will be issued as it stands and CLOSED. The job card records that the customer refused to sign rather than carrying a signature, there is no further signature step, and nothing on the job can be changed afterwards. Choose Customer Signature instead if anything on it can still be put right.`}
+        confirmLabel="Close without a signature"
         onCancel={() => setConfirmIssue(false)}
         onConfirm={async () => {
           const ok = await operation.run(() => jobs.resolveRefusal(job.id, note));

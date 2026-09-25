@@ -144,62 +144,88 @@ export const JobActionBar = ({
 
   if (job.status === 'review') {
     /*
-     * An unresolved signature refusal changes what this button honestly offers.
-     * The job card cannot be submitted yet — the review screen says so and
-     * withholds the action — so the button says so too rather than promising a
-     * submission it will not deliver. The job is still at Review either way.
+     * TWO DIFFERENT JOBS SHARE THIS STATUS, and they are not offered the same
+     * things. A signature and a refusal both land at `review`; what tells them
+     * apart is whether there is a refusal still awaiting the office.
      */
     const awaitingResolution = refusalAwaitingResolution(job);
-    const canCorrect = can(currentUser.role, 'jobs.editSubmittedJob');
-
-    /*
-     * THE TECHNICIAN IS READ-ONLY HERE. MASTER SCOPE REF-11.
-     *
-     * "The technician may ONLY view the submitted job card and its refusal
-     * information." Acceptance testing found a technician being offered the
-     * way back into a refused job card — an action the server refuses, so the
-     * button existed only to fail. The server is the control; this stops the
-     * screen advertising something it will not honour.
-     *
-     * The office keeps both actions: correcting the card IS the refusal
-     * workflow.
-     */
-    if (!canCorrect) return actions;
 
     if (awaitingResolution) {
+      /*
+       * A REFUSED JOB CARD IS THE OFFICE'S. THE TECHNICIAN IS READ-ONLY.
+       * MASTER SCOPE REF-11, REF-12.
+       *
+       * "The technician may ONLY view the submitted job card and its refusal
+       * information" — no Capture signature, no Return for signature, no
+       * Submit, no Resolve refusal, no Without customer signature. The server
+       * refuses all of them; this stops the screen advertising what it will
+       * not honour. The refusal panel above the action bar still shows the
+       * technician the reason, which is the part they are meant to see.
+       */
+      const office = can(currentUser.role, 'jobs.resolveSignatureRefusal');
+
       /*
        * The office's way into a refused job card.
        *
        * It goes to the job's own tabs — the completion write-up, the captured
        * work, the checklist, the photos — because correcting a job card is
        * editing the job, not operating a separate editor. The refusal panel at
-       * the top of that screen is where it is then sent back for signature.
+       * the top of that screen is where it is then sent back for signature or
+       * closed without one.
        */
+      if (office) {
+        actions.push(
+          <Button
+            key="correct"
+            size="lg"
+            onClick={onCompleteJob}
+            leadingIcon={<Icon name="wrench" className="size-5" />}
+          >
+            Correct &amp; resubmit
+          </Button>,
+          <Button
+            key="review"
+            size="lg"
+            variant="secondary"
+            onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
+            leadingIcon={<Icon name="warning" className="size-5" />}
+          >
+            Signature refusal — awaiting resolution
+          </Button>,
+        );
+      }
+    } else {
+      /*
+       * A SIGNED JOB CARD, WAITING TO BE ISSUED.
+       *
+       * THE FINAL SUBMISSION IS THE MASTER'S — `jobs.issueFinal`, §3.1 and
+       * §15 — and only a Master is offered it. Everyone else on the job gets
+       * the way IN to the job card and nothing that claims to submit it:
+       *
+       * - The TECHNICIAN is not stranded. Acceptance testing found exactly
+       *   that: a technician who had taken the signature was left with no
+       *   action at all on their own job, because the read-only rule written
+       *   for REFUSED cards was being applied to signed ones too. They have
+       *   handed the job over, so they may look at what they handed over.
+       * - The COORDINATOR does NOT get a generic "Review & submit job card".
+       *   She is the office for a REFUSAL and nothing more; a normal signed
+       *   job card is submitted by a Master. The button used to read Review &
+       *   submit for her, and the server then refused the submission it had
+       *   just offered.
+       */
+      const isSubmitter = can(currentUser.role, 'jobs.issueFinal');
       actions.push(
         <Button
-          key="correct"
+          key="review"
           size="lg"
-          onClick={onCompleteJob}
-          leadingIcon={<Icon name="wrench" className="size-5" />}
+          variant={isSubmitter ? 'primary' : 'secondary'}
+          onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
+          leadingIcon={<Icon name="document" className="size-5" />}
         >
-          Correct &amp; resubmit
+          {isSubmitter ? 'Review & submit job card' : 'View job card — with the office'}
         </Button>,
       );
     }
-
-    actions.push(
-      <Button
-        key="review"
-        size="lg"
-        variant={awaitingResolution ? 'secondary' : 'primary'}
-        onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
-        leadingIcon={<Icon name={awaitingResolution ? 'warning' : 'document'} className="size-5" />}
-      >
-        {awaitingResolution
-          ? 'Signature refusal — awaiting resolution'
-          : 'Review & submit job card'}
-      </Button>,
-    );
   }
 
   /*

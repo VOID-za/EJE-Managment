@@ -1649,8 +1649,10 @@ export const returnToCustomerSignature = async (
  * still has to issue the paperwork — which is exactly the document that records
  * the refusal rather than a signature. See the refusal block on the job card.
  *
- * It does not move the job: the status is `review` before and after. All it
- * clears is the condition that was holding the job card back.
+ * IT ENDS THE JOB. `review -> closed`, in one act: the unsigned document is
+ * rendered and stored, the refusal is marked resolved and the job is closed.
+ * There is no signature step after this and no review step after this, which is
+ * the confirmed rule — see the transition block below.
  */
 export const resolveSignatureRefusal = async (
   context: OperationContext,

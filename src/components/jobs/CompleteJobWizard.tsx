@@ -34,6 +34,18 @@ import { formatDate } from '@/lib/format';
 
 type StepId = 'completion' | 'checklist' | 'review' | 'collection' | 'signature' | 'issued';
 
+/** The completion write-up, in the order the customer's job card prints it. */
+const WRITE_UP_FIELDS: readonly {
+  readonly key: keyof Job['completionReport'];
+  readonly label: string;
+}[] = [
+  { key: 'faultFindings', label: 'Fault findings' },
+  { key: 'diagnosis', label: 'Diagnosis' },
+  { key: 'workPerformed', label: 'Work performed' },
+  { key: 'recommendations', label: 'Recommendations' },
+  { key: 'generalNotes', label: 'General notes' },
+];
+
 interface Step {
   readonly id: StepId;
   readonly title: string;
@@ -106,10 +118,9 @@ export const CompleteJobWizard = ({
     all.push({
       id: 'review',
       title: 'Review',
-      blurb:
-        correcting
-          ? 'The corrected job card, exactly as the customer will see it. Send it back for signature when it is right.'
-          : 'The job card exactly as the customer will receive it. Check it before they sign.',
+      blurb: correcting
+        ? 'Everything on the corrected job card, in summary. Send it back for signature when it is right.'
+        : 'Everything captured on this job, in summary. Check it before the customer signs.',
     });
     // The office corrects and hands back. It does not take the signature, and
     // it does not decide who collects — the technician at the counter does.
@@ -482,18 +493,19 @@ export const CompleteJobWizard = ({
         />
       )}
 
-      {step.id === 'review' && (
-        <Card className="mb-5">
-          <CardHeader
-            title="The job card"
-            description="Rendered by the same generator that produces the issued document, so this is the document itself rather than a drawing of it. Go back and correct anything before the customer signs."
-          />
-          <div className="mt-4">
-            <JobCardPdfPreview view={view} />
-          </div>
-        </Card>
-      )}
+      {/*
+        NO DOCUMENT PREVIEW ON THIS STEP. MASTER SCOPE REV-1.
 
+        The Review step is a VERIFICATION screen: everything captured on the
+        job, laid out so the technician can check it at a glance and go back
+        and fix what is wrong. A full PDF rendered into an iframe answers a
+        different question — what the paper looks like — and on a tablet it
+        buried the summary under a document nobody reads at that moment.
+
+        The document itself is NOT gone, and neither is the generator: the
+        SIGNED step still shows the real PDF, which is the one place it is
+        actually wanted, and every issued copy is produced exactly as before.
+      */}
       {step.id === 'review' && (
         <Card>
           <CardHeader
@@ -534,14 +546,25 @@ export const CompleteJobWizard = ({
             ))}
           </dl>
 
-          <div className="mt-5 border-t border-steel-100 pt-4">
-            <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
-              Work performed
-            </p>
-            <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-steel-800">
-              {job.completionReport.workPerformed}
-            </p>
-          </div>
+          {/*
+            The write-up as the document will carry it: only the fields that
+            were actually filled in, in the order they are printed. An empty
+            optional field is not shown here for the same reason it is not
+            printed there — a heading with nothing under it reads as something
+            forgotten rather than something that did not apply (DOC-1).
+          */}
+          {WRITE_UP_FIELDS.filter(
+            (field) => job.completionReport[field.key].trim().length > 0,
+          ).map((field) => (
+            <div key={field.key} className="mt-5 border-t border-steel-100 pt-4">
+              <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                {field.label}
+              </p>
+              <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-steel-800">
+                {job.completionReport[field.key]}
+              </p>
+            </div>
+          ))}
 
           {/* Captured work is listed only where there IS any: an empty section
               explaining what could have been captured is furniture on a review
@@ -549,8 +572,12 @@ export const CompleteJobWizard = ({
           {job.labour.length > 0 && (
             <ReviewLines
               title="Labour"
-              lines={job.labour.map(
-                (entry) => `${entry.hours.toFixed(2)} hrs — ${entry.description || 'No description'}`,
+              lines={job.labour.map((entry) =>
+                // The description is no longer captured per line (LAB-1); a
+                // historical line that carries one still shows it.
+                entry.description.length > 0
+                  ? `${entry.hours.toFixed(2)} hrs — ${entry.description}`
+                  : `${entry.hours.toFixed(2)} hrs`,
               )}
             />
           )}
@@ -570,6 +597,9 @@ export const CompleteJobWizard = ({
               )}
             />
           )}
+          {/* Only when it is being charged. Its absence is the default and
+              says nothing worth a line on a summary. */}
+          {job.calloutApplied && <ReviewLines title="Call-out" lines={['Charged on this job']} />}
           {job.notes.length > 0 && (
             <ReviewLines
               title="Notes"
@@ -747,8 +777,9 @@ export const CompleteJobWizard = ({
                 {labels.refusedLabel}
               </span>
               <span className="mt-0.5 block text-sm text-steel-600">
-                Tick this only if the customer would not sign. The job card is still issued, and a
-                Master resolves the refusal first.
+                Tick this only if the customer would not sign. The job card goes to the office —
+                a Master or a Coordinator — who decides what happens next. Once you record it,
+                this job is read-only for you.
               </span>
             </span>
           </label>

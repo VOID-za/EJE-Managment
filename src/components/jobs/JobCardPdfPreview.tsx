@@ -176,13 +176,32 @@ export const JobCardPdfPreview = ({
 
       {caption !== undefined && <p className="mb-2 text-sm text-steel-600">{caption}</p>}
 
-      {/* The browser's own PDF viewer. Scroll and zoom come free, and what is
-          on screen is unarguably the file rather than a re-drawing of it. */}
-      <iframe
-        title={`${view.job.jobNumber} job card preview`}
-        src={state.url}
-        className="h-[60vh] min-h-96 w-full rounded-[var(--radius-control)] border border-steel-200 bg-white"
-      />
+      {/*
+        THE FRAME IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1.
+
+        It was `h-[60vh] w-full`: a letterbox, far wider than it was tall,
+        holding a portrait A4 document. The browser's viewer fits the page to
+        whichever dimension runs out first, so on any normal screen the page
+        was shrunk to a squeezed strip with empty grey either side of it, and
+        reading it meant zooming.
+
+        So the frame is given A4's own proportions — 595.28 × 841.89 pt, the
+        page box every EJE document is written at, which is 1 : 1.4143 — and
+        the width is then capped so that box never grows taller than the
+        viewport. `aspect-ratio` sets the height from the width; `max-width`
+        set in `vh` is what stops a wide screen making it taller than the
+        screen. The result is a page at its true proportions, readable without
+        zooming, with the viewer's own scrolling for further pages.
+
+        Nothing about the DOCUMENT changed. This is the viewer, not the file.
+      */}
+      <div className="mx-auto w-full max-w-[calc(80vh*595.28/841.89)]">
+        <iframe
+          title={`${view.job.jobNumber} job card preview`}
+          src={state.url}
+          className="aspect-[595.28/841.89] w-full rounded-[var(--radius-control)] border border-steel-200 bg-white"
+        />
+      </div>
     </div>
   );
 };
