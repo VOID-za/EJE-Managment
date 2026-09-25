@@ -230,7 +230,7 @@ customer has signed, nothing on the job card may be edited by anyone, and no
 reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 
 ### CR-08 — One exception: the office may submit for a technician who cannot
-*Confirmed 25 September 2026, resolving **BD-09**. Implemented `PENDING`
+*Confirmed 25 September 2026, resolving **BD-09**. Implemented `63ca3c0`
 (see TAKEOVER-1…TAKEOVER-14).*
 
 CR-07 gave the final submission to the technician who attended the machine, and
@@ -386,20 +386,20 @@ by reading the wording.
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| TAKEOVER-1 | "Technician unavailable" = a disabled account, or a whole-day active absence covering today, for **everyone** on the job who could submit it | **DONE** | `PENDING` | `submissionCover`, `isAwayAllDayOn`; `submission-takeover.test.ts` |
-| TAKEOVER-2 | The condition is decided on the SERVER from the availability register and user records — never from a client flag | **DONE** | `PENDING` | `loadSubmissionCover`; `views.ts` computes it for the screen |
-| TAKEOVER-3 | A part-day absence does NOT unlock it | **DONE** | `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-4 | An absence on another day, a cancelled absence, or somebody else's absence does NOT unlock it | **DONE** | `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-5 | A second technician on the job who IS available keeps it shut | **DONE** | `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-6 | Master and Coordinator may take over when the condition holds; both are refused when it does not | **DONE** | `PENDING` | `submission-takeover.test.ts`; `scope-authorization.test.ts` |
-| TAKEOVER-7 | A technician may never take over — it is the office's exception | **DONE** | `PENDING` | 403 in `scope-authorization.test.ts` |
-| TAKEOVER-8 | A REFUSED job card can never be taken over; the refusal workflow is untouched and separate | **DONE** | `PENDING` | `submission-takeover.test.ts`; capability is not `jobs.resolveSignatureRefusal` |
-| TAKEOVER-9 | A takeover changes NOTHING on the signed job card — signature, write-up, labour, travel, parts, pricing all unchanged, and every edit operation still refuses | **DONE** | `947ef4f` + `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-10 | A takeover produces the IDENTICAL customer document — asserted byte for byte against a technician submission | **DONE** | `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-11 | A takeover creates the customer delivery, and the job still closes only on a confirmed delivery | **DONE** | `PENDING` | `submission-takeover.test.ts` |
-| TAKEOVER-12 | The audit records who took over, for whom and on what grounds, under its own event type | **DONE** | `PENDING` | `submission_taken_over`; `submission-takeover.test.ts` |
-| TAKEOVER-13 | The UI offers *Take over submission* — never *Review & submit* — only when the condition holds, and its dialog states that the signed card cannot be edited | **DONE** | `PENDING` | `TakeOverSubmissionDialog.tsx`; `JobActionBar.tsx` |
-| TAKEOVER-14 | Refusing the office because the technician IS available is a 422 (a condition, not yet met), while refusing a technician is a 403 (permanent) | **DONE** | `PENDING` | `takeover_not_available` vs `not_permitted`; `scope-authorization.test.ts` |
+| TAKEOVER-1 | "Technician unavailable" = a disabled account, or a whole-day active absence covering today, for **everyone** on the job who could submit it | **DONE** | `63ca3c0` | `submissionCover`, `isAwayAllDayOn`; `submission-takeover.test.ts` |
+| TAKEOVER-2 | The condition is decided on the SERVER from the availability register and user records — never from a client flag | **DONE** | `63ca3c0` | `loadSubmissionCover`; `views.ts` computes it for the screen |
+| TAKEOVER-3 | A part-day absence does NOT unlock it | **DONE** | `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-4 | An absence on another day, a cancelled absence, or somebody else's absence does NOT unlock it | **DONE** | `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-5 | A second technician on the job who IS available keeps it shut | **DONE** | `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-6 | Master and Coordinator may take over when the condition holds; both are refused when it does not | **DONE** | `63ca3c0` | `submission-takeover.test.ts`; `scope-authorization.test.ts` |
+| TAKEOVER-7 | A technician may never take over — it is the office's exception | **DONE** | `63ca3c0` | 403 in `scope-authorization.test.ts` |
+| TAKEOVER-8 | A REFUSED job card can never be taken over; the refusal workflow is untouched and separate | **DONE** | `63ca3c0` | `submission-takeover.test.ts`; capability is not `jobs.resolveSignatureRefusal` |
+| TAKEOVER-9 | A takeover changes NOTHING on the signed job card — signature, write-up, labour, travel, parts, pricing all unchanged, and every edit operation still refuses | **DONE** | `947ef4f` + `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-10 | A takeover produces the IDENTICAL customer document — asserted byte for byte against a technician submission | **DONE** | `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-11 | A takeover creates the customer delivery, and the job still closes only on a confirmed delivery | **DONE** | `63ca3c0` | `submission-takeover.test.ts` |
+| TAKEOVER-12 | The audit records who took over, for whom and on what grounds, under its own event type | **DONE** | `63ca3c0` | `submission_taken_over`; `submission-takeover.test.ts` |
+| TAKEOVER-13 | The UI offers *Take over submission* — never *Review & submit* — only when the condition holds, and its dialog states that the signed card cannot be edited | **DONE** | `63ca3c0` | `TakeOverSubmissionDialog.tsx`; `JobActionBar.tsx` |
+| TAKEOVER-14 | Refusing the office because the technician IS available is a 422 (a condition, not yet met), while refusing a technician is a 403 (permanent) | **DONE** | `63ca3c0` | `takeover_not_available` vs `not_permitted`; `scope-authorization.test.ts` |
 
 ### CR-06 — capture screen and customer document
 
