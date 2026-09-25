@@ -487,7 +487,7 @@ also matters for CR-02: an offline tablet must not depend on a renderer fetched
 from a CDN.
 
 ### CR-12 — A parts collection is counter work, raised and processed in one go
-*Confirmed 25 September 2026, resolving **BD-12**. Implemented `PENDING`
+*Confirmed 25 September 2026, resolving **BD-12**. Implemented `9c0e303`
 (see PARTS-1…PARTS-16).*
 
 A parts collection was being driven through the field-service workflow because
@@ -746,22 +746,22 @@ for every other one.*
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| PARTS-1 | A parts collection is created **at `completion`**, not `open` — no new status and no new transition; `completion` is the existing stage whose next legal move is the signature | **DONE** | `PENDING` | `job-creation.ts`; `parts-workflow.test.ts`; `parts-workflow-api.test.ts` |
-| PARTS-2 | Creating one **continues straight into its close-out**, rather than returning to the Jobs list | **DONE** | `PENDING` | `?continue=1`; `workflow-e2e.mjs` Part 23 |
-| PARTS-3 | **No technician**: a request naming one is refused, and assignment afterwards is refused too | **DONE** | `PENDING` | `assertAssignable`; `createJob`; both test files |
-| PARTS-4 | **No acceptance step** — refused to the office and to a technician alike, because there is nothing to accept | **DONE** | `PENDING` | `canAcceptJob`, `acceptJobRefusal`; 403 over HTTP |
-| PARTS-5 | **No scheduled date and no priority**: both are forced by the server whatever the request carries, and neither is asked for on the form | **DONE** | `PENDING` | `createJob`; `parts-workflow-api.test.ts` |
-| PARTS-6 | **No labour, travel or call-out fee — refused on the server**, not merely hidden on the screen | **DONE** | `PENDING` | `assertCapturesLabourAndTravel`; 422 over HTTP for all three |
-| PARTS-7 | The creation form keeps **customer, site, contact, customer order number (required), reference number, delivery note, collection details and attachments** | **DONE** | `PENDING` | `jobs/new/page.tsx`; `workflow-e2e.mjs` asserts each |
-| PARTS-8 | The close-out's first step is **Parts** — the goods, their quantities and their prices — with no completion write-up | **DONE** | `PENDING` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs`, `smoke.mjs` |
-| PARTS-9 | The steps are **Parts → Review → Collection → Collector signature → Signed**, and Review is unchanged | **DONE** | `PENDING` | `workflow-e2e.mjs` asserts the rail in order |
-| PARTS-10 | **Courier or customer is asked at the Collection step, and nowhere else** | **DONE** | `PENDING` | `setCollectionMethod`; creation forces `courierCollection: false` |
+| PARTS-1 | A parts collection is created **at `completion`**, not `open` — no new status and no new transition; `completion` is the existing stage whose next legal move is the signature | **DONE** | `9c0e303` | `job-creation.ts`; `parts-workflow.test.ts`; `parts-workflow-api.test.ts` |
+| PARTS-2 | Creating one **continues straight into its close-out**, rather than returning to the Jobs list | **DONE** | `9c0e303` | `?continue=1`; `workflow-e2e.mjs` Part 23 |
+| PARTS-3 | **No technician**: a request naming one is refused, and assignment afterwards is refused too | **DONE** | `9c0e303` | `assertAssignable`; `createJob`; both test files |
+| PARTS-4 | **No acceptance step** — refused to the office and to a technician alike, because there is nothing to accept | **DONE** | `9c0e303` | `canAcceptJob`, `acceptJobRefusal`; 403 over HTTP |
+| PARTS-5 | **No scheduled date and no priority**: both are forced by the server whatever the request carries, and neither is asked for on the form | **DONE** | `9c0e303` | `createJob`; `parts-workflow-api.test.ts` |
+| PARTS-6 | **No labour, travel or call-out fee — refused on the server**, not merely hidden on the screen | **DONE** | `9c0e303` | `assertCapturesLabourAndTravel`; 422 over HTTP for all three |
+| PARTS-7 | The creation form keeps **customer, site, contact, customer order number (required), reference number, delivery note, collection details and attachments** | **DONE** | `9c0e303` | `jobs/new/page.tsx`; `workflow-e2e.mjs` asserts each |
+| PARTS-8 | The close-out's first step is **Parts** — the goods, their quantities and their prices — with no completion write-up | **DONE** | `9c0e303` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs`, `smoke.mjs` |
+| PARTS-9 | The steps are **Parts → Review → Collection → Collector signature → Signed**, and Review is unchanged | **DONE** | `9c0e303` | `workflow-e2e.mjs` asserts the rail in order |
+| PARTS-10 | **Courier or customer is asked at the Collection step, and nowhere else** | **DONE** | `9c0e303` | `setCollectionMethod`; creation forces `courierCollection: false` |
 | PARTS-11 | The collector signs, on the collection declaration — unchanged | **DONE** | pre-existing | `parts-collection.test.ts` |
-| PARTS-12 | **Submit collection note** issues the stored document and emails the customer once, through the existing outbox | **DONE** | pre-existing + `PENDING` | `issueJobCard`; `parts-workflow.test.ts` |
-| PARTS-13 | **Submission does NOT close the job.** It moves to `awaiting_delivery`, and only a CONFIRMED delivery closes it — the same rule as SUBMIT-5, and no second closed state | **DONE** | `PENDING` | `parts-workflow.test.ts`; `workflow-e2e.mjs` |
-| PARTS-14 | Both a **Master and a Coordinator** can do all of it, alone | **DONE** | `PENDING` | `parts-workflow.test.ts`; `role-enforcement.test.ts` |
-| PARTS-15 | A **technician** can do none of it: no acceptance, no processing, no submission | **DONE** | `PENDING` | `access.test.ts`; `technician-submission.test.ts`; API refusals |
-| PARTS-16 | **Field service is unchanged.** Breakdown, Installation, Service and Test & Repair keep their schedule, priority, assignment, acceptance, labour, travel, call-out, signature, submission, delivery, refusal and takeover behaviour | **DONE** | `PENDING` | `parts-workflow.test.ts` drives a breakdown end to end; the whole existing suite is unchanged and green |
+| PARTS-12 | **Submit collection note** issues the stored document and emails the customer once, through the existing outbox | **DONE** | pre-existing + `9c0e303` | `issueJobCard`; `parts-workflow.test.ts` |
+| PARTS-13 | **Submission does NOT close the job.** It moves to `awaiting_delivery`, and only a CONFIRMED delivery closes it — the same rule as SUBMIT-5, and no second closed state | **DONE** | `9c0e303` | `parts-workflow.test.ts`; `workflow-e2e.mjs` |
+| PARTS-14 | Both a **Master and a Coordinator** can do all of it, alone | **DONE** | `9c0e303` | `parts-workflow.test.ts`; `role-enforcement.test.ts` |
+| PARTS-15 | A **technician** can do none of it: no acceptance, no processing, no submission | **DONE** | `9c0e303` | `access.test.ts`; `technician-submission.test.ts`; API refusals |
+| PARTS-16 | **Field service is unchanged.** Breakdown, Installation, Service and Test & Repair keep their schedule, priority, assignment, acceptance, labour, travel, call-out, signature, submission, delivery, refusal and takeover behaviour | **DONE** | `9c0e303` | `parts-workflow.test.ts` drives a breakdown end to end; the whole existing suite is unchanged and green |
 
 > **The document is unchanged.** A collection note still carries the customer,
 > contact, order number, reference, delivery note, the goods with quantities,
