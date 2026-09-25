@@ -161,7 +161,7 @@ The labour **field** is not removed from the record: lines captured before this
 keep what was written on them, and the document still prints it.
 
 ### CR-07 — The normal signed job card is submitted by its technician
-*Confirmed 25 September 2026. Implemented `PENDING` (see SUBMIT-1…SUBMIT-16).*
+*Confirmed 25 September 2026. Implemented `84d1802` (see SUBMIT-1…SUBMIT-16).*
 *This REVERSES a rule confirmed on 24 September 2026 and implemented in
 `d979aa9`. It is a business decision, recorded here in full so the reversal is
 legible rather than mysterious.*
@@ -259,7 +259,7 @@ reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 | REF-6 | Office may correct the **unsigned** card | **DONE** | `947ef4f` — held open deliberately by CR-01 |
 | REF-7 | Resubmit → Customer Signature | **DONE** | `returnToCustomerSignature` — corrected by REF-13 |
 | REF-8 | Resubmit → Without Customer Signature | **DONE** | `resolveSignatureRefusal` — corrected by REF-14 |
-| REF-9 | ~~Final submission/closure/delivery stays Master-controlled~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9`, reversed `PENDING` — see CR-07 |
+| REF-9 | ~~Final submission/closure/delivery stays Master-controlled~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9`, reversed `84d1802` — see CR-07 |
 | REF-10 | The refusal workflow never modifies a signed record | **DONE** | `947ef4f` |
 
 #### CR-04 — office ownership and the two outcomes
@@ -287,30 +287,30 @@ reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 | ROLE-3 | A technician is read-only on a **refused** job card, and sees no action on it at all | **DONE** | `b4e6140` + `901e579` | `workflow-role-matrix.test.ts` B; `workflow-e2e.mjs` |
 | ROLE-4 | The Coordinator gets **no** generic Review & submit on an ordinary signed job | **DONE** | `901e579` | `JobActionBar.tsx`, review page; `workflow-role-matrix.test.ts` D; `workflow-e2e.mjs` |
 | ROLE-5 | The Coordinator is **not** offered Accept on field work, and is refused it if she asks. The Parts exception is preserved | **DONE** | `901e579` | `canAcceptJob`; `job-creation-assignment.test.ts`; `workflow-e2e.mjs` |
-| ROLE-6 | ~~The final submission stays the Master's~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9` + `901e579`, reversed `PENDING` | Kept for the history. The requirement it replaced — that the screen and the server give the same answer for every role — survives unchanged as ROLE-7 and SUBMIT-8. |
+| ROLE-6 | ~~The final submission stays the Master's~~ | **SUPERSEDED by SUBMIT-1** | `d979aa9` + `901e579`, reversed `84d1802` | Kept for the history. The requirement it replaced — that the screen and the server give the same answer for every role — survives unchanged as ROLE-7 and SUBMIT-8. |
 | ROLE-7 | Every rule above is enforced in the application layer first; the UI only reflects it | **DONE** | `901e579` | every negative case in `workflow-role-matrix.test.ts` is an operation refusing, not a button missing |
 
 ### CR-07 — the technician's submission
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| SUBMIT-1 | The technician submits the signed job card; `jobs.issueFinal` is theirs | **DONE** | `PENDING` | `access.ts`; `access.test.ts`; `technician-submission.test.ts` |
-| SUBMIT-2 | The Coordinator CANNOT submit an ordinary signed job card, and nothing happens when she tries | **DONE** | `PENDING` | `technician-submission.test.ts`; `role-enforcement.test.ts`; `scope-authorization.test.ts` (403) |
-| SUBMIT-3 | The Master CANNOT either, on a job he did not attend, however senior — the capability table is no longer a seniority ladder | **DONE** | `PENDING` | same, plus `access.test.ts` |
-| SUBMIT-3a | **Whoever ATTENDED the machine submits it**, which includes a Master who accepted and worked the job himself. Anyone with `jobs.acceptField` who is ON the job may submit it; nobody may submit a job they did not attend | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts` — both the positive case and "does NOT let a Master submit a job somebody ELSE attended" |
-| SUBMIT-4 | The submission generates the customer's copy, emails it once, and moves the job to delivery-pending | **DONE** | pre-existing + `PENDING` | `issueJobCard`; `technician-submission.test.ts` |
+| SUBMIT-1 | The technician submits the signed job card; `jobs.issueFinal` is theirs | **DONE** | `84d1802` | `access.ts`; `access.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-2 | The Coordinator CANNOT submit an ordinary signed job card, and nothing happens when she tries | **DONE** | `84d1802` | `technician-submission.test.ts`; `role-enforcement.test.ts`; `scope-authorization.test.ts` (403) |
+| SUBMIT-3 | The Master CANNOT either, on a job he did not attend, however senior — the capability table is no longer a seniority ladder | **DONE** | `84d1802` | same, plus `access.test.ts` |
+| SUBMIT-3a | **Whoever ATTENDED the machine submits it**, which includes a Master who accepted and worked the job himself. Anyone with `jobs.acceptField` who is ON the job may submit it; nobody may submit a job they did not attend | **DONE** | `84d1802` | `canSubmitJobCard`; `technician-submission.test.ts` — both the positive case and "does NOT let a Master submit a job somebody ELSE attended" |
+| SUBMIT-4 | The submission generates the customer's copy, emails it once, and moves the job to delivery-pending | **DONE** | pre-existing + `84d1802` | `issueJobCard`; `technician-submission.test.ts` |
 | SUBMIT-5 | The job closes only on a CONFIRMED delivery, never on an accepted send | **DONE** | pre-existing | `delivery-handshake.test.ts` |
-| SUBMIT-6 | A signature asks the office for NOTHING: no notification, no queue, no link to a review screen | **DONE** | `PENDING` | `captureSignature`; `office-notifications.test.ts`; `technician-submission.test.ts` |
-| SUBMIT-7 | The office IS told, once, when the submission has happened and the customer has been emailed — information, not work, linked to the job | **DONE** | `PENDING` | `issueJobCard`; `office-notifications.test.ts` |
-| SUBMIT-8 | The normal journey does not route through `/jobs/:n/review`; the submission is taken in the close-out and on the job | **DONE** | `PENDING` | `SubmitJobCardDialog.tsx`; `CompleteJobWizard.tsx`; `JobActionBar.tsx`; `workflow-e2e.mjs` |
-| SUBMIT-9 | The superseded wording is gone from every screen, not hidden: no *Review & submit job card*, *With the office for submission* or *A Master makes the final submission* on an ordinary signed job | **DONE** | `PENDING` | `workflow-e2e.mjs`, `smoke.mjs` assert the exact strings are absent |
-| SUBMIT-10 | A parts collection is still issued by whoever processed it at the counter | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts`; `smoke.mjs` |
-| SUBMIT-11 | A job stranded in the retired Master Review stage can still be issued by a Master | **DONE** | `PENDING` | `canSubmitJobCard`; `technician-submission.test.ts`; `master-review.test.ts` |
-| SUBMIT-12 | Re-sending a customer's copy is open to the technician who submitted it AND to the office, because the office sees the failure | **DONE** | `PENDING` | `canResendCustomerCopy`; `delivery-handshake.test.ts`; `technician-submission.test.ts` |
-| SUBMIT-13 | Reporting a delivery outcome is gated as the outbox screen is — the office — rather than on `jobs.issueFinal` | **DONE** | `PENDING` | `/api/outbox/[messageId]/delivery` |
-| SUBMIT-14 | `jobs.submit` is retired: it guarded nothing and named a hand-over to an office review that no longer exists | **DONE** | `PENDING` | removed from `access.ts` and `access.test.ts` |
-| SUBMIT-15 | After refusal outcome A, the card rejoins the normal journey and is submitted by the technician | **DONE** | `PENDING` | `technician-submission.test.ts`; `refusal-correction.test.ts`; `workflow-e2e.mjs`, `smoke.mjs` |
-| SUBMIT-16 | Signed-job immutability is unaffected: no role may edit a signed job, and no reopen path was added | **DONE** | `947ef4f` + `PENDING` | `technician-submission.test.ts`; `signed-job-immutability.test.ts` |
+| SUBMIT-6 | A signature asks the office for NOTHING: no notification, no queue, no link to a review screen | **DONE** | `84d1802` | `captureSignature`; `office-notifications.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-7 | The office IS told, once, when the submission has happened and the customer has been emailed — information, not work, linked to the job | **DONE** | `84d1802` | `issueJobCard`; `office-notifications.test.ts` |
+| SUBMIT-8 | The normal journey does not route through `/jobs/:n/review`; the submission is taken in the close-out and on the job | **DONE** | `84d1802` | `SubmitJobCardDialog.tsx`; `CompleteJobWizard.tsx`; `JobActionBar.tsx`; `workflow-e2e.mjs` |
+| SUBMIT-9 | The superseded wording is gone from every screen, not hidden: no *Review & submit job card*, *With the office for submission* or *A Master makes the final submission* on an ordinary signed job | **DONE** | `84d1802` | `workflow-e2e.mjs`, `smoke.mjs` assert the exact strings are absent |
+| SUBMIT-10 | A parts collection is still issued by whoever processed it at the counter | **DONE** | `84d1802` | `canSubmitJobCard`; `technician-submission.test.ts`; `smoke.mjs` |
+| SUBMIT-11 | A job stranded in the retired Master Review stage can still be issued by a Master | **DONE** | `84d1802` | `canSubmitJobCard`; `technician-submission.test.ts`; `master-review.test.ts` |
+| SUBMIT-12 | Re-sending a customer's copy is open to the technician who submitted it AND to the office, because the office sees the failure | **DONE** | `84d1802` | `canResendCustomerCopy`; `delivery-handshake.test.ts`; `technician-submission.test.ts` |
+| SUBMIT-13 | Reporting a delivery outcome is gated as the outbox screen is — the office — rather than on `jobs.issueFinal` | **DONE** | `84d1802` | `/api/outbox/[messageId]/delivery` |
+| SUBMIT-14 | `jobs.submit` is retired: it guarded nothing and named a hand-over to an office review that no longer exists | **DONE** | `84d1802` | removed from `access.ts` and `access.test.ts` |
+| SUBMIT-15 | After refusal outcome A, the card rejoins the normal journey and is submitted by the technician | **DONE** | `84d1802` | `technician-submission.test.ts`; `refusal-correction.test.ts`; `workflow-e2e.mjs`, `smoke.mjs` |
+| SUBMIT-16 | Signed-job immutability is unaffected: no role may edit a signed job, and no reopen path was added | **DONE** | `947ef4f` + `84d1802` | `technician-submission.test.ts`; `signed-job-immutability.test.ts` |
 
 ### CR-06 — capture screen and customer document
 
@@ -340,7 +340,7 @@ reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 | NOTIF-1 | Coordinator receives operational notifications | **DONE** | `d979aa9` |
 | MSG-1 | "The office" is Master + Coordinator | **DONE** | `d979aa9` |
 | SEC-1 | Technicians cannot access customer correspondence | **DONE** | `d979aa9` |
-| EMAIL-1 | Only the final submission emails the customer — once, and by nothing else | **DONE** | `d979aa9`, actor corrected `PENDING` | The rule is unchanged by CR-07; only WHO makes that submission changed (the technician). |
+| EMAIL-1 | Only the final submission emails the customer — once, and by nothing else | **DONE** | `d979aa9`, actor corrected `84d1802` | The rule is unchanged by CR-07; only WHO makes that submission changed (the technician). |
 | CHK-1 | Installation/Service checklists mandatory | **DONE** | pre-existing |
 | CHK-HIST | Exact historical checklist version retrieved | **DONE** | pre-existing |
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
