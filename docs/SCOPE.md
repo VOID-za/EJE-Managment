@@ -95,7 +95,7 @@ nothing may be edited and there is no reopen path. CR-04 governs the **unsigned*
 card only.
 
 ### CR-05 — The roles are three different journeys, not one with switches
-*Confirmed 25 September 2026. Implemented `PENDING` (see ROLE-1…ROLE-6,
+*Confirmed 25 September 2026. Implemented `901e579` (see ROLE-1…ROLE-6,
 REV-1, PDF-1, WRITEUP-1, DOC-1, LAB-1, COST-CALLOUT).*
 
 A second round of VPS acceptance testing found the refusal rules leaking into
@@ -135,7 +135,7 @@ only by hiding a button.
 > that having no EDIT right is no longer treated as having no way in.
 
 ### CR-06 — Capture-screen and document corrections
-*Confirmed 25 September 2026. Implemented `PENDING`.*
+*Confirmed 25 September 2026. Implemented `901e579`.*
 
 Six changes to what is asked for and what is printed. None of them changes a
 price, a permission or a state.
@@ -197,36 +197,36 @@ keep what was written on them, and the document still prints it.
 | REF-16 | Outcome B still produces the unsigned customer document, stored and immutable | **DONE** | `b4e6140` | `renderAndStoreFinalDocument`; `refusal-document.test.ts` (12 cases) |
 | REF-17 | `customer_signature → customer_signature`, `closed → customer_signature`, `closed → review` and `closed → any editable state` are all illegal | **DONE** | `b4e6140` | `progress.test.ts` |
 | REF-18 | The seed demonstrates the refusal review from a state the application can actually produce | **DONE** | `b4e6140` | EJE-2018 seeded at `review`, not `customer_signature` |
-| REF-19 | The two outcomes are named on screen exactly as the business names them — **Customer Signature** and **Without Customer Signature** | **DONE** | `PENDING` | `SignatureRefusalPanel.tsx`; `workflow-e2e.mjs` |
-| REF-20 | A job closed without a signature says so: the document card reads *Issued without a customer signature*, never *Final signed job card* | **DONE** | `PENDING` | `FinalDocumentCard.tsx`; `workflow-e2e.mjs` |
-| REF-21 | The refusal record shows reason, recorded by, recorded at, outcome, resolved by, resolved at | **DONE** | pre-existing + `PENDING` | `SignatureRefusalPanel.tsx`; `workflow-role-matrix.test.ts` |
+| REF-19 | The two outcomes are named on screen exactly as the business names them — **Customer Signature** and **Without Customer Signature** | **DONE** | `901e579` | `SignatureRefusalPanel.tsx`; `workflow-e2e.mjs` |
+| REF-20 | A job closed without a signature says so: the document card reads *Issued without a customer signature*, never *Final signed job card* | **DONE** | `901e579` | `FinalDocumentCard.tsx`; `workflow-e2e.mjs` |
+| REF-21 | The refusal record shows reason, recorded by, recorded at, outcome, resolved by, resolved at | **DONE** | pre-existing + `901e579` | `SignatureRefusalPanel.tsx`; `workflow-role-matrix.test.ts` |
 
 ### CR-05 — the role matrix, enforced on the server and drawn on the screen
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| ROLE-1 | The technician keeps the whole normal workflow: accept, capture, write up, review, signature, hand over | **DONE** | `PENDING` | `workflow-role-matrix.test.ts` A, E |
-| ROLE-2 | A technician at Review on a **signed** job has an action and is not stranded | **DONE** | `PENDING` | `JobActionBar.tsx`; `workflow-e2e.mjs` |
-| ROLE-3 | A technician is read-only on a **refused** job card, and sees no action on it at all | **DONE** | `b4e6140` + `PENDING` | `workflow-role-matrix.test.ts` B; `workflow-e2e.mjs` |
-| ROLE-4 | The Coordinator gets **no** generic Review & submit on an ordinary signed job | **DONE** | `PENDING` | `JobActionBar.tsx`, review page; `workflow-role-matrix.test.ts` D; `workflow-e2e.mjs` |
-| ROLE-5 | The Coordinator is **not** offered Accept on field work, and is refused it if she asks. The Parts exception is preserved | **DONE** | `PENDING` | `canAcceptJob`; `job-creation-assignment.test.ts`; `workflow-e2e.mjs` |
-| ROLE-6 | The final submission stays the Master's; the screen and the server agree on that for every role | **DONE** | `d979aa9` + `PENDING` | `jobs.issueFinal`; `workflow-role-matrix.test.ts` |
-| ROLE-7 | Every rule above is enforced in the application layer first; the UI only reflects it | **DONE** | `PENDING` | every negative case in `workflow-role-matrix.test.ts` is an operation refusing, not a button missing |
+| ROLE-1 | The technician keeps the whole normal workflow: accept, capture, write up, review, signature, hand over | **DONE** | `901e579` | `workflow-role-matrix.test.ts` A, E |
+| ROLE-2 | A technician at Review on a **signed** job has an action and is not stranded | **DONE** | `901e579` | `JobActionBar.tsx`; `workflow-e2e.mjs` |
+| ROLE-3 | A technician is read-only on a **refused** job card, and sees no action on it at all | **DONE** | `b4e6140` + `901e579` | `workflow-role-matrix.test.ts` B; `workflow-e2e.mjs` |
+| ROLE-4 | The Coordinator gets **no** generic Review & submit on an ordinary signed job | **DONE** | `901e579` | `JobActionBar.tsx`, review page; `workflow-role-matrix.test.ts` D; `workflow-e2e.mjs` |
+| ROLE-5 | The Coordinator is **not** offered Accept on field work, and is refused it if she asks. The Parts exception is preserved | **DONE** | `901e579` | `canAcceptJob`; `job-creation-assignment.test.ts`; `workflow-e2e.mjs` |
+| ROLE-6 | The final submission stays the Master's; the screen and the server agree on that for every role | **DONE** | `d979aa9` + `901e579` | `jobs.issueFinal`; `workflow-role-matrix.test.ts` |
+| ROLE-7 | Every rule above is enforced in the application layer first; the UI only reflects it | **DONE** | `901e579` | every negative case in `workflow-role-matrix.test.ts` is an operation refusing, not a button missing |
 
 ### CR-06 — capture screen and customer document
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| WRITEUP-1 | The completion write-up autosaves: debounced, a ceiling for continuous typing, one write at a time, the text survives a failed save | **DONE** | `PENDING` | `src/lib/autosave.ts`; `autosave.test.ts` (11 cases); `workflow-e2e.mjs` |
-| WRITEUP-2 | Saving/saved/error is shown, and explicit *Save now* and *Discard* are both kept | **DONE** | `PENDING` | `CompletionReportPanel.tsx` |
+| WRITEUP-1 | The completion write-up autosaves: debounced, a ceiling for continuous typing, one write at a time, the text survives a failed save | **DONE** | `901e579` | `src/lib/autosave.ts`; `autosave.test.ts` (11 cases); `workflow-e2e.mjs` |
+| WRITEUP-2 | Saving/saved/error is shown, and explicit *Save now* and *Discard* are both kept | **DONE** | `901e579` | `CompletionReportPanel.tsx` |
 | WRITEUP-3 | Work performed stays mandatory before the customer signs | **DONE** | pre-existing | `checkReadyForSignature` |
-| DOC-1 | Empty write-up fields are omitted from the customer document — no empty headings, no "Not recorded" | **DONE** | `PENDING` | `write-up-sections.test.ts` (8 cases, model and PDF bytes) |
-| LAB-1 | Labour captures hours and a rate; *Description of work* is removed from the UI | **DONE** | `PENDING` | `WorkCapturePanel.tsx`; `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
-| LAB-2 | Historical labour descriptions are preserved and still printed | **DONE** | `PENDING` | `labour-and-callout.test.ts` |
-| COST-CALLOUT | The call-out fee sits under Parts, is per-job, is never inferred from the job type, and prices exactly as before | **DONE** | `PENDING` | `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
-| REV-1 | The wizard's Review step is a summary with **no** embedded PDF | **DONE** | `PENDING` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs` |
+| DOC-1 | Empty write-up fields are omitted from the customer document — no empty headings, no "Not recorded" | **DONE** | `901e579` | `write-up-sections.test.ts` (8 cases, model and PDF bytes) |
+| LAB-1 | Labour captures hours and a rate; *Description of work* is removed from the UI | **DONE** | `901e579` | `WorkCapturePanel.tsx`; `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
+| LAB-2 | Historical labour descriptions are preserved and still printed | **DONE** | `901e579` | `labour-and-callout.test.ts` |
+| COST-CALLOUT | The call-out fee sits under Parts, is per-job, is never inferred from the job type, and prices exactly as before | **DONE** | `901e579` | `labour-and-callout.test.ts`; `workflow-e2e.mjs` |
+| REV-1 | The wizard's Review step is a summary with **no** embedded PDF | **DONE** | `901e579` | `CompleteJobWizard.tsx`; `workflow-e2e.mjs` |
 | REV-2 | The final submission page keeps its presentation | **DONE** | unchanged | review page; only the card's wording for a non-submitter changed |
-| PDF-1 | The Signed step keeps the PDF preview, at A4 proportions and inside the viewport | **DONE** | `PENDING` | `JobCardPdfPreview.tsx`; `workflow-e2e.mjs` measures the frame |
+| PDF-1 | The Signed step keeps the PDF preview, at A4 proportions and inside the viewport | **DONE** | `901e579` | `JobCardPdfPreview.tsx`; `workflow-e2e.mjs` measures the frame |
 | PDF-2 | Document GENERATION is untouched by the viewer change | **DONE** | unchanged | `final-document-pixels.browser.test.ts`, `final-document-layout.test.ts` still pass |
 
 ### Roles, calendar, notifications (completed earlier — retained)
