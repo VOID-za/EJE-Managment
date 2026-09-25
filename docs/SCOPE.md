@@ -416,7 +416,7 @@ one new question the audit raised — whether a technician may issue a parts
 collection — is recorded as **BD-12** and left **OPEN**.
 
 ### CR-11 — Three defects found in tablet acceptance testing
-*Confirmed 25 September 2026. Implemented `PENDING` (see ACCEPT-1…2,
+*Confirmed 25 September 2026. Implemented `5f0ebbc` (see ACCEPT-1…2,
 CANCEL-1…6, DELETE-1…5, PDF-3…6, BROWSER-1).*
 
 Three separate faults, reported together from a tablet in the field. None of
@@ -640,26 +640,26 @@ together and tested separately. Nothing outside these rows changed.*
 
 | ID | Requirement | Status | Commit | Evidence |
 |---|---|---|---|---|
-| ACCEPT-1 | Accepting a job takes the technician to that job's own screen — `/jobs/<number>` — so the work they have just committed to is in front of them | **DONE** | `PENDING` | `AcceptJobFlow.tsx` (`finish`); `smoke.mjs` ACCEPT-1 |
-| ACCEPT-2 | Navigation follows a SUCCESSFUL acceptance and nothing else: a refused acceptance leaves the technician on the page they were on, with the refusal the flow already shows | **DONE** | `PENDING` | `AcceptJobFlow.tsx`; `smoke.mjs` ACCEPT-2 drives a real 422 from the server |
-| ACCEPT-3 | The site-location offer still comes first, because it is part of accepting; answering it is what finishes the flow, and the job opens then. Accepting from the job screen navigates nowhere — it is already there | **DONE** | `PENDING` | `smoke.mjs`, `workflow-e2e.mjs` — the offer, the decline and the queued message all unchanged |
-| CANCEL-1 | **Cancel is available only when the job is OPEN *and* has no technician assigned — neither primary nor additional.** Both halves are the rule | **DONE** | `PENDING` | `isEndableJob`, `isUnassigned` in `workflow.ts`; `end-unstarted-job.test.ts` |
-| CANCEL-2 | A **Master** may cancel such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
-| CANCEL-3 | A **Coordinator** may cancel such a job. This is new: she raises jobs, so she undoes one raised in error | **DONE** | `PENDING` | `jobs.endUnstartedJob` in `access.ts`; both test files |
-| CANCEL-4 | A **technician** may never cancel a job, in any state | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; API refusal |
-| CANCEL-5 | **Open BUT ASSIGNED is refused** — including a job assigned moments ago and not yet accepted, which is what `acceptedAt` could not see. The office is pointed at a transfer | **DONE** | `PENDING` | `end-unstarted-job.test.ts` (both the assigned-seed case and the assign-then-try case) |
-| CANCEL-6 | In progress, awaiting spares, completion, customer signature, review/signed, awaiting delivery, the retired submitted stage and closed are **all refused, to every role**, and refused by the SERVER rather than by a hidden button | **DONE** | `PENDING` | `end-unstarted-job-api.test.ts` drives each one over HTTP |
-| DELETE-1 | Delete carries exactly the same rule as CANCEL-1: the office, OPEN and UNASSIGNED | **DONE** | `PENDING` | one predicate pair, one helper — `isEndableJob` |
-| DELETE-2 | A Master may delete such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts` |
-| DELETE-3 | A Coordinator may delete such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
-| DELETE-4 | A job being worked on is refused AND pointed at cancellation, which keeps the work and the history. A signed, issued or closed job gets the plain refusal instead, because cancellation is equally refused there and would be a dead end | **DONE** | `PENDING` | `deleteJobRefusal`; `end-unstarted-job.test.ts` |
+| ACCEPT-1 | Accepting a job takes the technician to that job's own screen — `/jobs/<number>` — so the work they have just committed to is in front of them | **DONE** | `5f0ebbc` | `AcceptJobFlow.tsx` (`finish`); `smoke.mjs` ACCEPT-1 |
+| ACCEPT-2 | Navigation follows a SUCCESSFUL acceptance and nothing else: a refused acceptance leaves the technician on the page they were on, with the refusal the flow already shows | **DONE** | `5f0ebbc` | `AcceptJobFlow.tsx`; `smoke.mjs` ACCEPT-2 drives a real 422 from the server |
+| ACCEPT-3 | The site-location offer still comes first, because it is part of accepting; answering it is what finishes the flow, and the job opens then. Accepting from the job screen navigates nowhere — it is already there | **DONE** | `5f0ebbc` | `smoke.mjs`, `workflow-e2e.mjs` — the offer, the decline and the queued message all unchanged |
+| CANCEL-1 | **Cancel is available only when the job is OPEN *and* has no technician assigned — neither primary nor additional.** Both halves are the rule | **DONE** | `5f0ebbc` | `isEndableJob`, `isUnassigned` in `workflow.ts`; `end-unstarted-job.test.ts` |
+| CANCEL-2 | A **Master** may cancel such a job | **DONE** | `5f0ebbc` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
+| CANCEL-3 | A **Coordinator** may cancel such a job. This is new: she raises jobs, so she undoes one raised in error | **DONE** | `5f0ebbc` | `jobs.endUnstartedJob` in `access.ts`; both test files |
+| CANCEL-4 | A **technician** may never cancel a job, in any state | **DONE** | `5f0ebbc` | `end-unstarted-job.test.ts`; API refusal |
+| CANCEL-5 | **Open BUT ASSIGNED is refused** — including a job assigned moments ago and not yet accepted, which is what `acceptedAt` could not see. The office is pointed at a transfer | **DONE** | `5f0ebbc` | `end-unstarted-job.test.ts` (both the assigned-seed case and the assign-then-try case) |
+| CANCEL-6 | In progress, awaiting spares, completion, customer signature, review/signed, awaiting delivery, the retired submitted stage and closed are **all refused, to every role**, and refused by the SERVER rather than by a hidden button | **DONE** | `5f0ebbc` | `end-unstarted-job-api.test.ts` drives each one over HTTP |
+| DELETE-1 | Delete carries exactly the same rule as CANCEL-1: the office, OPEN and UNASSIGNED | **DONE** | `5f0ebbc` | one predicate pair, one helper — `isEndableJob` |
+| DELETE-2 | A Master may delete such a job | **DONE** | `5f0ebbc` | `end-unstarted-job.test.ts` |
+| DELETE-3 | A Coordinator may delete such a job | **DONE** | `5f0ebbc` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
+| DELETE-4 | A job being worked on is refused AND pointed at cancellation, which keeps the work and the history. A signed, issued or closed job gets the plain refusal instead, because cancellation is equally refused there and would be a dead end | **DONE** | `5f0ebbc` | `deleteJobRefusal`; `end-unstarted-job.test.ts` |
 | DELETE-5 | Deletion still destroys the job and still leaves the audit event behind it — unchanged | **DONE** | pre-existing | `job-cancel-delete.test.ts`, `jobs-api.test.ts` |
-| PDF-3 | The Signed step shows the signed document on a browser with **no built-in PDF viewer**, at A4 proportions, without leaving the page | **DONE** | `PENDING` | `canDisplayPdfInline`; `JobCardPdfPreview.tsx`; `tablet-pdf-check.mjs` |
-| PDF-4 | **The desktop preview is unchanged**: the same PDF, in the same frame, at the same measured A4 proportions | **DONE** | `PENDING` | `tablet-pdf-check.mjs` measures 565.66 × 800.0 px, ratio 1.4143 — the figure PDF-1 fixed |
-| PDF-5 | The fallback is the SAME document, not a lookalike: `JobCardDocument`/`PartsCollectionNote` and the PDF renderer are both built from `buildJobCardModel`, so content, order, labels and the signature cannot drift | **DONE** | `PENDING` | `model.ts` is the single definition; `tablet-pdf-check.mjs` asserts the job number, the company and the customer's name |
-| PDF-6 | **No dead action.** No `iframe`, `embed` or `object` is handed to a browser that cannot render one, so the browser's own "couldn't display / Open" block cannot appear; the actions offered are ones that work, and Download really downloads | **DONE** | `PENDING` | `tablet-pdf-check.mjs` — the download event is awaited, not assumed |
-| PDF-7 | The stored document still answers over HTTP as a real PDF: 200, `application/pdf`, `%PDF-`…`%%EOF`, the same bytes every time, and nothing without a session | **DONE** | `PENDING` | `signed-document-api.test.ts` |
-| BROWSER-1 | The platform limitation behind PDF-3 is **documented, detected from the browser's own capability signal, and never inferred from the user agent** | **DONE** | `PENDING` | `src/lib/pdf-support.ts`; `pdf-support.test.ts` (4 cases) |
+| PDF-3 | The Signed step shows the signed document on a browser with **no built-in PDF viewer**, at A4 proportions, without leaving the page | **DONE** | `5f0ebbc` | `canDisplayPdfInline`; `JobCardPdfPreview.tsx`; `tablet-pdf-check.mjs` |
+| PDF-4 | **The desktop preview is unchanged**: the same PDF, in the same frame, at the same measured A4 proportions | **DONE** | `5f0ebbc` | `tablet-pdf-check.mjs` measures 565.66 × 800.0 px, ratio 1.4143 — the figure PDF-1 fixed |
+| PDF-5 | The fallback is the SAME document, not a lookalike: `JobCardDocument`/`PartsCollectionNote` and the PDF renderer are both built from `buildJobCardModel`, so content, order, labels and the signature cannot drift | **DONE** | `5f0ebbc` | `model.ts` is the single definition; `tablet-pdf-check.mjs` asserts the job number, the company and the customer's name |
+| PDF-6 | **No dead action.** No `iframe`, `embed` or `object` is handed to a browser that cannot render one, so the browser's own "couldn't display / Open" block cannot appear; the actions offered are ones that work, and Download really downloads | **DONE** | `5f0ebbc` | `tablet-pdf-check.mjs` — the download event is awaited, not assumed |
+| PDF-7 | The stored document still answers over HTTP as a real PDF: 200, `application/pdf`, `%PDF-`…`%%EOF`, the same bytes every time, and nothing without a session | **DONE** | `5f0ebbc` | `signed-document-api.test.ts` |
+| BROWSER-1 | The platform limitation behind PDF-3 is **documented, detected from the browser's own capability signal, and never inferred from the user agent** | **DONE** | `5f0ebbc` | `src/lib/pdf-support.ts`; `pdf-support.test.ts` (4 cases) |
 
 > **What CR-11 deliberately did NOT touch**, and what the suites re-proved
 > afterwards: the state machine and its transitions; who may accept a job and
@@ -712,7 +712,7 @@ by reading the code and its tests during the audit, not by assumption.*
 | MOD-8 | **Outbox screen.** The office can see what was sent and what became of it. A technician cannot reach it at all — SEC-1 | **DONE** | pre-existing + `84d1802` | `/notifications?tab=outbox`; `/api/outbox` gated on `jobs.viewAll`; `smoke.mjs` |
 | MOD-9 | **Dashboard**, scoped by role: the technician sees their work, the office sees the operation | **DONE** | pre-existing | `/dashboard`; `/api/dashboard`; `smoke.mjs` |
 | MOD-10 | **Theming.** Light is the default; dark is a single control in the top bar, applied before hydration, surviving a reload, across every screen. **The job-card preview stays light, because it represents paper** | **DONE** | pre-existing | `src/lib/theme.ts`; `theme.test.ts`; `smoke.mjs` (theme section) |
-| MOD-5a | **`jobs.endUnstartedJob`** — the capability behind MOD-5, added by CR-11 so that cancelling and deleting ask a capability like everything else rather than testing for a role inline. Held by the Master and the Coordinator; never by a technician | **DONE** | `PENDING` | `access.ts`; `end-unstarted-job.test.ts` |
+| MOD-5a | **`jobs.endUnstartedJob`** — the capability behind MOD-5, added by CR-11 so that cancelling and deleting ask a capability like everything else rather than testing for a role inline. Held by the Master and the Coordinator; never by a technician | **DONE** | `5f0ebbc` | `access.ts`; `end-unstarted-job.test.ts` |
 | MOD-11 | **Administrative capture.** The office may capture completion information, and a signature, on a job it did not attend — recorded as an administrative capture, with the technician who did the work staying the technician on the job. This is NOT `jobs.acceptField` and does not make the office a field worker | **DONE** | pre-existing | `jobs.captureAdministratively` in `access.ts`; `assertCanCapture` (`job-operations.ts:147`) |
 
 > **MOD-11 is recorded, not endorsed.** The audit found it implemented and
