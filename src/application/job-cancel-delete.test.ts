@@ -148,10 +148,10 @@ describe('cancelling a job that will not happen', () => {
     harness = buildHarness();
   });
 
-  it('is a Master action', async () => {
+  it('is an office action — CR-11: the Coordinator has it too, the technician does not', async () => {
     const job = await openJob(harness);
-    expect(canCancelJob('master', job.status)).toBe(true);
-    expect(canCancelJob('technician', job.status)).toBe(false);
+    expect(canCancelJob('master', job)).toBe(true);
+    expect(canCancelJob('technician', job)).toBe(false);
 
     await expect(
       cancelJob(harness.as(sipho), job, { reason: 'customer_resolved', description: '' }),
@@ -251,7 +251,7 @@ describe('cancelling a job that will not happen', () => {
     const job = await openJob(harness);
     const accepted = await acceptJob(harness.as(sipho), job);
 
-    expect(canCancelJob('master', accepted.status)).toBe(false);
+    expect(canCancelJob('master', accepted)).toBe(false);
     await expect(
       cancelJob(harness.as(elmarie), accepted, { reason: 'customer_resolved', description: '' }),
     ).rejects.toBeInstanceOf(WorkflowError);

@@ -2787,7 +2787,7 @@ export const cancelJob = async (
   job: Job,
   input: CancellationInput,
 ): Promise<Job> => {
-  const refusal = cancelJobRefusal(context.actor.role, job.status);
+  const refusal = cancelJobRefusal(context.actor.role, job);
   if (refusal !== null) {
     throw new WorkflowError(refusal, [{ code: 'cancel_not_permitted', message: refusal }]);
   }

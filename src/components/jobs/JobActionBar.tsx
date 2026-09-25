@@ -347,9 +347,17 @@ export const JobActionBar = ({
     );
   }
 
-  // Cancel and delete are Master-only and deliberately separate: a real job
-  // that will not happen versus one that should never have existed.
-  if (canCancelJob(currentUser.role, job.status)) {
+  /*
+   * Cancel and delete are deliberately separate: a real job that will not
+   * happen versus one that should never have existed.
+   *
+   * CR-11: both are the OFFICE's — Master and Coordinator — and both are
+   * offered only while the job is OPEN AND UNASSIGNED. The predicates are the
+   * ones the operations ask, so what is drawn here and what the server will
+   * accept are the same answer; there is no second copy of the rule in this
+   * file.
+   */
+  if (canCancelJob(currentUser.role, job)) {
     actions.push(
       <Button
         key="cancel"

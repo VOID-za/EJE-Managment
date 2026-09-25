@@ -69,12 +69,15 @@ describe('what belongs in the archive', () => {
   });
 
   it('does not list a job cancelled during this session either', async () => {
-    const open = await seededJob(harness, 'EJE-1058');
+    // EJE-1066 rather than EJE-1058: CR-11 allows cancellation only while a job
+    // is Open AND UNASSIGNED, and EJE-1058 is assigned. The subject of this test
+    // is the archive, not who may cancel — `job-cancel-delete.test.ts` owns that.
+    const open = await seededJob(harness, 'EJE-1066');
     await cancelJob(harness.as(master), open, {
       reason: 'duplicate',
       description: 'Raised twice by the office.',
     });
-    expect(await jobNumbers(harness)).not.toContain('EJE-1058');
+    expect(await jobNumbers(harness)).not.toContain('EJE-1066');
   });
 
   /*

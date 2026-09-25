@@ -2138,6 +2138,43 @@ await step('another technician accepts the returned job and sees the previous wo
   await page.getByText('FUS-HRC-32').first().waitFor({ timeout: 8000 });
 });
 
+await step('ACCEPT-2: a refused acceptance leaves the technician where they are', async () => {
+  /*
+   * The other half of the rule: NAVIGATION FOLLOWS A SUCCESSFUL ACCEPTANCE AND
+   * NOTHING ELSE. The server is made to refuse the acceptance — the way it
+   * genuinely would if somebody else took the job first — and the technician
+   * must still be on the list they were standing on.
+   */
+  await page.goto(`${BASE}/jobs?status=open`, { waitUntil: 'networkidle' });
+  await page.route('**/api/jobs/*/accept', (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'workflow_refused',
+          message: 'Another technician accepted this job first.',
+          violations: [{ code: 'not_open', message: 'The job is no longer open.' }],
+        },
+      }),
+    }),
+  );
+
+  const accept = page.getByRole('button', { name: 'Accept', exact: true }).first();
+  await accept.waitFor({ timeout: 10000 });
+  await accept.click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.waitForTimeout(1200);
+
+  await page.unroute('**/api/jobs/*/accept');
+
+  if (!/\/jobs\?status=open$/.test(page.url())) {
+    throw new Error(`a refused acceptance navigated to ${page.url()}`);
+  }
+  // And nothing was accepted: the list still offers the job.
+  await page.getByRole('button', { name: 'Accept', exact: true }).first().waitFor({ timeout: 8000 });
+});
+
 await step('accepting from the Open Jobs list also offers the site location', async () => {
   await page.goto(`${BASE}/jobs?status=open`, { waitUntil: 'networkidle' });
   const acceptButton = page.getByRole('button', { name: 'Accept', exact: true }).first();
@@ -2153,6 +2190,29 @@ await step('accepting from the Open Jobs list also offers the site location', as
 
   await page.getByRole('button', { name: 'Send Location' }).click();
   await page.getByText('Site location queued', { exact: false }).waitFor({ timeout: 10000 });
+});
+
+await step('ACCEPT-1: dismissing the outcome opens the job that was just accepted', async () => {
+  /*
+   * ACCEPTING A JOB TAKES THE TECHNICIAN TO THE JOB. MASTER SCOPE ACCEPT-1.
+   *
+   * Accepted from the Open Jobs list, the acceptance succeeded, the list
+   * refreshed — and the technician was left standing on the list with the job
+   * they had just taken no longer on it, having to find it again to do any of
+   * the work they had just committed to.
+   *
+   * The site-location offer still comes first, because it is part of accepting
+   * and navigating away would unmount it mid-question. Answering it is what
+   * finishes the flow, and the job opens.
+   */
+  await page.getByRole('button', { name: 'Dismiss' }).first().click();
+  await page.waitForURL(/\/jobs\/EJE-\d+$/, { timeout: 15000 });
+
+  const url = page.url();
+  const jobNumber = url.slice(url.lastIndexOf('/') + 1);
+  await page.getByRole('heading', { name: jobNumber }).waitFor({ timeout: 10000 });
+  // The accepted job, with the work in front of the technician.
+  await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
 });
 
 await step('the site location message carries job, customer, machine, site and a map link', async () => {

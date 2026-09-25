@@ -259,7 +259,20 @@ describe('deleting a job', () => {
   it('destroys it permanently, keeps the audit event, and offers no way back', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const rows = await jobsFor(master);
-    const target = rows.find((row) => row.job.status === 'open');
+    /*
+     * OPEN AND UNASSIGNED. CR-11.
+     *
+     * It used to take the first Open job it found, and most Open jobs in the
+     * register are assigned to somebody — which is now, correctly, a refusal.
+     * The subject here is what deletion DOES, so the fixture asks for a job
+     * deletion applies to.
+     */
+    const target = rows.find(
+      (row) =>
+        row.job.status === 'open' &&
+        row.job.primaryTechnicianId === null &&
+        row.job.additionalTechnicianIds.length === 0,
+    );
     expect(target).toBeDefined();
     const jobNumber = target?.job.jobNumber ?? '';
 
@@ -303,7 +316,14 @@ describe('deleting a job', () => {
   it('has no endpoint that reads a deleted job', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const rows = await jobsFor(master);
-    const jobNumber = rows.find((row) => row.job.status === 'open')?.job.jobNumber ?? '';
+    // Open AND unassigned — the only kind CR-11 lets anyone delete.
+    const jobNumber =
+      rows.find(
+        (row) =>
+          row.job.status === 'open' &&
+          row.job.primaryTechnicianId === null &&
+          row.job.additionalTechnicianIds.length === 0,
+      )?.job.jobNumber ?? '';
 
     await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'Duplicate.' });
 

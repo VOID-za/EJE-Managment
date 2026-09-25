@@ -118,6 +118,23 @@ export type Capability =
    */
   | 'jobs.processParts'
   /**
+   * CANCEL OR DELETE A JOB THAT HAS NOT STARTED. CR-11.
+   *
+   * The office's, both of them — a Master and a Coordinator raise jobs, so
+   * they are the people who undo one raised in error or one the customer has
+   * called off. It is deliberately NOT the technician's: a job they may be
+   * assigned is not theirs to remove.
+   *
+   * IT IS NOT ON ITS OWN A RIGHT TO CANCEL ANYTHING. `canCancelJob` and
+   * `canDeleteJob` pair it with the state of the job, which is the other half
+   * of the rule: OPEN, and with nobody's name on it. A job already given to a
+   * technician is transferred, not deleted behind their back.
+   *
+   * This replaces `role === 'master'` written inline in both predicates —
+   * which was the reason a Coordinator was never offered either action.
+   */
+  | 'jobs.endUnstartedJob'
+  /**
    * Capture completion information on someone else's job, for administration.
    *
    * Recorded as an administrative capture, never as field execution: the
@@ -184,6 +201,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.resubmitForSignature',
   'jobs.processParts',
   'jobs.captureAdministratively',
+  'jobs.endUnstartedJob',
   'customers.view',
   'customers.manage',
   'machines.manage',
@@ -229,6 +247,7 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'jobs.resubmitForSignature',
   'jobs.processParts',
   'jobs.captureAdministratively',
+  'jobs.endUnstartedJob',
   'customers.view',
   'customers.manage',
   'machines.manage',

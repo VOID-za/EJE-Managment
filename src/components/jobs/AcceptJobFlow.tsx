@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { can, getJobTypeDefinition, type Job } from '@/domain';
 import { buildSiteLocationMessage } from '@/application/job-operations';
@@ -39,6 +40,8 @@ export const AcceptJobFlow = ({
 }) => {
   const currentUser = useCurrentUser();
   const operation = useOperation();
+  const router = useRouter();
+  const pathname = usePathname();
   const [locationPrompt, setLocationPrompt] = useState<Job | null>(null);
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationOutcome, setLocationOutcome] = useState<string | null>(null);
@@ -50,6 +53,34 @@ export const AcceptJobFlow = ({
    * technician to accept a job they have already accepted.
    */
   const [accepted, setAccepted] = useState(false);
+
+  /*
+   * ACCEPTING A JOB TAKES THE TECHNICIAN TO THE JOB. ACCEPT-1.
+   *
+   * Accepted from the Open Jobs list, the acceptance succeeded and the list
+   * refreshed — and the technician was left standing on the list, with the job
+   * they had just taken no longer on it. They then had to find it again to do
+   * any of the work they had just committed to.
+   *
+   * Called at every exit from the flow rather than the moment the API returns,
+   * because the site-location offer is part of accepting and navigating away
+   * would unmount it mid-question. The offer is answered, and then the job
+   * opens.
+   *
+   * NOTHING HAPPENS IF THE ACCEPTANCE FAILED. `finish` is only reached from a
+   * successful acceptance; a refusal calls `onClose` directly and leaves the
+   * technician where they are, with the error the flow already shows.
+   *
+   * On the job screen this is a no-op: the destination is the page already
+   * being looked at, and pushing it would scroll the technician back to the top
+   * of the job they are standing on.
+   */
+  const target = `/jobs/${jobNumber}`;
+  const finish = (): void => {
+    setAccepted(false);
+    onClose();
+    if (pathname !== target) router.push(target);
+  };
 
   // The caller may already hold the view (the job screen does); the Open Jobs
   // list does not, so it is loaded here rather than by every row.
@@ -78,8 +109,7 @@ export const AcceptJobFlow = ({
 
   const dismissOutcome = (): void => {
     setLocationOutcome(null);
-    setAccepted(false);
-    onClose();
+    finish();
   };
 
   return (
@@ -151,8 +181,7 @@ export const AcceptJobFlow = ({
             setLocationOutcome(null);
             setLocationPrompt(acceptedJob);
           } else {
-            setAccepted(false);
-            onClose();
+            finish();
           }
         }}
         onCancel={onClose}
@@ -163,8 +192,7 @@ export const AcceptJobFlow = ({
         title="Send Site Location?"
         onClose={() => {
           setLocationPrompt(null);
-          setAccepted(false);
-          onClose();
+          finish();
         }}
         size="sm"
         footer={
@@ -186,9 +214,8 @@ export const AcceptJobFlow = ({
                   // as a failure on a job that is already accepted.
                 } finally {
                   setLocationBusy(false);
-                  setAccepted(false);
                   onAccepted();
-                  onClose();
+                  finish();
                 }
               }}
             >

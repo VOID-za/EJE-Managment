@@ -473,43 +473,104 @@ const hasOutstandingRefusal = (job: Pick<Job, 'signatureRefusals'>): boolean => 
 export const canResendCustomerCopy = (role: UserRole): boolean =>
   can(role, 'jobs.issueFinal') || can(role, 'jobs.viewAll');
 
+/** A job nobody is named on: no primary technician and no additional ones. */
+export type AssignableJob = Pick<Job, 'primaryTechnicianId' | 'additionalTechnicianIds'>;
+
+export const isUnassigned = (job: AssignableJob): boolean =>
+  job.primaryTechnicianId === null && job.additionalTechnicianIds.length === 0;
+
+/**
+ * A job that may still be taken out of the register altogether.
+ *
+ * OPEN AND UNASSIGNED, AND NOTHING ELSE. Both halves are the rule, and the
+ * second half is the one that was missing: an Open job with a technician's name
+ * on it has been given to somebody — they may be on their way to it, they may
+ * have been told about it by WhatsApp — so cancelling or deleting it behind
+ * their back is not an administrative tidy-up. Once it is assigned, the honest
+ * actions are to TRANSFER it or to let it run.
+ *
+ * `acceptedAt` used to carry this on its own, and it does not: acceptance is a
+ * LATER event than assignment, so a job assigned this morning and not yet
+ * accepted read as nobody's.
+ *
+ * One predicate, asked by the screen and by the operation, so a button cannot
+ * be offered that the server would refuse — and so this rule cannot be
+ * half-applied by being written down twice.
+ */
+const isEndableJob = (job: Pick<Job, 'status'> & AssignableJob): boolean =>
+  job.status === 'open' && isUnassigned(job);
+
+/** Why this job cannot be taken out of the register, whatever the actor may do. */
+const endableRefusal = (job: Pick<Job, 'status'> & AssignableJob): string | null => {
+  if (isEndableJob(job)) return null;
+  if (job.status !== 'open') {
+    return `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be cancelled or deleted. Only a job that is still Open and has not been given to anybody can be.`;
+  }
+  return 'This job has already been assigned to a technician, so it can no longer be cancelled or deleted. Transfer it instead — that keeps the job and says who it moved to.';
+};
+
 /**
  * Deletion is for an administrative mistake — a duplicate, the wrong customer,
  * a job that should never have existed. Once a technician has accepted it there
  * is real work attached, and the honest action is to CANCEL, which keeps
  * everything.
+ *
+ * *Amended 25 September 2026 (CR-11, CANCEL-1…3):* the office — Master AND
+ * Coordinator — may do this, and only while the job is Open AND unassigned. It
+ * asks a capability rather than testing for a role, like everything else in
+ * this file.
  */
-export const canDeleteJob = (role: UserRole, job: Pick<Job, 'status' | 'acceptedAt'>): boolean => {
-  if (role !== 'master') return false;
-  if (job.acceptedAt !== null) return false;
-  return job.status === 'open' || job.status === 'draft';
-};
+export const canDeleteJob = (
+  role: UserRole,
+  job: Pick<Job, 'status' | 'acceptedAt'> & AssignableJob,
+): boolean => can(role, 'jobs.endUnstartedJob') && isEndableJob(job);
+
+/** The stages where work is under way, and cancelling is the honest answer. */
+const WORK_UNDER_WAY: readonly JobStatus[] = ['in_progress', 'awaiting_spares', 'completion'];
 
 export const deleteJobRefusal = (
   role: UserRole,
-  job: Pick<Job, 'status' | 'acceptedAt'>,
+  job: Pick<Job, 'status' | 'acceptedAt'> & AssignableJob,
 ): string | null => {
   if (canDeleteJob(role, job)) return null;
-  if (role !== 'master') return 'Only a Master can delete a job.';
-  if (job.acceptedAt !== null) {
+  if (!can(role, 'jobs.endUnstartedJob')) return 'Only the office can delete a job.';
+  /*
+   * The one case with somewhere else to go, and it is said first.
+   *
+   * A job being worked on right now HAS an answer — cancel it, which keeps
+   * everything — and a message that only says "no" would send the office
+   * looking for a way round. A signed, issued or closed job has no such
+   * answer, so it gets the plain refusal below instead of being pointed at a
+   * cancellation that is equally refused.
+   */
+  if (job.acceptedAt !== null && WORK_UNDER_WAY.includes(job.status)) {
     return 'A technician has already accepted this job, so it can no longer be deleted. Cancel it instead — that keeps the work and the history.';
   }
-  return `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be deleted. Only a job that has not been started can be.`;
+  return endableRefusal(job) ?? 'This job cannot be deleted.';
 };
 
 /**
  * Cancellation is for a legitimate job that will not happen. Allowed while the
  * job is still waiting to be started; once work is under way, cancelling would
  * discard it, so that is deliberately not offered here.
+ *
+ * *Amended 25 September 2026 (CR-11, CANCEL-1…3):* as `canDeleteJob` above —
+ * the office, and Open AND unassigned. It takes the JOB now rather than the
+ * status alone, because the status alone was never the rule.
  */
-export const canCancelJob = (role: UserRole, status: JobStatus): boolean =>
-  role === 'master' && (status === 'open' || status === 'draft');
+export const canCancelJob = (
+  role: UserRole,
+  job: Pick<Job, 'status'> & AssignableJob,
+): boolean => can(role, 'jobs.endUnstartedJob') && isEndableJob(job);
 
-export const cancelJobRefusal = (role: UserRole, status: JobStatus): string | null => {
-  if (canCancelJob(role, status)) return null;
-  if (role !== 'master') return 'Only a Master can cancel a job.';
-  if (status === 'cancelled') return 'This job is already cancelled.';
-  return `A ${jobStatusLabel(status).toLowerCase()} job cannot be cancelled from here, because work has already been recorded against it.`;
+export const cancelJobRefusal = (
+  role: UserRole,
+  job: Pick<Job, 'status'> & AssignableJob,
+): string | null => {
+  if (canCancelJob(role, job)) return null;
+  if (!can(role, 'jobs.endUnstartedJob')) return 'Only the office can cancel a job.';
+  if (job.status === 'cancelled') return 'This job is already cancelled.';
+  return endableRefusal(job) ?? 'This job cannot be cancelled.';
 };
 
 /**

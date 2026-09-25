@@ -415,6 +415,77 @@ implementation look better, and no open question was closed by this work.** The
 one new question the audit raised — whether a technician may issue a parts
 collection — is recorded as **BD-12** and left **OPEN**.
 
+### CR-11 — Three defects found in tablet acceptance testing
+*Confirmed 25 September 2026. Implemented `PENDING` (see ACCEPT-1…2,
+CANCEL-1…6, DELETE-1…5, PDF-3…6, BROWSER-1).*
+
+Three separate faults, reported together from a tablet in the field. None of
+them changes the workflow, the state machine, the permissions outside their own
+subject, the generated document, the signature, or submission, delivery,
+refusal and takeover behaviour — all of which are unchanged and re-proved.
+
+**(a) Accepting a job left the technician on the list.** Accepted from Open
+Jobs, the acceptance succeeded and the list refreshed — and the technician was
+left standing on the list, with the job they had just taken no longer on it,
+having to find it again before they could do any of the work they had just
+committed to. The flow simply never navigated anywhere.
+
+**(b) Cancel and Delete were the Master's alone, and asked the wrong question
+about the job.** Two faults in one rule. `canCancelJob` and `canDeleteJob` both
+tested `role === 'master'` inline, so a Coordinator — who raises jobs — was
+never offered either action and was refused if she asked. And neither asked
+whether the job had been GIVEN to anybody: cancellation ignored assignment
+entirely, and deletion asked `acceptedAt`, which is a later event than
+assignment, so a job assigned this morning and not yet accepted read as
+nobody's and could be removed behind the technician's back.
+
+**(c) The signed PDF preview failed on the tablet.** The Signed step showed the
+document in an `<iframe>` holding a `blob:` PDF, which requires the browser to
+have a PDF viewer of its own. See **BROWSER-1**: the tablets do not have one.
+
+> **Superseded — the cancel/delete rule as at `2166ac6`:** *cancel — a Master,
+> on a job at `open` or `draft`; delete — a Master, on a job at `open` or
+> `draft` whose `acceptedAt` is null.* Replaced by CANCEL-1 and DELETE-1: THE
+> OFFICE (Master **and** Coordinator), on a job that is **OPEN and
+> UNASSIGNED**. Two things narrow with it, deliberately: a `draft` job is no
+> longer cancellable or deletable (nothing can create one — see DRAFT-1 — so
+> this removes no working path), and an **Open job with a technician's name on
+> it** is no longer removable by anybody. The honest action there is a
+> transfer, which keeps the job and says who it moved to.
+
+### BROWSER-1 — Chrome on Android has no inline PDF viewer
+*Platform limitation, established 25 September 2026 while investigating CR-11(c).
+An architectural constraint on this system, not a defect in it.*
+
+**What was found.** The Signed step never asked the server for the document at
+all: it renders the PDF in the browser from the view already on screen and puts
+the bytes in a `blob:` URL. So the failure could not be an HTTP status, a
+content type, a `Content-Disposition`, a cookie, a CSP rule or a cross-origin
+problem — there is no request. What fails is the display.
+
+**Why it fails.** Rendering a PDF inside a page needs the browser to have a PDF
+viewer built in. Desktop Chrome, Firefox and Safari do. **Chrome on Android has
+never shipped one**, and nor do the Android WebView or the in-app browsers built
+on it. Such a browser does not fail quietly: it paints its own *"couldn't
+display this PDF"* block with an **Open** button — which is the block the tablet
+showed — and that button cannot act on a `blob:` URL, because a blob exists only
+inside the page that created it and cannot be handed to another application.
+Hence a dead button, and hence one that no amount of application code could fix:
+it was never ours.
+
+**How it is detected.** `navigator.pdfViewerEnabled`, which is the browser's own
+answer about its own capability — *"the user agent supports inline display of
+PDF files"* — asked before the frame is drawn. Never inferred from the user
+agent, which cannot be trusted and would have to be maintained for ever.
+
+**The consequence for this system.** Any screen that shows a PDF inline must
+have a representation that does not depend on a viewer being present. This one
+already did: `JobCardDocument` is how the review screen has always shown the
+document, and it is built from `buildJobCardModel` — the same definition the PDF
+renderer consumes — so the two cannot drift. **No PDF library was added**, which
+also matters for CR-02: an offline tablet must not depend on a renderer fetched
+from a CDN.
+
 ---
 
 ## Requirement register
@@ -562,6 +633,41 @@ collection — is recorded as **BD-12** and left **OPEN**.
 > sent, by the submission and by nothing else — but the adapter that would send
 > it does not exist. See EMAIL-2, AUD-1, MANDATE-3.
 
+### CR-11 — acceptance, ending a job, and the signed preview on a tablet
+
+*Added 25 September 2026. Three defects from tablet acceptance testing, fixed
+together and tested separately. Nothing outside these rows changed.*
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| ACCEPT-1 | Accepting a job takes the technician to that job's own screen — `/jobs/<number>` — so the work they have just committed to is in front of them | **DONE** | `PENDING` | `AcceptJobFlow.tsx` (`finish`); `smoke.mjs` ACCEPT-1 |
+| ACCEPT-2 | Navigation follows a SUCCESSFUL acceptance and nothing else: a refused acceptance leaves the technician on the page they were on, with the refusal the flow already shows | **DONE** | `PENDING` | `AcceptJobFlow.tsx`; `smoke.mjs` ACCEPT-2 drives a real 422 from the server |
+| ACCEPT-3 | The site-location offer still comes first, because it is part of accepting; answering it is what finishes the flow, and the job opens then. Accepting from the job screen navigates nowhere — it is already there | **DONE** | `PENDING` | `smoke.mjs`, `workflow-e2e.mjs` — the offer, the decline and the queued message all unchanged |
+| CANCEL-1 | **Cancel is available only when the job is OPEN *and* has no technician assigned — neither primary nor additional.** Both halves are the rule | **DONE** | `PENDING` | `isEndableJob`, `isUnassigned` in `workflow.ts`; `end-unstarted-job.test.ts` |
+| CANCEL-2 | A **Master** may cancel such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
+| CANCEL-3 | A **Coordinator** may cancel such a job. This is new: she raises jobs, so she undoes one raised in error | **DONE** | `PENDING` | `jobs.endUnstartedJob` in `access.ts`; both test files |
+| CANCEL-4 | A **technician** may never cancel a job, in any state | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; API refusal |
+| CANCEL-5 | **Open BUT ASSIGNED is refused** — including a job assigned moments ago and not yet accepted, which is what `acceptedAt` could not see. The office is pointed at a transfer | **DONE** | `PENDING` | `end-unstarted-job.test.ts` (both the assigned-seed case and the assign-then-try case) |
+| CANCEL-6 | In progress, awaiting spares, completion, customer signature, review/signed, awaiting delivery, the retired submitted stage and closed are **all refused, to every role**, and refused by the SERVER rather than by a hidden button | **DONE** | `PENDING` | `end-unstarted-job-api.test.ts` drives each one over HTTP |
+| DELETE-1 | Delete carries exactly the same rule as CANCEL-1: the office, OPEN and UNASSIGNED | **DONE** | `PENDING` | one predicate pair, one helper — `isEndableJob` |
+| DELETE-2 | A Master may delete such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts` |
+| DELETE-3 | A Coordinator may delete such a job | **DONE** | `PENDING` | `end-unstarted-job.test.ts`; `end-unstarted-job-api.test.ts` |
+| DELETE-4 | A job being worked on is refused AND pointed at cancellation, which keeps the work and the history. A signed, issued or closed job gets the plain refusal instead, because cancellation is equally refused there and would be a dead end | **DONE** | `PENDING` | `deleteJobRefusal`; `end-unstarted-job.test.ts` |
+| DELETE-5 | Deletion still destroys the job and still leaves the audit event behind it — unchanged | **DONE** | pre-existing | `job-cancel-delete.test.ts`, `jobs-api.test.ts` |
+| PDF-3 | The Signed step shows the signed document on a browser with **no built-in PDF viewer**, at A4 proportions, without leaving the page | **DONE** | `PENDING` | `canDisplayPdfInline`; `JobCardPdfPreview.tsx`; `tablet-pdf-check.mjs` |
+| PDF-4 | **The desktop preview is unchanged**: the same PDF, in the same frame, at the same measured A4 proportions | **DONE** | `PENDING` | `tablet-pdf-check.mjs` measures 565.66 × 800.0 px, ratio 1.4143 — the figure PDF-1 fixed |
+| PDF-5 | The fallback is the SAME document, not a lookalike: `JobCardDocument`/`PartsCollectionNote` and the PDF renderer are both built from `buildJobCardModel`, so content, order, labels and the signature cannot drift | **DONE** | `PENDING` | `model.ts` is the single definition; `tablet-pdf-check.mjs` asserts the job number, the company and the customer's name |
+| PDF-6 | **No dead action.** No `iframe`, `embed` or `object` is handed to a browser that cannot render one, so the browser's own "couldn't display / Open" block cannot appear; the actions offered are ones that work, and Download really downloads | **DONE** | `PENDING` | `tablet-pdf-check.mjs` — the download event is awaited, not assumed |
+| PDF-7 | The stored document still answers over HTTP as a real PDF: 200, `application/pdf`, `%PDF-`…`%%EOF`, the same bytes every time, and nothing without a session | **DONE** | `PENDING` | `signed-document-api.test.ts` |
+| BROWSER-1 | The platform limitation behind PDF-3 is **documented, detected from the browser's own capability signal, and never inferred from the user agent** | **DONE** | `PENDING` | `src/lib/pdf-support.ts`; `pdf-support.test.ts` (4 cases) |
+
+> **What CR-11 deliberately did NOT touch**, and what the suites re-proved
+> afterwards: the state machine and its transitions; who may accept a job and
+> on what terms; the completion write-up and its autosave; labour, travel,
+> parts and the call-out; the generated PDF and its content; the signature; the
+> technician's submission; the delivery handshake; the refusal workflow and its
+> two outcomes; the CR-08 takeover; and signed-job immutability.
+
 ### CR-10 — verification record at `ca1cda7`
 
 *Added 25 September 2026. What the audit checked in the CODE, so that a later
@@ -606,6 +712,7 @@ by reading the code and its tests during the audit, not by assumption.*
 | MOD-8 | **Outbox screen.** The office can see what was sent and what became of it. A technician cannot reach it at all — SEC-1 | **DONE** | pre-existing + `84d1802` | `/notifications?tab=outbox`; `/api/outbox` gated on `jobs.viewAll`; `smoke.mjs` |
 | MOD-9 | **Dashboard**, scoped by role: the technician sees their work, the office sees the operation | **DONE** | pre-existing | `/dashboard`; `/api/dashboard`; `smoke.mjs` |
 | MOD-10 | **Theming.** Light is the default; dark is a single control in the top bar, applied before hydration, surviving a reload, across every screen. **The job-card preview stays light, because it represents paper** | **DONE** | pre-existing | `src/lib/theme.ts`; `theme.test.ts`; `smoke.mjs` (theme section) |
+| MOD-5a | **`jobs.endUnstartedJob`** — the capability behind MOD-5, added by CR-11 so that cancelling and deleting ask a capability like everything else rather than testing for a role inline. Held by the Master and the Coordinator; never by a technician | **DONE** | `PENDING` | `access.ts`; `end-unstarted-job.test.ts` |
 | MOD-11 | **Administrative capture.** The office may capture completion information, and a signature, on a job it did not attend — recorded as an administrative capture, with the technician who did the work staying the technician on the job. This is NOT `jobs.acceptField` and does not make the office a field worker | **DONE** | pre-existing | `jobs.captureAdministratively` in `access.ts`; `assertCanCapture` (`job-operations.ts:147`) |
 
 > **MOD-11 is recorded, not endorsed.** The audit found it implemented and
@@ -628,6 +735,7 @@ these is CR-09's work; the IDs exist so the fix can point at something.*
 | AUD-5 | **No CI.** Every verification gate is run by hand, so a regression can reach the VPS unnoticed | **ACCEPTANCE BLOCKER** | OPEN | ARCH-6, CR-09 Phase 2(c) |
 | AUD-6 | **No PostgreSQL-layer test for submission, delivery or takeover.** The database suite stops at creation, acceptance and immutability; CR-07 and CR-08 are proven only against the in-memory repositories | **HIGH** | OPEN | CR-09 Phase 2(a) |
 | AUD-7 | **Three status writes bypass the state machine.** `captureSignature`, `recordSignatureRefusal` and `closeOnDelivery` write the status onto the saved record directly rather than through `transition()`. All three are legal edges and each is guarded by its own preconditions, so no illegal state is reachable today — but `TRANSITIONS` is not what enforces them. **Investigate before changing** | **MEDIUM — no known defect** | OPEN | CR-09 Phase 2(b) |
+| AUD-9 | **A refused cancellation and a refused deletion come back with different HTTP status codes** — 422 and 403 — because `delete_not_permitted` is listed in `PERMISSION_CODES` and `cancel_not_permitted` is not. Both are refusals and both leave the job untouched, so nothing is unsafe; it is an inconsistency in what a client is told. Found while writing CR-11's API tests, which assert the code each route actually returns rather than flattening the difference | **LOW — no unsafe behaviour** | OPEN | `errors.ts`; `end-unstarted-job-api.test.ts` |
 | AUD-8 | **Demonstration data cannot demonstrate a takeover.** In both seeds the technician on the signed job at `review` has either no absence or a **part-day** absence today — correctly keeping the exception shut — so there is no seeded job the office may actually take over. A demonstrator must first record an all-day absence, which is what `workflow-e2e.mjs` Part 22 does. Related: `src/db/seed/jobs.ts:1145,1149` still describes EJE-2025 as *"Waiting on a Master's final submission"*, which CR-07 removed, and `finalDocument.simulated` is still `true` on a document whose bytes are real — only the email is simulated | **LOW — documentation and demo data** | OPEN | DEMO-5, CR-08 |
 
 ### CR-09 — customer delivery and production readiness (DEFINED, not implemented)

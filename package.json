@@ -29,7 +29,8 @@
     "clean": "node scripts/clean.mjs",
     "e2e": "node scripts/workflow-e2e.mjs",
     "pdf-check": "node scripts/pdf-visual-check.mjs",
-    "pdf-pixels": "vitest run --config vitest.browser.config.mts"
+    "pdf-pixels": "vitest run --config vitest.browser.config.mts",
+    "tablet-pdf-check": "node scripts/tablet-pdf-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
