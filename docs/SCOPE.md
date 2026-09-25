@@ -13,6 +13,41 @@ so the history of the decision survives.
 Statuses: **DONE** · **PARTIAL** · **NOT IMPLEMENTED** · **UNVERIFIED** ·
 **BLOCKED** · **FAIL** (implemented, but contradicts the scope).
 
+*Added 25 September 2026 by CR-10:* **DEFINED** — agreed and specified here,
+deliberately not yet built. A batch may be scoped before it is built (CR-09 is),
+and "NOT IMPLEMENTED" alone could not tell an agreed, specified batch apart from
+a gap nobody has decided about yet.
+
+### How this document is maintained
+
+| ID | Rule | Added |
+|---|---|---|
+| PROC-1 | **An implementation batch is not complete until this file is updated in the same batch.** The code and the register move together; a commit that changes behaviour without changing the requirement it implements is an incomplete batch, not a finished one | 25 Sep 2026, CR-10 |
+| PROC-2 | **Nothing is ever deleted.** A completed requirement stays, marked DONE with its evidence. A changed requirement keeps its original wording and gains a dated amendment or a **SUPERSEDED** marker beneath it. A question that implementation has overtaken stays until the business answers it | 25 Sep 2026, CR-10 (restating the rule this file has always followed) |
+| PROC-3 | **Everything gets an ID.** A new requirement, a correction, a decision, an exception, an architectural constraint or a business rule is not recorded until it carries an identifier this document can be searched by | 25 Sep 2026, CR-10 |
+| PROC-4 | **A decision is never made by implementation.** Anything the business has not answered is carried in *Open business decisions* with its options and the status **OPEN**, whatever the code currently happens to do | 25 Sep 2026, CR-10 |
+| PROC-5 | **This file describes the system as it is intended to be**, not only the work that has been done. Anything built is recorded here even if it was built before anybody wrote a requirement for it | 25 Sep 2026, CR-10 |
+
+---
+
+## Product mandate
+
+Non-negotiable properties of the delivered system. These are not features to be
+traded away in a batch; a release that does not have them is not the system EJE
+asked for.
+
+| ID | Mandate | Status | Detail |
+|---|---|---|---|
+| MANDATE-1 | **THE SYSTEM MUST BE USABLE OFFLINE.** The complete field workflow — reading the job, doing the work, capturing labour, travel, parts and photographs, writing the completion report, running the checklist and taking the customer's signature or recording their refusal — must work with no connectivity at all, and must survive the tablet being closed, locked, dropped or running out of battery. Work captured offline is not lost and is not silently overwritten when the tablet reconnects | **NOT IMPLEMENTED** | CR-02, OFF-1…OFF-13, ACC-OFF-1…ACC-OFF-12 |
+| MANDATE-2 | **THE SYSTEM MUST BE INSTALLABLE AS A TABLET APPLICATION.** It is installed to the home screen of a rugged Android tablet from the browser, launches standalone without browser furniture, reaches the camera, updates itself, and recovers after an interruption. A native Android/iOS application remains out of scope (v2.0 §26) — the installable PWA is how this is delivered | **NOT IMPLEMENTED** | CR-03, PWA-1…PWA-8, ACC-PWA-1…ACC-PWA-6 |
+| MANDATE-3 | **THE CUSTOMER MUST ACTUALLY RECEIVE THEIR DOCUMENT.** The final submission's purpose is to put the job card in the customer's hands. Until a production email adapter exists, no deployment does that — the send is simulated in every environment | **NOT IMPLEMENTED** | EMAIL-2, CR-09 Phase 1 |
+
+*Recorded 25 September 2026 by CR-10. MANDATE-1 and MANDATE-2 restate CR-02 and
+CR-03 as acceptance conditions on the product rather than as entries in a list
+of outstanding work, because the audit at `ca1cda7` found them at zero and the
+rest of the system complete enough that they are now the whole of what stands
+between this and acceptance.*
+
 ---
 
 ## Change register
@@ -299,6 +334,87 @@ whose job it was, and the grounds. The ordinary `job_submitted` is written too,
 because the job card *was* submitted; the two are told apart by type rather than
 by reading the wording.
 
+### CR-09 — Customer delivery and production readiness
+*Defined 25 September 2026, from the implementation audit at `ca1cda7`.*
+***DEFINED — NOT IMPLEMENTED. No code has been written for any phase of this.***
+
+The audit found the office and field workflow complete and enforced, and found
+two things standing between it and acceptance that are not defects in what
+exists: **the customer is never actually emailed**, and **the offline/tablet
+mandate is at zero**. CR-09 is the batch that closes the first and lays the
+foundation for the second, in four phases whose order is a dependency order, not
+a preference.
+
+**Phase 1 — the customer receives the document.**
+
+| | What | Why it is first |
+|---|---|---|
+| (a) | A **production email adapter** | Nothing else in the workflow can be accepted while the last step is simulated |
+| (b) | The **simulated adapter is kept**, for the demonstration and the tests | The demo must keep working with no mail account, exactly as WhatsApp does |
+| (c) | **Success and failure are handled honestly** — an accepted send is not a delivery, a failure is reported and retryable | The existing delivery handshake already works this way and must not be weakened |
+| (d) | **Delivery and outbox integration** — provider reports drive `awaiting_delivery → closed` | Today that transition is driven by a simulator |
+| (e) | **The production configuration is documented** | A deployment that silently falls back to simulation would be worse than one that refuses to start |
+| (f) | **BD-06 is decided and recorded BEFORE any unsigned-copy delivery is built** | It is a business decision about what EJE sends a customer who refused to sign, and it is not the implementer's to make |
+
+**Phase 2 — protect what exists.**
+
+| | What |
+|---|---|
+| (a) | **PostgreSQL-layer tests for submission, delivery and takeover.** The newest and most business-critical paths are proven only against the in-memory repositories today |
+| (b) | **Investigate the three status writes that bypass `transition()`** — in `captureSignature`, `recordSignatureRefusal` and `closeOnDelivery`. All three are legal edges today; the finding is that the state machine is not what enforces them. **Investigate before changing anything** |
+| (c) | **CI for the existing verification gates** — lint, typecheck, test, db:test, build |
+
+**Phase 3 — the PWA foundation.** Manifest, installability, service worker,
+application shell, an IndexedDB **read** cache, and tablet installation. This is
+the smallest honest step into MANDATE-2 that can be demonstrated and tested. It
+deliberately does **not** include a mutation queue.
+
+**Phase 4 — the full offline system.** Offline viewing, offline job and work
+updates, offline completion write-up, offline labour and travel, offline
+signature capture, the mutation queue, sync, conflict handling, sync-state
+indicators, recovery and retry, reconnect behaviour, offline document and media
+handling, and tablet/PWA acceptance testing.
+
+> **Phase 4 MUST be separately scoped in this document before any of it is
+> implemented.** It is the largest and riskiest work in the project, "conflict"
+> has no agreed meaning for a job card yet, and CR-02's rule that captured work
+> is never silently overwritten cannot be honoured by an implementation that
+> decides what a conflict is as it goes along.
+
+**Nothing in CR-09 changes a business rule.** CR-01 through CR-08 stand
+unaltered: the technician still submits, the office still reviews only a
+refusal, a signed job card is still immutable, and a takeover is still the
+exception it was defined as.
+
+### CR-10 — The scope records the whole system
+*Confirmed 25 September 2026. Implemented by the scope-reconciliation commit
+itself — see PROC-1…PROC-5, MANDATE-1…3, MOD-1…MOD-11, AUD-1…AUD-8, ACC-OFF-\*,
+ACC-PWA-\*, BD-12, and the dated amendments to UX-1, IDEM-2 and EMAIL-2.*
+
+A full scope-versus-implementation audit was run against `ca1cda7`. It verified
+CR-01 through CR-08 in the code rather than taking this register's word for
+them, and found three kinds of drift, none of them behavioural:
+
+1. **Whole modules are implemented and carry no requirement ID at all** — the
+   Closed Jobs archive, chat, the technical library, attachments, cancel and
+   delete, global search, the notifications inbox, the outbox screen, the
+   dashboard, theming, and the office's administrative capture. This register
+   described the change register thoroughly and the rest of the system not at
+   all, so it could not be used to answer "what is this system supposed to do".
+   They are recorded as MOD-1…MOD-11, DONE, against the evidence that already
+   exists.
+2. **Two statuses had gone stale** — UX-1 and IDEM-2 — because work done for
+   another requirement had quietly satisfied part of them. Both keep their
+   original wording and gain a dated amendment; neither is rewritten.
+3. **The audit's own findings had nowhere to live.** They are recorded as
+   AUD-1…AUD-8 so that an acceptance blocker is a tracked item with an ID rather
+   than a paragraph in a report nobody reads again.
+
+**No requirement was deleted, no status was downgraded to make the
+implementation look better, and no open question was closed by this work.** The
+one new question the audit raised — whether a technician may issue a parts
+collection — is recorded as **BD-12** and left **OPEN**.
+
 ---
 
 ## Requirement register
@@ -429,13 +545,172 @@ by reading the wording.
 | NOTIF-1 | Coordinator receives operational notifications | **DONE** | `d979aa9` |
 | MSG-1 | "The office" is Master + Coordinator | **DONE** | `d979aa9` |
 | SEC-1 | Technicians cannot access customer correspondence | **DONE** | `d979aa9` |
-| EMAIL-1 | Only the final submission emails the customer — once, and by nothing else | **DONE** | `d979aa9`, actor corrected `84d1802` | The rule is unchanged by CR-07; only WHO makes that submission changed (the technician). |
+| EMAIL-1 | Only the final submission emails the customer — once, and by nothing else | **DONE** | `d979aa9`, actor corrected `84d1802` |
 | CHK-1 | Installation/Service checklists mandatory | **DONE** | pre-existing |
 | CHK-HIST | Exact historical checklist version retrieved | **DONE** | pre-existing |
 | COST-8 | Pricing snapshots frozen | **DONE** | pre-existing |
 | TRANS-1..4 | Transfers | **DONE** | pre-existing |
 | DEMO-1..4 | Demo users, switcher, idempotent seed | **DONE** | `202e1fe`, `95e9848` |
 | DEMO-5 | Seed demonstrates the office review queue | **DONE** | `947ef4f` — EJE-2025 signed, EJE-2026 refused; EJE-2018 corrected to `review` in `b4e6140` (REF-18) |
+
+> **EMAIL-1's note, relocated 25 September 2026 (CR-10), wording unchanged:**
+> *"The rule is unchanged by CR-07; only WHO makes that submission changed (the
+> technician)."* It was written as a fifth cell in a four-column table, so it was
+> in the file but did not render. Nothing about the requirement has changed.
+>
+> **EMAIL-1 is DONE as a rule and blocked as an outcome.** Exactly one email is
+> sent, by the submission and by nothing else — but the adapter that would send
+> it does not exist. See EMAIL-2, AUD-1, MANDATE-3.
+
+### CR-10 — verification record at `ca1cda7`
+
+*Added 25 September 2026. What the audit checked in the CODE, so that a later
+reader can tell a verified DONE from an asserted one. Every statement below was
+established by reading the implementation and its tests, not by reading this
+register.*
+
+| ID | Verified behaviour | Where it is enforced |
+|---|---|---|
+| VER-1 | **The normal journey is** accept → work → completion write-up → customer signature → signed → **technician submits** → customer emailed → delivery confirmed → **closed**. No office step exists anywhere in it | `TRANSITIONS`; `canSubmitJobCard`; `performIssue`; `JobActionBar` |
+| VER-2 | **The office review exists only for a refusal.** A signed job card offers the office nothing but *View job card* | `JobActionBar` branches on `refusalAwaitingResolution`, not on status |
+| VER-3 | **The technician records a refusal and is read-only from that moment** — refused server-side, not hidden | `canEditJob` at `review` asks `jobs.editSubmittedJob`; `refusal-review-roles.test.ts` |
+| VER-4 | **Both the Master and the Coordinator are notified** of a refusal; the reason lives on the job, not in the audit detail, so one access rule governs it | `notifyOffice`; `recordSignatureRefusal` |
+| VER-5 | **Outcome A** is `review → customer_signature` and rejoins the normal journey; **Outcome B** is `review → closed` in one act, producing the stored unsigned document | `returnToCustomerSignature`; `resolveSignatureRefusal` |
+| VER-6 | **A signed job card cannot be edited by anyone**, at four layers: `isFinalized`, `assertEditable` on all sixteen mutations, the screen predicates, and seven PostgreSQL triggers raising SQLSTATE `23001`. **No reopen path exists** — `closed: []` | `0002`, `0007`; `job-repository.db.test.ts` |
+| VER-7 | **Takeover unlocks only when nobody who could submit is available** — a disabled account, or an `active`, `allDay` absence covering today — decided on the server and re-asked by the operation before it acts; it edits nothing, produces byte-identical output, and writes its own audit event | `submissionCover`; `canTakeOverSubmission`; `takeOverSubmission`; `submission-takeover.test.ts` |
+| VER-8 | **The capture screen and the document** behave as CR-06 requires: write-up autosaves (1 200 ms debounce, 5 000 ms ceiling, one write in flight, the edit survives a failure), empty sections are omitted, Work performed is mandatory, labour has no description field, the call-out sits under Parts, the wizard's Review step carries no PDF and the Signed step carries one at A4 | `src/lib/autosave.ts`; `model.ts`; `checkReadyForSignature`; `JobCardPdfPreview` |
+| VER-9 | **The Coordinator cannot accept field work but may process Parts**, and the screen and the server give the same answer | `canAcceptJob`; `acceptJobRefusal` |
+| VER-10 | **Gates at `ca1cda7`:** `npm test` **1566 passed** (95 files) · `npm run db:test` **145 passed** (11 files) · `check-routes` **28/28** · lint clean · typecheck clean · `npm run build` exit 0 · `workflow-e2e` 47 steps · `smoke` 202 checks | re-run during the audit |
+
+> **No migration is outstanding.** Migration head is `0007`, added in `947ef4f`,
+> which is an ancestor of the deployed VPS commit `83b6754`. CR-04 through CR-08
+> are application-layer only; CR-08 needed no migration because
+> `audit_events.type` is `text`.
+
+### CR-10 — modules implemented before they had a requirement ID
+
+*Added 25 September 2026. Every row below was **already built and working** at
+`ca1cda7`; what was missing was the requirement. Each is recorded against the
+implementation that exists, not against a new intention. Status was established
+by reading the code and its tests during the audit, not by assumption.*
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| MOD-1 | **Closed Jobs archive.** Closed jobs are their own screen, searchable by job number, serial number, machine number and customer order number, filterable by customer, job type, technician and closing date, and each one opens the complete historical record with its stored final document | **DONE** | pre-existing | `src/application/closed-jobs.ts`; `closed-jobs.test.ts`; `src/app/(app)/jobs/closed/page.tsx`; `smoke.mjs` (archive section) |
+| MOD-2 | **Chat.** A technician can message the office and continue the same conversation; the office is notified and can reply. A message is NOT an availability record — see AVAIL-1 | **DONE** | pre-existing | `src/application/chat-operations.ts`; `chat.test.ts`; `/messages`; `smoke.mjs` |
+| MOD-3 | **Technical library.** Documents are uploaded, versioned, approved and read; a technician reads and does not manage | **DONE** | pre-existing | `src/application/library-operations.ts`; `library-admin.test.ts`; `/library`; `library.view` / `library.manage` |
+| MOD-4 | **Job attachments.** Documents are attached to a job and downloaded through authorised endpoints, never from a public path | **DONE** | pre-existing | `attachDocument`, `readJobAttachment`; `/api/jobs/[jobId]/attachments`; filesystem storage adapter |
+| MOD-5 | **Cancel and delete.** An open job may be cancelled with a reason and stays searchable; a duplicate open job may be deleted, and the audit trail outlives it. An accepted job can no longer be deleted, only cancelled | **DONE** | pre-existing | `cancelJob`, `deleteJob`, `canDeleteJob`, `canCancelJob`; `job-cancel-delete.test.ts`; `smoke.mjs` |
+| MOD-6 | **Global search** across jobs, customers, machines and serial numbers | **DONE** | pre-existing | `src/application/search.ts`; `/search`; `smoke.mjs` |
+| MOD-7 | **Notifications inbox.** Each person sees their own notifications; a notification opens the thing it is about; a handled notification stops being outstanding | **DONE** | pre-existing + `b4e6140` | `/notifications`; `notification-repository.ts`; `fileRefusalNotifications`; `office-notifications.test.ts` |
+| MOD-8 | **Outbox screen.** The office can see what was sent and what became of it. A technician cannot reach it at all — SEC-1 | **DONE** | pre-existing + `84d1802` | `/notifications?tab=outbox`; `/api/outbox` gated on `jobs.viewAll`; `smoke.mjs` |
+| MOD-9 | **Dashboard**, scoped by role: the technician sees their work, the office sees the operation | **DONE** | pre-existing | `/dashboard`; `/api/dashboard`; `smoke.mjs` |
+| MOD-10 | **Theming.** Light is the default; dark is a single control in the top bar, applied before hydration, surviving a reload, across every screen. **The job-card preview stays light, because it represents paper** | **DONE** | pre-existing | `src/lib/theme.ts`; `theme.test.ts`; `smoke.mjs` (theme section) |
+| MOD-11 | **Administrative capture.** The office may capture completion information, and a signature, on a job it did not attend — recorded as an administrative capture, with the technician who did the work staying the technician on the job. This is NOT `jobs.acceptField` and does not make the office a field worker | **DONE** | pre-existing | `jobs.captureAdministratively` in `access.ts`; `assertCanCapture` (`job-operations.ts:147`) |
+
+> **MOD-11 is recorded, not endorsed.** The audit found it implemented and
+> undocumented. It is a real capability the office holds today; if EJE does not
+> want it, that is a change request, not a correction, and this row is what it
+> would supersede.
+
+### CR-10 — audit findings at `ca1cda7`
+
+*Added 25 September 2026. Findings from the full implementation audit, recorded
+so that a blocker is a tracked item rather than a paragraph in a report. Fixing
+these is CR-09's work; the IDs exist so the fix can point at something.*
+
+| ID | Finding | Severity | Status | Where |
+|---|---|---|---|---|
+| AUD-1 | **No production email adapter.** `src/server/runtime.ts` constructs `SimulatedEmailService` unconditionally — there is no branch, no configuration reader and no adapter. The customer is not emailed in any environment | **ACCEPTANCE BLOCKER** | OPEN | EMAIL-2, MANDATE-3, CR-09 Phase 1 |
+| AUD-2 | **Offline and PWA are at zero**: no `public/` directory, no manifest, no service worker, no IndexedDB, no mutation queue, no sync or conflict handling. `request-failure.ts` classifies a network failure as `offline` and says so, which is an error message, not offline capability | **ACCEPTANCE BLOCKER** | OPEN | CR-02, CR-03, MANDATE-1, MANDATE-2, CR-09 Phases 3–4 |
+| AUD-3 | **A signed job card with a genuine error has no remedy at any layer** | **ACCEPTANCE BLOCKER** | OPEN — **business decision BD-02** | IMMUT-9 |
+| AUD-4 | **Closing Without Customer Signature sends the customer nothing.** The document is rendered, stored and downloadable; no delivery is attempted | **ACCEPTANCE BLOCKER** | OPEN — **business decision BD-06** | REF-16, CR-09 Phase 1(f) |
+| AUD-5 | **No CI.** Every verification gate is run by hand, so a regression can reach the VPS unnoticed | **ACCEPTANCE BLOCKER** | OPEN | ARCH-6, CR-09 Phase 2(c) |
+| AUD-6 | **No PostgreSQL-layer test for submission, delivery or takeover.** The database suite stops at creation, acceptance and immutability; CR-07 and CR-08 are proven only against the in-memory repositories | **HIGH** | OPEN | CR-09 Phase 2(a) |
+| AUD-7 | **Three status writes bypass the state machine.** `captureSignature`, `recordSignatureRefusal` and `closeOnDelivery` write the status onto the saved record directly rather than through `transition()`. All three are legal edges and each is guarded by its own preconditions, so no illegal state is reachable today — but `TRANSITIONS` is not what enforces them. **Investigate before changing** | **MEDIUM — no known defect** | OPEN | CR-09 Phase 2(b) |
+| AUD-8 | **Demonstration data cannot demonstrate a takeover.** In both seeds the technician on the signed job at `review` has either no absence or a **part-day** absence today — correctly keeping the exception shut — so there is no seeded job the office may actually take over. A demonstrator must first record an all-day absence, which is what `workflow-e2e.mjs` Part 22 does. Related: `src/db/seed/jobs.ts:1145,1149` still describes EJE-2025 as *"Waiting on a Master's final submission"*, which CR-07 removed, and `finalDocument.simulated` is still `true` on a document whose bytes are real — only the email is simulated | **LOW — documentation and demo data** | OPEN | DEMO-5, CR-08 |
+
+### CR-09 — customer delivery and production readiness (DEFINED, not implemented)
+
+*Added 25 September 2026. **No code has been written for any of these.** They
+are the agreed shape of the next batch, recorded before implementation so that
+the implementation can be checked against something.*
+
+**Phase 1 — the customer receives the document**
+
+| ID | Requirement | Status |
+|---|---|---|
+| DELIV-1 | A **production email adapter** exists behind the existing `EmailService` port, selected from configuration exactly as `buildWhatsApp` selects the WhatsApp adapter | **DEFINED** |
+| DELIV-2 | The **simulated adapter is retained** and is what the demonstration and the test suites use. A deployment never silently falls back to it: an unconfigured production deployment refuses and says why, as `UnconfiguredWhatsAppService` does | **DEFINED** |
+| DELIV-3 | **An accepted send is not a delivery.** The adapter may report `pending_delivery` and nothing else until the provider says otherwise; only a confirmed delivery closes a job (SUBMIT-5 is unchanged) | **DEFINED** |
+| DELIV-4 | A **failed send is reported and retryable**, re-sending the STORED document rather than rendering a new one (SUBMIT-12 unchanged) | **DEFINED** |
+| DELIV-5 | **Provider reports drive the delivery handshake** through the existing outbox and `/api/outbox/[messageId]/delivery`, gated as it is today | **DEFINED** |
+| DELIV-6 | **The production configuration is documented** — every variable, what happens when each is absent, and how to verify a live send without sending a customer a test job card | **DEFINED** |
+| DELIV-7 | **BD-06 is answered and recorded in this document BEFORE any unsigned-copy delivery is implemented** | **DEFINED — blocked on BD-06** |
+
+**Phase 2 — protect what exists**
+
+| ID | Requirement | Status |
+|---|---|---|
+| QA-1 | PostgreSQL-layer tests for **submission**, **delivery** and **takeover**, including the audit rows each writes | **DEFINED** |
+| QA-2 | A **duplicate submission** is tested, not merely refused by a status guard (closes the untested half of IDEM-2) | **DEFINED** |
+| QA-3 | The three status writes in AUD-7 are **investigated and reported on before any change is made**. If they are left as they are, the reason is recorded here | **DEFINED** |
+| QA-4 | **CI** runs lint, typecheck, `npm test`, `npm run db:test` and `npm run build` on every push (ARCH-6) | **DEFINED** |
+
+**Phase 3 — the PWA foundation**
+
+| ID | Requirement | Status |
+|---|---|---|
+| PWA-5 | An **application shell** that renders without a network round trip | **DEFINED** |
+| PWA-6 | An **IndexedDB read cache** for the signed-in technician's assigned jobs and the reference data they need to read them | **DEFINED** |
+| PWA-7 | An **update mechanism**: a new version is picked up and applied without the tablet being reinstalled, and never mid-capture | **DEFINED** |
+| PWA-8 | **Tablet installation is documented and demonstrated** on the target rugged Android device | **DEFINED** |
+
+*PWA-1…PWA-4 already exist below and are unchanged; Phase 3 delivers PWA-1,
+PWA-2 and these four. Phase 3 deliberately contains **no** mutation queue —
+writing offline is Phase 4.*
+
+**Phase 4 — the full offline system (MUST be separately scoped first)**
+
+| ID | Requirement | Status |
+|---|---|---|
+| OFF-10 | **Offline authentication and session.** A technician who is already signed in can keep working through a shift with no connectivity, without their session silently expiring mid-job | **DEFINED** |
+| OFF-11 | **Reconnect behaviour** is defined and visible: what syncs first, what the technician sees while it happens, and what they may do during it | **DEFINED** |
+| OFF-12 | **Offline document and media handling** — what a technician may view and produce offline, and what necessarily waits for a connection | **DEFINED** |
+| OFF-13 | **Tablet/PWA acceptance testing** on the target device, covering a full job captured start to finish with the network off | **DEFINED** |
+
+> Phase 4 also delivers OFF-1…OFF-9 below. **None of it may be implemented
+> until the phase is scoped in this document**, because CR-02's promise that
+> captured work is never silently overwritten depends on an agreed definition of
+> a conflict, and there is none yet.
+
+### Offline and tablet acceptance criteria (CR-02, CR-03, CR-09, MANDATE-1, MANDATE-2)
+
+*Added 25 September 2026 by CR-10. The audit found the offline requirement
+stated as an aspiration and as a list of unimplemented rows, with nothing that
+says what "done" would look like. These are the conditions a release must meet
+to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
+
+| ID | Acceptance criterion | Satisfies |
+|---|---|---|
+| ACC-OFF-1 | With the network disabled, a signed-in technician can open the application and see their assigned jobs, including everything already captured on them | OFF-1, PWA-6 |
+| ACC-OFF-2 | With the network disabled, a technician can capture labour, travel, parts, the call-out flag, notes and photographs on a job, and see them on the job immediately | OFF-2, OFF-3 |
+| ACC-OFF-3 | With the network disabled, a technician can complete a checklist, including a failed item and its mandatory note | OFF-4 |
+| ACC-OFF-4 | With the network disabled, a technician can write the completion report, and **not one keystroke is lost** if the tablet is locked, closed or runs out of battery before it reconnects | OFF-1, MANDATE-1 |
+| ACC-OFF-5 | With the network disabled, a technician can take the customer's signature **or** record their refusal with its reason, under the same readiness rules as online (Work performed mandatory, checklist complete, waybill for a courier) | OFF-5 |
+| ACC-OFF-6 | Everything captured offline survives the browser being closed, the tablet being restarted and the battery running flat | OFF-6 |
+| ACC-OFF-7 | On reconnection, queued work is sent in the order it was captured, and a partial failure leaves the rest queued rather than lost | OFF-6, OFF-7, OFF-11 |
+| ACC-OFF-8 | The technician can always see, per job, whether their work is **synced / saved locally / syncing / waiting / action required** | OFF-8 |
+| ACC-OFF-9 | **Nothing is ever silently overwritten.** Where the server and the tablet disagree, the conflict is detected, the technician is told, and a person decides | OFF-9 |
+| ACC-OFF-10 | An upload interrupted mid-photograph resumes or retries; it never leaves a half-written attachment on a job | OFF-7 |
+| ACC-OFF-11 | **No offline path may weaken a business rule.** A signed job card is still immutable offline, a refused card is still read-only to the technician offline, and a submission still happens exactly once | CR-01, CR-04, CR-07 |
+| ACC-OFF-12 | A full job — accept, work, write-up, signature — is captured start to finish on the target tablet with the network off, and reaches `closed` correctly once it reconnects and the customer's copy is delivered | MANDATE-1 |
+| ACC-PWA-1 | The application installs to the home screen of the target rugged Android tablet from the browser, with EJE's name and icon | PWA-1 |
+| ACC-PWA-2 | Launched from the home screen it runs standalone — no address bar, no browser chrome | PWA-2 |
+| ACC-PWA-3 | The camera and gallery are reachable from the installed application for job photographs | PWA-3 |
+| ACC-PWA-4 | Closing the application mid-job and reopening it returns the technician to where they were, with nothing lost | PWA-4 |
+| ACC-PWA-5 | A new version is delivered to an installed tablet without reinstallation, and never applies itself in the middle of capture | PWA-7 |
+| ACC-PWA-6 | The interface is usable in the field: one-handed, gloved, in daylight, at the tablet's real resolution — every control a reliable tap target | UX-1, PWA-2 |
 
 ### Offline and tablet (CR-02, CR-03) — none implemented
 
@@ -455,6 +730,24 @@ by reading the wording.
 | PWA-3 | Camera / gallery access | **NOT IMPLEMENTED** |
 | PWA-4 | Recovery after interruption | **NOT IMPLEMENTED** |
 | UX-1 | Rugged-tablet touch usability | **UNVERIFIED** — no responsive or touch tests exist |
+
+> **Amended 25 September 2026 (CR-10). UX-1 is now PARTIAL, not UNVERIFIED.**
+> The original wording above is kept because it was true when it was written.
+> The audit at `ca1cda7` found that work done for other requirements has since
+> produced real evidence: `scripts/smoke.mjs` loads a job at an 820×1180 tablet
+> viewport and asserts **no horizontal overflow**, asserts every calendar bar
+> stays **at least 20px tall as a tap target**, asserts the month grid stays
+> compact and that a busy day collapses behind *+N more* rather than stretching.
+>
+> What is still absent, and why this is PARTIAL rather than DONE: **no touch
+> gesture testing, and no testing on a real rugged device.** ACC-PWA-6 is the
+> criterion that would close it.
+>
+> OFF-1…OFF-9 and PWA-1…PWA-4 above are **unchanged and remain NOT
+> IMPLEMENTED** — verified by search at `ca1cda7`, not assumed: there is no
+> `public/` directory, no manifest, no service worker and no IndexedDB
+> reference anywhere in `src/`. See AUD-2. New rows OFF-10…OFF-13 and
+> PWA-5…PWA-8 are defined under CR-09 above.
 
 ### Remaining workflow and data gaps
 
@@ -477,9 +770,48 @@ by reading the wording.
 | IDEM-2 | Duplicate acceptance / submission tested | **PARTIAL** — mechanism present, untested |
 | ARCH-6 | CI pipeline | **NOT IMPLEMENTED** |
 
+> **Amendments of 25 September 2026 (CR-10), from the audit at `ca1cda7`. The
+> rows above keep their original wording; these are corrections to what is
+> known about them, not rewrites of what was asked for.**
+>
+> - **IDEM-2** — "PARTIAL: mechanism present, untested" **understates what is
+>   tested**. Replay under one idempotency key IS tested, at the API layer
+>   (`job-workflow-api.test.ts:269`) and against real PostgreSQL
+>   (`http-api.db.test.ts:272,295`, including that the idempotency record
+>   commits in the same transaction as the change). What is **not** tested is a
+>   duplicate **submission** — `performIssue`'s status guard refuses it, and
+>   nothing asserts that. IDEM-2 stays **PARTIAL** for that reason alone.
+>   QA-2 closes it.
+> - **EMAIL-2** — "NOT IMPLEMENTED — simulated only" is **confirmed and is now
+>   an acceptance blocker**, not a gap. `runtime.ts` constructs
+>   `SimulatedEmailService` unconditionally: there is no Microsoft Graph
+>   adapter, no configuration reader and no branch. See AUD-1, MANDATE-3, and
+>   CR-09 Phase 1, which is the batch that implements it.
+> - **MEDIA-1** — confirmed by reading the schema: `job_media` (migration
+>   `0000`, line 246) has no customer-facing/internal column. MEDIA-2 is
+>   correctly BLOCKED behind it.
+> - **DRAFT-1** — confirmed NOT IMPLEMENTED: `job-creation.ts:316` always
+>   creates at `open`. **Noted inconsistency:** the browser demonstration seed
+>   nevertheless contains a `draft` job, which is a state the application cannot
+>   produce. Recorded under AUD-8's family of demo-data findings.
+> - **AUDIT-2** — confirmed PARTIAL: `audit_events.metadata` is a `jsonb`
+>   column that exists and is not used for structured before/after values. The
+>   trail is narrative.
+> - **ARCH-6** — confirmed NOT IMPLEMENTED; it is AUD-5, an acceptance blocker,
+>   and QA-4 in CR-09 Phase 2.
+
 ---
 
 ## Open business decisions
+
+*Every question here is **OPEN** unless its row says otherwise, and remains open
+until EJE answers it — PROC-4. Implementation never closes one of these by
+proceeding; where the code already behaves one way, that is the current
+behaviour, not the decision. Answered questions stay, struck through, with the
+answer and its date.*
+
+**Open at 25 September 2026:** BD-02, BD-03, BD-04, BD-05, BD-06, BD-08, BD-10,
+BD-11, BD-12. **Answered and retained:** BD-07 (by CR-05), BD-09 (by CR-08).
 
 | ID | Question | Blocks |
 |---|---|---|
@@ -492,6 +824,7 @@ by reading the wording.
 | **BD-08** | Should a technician be able to see that a colleague is *editing* a job card they handed over, or is "with the office" enough? Raised by CR-05(a): the technician now has a way back INTO a signed job card and may find it changed under them. | cosmetic |
 | **BD-09** | ~~**There is no office fallback for a signed job whose technician cannot submit it.**~~ **RESOLVED 25 September 2026 by CR-08.** EJE chose the second option: the office may submit on the technician's behalf, audited against both, and ONLY when the technician is provably unavailable — a disabled account, or a whole-day absence on the availability register. It is an explicit exceptional action labelled *Take over submission*, it does not go through the office review workflow, and it cannot edit the signed job card. Held as TAKEOVER-1…14. | resolved |
 | **BD-11** | **A technician who is present but cannot reach the system** — a lost, broken or flat tablet — is not modelled anywhere, so CR-08's condition cannot see it. Today the office's remedy is to put an absence on the calendar, which is deliberate and audited but describes the situation loosely. Is that acceptable, or should there be an explicit "cannot submit" state a Master can set on a job with its own reason? | TAKEOVER-1 |
+| **BD-12** | **MAY A TECHNICIAN ISSUE A PARTS COLLECTION?** Raised by the audit at `ca1cda7`, and **not decided here.** `jobs.processParts` is held by the Master, the Coordinator **and the technician**, so a technician can today accept a parts job and issue its collection note — while the prose of CR-05, CR-07 and SUBMIT-10 consistently describes a parts collection as counter work the OFFICE processes ("handed over at the EJE counter, not on a customer's site"). One of the two is wrong, and which one is a business question, not an implementation detail. **Current behaviour: a technician may.** Options: **(a)** confirm it — a technician at the counter is exactly who hands the goods over, and the prose is amended to say "whoever is at the counter"; **(b)** remove `jobs.processParts` from `TECHNICIAN_CAPABILITIES`, making parts strictly office work, which also removes a technician's ability to accept a parts job; **(c)** split the capability so a technician may process a collection they prepared but not one they did not | ROLE-5, SUBMIT-10, MOD-11 |
 | **BD-10** | The `review` STATUS keeps its name although it is no longer an office review — it is where a signed job card waits for its own technician to submit it, and where a refused one waits for the office. Renaming it would touch stored history and would misdescribe the refusal case, so it was left; the rail therefore still reads *Review* between Customer Signature and Closed. Rename, or accept? | cosmetic |
 
 ---
