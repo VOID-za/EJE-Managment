@@ -26,9 +26,12 @@ import {
   workAttribution,
   transferJobRefusal,
   transferReasonLabel,
+  availabilityTypeLabel,
   canEditJob,
   canResendCustomerCopy,
   canSubmitJobCard,
+  canTakeOverSubmission,
+  submissionCover,
   finalizedRefusal,
   labourRateLabel,
   siteAddressLine,
@@ -53,10 +56,13 @@ import {
   type RefusalResolution,
   type SignatureRefusal,
   type TransferReason,
+  type SubmissionCover,
   type User,
+  type UserRole,
   type DeliveryRecord,
   type UserId,
 } from '@/domain';
+import { businessDateOf } from '@/lib/business-time';
 import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
@@ -2077,6 +2083,26 @@ export const issueJobCard = async (
     ]);
   }
 
+  return performIssue(context, job, customerEmail, customerDisplayName);
+};
+
+/**
+ * Issuing, once WHO has been settled.
+ *
+ * Split out so the CR-08 takeover can run the identical path after its OWN
+ * authorisation — which is a different question with a different answer — and
+ * the customer therefore receives the same document either way. Nothing else
+ * about issuing is duplicated or reimplemented anywhere.
+ *
+ * It is deliberately not exported: every caller must pass an authorisation
+ * gate of its own first.
+ */
+const performIssue = async (
+  context: OperationContext,
+  job: Job,
+  customerEmail: string,
+  customerDisplayName: string,
+): Promise<SubmitResult> => {
   if (job.status !== 'review' && job.status !== 'submitted') {
     throw new WorkflowError(`${job.jobNumber} is not ready to be issued.`, [
       {
@@ -2398,6 +2424,153 @@ export const retryJobCardDelivery = async (
     throw new WorkflowError(`${job.jobNumber} is not awaiting delivery.`, []);
   }
   return sendFinalDocument(context, job, customerDisplayName);
+};
+
+/**
+ * Reads who is on this job and whether any of them can submit it. CR-08.
+ *
+ * Server-side, from the availability register and the user records, so the
+ * question is answered from what the office actually maintains rather than
+ * from anything a browser said.
+ */
+export const loadSubmissionCover = async (
+  context: OperationContext,
+  job: Job,
+): Promise<SubmissionCover> => {
+  const today = businessDateOf(context.services.clock.now()) ?? '';
+  const [people, absences] = await Promise.all([
+    context.repos.users.list(),
+    // Only today's absences: the rule asks about today and nothing else.
+    context.repos.availability.list(today, today),
+  ]);
+  return submissionCover(job, people, absences, today);
+};
+
+/**
+ * THE OFFICE SUBMITS A SIGNED JOB CARD FOR A TECHNICIAN WHO CANNOT. CR-08.
+ *
+ * The exception BD-09 asked for, and nothing more than the exception. A job
+ * the customer has signed is finished work: the document is decided, the
+ * record is immutable, and the only thing left is to send it. When the person
+ * whose job it is has left EJE or is away for the day, that last step had
+ * nobody who could take it, and the customer's copy sat unsent.
+ *
+ * WHAT THIS IS NOT:
+ *
+ *  - It is NOT a submission right. `canTakeOverSubmission` unlocks only when
+ *    the office can show, from the register, that nobody who could submit it
+ *    is available. On an ordinary signed job it is closed, and the office is
+ *    offered nothing — CR-07 is untouched.
+ *  - It is NOT the refusal review. A refused job card is refused here
+ *    outright: it has its own workflow, its own two outcomes, and merging them
+ *    would put the office review back into the signed journey.
+ *  - It is NOT an edit. The job is signed, so `isFinalized` is already true
+ *    and every mutation is already refused. This changes nothing on the
+ *    record except the fact of its submission.
+ *
+ * It runs `issueJobCard`'s own path, so the customer receives the identical
+ * document the technician would have sent — same renderer, same frozen
+ * pricing, same signature, same file name.
+ */
+export const takeOverSubmission = async (
+  context: OperationContext,
+  job: Job,
+  customerEmail: string,
+  customerDisplayName: string,
+): Promise<SubmitResult> => {
+  const cover = await loadSubmissionCover(context, job);
+
+  if (!canTakeOverSubmission(context.actor.role, job, cover)) {
+    /*
+     * TWO DIFFERENT REFUSALS, AND THE CODES TELL THEM APART.
+     *
+     * Somebody without the capability is refused permanently — no change to
+     * the job or the calendar will ever make it true for them — and that is a
+     * 403. The office asking while the technician is at their desk is a
+     * CONDITION that is simply not met today, and that is a 422: the same
+     * request is legitimate the moment the register says otherwise. Collapsing
+     * the two would tell a Coordinator she is forbidden from something she is
+     * in fact entitled to do tomorrow.
+     */
+    const permanent = !can(context.actor.role, 'jobs.takeOverSubmission');
+    throw new WorkflowError(`${job.jobNumber} cannot be taken over by you.`, [
+      {
+        code: permanent ? 'not_permitted' : 'takeover_not_available',
+        message: takeoverRefusal(context.actor.role, job),
+      },
+    ]);
+  }
+
+  /*
+   * Recorded BEFORE the submission, and as its own event type.
+   *
+   * `issueJobCard` writes the ordinary `job_submitted` afterwards, which is
+   * true — the job card was submitted — and this says the part that ordinary
+   * event cannot: that the office did it, for whom, and on what grounds. A
+   * trail that cannot tell the two apart is a trail that hides an exception.
+   */
+  await audit(context, {
+    jobId: job.id,
+    type: 'submission_taken_over',
+    summary: 'Office took over the submission',
+    detail:
+      `${userFullName(context.actor)} submitted the signed job card for ${job.jobNumber} ` +
+      `on behalf of ${await namesOf(context, coveredPeople(job))}, because ` +
+      `${describeCover(cover)}. Nothing on the signed job card was changed.`,
+  });
+
+  /*
+   * The SAME issue path the technician would have run, after this operation's
+   * own gate. Not `issueJobCard`, which would ask `canSubmitJobCard` again and
+   * refuse the office — correctly, because on an ordinary signed job it must.
+   */
+  return performIssue(context, job, customerEmail, customerDisplayName);
+};
+
+/** Everyone the job names, for the audit line. */
+const coveredPeople = (job: Job): readonly UserId[] =>
+  [job.primaryTechnicianId, ...job.additionalTechnicianIds].filter(
+    (id): id is UserId => id !== null,
+  );
+
+const namesOf = async (context: OperationContext, ids: readonly UserId[]): Promise<string> => {
+  if (ids.length === 0) return 'the technician on the job';
+  const people = await context.repos.users.list();
+  const names = ids
+    .map((id) => people.find((person) => person.id === id))
+    .filter((person): person is User => person !== undefined)
+    .map((person) => userFullName(person));
+  return names.length === 0 ? 'the technician on the job' : names.join(' and ');
+};
+
+/** The grounds, in the words the audit trail should carry. */
+const describeCover = (cover: SubmissionCover): string => {
+  if (cover.unassigned) return 'the job names nobody who could submit it';
+  const reasons = cover.blocked.map((block) =>
+    block.kind === 'account_disabled'
+      ? 'their account is disabled'
+      : `they are on ${availabilityTypeLabel(block.absence).toLowerCase()} from ${block.from} to ${block.to}`,
+  );
+  return reasons.length === 0 ? 'nobody was available to submit it' : reasons.join('; ');
+};
+
+/** Why the takeover was refused, in a sentence the office can act on. */
+const takeoverRefusal = (role: UserRole, job: Job): string => {
+  if (!can(role, 'jobs.takeOverSubmission')) {
+    return 'Only the office can take over a submission.';
+  }
+  if (job.signature === null) {
+    return outstandingRefusal(job) === null
+      ? 'This job card has not been signed, so there is no submission to take over.'
+      : 'The customer refused to sign this job card. Resolve the refusal instead — a takeover is for a SIGNED job card whose technician cannot submit it.';
+  }
+  if (outstandingRefusal(job) !== null) {
+    return 'This job card has an outstanding refusal to resolve first.';
+  }
+  if (job.status !== 'review') {
+    return `${job.jobNumber} is not a signed job card waiting to be submitted.`;
+  }
+  return 'The technician on this job is available to submit it themselves. A takeover is only for a technician who has left or is away for the day.';
 };
 
 /**

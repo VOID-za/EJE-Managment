@@ -49,6 +49,9 @@ describe('the Coordinator', () => {
     'jobs.create',
     'jobs.assign',
     'jobs.captureWork',
+    // CR-08: the exceptional takeover. Not a submission right — it unlocks
+    // only when the people who could submit the job are provably unavailable.
+    'jobs.takeOverSubmission',
     'jobs.processParts',
     'jobs.captureAdministratively',
     'customers.view',
@@ -102,6 +105,9 @@ describe('the technician', () => {
     'jobs.viewAll',
     'jobs.create',
     'jobs.assign',
+    // The CR-08 takeover is the OFFICE's exception. No calendar entry and no
+    // amount of seniority in the field makes it a technician's.
+    'jobs.takeOverSubmission',
     'jobs.captureAdministratively',
     'customers.manage',
     'machines.manage',

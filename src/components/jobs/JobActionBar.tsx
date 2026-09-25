@@ -8,11 +8,13 @@ import {
   canCancelJob,
   canDeleteJob,
   canSubmitJobCard,
+  canTakeOverSubmission,
   canTransferJob,
   checkReadyForSignature,
   checkReadyForSubmission,
   refusalAwaitingResolution,
 } from '@/domain';
+import type { SubmissionCover, User } from '@/domain';
 import type { JobView } from '@/application/job-view';
 import { Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
 import { jobs } from '@/api/endpoints';
@@ -21,6 +23,7 @@ import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { AcceptJobFlow } from './AcceptJobFlow';
 import { SubmitJobCardDialog, submissionBlocker } from './SubmitJobCardDialog';
+import { TakeOverSubmissionDialog } from './TakeOverSubmissionDialog';
 import { CancelJobDialog } from './CancelJobDialog';
 import { TransferJobDialog } from './TransferJobDialog';
 
@@ -31,10 +34,21 @@ import { TransferJobDialog } from './TransferJobDialog';
  */
 export const JobActionBar = ({
   view,
+  cover,
+  users,
   onChanged,
   onCompleteJob,
 }: {
   readonly view: JobView;
+  /**
+   * Who could submit this job card today, decided on the SERVER. CR-08.
+   *
+   * Passed in rather than worked out here: the availability register is not
+   * the browser's to interpret, and the operation asks the same question again
+   * before it acts.
+   */
+  readonly cover: SubmissionCover;
+  readonly users: readonly User[];
   readonly onChanged: () => void;
   /** Opens the guided close-out. The job screen owns the wizard. */
   readonly onCompleteJob: () => void;
@@ -49,6 +63,7 @@ export const JobActionBar = ({
   const [confirmResume, setConfirmResume] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [takingOver, setTakingOver] = useState(false);
   const [ending, setEnding] = useState<'cancel' | 'delete' | null>(null);
 
   const signatureReadiness = checkReadyForSignature(job);
@@ -231,6 +246,29 @@ export const JobActionBar = ({
         );
       }
 
+      /*
+       * THE EXCEPTIONAL TAKEOVER. MASTER SCOPE CR-08.
+       *
+       * Not a submission button in office clothing. It appears only when the
+       * server has said, from the availability register, that nobody who could
+       * submit this job card is here to do it — so on an ordinary signed job
+       * the office sees nothing, which is CR-07 untouched. It is labelled for
+       * what it is, and its dialog says the signed card cannot be edited.
+       */
+      if (canTakeOverSubmission(currentUser.role, job, cover)) {
+        actions.push(
+          <Button
+            key="take-over"
+            size="lg"
+            variant="secondary"
+            onClick={() => setTakingOver(true)}
+            leadingIcon={<Icon name="warning" className="size-5" />}
+          >
+            Take over submission
+          </Button>,
+        );
+      }
+
       // The document itself, for whoever is looking — including the office,
       // who may read a signed job card without having anything to do to it.
       actions.push(
@@ -369,6 +407,17 @@ export const JobActionBar = ({
         view={view}
         open={submitting}
         onClose={() => setSubmitting(false)}
+        onSubmitted={onChanged}
+      />
+
+      {/* The CR-08 exception, with its own wording: a takeover is not a
+          submission, and the two must never read as though they were. */}
+      <TakeOverSubmissionDialog
+        view={view}
+        cover={cover}
+        users={users}
+        open={takingOver}
+        onClose={() => setTakingOver(false)}
         onSubmitted={onChanged}
       />
 

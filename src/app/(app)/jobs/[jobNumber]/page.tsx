@@ -10,6 +10,7 @@ import {
   signatureExceptionLabel,
   userFullName,
   type ActivityEvent,
+  type SubmissionCover,
   type User,
 } from '@/domain';
 import { isNotFound } from '@/api/client';
@@ -109,6 +110,18 @@ const JobDetailPage = ({
 
   const { job } = view;
   const users: readonly User[] = supportQuery.data?.users ?? [];
+  /*
+   * Who could submit this job card today, as the SERVER decided it. CR-08.
+   *
+   * Defaulted to "somebody is available" while the screen is still loading, so
+   * a takeover can never be offered on a half-loaded page. The operation asks
+   * the same question again regardless.
+   */
+  const submissionCover: SubmissionCover = supportQuery.data?.submissionCover ?? {
+    available: [],
+    blocked: [],
+    unassigned: false,
+  };
   // Already scoped to this job and to this viewer by `loadJobActivity`.
   const activity: readonly ActivityEvent[] = supportQuery.data?.activity ?? [];
 
@@ -290,7 +303,13 @@ const JobDetailPage = ({
           }
         />
         <div className="mt-4 border-t border-steel-100 pt-4">
-          <JobActionBar view={view} onChanged={refresh} onCompleteJob={() => setCompleting(true)} />
+          <JobActionBar
+            view={view}
+            cover={submissionCover}
+            users={users}
+            onChanged={refresh}
+            onCompleteJob={() => setCompleting(true)}
+          />
         </div>
       </Card>
 

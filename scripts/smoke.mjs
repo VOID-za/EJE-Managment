@@ -2410,9 +2410,14 @@ await step('a contact nothing refers to is deleted outright', async () => {
   await page.getByRole('button', { name: 'Remove' }).last().click();
   await page.getByText('has been deleted', { exact: false }).first().waitFor({ timeout: 10000 });
   // Scoped to the list: the outcome banner names the contact too, and matching
-  // that would report a deletion that never happened.
-  const listed = await page.locator('li').filter({ hasText: 'Thandi Ngwenya' }).count();
-  if (listed !== 0) throw new Error('the deleted contact is still listed');
+  // that would report a deletion that never happened. Waited for rather than
+  // counted once, because the list re-fetches after the banner appears.
+  const rows = page.locator('li').filter({ hasText: 'Thandi Ngwenya' });
+  try {
+    await rows.first().waitFor({ state: 'detached', timeout: 10000 });
+  } catch {
+    throw new Error('the deleted contact is still listed');
+  }
 });
 
 await step('a contact a job has named is kept, not destroyed', async () => {
@@ -2966,6 +2971,10 @@ await step('the same closed job is reached from the customer and the machine his
 
   await page.goto(`${BASE}/machines/machine-abc-lv40`, { waitUntil: 'networkidle' });
   const fromMachine = page.getByRole('row').filter({ hasText: 'EJE-1044' });
+  // Waited for before it is COUNTED, exactly as the customer half above does.
+  // Counting a list that has not rendered yet reads zero and reports a missing
+  // row, which is a timing artefact rather than a finding.
+  await fromMachine.first().waitFor({ timeout: 10000 });
   if (await fromMachine.count() !== 1) {
     throw new Error('the machine history holds no single EJE-1044 row');
   }

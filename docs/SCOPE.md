@@ -229,6 +229,76 @@ a breakdown and then refused the last step of the job he had just done.*
 customer has signed, nothing on the job card may be edited by anyone, and no
 reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 
+### CR-08 — One exception: the office may submit for a technician who cannot
+*Confirmed 25 September 2026, resolving **BD-09**. Implemented `PENDING`
+(see TAKEOVER-1…TAKEOVER-14).*
+
+CR-07 gave the final submission to the technician who attended the machine, and
+raised BD-09 in the same breath: a job the customer had **already signed**,
+whose technician then left EJE or went on leave, had nobody who could send the
+customer their copy. It sat finished and unsent. This is the rescue for that,
+and nothing else.
+
+**The normal journey is unchanged.** Accept → work → write-up → customer
+signature → signed → **technician submits** → customer emailed → delivery
+confirmed → closed. On an ordinary signed job the office is offered nothing and
+is refused if it asks. CR-07 stands in full.
+
+**What "technician unavailable" means — exactly, from data the office already
+maintains.** Nobody on the job who could submit it is available, where a person
+is unavailable when either:
+
+| | Condition | Source |
+|---|---|---|
+| **(a)** | Their **account is disabled** (`User.active === false`) | the user record — they have left EJE, or access was revoked |
+| **(b)** | A **whole-day absence covering today** stands on the availability register | `AvailabilityRecord`: `status === 'active'`, `allDay`, `startDate ≤ today ≤ endDate` |
+
+Three things make this safe to hang a permission on:
+
+- **Only a Master writes an availability record.** The type's own docblock says
+  so: *"A technician telling the office they have an appointment is a MESSAGE,
+  not an availability record — the office decides what goes on the calendar."*
+  It is an authoritative, audited act, not a self-service flag.
+- **ALL-DAY ONLY.** A part-day absence — the two-hour appointment the data
+  models separately with `startTime`/`endTime` — means the technician is at
+  work today and will pick the job up. It is not grounds for the office to take
+  their submission away from them.
+- **EVERYONE on the job is asked, not only the primary.** If a second
+  technician who attended is at work, the job is not stuck and the exception
+  stays shut.
+
+**What it deliberately does NOT model.** A technician who is at work but cannot
+reach the system — a lost or broken tablet. There is no record of that anywhere
+in the data, and inventing a flag for it would be exactly the vague client-side
+condition the rule exists to avoid. The office's remedy is to put the absence on
+the calendar, which is a deliberate, audited act by a Master. *Raised as
+**BD-11**.*
+
+**What a takeover is not.**
+
+- **Not a submission right.** It unlocks only on the condition above, decided
+  server-side. The screen is told the answer; the operation asks the same
+  question again from the same data before it acts.
+- **Not the refusal review.** A refused job card is refused outright — it has
+  its own workflow, its own two outcomes and its own review, and merging them
+  would put the office review back into the signed journey by another name.
+  CR-04 and CR-05 are untouched.
+- **Not an edit.** The job is signed, so CR-01 has already made it immutable and
+  every mutation is already refused. A takeover sends the document that exists
+  and changes nothing else.
+- **Not a different document.** It runs the same issue path, so the customer
+  receives byte-for-byte the document the technician would have sent.
+
+**It is its own capability**, `jobs.takeOverSubmission`, held by Master and
+Coordinator — deliberately not `jobs.resolveSignatureRefusal` (that is the
+refusal) and deliberately not a loosening of `jobs.issueFinal` (that is the
+technician's).
+
+**It is its own audit event**, `submission_taken_over`, recording who took over,
+whose job it was, and the grounds. The ordinary `job_submitted` is written too,
+because the job card *was* submitted; the two are told apart by type rather than
+by reading the wording.
+
 ---
 
 ## Requirement register
@@ -311,6 +381,25 @@ reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 | SUBMIT-14 | `jobs.submit` is retired: it guarded nothing and named a hand-over to an office review that no longer exists | **DONE** | `84d1802` | removed from `access.ts` and `access.test.ts` |
 | SUBMIT-15 | After refusal outcome A, the card rejoins the normal journey and is submitted by the technician | **DONE** | `84d1802` | `technician-submission.test.ts`; `refusal-correction.test.ts`; `workflow-e2e.mjs`, `smoke.mjs` |
 | SUBMIT-16 | Signed-job immutability is unaffected: no role may edit a signed job, and no reopen path was added | **DONE** | `947ef4f` + `84d1802` | `technician-submission.test.ts`; `signed-job-immutability.test.ts` |
+
+### CR-08 — the exceptional takeover
+
+| ID | Requirement | Status | Commit | Evidence |
+|---|---|---|---|---|
+| TAKEOVER-1 | "Technician unavailable" = a disabled account, or a whole-day active absence covering today, for **everyone** on the job who could submit it | **DONE** | `PENDING` | `submissionCover`, `isAwayAllDayOn`; `submission-takeover.test.ts` |
+| TAKEOVER-2 | The condition is decided on the SERVER from the availability register and user records — never from a client flag | **DONE** | `PENDING` | `loadSubmissionCover`; `views.ts` computes it for the screen |
+| TAKEOVER-3 | A part-day absence does NOT unlock it | **DONE** | `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-4 | An absence on another day, a cancelled absence, or somebody else's absence does NOT unlock it | **DONE** | `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-5 | A second technician on the job who IS available keeps it shut | **DONE** | `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-6 | Master and Coordinator may take over when the condition holds; both are refused when it does not | **DONE** | `PENDING` | `submission-takeover.test.ts`; `scope-authorization.test.ts` |
+| TAKEOVER-7 | A technician may never take over — it is the office's exception | **DONE** | `PENDING` | 403 in `scope-authorization.test.ts` |
+| TAKEOVER-8 | A REFUSED job card can never be taken over; the refusal workflow is untouched and separate | **DONE** | `PENDING` | `submission-takeover.test.ts`; capability is not `jobs.resolveSignatureRefusal` |
+| TAKEOVER-9 | A takeover changes NOTHING on the signed job card — signature, write-up, labour, travel, parts, pricing all unchanged, and every edit operation still refuses | **DONE** | `947ef4f` + `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-10 | A takeover produces the IDENTICAL customer document — asserted byte for byte against a technician submission | **DONE** | `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-11 | A takeover creates the customer delivery, and the job still closes only on a confirmed delivery | **DONE** | `PENDING` | `submission-takeover.test.ts` |
+| TAKEOVER-12 | The audit records who took over, for whom and on what grounds, under its own event type | **DONE** | `PENDING` | `submission_taken_over`; `submission-takeover.test.ts` |
+| TAKEOVER-13 | The UI offers *Take over submission* — never *Review & submit* — only when the condition holds, and its dialog states that the signed card cannot be edited | **DONE** | `PENDING` | `TakeOverSubmissionDialog.tsx`; `JobActionBar.tsx` |
+| TAKEOVER-14 | Refusing the office because the technician IS available is a 422 (a condition, not yet met), while refusing a technician is a 403 (permanent) | **DONE** | `PENDING` | `takeover_not_available` vs `not_permitted`; `scope-authorization.test.ts` |
 
 ### CR-06 — capture screen and customer document
 
@@ -401,7 +490,8 @@ reopen path exists. CR-07 changes WHO SUBMITS, not what may be changed.
 | **BD-06** | Outcome B closes the job without **emailing** the unsigned copy to the customer. The old route emailed, because it went through `issueJobCard`; §15 puts customer delivery after the final **Master** submission, and outcome B is open to a Coordinator. Should closing without a signature send the customer their copy, and if so, under whose authority? The document is rendered, stored and downloadable either way. | REF-16 |
 | **BD-07** | ~~After outcome A returns the card to `customer_signature`, **who** captures the signature?~~ **ANSWERED 25 September 2026 by CR-05(a).** The read-only rule is about a REFUSED job card, not about the technician. Once outcome A returns the card to the signature step there is no outstanding refusal, so the ordinary signature workflow resumes and the technician captures it exactly as they would have the first time. Held as ROLE-1 and proved end to end in `workflow-e2e.mjs`. | closed |
 | **BD-08** | Should a technician be able to see that a colleague is *editing* a job card they handed over, or is "with the office" enough? Raised by CR-05(a): the technician now has a way back INTO a signed job card and may find it changed under them. | cosmetic |
-| **BD-09** | **There is no office fallback for a signed job whose technician cannot submit it.** CR-07 gives `jobs.issueFinal` to the technician alone, so a job signed by somebody who then goes on leave, leaves EJE or loses their device sits signed and unsubmitted with nobody able to send the customer their copy. Options: leave it (the technician submits on their return), let a Master submit on their behalf with the act audited against both, or let the office transfer a signed job to another technician. Raised at implementation; no answer assumed. | SUBMIT-1 |
+| **BD-09** | ~~**There is no office fallback for a signed job whose technician cannot submit it.**~~ **RESOLVED 25 September 2026 by CR-08.** EJE chose the second option: the office may submit on the technician's behalf, audited against both, and ONLY when the technician is provably unavailable — a disabled account, or a whole-day absence on the availability register. It is an explicit exceptional action labelled *Take over submission*, it does not go through the office review workflow, and it cannot edit the signed job card. Held as TAKEOVER-1…14. | resolved |
+| **BD-11** | **A technician who is present but cannot reach the system** — a lost, broken or flat tablet — is not modelled anywhere, so CR-08's condition cannot see it. Today the office's remedy is to put an absence on the calendar, which is deliberate and audited but describes the situation loosely. Is that acceptable, or should there be an explicit "cannot submit" state a Master can set on a job with its own reason? | TAKEOVER-1 |
 | **BD-10** | The `review` STATUS keeps its name although it is no longer an office review — it is where a signed job card waits for its own technician to submit it, and where a refused one waits for the office. Renaming it would touch stored history and would misdescribe the refusal case, so it was left; the rail therefore still reads *Review* between Customer Signature and Closed. Rename, or accept? | cosmetic |
 
 ---

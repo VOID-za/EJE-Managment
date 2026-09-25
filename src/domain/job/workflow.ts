@@ -1,3 +1,6 @@
+import type { IsoDate, UserId } from '../types/common';
+import type { AvailabilityRecord, AvailabilityType } from '../types/availability';
+import { isBlockingAvailability } from '../types/availability';
 import type { Job, JobStatus } from '../types/job';
 import type { User, UserRole } from '../types/user';
 import { can } from '../access';
@@ -302,6 +305,158 @@ export const canSubmitJobCard = (
    * all, because she cannot be on one.
    */
   return can(actor.role, 'jobs.acceptField') && isAssignedTo(job, actor.id);
+};
+
+/* -------------------------------------------------------------------------- *
+ * THE EXCEPTIONAL TAKEOVER. MASTER SCOPE CR-08, resolving BD-09.
+ * -------------------------------------------------------------------------- */
+
+/** Why one person who could otherwise submit this job card cannot. */
+export type SubmissionBlock =
+  /** Their account has been disabled: they have left, or access was revoked. */
+  | { readonly kind: 'account_disabled'; readonly userId: UserId }
+  /** The office put a whole-day absence on the calendar covering today. */
+  | {
+      readonly kind: 'away';
+      readonly userId: UserId;
+      readonly absence: AvailabilityType;
+      readonly from: IsoDate;
+      readonly to: IsoDate;
+    };
+
+export interface SubmissionCover {
+  /** People on the job who could submit it, and are here to do it. */
+  readonly available: readonly UserId[];
+  /** People on the job who could submit it, and cannot. */
+  readonly blocked: readonly SubmissionBlock[];
+  /** True when the job names nobody who could submit it at all. */
+  readonly unassigned: boolean;
+}
+
+/**
+ * A whole-day absence, on the calendar, covering this day.
+ *
+ * ALL-DAY ONLY, and that is the business rule rather than an implementation
+ * convenience. A part-day record — the two-hour appointment the data models
+ * separately with `startTime`/`endTime` — means the technician is at work
+ * today and will pick the job up; it is not a reason for the office to take
+ * their submission away from them. A whole day is.
+ *
+ * Cancelled records are ignored, because `isBlockingAvailability` says a
+ * cancelled absence stops blocking, and this must agree with the calendar the
+ * office is looking at.
+ */
+export const isAwayAllDayOn = (record: AvailabilityRecord, day: IsoDate): boolean =>
+  isBlockingAvailability(record) &&
+  record.allDay &&
+  record.startDate <= day &&
+  day <= record.endDate;
+
+/**
+ * WHO COULD SUBMIT THIS SIGNED JOB CARD TODAY, AND WHO CANNOT. CR-08.
+ *
+ * The whole of "the technician is unavailable", decided here, from data the
+ * office already maintains:
+ *
+ *  - `User.active` — a disabled account. They have left EJE or their access
+ *    was revoked, which is permanent and unambiguous.
+ *  - The AVAILABILITY REGISTER — a whole-day absence covering today. Only a
+ *    Master writes those, and the docblock on `AvailabilityRecord` says so:
+ *    "A technician telling the office they have an appointment is a MESSAGE,
+ *    not an availability record — the office decides what goes on the
+ *    calendar." That is what makes it safe to hang a permission on.
+ *
+ * It asks about EVERYONE on the job who could submit it, not only the primary:
+ * if a second technician who attended is at work, the job is not stuck and
+ * there is nothing to rescue.
+ *
+ * WHAT IT DELIBERATELY DOES NOT MODEL is a technician who is at work but
+ * cannot reach the system — a lost or broken tablet. There is no record of
+ * that anywhere in the data, and inventing a flag for it would be exactly the
+ * vague client-side condition this function exists to avoid. The office's
+ * remedy there is to put the absence on the calendar, which is a deliberate,
+ * audited act by a Master.
+ */
+export const submissionCover = (
+  job: Pick<Job, 'status' | 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
+  people: readonly User[],
+  absences: readonly AvailabilityRecord[],
+  today: IsoDate,
+): SubmissionCover => {
+  const onTheJob = people.filter(
+    (person) =>
+      isAssignedTo(job, person.id) && canSubmitJobCard(person, { ...job, status: 'review' }),
+  );
+
+  if (onTheJob.length === 0) {
+    return { available: [], blocked: [], unassigned: true };
+  }
+
+  const available: UserId[] = [];
+  const blocked: SubmissionBlock[] = [];
+
+  for (const person of onTheJob) {
+    if (!person.active) {
+      blocked.push({ kind: 'account_disabled', userId: person.id });
+      continue;
+    }
+    const away = absences.find(
+      (record) => record.userId === person.id && isAwayAllDayOn(record, today),
+    );
+    if (away !== undefined) {
+      blocked.push({
+        kind: 'away',
+        userId: person.id,
+        absence: away.type,
+        from: away.startDate,
+        to: away.endDate,
+      });
+      continue;
+    }
+    available.push(person.id);
+  }
+
+  return { available, blocked, unassigned: false };
+};
+
+/** Nobody who could submit this job card is here to do it. */
+export const isSubmissionUncovered = (cover: SubmissionCover): boolean =>
+  cover.available.length === 0;
+
+/**
+ * Whether this person may take the submission over. CR-08.
+ *
+ * FOUR THINGS AT ONCE, and every one of them is required:
+ *
+ *  1. They hold `jobs.takeOverSubmission` — the office, and nobody else.
+ *  2. The job is SIGNED. A refused job card is not eligible and never will be:
+ *     it has its own workflow, its own two outcomes and its own review, and
+ *     merging the two would put the office review back into the signed journey
+ *     by another name.
+ *  3. The job is at `review`, which is where a signed, unsubmitted job card
+ *     waits. Not closed, not already issued, not in the retired stage.
+ *  4. Nobody who could submit it is available.
+ *
+ * It grants no editing of any kind. The job is signed, so `isFinalized` is
+ * already true and every mutation is already refused; a takeover submits the
+ * document the technician would have submitted and does nothing else.
+ */
+export const canTakeOverSubmission = (
+  role: UserRole,
+  job: Pick<Job, 'status' | 'signature' | 'signatureRefusals'>,
+  cover: SubmissionCover,
+): boolean => {
+  if (!can(role, 'jobs.takeOverSubmission')) return false;
+  if (job.signature === null) return false;
+  if (job.status !== 'review') return false;
+  if (hasOutstandingRefusal(job)) return false;
+  return isSubmissionUncovered(cover);
+};
+
+/** An outstanding refusal, asked without importing the refusal module. */
+const hasOutstandingRefusal = (job: Pick<Job, 'signatureRefusals'>): boolean => {
+  const latest = job.signatureRefusals.at(-1);
+  return latest !== undefined && latest.resolvedAt === null;
 };
 
 /**

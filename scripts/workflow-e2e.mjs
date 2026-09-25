@@ -847,6 +847,140 @@ await step('and nothing about EJE-1066 offers a signature step afterwards', asyn
   }
 });
 
+/*
+ * ── PART 22: THE EXCEPTIONAL TAKEOVER ────────────────────────────────────────
+ *
+ * Master Scope CR-08, resolving BD-09. CR-07 made the submission the
+ * technician's, which left a signed job card whose technician then went on
+ * leave with nobody able to send the customer their copy. The office may
+ * rescue exactly that, and only that.
+ *
+ * The negative half is asserted throughout Part 19 — on an ordinary signed job
+ * neither the Master nor the Coordinator is offered anything. This is the
+ * positive half, driven the way the office would actually do it: put the
+ * absence on the calendar, then take the submission over.
+ */
+await step('a technician signs EJE-1058 and leaves it unsubmitted', async () => {
+  await signInAs('Technician', 'Lerato Dlamini', /Hello, Lerato/);
+  await visit('/jobs/EJE-1058');
+
+  await page.getByRole('button', { name: 'Accept job' }).click();
+  await page.getByRole('button', { name: 'Accept and start' }).click();
+  await page.getByRole('button', { name: 'No, Thanks' }).click({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 20000 });
+  await page.getByLabel(/Work performed/).fill('Replaced the drive belt and re-tensioned it.');
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
+
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await page.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByText('Normal Time').first().waitFor({ timeout: 15000 });
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Ready for the customer').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByText('Step 3 of', { exact: false }).waitFor({ timeout: 20000 });
+
+  await page.getByLabel('Customer name').fill('Annelie');
+  await page.getByLabel('Customer surname').fill('Botha');
+  await drawSignature();
+  await page.getByRole('button', { name: 'Confirm signature' }).click();
+  await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 30000 });
+
+  // Walks away without submitting — which is the whole premise.
+  await page.getByRole('button', { name: 'Leave the wizard' }).click();
+  await page.getByRole('button', { name: 'Submit job card' }).waitFor({ timeout: 20000 });
+});
+
+await step('while that technician is at work, the office is offered NO takeover', async () => {
+  for (const [label, who, greeting] of [
+    ['Coordinator', 'Christene van Niekerk', /Christene/],
+    ['Master', 'Elmarie Coetzee', /Good day, Elmarie/],
+  ]) {
+    await signInAs(label, who, greeting);
+    await visit('/jobs/EJE-1058');
+    await page.getByRole('button', { name: 'View job card' }).waitFor({ timeout: 20000 });
+    for (const name of ['Take over submission', 'Submit job card', 'Review & submit job card']) {
+      if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
+        throw new Error(`${who} was offered "${name}" while the technician is available`);
+      }
+    }
+  }
+});
+
+await step('the office records that the technician is away all day', async () => {
+  await visit('/technicians/user-tech-lerato');
+  await page.getByRole('button', { name: 'Mark unavailable' }).first().click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+  await dialog.getByLabel('Start date').fill(today);
+  await dialog.getByLabel('End date').fill(today);
+  /*
+   * ALL DAY, and that is the rule rather than a convenience. CR-08 unlocks a
+   * takeover on a WHOLE-day absence only: a part-day window means the
+   * technician is at work either side of it and will submit the job
+   * themselves. Ticking this is what makes the difference on screen.
+   */
+  await dialog.getByText('All day', { exact: true }).click();
+  await dialog.getByRole('button', { name: 'Record availability' }).click();
+  await page.getByText('Availability recorded', { exact: false }).first().waitFor({
+    timeout: 15000,
+  });
+});
+
+await step('NOW the office may take over — and it says the card cannot be edited', async () => {
+  await visit('/jobs/EJE-1058');
+  await page.getByRole('button', { name: 'Take over submission' }).waitFor({ timeout: 20000 });
+
+  // Never dressed up as an ordinary submission.
+  for (const name of ['Submit job card', 'Review & submit job card']) {
+    if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
+      throw new Error(`the takeover was presented as "${name}"`);
+    }
+  }
+
+  await page.getByRole('button', { name: 'Take over submission' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+
+  const explanation = await dialog.innerText();
+  if (!/nothing can be changed/i.test(explanation)) {
+    throw new Error('the takeover does not say the signed job card is final');
+  }
+  if (!/lerato/i.test(explanation)) {
+    throw new Error('the takeover does not name whose job it is');
+  }
+
+  await dialog.getByRole('button', { name: 'Take over submission' }).click();
+  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+});
+
+await step('the takeover is on the trail, distinct from an ordinary submission', async () => {
+  await visit('/jobs/EJE-1058');
+  await page.getByRole('tab', { name: /Activity/ }).click();
+  const trail = await page.locator('main').innerText();
+  if (!/took over/i.test(trail)) {
+    throw new Error('the activity trail does not record the takeover');
+  }
+  if (!/Elmarie/.test(trail)) {
+    throw new Error('the activity trail does not name who took over');
+  }
+});
+
+await step('a technician is never offered a takeover', async () => {
+  await signInAs('Technician', 'Lerato Dlamini', /Hello, Lerato/);
+  await visit('/jobs/EJE-1058');
+  if ((await page.getByRole('button', { name: 'Take over submission' }).count()) !== 0) {
+    throw new Error('a technician was offered a takeover');
+  }
+});
+
 await browser.close();
 
 console.log('\n=== WORKFLOW E2E SUMMARY ===');

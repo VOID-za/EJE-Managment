@@ -52,6 +52,16 @@ export type ActivityEventType =
   | 'pdf_generated'
   | 'job_submitted'
   /**
+   * THE OFFICE SUBMITTED A SIGNED JOB CARD FOR AN UNAVAILABLE TECHNICIAN.
+   * MASTER SCOPE CR-08.
+   *
+   * Its own type so the two are never confused when the trail is read: an
+   * ordinary `job_submitted` is the technician's own last act, and this is the
+   * office stepping in because that technician could not. It carries who took
+   * over, whose job it was, and the unavailability that permitted it.
+   */
+  | 'submission_taken_over'
+  /**
    * A change in what became of the customer's copy.
    *
    * Every attempt and every state change is recorded, so "we sent it" can be

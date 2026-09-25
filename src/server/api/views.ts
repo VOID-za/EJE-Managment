@@ -6,11 +6,13 @@ import {
   can,
   isJobOpenWork,
   machineDisplayName,
+  submissionCover,
   type Machine,
   type TemplateUsage,
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { businessToday } from '@/lib/business-time';
 import { loadActivityFeed, loadJobActivity } from '@/application/activity-read';
 import { loadCalendar } from '@/application/calendar';
 import { loadClosedJobs, type ClosedJobFilters } from '@/application/closed-jobs';
@@ -108,11 +110,25 @@ export const jobView = async ({ repos, actor }: ViewContext, jobNumber: string) 
   const view = await loadJobView(repos, jobNumber, actor);
   if (view === null) return null;
 
-  const [users, activity] = await Promise.all([
+  const [users, activity, absences] = await Promise.all([
     repos.users.list(),
     loadJobActivity(repos, actor, view.job.id),
+    // Only today's absences: the rule asks about today and nothing else, so
+    // the screen must not read the whole register to answer it.
+    repos.availability.list(businessToday(), businessToday()),
   ]);
-  return { view, users, activity };
+
+  /*
+   * WHO COULD SUBMIT THIS JOB CARD TODAY. MASTER SCOPE CR-08.
+   *
+   * Decided HERE, on the server, from the availability register and the user
+   * records — never by the browser. The screen is told the answer and draws
+   * it; the operation asks the same question again before it acts, so a
+   * client that lied about it would change nothing.
+   */
+  const cover = submissionCover(view.job, users, absences, businessToday());
+
+  return { view, users, activity, submissionCover: cover };
 };
 
 export const jobFormView = async ({ repos, actor }: ViewContext) => {

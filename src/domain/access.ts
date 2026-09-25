@@ -61,6 +61,24 @@ export type Capability =
    */
   | 'jobs.issueFinal'
   /**
+   * SUBMIT A SIGNED JOB CARD ON BEHALF OF A TECHNICIAN WHO CANNOT. CR-08.
+   *
+   * The exception to CR-07, and deliberately a capability of its own rather
+   * than a loosening of `jobs.issueFinal`. The office does not submit signed
+   * job cards; it rescues one that would otherwise be stuck, and only when the
+   * people who could submit it are provably unavailable — see
+   * `submissionCover`, which decides that from the availability register and
+   * the user record, not from anybody's opinion.
+   *
+   * It is NOT `jobs.resolveSignatureRefusal`. A refusal is a different
+   * workflow with a different question in front of it, and merging the two
+   * would put the refusal review back into the signed journey by the back
+   * door. A takeover submits the document that already exists and changes
+   * nothing else: the job is signed, so it is final, and there is nothing on
+   * it a takeover could edit even if it wanted to.
+   */
+  | 'jobs.takeOverSubmission'
+  /**
    * Resolve a customer's refusal to sign, so the job card can move on.
    *
    * The office — Masters and Coordinators. A refusal is an exception the office
@@ -160,6 +178,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   // completed; the technician who did the work does. What the Master keeps is
   // the REFUSAL, below, which is the one case where the office is needed.
   'jobs.resolveSignatureRefusal',
+  'jobs.takeOverSubmission',
   'jobs.viewAnySignatureRefusal',
   'jobs.editSubmittedJob',
   'jobs.resubmitForSignature',
@@ -202,6 +221,9 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   // IS the office. Note what this still does not include: `jobs.acceptField`.
   // Correcting a job card is administration; attending the machine is not.
   'jobs.resolveSignatureRefusal',
+  // The CR-08 rescue, not a submission right: it unlocks only when the people
+  // who could submit the job are provably unavailable.
+  'jobs.takeOverSubmission',
   'jobs.viewAnySignatureRefusal',
   'jobs.editSubmittedJob',
   'jobs.resubmitForSignature',

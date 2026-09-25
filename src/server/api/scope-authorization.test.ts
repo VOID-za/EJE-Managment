@@ -46,6 +46,41 @@ describe('the final official submission — §3.1, §7, §15', () => {
     expect(JSON.stringify(response.raw)).toMatch(/cannot be submitted by you/i);
   });
 
+  /*
+   * THE CR-08 TAKEOVER, AT THE SAME LAYER.
+   *
+   * It is the one route that lets the office submit a signed job card, so the
+   * thing worth holding here is that it is not a second door into `issue`: it
+   * refuses on its own grounds, and the fixture's technician is at work.
+   */
+  const takeOver = async (client: ApiTestClient) =>
+    client.post('/api/jobs/EJE-1048/take_over_submission', {});
+
+  it('refuses a takeover while the technician is available — Master', async () => {
+    // 422, not 403: the Master MAY take over, just not today. The condition is
+    // the register's, and it can change; being told "forbidden" would be wrong.
+    const response = await takeOver(await signedInAs(DEMO_USERS.master));
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(response.raw)).toMatch(/cannot be taken over by you/i);
+    // Refused on the TAKEOVER's own grounds — the fixture's job is not signed
+    // — rather than by falling through to the ordinary submission's refusal.
+    expect(JSON.stringify(response.raw)).toMatch(/takeover_not_available/);
+    expect(JSON.stringify(response.raw)).not.toMatch(/cannot be submitted by you/i);
+  });
+
+  it('refuses a takeover while the technician is available — Coordinator', async () => {
+    const response = await takeOver(await signedInAs(DEMO_USERS.coordinator));
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(response.raw)).toMatch(/cannot be taken over by you/i);
+  });
+
+  it('refuses a takeover to a technician outright — it is the office’s exception', async () => {
+    // 403 here, and permanently: no calendar entry makes this theirs.
+    const response = await takeOver(await signedInAs(DEMO_USERS.technician));
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(response.raw)).toMatch(/cannot be taken over by you/i);
+  });
+
   it('gets the technician past the permission check, and on to the job’s state', async () => {
     // Not refused for WHO they are. EJE-1048 is not at Review in the fixture,
     // so state refuses it — which is the correct second question, and proves

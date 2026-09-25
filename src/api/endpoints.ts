@@ -13,6 +13,7 @@ import type {
   Site,
   SystemSettings,
   TechnicalDocument,
+  SubmissionCover,
   TemplateUsage,
   User,
 } from '@/domain';
@@ -103,6 +104,14 @@ export interface JobScreen {
   readonly view: JobView;
   readonly users: readonly User[];
   readonly activity: readonly ActivityEvent[];
+  /**
+   * Who on this job could submit it today, decided on the SERVER. CR-08.
+   *
+   * The screen renders this; it never works it out. The operation asks the
+   * same question again from the same data before it acts, so this cannot be
+   * used to unlock anything.
+   */
+  readonly submissionCover: SubmissionCover;
 }
 
 export interface JobFormData {
@@ -316,6 +325,10 @@ export const jobs = {
     command<GeneratedPdf>(`/api/jobs/${segment(jobId)}/generate_document`),
   issue: (jobId: string) => command<SubmitResult>(`/api/jobs/${segment(jobId)}/issue`),
   confirmDelivery: (jobId: string) => jobAction(jobId, 'confirm_delivery'),
+  /** CR-08: the office submits a signed job card its technician cannot. */
+  takeOverSubmission: (jobId: string) =>
+    command<SubmitResult>(`/api/jobs/${segment(jobId)}/take_over_submission`),
+
   retryDelivery: (jobId: string) =>
     command<SubmitResult>(`/api/jobs/${segment(jobId)}/retry_delivery`),
   transferToOpen: (jobId: string, input: unknown) => jobAction(jobId, 'transfer_to_open', input),

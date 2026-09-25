@@ -463,6 +463,25 @@ export const JOB_COMMANDS: CommandRegistry = {
 
   confirm_delivery: simple((context, job) => jobs.confirmJobCardDelivery(context.operation, job)),
 
+  /**
+   * The CR-08 rescue: the office submits a signed job card whose technician
+   * cannot. Authorised entirely in the operation, which reads the availability
+   * register itself — the browser sends nothing but the job.
+   */
+  take_over_submission: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      const job = await loadVisibleJob(context, target);
+      const recipient = await resolveRecipient(context, job);
+      return jobs.takeOverSubmission(
+        context.operation,
+        job,
+        recipient.email,
+        recipient.displayName,
+      );
+    },
+  }),
+
   retry_delivery: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {
