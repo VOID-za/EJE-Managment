@@ -294,8 +294,18 @@ export const createJob = async (
    */
   const { customer, site, contact, machine } = await resolveRegister(context, input);
 
-  const faultDescription = input.faultDescription.trim();
-  if (faultDescription.length === 0) {
+  /*
+   * WHAT THE JOB IS ABOUT — ON THE JOB TYPES THAT HAVE SUCH A THING. CR-13.
+   *
+   * A field job is raised on a description: it is what the technician is sent
+   * out on and it is printed on the customer's job card, so it is required and
+   * always has been. A parts collection is not raised on anything of the sort —
+   * the goods listed on it are the record — so it does not collect one and it
+   * does not keep one a request happens to carry. The document omits the
+   * section entirely rather than printing a heading over nothing.
+   */
+  const faultDescription = definition.officeProcessed ? '' : input.faultDescription.trim();
+  if (!definition.officeProcessed && faultDescription.length === 0) {
     throw new WorkflowError('A job needs to say what the work is.', [
       {
         code: 'fault_description_required',

@@ -78,6 +78,65 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     startPostgresTestServer(url ?? '');
   });
 
+  /*
+   * THE PARTS COLLECTION SHAPE, AGAINST THE REAL SCHEMA. MASTER SCOPE CR-12/13.
+   *
+   * The claim being tested is that NO MIGRATION IS REQUIRED: a collection is a
+   * job row with `status = 'completion'`, no technician, no scheduled date and
+   * an empty description, and every one of those columns already allows it —
+   * `scheduled_date date` and `primary_technician_id uuid` are nullable,
+   * `fault_description` is `text DEFAULT '' NOT NULL`, and `completion` is
+   * already in the `job_status` enum. Reading it back from the table is what
+   * turns that from a reading of the DDL into a fact.
+   */
+  it('persists a parts collection with no technician, date or description', async () => {
+    const master = await signIn(EMAILS.master);
+    const created = await raise(master, {
+      jobType: 'parts',
+      machineId: null,
+      orderNumber: 'PO-PARTS-01',
+      deliveryNote: 'DN-1',
+      // Sent deliberately: the server decides all three, whatever is asked for.
+      priority: 'urgent',
+      scheduledDate: '2026-09-28',
+      faultDescription: 'ignored on a collection',
+    });
+    expect(created.status).toBe(200);
+
+    const [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, created.data.id));
+    expect(row?.status).toBe('completion');
+    expect(row?.primaryTechnicianId).toBeNull();
+    expect(row?.scheduledDate).toBeNull();
+    expect(row?.faultDescription).toBe('');
+    expect(row?.priority).toBe('normal');
+    expect(row?.courierCollection).toBe(false);
+
+    // And no technician rows were written for it.
+    const participants = await db
+      .select()
+      .from(schema.jobTechnicians)
+      .where(eq(schema.jobTechnicians.jobId, created.data.id));
+    expect(participants).toHaveLength(0);
+  });
+
+  it('refuses acceptance of a parts collection over the real API', async () => {
+    const master = await signIn(EMAILS.master);
+    const created = await raise(master, {
+      jobType: 'parts',
+      machineId: null,
+      orderNumber: 'PO-PARTS-02',
+    });
+    expect(created.status).toBe(200);
+
+    const accepted = await master.post(`/api/jobs/${created.data.id}/accept`, {});
+    expect(accepted.status).toBe(403);
+
+    // The row is untouched: no status change, no acceptance stamp.
+    const [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, created.data.id));
+    expect(row?.status).toBe('completion');
+    expect(row?.acceptedAt).toBeNull();
+  });
+
   it('writes the job, its technicians and its attachments as rows', async () => {
     const master = await signIn(EMAILS.master);
     const created = await raise(master, {

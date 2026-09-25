@@ -922,8 +922,10 @@ export const seedJobs: readonly Job[] = [
     orderNumber: 'PO-77501',
     referenceNumber: 'HAC-PARTS-042',
     courierCollection: false,
-    faultDescription:
-      'Way wipers and filters for the Okamoto grinder. Customer collecting from the Isando counter this afternoon.',
+    // No description: a collection is not raised on one (CR-13), and the goods
+    // below are the record. EJE-1062, closed, still carries the one it was
+    // given — which is what proves an older collection still renders.
+    faultDescription: '',
     primaryTechnicianId: null,
     createdAt: timeOffset(-1, 9, 20),
     createdBy: asUserId('user-master-elmarie'),

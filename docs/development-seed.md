@@ -176,7 +176,7 @@ survive a re-run untouched.
 | EJE-2002 | Installation | Open, unassigned | Order number present |
 | EJE-2003 | Service | Open, unassigned | Scheduled, order number present |
 | EJE-2004 | Test & Repair | Open, unassigned | No order number |
-| EJE-2005 | Parts | Open, unassigned | Order number present |
+| EJE-2005 | Parts | **At its collection close-out**, unassigned | A collection waiting at the counter. CR-12: a parts job is never Open and never accepted — it is raised straight into its own close-out by the office |
 | EJE-2006 | Breakdown | Assigned, not yet accepted | Mike's dashboard shows it waiting for him |
 | EJE-2007 | Installation | In progress | Checklist **started and unfinished** — the gate |
 | EJE-2008 | Service | In progress | Single-day schedule; checklist not yet started |

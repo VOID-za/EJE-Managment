@@ -114,14 +114,18 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
         </div>
       </section>
 
-      <section className="mt-6">
-        <h3 className="mb-2 text-xs font-bold tracking-[0.12em] text-steel-500 uppercase">
-          Notes
-        </h3>
-        <p className="rounded border border-steel-200 bg-steel-50 p-3 text-steel-700">
-          {model.faultDescription}
-        </p>
-      </section>
+      {/* Only if something was written. A collection raised under CR-13 has
+          no notes at all; one raised before it keeps what it was given. */}
+      {model.faultDescription !== null && (
+        <section className="mt-6">
+          <h3 className="mb-2 text-xs font-bold tracking-[0.12em] text-steel-500 uppercase">
+            Notes
+          </h3>
+          <p className="rounded border border-steel-200 bg-steel-50 p-3 text-steel-700">
+            {model.faultDescription}
+          </p>
+        </section>
+      )}
 
       {/*
         The goods.

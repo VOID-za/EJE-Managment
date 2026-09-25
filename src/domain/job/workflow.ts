@@ -270,8 +270,10 @@ export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
  *
  * - A PARTS COLLECTION is handed over at the EJE counter, not on a customer's
  *   site. Whoever processed it issues it, which is `jobs.processParts` — the
- *   same exception, in the same shape, as `acceptJobRefusal` and
- *   `canAcceptJob` already carry.
+ *   office, and under CR-12 the office alone. (`canAcceptJob` and
+ *   `acceptJobRefusal` once carried the same exception in the same shape;
+ *   they now REFUSE a collection outright, because there is no acceptance
+ *   step in the collection workflow at all.)
  * - THE RETIRED MASTER REVIEW STAGE. Nothing can enter `submitted` any more,
  *   but jobs that entered it before it was retired still exist and still have
  *   to be able to leave. A Master can move those on, because otherwise they
@@ -284,7 +286,18 @@ export const canSubmitJobCard = (
   actor: Pick<User, 'id' | 'role'>,
   job: Pick<Job, 'status' | 'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds'>,
 ): boolean => {
-  if (job.jobType === 'parts') return can(actor.role, 'jobs.processParts');
+  /*
+   * ONE FLAG ASKS THE QUESTION, EVERYWHERE. CR-12.
+   *
+   * This read `job.jobType === 'parts'` while every other rule in the
+   * collection workflow asks `officeProcessed` — the same question written two
+   * ways, which is how the two answers eventually differ. The behaviour is
+   * identical today (parts is the only office-processed type) and now there is
+   * one place to change if that ever stops being true.
+   */
+  if (getJobTypeDefinition(job.jobType).officeProcessed) {
+    return can(actor.role, 'jobs.processParts');
+  }
   if (job.status === 'submitted') return actor.role === 'master';
 
   // The technician's own capability: the field holds it and the office does not.

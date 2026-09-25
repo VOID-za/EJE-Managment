@@ -246,7 +246,8 @@ export const seedJobs: readonly Job[] = [
     machineId: REGISTER.sic.press,
     orderNumber: 'PO-SIC-2205',
     referenceNumber: 'SIC-PRT-118',
-    faultDescription: 'Light curtain transmitter and receiver pair for the press brake.',
+    // As EJE-1064: a collection carries no description under CR-13.
+    faultDescription: '',
     createdAt: timeAgo(1, 14),
   }),
 

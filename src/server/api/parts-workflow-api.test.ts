@@ -53,6 +53,34 @@ describe('raising a collection over the API', () => {
     expect(job.courierCollection).toBe(false);
   });
 
+  it('drops a description a request carries, and accepts one with none', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+
+    // CR-13: sent deliberately, and not kept.
+    const withText = await raise(master, { orderNumber: 'PO-99790' });
+    expect(withText.status).toBe(200);
+    expect(withText.data.faultDescription).toBe('');
+
+    // And a request that omits it entirely is not a malformed one.
+    const without = await raise(master, { orderNumber: 'PO-99791', faultDescription: '' });
+    expect(without.status).toBe(200);
+  });
+
+  it('still refuses a FIELD job with no description — 422, not 400', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const response = await master.post('/api/jobs', {
+      ...PARTS_JOB,
+      jobType: 'breakdown',
+      machineId: 'machine-abc-lv40',
+      orderNumber: '',
+      faultDescription: '',
+    });
+    // The rule moved from the schema to the operation, where the job type is
+    // known — so it is a business refusal the screen renders, not a protocol
+    // error. Both are refusals; this asserts which one it now is.
+    expect(response.status).toBe(422);
+  });
+
   it('lets a Coordinator raise one', async () => {
     const coordinator = await signedInAs(DEMO_USERS.coordinator);
     const response = await raise(coordinator, { orderNumber: 'PO-99778' });

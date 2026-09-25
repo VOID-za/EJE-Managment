@@ -117,12 +117,16 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         </div>
       </section>
 
-      <section className="mt-6">
-        <SectionTitle>Reported fault</SectionTitle>
-        <p className="rounded border border-steel-200 bg-steel-50 p-3 text-steel-700">
-          {model.faultDescription}
-        </p>
-      </section>
+      {/* Every field job has one — creation refuses it without one — so this
+          only ever hides the section on a job type that collects none. */}
+      {model.faultDescription !== null && (
+        <section className="mt-6">
+          <SectionTitle>Reported fault</SectionTitle>
+          <p className="rounded border border-steel-200 bg-steel-50 p-3 text-steel-700">
+            {model.faultDescription}
+          </p>
+        </section>
+      )}
 
       {model.workBlocks.length > 0 && (
         <section className="mt-6 space-y-4">

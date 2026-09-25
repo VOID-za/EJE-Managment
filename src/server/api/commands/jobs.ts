@@ -593,14 +593,18 @@ export const createJobSchema = z
     orderNumber: text(120),
     referenceNumber: text(120),
     /*
-     * Required here as well as in the operation.
+     * PRESENT, BUT NOT NECESSARILY FILLED IN. CR-13.
      *
-     * Not duplication for its own sake: a blank body is a MALFORMED request and
-     * answers 400, while the operation's refusal is a business rule and answers
-     * 422 with a violation the screen renders. Both are true, and a client that
-     * omits the field entirely should be told so in the terms of the protocol.
+     * It used to be `.min(1)` here as well as in the operation — a blank body
+     * was a MALFORMED request answering 400, while the operation's refusal was
+     * a business rule answering 422. That stopped being one rule when the job
+     * types diverged: a field job still must say what the work is, and a parts
+     * collection has no such field at all. A rule that is true of some job
+     * types and not others belongs where the job type is known, so the length
+     * is now checked once, in `createJob`, and the protocol only says this is
+     * a string of sane length.
      */
-    faultDescription: z.string().trim().min(1).max(8000),
+    faultDescription: z.string().trim().max(8000),
     primaryTechnicianId: userId.nullable(),
     /** Assistants. Bounded because a van holds a crew, not a department. */
     additionalTechnicianIds: z.array(userId).max(8).default([]),

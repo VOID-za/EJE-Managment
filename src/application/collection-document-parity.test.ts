@@ -246,6 +246,44 @@ describe('a courier collection', () => {
   });
 });
 
+describe('a collection raised under CR-13 carries no description section', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  it('the model reports no description at all, rather than a placeholder', async () => {
+    const job = await partsJob(harness, { courier: false });
+    expect(job.faultDescription).toBe('');
+
+    const model = await modelFor(harness, job);
+    // Null, so both renderers skip the section. A placeholder string would
+    // have printed a heading over "No fault description recorded."
+    expect(model.faultDescription).toBeNull();
+  });
+
+  it('the issued PDF prints no Notes heading and no placeholder', async () => {
+    const job = await partsJob(harness, { courier: false });
+    const text = await issuedText(harness, job);
+
+    expect(text).not.toContain('No fault description recorded');
+    expect(text).not.toContain('Reported fault');
+    // And it is a real collection note, not an empty document.
+    expect(text).toContain('ENC-INC-1024');
+  });
+
+  it('a collection that WAS given one still prints it — older records are unchanged', async () => {
+    const raised = await partsJob(harness, { courier: false });
+    const withNote = await harness.repos.jobs.save({
+      ...raised,
+      faultDescription: 'Spares for the Leadwell turret, collected at the counter.',
+    });
+
+    const model = await modelFor(harness, withNote);
+    expect(model.faultDescription).toContain('Leadwell turret');
+  });
+});
+
 describe('the waybill, enforced by the workflow rather than by a screen', () => {
   let harness: Harness;
   beforeEach(() => {

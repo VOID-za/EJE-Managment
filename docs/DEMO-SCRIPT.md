@@ -154,11 +154,20 @@ situation demands.
 
 ## 9. Parts, and who may see the price (1½ min)
 
-Open **EJE-1064**, a parts collection. The Parts tab carries no labour, no
-travel and no call-out fee — a collection is goods over a counter, not a site
-visit, so those cards are not hidden, they do not exist for this job type. Take
-it through to signature: the person signing is the **collector**, and what they
-confirm is that they received the parts, not that work was completed.
+Raise one from **New Job → Parts** and show what it does NOT ask for: no
+priority, no scheduled date, nobody to assign it to, no courier question and no
+description. A collection is goods over a counter, so none of those exist for
+it — and creating it drops you straight into the collection itself rather than
+back on the Jobs list. There is no Accept step: the office raises it and works
+it, in one sitting.
+
+Then open **EJE-1064**, a collection already waiting at the counter. Its first
+step is **Parts** — no labour, no travel, no call-out fee, and no completion
+write-up, because nothing was worked on. Take it through to signature: the
+person signing is the **collector**, and what they confirm is that they
+received the parts, not that work was completed. Submit the collection note and
+it goes to **Awaiting Delivery**, not straight to Closed — a collection closes
+on a confirmed delivery exactly as a job card does.
 
 Then put the two seeded examples side by side:
 

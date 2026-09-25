@@ -193,7 +193,9 @@ describe('the PDF and the screen render one document', () => {
       model.machine!.title,
       ...model.machine!.rows.map((row) => row.value),
       ...model.jobDetails.map((row) => row.value),
-      model.faultDescription,
+      // Null only on a job type that collects no description — CR-13. EJE-1044
+      // is a breakdown, so it has one, and the assertion below still runs.
+      ...(model.faultDescription === null ? [] : [model.faultDescription]),
       ...model.workBlocks.map((block) => block.value),
       ...model.charges!.rows.map((row) => row.amount),
       model.charges!.total,

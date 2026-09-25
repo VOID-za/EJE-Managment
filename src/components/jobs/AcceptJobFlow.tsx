@@ -166,14 +166,20 @@ export const AcceptJobFlow = ({
 
           setAccepted(true);
           onAccepted();
-          // Offered only once the job is safely accepted, and only where there
-          // is a site to travel to: parts are collected from the EJE counter,
-          // so a site pin would send the technician nowhere.
-          //
-          // And only to somebody who is going to drive there. The office does
-          // not need a pin to a site it is not attending, so the Coordinator is
-          // never asked — she has no `jobs.acceptField` capability, which is
-          // the same thing the operation checks.
+          /*
+           * Offered only once the job is safely accepted, and only to somebody
+           * who is going to drive there — which is what `jobs.acceptField`
+           * says. The office does not need a pin to a site it is not
+           * attending, and the operation checks the same capability.
+           *
+           * `visitsSite` is the second half, and it is now defensive rather
+           * than load-bearing: the only job type that does not visit a site is
+           * a parts collection, and CR-12 removed acceptance from collections
+           * altogether, so this flow cannot be reached by one. It is kept
+           * because the rule it states is the true one — a site pin needs a
+           * site — and a future job type that is collected rather than
+           * attended would otherwise silently start offering one.
+           */
           if (
             getJobTypeDefinition(job.jobType).visitsSite &&
             can(currentUser.role, 'jobs.acceptField')

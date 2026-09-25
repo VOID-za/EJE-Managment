@@ -996,9 +996,11 @@ await step('the office raises a Parts job, and is asked for none of the field-se
   await visit('/jobs/new');
 
   await page.getByLabel('Job type').selectOption('parts');
-  await page.getByText('Collection details').first().waitFor({ timeout: 10000 });
+  // The form has re-rendered as a collection once the delivery note — which
+  // only a collection and a workshop repair carry — is on screen.
+  await page.getByLabel(/^Delivery note/).waitFor({ timeout: 10000 });
 
-  // The five fields a collection does not have. CR-12.
+  // The fields a collection does not have. CR-12 and CR-13.
   for (const [label, what] of [
     ['Priority', 'a priority'],
     ['Scheduled date', 'a scheduled date'],
@@ -1014,6 +1016,12 @@ await step('the office raises a Parts job, and is asked for none of the field-se
   }
   if ((await page.getByText('Courier Collection').count()) !== 0) {
     throw new Error('a parts collection was asked about a courier at creation');
+  }
+  // CR-13: and no free-text description either — the goods are the record.
+  for (const label of [/^Collection details/, /^Fault description/]) {
+    if ((await page.getByLabel(label).count()) !== 0) {
+      throw new Error('a parts collection was asked for a description at creation');
+    }
   }
   // And it keeps what the counter reconciles by.
   await page.getByLabel(/^Customer order number/).waitFor({ timeout: 8000 });
@@ -1042,7 +1050,6 @@ await step('raising it goes straight into the collection, not back to the Jobs l
   await page.getByLabel(/^Customer order number/).fill('PO-CR12-001');
   await page.getByLabel(/^Reference number/).fill('REF-CR12');
   await page.getByLabel(/^Delivery note/).fill('DN-CR12');
-  await page.getByLabel(/^Collection details/).fill('Spindle drive spares, collected at the counter.');
 
   await page.getByRole('button', { name: 'Create job' }).click();
 

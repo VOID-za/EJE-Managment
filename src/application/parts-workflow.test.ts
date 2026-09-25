@@ -134,6 +134,23 @@ describe('raising a parts collection', () => {
     expect(job.deliveryNote).toBe('DN-99001');
   });
 
+  it('collects NO description, and does not keep one a request carries', async () => {
+    /*
+     * MASTER SCOPE CR-13. The goods listed on the note are the record; a free
+     * text field above them said the same thing again in worse words. `raise`
+     * sends one deliberately, to prove the server drops it rather than the
+     * form merely not showing it.
+     */
+    const job = await raise(harness, master);
+    expect(job.faultDescription).toBe('');
+  });
+
+  it('is raised without one at all, and is not refused for it', async () => {
+    const job = await raise(harness, master, { faultDescription: '' });
+    expect(job.status).toBe('completion');
+    expect(job.faultDescription).toBe('');
+  });
+
   it('still requires the customer order number, which is what ties the goods to the order', async () => {
     const job = await raise(harness, master, { orderNumber: '' });
     const withGoods = await withParts(harness, master, job);
@@ -305,6 +322,35 @@ describe('field service is untouched', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = buildHarness();
+  });
+
+  it('a field job still REQUIRES the fault description a collection does not have', async () => {
+    const [customer] = await harness.repos.customers.list();
+    const sites = await harness.repos.customers.listSites(customer!.id);
+    const contacts = await harness.repos.customers.listContacts(customer!.id);
+    const machines = (await harness.repos.machines.list()).filter(
+      (machine) => machine.customerId === customer!.id,
+    );
+
+    await expect(
+      createJob(harness.as(master), {
+        customerId: customer!.id,
+        siteId: sites[0]!.id,
+        contactId: contacts[0]!.id,
+        machineId: machines[0]!.id,
+        jobType: 'breakdown',
+        priority: 'urgent',
+        scheduledDate: null,
+        scheduledEndDate: null,
+        orderNumber: '',
+        referenceNumber: '',
+        deliveryNote: '',
+        faultDescription: '   ',
+        primaryTechnicianId: null,
+        additionalTechnicianIds: [],
+        courierCollection: false,
+      }),
+    ).rejects.toBeInstanceOf(WorkflowError);
   });
 
   it('every other job type still schedules, prioritises, assigns and is accepted', async () => {

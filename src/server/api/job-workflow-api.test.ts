@@ -143,9 +143,20 @@ describe('the register relationships, over the API', () => {
     expect(codes(response)).toContain('contact_not_of_customer');
   });
 
-  it('refuses a blank fault description as a malformed request', async () => {
+  it('refuses a blank fault description on a FIELD job — as a business rule', async () => {
+    /*
+     * > **Superseded, 25 September 2026 (CR-13).** This expected **400**: the
+     * > schema required a non-empty description of every job, so a blank one
+     * > was a MALFORMED request. That stopped being one rule when the job
+     * > types diverged — a field job must still say what the work is, and a
+     * > parts collection has no such field at all — so the length is checked
+     * > once, in `createJob`, where the job type is known. It is now a refusal
+     * > the screen renders, with a violation code, rather than a protocol
+     * > error. Still refused; refused for the right reason.
+     */
     const response = await create(await signedInAs(DEMO_USERS.master), { faultDescription: '  ' });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(422);
+    expect(codes(response)).toContain('fault_description_required');
   });
 
   it('refuses a technician who does not do field work', async () => {

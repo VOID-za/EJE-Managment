@@ -130,7 +130,8 @@ const NewJobPage = () => {
     if (definition.capturesLabourAndTravel && machineId.length === 0) {
       next.machineId = 'Select the machine this job is for.';
     }
-    if (faultDescription.trim().length === 0) {
+    // Only where the job type collects one. CR-13.
+    if (!definition.officeProcessed && faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
     // On a parts collection the order number is what ties the goods to what the
@@ -167,7 +168,7 @@ const NewJobPage = () => {
         scheduledEndDate: scheduledEndDate.length > 0 ? scheduledEndDate : null,
         orderNumber,
         referenceNumber,
-        faultDescription,
+        faultDescription: definition.officeProcessed ? '' : faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? technicianId : null,
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
         courierCollection,
@@ -347,6 +348,7 @@ const NewJobPage = () => {
                       setTechnicianId('');
                       setAdditionalIds([]);
                       setCourierCollection(false);
+                      setFaultDescription('');
                     }
                   }}
                   options={JOB_TYPE_CODES.map((code) => ({
@@ -439,28 +441,28 @@ const NewJobPage = () => {
                 </div>
               )}
 
-              <TextAreaField
-                label={
-                  jobType === 'parts'
-                    ? 'Collection details'
-                    : 'Fault description / work requested'
-                }
-                required
-                rows={4}
-                value={faultDescription}
-                error={errors.faultDescription}
-                onChange={(event) => setFaultDescription(event.target.value)}
-                placeholder={
-                  jobType === 'parts'
-                    ? 'e.g. Spindle drive spares for collection against PO-88212.'
-                    : 'e.g. Machine stopped during operation. Spindle fault reported.'
-                }
-                hint={
-                  jobType === 'parts'
-                    ? 'What is being collected, and anything the office should know.'
-                    : 'Record what the customer reported, in their words where possible.'
-                }
-              />
+              {/*
+                A COLLECTION IS NOT RAISED ON A DESCRIPTION. CR-13.
+
+                It used to be asked for here, labelled "Collection details" on a
+                parts job. The goods are the record: they are listed on the note
+                with their quantities and prices, and a second free-text field
+                above them said the same thing again in worse words. The
+                document omits the section entirely rather than printing a
+                heading over nothing.
+              */}
+              {!definition.officeProcessed && (
+                <TextAreaField
+                  label="Fault description / work requested"
+                  required
+                  rows={4}
+                  value={faultDescription}
+                  error={errors.faultDescription}
+                  onChange={(event) => setFaultDescription(event.target.value)}
+                  placeholder="e.g. Machine stopped during operation. Spindle fault reported."
+                  hint="Record what the customer reported, in their words where possible."
+                />
+              )}
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TextField

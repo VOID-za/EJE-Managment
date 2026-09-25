@@ -90,7 +90,15 @@ export interface JobCardModel {
   readonly machine: { readonly title: string; readonly rows: readonly LabelValue[] } | null;
   readonly jobDetails: readonly LabelValue[];
 
-  readonly faultDescription: string;
+  /**
+   * What the job was raised about, or NULL when the job type does not collect
+   * one — a parts collection, where the goods listed below are the record.
+   *
+   * Null rather than a placeholder, so the section is omitted entirely: the
+   * same rule DOC-1 applies to the write-up. "No fault description recorded."
+   * on a collection note read as something forgotten.
+   */
+  readonly faultDescription: string | null;
   readonly workBlocks: readonly { readonly label: string; readonly value: string }[];
   readonly notes: readonly { readonly body: string; readonly byline: string }[];
 
@@ -350,8 +358,19 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       },
     ],
 
-    faultDescription:
-      job.faultDescription.length > 0 ? job.faultDescription : 'No fault description recorded.',
+    /*
+     * PRINTED IF IT WAS WRITTEN, AND NOT PRINTED IF IT WAS NOT. CR-13.
+     *
+     * A field job always has one — `createJob` refuses it without one — so the
+     * fallback below only ever applied to a job type that does not collect
+     * one at all. A parts collection is now that case by rule, and a heading
+     * over "No fault description recorded." is the empty section DOC-1 exists
+     * to keep off the customer's document.
+     *
+     * A collection raised BEFORE this keeps whatever was written on it, and it
+     * still prints. That is why this asks the RECORD rather than the job type.
+     */
+    faultDescription: job.faultDescription.length > 0 ? job.faultDescription : null,
     /*
      * ONLY WHAT WAS ACTUALLY WRITTEN. MASTER SCOPE DOC-1.
      *

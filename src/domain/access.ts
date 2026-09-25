@@ -55,9 +55,11 @@ export type Capability =
    * different people for a different reason.
    *
    * A PARTS COLLECTION IS NOT FIELD WORK and does not go through this: it is
-   * handed over at the EJE counter by whoever is there, so `issueJobCard`
-   * gates a collection on `jobs.processParts` instead. Same exception, same
-   * shape, as `acceptJobRefusal`.
+   * handed over at the EJE counter by the office, so `issueJobCard` gates a
+   * collection on `jobs.processParts` instead. Nor does it go through
+   * `acceptJobRefusal`, which once carried the same exception and now refuses
+   * a collection outright — CR-12 removed the acceptance step from the
+   * collection workflow entirely.
    */
   | 'jobs.issueFinal'
   /**

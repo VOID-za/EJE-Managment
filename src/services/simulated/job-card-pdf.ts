@@ -310,6 +310,8 @@ const parties = (sheet: Sheet, model: JobCardModel): void => {
 };
 
 const fault = (sheet: Sheet, model: JobCardModel): void => {
+  // Nothing to report, so no heading and no empty box. See the model.
+  if (model.faultDescription === null) return;
   sheet.sectionTitle('Reported fault');
   const lines = PdfBuilder.wrap(model.faultDescription, CONTENT_WIDTH - 18, SIZE.body);
   const boxHeight = lines.length * GAP.line + 12;
