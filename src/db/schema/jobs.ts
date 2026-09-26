@@ -122,7 +122,29 @@ export const jobs = pgTable(
     /** The customer's own delivery note reference, where they work by one. */
     deliveryNote: text('delivery_note').notNull().default(''),
 
+    /*
+     * THE SPARES REQUEST. SPARE-2.
+     *
+     * `awaiting_spares_reason` keeps its name and its data: it always held the
+     * DESCRIPTION of what was needed, and renaming a populated column buys
+     * nothing a comment cannot. The three beside it are what it never had.
+     *
+     * `awaiting_spares_requested_at` is what makes this a request rather than a
+     * note: without it nobody can say how long a job has been waiting, which is
+     * the first thing the office asks.
+     */
     awaitingSparesReason: text('awaiting_spares_reason').notNull().default(''),
+    awaitingSparesNotes: text('awaiting_spares_notes').notNull().default(''),
+    /*
+     * One of the job's OWN photographs, not a second upload path.
+     *
+     * A technician photographs the part or its nameplate as a job photo anyway;
+     * pointing at that is the whole feature. `set null` rather than `cascade`:
+     * removing the photograph must not delete the spares request that referred
+     * to it.
+     */
+    awaitingSparesPhotoId: uuid('awaiting_spares_photo_id'),
+    awaitingSparesRequestedAt: instant('awaiting_spares_requested_at'),
 
     /* ---- completion report: one-to-one, always present, so inline ---- */
     reportFaultFindings: text('report_fault_findings').notNull().default(''),

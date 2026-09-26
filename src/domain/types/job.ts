@@ -1,6 +1,7 @@
 import type { DeliveryRecord } from './delivery';
 import type {
   Attachment,
+  AttachmentId,
   Cents,
   ContactId,
   CustomerId,
@@ -257,6 +258,35 @@ export interface PartEntry {
 }
 
 
+/**
+ * A part a job is waiting for. SPARE-2.
+ *
+ * It replaced a single free-text `awaitingSparesReason`, which conflated what
+ * was needed with anything anybody added afterwards and recorded no date at all.
+ */
+export interface SparesRequest {
+  /** What is needed. Required: a request for nothing is not a request. */
+  readonly description: string;
+  /** Anything added after the request was raised. Often empty. */
+  readonly notes: string;
+  /**
+   * One of the job's OWN photographs, by id, or null.
+   *
+   * Deliberately a reference rather than another upload: the technician
+   * photographs the part or its nameplate as a job photo, and this points at it.
+   * Null when the photograph it named has since been removed from the job.
+   */
+  readonly photoId: AttachmentId | null;
+  /**
+   * When the request was made.
+   *
+   * The moment it was raised, from the clock — NOT a date anybody types, and not
+   * an expected-return date. "How long has this job been waiting?" is the
+   * question it exists to answer.
+   */
+  readonly requestedAt: IsoDateTime;
+}
+
 export interface JobNote {
   readonly id: string;
   readonly body: string;
@@ -405,8 +435,15 @@ export interface Job {
    */
   readonly signatureRefusals: readonly SignatureRefusal[];
 
-  /** Reason recorded when the job was last moved to `awaiting_spares`. */
-  readonly awaitingSparesReason: string;
+  /**
+   * What the job is waiting for, and since when. SPARE-2.
+   *
+   * Null on every job that has never waited for spares. Kept when the job
+   * returns to `in_progress` rather than cleared, because how long a machine
+   * stood waiting for a part is exactly what the office is asked about
+   * afterwards — `returnToInProgress` moves the status, not the history.
+   */
+  readonly sparesRequest: SparesRequest | null;
 
   /** True when the fixed call-out fee applies to this job. */
   readonly calloutApplied: boolean;

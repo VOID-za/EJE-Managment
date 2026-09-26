@@ -57,6 +57,13 @@
       "when": 1790018690211,
       "tag": "0007_signed_job_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790457890761,
+      "tag": "0008_spares_request",
+      "breakpoints": true
     }
   ]
 }

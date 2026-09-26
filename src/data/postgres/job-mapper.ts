@@ -262,7 +262,26 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     // rest are how the job got there.
     signatureRefusals: rows.refusals.map(refusalFrom),
 
-    awaitingSparesReason: rows.job.awaitingSparesReason,
+    /*
+     * A REQUEST, OR NOTHING. SPARE-2.
+     *
+     * `requested_at` is what decides which. A job that has never waited for
+     * spares has null there, and answers null here — rather than a request whose
+     * every field is empty, which the screens would then have to tell apart from
+     * a real one.
+     */
+    sparesRequest:
+      rows.job.awaitingSparesRequestedAt === null
+        ? null
+        : {
+            description: rows.job.awaitingSparesReason,
+            notes: rows.job.awaitingSparesNotes,
+            photoId:
+              rows.job.awaitingSparesPhotoId === null
+                ? null
+                : asAttachmentId(rows.job.awaitingSparesPhotoId),
+            requestedAt: rows.job.awaitingSparesRequestedAt,
+          },
     calloutApplied: rows.job.calloutApplied,
     courierCollection: rows.job.courierCollection,
     waybillNumber: rows.job.waybillNumber,
@@ -311,7 +330,10 @@ export const toJobRow = (
   courierCollection: job.courierCollection,
   waybillNumber: job.waybillNumber,
   deliveryNote: job.deliveryNote,
-  awaitingSparesReason: job.awaitingSparesReason,
+  awaitingSparesReason: job.sparesRequest?.description ?? '',
+  awaitingSparesNotes: job.sparesRequest?.notes ?? '',
+  awaitingSparesPhotoId: job.sparesRequest?.photoId ?? null,
+  awaitingSparesRequestedAt: job.sparesRequest?.requestedAt ?? null,
   reportFaultFindings: job.completionReport.faultFindings,
   reportDiagnosis: job.completionReport.diagnosis,
   reportWorkPerformed: job.completionReport.workPerformed,

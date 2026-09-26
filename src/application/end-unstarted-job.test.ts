@@ -132,7 +132,9 @@ describe('CANCEL-3 / DELETE-3…5 — every other state is refused', () => {
     const accepted = await acceptJob(harness.as(actor), job);
     if (status === 'in_progress') return accepted;
     if (status === 'awaiting_spares') {
-      return moveToAwaitingSpares(harness.as(actor), accepted, 'Waiting on a contactor.');
+      return moveToAwaitingSpares(harness.as(actor), accepted, {
+        description: 'Waiting on a contactor.',
+      });
     }
     return startCompletion(harness.as(actor), accepted);
   };

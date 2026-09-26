@@ -302,8 +302,10 @@ export const jobs = {
   addMedia: (jobId: string, input: unknown) => jobAction(jobId, 'add_media', input),
   removeMedia: (jobId: string, kind: 'photo' | 'video', attachmentId: string) =>
     jobAction(jobId, 'remove_media', { kind, attachmentId }),
-  awaitingSpares: (jobId: string, reason: string) =>
-    jobAction(jobId, 'awaiting_spares', { reason }),
+  awaitingSpares: (
+    jobId: string,
+    request: { description: string; notes?: string; photoId?: string | null },
+  ) => jobAction(jobId, 'awaiting_spares', request),
   returnToProgress: (jobId: string) => jobAction(jobId, 'return_to_progress'),
   startCompletion: (jobId: string) => jobAction(jobId, 'start_completion'),
   saveReport: (jobId: string, report: unknown) => jobAction(jobId, 'save_report', report),

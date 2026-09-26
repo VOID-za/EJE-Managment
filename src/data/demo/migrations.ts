@@ -179,11 +179,47 @@ const v11ToV12 = (data: Loose): Loose => ({
   }),
 });
 
+/**
+ * v12 -> v13. SPARE-2.
+ *
+ * `awaitingSparesReason` — one free-text line — becomes a `sparesRequest` with a
+ * description, notes, an optional photograph and the date it was raised.
+ *
+ * THE OLD LINE BECOMES THE DESCRIPTION, because that is what it held: "IGBT
+ * module on back order with the supplier" is what somebody has to order. It is
+ * deliberately NOT split into description and notes — a guess at where the
+ * sentence divides would put half of it under the wrong heading.
+ *
+ * THE DATE IS THE ONE THING THAT CANNOT BE RECOVERED. No snapshot ever recorded
+ * when the request was raised, so a job carrying a reason gets the moment of the
+ * upgrade. That is the only honest answer available, and it is why the new
+ * database column is nullable rather than defaulted. A job with no reason gets no
+ * request at all rather than an empty one.
+ */
+const v12ToV13 = (data: Loose): Loose => {
+  const upgradedAt = new Date().toISOString();
+  return {
+    ...data,
+    jobs: rows(data, 'jobs').map((job) => {
+      const reason = text(job.awaitingSparesReason);
+      const { awaitingSparesReason: _replaced, ...rest } = job;
+      return {
+        ...rest,
+        sparesRequest:
+          reason.trim().length === 0
+            ? null
+            : { description: reason, notes: '', photoId: null, requestedAt: upgradedAt },
+      };
+    }),
+  };
+};
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
   10: v10ToV11,
   11: v11ToV12,
+  12: v12ToV13,
 };
 
 /**

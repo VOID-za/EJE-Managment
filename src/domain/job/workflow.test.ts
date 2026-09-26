@@ -48,7 +48,7 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   checklist: null,
   signature: null,
   signatureRefusals: [],
-  awaitingSparesReason: '',
+  sparesRequest: null,
   calloutApplied: false,
   courierCollection: false,
   waybillNumber: '',

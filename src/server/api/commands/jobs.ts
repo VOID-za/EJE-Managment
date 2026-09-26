@@ -340,9 +340,23 @@ export const JOB_COMMANDS: CommandRegistry = {
       jobs.removeMedia(context.operation, job, input.kind, input.attachmentId),
   ),
 
+  /**
+   * Putting a job on hold for a part. SPARE-2.
+   *
+   * `description` is what the field was called `reason` for; it is what somebody
+   * has to order. `notes` and `photoId` are optional, and the REQUEST DATE is
+   * deliberately not in this schema — it is stamped from the server's clock, so
+   * a client cannot claim a job has been waiting since last month.
+   */
   awaiting_spares: withInput(
-    z.object({ reason: z.string().min(1).max(1000) }).strict(),
-    (context, job, input) => jobs.moveToAwaitingSpares(context.operation, job, input.reason),
+    z
+      .object({
+        description: text(1000),
+        notes: text(2000).optional(),
+        photoId: z.string().min(1).max(100).nullable().optional(),
+      })
+      .strict(),
+    (context, job, input) => jobs.moveToAwaitingSpares(context.operation, job, input),
   ),
 
   return_to_progress: simple((context, job) => jobs.returnToInProgress(context.operation, job)),

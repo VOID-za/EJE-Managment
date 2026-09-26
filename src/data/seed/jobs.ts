@@ -127,7 +127,7 @@ const baseJob = (jobNumber: string): Job => ({
   checklist: null,
   signature: null,
   signatureRefusals: [],
-  awaitingSparesReason: '',
+  sparesRequest: null,
   calloutApplied: false,
   courierCollection: false,
   waybillNumber: '',
@@ -279,8 +279,12 @@ export const seedJobs: readonly Job[] = [
     faultDescription:
       'Axis drive removed for workshop testing. Intermittent Z-axis following error under load.',
     primaryTechnicianId: asUserId('user-tech-deon'),
-    awaitingSparesReason:
-      'Replacement IGBT module on back-order from the supplier. ETA confirmed for next week.',
+    sparesRequest: {
+      description: 'Replacement IGBT module, Siemens 6SL3120-1TE21-0AA4.',
+      notes: 'On back-order from the supplier. ETA confirmed for next week.',
+      photoId: null,
+      requestedAt: timeOffset(-4, 9, 10),
+    },
     createdAt: timeOffset(-9, 8, 15),
     acceptedAt: timeOffset(-4, 8, 40),
     labour: [
@@ -325,7 +329,12 @@ export const seedJobs: readonly Job[] = [
     faultDescription:
       'Rotary table not indexing. Siemens control reporting axis fault on the B-axis.',
     primaryTechnicianId: asUserId('user-tech-naledi'),
-    awaitingSparesReason: 'Encoder assembly quoted to the customer. Awaiting purchase order.',
+    sparesRequest: {
+      description: 'Heidenhain encoder assembly, ROD 486.',
+      notes: 'Quoted to the customer. Awaiting their purchase order.',
+      photoId: null,
+      requestedAt: timeOffset(-6, 10, 25),
+    },
     createdAt: timeOffset(-2, 7, 5),
     acceptedAt: timeOffset(-2, 7, 40),
     travel: [

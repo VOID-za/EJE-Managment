@@ -395,7 +395,7 @@ export const createJob = async (
     checklist: null,
     signature: null,
     signatureRefusals: [],
-    awaitingSparesReason: '',
+    sparesRequest: null,
     // A call-out fee is a per-job commercial decision, applied on the job card.
     calloutApplied: false,
     // Offered on the job types whose work is collected from the counter; false

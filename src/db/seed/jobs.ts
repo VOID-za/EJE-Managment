@@ -144,7 +144,7 @@ const base = (jobNumber: string): Job => ({
   checklist: null,
   signature: null,
   signatureRefusals: [],
-  awaitingSparesReason: '',
+  sparesRequest: null,
   calloutApplied: false,
   courierCollection: false,
   waybillNumber: '',
@@ -363,8 +363,12 @@ export const seedJobs: readonly Job[] = [
     faultDescription: 'SINUMERIK drive module returned for test and repair.',
     primaryTechnicianId: TECH2,
     acceptedAt: timeAgo(5, 8),
-    awaitingSparesReason:
-      'IGBT module on back order with the supplier. Expected in seven working days.',
+    sparesRequest: {
+      description: 'IGBT module, Siemens 6SL3120-1TE21-0AA4.',
+      notes: 'On back order with the supplier. Expected in seven working days.',
+      photoId: null,
+      requestedAt: timeAgo(5, 9),
+    },
     createdAt: timeAgo(6, 8),
     labour: [
       {
@@ -413,7 +417,12 @@ export const seedJobs: readonly Job[] = [
     faultDescription: 'Annual service on the VCN-530C.',
     primaryTechnicianId: TECH1,
     acceptedAt: timeAgo(2, 8),
-    awaitingSparesReason: 'Spindle drive belt not in stock. Courier delivery expected tomorrow.',
+    sparesRequest: {
+      description: 'Spindle drive belt, Optibelt SK 1120.',
+      notes: 'Not in stock. Courier delivery expected tomorrow.',
+      photoId: null,
+      requestedAt: timeAgo(1, 14),
+    },
     createdAt: timeAgo(3, 9),
   }),
 

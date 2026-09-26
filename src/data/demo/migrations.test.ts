@@ -276,4 +276,52 @@ describe('migrating a persisted snapshot', () => {
     expect(migrateDatabase(8, null, SCHEMA_VERSION)).toBeNull();
     expect(migrateDatabase(8, 'not a snapshot', SCHEMA_VERSION)).toBeNull();
   });
+
+  /* -- v12 -> v13: the spares request (SPARE-2) ---------------------------- */
+
+  it('carries a spares reason forward as the request description', () => {
+    const snapshot = {
+      version: 12,
+      jobs: [
+        { id: 'job-1', awaitingSparesReason: 'IGBT module on back order.' },
+        { id: 'job-2', awaitingSparesReason: '' },
+      ],
+    };
+
+    const migrated = migrateDatabase(12, snapshot, SCHEMA_VERSION)!;
+    const [held, never] = migrated.jobs as unknown as {
+      sparesRequest: { description: string; notes: string; photoId: null; requestedAt: string } | null;
+      awaitingSparesReason?: unknown;
+    }[];
+
+    /*
+     * The sentence becomes the DESCRIPTION, whole. Splitting it into description
+     * and notes would need a guess at where it divides, and half of it would end
+     * up under the wrong heading.
+     */
+    expect(held?.sparesRequest?.description).toBe('IGBT module on back order.');
+    expect(held?.sparesRequest?.notes).toBe('');
+    expect(held?.sparesRequest?.photoId).toBeNull();
+    // Unrecoverable, so it is the moment of the upgrade rather than a fiction.
+    expect(Number.isNaN(Date.parse(held?.sparesRequest?.requestedAt ?? ''))).toBe(false);
+
+    // A job that never waited gets no request, not an empty one.
+    expect(never?.sparesRequest).toBeNull();
+
+    // And the field it replaced is GONE, not left beside it.
+    expect(held?.awaitingSparesReason).toBeUndefined();
+    expect(never?.awaitingSparesReason).toBeUndefined();
+  });
+
+  it('upgrades a v8 snapshot all the way to a spares request', () => {
+    // The whole chain still runs, which is what keeps a demonstration that has
+    // been going since v8 from being thrown away.
+    const migrated = migrateDatabase(8, v8Snapshot(), SCHEMA_VERSION);
+    expect(migrated).not.toBeNull();
+    for (const job of migrated!.jobs) {
+      expect(job).not.toHaveProperty('awaitingSparesReason');
+      expect(job).toHaveProperty('sparesRequest');
+    }
+  });
+
 });

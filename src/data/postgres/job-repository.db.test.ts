@@ -217,6 +217,63 @@ describeDb('the PostgreSQL job repository', () => {
     });
   });
 
+  describe('the spares request (SPARE-2)', () => {
+    it('round trips all four fields', async () => {
+      const job = await newJob({
+        status: 'awaiting_spares',
+        sparesRequest: {
+          description: 'IGBT module, Siemens 6SL3120-1TE21-0AA4.',
+          notes: 'On back-order. Machine isolated.',
+          photoId: null,
+          requestedAt: '2026-09-20T09:15:00.000Z',
+        },
+      });
+      await repository.save(job);
+
+      const read = await repository.findById(job.id);
+      expect(read?.sparesRequest).toEqual({
+        description: 'IGBT module, Siemens 6SL3120-1TE21-0AA4.',
+        notes: 'On back-order. Machine isolated.',
+        photoId: null,
+        requestedAt: '2026-09-20T09:15:00.000Z',
+      });
+    });
+
+    it('answers null for a job that has never waited for a part', async () => {
+      /*
+       * `awaiting_spares_requested_at` is what decides this. A job with no
+       * request must not read back as a request whose fields happen to be empty
+       * — the screens would then have to tell the two apart.
+       */
+      const job = await repository.save(await newJob());
+      expect(job.sparesRequest).toBeNull();
+
+      const read = await repository.findById(job.id);
+      expect(read?.sparesRequest).toBeNull();
+    });
+
+    it('keeps the request after the job resumes', async () => {
+      const job = await repository.save(
+        await newJob({
+          status: 'awaiting_spares',
+          sparesRequest: {
+            description: 'Spindle drive belt.',
+            notes: '',
+            photoId: null,
+            requestedAt: '2026-09-20T09:15:00.000Z',
+          },
+        }),
+      );
+
+      // What `returnToInProgress` writes: the status moves, the request does not.
+      const resumed = await repository.save({ ...job, status: 'in_progress' });
+
+      expect(resumed.status).toBe('in_progress');
+      expect(resumed.sparesRequest?.description).toBe('Spindle drive belt.');
+      expect(resumed.sparesRequest?.requestedAt).toBe('2026-09-20T09:15:00.000Z');
+    });
+  });
+
   describe('immutability, enforced by the database', () => {
     it('refuses to rewrite a captured signature', async () => {
       const job = await newJob({

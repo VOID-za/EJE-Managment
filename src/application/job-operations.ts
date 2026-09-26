@@ -1143,24 +1143,88 @@ export const removeMedia = async (
   return saved;
 };
 
+/**
+ * How long a job stood waiting, in words. SPARE-2.
+ *
+ * For the audit line the office reads when a part finally arrives. Whole days,
+ * because "3 days" is the answer to the question and "2 days 7 hours 14 minutes"
+ * is not; under a day says so rather than rounding to zero.
+ */
+const daysWaiting = (from: string, to: string): string => {
+  const hours = (Date.parse(to) - Date.parse(from)) / 3_600_000;
+  if (!Number.isFinite(hours) || hours < 24) return 'less than a day';
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day' : `${days} days`;
+};
+
+export interface SparesRequestInput {
+  /** What is needed. A request for nothing is refused. */
+  readonly description: string;
+  readonly notes?: string;
+  /** One of the job's own photographs, by id. */
+  readonly photoId?: string | null;
+}
+
 export const moveToAwaitingSpares = async (
   context: OperationContext,
   job: Job,
-  reason: string,
+  input: SparesRequestInput,
 ): Promise<Job> => {
   assertCanCapture(context, job);
+  assertEditable(context, job);
+
+  const description = input.description.trim();
+  if (description.length === 0) {
+    throw new WorkflowError(`${job.jobNumber} cannot be put on hold for nothing.`, [
+      {
+        code: 'spares_description_required',
+        message: 'Say what the job is waiting for. "Awaiting spares" on its own tells nobody what to order.',
+      },
+    ]);
+  }
+
+  /*
+   * THE PHOTOGRAPH MUST BE ONE OF THIS JOB'S. SPARE-2.
+   *
+   * Checked here rather than trusted from the request. An id from another job
+   * would put one customer's photograph on another customer's job, and the
+   * screens would render it without ever asking whose it was.
+   */
+  const photoId = (input.photoId ?? '').trim();
+  if (photoId.length > 0 && !job.photos.some((photo) => photo.id === photoId)) {
+    throw new WorkflowError(`That photograph is not on ${job.jobNumber}.`, [
+      {
+        code: 'photo_not_on_job',
+        message: 'Choose one of the photographs already captured on this job.',
+      },
+    ]);
+  }
+
   transition(job, 'awaiting_spares');
 
   const saved = await context.repos.jobs.save({
     ...job,
     status: 'awaiting_spares',
-    awaitingSparesReason: reason,
+    sparesRequest: {
+      description,
+      notes: (input.notes ?? '').trim(),
+      /*
+       * STAMPED FROM THE CLOCK, never typed. The question this answers is "how
+       * long has this machine been waiting?", and a date somebody keyed in
+       * cannot answer it.
+       */
+      requestedAt: context.services.clock.now(),
+      photoId: photoId.length === 0 ? null : asAttachmentId(photoId),
+    },
   });
   await audit(context, {
     jobId: job.id,
     type: 'moved_to_awaiting_spares',
     summary: 'Job moved to Awaiting Spares',
-    detail: reason,
+    detail:
+      (saved.sparesRequest?.notes ?? '').length > 0
+        ? `${description} — ${saved.sparesRequest?.notes ?? ''}`
+        : description,
   });
   return saved;
 };
@@ -1169,16 +1233,23 @@ export const returnToInProgress = async (context: OperationContext, job: Job): P
   assertCanCapture(context, job);
   transition(job, 'in_progress');
 
-  const saved = await context.repos.jobs.save({
-    ...job,
-    status: 'in_progress',
-    awaitingSparesReason: '',
-  });
+  /*
+   * THE REQUEST IS KEPT. SPARE-2.
+   *
+   * This used to clear the reason, so the moment the part arrived there was no
+   * longer any record that the job had waited for one, or for how long. The
+   * status moves; the history does not. What the job is waiting for NOW is read
+   * from the status, not from the presence of a request.
+   */
+  const saved = await context.repos.jobs.save({ ...job, status: 'in_progress' });
   await audit(context, {
     jobId: job.id,
     type: 'returned_to_in_progress',
     summary: 'Job returned to In Progress',
-    detail: 'Spares received or the job resumed on site.',
+    detail:
+      job.sparesRequest === null
+        ? 'The job resumed on site.'
+        : `Waited ${daysWaiting(job.sparesRequest.requestedAt, context.services.clock.now())} for: ${job.sparesRequest.description}`,
   });
   return saved;
 };

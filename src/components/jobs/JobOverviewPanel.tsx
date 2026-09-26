@@ -70,13 +70,26 @@ export const JobOverviewPanel = ({
               : 'No fault description was recorded when this job was created.'}
           </p>
 
-          {job.status === 'awaiting_spares' && job.awaitingSparesReason.length > 0 && (
+          {job.status === 'awaiting_spares' && job.sparesRequest !== null && (
             <div className="mt-4 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4">
               <p className="flex items-center gap-2 text-sm font-semibold text-amber-eje-700">
                 <Icon name="box" className="size-4" />
                 Awaiting spares
               </p>
-              <p className="mt-1.5 text-sm text-steel-700">{job.awaitingSparesReason}</p>
+              <p className="mt-1.5 text-sm font-medium text-steel-800">
+                {job.sparesRequest.description}
+              </p>
+              {job.sparesRequest.notes.length > 0 && (
+                <p className="mt-1.5 text-sm text-steel-700">{job.sparesRequest.notes}</p>
+              )}
+              {/*
+                HOW LONG, not only what. SPARE-2.
+                The first thing the office is asked about a held-up job is how
+                long it has been standing, and until now nothing recorded it.
+              */}
+              <p className="mt-2 text-xs text-steel-600">
+                Requested {formatDateTime(job.sparesRequest.requestedAt)}
+              </p>
             </div>
           )}
         </Card>

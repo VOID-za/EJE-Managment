@@ -16,7 +16,7 @@ import {
 } from '@/domain';
 import type { SubmissionCover, User } from '@/domain';
 import type { JobView } from '@/application/job-view';
-import { Button, ConfirmDialog, Icon, Modal, TextAreaField } from '@/components/ui';
+import { Button, ConfirmDialog, Icon, Modal, SelectField, TextAreaField } from '@/components/ui';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -59,7 +59,9 @@ export const JobActionBar = ({
   const currentUser = useCurrentUser();
   const [confirmAccept, setConfirmAccept] = useState(false);
   const [sparesOpen, setSparesOpen] = useState(false);
-  const [sparesReason, setSparesReason] = useState('');
+  const [sparesDescription, setSparesDescription] = useState('');
+  const [sparesNotes, setSparesNotes] = useState('');
+  const [sparesPhotoId, setSparesPhotoId] = useState('');
   const [confirmResume, setConfirmResume] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -458,7 +460,7 @@ export const JobActionBar = ({
       <Modal
         open={sparesOpen}
         title="Move to Awaiting Spares"
-        description="Record why the job is blocked. The reason appears on the job and in the activity trail."
+        description="Say what the job is waiting for. It appears on the job, in the activity trail, and on the office's list of jobs held up."
         onClose={() => setSparesOpen(false)}
         footer={
           <>
@@ -467,14 +469,20 @@ export const JobActionBar = ({
             </Button>
             <Button
               loading={operation.running}
-              disabled={sparesReason.trim().length === 0}
+              disabled={sparesDescription.trim().length === 0}
               onClick={async () => {
                 const ok = await operation.run(() =>
-                  jobs.awaitingSpares(job.id, sparesReason.trim()),
+                  jobs.awaitingSpares(job.id, {
+                    description: sparesDescription.trim(),
+                    notes: sparesNotes.trim(),
+                    photoId: sparesPhotoId.length === 0 ? null : sparesPhotoId,
+                  }),
                 );
                 if (ok) {
                   setSparesOpen(false);
-                  setSparesReason('');
+                  setSparesDescription('');
+                  setSparesNotes('');
+                  setSparesPhotoId('');
                   onChanged();
                 }
               }}
@@ -484,15 +492,60 @@ export const JobActionBar = ({
           </>
         }
       >
+        {/*
+          WHAT TO ORDER, separately from everything else. SPARE-2.
+          This was one box called "Reason", which mixed the part somebody has to
+          order with whatever else was going on. The description is what gets
+          quoted and ordered, so it stands on its own.
+        */}
         <TextAreaField
-          label="Reason"
+          label="What is needed"
           required
-          rows={4}
-          value={sparesReason}
-          onChange={(event) => setSparesReason(event.target.value)}
-          placeholder="e.g. Replacement IGBT module on back-order from the supplier, ETA next week."
-          hint="A job may move in and out of Awaiting Spares as many times as needed."
+          rows={3}
+          value={sparesDescription}
+          onChange={(event) => setSparesDescription(event.target.value)}
+          placeholder="e.g. Replacement IGBT module, Siemens 6SL3120-1TE21-0AA4."
+          hint="The part, as precisely as you can. This is what the office orders from."
         />
+
+        <TextAreaField
+          label="Notes"
+          rows={3}
+          value={sparesNotes}
+          onChange={(event) => setSparesNotes(event.target.value)}
+          placeholder="e.g. On back-order from the supplier, ETA next week. Machine left safe and isolated."
+          hint="Optional. Anything the office or the next technician should know."
+        />
+
+        {/*
+          A PHOTOGRAPH ALREADY ON THE JOB, not another upload. SPARE-2.
+          The technician photographs the part or its nameplate as a job photo;
+          this points at it, so there is one copy of the bytes and one place they
+          are managed.
+        */}
+        {job.photos.length > 0 ? (
+          <SelectField
+            label="Photograph of the part"
+            value={sparesPhotoId}
+            onChange={(event) => setSparesPhotoId(event.target.value)}
+            placeholder="None"
+            hint="Choose one of this job's photographs. Take it on the Photographs tab first if it is not there yet."
+            options={job.photos.map((photo) => ({
+              value: photo.id,
+              label: photo.caption.length > 0 ? photo.caption : photo.fileName,
+            }))}
+          />
+        ) : (
+          <p className="text-sm text-steel-600">
+            No photographs on this job yet. Take one on the Photographs tab if the office will need
+            to see the part.
+          </p>
+        )}
+
+        <p className="text-sm text-steel-600">
+          The date and time are recorded automatically, so the office can see how long the job has
+          been waiting.
+        </p>
       </Modal>
 
       {transferring && (
