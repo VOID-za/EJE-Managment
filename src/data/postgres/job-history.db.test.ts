@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { asc, eq, sql } from 'drizzle-orm';
 import {
+  asActivityId,
   asLineItemId,
   asUserId,
   canSeeJob,
@@ -546,6 +547,132 @@ describeDb('what a job leaves behind', () => {
           add constraint job_notes_job_id_jobs_id_fk
             foreign key (job_id) references jobs (id) on delete cascade
       `);
+    });
+  });
+
+  /*
+   * AUDIT-2, at the layer that actually has to keep it.
+   *
+   * The application tests prove the operations record what a value used to be.
+   * They cannot prove it SURVIVES, because the demonstration store holds the
+   * event object itself. `metadata` is untyped `jsonb`, so the round trip — and
+   * what happens to a row that has none, or has something else in there — is
+   * only answerable here.
+   */
+  describe('structured before/after values (AUDIT-2)', () => {
+    const changes = [
+      { field: 'part.unitPrice', from: 185_000, to: 240_000 },
+      { field: 'part.description', from: 'Coolant pump', to: 'Coolant pump, heavy duty' },
+    ] as const;
+
+    it('round trips through the metadata column', async () => {
+      const job = await jobs.save(await newJob());
+      const repos = createPostgresRepositories(db);
+
+      await repos.activity.append({
+        id: asActivityId(crypto.randomUUID()),
+        jobId: job.id,
+        type: 'part_added',
+        summary: 'Part amended: PMP-4410',
+        detail: 'Was Coolant pump x1.',
+        actorId: asUserId(IDS.technician),
+        occurredAt: '2026-09-20T09:00:00.000Z',
+        changes: [...changes],
+      });
+
+      // In the column, as JSON — not in `detail`, and not in a new table.
+      const rows = await db
+        .select()
+        .from(schema.auditEvents)
+        .where(eq(schema.auditEvents.jobId, job.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.metadata).toEqual({ changes: [...changes] });
+
+      // And back out again, with the numbers still numbers.
+      const read = await repos.activity.list(job.id);
+      expect(read[0]?.changes).toEqual([...changes]);
+      expect(typeof read[0]?.changes[0]?.from).toBe('number');
+    });
+
+    it('writes NULL, not an empty object, for an event that carries none', async () => {
+      const job = await jobs.save(await newJob());
+      const repos = createPostgresRepositories(db);
+
+      await repos.activity.append({
+        id: asActivityId(crypto.randomUUID()),
+        jobId: job.id,
+        type: 'job_accepted',
+        summary: 'Job accepted',
+        detail: 'Accepted by Sipho Mahlangu.',
+        actorId: asUserId(IDS.technician),
+        occurredAt: '2026-09-20T09:00:00.000Z',
+        changes: [],
+      });
+
+      const rows = await db
+        .select()
+        .from(schema.auditEvents)
+        .where(eq(schema.auditEvents.jobId, job.id));
+      expect(rows[0]?.metadata).toBeNull();
+
+      const read = await repos.activity.list(job.id);
+      expect(read[0]?.changes).toEqual([]);
+    });
+
+    it('reads a row whose metadata predates AUDIT-2 as carrying no changes', async () => {
+      const job = await jobs.save(await newJob());
+      const repos = createPostgresRepositories(db);
+      const id = crypto.randomUUID();
+
+      /*
+       * `metadata` is untyped and was there before this requirement, so a row
+       * may hold anything at all. A trail that threw on one of them would be a
+       * trail nobody could open — so the unreadable parts are dropped and the
+       * rest is served.
+       */
+      await db.insert(schema.auditEvents).values({
+        id,
+        occurredAt: '2026-09-20T09:00:00.000Z',
+        actorId: IDS.technician,
+        actorName: 'Sipho Mahlangu',
+        type: 'job_accepted',
+        summary: 'Job accepted',
+        detail: '',
+        jobId: job.id,
+        metadata: { somethingElse: 'from another era', changes: 'not a list' },
+      });
+
+      const read = await repos.activity.list(job.id);
+      expect(read[0]?.changes).toEqual([]);
+      expect(read[0]?.summary).toBe('Job accepted');
+    });
+
+    it('drops a malformed entry and keeps the sound ones', async () => {
+      const job = await jobs.save(await newJob());
+      const repos = createPostgresRepositories(db);
+
+      await db.insert(schema.auditEvents).values({
+        id: crypto.randomUUID(),
+        occurredAt: '2026-09-20T09:00:00.000Z',
+        actorId: IDS.technician,
+        actorName: 'Sipho Mahlangu',
+        type: 'part_added',
+        summary: 'Part amended',
+        detail: '',
+        jobId: job.id,
+        metadata: {
+          changes: [
+            { field: 'part.quantity', from: 1, to: 2 },
+            { field: 'part.broken' },
+            { from: 1, to: 2 },
+            { field: 'part.nested', from: { a: 1 }, to: 2 },
+            null,
+          ],
+        },
+      });
+
+      const read = await repos.activity.list(job.id);
+      expect(read[0]?.changes).toEqual([{ field: 'part.quantity', from: 1, to: 2 }]);
     });
   });
 

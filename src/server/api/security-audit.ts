@@ -38,5 +38,7 @@ export const recordSecurityEvent = async (
     // nullable precisely for this.
     actorId: input.actorId ?? asUserId(''),
     occurredAt: input.occurredAt,
+    // A security event records an attempt, not a field changing. AUDIT-2.
+    changes: [],
   });
 };

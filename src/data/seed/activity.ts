@@ -19,6 +19,8 @@ const event = (
   detail,
   actorId: asUserId(actor),
   occurredAt: timeOffset(days, hours, minutes),
+  // Seeded history records what happened, not a value that moved. AUDIT-2.
+  changes: [],
 });
 
 /** Seeded audit trail. New events are appended by the application at runtime. */

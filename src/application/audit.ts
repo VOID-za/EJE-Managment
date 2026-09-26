@@ -4,6 +4,8 @@ import {
   asNotificationId,
   type ActivityEvent,
   type AppNotification,
+  type AuditValue,
+  type FieldChange,
   type NotificationChannel,
   type NotificationType,
   type UserId,
@@ -17,6 +19,31 @@ import type { AuditInput, OperationContext } from './context';
  * everywhere: resolved at write time, attributed to the acting user, and
  * emitted by the business logic rather than by a screen.
  */
+/**
+ * The fields that actually moved, as an audit event's `changes`. AUDIT-2.
+ *
+ * Only genuine differences: a screen that posts a whole form back unchanged
+ * must not fill the trail with sixteen "from X to X" entries, so a field whose
+ * value is identical is left out entirely, and an operation where nothing moved
+ * records no changes at all.
+ *
+ * `prefix` namespaces the keys — `labour.hours`, `rates.callout` — so a reader
+ * of the trail can tell a labour line's date from a travel line's without
+ * consulting the event type.
+ */
+export const changesBetween = (
+  prefix: string,
+  before: Readonly<Record<string, AuditValue>>,
+  after: Readonly<Record<string, AuditValue>>,
+): readonly FieldChange[] =>
+  Object.keys(after)
+    .filter((key) => before[key] !== after[key])
+    .map((key) => ({
+      field: `${prefix}.${key}`,
+      from: before[key] ?? null,
+      to: after[key] ?? null,
+    }));
+
 export const audit = async (
   context: OperationContext,
   input: AuditInput,
@@ -29,6 +56,8 @@ export const audit = async (
     detail: input.detail,
     actorId: context.actor.id,
     occurredAt: context.services.clock.now(),
+    // Empty unless the caller had a before and an after to record. AUDIT-2.
+    changes: input.changes ?? [],
   };
   return context.repos.activity.append(event);
 };

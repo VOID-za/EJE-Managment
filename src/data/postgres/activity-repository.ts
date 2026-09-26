@@ -1,10 +1,52 @@
 import { desc, eq } from 'drizzle-orm';
-import { asActivityId, asJobId, asUserId, type ActivityEvent, type JobId } from '@/domain';
+import {
+  asActivityId,
+  asJobId,
+  asUserId,
+  type ActivityEvent,
+  type AuditValue,
+  type FieldChange,
+  type JobId,
+} from '@/domain';
 import type { ActivityRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 
 type AuditRow = typeof schema.auditEvents.$inferSelect;
+
+/**
+ * The structured changes on a row, if it genuinely has any. AUDIT-2.
+ *
+ * `metadata` is untyped `jsonb`, and rows written before AUDIT-2 — or by a
+ * future event type that puts something else in there — must not be able to
+ * break a read. So every element is checked rather than cast: anything that is
+ * not a `{field, from, to}` with values of the permitted kinds is dropped, and
+ * an unreadable `metadata` yields an empty list instead of an exception. The
+ * audit trail is the last thing that should fail to load.
+ */
+const isAuditValue = (value: unknown): value is AuditValue =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean';
+
+const changesFrom = (metadata: unknown): readonly FieldChange[] => {
+  if (metadata === null || typeof metadata !== 'object') return [];
+  const listed = (metadata as { changes?: unknown }).changes;
+  if (!Array.isArray(listed)) return [];
+
+  return listed.filter((entry): entry is FieldChange => {
+    if (entry === null || typeof entry !== 'object') return false;
+    const candidate = entry as Record<string, unknown>;
+    return (
+      typeof candidate.field === 'string' &&
+      'from' in candidate &&
+      'to' in candidate &&
+      isAuditValue(candidate.from) &&
+      isAuditValue(candidate.to)
+    );
+  });
+};
 
 const toDomainEvent = (row: AuditRow): ActivityEvent => ({
   id: asActivityId(row.id),
@@ -14,6 +56,7 @@ const toDomainEvent = (row: AuditRow): ActivityEvent => ({
   detail: row.detail,
   actorId: asUserId(row.actorId ?? ''),
   occurredAt: row.occurredAt,
+  changes: changesFrom(row.metadata),
 });
 
 /**
@@ -72,6 +115,15 @@ export class PostgresActivityRepository implements ActivityRepository {
         detail: event.detail,
         jobId: event.jobId,
         jobNumber: job,
+        /*
+         * NULL when there is nothing structured to say. AUDIT-2.
+         *
+         * `{"changes": []}` on every one of the events that record that
+         * something merely happened would put an empty object on most rows in
+         * the table for no gain. Null means "this event carries no values", and
+         * `changesFrom` reads it back as the empty list it is.
+         */
+        metadata: event.changes.length === 0 ? null : { changes: event.changes },
       })
       .returning();
 

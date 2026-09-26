@@ -1,6 +1,6 @@
 import { can, type SystemSettings } from '@/domain';
 import type { OperationContext } from './context';
-import { audit } from './audit';
+import { audit, changesBetween } from './audit';
 import { WorkflowError } from './errors';
 
 /**
@@ -45,6 +45,33 @@ export const updateSettings = async (
       changes.length === 0
         ? 'Saved with no change to any rate.'
         : `Changed: ${changes.join(', ')}. Jobs already signed keep the rates they were signed at.`,
+    /*
+     * THE RATES THEMSELVES, not only their names. AUDIT-2.
+     *
+     * The sentence above has always said WHICH rates moved. It has never said
+     * what they moved from, so the only record of yesterday's charge-out rate
+     * was whatever job happened to be signed at it. These are the commercial
+     * terms EJE trades on; what they used to be is worth keeping.
+     */
+    changes: changesBetween(
+      'rates',
+      {
+        labourNormal: previous.labourRates.normal,
+        labourOvertime: previous.labourRates.overtime,
+        labourDouble: previous.labourRates.double,
+        callout: previous.calloutRate,
+        kilometre: previous.kilometreRate,
+        vatPercentage: previous.vatPercentage,
+      },
+      {
+        labourNormal: saved.labourRates.normal,
+        labourOvertime: saved.labourRates.overtime,
+        labourDouble: saved.labourRates.double,
+        callout: saved.calloutRate,
+        kilometre: saved.kilometreRate,
+        vatPercentage: saved.vatPercentage,
+      },
+    ),
   });
   return saved;
 };

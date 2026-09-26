@@ -1,4 +1,4 @@
-import type { ActivityEventType, User } from '@/domain';
+import type { ActivityEventType, User, FieldChange} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import type {
   Clock,
@@ -37,4 +37,12 @@ export interface AuditInput {
   readonly type: ActivityEventType;
   readonly summary: string;
   readonly detail: string;
+  /**
+   * What changed, structured. AUDIT-2.
+   *
+   * Omitted by the great majority of callers, which record that something
+   * happened rather than that a value moved. Supplied where an existing
+   * recorded value was replaced — see `ActivityEvent.changes`.
+   */
+  readonly changes?: readonly FieldChange[];
 }

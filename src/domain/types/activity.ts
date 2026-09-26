@@ -146,6 +146,31 @@ export type ActivityEventType =
   /** Every live session for one person ended at once, e.g. on being disabled. */
   | 'user_sessions_revoked';
 
+/**
+ * A value an audit event can carry. AUDIT-2.
+ *
+ * Deliberately narrow. Cents stay numbers, an enum stays its own string, a flag
+ * stays a boolean, and an absent value is null rather than an empty string —
+ * "no call-out fee" and "a call-out fee of nothing" are different facts. Dates
+ * and money are NOT pre-formatted here: a trail that stored "R1 850,00" could
+ * never be compared, totalled or re-rendered in another currency, and the
+ * formatting belongs to whoever displays it.
+ */
+export type AuditValue = string | number | boolean | null;
+
+/**
+ * One field that changed, and what it changed from. AUDIT-2.
+ *
+ * `field` is a STABLE IDENTIFIER, not a label — `labour.hours`, not "Hours" —
+ * because the trail outlives the wording on any screen, and a renamed heading
+ * must not orphan the history that used it.
+ */
+export interface FieldChange {
+  readonly field: string;
+  readonly from: AuditValue;
+  readonly to: AuditValue;
+}
+
 export interface ActivityEvent {
   readonly id: ActivityId;
   readonly jobId: JobId | null;
@@ -155,4 +180,18 @@ export interface ActivityEvent {
   readonly detail: string;
   readonly actorId: UserId;
   readonly occurredAt: IsoDateTime;
+  /**
+   * What changed, structured. AUDIT-2.
+   *
+   * Empty for the great majority of events, which record that something
+   * HAPPENED rather than that a value moved: a job accepted, a document
+   * generated, a signature captured. It is populated where an existing recorded
+   * value was replaced and the old one would otherwise be lost — an amended
+   * labour line, a corrected part quantity, a charge-out rate.
+   *
+   * It does NOT replace `summary` and `detail`. Those stay the record a person
+   * reads; this is the record a dispute can be settled from, and the two are
+   * written together so they can never disagree.
+   */
+  readonly changes: readonly FieldChange[];
 }

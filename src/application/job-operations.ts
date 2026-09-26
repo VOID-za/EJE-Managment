@@ -67,7 +67,7 @@ import { formatHours, formatKilometres } from '@/lib/format';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment } from './assignment-notice';
-import { audit, notify, notifyOffice } from './audit';
+import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
@@ -765,6 +765,28 @@ export const updateLabour = async (
     type: 'labour_added',
     summary: `Labour amended: ${formatHours(input.hours)} ${labourRateLabel(input.rateType).toLowerCase()}`,
     detail: `Was ${formatHours(existing.hours)} ${labourRateLabel(existing.rateType).toLowerCase()}.`,
+    /*
+     * The whole line, not only the hours the sentence mentions. AUDIT-2.
+     *
+     * `detail` names the change a person would notice; an amended date or
+     * description is just as much a change to what the customer was billed for,
+     * and was previously lost the moment it was overwritten.
+     */
+    changes: changesBetween(
+      'labour',
+      {
+        date: existing.date,
+        rateType: existing.rateType,
+        hours: existing.hours,
+        description: existing.description,
+      },
+      {
+        date: input.date,
+        rateType: input.rateType,
+        hours: input.hours,
+        description: input.description,
+      },
+    ),
   });
   await recordPostSignatureChange(context, saved, 'A labour line was amended.');
   return saved;
@@ -803,6 +825,15 @@ export const updateTravel = async (
     type: 'travel_added',
     summary: `Travel amended: ${formatKilometres(input.kilometres)}`,
     detail: `Was ${formatKilometres(existing.kilometres)}.`,
+    changes: changesBetween(
+      'travel',
+      {
+        date: existing.date,
+        kilometres: existing.kilometres,
+        description: existing.description,
+      },
+      { date: input.date, kilometres: input.kilometres, description: input.description },
+    ),
   });
   await recordPostSignatureChange(context, saved, 'A travel line was amended.');
   return saved;
@@ -842,6 +873,26 @@ export const updatePart = async (
     type: 'part_added',
     summary: `Part amended: ${input.partNumber}`,
     detail: `Was ${existing.partNumber} x${existing.quantity}, now x${input.quantity}.`,
+    /*
+     * `unitPrice` IS in here, and it is the reason this requirement matters.
+     * The sentence records the part number and the quantity; the price each was
+     * the one field a dispute would turn on and the one field nothing kept.
+     */
+    changes: changesBetween(
+      'part',
+      {
+        partNumber: existing.partNumber,
+        description: existing.description,
+        quantity: existing.quantity,
+        unitPrice: existing.unitPrice,
+      },
+      {
+        partNumber: input.partNumber,
+        description: input.description,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+      },
+    ),
   });
   await recordPostSignatureChange(context, saved, 'A parts line was amended.');
   return saved;

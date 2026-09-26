@@ -28,6 +28,8 @@ const event = (
   detail,
   actorId,
   occurredAt,
+  // Seeded history records what happened, not a value that moved. AUDIT-2.
+  changes: [],
 });
 
 export const seedActivity: readonly ActivityEvent[] = [
