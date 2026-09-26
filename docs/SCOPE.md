@@ -40,7 +40,7 @@ asked for.
 |---|---|---|---|
 | MANDATE-1 | **THE SYSTEM MUST BE USABLE OFFLINE.** The complete field workflow — reading the job, doing the work, capturing labour, travel, parts and photographs, writing the completion report, running the checklist and taking the customer's signature or recording their refusal — must work with no connectivity at all, and must survive the tablet being closed, locked, dropped or running out of battery. Work captured offline is not lost and is not silently overwritten when the tablet reconnects | **NOT IMPLEMENTED** | CR-02, OFF-1…OFF-13, ACC-OFF-1…ACC-OFF-12 |
 | MANDATE-2 | **THE SYSTEM MUST BE INSTALLABLE AS A TABLET APPLICATION.** It is installed to the home screen of a rugged Android tablet from the browser, launches standalone without browser furniture, reaches the camera, updates itself, and recovers after an interruption. A native Android/iOS application remains out of scope (v2.0 §26) — the installable PWA is how this is delivered | **NOT IMPLEMENTED** | CR-03, PWA-1…PWA-8, ACC-PWA-1…ACC-PWA-6 |
-| MANDATE-3 | **THE CUSTOMER MUST ACTUALLY RECEIVE THEIR DOCUMENT.** The final submission's purpose is to put the job card in the customer's hands. Until a production email adapter exists, no deployment does that — the send is simulated in every environment | **NOT IMPLEMENTED** | EMAIL-2, CR-09 Phase 1 |
+| MANDATE-3 | **THE CUSTOMER MUST ACTUALLY RECEIVE THEIR DOCUMENT.** The final submission's purpose is to put the job card in the customer's hands. Until a production email adapter exists, no deployment does that — the send is simulated in every environment | **PARTIAL** — *amended 26 September 2026 by CR-09 Phase 1:* the adapter now exists and sends through Microsoft 365 `8479a69`. It is **not yet configured on any deployment**, so no customer has received a job card yet; a production deployment refuses rather than simulating. This mandate is met when Graph is configured and a live send has been verified | EMAIL-2, CR-09 Phase 1, DELIV-1…DELIV-6 |
 
 *Recorded 25 September 2026 by CR-10. MANDATE-1 and MANDATE-2 restate CR-02 and
 CR-03 as acceptance conditions on the product rather than as entries in a list
@@ -336,7 +336,9 @@ by reading the wording.
 
 ### CR-09 — Customer delivery and production readiness
 *Defined 25 September 2026, from the implementation audit at `ca1cda7`.*
-***DEFINED — NOT IMPLEMENTED. No code has been written for any phase of this.***
+***Phase 1 (a)–(e) IMPLEMENTED `8479a69`, 26 September 2026 — see DELIV-1…DELIV-6.
+Phase 1(f) — BD-06 — remains OPEN, and DELIV-7 with it. Phases 2, 3 and 4 remain
+DEFINED — NOT IMPLEMENTED; no code has been written for any of them.***
 
 The audit found the office and field workflow complete and enforced, and found
 two things standing between it and acceptance that are not defects in what
@@ -899,7 +901,7 @@ these is CR-09's work; the IDs exist so the fix can point at something.*
 
 | ID | Finding | Severity | Status | Where |
 |---|---|---|---|---|
-| AUD-1 | **No production email adapter.** `src/server/runtime.ts` constructs `SimulatedEmailService` unconditionally — there is no branch, no configuration reader and no adapter. The customer is not emailed in any environment | **ACCEPTANCE BLOCKER** | OPEN | EMAIL-2, MANDATE-3, CR-09 Phase 1 |
+| AUD-1 | **No production email adapter.** `src/server/runtime.ts` constructs `SimulatedEmailService` unconditionally — there is no branch, no configuration reader and no adapter. The customer is not emailed in any environment | **ACCEPTANCE BLOCKER** | **RESOLVED 26 September 2026** `8479a69` — `buildEmail` now selects Microsoft 365 through Graph where configured, and refuses in production where it is not. The finding is kept as it was written; what changed is the answer to it | EMAIL-2, MANDATE-3, CR-09 Phase 1 |
 | AUD-2 | **Offline and PWA are at zero**: no `public/` directory, no manifest, no service worker, no IndexedDB, no mutation queue, no sync or conflict handling. `request-failure.ts` classifies a network failure as `offline` and says so, which is an error message, not offline capability | **ACCEPTANCE BLOCKER** | OPEN | CR-02, CR-03, MANDATE-1, MANDATE-2, CR-09 Phases 3–4 |
 | AUD-3 | **A signed job card with a genuine error has no remedy at any layer** | **ACCEPTANCE BLOCKER** | OPEN — **business decision BD-02** | IMMUT-9 |
 | AUD-4 | **Closing Without Customer Signature sends the customer nothing.** The document is rendered, stored and downloadable; no delivery is attempted | **ACCEPTANCE BLOCKER** | OPEN — **business decision BD-06** | REF-16, CR-09 Phase 1(f) |
@@ -919,12 +921,12 @@ the implementation can be checked against something.*
 
 | ID | Requirement | Status |
 |---|---|---|
-| DELIV-1 | A **production email adapter** exists behind the existing `EmailService` port, selected from configuration exactly as `buildWhatsApp` selects the WhatsApp adapter | **DEFINED** |
-| DELIV-2 | The **simulated adapter is retained** and is what the demonstration and the test suites use. A deployment never silently falls back to it: an unconfigured production deployment refuses and says why, as `UnconfiguredWhatsAppService` does | **DEFINED** |
-| DELIV-3 | **An accepted send is not a delivery.** The adapter may report `pending_delivery` and nothing else until the provider says otherwise; only a confirmed delivery closes a job (SUBMIT-5 is unchanged) | **DEFINED** |
-| DELIV-4 | A **failed send is reported and retryable**, re-sending the STORED document rather than rendering a new one (SUBMIT-12 unchanged) | **DEFINED** |
-| DELIV-5 | **Provider reports drive the delivery handshake** through the existing outbox and `/api/outbox/[messageId]/delivery`, gated as it is today | **DEFINED** |
-| DELIV-6 | **The production configuration is documented** — every variable, what happens when each is absent, and how to verify a live send without sending a customer a test job card | **DEFINED** |
+| DELIV-1 | A **production email adapter** exists behind the existing `EmailService` port, selected from configuration exactly as `buildWhatsApp` selects the WhatsApp adapter | **DONE** — GraphEmailService, selected by chooseEmailTransport exactly as buildWhatsApp selects WhatsApp, `8479a69` |
+| DELIV-2 | The **simulated adapter is retained** and is what the demonstration and the test suites use. A deployment never silently falls back to it: an unconfigured production deployment refuses and says why, as `UnconfiguredWhatsAppService` does | **DONE** — SimulatedEmailService retained for the demonstration and the suites; a production deployment with no Graph configuration gets UnconfiguredEmailService, which refuses and names what to set, `8479a69` |
+| DELIV-3 | **An accepted send is not a delivery.** The adapter may report `pending_delivery` and nothing else until the provider says otherwise; only a confirmed delivery closes a job (SUBMIT-5 is unchanged) | **DONE** — every adapter returns pending_delivery on acceptance; no adapter can return delivered; `email.test.ts` asserts it for Graph, SMTP and the refusal, `8479a69` |
+| DELIV-4 | A **failed send is reported and retryable**, re-sending the STORED document rather than rendering a new one (SUBMIT-12 unchanged) | **DONE** — a throwing adapter is caught in performIssue and recorded as a failed delivery with its reason; resendCustomerCopy re-sends the STORED document, unchanged, `8479a69` |
+| DELIV-5 | **Provider reports drive the delivery handshake** through the existing outbox and `/api/outbox/[messageId]/delivery`, gated as it is today | **DONE** — deliveryState drives awaiting_delivery → closed through the existing outbox route, gated as before, `8479a69` |
+| DELIV-6 | **The production configuration is documented** — every variable, what happens when each is absent, and how to verify a live send without sending a customer a test job card | **DONE** — docs/integrations.md — every variable, what each absence does, and how to verify a live send without emailing a customer; .env.example, `8479a69` |
 | DELIV-7 | **BD-06 is answered and recorded in this document BEFORE any unsigned-copy delivery is implemented** | **DEFINED — blocked on BD-06** |
 
 **Phase 2 — protect what exists**
@@ -1035,7 +1037,7 @@ to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
 | MEDIA-1 | Customer-facing vs Internal classification | **NOT IMPLEMENTED** — no column on `job_media` |
 | MEDIA-2 | Only customer-facing media in the customer PDF | **BLOCKED** by MEDIA-1 |
 | MEDIA-5 | Video capture | **PARTIAL** — type only, no capture path |
-| EMAIL-2 | Microsoft 365 / Graph adapter | **NOT IMPLEMENTED** — simulated only |
+| EMAIL-2 | Microsoft 365 / Graph adapter | **DONE** `8479a69` — `GraphEmailService`. *Amended 26 September 2026 by CR-09 Phase 1:* the row read **NOT IMPLEMENTED — simulated only** until the adapter existed. Graph is production; SMTP (`src/services/development/email.ts`) is a development and testing transport and is refused in production |
 | DRAFT-1 | Draft jobs, Master-only | **NOT IMPLEMENTED** — creation always `open` |
 | SPARE-2 | Spares: description, notes, photo, request date | **PARTIAL** — only `awaiting_spares_reason` |
 | CUST-CR | Customer change requests | **NOT IMPLEMENTED** |
