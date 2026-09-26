@@ -1056,7 +1056,7 @@ to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
 | CUST-CR | Customer change requests | **NOT IMPLEMENTED** |
 | MACH-HIST | Machine location history | **NOT IMPLEMENTED** |
 | COST-5 | Additional charges and discounts | **NOT IMPLEMENTED** |
-| AUDIT-2 | Structured before/after values | **PARTIAL** — narrative detail only |
+| AUDIT-2 | Structured before/after values | **TESTED — awaiting approval** `9c5ed5e`. *Amended 26 September 2026:* the row read **PARTIAL — narrative detail only**, and CR-10 pinned the gap to `audit_events.metadata` — a `jsonb` column that existed and was never written to. It is written now. `ActivityEvent.changes` carries `{field, from, to}` with values kept as they are (cents as numbers, an enum as its own string, absence as null) rather than pre-formatted, because a trail holding "R1 850,00" could never be compared or re-rendered. Populated where an existing recorded value was REPLACED — an amended labour, travel or part line, and the charge-out rates — and **only for the fields that actually moved**. Every other event carries an empty list and the column stays NULL. The screens are unchanged: the schema's own note says `metadata` is used sparingly and that `summary` and `detail` remain the record a person reads, and they still are. `audit-changes.test.ts` covers the operations; `job-history.db.test.ts` covers the round trip through the column, including a row whose `metadata` predates this and one carrying a malformed entry |
 | SEARCH-4 | CSV / Excel export | **NOT IMPLEMENTED** |
 | LIB-5 | Full-text PDF search / OCR | **NOT IMPLEMENTED** |
 | BACKUP-1 | Database **and files** backed up | **PARTIAL** — `pg_dump` documented; storage not covered |
@@ -1090,7 +1090,10 @@ to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
 >   produce. Recorded under AUD-8's family of demo-data findings.
 > - **AUDIT-2** — confirmed PARTIAL: `audit_events.metadata` is a `jsonb`
 >   column that exists and is not used for structured before/after values. The
->   trail is narrative.
+>   trail is narrative. **Addressed 26 September 2026 `9c5ed5e`** — the
+>   column is now written, and this finding is what said where to write it. No
+>   migration was needed, which is the whole reason this was the next thing
+>   worth doing.
 > - **ARCH-6** — confirmed NOT IMPLEMENTED; it is AUD-5, an acceptance blocker,
 >   and QA-4 in CR-09 Phase 2.
 
