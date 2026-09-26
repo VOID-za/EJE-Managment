@@ -23,7 +23,8 @@ export const SIMULATED_CAPABILITIES: readonly SimulatedCapability[] = [
     name: 'Customer email delivery',
     explanation:
       'Submitting a job card records the email in the Simulated Outbox. No email is sent.',
-    productionPlan: 'Microsoft 365 via the Graph API, behind the EmailService interface.',
+    productionPlan:
+      'Microsoft 365 via the Graph API, behind the EmailService interface. The adapter exists (GraphEmailService); a deployment that configures it sends real mail, and a production deployment that does not refuses rather than simulating.',
   },
   {
     id: 'whatsapp',

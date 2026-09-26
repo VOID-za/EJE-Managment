@@ -7,6 +7,18 @@ import { createPostgresRepositories } from '@/data/postgres';
 import { withTransaction } from '@/data/postgres/transaction';
 import { getDatabase } from '@/db/client';
 import type { AppServices } from '@/application/context';
+import {
+  chooseEmailTransport,
+  GraphEmailService,
+  readGraphEmailConfiguration,
+  UnconfiguredEmailService,
+  type GraphEmailConfiguration,
+} from '@/services/production/email';
+import {
+  readSmtpEmailConfiguration,
+  SmtpEmailService,
+  type SmtpEmailConfiguration,
+} from '@/services/development/email';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
@@ -15,6 +27,7 @@ import {
   DemoStorageService,
   type FileStore,
 } from '@/services/simulated/storage';
+import type { StorageService } from '@/services/ports';
 import {
   FilesystemStorageService,
   readStorageConfiguration,
@@ -122,6 +135,50 @@ const buildWhatsApp = (
     : new UnconfiguredWhatsAppService();
 };
 
+/**
+ * Which email adapter this deployment gets.
+ *
+ * The RULE lives in `chooseEmailTransport`, where it is unit-tested; this maps
+ * its answer onto a constructor and does nothing else.
+ *
+ * Two signals, each doing one job. `backend` decides whether this is the
+ * DEMONSTRATION, exactly as `buildWhatsApp` uses it — the demo has no database
+ * and no mail account and keeps its visible outbox. `NODE_ENV` decides only
+ * whether SMTP, a development transport, may be used at all; `next build` and
+ * `next start` set it, `next dev` and the test runner do not.
+ */
+const buildEmail = (
+  backend: PersistenceBackend,
+  outbox: SimulatedOutbox,
+  clock: SystemClock,
+  ids: UuidGenerator | SequentialIdGenerator,
+  storage: StorageService,
+) => {
+  const graph = readGraphEmailConfiguration();
+  const smtp = readSmtpEmailConfiguration();
+  const transport = chooseEmailTransport({
+    graphConfigured: graph !== null,
+    smtpConfigured: smtp !== null,
+    isProduction: process.env.NODE_ENV === 'production',
+    isDemoBackend: backend === 'demo',
+  });
+
+  switch (transport) {
+    case 'graph':
+      return new GraphEmailService(graph as GraphEmailConfiguration, storage, clock);
+    case 'smtp':
+      return new SmtpEmailService(smtp as SmtpEmailConfiguration, storage, clock, outbox);
+    case 'simulated':
+      return new SimulatedEmailService(outbox, clock, ids);
+    default:
+      return new UnconfiguredEmailService(
+        smtp === null
+          ? ''
+          : 'SMTP is configured, but SMTP is a development transport and is never used in production.',
+      );
+  }
+};
+
 const buildServices = (backend: PersistenceBackend, store: DemoStore | null): BuiltServices => {
   const clock = new SystemClock();
   /*
@@ -168,14 +225,15 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
     clock,
     ids,
     /*
-     * Microsoft Graph and object storage are still simulated, deliberately and
-     * visibly; WhatsApp is now real WHERE IT IS CONFIGURED — see
-     * `buildWhatsApp`. Every one of them sits behind `src/services/ports.ts`
+     * Object storage is still simulated, deliberately and visibly. Customer
+     * email is now real WHERE IT IS CONFIGURED — Microsoft 365 through Graph,
+     * see `buildEmail` — and so is WhatsApp, see `buildWhatsApp`. Every one of
+     * them sits behind `src/services/ports.ts`
      * and is constructed here, so swapping an adapter is a change in this
      * function and nowhere else. That is what made the WhatsApp swap a
      * three-line change rather than a rewrite.
      */
-    email: new SimulatedEmailService(outbox, clock, ids),
+    email: buildEmail(backend, outbox, clock, ids, storage),
     whatsapp: buildWhatsApp(backend, outbox, clock, ids),
     pdf: new SimulatedPdfService(clock),
     storage,
