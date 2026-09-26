@@ -51,3 +51,33 @@ export class ConcurrencyError extends Error {
     this.name = 'ConcurrencyError';
   }
 }
+
+/**
+ * Raised when a write would have altered what a customer signed for. AUD-10.
+ *
+ * The evidence on a signed job card — labour, travel, parts, notes, media — is
+ * final at every layer: the operations refuse to edit it (`assertEditable`),
+ * the repository declines to rewrite it, and
+ * `0007_signed_job_immutability.sql` refuses the UPDATE or DELETE outright.
+ * This is the middle one, and it exists so the middle layer FAILS LOUDLY rather
+ * than quietly dropping a change it has decided not to make.
+ *
+ * Reaching it means a caller handed the repository a signed job whose job card
+ * differs from the stored one. That is a programming error, not something a
+ * person can do — every route into those collections is already refused above —
+ * so it names the collection and says what it will not do, for whoever is
+ * reading the log.
+ */
+export class SignedJobCardAltered extends Error {
+  constructor(
+    readonly jobNumber: string,
+    /** The collections that differ, e.g. `['labour', 'parts']`. */
+    readonly collections: readonly string[],
+  ) {
+    super(
+      `${jobNumber} has been signed by the customer, so its ${collections.join(' and ')} ` +
+        'cannot be rewritten. The signed job card is final.',
+    );
+    this.name = 'SignedJobCardAltered';
+  }
+}

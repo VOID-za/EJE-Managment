@@ -28,6 +28,7 @@ import {
   vatBasisPointsFromPercent,
   type JobRowSet,
 } from './job-mapper';
+import { SignedJobCardAltered } from './transaction';
 import { VersionLedger, requireWritten } from './versions';
 import { isUuid } from './identifiers';
 
@@ -55,6 +56,91 @@ const sequenceFromJobNumber = (jobNumber: string): number => {
   }
   return Number(digits[1]);
 };
+
+/**
+ * The five collections a customer's signature freezes. AUD-10, IMMUT-7.
+ *
+ * Exactly the five `0007_signed_job_immutability.sql` puts a trigger on —
+ * `job_labour`, `job_travel`, `job_parts`, `job_notes`, `job_media` — and no
+ * others. `job_technicians` is deliberately absent: who attended is not part of
+ * what the customer signed for and carries no trigger.
+ *
+ * Each collection becomes one string, sorted by id so row order cannot matter,
+ * carrying every field the table actually stores. Comparing whole strings means
+ * a new field on one of these types is compared the moment it is persisted,
+ * rather than being quietly left out of the check by a hand-written field list
+ * somebody forgot to extend.
+ */
+type FrozenCollection = 'labour' | 'travel' | 'parts' | 'notes' | 'media';
+
+const fingerprint = (rows: readonly Record<string, unknown>[]): string =>
+  JSON.stringify(
+    rows
+      .map((row) =>
+        Object.keys(row)
+          .sort()
+          .map((key) => [key, row[key]]),
+      )
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+  );
+
+const frozenJobCard = (job: Job): Record<FrozenCollection, string> => ({
+  labour: fingerprint(
+    job.labour.map((entry) => ({
+      id: entry.id,
+      technicianId: entry.technicianId,
+      capturedBy: entry.capturedBy,
+      date: entry.date,
+      rateType: entry.rateType,
+      hours: entry.hours,
+      description: entry.description,
+      capturedAt: entry.capturedAt,
+    })),
+  ),
+  travel: fingerprint(
+    job.travel.map((entry) => ({
+      id: entry.id,
+      technicianId: entry.technicianId,
+      capturedBy: entry.capturedBy,
+      date: entry.date,
+      kilometres: entry.kilometres,
+      description: entry.description,
+      capturedAt: entry.capturedAt,
+    })),
+  ),
+  parts: fingerprint(
+    job.parts.map((entry) => ({
+      id: entry.id,
+      partNumber: entry.partNumber,
+      description: entry.description,
+      quantity: entry.quantity,
+      unitPrice: entry.unitPrice,
+      capturedAt: entry.capturedAt,
+      capturedBy: entry.capturedBy,
+    })),
+  ),
+  notes: fingerprint(
+    job.notes.map((note) => ({
+      id: note.id,
+      body: note.body,
+      authorId: note.authorId,
+      internal: note.internal,
+      createdAt: note.createdAt,
+    })),
+  ),
+  media: fingerprint(
+    [...job.photos, ...job.videos, ...job.attachments].map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      fileName: item.fileName,
+      caption: item.caption,
+      storageKey: item.storageKey,
+      sizeBytes: item.sizeBytes,
+      uploadedAt: item.uploadedAt,
+      uploadedBy: item.uploadedBy,
+    })),
+  ),
+});
 
 /**
  * The job aggregate, in PostgreSQL.
@@ -334,7 +420,7 @@ export class PostgresJobRepository implements JobRepository {
       this.versions.remember(job.id, written.version);
     }
 
-    await this.replaceChildren(job);
+    await this.writeChildren(job);
     await writeChecklist(this.db, job);
     await this.appendImmutableRecords(job);
 
@@ -410,8 +496,87 @@ export class PostgresJobRepository implements JobRepository {
 
   /* ---------------------------------------------------------------------- */
 
-  /** Children that are freely editable while the job is: replaced wholesale. */
-  private async replaceChildren(job: Job): Promise<void> {
+  /**
+   * THE TWO WAYS A JOB IS WRITTEN, AND WHY THEY ARE NOT THE SAME. AUD-10.
+   *
+   * (A) EDITING AN UNSIGNED JOB. The evidence on the job card — labour, travel,
+   * parts, notes, media — is the technician's to change, and it is replaced
+   * wholesale: a job has a handful of lines, the write is one round trip either
+   * way, and a diff is a place for a bug to live.
+   *
+   * (B) MOVING A SIGNED JOB THROUGH THE WORKFLOW. Issuing the job card,
+   * recording the delivery, closing on confirmation. The customer has put their
+   * name to the evidence, so NONE of it may be rewritten — and
+   * `0007_signed_job_immutability.sql` enforces exactly that, with a trigger on
+   * each of those five tables refusing UPDATE and DELETE once a signature
+   * exists.
+   *
+   * Before this, `save` did (A) unconditionally, so (B) ran head-first into the
+   * trigger: `DELETE FROM job_labour` on a signed job raised
+   * `restrict_violation`, the transaction rolled back, and
+   * `POST /api/jobs/:id/issue` answered 500. A signed job carrying so much as
+   * one labour line could not be issued at all on PostgreSQL, which is to say
+   * the customer never received their job card. That is AUD-10.
+   *
+   * THE FIX IS NOT TO WEAKEN THE TRIGGER, and it is not to make signed rows
+   * deletable. The trigger is right; the repository was asking it the wrong
+   * question. A signed job's job-card children are not written at all — there
+   * is nothing legitimate left to write — and the repository VERIFIES that
+   * rather than assuming it, so a caller that does try to alter signed evidence
+   * is refused here, by name, instead of silently losing the change or dying
+   * inside the driver. `writeChecklist` has taken exactly this shape since it
+   * was written: "Already completed: frozen... There is nothing legitimate left
+   * to write."
+   *
+   * WHAT STILL CHANGES ON A SIGNED JOB, and must: the job row's own workflow
+   * columns (status, submitted_at, the final document, the delivery record) —
+   * which `0007` deliberately leaves alone, guarding only the seven job-card
+   * fields by name — plus the append-only records in
+   * `appendImmutableRecords`, every one of which is insert-if-absent.
+   */
+  private async writeChildren(job: Job): Promise<void> {
+    await this.replaceTechnicians(job);
+    await this.recordParticipation(job);
+
+    /*
+     * THE SAME QUESTION THE TRIGGER ASKS, and deliberately not a different one.
+     *
+     * `0007` freezes a row when `job_signatures` HOLDS a row for the job —
+     * which is not the same as the aggregate in hand carrying a signature. A
+     * job being written for the first time WITH its signature already attached
+     * (the seed does exactly this, and so does `captureSignature`, which writes
+     * the evidence and the signature in one save) has no stored signature yet
+     * at the moment its children are written, so the trigger lets them through
+     * and so must this. Asking the object instead of the table would silently
+     * drop the children of every job created already-signed — a quieter and
+     * worse failure than the one being fixed.
+     */
+    const frozen = await this.hasStoredSignature(job);
+    if (!frozen) {
+      await this.replaceJobCardChildren(job);
+      return;
+    }
+    await this.assertJobCardUnchanged(job);
+  }
+
+  /** Whether the database already holds the signature that freezes this job. */
+  private async hasStoredSignature(job: Job): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: schema.jobSignatures.id })
+      .from(schema.jobSignatures)
+      .where(eq(schema.jobSignatures.jobId, job.id))
+      .limit(1);
+    return rows[0] !== undefined;
+  }
+
+  /**
+   * Who is ON the job, which a signature does not freeze.
+   *
+   * Deliberately outside the frozen set: `job_technicians` carries no trigger
+   * in `0002` or `0007`, because who attended is not part of what the customer
+   * signed for and the office may still correct it.
+   */
+  private async replaceTechnicians(job: Job): Promise<void> {
     await this.db.delete(schema.jobTechnicians).where(eq(schema.jobTechnicians.jobId, job.id));
     if (job.additionalTechnicianIds.length > 0) {
       await this.db.insert(schema.jobTechnicians).values(
@@ -421,9 +586,10 @@ export class PostgresJobRepository implements JobRepository {
         })),
       );
     }
+  }
 
-    await this.recordParticipation(job);
-
+  /** (A) The job card's evidence, while it is still the technician's to change. */
+  private async replaceJobCardChildren(job: Job): Promise<void> {
     await this.db.delete(schema.jobLabour).where(eq(schema.jobLabour.jobId, job.id));
     if (job.labour.length > 0) {
       await this.db.insert(schema.jobLabour).values(
@@ -519,6 +685,33 @@ export class PostgresJobRepository implements JobRepository {
           set: { caption: item.caption, removedAt: null },
         });
     }
+  }
+
+  /**
+   * (B) The job card, once the customer has signed it: verified, never written.
+   *
+   * Nothing here writes a row. The whole method exists to prove the caller is
+   * not asking for one — because the alternative, skipping the write silently,
+   * would turn an attempt to alter signed evidence into a change that vanished
+   * without trace, which is a worse failure than the 500 this replaces.
+   *
+   * The comparison is made between two DOMAIN aggregates, not between rows: the
+   * stored job is read back through the same mappers the caller's copy came
+   * from, so a numeric column that round-trips as a string, or a row order that
+   * differs, cannot raise a false alarm. Order is ignored; identity and content
+   * are not.
+   */
+  private async assertJobCardUnchanged(job: Job): Promise<void> {
+    // A stored signature implies a stored job, so this cannot be null here.
+    const stored = await this.findById(job.id);
+    if (stored === null) return;
+
+    const frozen = frozenJobCard(stored);
+    const altered = Object.entries(frozenJobCard(job))
+      .filter(([name, incoming]) => incoming !== frozen[name as FrozenCollection])
+      .map(([name]) => name);
+
+    if (altered.length > 0) throw new SignedJobCardAltered(job.jobNumber, altered);
   }
 
   /**

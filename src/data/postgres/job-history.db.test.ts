@@ -15,7 +15,7 @@ import type { Database } from '@/db/client';
 import * as schema from '@/db/schema';
 import { PostgresJobRepository } from './job-repository';
 import { createPostgresRepositories } from './repositories';
-import { withTransaction } from './transaction';
+import { SignedJobCardAltered, withTransaction } from './transaction';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from './test-database';
 import { IDS, jobFixture, seedBaseline } from './test-fixtures';
 import { deleteJob } from '@/application/job-operations';
@@ -385,9 +385,35 @@ describeDb('what a job leaves behind', () => {
         .catch((cause: unknown) => cause);
 
       expect(refusal).not.toBeNull();
+      /*
+       * REFUSED BY THE REPOSITORY NOW, AND STILL BY THE DATABASE. AUD-10.
+       *
+       * This used to assert the driver's own SQLSTATE, because the repository
+       * rewrote the children wholesale and the trigger was the only thing that
+       * stopped it. It also meant a LEGITIMATE save of a signed job — issuing
+       * it — hit the same wall and answered 500. The repository now declines to
+       * rewrite a signed job card itself, so the refusal arrives one layer
+       * earlier and says which collection it protected.
+       *
+       * The database guarantee is not taken on trust because of that: the same
+       * amendment is attempted straight at the table below, and `0007` refuses
+       * it with the SQLSTATE this case has always asserted.
+       */
+      expect(refusal).toBeInstanceOf(SignedJobCardAltered);
+      expect((refusal as Error).message).toMatch(/parts/u);
+      expect((refusal as Error).message).toMatch(/signed by the customer/i);
+
+      const direct = await db
+        .update(schema.jobParts)
+        .set({ quantity: 4 })
+        .where(eq(schema.jobParts.jobId, job.id))
+        .then(() => null)
+        .catch((cause: unknown) => cause);
+
+      expect(direct).not.toBeNull();
       // drizzle wraps the driver error, so the trigger's own sentence — and
       // its SQLSTATE — are on `cause` rather than on the message.
-      const driver = (refusal as { cause?: { message?: string; code?: string } }).cause;
+      const driver = (direct as { cause?: { message?: string; code?: string } }).cause;
       expect(driver?.message).toMatch(/signed by the customer/i);
       expect(driver?.code).toBe('23001');
 

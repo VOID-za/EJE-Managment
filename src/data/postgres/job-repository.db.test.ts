@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import { PostgresJobRepository } from './job-repository';
-import { ConcurrencyError, withTransaction } from './transaction';
+import { ConcurrencyError, SignedJobCardAltered, withTransaction } from './transaction';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from './test-database';
 import { asUserId, asLineItemId, type Job } from '@/domain';
 import { IDS, jobFixture, seedBaseline } from './test-fixtures';
@@ -235,6 +235,106 @@ describeDb('the PostgreSQL job repository', () => {
         db.execute(sql`update job_signatures set customer_name = 'Somebody Else'`),
       );
       expect(message).toMatch(/immutable historical record/i);
+    });
+
+    /*
+     * THE REPOSITORY'S OWN HALF OF IMMUT-7. AUD-10.
+     *
+     * The trigger above is the last line. These are the one before it: a signed
+     * job's job card is not rewritten, so saving one that has been ALTERED is
+     * refused here, by name, rather than being silently dropped or dying inside
+     * the driver. Saving a signed job that has NOT been altered is the ordinary
+     * workflow write — issuing it, recording the delivery, closing it — and
+     * must go straight through.
+     */
+    const signed = {
+      customerName: 'Pieter',
+      customerSurname: 'Nel',
+      strokeData: 'M0,0 L1,1',
+      signedAt: '2026-09-20T12:00:00.000Z',
+      declaration: 'I confirm that the work described above has been completed.',
+    } as const;
+
+    const signedJobWithEvidence = async (): Promise<Job> => {
+      const job = await newJob({
+        status: 'review',
+        signature: signed,
+        labour: [
+          {
+            id: asLineItemId(crypto.randomUUID()),
+            technicianId: asUserId(TECHNICIAN),
+            capturedBy: asUserId(TECHNICIAN),
+            date: '2026-09-20',
+            rateType: 'normal',
+            hours: 3,
+            description: 'Replaced the coolant pump.',
+            capturedAt: '2026-09-20T11:00:00.000Z',
+          },
+        ],
+      });
+      return repository.save(job);
+    };
+
+    it('moves a signed job through the workflow without rewriting its job card', async () => {
+      const stored = await signedJobWithEvidence();
+
+      // Exactly what issuing does: the workflow columns move, the evidence does
+      // not. Before AUD-10 was fixed this raised `restrict_violation`.
+      const issued = await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        submittedAt: '2026-09-20T12:30:00.000Z',
+      });
+
+      expect(issued.status).toBe('awaiting_delivery');
+      expect(issued.labour).toHaveLength(1);
+      expect(issued.labour[0]?.hours).toBe(3);
+    });
+
+    it('refuses to save a signed job whose job card has been altered', async () => {
+      const stored = await signedJobWithEvidence();
+
+      const altered = {
+        ...stored,
+        labour: stored.labour.map((entry) => ({ ...entry, hours: 99 })),
+      };
+
+      await expect(repository.save(altered)).rejects.toThrow(SignedJobCardAltered);
+      // And it names what it would not rewrite, for whoever reads the log.
+      await expect(repository.save(altered)).rejects.toThrow(/labour/u);
+
+      // Nothing was written: the stored line is still the signed one.
+      const read = await repository.findById(stored.id);
+      expect(read?.labour[0]?.hours).toBe(3);
+    });
+
+    it('refuses to save a signed job that has GAINED a line', async () => {
+      const stored = await signedJobWithEvidence();
+
+      const withExtra = {
+        ...stored,
+        parts: [
+          {
+            id: asLineItemId(crypto.randomUUID()),
+            partNumber: 'PMP-4410',
+            description: 'Coolant pump',
+            quantity: 1,
+            unitPrice: 185_000,
+            capturedAt: '2026-09-20T13:00:00.000Z',
+            capturedBy: asUserId(TECHNICIAN),
+          },
+        ],
+      };
+
+      await expect(repository.save(withExtra)).rejects.toThrow(/parts/u);
+      expect((await repository.findById(stored.id))?.parts).toHaveLength(0);
+    });
+
+    it('refuses to save a signed job that has LOST a line', async () => {
+      const stored = await signedJobWithEvidence();
+
+      await expect(repository.save({ ...stored, labour: [] })).rejects.toThrow(/labour/u);
+      expect((await repository.findById(stored.id))?.labour).toHaveLength(1);
     });
 
     it('refuses to rewrite what a technician recorded when the customer refused', async () => {
