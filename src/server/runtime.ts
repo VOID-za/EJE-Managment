@@ -253,10 +253,45 @@ const createRuntime = (): ServerRuntime => {
     const { services, outbox } = buildServices('demo', store);
     const unit: UnitOfWork = { repos, services, idempotency: new MemoryIdempotencyStore() };
 
+    /*
+     * ONE WRITER AT A TIME. IDEM-2.
+     *
+     * PostgreSQL gives this for nothing: `withTransaction` opens a transaction,
+     * every optimistic update says `where version = $expected`, and the second
+     * of two concurrent writers loses and is told so. The demonstration store
+     * has no transactions and no row versions, so before this it had NO
+     * serialisation at all — two requests that arrived together each read the
+     * job, each found it acceptable, and each wrote. Two taps on Submit issued
+     * the job card TWICE and emailed the customer TWICE, and every guard in the
+     * domain was satisfied both times because both had read the job before
+     * either wrote it.
+     *
+     * Proven, not assumed: `duplicate-operations.test.ts` drives two concurrent
+     * `POST /issue` requests through the real routes and asserts exactly one
+     * customer copy.
+     *
+     * A promise chain is the whole mechanism. It is not a lock, a queue library
+     * or a scheduler — it is the transaction boundary PostgreSQL already has,
+     * expressed for a store that has none, so a mutation begins only once the
+     * one before it has finished and the state the next one reads is the state
+     * the last one left. READS ARE NOT CHAINED: they take no locks on
+     * PostgreSQL either, and serialising them would turn the demonstration into
+     * a queue for no benefit.
+     *
+     * The chain never breaks on a failure — `catch` keeps the tail alive — so a
+     * refused mutation cannot wedge every mutation after it.
+     */
+    let pending: Promise<unknown> = Promise.resolve();
+    const serialise = <T>(work: (unit: UnitOfWork) => Promise<T>): Promise<T> => {
+      const next = pending.then(() => work(unit));
+      pending = next.catch(() => undefined);
+      return next;
+    };
+
     return {
       backend,
       auth: new DemoAuthStore(() => repos.users.list()),
-      write: (work) => work(unit),
+      write: serialise,
       read: (work) => work(unit),
       outbox,
       resetDemoData: () => {

@@ -275,6 +275,39 @@ const transition = (job: Job, to: JobStatus): void => {
 };
 
 /**
+ * The job as the store has it NOW, not as the caller remembers it. IDEM-2.
+ *
+ * Every guard in this module asks a `Job` OBJECT what state it is in, and that
+ * object is as old as whenever its holder read it. For most operations that is
+ * harmless — the version check catches a stale write on PostgreSQL, and the
+ * caller is told to reload. For the two operations that CANNOT be done twice it
+ * is not harmless at all: acceptance starts a job, and issuing emails a customer
+ * their signed job card. Deciding either from a stale copy is how a tablet that
+ * has been in a pocket since this morning submits a job card the office already
+ * submitted at eleven.
+ *
+ * So both re-read first and hold themselves to what the store says. This is
+ * cheap — one query on a path that is about to render a PDF — and it is the
+ * difference between "the status was right when I looked" and "the status is
+ * right".
+ *
+ * IT IS NOT A LOCK, and it is not the whole mechanism. Two requests that both
+ * re-read before either writes still both see an issuable job; what stops them
+ * is the write itself — the row version on PostgreSQL, the serialised write
+ * boundary in the demonstration (`src/server/runtime.ts`). This closes the STALE
+ * caller; those close the CONCURRENT one.
+ */
+const asStored = async (context: OperationContext, job: Job): Promise<Job> => {
+  const current = await context.repos.jobs.findById(job.id);
+  if (current === null) {
+    throw new WorkflowError(`${job.jobNumber} could not be read.`, [
+      { code: 'job_not_found', message: 'This job no longer exists. Reload the job list.' },
+    ]);
+  }
+  return current;
+};
+
+/**
  * Technician acceptance. Acceptance is what starts the job — there is no
  * separate Start action. The caller is responsible for confirming with the user
  * before calling this.
@@ -326,20 +359,31 @@ export const acceptJobRefusal = (
 };
 
 export const acceptJob = async (context: OperationContext, job: Job): Promise<Job> => {
-  const refusal = acceptJobRefusal(context.actor, job);
+  /*
+   * WHOSE JOB, AND WHAT STATE, both from the store. IDEM-2.
+   *
+   * `acceptJobRefusal` reads the assignment and `transition` reads the status,
+   * and a job reassigned or already accepted since the caller read it would
+   * satisfy neither. `in_progress` has no edge back to itself, so a second
+   * acceptance is refused by the state machine — but only if the status it is
+   * shown is the current one.
+   */
+  const current = await asStored(context, job);
+
+  const refusal = acceptJobRefusal(context.actor, current);
   if (refusal !== null) {
-    throw new WorkflowError(`${job.jobNumber} cannot be accepted by you.`, [
+    throw new WorkflowError(`${current.jobNumber} cannot be accepted by you.`, [
       { code: 'not_field_technician', message: refusal },
     ]);
   }
-  transition(job, 'in_progress');
+  transition(current, 'in_progress');
 
   const now = context.services.clock.now();
   const next: Job = {
-    ...job,
+    ...current,
     status: 'in_progress',
     acceptedAt: now,
-    primaryTechnicianId: job.primaryTechnicianId ?? context.actor.id,
+    primaryTechnicianId: current.primaryTechnicianId ?? context.actor.id,
   };
 
   const saved = await context.repos.jobs.save(next);
@@ -2152,10 +2196,28 @@ export const issueJobCard = async (
  */
 const performIssue = async (
   context: OperationContext,
-  job: Job,
+  stale: Job,
   customerEmail: string,
   customerDisplayName: string,
 ): Promise<SubmitResult> => {
+  /*
+   * ISSUED ONCE. IDEM-2.
+   *
+   * The parameter is named `stale` because that is what it is: the job as
+   * whoever called this last read it. Issuing is the one operation in the
+   * system that cannot be undone from outside — it renders the customer's copy,
+   * freezes the recipient onto it and emails it — so the question "has this
+   * already been issued?" is asked of the STORE, not of a copy that may predate
+   * the answer.
+   *
+   * A job that has been issued is at `awaiting_delivery` or `closed`, and
+   * neither is in the pair below, so the existing refusal does the work as soon
+   * as it is shown the current status. Nothing new is invented: the code, the
+   * message and the 422 are the ones a duplicate submission already got when
+   * the caller happened to hold a fresh copy.
+   */
+  const job = await asStored(context, stale);
+
   if (job.status !== 'review' && job.status !== 'submitted') {
     throw new WorkflowError(`${job.jobNumber} is not ready to be issued.`, [
       {
