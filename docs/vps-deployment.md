@@ -383,11 +383,44 @@ sudo ss -lntp | grep 3000
 | PostgreSQL maintenance | EJE stays up. `Wants=` not `Requires=`, so restarting PostgreSQL does not stop the application; `/api/health` reports `"database":"unreachable"` while it is down |
 | Rollback | `git checkout <previous commit>` then rebuild and restart. **A migration is not rolled back by checking out old code** — the schema is additive, so old code runs against the newer schema; that is the safe direction and the reason there are no destructive migrations |
 
-### Backups before anything risky
+### Backups
 
 ```bash
-sudo -u postgres pg_dump -Fc eje_production > /var/backups/eje-$(date +%F-%H%M).dump
+EJE_BACKUP_DIR=/var/backups/eje npm run backup
 ```
+
+**The database alone is not a backup of this system.** `job_media` and
+`final_documents` hold a `storage_key` and nothing else — the bytes live under
+`EJE_STORAGE_DIR`. A `pg_dump` restored on its own gives a database full of rows
+pointing at signed job cards that are gone, and a customer-signed job card
+cannot be rebuilt from anything (CR-01, IMMUT-6). This is what the line here used
+to be, and why it changed.
+
+`npm run backup` writes one timestamped directory holding `database.dump`,
+`storage.tar.gz` and a `manifest.json` of sizes, SHA-256 checksums and the build
+that produced them. It reads `DATABASE_URL` and `EJE_STORAGE_DIR` — the same
+variables the application reads, so it cannot back up a different directory from
+the one being written to.
+
+It refuses rather than producing half a backup:
+
+| | |
+|---|---|
+| `EJE_BACKUP_DIR` unset | refused — name a volume that is **not** the one being backed up |
+| The document directory is missing | refused; almost always a misconfigured `EJE_STORAGE_DIR` |
+| The document directory is empty | refused, unless `EJE_BACKUP_ALLOW_EMPTY=yes` says the deployment really is new |
+| `pg_dump` fails, or `pg_restore` cannot read what it wrote | refused, and the part-written directory is **removed** |
+| The archive holds fewer files than the directory does | refused — `tar` exits 0 having skipped a file it could not read |
+
+The directory and all three files are `0700`/`0600`: they are a complete copy of
+the database and of every customer's signed job card.
+
+Run it before anything risky, and on a schedule. **Copy it off the machine** —
+a backup on the disk it is a backup of is not one.
+
+**It is not encrypted and no restore has been tested against it.** BACKUP-2 owns
+both and is not implemented; the manifest says so in the file itself, so whoever
+finds it later is not misled.
 
 ---
 
