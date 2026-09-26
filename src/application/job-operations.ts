@@ -1362,9 +1362,23 @@ export const captureSignature = async (
       readiness.violations,
     );
   }
-  if (job.status !== 'customer_signature') {
-    transition(job, 'customer_signature');
-  }
+  /*
+   * THE EDGE THAT IS ACTUALLY TAKEN. AUD-7, QA-3.
+   *
+   * This asked whether the job could move to `customer_signature` and then
+   * wrote `review`, so the state machine was authorising a transition nobody
+   * performed. From `completion` that reads as legal — `completion ->
+   * customer_signature` is an edge — and the job then landed on `review`, which
+   * is NOT an edge from `completion`. A signature taken that way skipped the
+   * Customer Signature stage altogether, and `TRANSITIONS` had approved
+   * something else entirely.
+   *
+   * Asking about the destination is the whole fix. `customer_signature ->
+   * review` is legal and is the normal journey; `completion -> review` and
+   * `in_progress -> review` are not, and are now refused by the table rather
+   * than by luck.
+   */
+  transition(job, 'review');
 
   const now = context.services.clock.now();
 
@@ -1484,9 +1498,8 @@ export const recordSignatureRefusal = async (
     );
   }
 
-  if (job.status !== 'customer_signature') {
-    transition(job, 'customer_signature');
-  }
+  // The edge that is actually taken, not a different one. See `captureSignature`.
+  transition(job, 'review');
 
   const now = context.services.clock.now();
   const settings = await context.repos.settings.get();
@@ -1805,6 +1818,9 @@ export const resolveSignatureRefusal = async (
    * asked for on this path, so the document is stored and downloadable and the
    * send is left as an explicit business decision — BD-06 in docs/SCOPE.md.
    */
+  // `review -> closed` is the edge, and the table is what says so. AUD-7, QA-3.
+  transition(job, 'closed');
+
   const { job: priced, finalDocument } = await renderAndStoreFinalDocument(context, job, now);
 
   const saved = await context.repos.jobs.save({
@@ -2456,6 +2472,17 @@ const closeOnDelivery = async (
   job: Job,
   now: string,
 ): Promise<Job> => {
+  /*
+   * ONLY A CONFIRMED DELIVERY CLOSES A JOB, and now the table agrees. AUD-7.
+   *
+   * `awaiting_delivery -> closed` was written straight onto the record, so the
+   * one transition the whole delivery handshake exists to protect was the one
+   * the state machine had no say in. Both callers reach here from
+   * `awaiting_delivery` (and a historical `submitted`), which the table allows;
+   * anything else is refused here instead of being taken on trust.
+   */
+  transition(job, 'closed');
+
   const closed = await context.repos.jobs.save({ ...job, status: 'closed', closedAt: now });
   await audit(context, {
     jobId: job.id,

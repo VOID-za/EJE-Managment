@@ -122,7 +122,18 @@ const modelFor = async (harness: Harness, job: Job) => {
 
 /** Signs, issues and closes, returning the stored document's text. */
 const issuedText = async (harness: Harness, job: Job): Promise<string> => {
-  const signed = await captureSignature(harness.as(master), job, {
+  /*
+   * THROUGH THE SIGNATURE STAGE, not around it. AUD-7.
+   *
+   * This went straight from `completion` to `captureSignature`, which used to
+   * work because the signature write validated a transition to
+   * `customer_signature` and then wrote `review` — so it skipped the stage and
+   * the state machine never noticed. The workflow now refuses that edge, and
+   * this fixture walks the journey the office and the tablet actually walk.
+   * Nothing this file asserts has changed; only the way it gets a signed job.
+   */
+  const atSignature = await startSignature(harness.as(master), job);
+  const signed = await captureSignature(harness.as(master), atSignature, {
     customerName: 'Thabo',
     customerSurname: 'Dlamini',
     strokeData: 'M0,0 L1,1',
