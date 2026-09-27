@@ -1047,8 +1047,8 @@ to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
 
 | ID | Requirement | Status |
 |---|---|---|
-| MEDIA-1 | Customer-facing vs Internal classification | **NOT IMPLEMENTED** — no column on `job_media` |
-| MEDIA-2 | Only customer-facing media in the customer PDF | **BLOCKED** by MEDIA-1 |
+| MEDIA-1 | Customer-facing vs Internal classification | **TESTED — awaiting approval** `28557da`. `job_media.visibility` — `customer_facing` | `internal` — set when a photograph is captured and correctable afterwards (`set_media_visibility`, its own action and its own audit event `photo_visibility_changed`). Migration `0009_media_visibility.sql` is additive. **The default is `customer_facing`, and that is a decision worth reviewing:** it is what every existing photograph already WAS in effect, because the customer document printed them all, so recording them otherwise would reclassify records nobody has reviewed — including on signed job cards. New media defaults the same way and the technician marks the exceptions. **Reclassifying is refused once the customer has signed** (IMMUT-7) at three layers: `assertEditable`, the repository's frozen fingerprint, and `0007`'s trigger |
+| MEDIA-2 | Only customer-facing media in the customer PDF | **TESTED — awaiting approval** `28557da` — *satisfied by MEDIA-1's minimal supporting change, not by separate work, and flagged as such rather than claimed quietly.* `lib/job-card/model.ts` mapped EVERY photograph onto the customer's document, so a technician's note to the workshop had its caption printed on the job card the customer signed. It now filters on `visibility`. **The one line was not optional:** a classification the document ignores is a control that lies, so MEDIA-1 could not ship truthfully without it. The filter is in the MODEL, which the on-screen preview, the PDF and the stored document all share, so they cannot disagree. **Unchanged:** DOC-1 still omits an empty section rather than printing a bare heading |
 | MEDIA-5 | Video capture | **PARTIAL** — type only, no capture path |
 | EMAIL-2 | Microsoft 365 / Graph adapter | **DONE** `8479a69` — `GraphEmailService`. *Amended 26 September 2026 by CR-09 Phase 1:* the row read **NOT IMPLEMENTED — simulated only** until the adapter existed. Graph is production; SMTP (`src/services/development/email.ts`) is a development and testing transport and is refused in production |
 | DRAFT-1 | Draft jobs, Master-only | **NOT IMPLEMENTED** — creation always `open` |
@@ -1083,7 +1083,11 @@ to satisfy MANDATE-1 and MANDATE-2. They are acceptance criteria, not a design.*
 >   CR-09 Phase 1, which is the batch that implements it.
 > - **MEDIA-1** — confirmed by reading the schema: `job_media` (migration
 >   `0000`, line 246) has no customer-facing/internal column. MEDIA-2 is
->   correctly BLOCKED behind it.
+>   correctly BLOCKED behind it. **Both addressed 27 September 2026
+>   `28557da`.** This finding was right about the cause and understated the
+>   consequence: with nothing to filter by, the customer's job card printed the
+>   caption of every photograph on the job, including the ones taken for EJE
+>   alone.
 > - **DRAFT-1** — confirmed NOT IMPLEMENTED: `job-creation.ts:316` always
 >   creates at `open`. **Noted inconsistency:** the browser demonstration seed
 >   nevertheless contains a `draft` job, which is a state the application cannot
