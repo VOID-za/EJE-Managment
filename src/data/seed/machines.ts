@@ -14,6 +14,8 @@ import { timeOffset } from './reference';
 const photo = (id: string, fileName: string, caption: string, days: number): Attachment => ({
   id: asAttachmentId(id),
   kind: 'photo',
+  // A machine register photograph, not job media. See MEDIA-1.
+  visibility: 'customer_facing',
   fileName,
   caption,
   storageKey: `machines/${fileName}`,

@@ -29,6 +29,16 @@ export type ActivityEventType =
   | 'photo_uploaded'
   /** An attachment taken off the job, and by whom. */
   | 'photo_removed'
+  /**
+   * A photograph reclassified as the customer's or as EJE's own. MEDIA-1.
+   *
+   * Its own type rather than a second `photo_uploaded`: what changed is who the
+   * photograph is FOR, which decides whether its caption appears on the document
+   * the customer signs. A trail that could not tell that from an upload could not
+   * answer why last month's job card shows two photographs and this month's shows
+   * three.
+   */
+  | 'photo_visibility_changed'
   | 'labour_added'
   | 'travel_added'
   | 'part_added'

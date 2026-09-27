@@ -50,9 +50,30 @@ export type IsoDate = string;
  */
 export type Cents = number;
 
+/**
+ * Who a piece of media is FOR. MEDIA-1.
+ *
+ * `customer_facing` is evidence the customer is entitled to see on their job
+ * card. `internal` is what a technician captures for EJE alone — a damaged part
+ * being claimed for, an unsafe installation, a note to the workshop — and it is
+ * kept OFF the customer's document (MEDIA-2).
+ *
+ * Named for the audience, not for what is hidden: `internal: true` would read as
+ * a double negative at every call site that asks whether to show something.
+ */
+export type MediaVisibility = 'customer_facing' | 'internal';
+
 export interface Attachment {
   readonly id: AttachmentId;
   readonly kind: 'photo' | 'video' | 'document';
+  /**
+   * Who this is for. MEDIA-1.
+   *
+   * `customer_facing` unless somebody said otherwise, which is what every
+   * attachment captured before this field existed was in effect — the customer
+   * document printed them all.
+   */
+  readonly visibility: MediaVisibility;
   readonly fileName: string;
   readonly caption: string;
   /**

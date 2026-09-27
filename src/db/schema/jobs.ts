@@ -14,6 +14,7 @@ import {
 import { cents, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import {
   attachmentKind,
+  mediaVisibility,
   cancellationReason,
   jobParticipationRole,
   jobPriority,
@@ -427,6 +428,17 @@ export const jobMedia = pgTable(
       .notNull()
       .references(() => jobs.id, { onDelete: 'cascade' }),
     kind: attachmentKind('kind').notNull(),
+    /*
+     * WHO IT IS FOR. MEDIA-1.
+     *
+     * Defaults to `customer_facing`, which is what every existing row already
+     * IS: the customer document has printed every photograph's caption since it
+     * was written, so recording existing media as anything else would be
+     * inventing a reclassification of records nobody reviewed. New media
+     * defaults the same way and the technician marks the exceptions — most
+     * photographs on a job are evidence of the work, not notes to the workshop.
+     */
+    visibility: mediaVisibility('visibility').notNull().default('customer_facing'),
     fileName: text('file_name').notNull(),
     caption: text('caption').notNull().default(''),
     storageKey: text('storage_key').notNull(),

@@ -16,6 +16,7 @@ import {
   type FinalDocument,
   type IsoDateTime,
   type Job,
+  type MediaVisibility,
   type PricingSnapshot,
 } from '@/domain';
 import { dateOffset, nextMonday, timeOffset } from './reference';
@@ -34,9 +35,12 @@ const jobPhoto = (
   days: number,
   hours: number,
   uploadedBy: string,
+  /** MEDIA-1. Omitted is customer-facing, as every seeded photograph was. */
+  visibility: MediaVisibility = 'customer_facing',
 ): Attachment => ({
   id: asAttachmentId(id),
   kind: 'photo',
+  visibility,
   fileName,
   caption,
   storageKey: `jobs/${fileName}`,
@@ -523,6 +527,24 @@ export const seedJobs: readonly Job[] = [
         -1,
         14,
         'user-tech-lerato',
+      ),
+      /*
+       * AN INTERNAL PHOTOGRAPH, so the demonstration can show MEDIA-1 working.
+       *
+       * The leaking roof is the CUSTOMER'S building problem and EJE's evidence
+       * that the failure will repeat — the recommendation above says so. It is
+       * not part of the work done, so it does not belong on the job card the
+       * customer signs, and on this seeded job it is the one photograph the
+       * document leaves out.
+       */
+      jobPhoto(
+        'att-1054-3',
+        'eje-1054-roof.jpg',
+        'Leaking roof sheet above the cabinet — recorded for EJE, not for the job card',
+        -1,
+        15,
+        'user-tech-lerato',
+        'internal',
       ),
     ],
     signature: {

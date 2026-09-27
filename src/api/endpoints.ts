@@ -300,6 +300,9 @@ export const jobs = {
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),
   addMedia: (jobId: string, input: unknown) => jobAction(jobId, 'add_media', input),
+  /** Reclassifies a photograph as the customer's or as EJE's own. MEDIA-1. */
+  setMediaVisibility: (jobId: string, attachmentId: string, visibility: string) =>
+    jobAction(jobId, 'set_media_visibility', { attachmentId, visibility }),
   removeMedia: (jobId: string, kind: 'photo' | 'video', attachmentId: string) =>
     jobAction(jobId, 'remove_media', { kind, attachmentId }),
   awaitingSpares: (

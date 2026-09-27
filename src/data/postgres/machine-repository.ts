@@ -194,6 +194,15 @@ export class PostgresMachineRepository implements MachineRepository {
       photos: photosFor(row.id).map((photo) => ({
         id: asAttachmentId(photo.id),
         kind: 'photo' as const,
+        /*
+         * A MACHINE photograph, not job media. MEDIA-1.
+         *
+         * `machine_photos` is a different table with no visibility column, and
+         * it needs none: a machine's photographs belong to the machine register
+         * the customer already sees, and they are not printed on a job card.
+         * `customer_facing` is the honest value, not a placeholder.
+         */
+        visibility: 'customer_facing' as const,
         fileName: photo.fileName,
         caption: photo.caption,
         storageKey: photo.storageKey,

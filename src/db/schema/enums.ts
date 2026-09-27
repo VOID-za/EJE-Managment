@@ -76,6 +76,20 @@ export const orderNumberExpectation = pgEnum('order_number_expectation', [
 
 export const attachmentKind = pgEnum('attachment_kind', ['photo', 'video', 'document']);
 
+/**
+ * Who a piece of media is FOR. MASTER SCOPE MEDIA-1.
+ *
+ * `customer_facing` is evidence the customer is entitled to see on their job
+ * card — the machine, the fault, the work done. `internal` is everything a
+ * technician photographs for EJE alone: a damaged part being claimed for, an
+ * unsafe installation, a note to the workshop.
+ *
+ * An enum rather than a boolean, and named for the audience rather than for what
+ * is hidden. `internal: true` would have read as "not customer facing" at every
+ * call site and inverted the moment somebody added a third audience.
+ */
+export const mediaVisibility = pgEnum('media_visibility', ['customer_facing', 'internal']);
+
 export const pricingSnapshotReason = pgEnum('pricing_snapshot_reason', [
   'customer_signature',
   'signature_refused',

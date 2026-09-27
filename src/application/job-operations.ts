@@ -61,6 +61,7 @@ import {
   type UserRole,
   type DeliveryRecord,
   type UserId,
+  type MediaVisibility,
 } from '@/domain';
 import { businessDateOf } from '@/lib/business-time';
 import { formatHours, formatKilometres } from '@/lib/format';
@@ -972,6 +973,13 @@ export interface MediaInput {
   readonly fileName: string;
   readonly caption: string;
   readonly sizeBytes: number;
+  /**
+   * Who it is for. MEDIA-1.
+   *
+   * Omitted means `customer_facing`, which is what every photograph on a job was
+   * in effect before this existed. A technician marks the exceptions.
+   */
+  readonly visibility?: MediaVisibility;
 }
 
 /**
@@ -993,6 +1001,7 @@ export const addMedia = async (
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: input.kind,
+    visibility: input.visibility ?? 'customer_facing',
     fileName: input.fileName,
     caption: input.caption,
     storageKey: stored.storageKey,
@@ -1056,6 +1065,11 @@ export const attachDocument = async (
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: 'document',
+    /*
+     * A document the office attached — a customer order, a quotation — is the
+     * customer's own paperwork. MEDIA-1.
+     */
+    visibility: 'customer_facing',
     fileName: file.fileName,
     caption: file.caption.trim(),
     storageKey: stored.storageKey,
@@ -1113,6 +1127,69 @@ export const readJobAttachment = async (
  * recorded, because a photograph that was on a job card and then was not is
  * exactly the kind of thing somebody asks about later.
  */
+/**
+ * Reclassifies a photograph as the customer's or as EJE's own. MEDIA-1.
+ *
+ * The one thing about a captured photograph that may legitimately change: the
+ * bytes, the caption and who took it are the record of what a machine looked
+ * like, and none of them moves. Who the photograph is FOR is a judgement the
+ * technician may get wrong on a wet afternoon and correct afterwards.
+ *
+ * REFUSED ONCE THE CUSTOMER HAS SIGNED, by `assertEditable`. The document they
+ * signed showed exactly the customer-facing photographs of that moment;
+ * reclassifying one afterwards would change what a signed job card means, which
+ * IMMUT-7 forbids at three layers — here, in the repository's frozen fingerprint,
+ * and in `0007`'s trigger.
+ */
+export const setMediaVisibility = async (
+  context: OperationContext,
+  job: Job,
+  attachmentId: string,
+  visibility: MediaVisibility,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+
+  const existing = [...job.photos, ...job.videos].find((item) => item.id === attachmentId);
+  if (existing === undefined) {
+    throw new WorkflowError('That photograph is not on this job.', [
+      { code: 'media_not_on_job', message: 'It may already have been removed. Reload the job.' },
+    ]);
+  }
+  // Nothing to say and nothing to write.
+  if (existing.visibility === visibility) return job;
+
+  const reclassify = (items: readonly Attachment[]): readonly Attachment[] =>
+    items.map((item) => (item.id === attachmentId ? { ...item, visibility } : item));
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    photos: reclassify(job.photos),
+    videos: reclassify(job.videos),
+  });
+
+  const label = existing.caption.length > 0 ? existing.caption : existing.fileName;
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_visibility_changed',
+    summary:
+      visibility === 'internal'
+        ? `Photograph marked internal: ${label}`
+        : `Photograph marked customer-facing: ${label}`,
+    detail:
+      visibility === 'internal'
+        ? `${userFullName(context.actor)} marked it internal, so it is kept off the customer's job card.`
+        : `${userFullName(context.actor)} marked it customer-facing, so it appears on the customer's job card.`,
+    // AUDIT-2: what it was, not only what it became.
+    changes: changesBetween(
+      'media',
+      { visibility: existing.visibility },
+      { visibility },
+    ),
+  });
+  return saved;
+};
+
 export const removeMedia = async (
   context: OperationContext,
   job: Job,
@@ -1395,6 +1472,8 @@ export const addChecklistPhoto = async (
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: 'photo',
+    // Evidence against a checklist question the customer's document reports.
+    visibility: 'customer_facing',
     fileName,
     caption: 'Checklist evidence',
     storageKey: stored.storageKey,

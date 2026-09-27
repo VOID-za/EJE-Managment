@@ -77,6 +77,7 @@ const numberFrom = (value: string | null): number => (value === null ? 0 : Numbe
 const attachmentFrom = (row: MediaRow): Attachment => ({
   id: asAttachmentId(row.id),
   kind: row.kind,
+  visibility: row.visibility,
   fileName: row.fileName,
   caption: row.caption,
   storageKey: row.storageKey,

@@ -45,6 +45,8 @@ const toDomainResponse = (
   photos: photos.map((photo) => ({
     id: asAttachmentId(photo.id),
     kind: 'photo' as const,
+    // Evidence against a checklist question the customer's document reports.
+    visibility: 'customer_facing' as const,
     fileName: photo.fileName,
     caption: photo.caption,
     storageKey: photo.storageKey,

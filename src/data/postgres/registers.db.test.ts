@@ -240,6 +240,7 @@ describeDb('the PostgreSQL registers', () => {
           {
             id: asAttachmentId(crypto.randomUUID()),
             kind: 'photo',
+            visibility: 'customer_facing',
             fileName: 'haas-st20-rating-plate.jpg',
             caption: 'Rating plate',
             storageKey: 'machines/haas-st20-rating-plate.jpg',

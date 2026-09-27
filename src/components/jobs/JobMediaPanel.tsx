@@ -1,7 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { getJobTypeDefinition, type Attachment, type Job, type User } from '@/domain';
+import {
+  getJobTypeDefinition,
+  type Attachment,
+  type Job,
+  type MediaVisibility,
+  type User,
+} from '@/domain';
 import {
   Badge,
   Button,
@@ -38,9 +44,16 @@ export const JobMediaPanel = ({
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<'photo' | 'video'>('photo');
   const [caption, setCaption] = useState('');
+  const [visibility, setVisibility] = useState<MediaVisibility>('customer_facing');
 
   const definition = getJobTypeDefinition(job.jobType);
   const photosRequired = definition.photosRequired && job.photos.length === 0;
+
+  /** Reclassifies one, through the operation that records what it was. MEDIA-1. */
+  const reclassify = async (attachmentId: string, next: MediaVisibility) => {
+    const ok = await operation.run(() => jobs.setMediaVisibility(job.id, attachmentId, next));
+    if (ok) onChanged();
+  };
 
   /** Takes an attachment off the job, through the operation that records it. */
   const remove = async (kindToRemove: 'photo' | 'video', attachmentId: string) => {
@@ -58,11 +71,13 @@ export const JobMediaPanel = ({
         fileName: `${job.jobNumber}-${stamp}.${kind === 'photo' ? 'jpg' : 'mp4'}`,
         caption: caption.trim(),
         sizeBytes: kind === 'photo' ? 2_140_000 : 18_600_000,
+        visibility,
       }),
     );
     if (ok) {
       setOpen(false);
       setCaption('');
+      setVisibility('customer_facing');
       onChanged();
     }
   };
@@ -108,12 +123,14 @@ export const JobMediaPanel = ({
         items={job.photos}
         users={users}
         onRemove={editable ? (id) => remove('photo', id) : undefined}
+        onReclassify={editable ? reclassify : undefined}
       />
       <MediaGrid
         title="Videos"
         items={job.videos}
         users={users}
         onRemove={editable ? (id) => remove('video', id) : undefined}
+        onReclassify={editable ? reclassify : undefined}
       />
 
       <Modal
@@ -147,7 +164,22 @@ export const JobMediaPanel = ({
             value={caption}
             onChange={(event) => setCaption(event.target.value)}
             placeholder="e.g. Spindle drive showing alarm 750"
-            hint="Captions appear on the customer job card."
+            hint="A customer-facing caption appears on the customer job card."
+          />
+          {/*
+            WHO IT IS FOR, asked at capture. MEDIA-1.
+            Customer-facing by default, because most photographs on a job are
+            evidence of the work. The technician marks the exceptions.
+          */}
+          <SelectField
+            label="Who it is for"
+            value={visibility}
+            onChange={(event) => setVisibility(event.target.value as MediaVisibility)}
+            options={[
+              { value: 'customer_facing', label: 'Customer — appears on the job card' },
+              { value: 'internal', label: 'Internal — EJE only, kept off the job card' },
+            ]}
+            hint="Internal is for what EJE needs and the customer does not: a damaged part being claimed for, an unsafe installation, a note to the workshop."
           />
         </div>
       </Modal>
@@ -160,12 +192,15 @@ const MediaGrid = ({
   items,
   users,
   onRemove,
+  onReclassify,
 }: {
   readonly title: string;
   readonly items: readonly Attachment[];
   readonly users: readonly User[];
   /** Offered only where the job may still be changed. */
   readonly onRemove?: (attachmentId: string) => void;
+  /** Offered only where the job may still be changed. MEDIA-1. */
+  readonly onReclassify?: (attachmentId: string, next: MediaVisibility) => void;
 }) => {
   if (items.length === 0) {
     if (title === 'Videos') return null;
@@ -205,10 +240,41 @@ const MediaGrid = ({
                     <Icon name="close" className="size-4" />
                   </button>
                 )}
+                {/*
+                  ON THE TILE, not behind a menu. MEDIA-1.
+                  Whether a photograph reaches the customer is the kind of thing
+                  somebody needs to see at a glance across a whole grid before the
+                  job card is signed, not one item at a time.
+                */}
+                {item.visibility === 'internal' && (
+                  <span className="absolute bottom-1.5 left-1.5 rounded bg-steel-900/80 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+                    Internal
+                  </span>
+                )}
               </div>
               <p className="mt-1.5 truncate text-xs font-medium text-steel-800">
                 {item.caption.length > 0 ? item.caption : item.fileName}
               </p>
+              {onReclassify !== undefined && (
+                /*
+                  A 44px target, because this is set on a tablet with gloves on —
+                  rule 25. A full-width button rather than a toggle: the label says
+                  what tapping it DOES, so nobody has to work out which way a
+                  switch is pointing.
+                */
+                <button
+                  type="button"
+                  onClick={() =>
+                    onReclassify(
+                      item.id,
+                      item.visibility === 'internal' ? 'customer_facing' : 'internal',
+                    )
+                  }
+                  className="mt-1.5 flex h-11 w-full items-center justify-center rounded-[var(--radius-control)] border border-steel-200 px-2 text-[11px] font-semibold text-steel-700 transition-colors hover:bg-steel-50"
+                >
+                  {item.visibility === 'internal' ? 'Show to customer' : 'Mark internal'}
+                </button>
+              )}
               <p className="truncate text-[11px] text-steel-400">
                 {uploader?.initials ?? '—'} · {formatRelative(item.uploadedAt)} ·{' '}
                 {formatFileSize(item.sizeBytes)}

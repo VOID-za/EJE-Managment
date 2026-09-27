@@ -12,6 +12,7 @@ const ICONS: Partial<Record<ActivityEvent['type'], IconName>> = {
   technician_removed: 'user',
   note_added: 'note',
   photo_uploaded: 'camera',
+  photo_visibility_changed: 'camera',
   labour_added: 'clock',
   travel_added: 'truck',
   part_added: 'box',

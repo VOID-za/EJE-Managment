@@ -464,7 +464,22 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
           }
         : null,
 
-    photos: job.photos.map((photo) => ({ caption: photo.caption })),
+    /*
+     * ONLY WHAT THE CUSTOMER IS MEANT TO SEE. MEDIA-1, MEDIA-2.
+     *
+     * This mapped EVERY photograph, so a technician's note to the workshop — a
+     * damaged part being claimed for, an unsafe installation — had its caption
+     * printed on the document the customer signed. There was no way to say
+     * otherwise until `visibility` existed, which is what MEDIA-2 was blocked on.
+     *
+     * The filter is here, in the MODEL, rather than in the renderer: this object
+     * is what every output shares — the on-screen preview, the PDF and the stored
+     * document — so filtering once is what makes them agree. A renderer that
+     * filtered for itself would leave the others printing the internal ones.
+     */
+    photos: job.photos
+      .filter((photo) => photo.visibility === 'customer_facing')
+      .map((photo) => ({ caption: photo.caption })),
 
     acceptance:
       job.signature === null

@@ -102,6 +102,8 @@ export const createMachine = async (
     photos.push({
       id: asAttachmentId(context.services.ids.next('att')),
       kind: 'photo',
+      // A machine register photograph, not job media. See MEDIA-1.
+      visibility: 'customer_facing',
       fileName: photo.fileName,
       caption: photo.caption,
       storageKey: stored.storageKey,

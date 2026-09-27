@@ -4,7 +4,8 @@ import type { Database } from '@/db/client';
 import { PostgresJobRepository } from './job-repository';
 import { ConcurrencyError, SignedJobCardAltered, withTransaction } from './transaction';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from './test-database';
-import { asUserId, asLineItemId, type Job } from '@/domain';
+import * as schema from '@/db/schema';
+import { asAttachmentId, asUserId, asLineItemId, type Job } from '@/domain';
 import { IDS, jobFixture, seedBaseline } from './test-fixtures';
 
 /**
@@ -214,6 +215,94 @@ describeDb('the PostgreSQL job repository', () => {
       const twice = await repo.save({ ...once, faultDescription: 'Second change.' });
 
       expect(twice.faultDescription).toBe('Second change.');
+    });
+  });
+
+  describe('media visibility (MEDIA-1)', () => {
+    const photo = (id: string, caption: string, visibility: 'customer_facing' | 'internal') => ({
+      id: asAttachmentId(id),
+      kind: 'photo' as const,
+      visibility,
+      fileName: `${id}.jpg`,
+      caption,
+      storageKey: `uploads/${id}`,
+      uploadedAt: '2026-09-20T09:00:00.000Z',
+      uploadedBy: asUserId(TECHNICIAN),
+      sizeBytes: 2_140_000,
+    });
+
+    it('round trips both classifications', async () => {
+      const job = await newJob({
+        photos: [
+          photo(crypto.randomUUID(), 'Failed transformer', 'customer_facing'),
+          photo(crypto.randomUUID(), 'Leaking roof', 'internal'),
+        ],
+      });
+      await repository.save(job);
+
+      const read = await repository.findById(job.id);
+      const byCaption = new Map(read!.photos.map((item) => [item.caption, item.visibility]));
+      expect(byCaption.get('Failed transformer')).toBe('customer_facing');
+      expect(byCaption.get('Leaking roof')).toBe('internal');
+    });
+
+    it('defaults a row written without one to customer-facing', async () => {
+      /*
+       * The column carries a database default, so a row inserted by anything that
+       * predates MEDIA-1 — an older build mid-deploy, a support script — is
+       * recorded as what every photograph already was rather than as nothing.
+       */
+      const job = await repository.save(await newJob());
+      const id = crypto.randomUUID();
+      await db.insert(schema.jobMedia).values({
+        id,
+        jobId: job.id,
+        kind: 'photo',
+        fileName: 'legacy.jpg',
+        caption: 'Written without a visibility',
+        storageKey: `uploads/${id}`,
+        uploadedAt: '2026-09-20T09:00:00.000Z',
+        uploadedBy: TECHNICIAN,
+      });
+
+      const read = await repository.findById(job.id);
+      expect(read?.photos.find((item) => item.caption === 'Written without a visibility')?.visibility).toBe(
+        'customer_facing',
+      );
+    });
+
+    it('refuses to reclassify a photograph on a SIGNED job card', async () => {
+      const id = crypto.randomUUID();
+      const stored = await repository.save(
+        await newJob({
+          status: 'review',
+          signature: {
+            customerName: 'Pieter',
+            customerSurname: 'Nel',
+            strokeData: 'M0,0 L1,1',
+            signedAt: '2026-09-20T12:00:00.000Z',
+            declaration: 'I confirm that the work described above has been completed.',
+          },
+          photos: [photo(id, 'Failed transformer', 'customer_facing')],
+        }),
+      );
+
+      /*
+       * IMMUT-7, at the repository. The document the customer signed showed
+       * exactly the customer-facing photographs of that moment, so `visibility`
+       * belongs in the frozen fingerprint — without it this save would pass here
+       * and die inside `0007`'s trigger as a 500, which is the shape of defect
+       * AUD-10 was.
+       */
+      const altered = {
+        ...stored,
+        photos: stored.photos.map((item) => ({ ...item, visibility: 'internal' as const })),
+      };
+
+      await expect(repository.save(altered)).rejects.toThrow(SignedJobCardAltered);
+      await expect(repository.save(altered)).rejects.toThrow(/media/u);
+
+      expect((await repository.findById(stored.id))?.photos[0]?.visibility).toBe('customer_facing');
     });
   });
 

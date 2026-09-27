@@ -324,9 +324,36 @@ export const JOB_COMMANDS: CommandRegistry = {
         fileName: text(260),
         caption: text(500),
         sizeBytes: z.number().int().nonnegative().max(2_000_000_000),
+        /*
+         * WHO IT IS FOR. MEDIA-1.
+         *
+         * Optional, and absent means `customer_facing` — which is what every
+         * photograph already was, so an older client that does not send it keeps
+         * working and keeps its existing behaviour.
+         */
+        visibility: z.enum(['customer_facing', 'internal']).optional(),
       })
       .strict(),
     (context, job, input) => jobs.addMedia(context.operation, job, input),
+  ),
+
+  /**
+   * Reclassifying a photograph after it was taken. MEDIA-1.
+   *
+   * Its own action rather than a general media edit: this is the ONE thing about
+   * a captured photograph that may change, and naming it means the authorisation
+   * and the immutability rule are stated about that one thing instead of about
+   * "editing media".
+   */
+  set_media_visibility: withInput(
+    z
+      .object({
+        attachmentId: z.string().min(1).max(100),
+        visibility: z.enum(['customer_facing', 'internal']),
+      })
+      .strict(),
+    (context, job, input) =>
+      jobs.setMediaVisibility(context.operation, job, input.attachmentId, input.visibility),
   ),
 
   remove_media: withInput(

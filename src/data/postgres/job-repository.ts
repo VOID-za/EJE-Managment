@@ -132,6 +132,16 @@ const frozenJobCard = (job: Job): Record<FrozenCollection, string> => ({
     [...job.photos, ...job.videos, ...job.attachments].map((item) => ({
       id: item.id,
       kind: item.kind,
+      /*
+       * MEDIA-1 joins the frozen set. IMMUT-7.
+       *
+       * The document the customer signed showed exactly the customer-facing
+       * photographs of that moment, so reclassifying one afterwards would change
+       * what the signed job card means. Without this the repository would pass
+       * such a save and `0007`'s trigger would refuse the UPDATE, turning a
+       * refusal into a 500 — which is the shape of defect AUD-10 was.
+       */
+      visibility: item.visibility,
       fileName: item.fileName,
       caption: item.caption,
       storageKey: item.storageKey,
@@ -673,6 +683,7 @@ export class PostgresJobRepository implements JobRepository {
           id: item.id as string,
           jobId: job.id as string,
           kind,
+          visibility: item.visibility,
           fileName: item.fileName,
           caption: item.caption,
           storageKey: item.storageKey,

@@ -416,6 +416,8 @@ export const seedContacts: readonly Contact[] = [
 const machinePhoto = (key: string, fileName: string, caption: string): Attachment => ({
   id: asAttachmentId(demoId(`attachment:${key}`)),
   kind: 'photo',
+  // A machine register photograph, not job media. See MEDIA-1.
+  visibility: 'customer_facing',
   fileName,
   caption,
   storageKey: `machines/${fileName}`,

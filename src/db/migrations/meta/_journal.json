@@ -64,6 +64,13 @@
       "when": 1790457890761,
       "tag": "0008_spares_request",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790516112512,
+      "tag": "0009_media_visibility",
+      "breakpoints": true
     }
   ]
 }
