@@ -357,6 +357,21 @@ tokens map onto them. No component carries a `dark:` variant. A job card preview
 is pinned to the light palette in both themes, because it represents the paper
 document the customer receives.
 
+## Project tracking
+
+Requirements live in [`docs/SCOPE.md`](docs/SCOPE.md). **Work items live in
+GitHub Issues**, one per requirement ID — `[MEDIA-1] …` — with the evidence in
+the issue comments and the implementation history in the commits. GitHub is the
+project-status source of truth.
+
+The lifecycle is `PLANNED → IN_PROGRESS → TESTING → APPROVED → DONE`, plus
+`BLOCKED`, `SUPERSEDED` and `OPEN`. **Tested is not approved, pushed is not
+deployed, and nothing is DONE without the owner's approval.**
+
+The separate `eje-tracker` application and its database are **retired**. Nothing
+here depends on them, and a replacement is not to be built — see
+[`docs/project-tracking.md`](docs/project-tracking.md) for the whole workflow.
+
 ## Known gaps at the end of Phase 1
 
 These are recorded deliberately rather than left to be discovered. None of them

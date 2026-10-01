@@ -213,6 +213,20 @@ export class SmtpEmailService implements EmailService {
     private readonly timeoutMs = 15_000,
   ) {}
 
+  /**
+   * What this client calls itself at EHLO.
+   *
+   * RFC 5321 asks for the client's own domain, and the sender address is the
+   * only identity this adapter is configured with — so its domain is what the
+   * receiving server's logs will show. It read `eje-tracker` until 1 October
+   * 2026, which was the name of a retired project-tracking application that
+   * never sent a message in its life.
+   */
+  private get ehloName(): string {
+    const domain = this.config.sender.split('@').pop()?.trim() ?? '';
+    return domain.length > 0 ? domain : 'eje';
+  }
+
   /** Keeps the account password out of anything that is about to be reported. */
   private redact(text: string): string {
     return this.config.password.length === 0
@@ -281,13 +295,13 @@ export class SmtpEmailService implements EmailService {
     const conversation = await openConversation(this.config, this.timeoutMs);
 
     try {
-      let greeting = await conversation.send(`EHLO eje-tracker`);
+      let greeting = await conversation.send(`EHLO ${this.ehloName}`);
       expect(greeting, ['250'], `${this.config.host} refused EHLO`);
 
       if (!this.config.implicitTls && /STARTTLS/iu.test(greeting)) {
         expect(await conversation.send('STARTTLS'), ['220'], 'STARTTLS was refused');
         await conversation.upgrade();
-        greeting = await conversation.send(`EHLO eje-tracker`);
+        greeting = await conversation.send(`EHLO ${this.ehloName}`);
         expect(greeting, ['250'], `${this.config.host} refused EHLO after STARTTLS`);
       }
 

@@ -165,7 +165,9 @@ describe('sending', () => {
     expect(receipt.entry?.attachments).toEqual(['EJE-1103-Final-Job-Card.pdf']);
 
     const conversation = server.transcript.join('\n');
-    expect(conversation).toContain('EHLO');
+    // The client names ITSELF here, from the sender's domain — not the name of
+    // some other application that happens to live in the same repository.
+    expect(conversation).toContain('EHLO eje.example');
     expect(conversation).toContain('AUTH PLAIN');
     expect(conversation).toContain('MAIL FROM:<jobcards@eje.example>');
     expect(conversation).toContain('RCPT TO:<customer@abc-engineering.example>');
