@@ -26,6 +26,22 @@ describe('a refusal', () => {
     expect(denied.retryable).toBe(false);
   });
 
+  it('REPLACES the server sentence rather than showing it — why AUD-9 mattered', () => {
+    /*
+     * The fixed wording is deliberate — nothing about the authorization model
+     * reaches the screen — and it is also why a 403 must only ever be sent
+     * where the role really is the problem: wherever this function renders a
+     * failure, the server's own explanation is thrown away. That is what made
+     * AUD-9 worth fixing rather than arguing about: a state refusal
+     * ("this job is assigned, so it cannot be deleted") was sent as a 403,
+     * and this is what a 403 becomes. 422 keeps its message, asserted below.
+     */
+    expect(denied.message).not.toContain('office screen');
+    expect(denied.message).toBe(
+      'Your role does not include this screen. If you need it for your work, speak to the office.',
+    );
+  });
+
   it('says what to do about it without naming what is missing', () => {
     const text = `${denied.title} ${denied.message}`.toLowerCase();
 

@@ -538,15 +538,46 @@ export const canDeleteJob = (
   job: Pick<Job, 'status' | 'acceptedAt'> & AssignableJob,
 ): boolean => can(role, 'jobs.endUnstartedJob') && isEndableJob(job);
 
+/**
+ * WHY ENDING A JOB WAS REFUSED, AND NOT ONLY THAT IT WAS. AUD-9.
+ *
+ * The two causes are different facts and the client has to tell them apart:
+ *
+ *   - `permission` — THIS ACTOR may not, and no change to the job will help. A
+ *     technician asking to cancel is told so, and sending them to the office is
+ *     the right advice.
+ *   - `state` — THIS JOB may not be ended this way, by anybody. The office is
+ *     already the role that may delete jobs, so "you are not permitted" is the
+ *     wrong thing to say to them; the answer is the sentence explaining the
+ *     state, which these functions take trouble to write.
+ *
+ * Collapsing the two meant the HTTP code contradicted the rule written at the
+ * top of `PERMISSION_CODES`: a state refusal came back as 403 — "permanent for
+ * this actor" — which is false, and `describeFailure` turns a 403 into a fixed
+ * "your role does not include this screen", discarding whatever the server
+ * explained. The cancel/delete DIALOG happens to show the server's sentence
+ * either way, because `useOperation` passes the message through; the defect is
+ * in what the code MEANS, and in every consumer that branches on it.
+ */
+export interface JobEndRefusal {
+  readonly kind: 'permission' | 'state';
+  readonly message: string;
+}
+
+const permissionRefusal = (message: string): JobEndRefusal => ({ kind: 'permission', message });
+const stateRefusal = (message: string): JobEndRefusal => ({ kind: 'state', message });
+
 /** The stages where work is under way, and cancelling is the honest answer. */
 const WORK_UNDER_WAY: readonly JobStatus[] = ['in_progress', 'awaiting_spares', 'completion'];
 
 export const deleteJobRefusal = (
   role: UserRole,
   job: Pick<Job, 'status' | 'acceptedAt'> & AssignableJob,
-): string | null => {
+): JobEndRefusal | null => {
   if (canDeleteJob(role, job)) return null;
-  if (!can(role, 'jobs.endUnstartedJob')) return 'Only the office can delete a job.';
+  if (!can(role, 'jobs.endUnstartedJob')) {
+    return permissionRefusal('Only the office can delete a job.');
+  }
   /*
    * The one case with somewhere else to go, and it is said first.
    *
@@ -557,9 +588,11 @@ export const deleteJobRefusal = (
    * cancellation that is equally refused.
    */
   if (job.acceptedAt !== null && WORK_UNDER_WAY.includes(job.status)) {
-    return 'A technician has already accepted this job, so it can no longer be deleted. Cancel it instead — that keeps the work and the history.';
+    return stateRefusal(
+      'A technician has already accepted this job, so it can no longer be deleted. Cancel it instead — that keeps the work and the history.',
+    );
   }
-  return endableRefusal(job) ?? 'This job cannot be deleted.';
+  return stateRefusal(endableRefusal(job) ?? 'This job cannot be deleted.');
 };
 
 /**
@@ -579,11 +612,13 @@ export const canCancelJob = (
 export const cancelJobRefusal = (
   role: UserRole,
   job: Pick<Job, 'status'> & AssignableJob,
-): string | null => {
+): JobEndRefusal | null => {
   if (canCancelJob(role, job)) return null;
-  if (!can(role, 'jobs.endUnstartedJob')) return 'Only the office can cancel a job.';
-  if (job.status === 'cancelled') return 'This job is already cancelled.';
-  return endableRefusal(job) ?? 'This job cannot be cancelled.';
+  if (!can(role, 'jobs.endUnstartedJob')) {
+    return permissionRefusal('Only the office can cancel a job.');
+  }
+  if (job.status === 'cancelled') return stateRefusal('This job is already cancelled.');
+  return stateRefusal(endableRefusal(job) ?? 'This job cannot be cancelled.');
 };
 
 /**

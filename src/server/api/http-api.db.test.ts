@@ -340,6 +340,84 @@ describeDb('the HTTP API on PostgreSQL', () => {
     expect(JSON.stringify(activity.data)).toContain(jobNumber);
   });
 
+  /**
+   * A REFUSED DELETION, ON REAL POSTGRESQL. AUD-9.
+   *
+   * Deletion is the one operation in this system that destroys a row, so the
+   * refusal path is worth proving where the row actually lives rather than
+   * against an in-memory repository: a refusal that wrote anything, or that
+   * deleted and then failed, would be invisible to a test of the status code
+   * alone.
+   *
+   * It also pins the two causes to the two codes, because that is what a client
+   * reads: 422 for the job's state, with the sentence that explains it, and 403
+   * only where the role really is the reason.
+   */
+  it('refuses a deletion by STATE with 422, and the row survives', async () => {
+    const master = await signIn(EMAILS.master);
+    // Assigned, so the office may no longer simply delete it.
+    const created = await raiseJob(master, { primaryTechnicianId: IDS.technician });
+    const jobNumber = created.data.jobNumber;
+
+    const refused = await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' });
+    expect(refused.status).toBe(422);
+    expect(JSON.stringify(refused.raw)).toContain('delete_refused');
+
+    // The row is still there, and nothing recorded a deletion of any kind.
+    const rows = await db.select().from(schema.jobs);
+    expect(rows).toHaveLength(1);
+    expect((await master.get(`/api/jobs/${jobNumber}`)).status).toBe(200);
+
+    const events = await db.select().from(schema.auditEvents);
+    expect(events.map((event) => event.type)).not.toContain('job_deleted');
+    expect(events.map((event) => event.type)).not.toContain('job_deletion_failed');
+  });
+
+  it('refuses a deletion by ROLE with 403, and the row survives', async () => {
+    const master = await signIn(EMAILS.master);
+    const created = await raiseJob(master);
+    const jobNumber = created.data.jobNumber;
+
+    const technician = await signIn(EMAILS.technician);
+    const refused = await technician.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' });
+    // 403 where the role is the reason; 404 if this technician may not see the
+    // job at all, which is the visibility rule answering first.
+    expect([403, 404]).toContain(refused.status);
+    if (refused.status === 403) {
+      expect(JSON.stringify(refused.raw)).toContain('delete_not_permitted');
+    }
+
+    expect(await db.select().from(schema.jobs)).toHaveLength(1);
+  });
+
+  it('refuses a cancellation by STATE with 422 and by ROLE with 403', async () => {
+    const master = await signIn(EMAILS.master);
+    const assigned = await raiseJob(master, { primaryTechnicianId: IDS.technician });
+
+    const byState = await master.post(`/api/jobs/${assigned.data.jobNumber}/cancel`, {
+      reason: 'duplicate',
+      description: 'Raised twice.',
+    });
+    expect(byState.status).toBe(422);
+    expect(JSON.stringify(byState.raw)).toContain('cancel_refused');
+
+    const deletable = await raiseJob(master);
+    const technician = await signIn(EMAILS.technician);
+    const byRole = await technician.post(`/api/jobs/${deletable.data.jobNumber}/cancel`, {
+      reason: 'duplicate',
+      description: 'x',
+    });
+    expect([403, 404]).toContain(byRole.status);
+    if (byRole.status === 403) {
+      expect(JSON.stringify(byRole.raw)).toContain('cancel_not_permitted');
+    }
+
+    // Both jobs are untouched: still open, still two of them.
+    const rows = await db.select().from(schema.jobs);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.status === 'open')).toBe(true);
+  });
+
   /* ---------------------------------------------------------------------- */
   /* 7. What must never cross the wire                                       */
   /* ---------------------------------------------------------------------- */

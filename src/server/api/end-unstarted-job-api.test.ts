@@ -5,13 +5,26 @@ import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
 /**
  * CANCEL AND DELETE, OVER THE REAL HTTP API. MASTER SCOPE CR-11.
  *
- * THE TWO REFUSALS COME BACK WITH DIFFERENT STATUS CODES, and that is the
- * existing convention rather than anything this change introduced:
- * `delete_not_permitted` is listed in `PERMISSION_CODES`, so a refused deletion
- * is a 403, while a refused cancellation carries `cancel_not_permitted` and is
- * a 422. Both are refusals and both leave the job exactly as it was; the tests
- * below assert the code each route actually returns rather than flattening the
- * difference.
+ * THE STATUS CODE FOLLOWS THE CAUSE OF THE REFUSAL, NOT THE ROUTE. AUD-9,
+ * corrected here. A refusal about WHO IS ASKING is 403 on both routes; a
+ * refusal about THE JOB'S STATE is 422 on both, and carries the server's own
+ * sentence. Both leave the job exactly as it was.
+ *
+ * *This file used to assert the opposite, and said so:* every delete refusal
+ * was a 403 because `delete_not_permitted` covered both causes and sat in
+ * `PERMISSION_CODES`, and every cancel refusal was a 422 because
+ * `cancel_not_permitted` covered both causes and sat outside it. So each route
+ * was wrong for half its cases. The tests still assert the code each route
+ * actually returns rather than flattening the difference; the codes themselves
+ * have changed.
+ *
+ * What the wrong code costs: a 403 states that the refusal is permanent for
+ * this actor, so a client may stop offering the action and `describeFailure`
+ * replaces the message with a fixed "your role does not include this screen".
+ * Neither is true of "this job is assigned, so it cannot be deleted". The
+ * cancel/delete dialog shows the server's sentence either way — `useOperation`
+ * passes it through — so this was not a wrong word on that screen; it was a
+ * wrong fact in the response, which is what anything else reading it believes.
  *
  * The screen asks the same predicate the operation does, so a button cannot be
  * offered that the server would refuse — but a button is not what these prove.
@@ -103,7 +116,13 @@ describe('the server refuses every other case, however the request is made', () 
     const remove = await master.post(`/api/jobs/${target.jobNumber}/delete`, {
       reason: 'Duplicate.',
     });
-    expect(remove.status).toBe(403);
+    /*
+     * 422, NOT 403. The Master is the role that deletes jobs; what stops this
+     * one is the job, and the sentence saying so has to reach the screen.
+     */
+    expect(remove.status).toBe(422);
+    expect(JSON.stringify(remove.raw)).toContain('delete_refused');
+    expect(JSON.stringify(remove.raw)).toMatch(/assigned|cannot be deleted/iu);
 
     // And the job is still there, untouched.
     const after = await master.get<{ readonly view: { readonly job: Job } }>(
@@ -127,7 +146,7 @@ describe('the server refuses every other case, however the request is made', () 
         })
       ).status,
     ).toBe(422);
-    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(403);
+    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
   });
 
   it('CANCEL-5 / DELETE-4: an awaiting-spares job is refused', async () => {
@@ -144,7 +163,7 @@ describe('the server refuses every other case, however the request is made', () 
         })
       ).status,
     ).toBe(422);
-    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(403);
+    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
   });
 
   it('CANCEL-6 / DELETE-5: a signed job and one in the retired review stage are refused', async () => {
@@ -167,7 +186,7 @@ describe('the server refuses every other case, however the request is made', () 
       expect(
         (await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status,
         `delete ${status}`,
-      ).toBe(403);
+      ).toBe(422);
     }
   });
 
@@ -176,12 +195,56 @@ describe('the server refuses every other case, however the request is made', () 
     const target = openUnassigned(await jobs(master));
 
     const technician = await signedInAs(DEMO_USERS.technician);
+    /*
+     * A PERMISSION REFUSAL ON BOTH ROUTES NOW. 403, or 404 where the job is not
+     * one this technician may see at all — which is the visibility rule
+     * answering first, and is equally correct.
+     */
     const cancel = await technician.post(`/api/jobs/${target.jobNumber}/cancel`, {
       reason: 'duplicate',
       description: 'x',
     });
-    expect([422, 404]).toContain(cancel.status);
+    expect([403, 404]).toContain(cancel.status);
+    if (cancel.status === 403) {
+      expect(JSON.stringify(cancel.raw)).toContain('cancel_not_permitted');
+    }
+
     const remove = await technician.post(`/api/jobs/${target.jobNumber}/delete`, { reason: 'x' });
     expect([403, 404]).toContain(remove.status);
+    if (remove.status === 403) {
+      expect(JSON.stringify(remove.raw)).toContain('delete_not_permitted');
+    }
+  });
+
+  it('AUD-9: the same route answers 403 for who is asking and 422 for the job', async () => {
+    /*
+     * THE WHOLE POINT, ON ONE ROUTE AND ONE PAIR OF JOBS.
+     *
+     * The office is refused by the STATE of an assigned job — 422, with the
+     * explanation. A technician is refused by WHO THEY ARE on the very job the
+     * office may end — 403, where "speak to the office" is true and useful.
+     * Before this change the delete route answered 403 to both, so the office
+     * was told its role was wrong.
+     */
+    const master = await signedInAs(DEMO_USERS.master);
+    const all = await jobs(master);
+
+    const byState = await master.post(`/api/jobs/${openAssigned(all).jobNumber}/delete`, {
+      reason: 'x',
+    });
+    expect(byState.status, 'office, assigned job').toBe(422);
+    expect(JSON.stringify(byState.raw)).toContain('delete_refused');
+
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const byRole = await technician.post(`/api/jobs/${openUnassigned(all).jobNumber}/delete`, {
+      reason: 'x',
+    });
+    expect([403, 404], 'technician, deletable job').toContain(byRole.status);
+    if (byRole.status === 403) {
+      expect(JSON.stringify(byRole.raw)).toContain('delete_not_permitted');
+      // The 403 presentation discards the server sentence, so a 403 must only
+      // ever be sent where "your role" really is the reason.
+      expect(JSON.stringify(byRole.raw)).toMatch(/only the office/iu);
+    }
   });
 });

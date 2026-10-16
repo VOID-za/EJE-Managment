@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   canEditJob,
+  cancelJobRefusal,
+  deleteJobRefusal,
   isJobWorkable,
   canTransition,
   checkReadyForSignature,
@@ -169,5 +171,81 @@ describe('checkReadyForSubmission', () => {
       },
     });
     expect(checkReadyForSubmission(job).allowed).toBe(true);
+  });
+});
+
+/**
+ * WHY ENDING A JOB WAS REFUSED. AUD-9.
+ *
+ * The kind is decided here and nowhere else, so this is where it is tested.
+ * The API turns `permission` into a 403 whose presentation REPLACES the
+ * server's sentence, and `state` into a 422 that keeps it — so a kind decided
+ * wrongly here shows the wrong thing to a real person, which is what AUD-9
+ * turned out to be.
+ */
+describe('ending a job: why it was refused', () => {
+  const openUnassigned = (): Job =>
+    buildJob({ status: 'open', primaryTechnicianId: null, additionalTechnicianIds: [], acceptedAt: null });
+
+  it('allows the office on an Open unassigned job — no refusal at all', () => {
+    expect(cancelJobRefusal('master', openUnassigned())).toBeNull();
+    expect(deleteJobRefusal('master', openUnassigned())).toBeNull();
+    expect(cancelJobRefusal('coordinator', openUnassigned())).toBeNull();
+    expect(deleteJobRefusal('coordinator', openUnassigned())).toBeNull();
+  });
+
+  it('calls a TECHNICIAN a permission refusal, on both actions', () => {
+    // True whatever the job does next, so "speak to the office" is the honest
+    // advice and a 403 is the honest code.
+    expect(cancelJobRefusal('technician', openUnassigned())).toEqual({
+      kind: 'permission',
+      message: 'Only the office can cancel a job.',
+    });
+    expect(deleteJobRefusal('technician', openUnassigned())).toEqual({
+      kind: 'permission',
+      message: 'Only the office can delete a job.',
+    });
+  });
+
+  it('calls the JOB a state refusal, and keeps the sentence that explains it', () => {
+    const assigned = buildJob({ status: 'open', acceptedAt: null });
+    expect(cancelJobRefusal('master', assigned)?.kind).toBe('state');
+    expect(deleteJobRefusal('master', assigned)?.kind).toBe('state');
+
+    // The one with somewhere else to go still says so — and now that sentence
+    // survives, because a state refusal is a 422 rather than a 403.
+    const inProgress = buildJob({ status: 'in_progress', acceptedAt: '2026-09-20T07:00:00.000Z' });
+    const refusal = deleteJobRefusal('master', inProgress);
+    expect(refusal?.kind).toBe('state');
+    expect(refusal?.message).toMatch(/Cancel it instead/u);
+  });
+
+  it('calls a SIGNED job a state refusal, not a permission one', () => {
+    /*
+     * The case that was wrong, and the reason it mattered: nobody may delete a
+     * signed job card, so telling the office their role is the problem was both
+     * false and a dead end.
+     */
+    for (const status of ['review', 'submitted', 'closed'] as const) {
+      const signed = buildJob({ status, acceptedAt: '2026-09-20T07:00:00.000Z' });
+      expect(deleteJobRefusal('master', signed)?.kind, status).toBe('state');
+      expect(cancelJobRefusal('master', signed)?.kind, status).toBe('state');
+    }
+  });
+
+  it('calls an already cancelled job a state refusal', () => {
+    const cancelled = buildJob({ status: 'cancelled' });
+    expect(cancelJobRefusal('master', cancelled)).toEqual({
+      kind: 'state',
+      message: 'This job is already cancelled.',
+    });
+  });
+
+  it('answers the role first when BOTH would refuse', () => {
+    // A technician on a signed job is refused for who they are: that is
+    // permanent, where the state is merely the state of one job.
+    const signed = buildJob({ status: 'review', acceptedAt: '2026-09-20T07:00:00.000Z' });
+    expect(deleteJobRefusal('technician', signed)?.kind).toBe('permission');
+    expect(cancelJobRefusal('technician', signed)?.kind).toBe('permission');
   });
 });

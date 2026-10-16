@@ -91,6 +91,23 @@ export const rateLimited = (message: string, retryAfterSeconds: number): ApiErro
 const PERMISSION_CODES = new Set([
   'not_permitted',
   /*
+   * ENDING A JOB: THE PAIRED CODES. AUD-9.
+   *
+   * `cancel_not_permitted` and `delete_not_permitted` now mean ONLY what their
+   * names say — this actor may not, whatever the job does next — so both are
+   * 403. The state refusals carry `cancel_refused` and `delete_refused` and are
+   * deliberately absent from this set, because they are 422s whose own sentence
+   * is the answer.
+   *
+   * They used to be split the wrong way round: `delete_not_permitted` covered
+   * both causes and sat in here, so deleting a SIGNED job card — impossible for
+   * anybody — answered 403, which this very comment defines as "permanent for
+   * this actor". `cancel_not_permitted` covered both causes and sat outside, so
+   * a technician's permanent refusal came back as "not yet". Each route was
+   * wrong for half its cases, against the rule written directly above.
+   */
+  'cancel_not_permitted',
+  /*
    * Accepting a job you may not accept.
    *
    * A Coordinator who does not do field work, or a technician reaching for a

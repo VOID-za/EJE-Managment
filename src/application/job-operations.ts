@@ -3132,7 +3132,20 @@ export const cancelJob = async (
 ): Promise<Job> => {
   const refusal = cancelJobRefusal(context.actor.role, job);
   if (refusal !== null) {
-    throw new WorkflowError(refusal, [{ code: 'cancel_not_permitted', message: refusal }]);
+    /*
+     * THE CODE FOLLOWS THE CAUSE, NOT THE OPERATION. AUD-9.
+     *
+     * `cancel_not_permitted` means this actor may not, and the API turns it
+     * into 403. `cancel_refused` means the job may not be cancelled as it
+     * stands, which is a 422 carrying the sentence above — the office needs
+     * that sentence, because the office is already the role allowed to cancel.
+     */
+    throw new WorkflowError(refusal.message, [
+      {
+        code: refusal.kind === 'permission' ? 'cancel_not_permitted' : 'cancel_refused',
+        message: refusal.message,
+      },
+    ]);
   }
   if (input.reason === 'other' && input.description.trim().length === 0) {
     throw new WorkflowError('A description is required when the reason is Other.', [
@@ -3201,7 +3214,13 @@ export const deleteJob = async (
 ): Promise<void> => {
   const refusal = deleteJobRefusal(context.actor.role, job);
   if (refusal !== null) {
-    throw new WorkflowError(refusal, [{ code: 'delete_not_permitted', message: refusal }]);
+    // As `cancelJob` above: 403 for who is asking, 422 for the job's state.
+    throw new WorkflowError(refusal.message, [
+      {
+        code: refusal.kind === 'permission' ? 'delete_not_permitted' : 'delete_refused',
+        message: refusal.message,
+      },
+    ]);
   }
 
   const trimmed = reason.trim();
