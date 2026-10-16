@@ -1,17 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
+import { encryptFile, keyFingerprint } from './crypto';
 import {
   BackupRefused,
   buildManifest,
@@ -43,9 +41,6 @@ const run = (command: string, args: readonly string[]): { ok: boolean; stderr: s
   return { ok: result.status === 0, stderr: (result.stderr ?? '').trim() };
 };
 
-const sha256 = (path: string): string =>
-  createHash('sha256').update(readFileSync(path)).digest('hex');
-
 /**
  * Measures and checksums an artefact, and takes everyone else off it first.
  *
@@ -57,10 +52,31 @@ const sha256 = (path: string): string =>
  * process that made them. The mode travels with the file; the directory's does
  * not. Rule 27.
  */
-const record = (destination: string, name: string): ArtefactRecord => {
-  const path = join(destination, name);
-  chmodSync(path, 0o600);
-  return { name, bytes: statSync(path).size, sha256: sha256(path) };
+/**
+ * Encrypts an artefact in place and takes the plaintext away. BACKUP-2.
+ *
+ * `database.dump` becomes `database.dump.enc` and the original is removed in the
+ * same step, because a directory holding both is a directory holding the
+ * plaintext. The checksum of the original is kept in the manifest — that is
+ * what a restore checks after decrypting, and it is the only thing that can
+ * prove the bytes that came out are the bytes that went in.
+ */
+const seal = async (
+  destination: string,
+  name: string,
+  key: Buffer,
+): Promise<ArtefactRecord> => {
+  const plain = join(destination, name);
+  const sealed = `${plain}.enc`;
+  const encrypted = await encryptFile(plain, sealed, key);
+  rmSync(plain, { force: true });
+  chmodSync(sealed, 0o600);
+  return {
+    name: `${name}.enc`,
+    bytes: encrypted.bytes,
+    sha256: encrypted.sha256,
+    plainSha256: encrypted.plainSha256,
+  };
 };
 
 /** Every file under a directory, recursively. The count the archive must match. */
@@ -169,13 +185,27 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     );
   }
 
+  /*
+   * ---- encryption ---------------------------------------------------------
+   *
+   * BACKUP-2. Last, so that everything above it — the readable dump, the
+   * counted archive — has already been proved on the plaintext. Encrypting
+   * first would mean checking the things a restore depends on through a layer
+   * that could hide them.
+   */
+  const artefacts = [
+    await seal(plan.destination, 'database.dump', plan.key),
+    await seal(plan.destination, 'storage.tar.gz', plan.key),
+  ];
+
   // ---- the manifest -------------------------------------------------------
   const manifest = buildManifest({
     plan,
     now,
     storedFiles,
-    artefacts: [record(plan.destination, 'database.dump'), record(plan.destination, 'storage.tar.gz')],
+    artefacts,
     appCommit: appCommit(),
+    keyFingerprint: keyFingerprint(plan.key),
   });
   writeFileSync(join(plan.destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, {
     mode: 0o600,
@@ -185,7 +215,9 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     `backup   ${plan.destination}\n` +
       `backup   database ${plan.databaseName}, ${manifest.artefacts[0]?.bytes ?? 0} bytes\n` +
       `backup   documents ${storedFiles} files, ${manifest.artefacts[1]?.bytes ?? 0} bytes\n` +
-      'backup   NOT encrypted and NOT restore-tested — BACKUP-2 owns both.\n',
+      `backup   encrypted aes-256-gcm, key ${manifest.encryption.keyFingerprint}\n` +
+      'backup   NOT restore-tested yet — run: npm run backup:restore-test ' +
+      `${plan.destination}\n`,
   );
 };
 

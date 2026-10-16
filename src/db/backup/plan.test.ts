@@ -21,6 +21,9 @@ import {
 const BASE = {
   DATABASE_URL: 'postgres://eje:s3cret@localhost:5432/eje_production',
   EJE_BACKUP_DIR: '/var/backups/eje',
+  // BACKUP-2: there is no unencrypted path, so a plan needs a key. A test key,
+  // obviously — the real one is never in a repository.
+  EJE_BACKUP_KEY: 'd'.repeat(64),
 } as const;
 
 const NOW = new Date('2026-09-26T21:14:03.000Z');
@@ -35,6 +38,26 @@ describe('planning a backup', () => {
   it('refuses to run with nowhere to write', () => {
     expect(() => planBackup({ DATABASE_URL: BASE.DATABASE_URL }, NOW, '/srv/eje')).toThrow(
       /EJE_BACKUP_DIR/u,
+    );
+  });
+
+  it('refuses to write an unencrypted backup at all — BACKUP-2', () => {
+    /*
+     * Not "encrypts when a key happens to be set". There is no plaintext path:
+     * a complete copy of every signed job card, written in the clear, is the
+     * thing this requirement exists to stop, and a flag to permit it would be
+     * used the first time somebody was in a hurry.
+     */
+    const { EJE_BACKUP_KEY: _omitted, ...noKey } = BASE;
+    expect(() => planBackup(noKey, NOW, '/srv/eje')).toThrow(/EJE_BACKUP_KEY/u);
+    expect(() => planBackup(noKey, NOW, '/srv/eje')).toThrow(/openssl rand -hex 32/u);
+  });
+
+  it('reads the key only after the plainer misconfigurations have spoken', () => {
+    // Somebody who has set neither should be told about the database first;
+    // the key refusal is long and would bury it.
+    expect(() => planBackup({ EJE_BACKUP_DIR: '/var/backups' }, NOW, '/srv/eje')).toThrow(
+      /DATABASE_URL/u,
     );
   });
 
@@ -143,8 +166,16 @@ describe('the manifest', () => {
     plan: planBackup(BASE, NOW, '/srv/eje'),
     now: NOW,
     storedFiles: 42,
-    artefacts: [{ name: 'database.dump', bytes: 1024, sha256: 'a'.repeat(64) }],
+    artefacts: [
+      {
+        name: 'database.dump.enc',
+        bytes: 1024,
+        sha256: 'a'.repeat(64),
+        plainSha256: 'b'.repeat(64),
+      },
+    ],
     appCommit: 'abc1234',
+    keyFingerprint: '0123456789abcdef',
   });
 
   it('records what was backed up, and from where', () => {
@@ -162,7 +193,26 @@ describe('the manifest', () => {
   it('says in the file itself that nothing has been restore-tested', () => {
     // Whoever reads a manifest years from now is deciding whether to trust the
     // directory. That belongs where they are looking, not only in the docs.
-    expect(manifest.notVerifiedBy).toMatch(/not encrypted/iu);
-    expect(manifest.notVerifiedBy).toMatch(/BACKUP-2/u);
+    // *Amended by BACKUP-2:* it no longer says "not encrypted", because it now
+    // is — and it still has to say that nobody has read these bytes back, and
+    // name the command that would.
+    expect(manifest.notVerifiedBy).toMatch(/NO RESTORE has been/u);
+    expect(manifest.notVerifiedBy).toMatch(/backup:restore-test/u);
+    expect(manifest.notVerifiedBy).not.toMatch(/not encrypted/iu);
+  });
+
+  it('records how it was encrypted, and which key it needs — BACKUP-2', () => {
+    expect(manifest.encryption.algorithm).toBe('aes-256-gcm');
+    // The fingerprint identifies the key. THE KEY ITSELF IS NOT IN THERE.
+    expect(manifest.encryption.keyFingerprint).toBe('0123456789abcdef');
+    expect(JSON.stringify(manifest)).not.toContain('d'.repeat(64));
+  });
+
+  it('keeps both checksums: the file on the shelf and the bytes inside it', () => {
+    const [artefact] = manifest.artefacts;
+    expect(artefact?.sha256).not.toBe(artefact?.plainSha256);
+    // The encrypted one proves the artefact is intact; only the plaintext one
+    // can prove a restore produced what was backed up.
+    expect(artefact?.name).toMatch(/\.enc$/u);
   });
 });

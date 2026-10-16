@@ -1,9 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { testDatabaseUrl } from '@/data/postgres/test-database';
+import { decryptFile } from './crypto';
 
 /**
  * A BACKUP THAT CAN ACTUALLY BE RESTORED FROM. BACKUP-1.
@@ -25,12 +34,44 @@ const describeDb = url === null ? describe.skip : describe;
 
 const roots: string[] = [];
 
+/**
+ * A test key. BACKUP-2 means there is no unencrypted path, so every run needs
+ * one — it lives in the helper rather than at each call site so that no test
+ * can accidentally assert the behaviour of a backup with no key.
+ */
+const TEST_KEY = 'c'.repeat(64);
+const KEY = Buffer.from(TEST_KEY, 'hex');
+
+const runCommand = (
+  script: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): { status: number; stdout: string; stderr: string } => {
+  const result = spawnSync('npx', ['tsx', script, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, EJE_BACKUP_KEY: TEST_KEY, ...env },
+    cwd: process.cwd(),
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  return {
+    status: result.status ?? -1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+};
+
+const runVerify = (directory: string, env: Readonly<Record<string, string>> = {}) =>
+  runCommand('src/db/backup/verify.ts', [directory], env);
+
+const runRestoreTest = (directory: string, env: Readonly<Record<string, string>> = {}) =>
+  runCommand('src/db/backup/restore-test.ts', [directory], { DATABASE_URL: url ?? '', ...env });
+
 const runBackup = (
   env: Readonly<Record<string, string>>,
 ): { status: number; stdout: string; stderr: string } => {
   const result = spawnSync('npx', ['tsx', 'src/db/backup/run.ts'], {
     encoding: 'utf8',
-    env: { ...process.env, ...env },
+    env: { ...process.env, EJE_BACKUP_KEY: TEST_KEY, ...env },
     cwd: process.cwd(),
     maxBuffer: 32 * 1024 * 1024,
   });
@@ -67,7 +108,7 @@ describeDb('npm run backup', () => {
     return join(parent, entries[0]!);
   };
 
-  it('writes a readable dump and every document, with a manifest', () => {
+  it('writes a readable dump and every document, with a manifest', async () => {
     const result = runBackup({
       DATABASE_URL: url ?? '',
       EJE_STORAGE_DIR: storage,
@@ -76,43 +117,55 @@ describeDb('npm run backup', () => {
     expect(result.status, result.stderr).toBe(0);
 
     const directory = onlyDirectory(into);
+    /*
+     * ENCRYPTED, AND THE PLAINTEXT IS NOT ALSO SITTING THERE. BACKUP-2.
+     * `database.dump` and `storage.tar.gz` are gone, not kept "just in case" —
+     * a directory holding both is a directory holding the plaintext.
+     */
     expect(readdirSync(directory).sort()).toEqual([
-      'database.dump',
+      'database.dump.enc',
       'manifest.json',
-      'storage.tar.gz',
+      'storage.tar.gz.enc',
     ]);
 
     // THE DUMP IS ONE pg_restore CAN READ. A file of the right name proves
-    // nothing; this is the tool a restore would actually use.
-    const listed = spawnSync('pg_restore', ['--list', join(directory, 'database.dump')], {
-      encoding: 'utf8',
-    });
+    // nothing; this is the tool a restore would actually use. It is decrypted
+    // first, which is also the proof that encryption did not corrupt it.
+    const plainDump = join(directory, 'decrypted.dump');
+    await decryptFile(join(directory, 'database.dump.enc'), plainDump, KEY);
+    const listed = spawnSync('pg_restore', ['--list', plainDump], { encoding: 'utf8' });
     expect(listed.status, listed.stderr).toBe(0);
     expect(listed.stdout).toContain('Archive created at');
 
     // AND THE SIGNED JOB CARD IS IN THE ARCHIVE. This is the half that was
     // missing before BACKUP-1: the database row points at this file.
-    const inArchive = spawnSync('tar', ['-tzf', join(directory, 'storage.tar.gz')], {
-      encoding: 'utf8',
-    });
+    const plainArchive = join(directory, 'decrypted.tar.gz');
+    await decryptFile(join(directory, 'storage.tar.gz.enc'), plainArchive, KEY);
+    const inArchive = spawnSync('tar', ['-tzf', plainArchive], { encoding: 'utf8' });
     expect(inArchive.stdout).toContain('jobcards/final/EJE-1048.pdf');
     expect(inArchive.stdout).toContain('uploads/order.pdf');
 
     const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as {
       storedFiles: number;
-      artefacts: { name: string; bytes: number; sha256: string }[];
+      artefacts: { name: string; bytes: number; sha256: string; plainSha256: string }[];
       notVerifiedBy: string;
+      encryption: { algorithm: string; keyFingerprint: string };
     };
     expect(manifest.storedFiles).toBe(2);
     expect(manifest.artefacts.map((entry) => entry.name).sort()).toEqual([
-      'database.dump',
-      'storage.tar.gz',
+      'database.dump.enc',
+      'storage.tar.gz.enc',
     ]);
     for (const artefact of manifest.artefacts) {
       expect(artefact.bytes).toBeGreaterThan(0);
       expect(artefact.sha256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(artefact.plainSha256).toMatch(/^[0-9a-f]{64}$/u);
     }
-    expect(manifest.notVerifiedBy).toMatch(/BACKUP-2/u);
+    // It still says, in the file, that nobody has read these bytes back.
+    expect(manifest.notVerifiedBy).toMatch(/NO RESTORE has been/u);
+    // And the key itself is nowhere in it. BACKUP-2.
+    expect(manifest.encryption.keyFingerprint).toMatch(/^[0-9a-f]{16}$/u);
+    expect(JSON.stringify(manifest)).not.toContain(TEST_KEY);
   });
 
   it('checksums what it actually wrote', () => {
@@ -152,7 +205,7 @@ describeDb('npm run backup', () => {
      * process umask — 0644 on a default install — and the mode is what travels
      * with the file when somebody rsyncs the backup somewhere else.
      */
-    for (const name of ['database.dump', 'storage.tar.gz', 'manifest.json']) {
+    for (const name of ['database.dump.enc', 'storage.tar.gz.enc', 'manifest.json']) {
       expect(statSync(join(directory, name)).mode & 0o777, name).toBe(0o600);
     }
   });
@@ -255,15 +308,13 @@ describeDb('npm run backup', () => {
     const directory = onlyDirectory(into);
 
     // The same destination, forced by reusing the directory name a second run
-    // would compute only within the same second — so it is created directly.
-    const again = spawnSync('npx', ['tsx', 'src/db/backup/run.ts'], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        DATABASE_URL: url ?? '',
-        EJE_STORAGE_DIR: storage,
-        EJE_BACKUP_DIR: into,
-      },
+    // would compute only within the same second. Through the helper, so it
+    // carries a key like every other run — BACKUP-2 refuses without one, and a
+    // run refused for the WRONG reason proves nothing about overwriting.
+    const again = runBackup({
+      DATABASE_URL: url ?? '',
+      EJE_STORAGE_DIR: storage,
+      EJE_BACKUP_DIR: into,
     });
     // Either it refused (same second) or it wrote a second, distinct directory.
     if (again.status !== 0) {
@@ -285,5 +336,240 @@ describeDb('npm run backup', () => {
     expect(result.stderr).toMatch(/pg_dump failed/u);
     // Nothing half-written: the dump failed, so the directory goes with it.
     expect(readdirSync(into)).toHaveLength(0);
+  });
+});
+
+/**
+ * BACKUP-2 — ENCRYPTED, INTEGRITY-VERIFIED, RESTORE-TESTED.
+ *
+ * The claims here are the ones somebody will depend on during an outage, so
+ * each is checked by doing the thing rather than by inspecting a file:
+ *
+ *   - a backup that has been ALTERED is refused, including when whoever altered
+ *     it recomputed the checksum, which is the whole reason for a tag;
+ *   - the wrong key is told apart from a damaged backup;
+ *   - a dump is restored into a database built for the purpose, which is then
+ *     dropped — and the ROWS are checked against the DOCUMENTS, because a
+ *     restored row pointing at a missing signed job card is this system's worst
+ *     failure and the only way to find it is to look.
+ */
+describeDb('npm run backup:verify and backup:restore-test', () => {
+  let storage: string;
+  let into: string;
+
+  /** A storage directory holding exactly the documents the database refers to. */
+  const documentsTheDatabaseRefersTo = (root: string): number => {
+    const tables = spawnSync(
+      'psql',
+      [
+        url ?? '',
+        '-At',
+        '-c',
+        "select table_name from information_schema.columns where column_name = 'storage_key' and table_schema = 'public'",
+      ],
+      { encoding: 'utf8' },
+    ).stdout.split('\n').filter((line) => line.length > 0);
+
+    let written = 0;
+    for (const table of tables) {
+      const keys = spawnSync('psql', [url ?? '', '-At', '-c', `select storage_key from public.${table}`], {
+        encoding: 'utf8',
+      }).stdout.split('\n').filter((line) => line.length > 0);
+      for (const key of keys) {
+        mkdirSync(join(root, key.split('/').slice(0, -1).join('/')), { recursive: true });
+        writeFileSync(join(root, key), `%PDF-1.4 ${key}`);
+        written += 1;
+      }
+    }
+    return written;
+  };
+
+  beforeEach(() => {
+    storage = mkdtempSync(join(tmpdir(), 'eje-docs2-'));
+    into = mkdtempSync(join(tmpdir(), 'eje-backups2-'));
+    roots.push(storage, into);
+  });
+
+  const freshBackup = (): string => {
+    documentsTheDatabaseRefersTo(storage);
+    const result = runBackup({
+      DATABASE_URL: url ?? '',
+      EJE_STORAGE_DIR: storage,
+      EJE_BACKUP_DIR: into,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const entries = readdirSync(into);
+    expect(entries).toHaveLength(1);
+    return join(into, entries[0]!);
+  };
+
+  const manifestOf = (directory: string) =>
+    JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as {
+      artefacts: { name: string; bytes: number; sha256: string; plainSha256: string }[];
+      storedFiles: number;
+      encryption: { keyFingerprint: string };
+      verifications?: { kind: string; at: string; detail: string }[];
+    };
+
+  it('verifies a fresh backup and records that it did', () => {
+    const directory = freshBackup();
+    const verified = runVerify(directory);
+
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(verified.stdout).toMatch(/intact and authentic/u);
+
+    const manifest = manifestOf(directory);
+    expect(manifest.verifications?.[0]?.kind).toBe('integrity');
+    expect(manifest.verifications?.[0]?.at).toMatch(/^20\d\d-/u);
+  });
+
+  it('leaves no decrypted copy behind after verifying', () => {
+    const directory = freshBackup();
+    expect(runVerify(directory).status).toBe(0);
+    // Still only the three files. Verification decrypts into a temporary
+    // directory of its own and removes it; a plaintext dump left beside the
+    // ciphertext would make running the check the dangerous act.
+    expect(readdirSync(directory).sort()).toEqual([
+      'database.dump.enc',
+      'manifest.json',
+      'storage.tar.gz.enc',
+    ]);
+  });
+
+  it('REFUSES a backup whose bytes have changed', () => {
+    const directory = freshBackup();
+    const target = join(directory, 'database.dump.enc');
+    const bytes = readFileSync(target);
+    bytes[Math.floor(bytes.length / 2)] = bytes[Math.floor(bytes.length / 2)]! ^ 0xff;
+    writeFileSync(target, bytes);
+
+    const verified = runVerify(directory);
+    expect(verified.status).toBe(1);
+    expect(verified.stderr).toMatch(/does not match its recorded SHA-256/u);
+  });
+
+  it('REFUSES an alteration whose checksum was recomputed — what the tag is for', () => {
+    /*
+     * THE CASE A CHECKSUM CANNOT CATCH.
+     *
+     * Whoever edits the file can recompute a SHA-256 and write it into the
+     * manifest; there is nothing secret in either. They cannot produce a GCM
+     * tag that verifies without the key. This simulates exactly that attacker
+     * and is the reason the artefacts are authenticated rather than merely
+     * checksummed.
+     */
+    const directory = freshBackup();
+    const target = join(directory, 'storage.tar.gz.enc');
+    const bytes = readFileSync(target);
+    bytes[20] = bytes[20]! ^ 0x01;
+    writeFileSync(target, bytes);
+
+    const manifest = manifestOf(directory);
+    const recomputed = spawnSync('sha256sum', [target], { encoding: 'utf8' }).stdout.split(' ')[0]!;
+    writeFileSync(
+      join(directory, 'manifest.json'),
+      JSON.stringify(
+        {
+          ...manifest,
+          artefacts: manifest.artefacts.map((artefact) =>
+            artefact.name === 'storage.tar.gz.enc'
+              ? { ...artefact, sha256: recomputed, bytes: bytes.length }
+              : artefact,
+          ),
+        },
+        null,
+        2,
+      ),
+    );
+
+    const verified = runVerify(directory);
+    expect(verified.status).toBe(1);
+    expect(verified.stderr).toMatch(/did not authenticate/u);
+  });
+
+  it('tells the wrong key apart from a damaged backup', () => {
+    const directory = freshBackup();
+    const verified = runVerify(directory, { EJE_BACKUP_KEY: 'e'.repeat(64) });
+
+    expect(verified.status).toBe(1);
+    // Not "altered or truncated" — that would send an operator looking for
+    // damage that is not there.
+    expect(verified.stderr).toMatch(/wrong key is configured/u);
+    expect(verified.stderr).toContain(manifestOf(directory).encryption.keyFingerprint);
+  });
+
+  it('RESTORES the dump into a database of its own, and drops it', () => {
+    const directory = freshBackup();
+    const restored = runRestoreTest(directory);
+
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout).toMatch(/jobs=\d+/u);
+    expect(restored.stdout).toMatch(/0 missing/u);
+    expect(restored.stdout).toMatch(/RESTORE-TESTED/u);
+
+    // The scratch database is gone. A copy of the production database left on
+    // the server would undo the encryption this backup was given.
+    const left = spawnSync(
+      'psql',
+      [url ?? '', '-At', '-c', "select datname from pg_database where datname like 'eje_restore_test_%'"],
+      { encoding: 'utf8' },
+    );
+    expect(left.stdout.trim()).toBe('');
+
+    const record = manifestOf(directory).verifications?.find((entry) => entry.kind === 'restore');
+    expect(record?.detail).toMatch(/restored into a scratch database and dropped again/u);
+    expect(record?.detail).toMatch(/all resolved/u);
+  });
+
+  it('REFUSES when a restored row points at a document the backup does not hold', () => {
+    /*
+     * THE FAILURE BACKUP-1 EXISTS TO PREVENT, checked rather than argued. One
+     * signed job card is removed from the storage directory before the backup
+     * is taken; the database row that names it is still in the dump.
+     */
+    documentsTheDatabaseRefersTo(storage);
+    const [first] = readdirSync(join(storage, 'jobcards', 'final'));
+    rmSync(join(storage, 'jobcards', 'final', first!));
+
+    const taken = runBackup({
+      DATABASE_URL: url ?? '',
+      EJE_STORAGE_DIR: storage,
+      EJE_BACKUP_DIR: into,
+    });
+    expect(taken.status, taken.stderr).toBe(0);
+    const directory = join(into, readdirSync(into)[0]!);
+
+    const restored = runRestoreTest(directory);
+    expect(restored.status).toBe(1);
+    expect(restored.stderr).toMatch(/point at documents that are not in the backup/u);
+    expect(restored.stderr).toContain(first!);
+  });
+
+  it('records the unresolved count rather than hiding it when orphans are accepted', () => {
+    documentsTheDatabaseRefersTo(storage);
+    const [first] = readdirSync(join(storage, 'jobcards', 'final'));
+    rmSync(join(storage, 'jobcards', 'final', first!));
+
+    expect(
+      runBackup({ DATABASE_URL: url ?? '', EJE_STORAGE_DIR: storage, EJE_BACKUP_DIR: into }).status,
+    ).toBe(0);
+    const directory = join(into, readdirSync(into)[0]!);
+
+    const restored = runRestoreTest(directory, { EJE_RESTORE_ALLOW_ORPHANS: 'yes' });
+    expect(restored.status, restored.stderr).toBe(0);
+    // Permitted, and NOT quiet: a restore record that cannot be told apart from
+    // a clean one is worth nothing.
+    expect(restored.stdout).toMatch(/1 missing/u);
+    expect(restored.stdout).toMatch(/WARNING/u);
+    const record = manifestOf(directory).verifications?.find((entry) => entry.kind === 'restore');
+    expect(record?.detail).toMatch(/1 UNRESOLVED/u);
+  });
+
+  it('REFUSES a directory with no manifest at all', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'eje-bare-'));
+    roots.push(bare);
+    const verified = runVerify(bare);
+    expect(verified.status).toBe(1);
+    expect(verified.stderr).toMatch(/nothing saying what this directory should contain/u);
   });
 });

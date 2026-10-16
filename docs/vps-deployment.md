@@ -386,7 +386,14 @@ sudo ss -lntp | grep 3000
 ### Backups
 
 ```bash
-EJE_BACKUP_DIR=/var/backups/eje npm run backup
+# Once, on a machine that is NOT this server. Keep it somewhere the server
+# cannot reach — a password manager, a sealed envelope, both.
+openssl rand -hex 32
+
+# Then, on the server:
+EJE_BACKUP_KEY=<that key> EJE_BACKUP_DIR=/var/backups/eje npm run backup
+npm run backup:verify       /var/backups/eje/eje-eje_production-<stamp>
+npm run backup:restore-test /var/backups/eje/eje-eje_production-<stamp>
 ```
 
 **The database alone is not a backup of this system.** `job_media` and
@@ -396,17 +403,18 @@ pointing at signed job cards that are gone, and a customer-signed job card
 cannot be rebuilt from anything (CR-01, IMMUT-6). This is what the line here used
 to be, and why it changed.
 
-`npm run backup` writes one timestamped directory holding `database.dump`,
-`storage.tar.gz` and a `manifest.json` of sizes, SHA-256 checksums and the build
-that produced them. It reads `DATABASE_URL` and `EJE_STORAGE_DIR` — the same
-variables the application reads, so it cannot back up a different directory from
-the one being written to.
+`npm run backup` writes one timestamped directory holding `database.dump.enc`,
+`storage.tar.gz.enc` and a `manifest.json` of sizes, SHA-256 checksums, the key's
+fingerprint and the build that produced them. It reads `DATABASE_URL` and
+`EJE_STORAGE_DIR` — the same variables the application reads, so it cannot back
+up a different directory from the one being written to.
 
 It refuses rather than producing half a backup:
 
 | | |
 |---|---|
 | `EJE_BACKUP_DIR` unset | refused — name a volume that is **not** the one being backed up |
+| `EJE_BACKUP_KEY` unset, or not 64 hex characters | refused. **There is no unencrypted path** — see below |
 | The document directory is missing | refused; almost always a misconfigured `EJE_STORAGE_DIR` |
 | The document directory is empty | refused, unless `EJE_BACKUP_ALLOW_EMPTY=yes` says the deployment really is new |
 | `pg_dump` fails, or `pg_restore` cannot read what it wrote | refused, and the part-written directory is **removed** |
@@ -418,9 +426,40 @@ the database and of every customer's signed job card.
 Run it before anything risky, and on a schedule. **Copy it off the machine** —
 a backup on the disk it is a backup of is not one.
 
-**It is not encrypted and no restore has been tested against it.** BACKUP-2 owns
-both and is not implemented; the manifest says so in the file itself, so whoever
-finds it later is not misled.
+#### Encryption, verification and the restore test — BACKUP-2
+
+**A backup is always encrypted, and there is no flag to write one in the clear.**
+AES-256-GCM, key from `EJE_BACKUP_KEY` and nowhere else — never in a file in the
+repository, never in the backup directory, never printed. The permissions above
+protect the copy on the machine it was made on and nothing else; a backup exists
+in order to be copied off, and every copy leaves those permissions behind.
+
+**Keep the key somewhere the server cannot reach, and keep it when you rotate
+it.** A backup whose key is lost cannot be restored — it is not a backup any
+more. The manifest records a 16-character fingerprint of the key so that an
+operator holding several can tell which one a directory needs; the fingerprint
+is a truncated SHA-256 and reveals nothing.
+
+| Command | What it proves |
+|---|---|
+| `npm run backup:verify <dir>` | The recorded SHA-256 of each artefact still matches **and** each one decrypts and authenticates. The checksum catches damage; the GCM tag catches ALTERATION, which a checksum cannot — whoever edited the file can recompute a checksum, and cannot forge a tag without the key. It decrypts into a temporary directory and removes it, so running the check never leaves a plaintext copy beside the ciphertext |
+| `npm run backup:restore-test <dir>` | The dump is actually restored, into a scratch database this command creates and then drops, and never into the one being backed up: the name is generated, checked against a pattern and against the source's name, and a name that already exists is refused rather than replaced. It then unpacks the archive and walks **every `storage_key` in the restored database**, demanding the file — because a restored row pointing at a signed job card that is not there is this system's worst failure, and the only way to find it is to look. Needs `DATABASE_URL` for the server, and writes nothing to the database named in it |
+
+Both append a dated record to `manifest.json`, so a backup nobody has checked and
+a backup somebody checked last Tuesday can be told apart. Until the restore
+record is there, the manifest says in the file itself that nobody has read those
+bytes back.
+
+On a **development or staging** database seeded rather than worked in, some
+`final_documents` rows name PDFs that were never generated; they were dangling
+before `pg_dump` ran. `EJE_RESTORE_ALLOW_ORPHANS=yes` accepts that, and the
+unresolved count still goes into the manifest — a restore record that cannot be
+told apart from a clean one is worth nothing. **Do not set it on production:**
+there, an unresolved key means a document is genuinely missing.
+
+**What BACKUP-2 still does not do:** it does not schedule anything and it does
+not copy a backup off this machine. Both are deployment, and both are still
+yours to arrange.
 
 ---
 

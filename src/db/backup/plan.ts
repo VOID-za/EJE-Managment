@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { readBackupKey } from './crypto';
 
 /**
  * WHAT A BACKUP OF THIS SYSTEM HAS TO CONTAIN. MASTER SCOPE BACKUP-1.
@@ -45,6 +46,14 @@ export interface BackupPlan {
   readonly destination: string;
   /** Set when the storage directory is allowed to be absent or empty. */
   readonly allowEmptyStorage: boolean;
+  /**
+   * The encryption key, from the environment. BACKUP-2.
+   *
+   * Part of the PLAN rather than read where it is used, so a run that cannot be
+   * encrypted is refused before `pg_dump` has written a single plaintext byte.
+   * Never logged, never written into the backup, never put in a refusal.
+   */
+  readonly key: Buffer;
 }
 
 /** The default the application itself uses when `EJE_STORAGE_DIR` is unset. */
@@ -155,13 +164,47 @@ export const planBackup = (
     storageRoot,
     destination: resolve(into, `eje-${databaseName}-${backupStamp(now)}`),
     allowEmptyStorage: (env.EJE_BACKUP_ALLOW_EMPTY ?? '').trim() === 'yes',
+    // Last, so a missing DATABASE_URL or EJE_BACKUP_DIR still reports itself
+    // first — but before anything is written, so there is no plaintext to
+    // clean up when the key turns out to be missing.
+    key: readBackupKey(env),
   };
 };
 
 export interface ArtefactRecord {
   readonly name: string;
   readonly bytes: number;
+  /** SHA-256 of the file AS STORED — encrypted. What `backup:verify` checks. */
   readonly sha256: string;
+  /**
+   * SHA-256 of the bytes BEFORE encryption. BACKUP-2.
+   *
+   * What a restore checks once it has decrypted: the ciphertext checksum proves
+   * the file on the shelf is intact, and only this proves that what came out of
+   * it is what went in.
+   */
+  readonly plainSha256: string;
+}
+
+/** How a backup was encrypted, and which key it needs. BACKUP-2. */
+export interface EncryptionRecord {
+  readonly algorithm: 'aes-256-gcm';
+  /**
+   * A short public name for the key — NOT the key, and not reversible to it.
+   *
+   * An operator who rotates keys has several; this is how they tell which one
+   * this directory needs, three years from now, without the manifest carrying
+   * anything secret.
+   */
+  readonly keyFingerprint: string;
+}
+
+/** One check run against a written backup. BACKUP-2. */
+export interface VerificationRecord {
+  /** `integrity` recomputed and decrypted; `restore` actually restored it. */
+  readonly kind: 'integrity' | 'restore';
+  readonly at: string;
+  readonly detail: string;
 }
 
 export interface BackupManifest {
@@ -173,14 +216,25 @@ export interface BackupManifest {
   readonly artefacts: readonly ArtefactRecord[];
   /** What produced it, so a restore can be matched to a build. */
   readonly appCommit: string;
+  /** BACKUP-2. Present on every backup this command writes; there is no plaintext path. */
+  readonly encryption: EncryptionRecord;
   /**
    * Said out loud in the manifest itself, not only in the documentation.
    *
    * Somebody reading a manifest three years from now is deciding whether they
    * can trust what is in the directory. "This has never been restore-tested"
-   * belongs where they are looking.
+   * belongs where they are looking — so it stays here, and `backup:restore-test`
+   * is what replaces it with a dated record of a restore that really happened.
    */
   readonly notVerifiedBy: string;
+  /**
+   * Verifications performed against this backup, appended as they happen.
+   *
+   * A backup nobody has checked and a backup somebody checked last Tuesday are
+   * different things, and the difference belongs in the artefact rather than in
+   * a person's memory.
+   */
+  readonly verifications?: readonly VerificationRecord[];
 }
 
 export const buildManifest = (input: {
@@ -189,6 +243,7 @@ export const buildManifest = (input: {
   readonly storedFiles: number;
   readonly artefacts: readonly ArtefactRecord[];
   readonly appCommit: string;
+  readonly keyFingerprint: string;
 }): BackupManifest => ({
   takenAt: input.now.toISOString(),
   databaseName: input.plan.databaseName,
@@ -196,7 +251,10 @@ export const buildManifest = (input: {
   storedFiles: input.storedFiles,
   artefacts: input.artefacts,
   appCommit: input.appCommit,
+  encryption: { algorithm: 'aes-256-gcm', keyFingerprint: input.keyFingerprint },
   notVerifiedBy:
-    'No restore has been performed against this backup, and it is not encrypted. ' +
-    'BACKUP-2 in docs/SCOPE.md owns both and is NOT IMPLEMENTED.',
+    'This backup is encrypted and its checksums are recorded, but NO RESTORE has been ' +
+    'performed against it. Run `npm run backup:restore-test <directory>` to prove it can be ' +
+    'restored; that writes a dated record into this manifest. Until it says so, nobody has ' +
+    'read these bytes back.',
 });
