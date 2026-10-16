@@ -2927,7 +2927,31 @@ await step('the archive filters by customer, job type and technician', async () 
 
 await step('the archive filters by the date the job was closed', async () => {
   await page.getByRole('button', { name: 'Clear filters' }).click();
-  await page.getByLabel('Closed to').fill('2026-04-01');
+
+  /*
+   * THE BOUNDARY COMES FROM THE DATA, NOT FROM A DATE SOMEBODY TYPED. QA-5.
+   *
+   * The demonstration closes EJE-1044 a hundred and eighty days before the
+   * server started, so the `2026-04-01` that used to be here was correct for
+   * about a fortnight either side of the day it was written and silently wrong
+   * afterwards — the step would then wait ten seconds for a row the filter was
+   * right to exclude, and report a defect in the application.
+   *
+   * The range is inclusive at both ends, so EJE-1044's own closing day keeps it
+   * in and leaves out EJE-1062, closed two days ago. That is the behaviour
+   * under test and it is unchanged.
+   */
+  const closedTo = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/closed`);
+    if (!response.ok) return '';
+    const body = await response.json();
+    const rows = body?.data?.rows ?? [];
+    const match = rows.find((row) => row?.job?.jobNumber === 'EJE-1044');
+    return (match?.job?.closedAt ?? '').slice(0, 10);
+  }, BASE);
+  if (closedTo === '') throw new Error('could not read the day EJE-1044 was closed');
+
+  await page.getByLabel('Closed to').fill(closedTo);
   await page.waitForFunction(
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1044')
       && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1062'),

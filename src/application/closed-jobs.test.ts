@@ -38,6 +38,33 @@ const seededJob = async (harness: Harness, jobNumber: string): Promise<Job> => {
   return job;
 };
 
+/**
+ * The day a seeded job was closed, as the filter itself reads it. QA-5.
+ *
+ * THE SEEDS ARE RELATIVE AND A WRITTEN-OUT DATE IS NOT. EJE-1044 is closed at
+ * `timeOffset(-180)` — a hundred and eighty days before whenever the suite
+ * runs — so a boundary typed as `2026-04-01` is only correct for a few weeks,
+ * and the two tests below passed for a fortnight and then started failing with
+ * no code change between them. A boundary derived from the fixture is right on
+ * every day.
+ *
+ * `slice(0, 10)` is deliberately the same expression `closedOn` uses in
+ * `closed-jobs.ts`: the test compares what production compares, so no
+ * timezone can open a gap between them.
+ */
+const closedDay = async (harness: Harness, jobNumber: string): Promise<string> => {
+  const { closedAt } = await seededJob(harness, jobNumber);
+  if (closedAt === null) throw new Error(`${jobNumber} is not seeded closed`);
+  return closedAt.slice(0, 10);
+};
+
+/** The next calendar day — where a boundary BETWEEN two closed jobs belongs. */
+const dayAfter = (day: string): string => {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+};
+
 describe('what belongs in the archive', () => {
   let harness: Harness;
   beforeEach(() => {
@@ -233,14 +260,21 @@ describe('narrowing the archive with filters', () => {
   });
 
   it('excludes a job closed before the from-date', async () => {
-    const found = await jobNumbers(harness, { closedFrom: '2026-09-01' });
-    // EJE-1062 was closed two days ago; EJE-1044 six months ago.
+    // EJE-1062 was closed two days ago; EJE-1044 six months ago. The boundary
+    // goes the day AFTER the older one, so it sits genuinely between the two
+    // however long ago "six months" happens to be.
+    const from = dayAfter(await closedDay(harness, 'EJE-1044'));
+    const found = await jobNumbers(harness, { closedFrom: from });
     expect(found).toContain('EJE-1062');
     expect(found).not.toContain('EJE-1044');
   });
 
   it('excludes a job closed after the to-date', async () => {
-    const found = await jobNumbers(harness, { closedTo: '2026-04-01' });
+    // The range is inclusive at both ends, so the older job's own closing day
+    // keeps it in and leaves out the one closed two days later — which is the
+    // behaviour under test: a job closed AFTER the to-date is excluded.
+    const to = await closedDay(harness, 'EJE-1044');
+    const found = await jobNumbers(harness, { closedTo: to });
     expect(found).toContain('EJE-1044');
     expect(found).not.toContain('EJE-1062');
   });
