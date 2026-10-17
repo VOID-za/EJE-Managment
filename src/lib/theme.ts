@@ -12,6 +12,18 @@ export type ResolvedTheme = 'light' | 'dark';
 
 export const THEME_STORAGE_KEY = 'eje.demo.theme.v1';
 
+/**
+ * The navy the system furniture takes. PWA-2.
+ *
+ * Stated once because two places need the same value and they are read by
+ * different things: the document's `theme-color` meta, which colours the
+ * browser's own bar, and the web manifest's `theme_color` and
+ * `background_color`, which colour an INSTALLED application's system bars and
+ * its splash screen. If they disagree, launching from the home screen flashes
+ * a white frame before the application paints.
+ */
+export const EJE_THEME_COLOR = '#1b2434';
+
 /** Light is the demonstration default, including when nothing is stored. */
 export const DEFAULT_THEME: ThemePreference = 'light';
 

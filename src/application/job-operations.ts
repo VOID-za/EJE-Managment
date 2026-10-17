@@ -1106,7 +1106,10 @@ export interface MediaInput {
   readonly kind: 'photo' | 'video';
   readonly fileName: string;
   readonly caption: string;
-  readonly sizeBytes: number;
+  /** What the server SNIFFED the bytes to be — never what the browser claimed. */
+  readonly contentType: string;
+  /** The file itself. There is no path into this function without one. */
+  readonly bytes: Uint8Array;
   /**
    * Who it is for. MEDIA-1.
    *
@@ -1117,11 +1120,24 @@ export interface MediaInput {
 }
 
 /**
- * Attaches media to a job.
+ * Attaches a PHOTOGRAPH OR VIDEO to a job, bytes and all. PWA-3.
  *
- * DEMO BEHAVIOUR: no file is uploaded. The storage service allocates a key and
- * the UI renders a placeholder tile. The production adapter uploads to object
- * storage and returns the same `Attachment` shape.
+ * WHAT THIS USED TO BE, because the change matters more than the code does: it
+ * took a file NAME and a size the browser made up, called `storage.put(…, null)`
+ * to allocate a key with nothing behind it, and recorded an attachment row. The
+ * screen then drew a placeholder tile. A technician could photograph a burnt
+ * contactor, see it listed on the job card, and there was never a photograph —
+ * the one thing the row asserted was the one thing that was not true.
+ *
+ * It now goes through `storeUpload`, which writes the bytes or raises, in the
+ * same order and for the same reason as `attachDocument`:
+ *
+ *   1. store the bytes   — raises if they did not land
+ *   2. record the row    — only reached when step 1 returned
+ *
+ * so the job cannot claim a photograph that does not exist. `sizeBytes` is
+ * measured off the bytes rather than accepted from the caller, which is what
+ * stops the tile saying 2.1 MB over a file of 400 bytes.
  */
 export const addMedia = async (
   context: OperationContext,
@@ -1130,7 +1146,12 @@ export const addMedia = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
-  const stored = await context.services.storage.put(input.fileName, 'image/jpeg', null);
+
+  const stored = await context.services.storage.storeUpload({
+    fileName: input.fileName,
+    contentType: input.contentType,
+    bytes: input.bytes,
+  });
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
@@ -1141,7 +1162,7 @@ export const addMedia = async (
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: input.sizeBytes,
+    sizeBytes: input.bytes.length,
   };
 
   const next: Job =
@@ -1225,6 +1246,34 @@ export const attachDocument = async (
   });
 
   return saved;
+};
+
+/**
+ * ONE PHOTOGRAPH'S OR VIDEO'S BYTES, for a caller that has already established
+ * that this actor may read this job. PWA-3.
+ *
+ * The sibling of `readJobAttachment`, and separate from it on purpose: media
+ * and documents are different collections on the job, a media id is not an
+ * attachment id, and a reader of one must not reach the other by passing the
+ * wrong kind of id. It looks only in THIS job's own photo and video lists, so a
+ * guessed id belonging to another job answers null — and so does a historical
+ * row from before capture stored any bytes, which must not be allowed to render
+ * as a broken image pretending to be evidence.
+ */
+export const readJobMedia = async (
+  context: OperationContext,
+  job: Job,
+  attachmentId: string,
+): Promise<{ attachment: Attachment; document: StoredDocument } | null> => {
+  const attachment =
+    job.photos.find((candidate) => candidate.id === attachmentId) ??
+    job.videos.find((candidate) => candidate.id === attachmentId);
+  if (attachment === undefined) return null;
+
+  const document = await context.services.storage.getDocument(attachment.storageKey);
+  if (document === null) return null;
+
+  return { attachment, document };
 };
 
 /**

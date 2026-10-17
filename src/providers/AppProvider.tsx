@@ -12,6 +12,7 @@ import {
 import type { User, UserId, UserRole } from '@/domain';
 import { auth, type SafeUser } from '@/api/endpoints';
 import { ApiRequestError, onSessionEnded } from '@/api/client';
+import { clearCachedJobs, clearOtherUsers } from '@/lib/pwa/job-cache';
 
 /**
  * The browser's state, which is now almost none of it.
@@ -121,7 +122,19 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
    * account, a logout elsewhere, an expiry. The client hears about it once,
    * centrally, rather than every screen having to check.
    */
-  useEffect(() => onSessionEnded(() => setCurrentUser(null)), []);
+  useEffect(
+    () =>
+      onSessionEnded(() => {
+        setCurrentUser(null);
+        /*
+         * A revoked session leaves nothing behind on the device. The cached
+         * job list is the last signed-in technician's work for the day, and a
+         * tablet is handed over between shifts — see `signOut`.
+         */
+        void clearCachedJobs().catch(() => undefined);
+      }),
+    [],
+  );
 
   const signIn = useCallback(
     async (email: string, password: string) => {
@@ -131,6 +144,13 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
         setConnectionError(null);
         // The identity changed, so everything on screen is somebody else's.
         setVersion((current) => current + 1);
+        /*
+         * WHOEVER HAD THIS TABLET BEFORE DOES NOT KEEP A COPY. Their cached
+         * jobs are removed on the way in as well as on the way out, because
+         * sign-out is the one step a person in a hurry skips — the next
+         * sign-in is the second chance to get this right.
+         */
+        void clearOtherUsers(result.user.id).catch(() => undefined);
         const me = await auth.me().catch(() => null);
         if (me !== null) setBackend(me.backend);
         return { ok: true, message: null };
@@ -151,6 +171,14 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     await auth.signOut().catch(() => undefined);
     setCurrentUser(null);
     setVersion((current) => current + 1);
+    /*
+     * EVERY USER'S CACHE, NOT JUST THIS ONE'S. Signing out is the moment the
+     * tablet stops belonging to anybody, and a store that still holds a job
+     * list is customer and fault data sitting on a device about to change
+     * hands. It is a cache of what the server already has, so there is nothing
+     * of value to lose by emptying it.
+     */
+    await clearCachedJobs().catch(() => undefined);
   }, []);
 
   const adoptSession = useCallback(async () => {
@@ -160,6 +188,8 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
     setConnectionError(null);
     // Somebody else is signed in now, so everything on screen is theirs.
     setVersion((current) => current + 1);
+    // Including the cached copy — the switcher is a sign-in by another route.
+    void clearOtherUsers(result.user.id).catch(() => undefined);
   }, []);
 
   const invalidate = useCallback(() => setVersion((current) => current + 1), []);

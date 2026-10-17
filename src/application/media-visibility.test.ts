@@ -10,7 +10,7 @@ import {
   startSignature,
 } from './job-operations';
 import { WorkflowError } from './errors';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, jpegFixture, seedUser, type Harness } from './test-harness';
 import { buildJobCardModel } from '@/lib/job-card/model';
 import { loadJobView } from './job-view';
 import type { Job } from '@/domain';
@@ -49,14 +49,19 @@ describe('customer-facing and internal media', () => {
     return acceptJob(harness.as(technician), opened!);
   };
 
-  const photo = (caption: string, visibility?: 'customer_facing' | 'internal') =>
-    ({
-      kind: 'photo' as const,
-      fileName: `${caption.replace(/\s+/gu, '-')}.jpg`,
-      caption,
-      sizeBytes: 2_140_000,
-      ...(visibility === undefined ? {} : { visibility }),
-    });
+  /*
+   * REAL BYTES, because capture now stores them. PWA-3 replaced the
+   * metadata-only path with one that writes the file or raises, so a fixture
+   * without a file would not reach the code under test at all.
+   */
+  const photo = (caption: string, visibility?: 'customer_facing' | 'internal') => ({
+    kind: 'photo' as const,
+    fileName: `${caption.replace(/\s+/gu, '-')}.jpg`,
+    caption,
+    contentType: 'image/jpeg',
+    bytes: jpegFixture(caption),
+    ...(visibility === undefined ? {} : { visibility }),
+  });
 
   /** The captions the customer's document would actually print. */
   const documentCaptions = async (job: Job): Promise<readonly string[]> => {

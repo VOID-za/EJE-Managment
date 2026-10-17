@@ -206,6 +206,15 @@ export const writeRoute =
 export interface UploadContext extends ReadContext {
   readonly file: File;
   readonly caption: string;
+  /**
+   * The rest of the multipart body.
+   *
+   * For the fields that travel WITH a file and would otherwise need a second
+   * request — a photograph's classification, for instance, which has to be
+   * decided at the moment of capture. Every field is still a client claim and
+   * is parsed and validated by the route, exactly like a JSON body.
+   */
+  readonly form: FormData;
   readonly operation: OperationContext;
 }
 
@@ -270,6 +279,7 @@ export const uploadRoute =
           request,
           params,
           file,
+          form,
           caption: typeof caption === 'string' ? caption.slice(0, 500) : '',
           operation: {
             repos: unit.repos,

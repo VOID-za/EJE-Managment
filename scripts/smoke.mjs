@@ -16,6 +16,7 @@
  *   PLAYWRIGHT_CHROMIUM  explicit Chromium binary, when not managed by Playwright
  */
 import { mkdirSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
 
@@ -45,10 +46,24 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
  */
 const EXPECTED_HTTP = /Failed to load resource:.*status of (400|401|403|404|409|422|429)\b/;
 
+/*
+ * THE ONE PLACE A TRANSPORT FAILURE IS EXPECTED.
+ *
+ * The PWA checks at the end of this file take the browser offline on purpose,
+ * and a request that cannot leave the machine logs `ERR_INTERNET_DISCONNECTED`
+ * rather than an HTTP status. That is the condition under test, so it is
+ * allowed for exactly as long as the suite is holding the network down — and
+ * nowhere else, because outside that window it is a real fault.
+ */
+const OFFLINE_TRANSPORT =
+  /net::ERR_INTERNET_DISCONNECTED|net::ERR_NETWORK_CHANGED|Failed to fetch/;
+let offlineExpected = false;
+
 page.on('console', (msg) => {
   if (msg.type() !== 'error') return;
   const text = msg.text();
   if (EXPECTED_HTTP.test(text)) return;
+  if (offlineExpected && OFFLINE_TRANSPORT.test(text)) return;
   errors.push(`console: ${text}`);
 });
 page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
@@ -78,6 +93,86 @@ const step = async (name, fn) => {
  * through the menu — which is also what proves the menu works.
  */
 const signOut = () => signOutOf(page, 10000);
+
+/**
+ * A REAL, DECODABLE PNG, built here rather than committed as a fixture. PWA-3.
+ *
+ * It has to be decodable, not merely well-signed: the panel renders the
+ * photograph it captured and the browser only shows an image it can decode, so
+ * a file with a valid header and no pixels in it would fail in the one place
+ * these checks are looking. Four pixels, coloured from the caption, so two
+ * photographs differ byte for byte.
+ */
+const pngBytes = (label) => {
+  const table = [...Array(256).keys()].map((n) => {
+    let c = n;
+    for (let bit = 0; bit < 8; bit += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (bytes) => {
+    let c = 0xffffffff;
+    for (const byte of bytes) c = table[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const name = Buffer.from(type, 'ascii');
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc(Buffer.concat([name, data])));
+    return Buffer.concat([length, name, data, checksum]);
+  };
+
+  const side = 2;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(side, 0);
+  header.writeUInt32BE(side, 4);
+  header[8] = 8; // 8 bits per channel
+  header[9] = 2; // truecolour RGB
+
+  const colour = [0, 1, 2].map(
+    (offset) => (label.charCodeAt(offset % label.length) * 7 + offset * 40) % 256,
+  );
+  const rows = [];
+  for (let y = 0; y < side; y += 1) {
+    rows.push(Buffer.from([0]));
+    for (let x = 0; x < side; x += 1) rows.push(Buffer.from(colour));
+  }
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+};
+
+/**
+ * Attaches a photograph the way a technician does on a tablet.
+ *
+ * The file goes into the hidden gallery input, which is what the "Choose
+ * photo" button clicks; the camera input is the same element with
+ * `capture="environment"`, and a headless browser has no camera to drive. The
+ * modal then shows the frame before it is sent, which is asserted here because
+ * a preview nobody checks is how a thumb over the lens reaches a customer.
+ */
+const attachPhoto = async (caption, visibility) => {
+  await page.setInputFiles('[data-testid="job-photo-gallery"]', {
+    name: `${caption.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`,
+    mimeType: 'image/png',
+    buffer: pngBytes(caption),
+  });
+
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 8000 });
+  await dialog.locator('[data-testid="job-photo-preview"]').waitFor({ timeout: 8000 });
+  await dialog.getByLabel('Caption').fill(caption);
+  if (visibility !== undefined) {
+    await dialog.getByLabel('Who it is for').selectOption(visibility);
+  }
+  await dialog.getByRole('button', { name: 'Attach photo' }).click();
+  await page.getByText(caption).first().waitFor({ timeout: 15000 });
+};
 
 const signInAsMasterIfNeeded = async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
@@ -432,24 +527,44 @@ await step('a breakdown is given no checklist step, and no collection step', asy
 });
 
 await step('the completion step carries the job photographs', async () => {
-  // The existing photo panel, in the close-out, so a technician never has to
-  // leave the sequence to attach what they took on site.
-  const add = page.getByRole('button', { name: 'Add photo', exact: true });
-  await add.waitFor({ timeout: 10000 });
+  /*
+   * REAL FILES NOW. PWA-3.
+   *
+   * This step used to click "Add photo" and fill in a caption, because that is
+   * all the panel did — a JSON body with an invented file name and no file
+   * anywhere. It now chooses an actual JPEG, which is what the camera and the
+   * gallery both hand the page, and the bytes go to the server.
+   */
+  await page.getByRole('button', { name: 'Take photo', exact: true }).waitFor({ timeout: 10000 });
   await page.getByText('No photos attached').first().waitFor({ timeout: 8000 });
 
   for (const caption of ['Failed cooling fan, as found', 'New fan fitted and running']) {
-    await add.click();
-    const dialog = page.getByRole('dialog');
-    await dialog.waitFor({ timeout: 8000 });
-    await dialog.getByLabel('Caption').fill(caption);
-    await dialog.getByRole('button', { name: 'Attach photo' }).click();
-    await page.getByText(caption).first().waitFor({ timeout: 10000 });
+    await attachPhoto(caption);
   }
 
-  // Both of them, with a preview tile each.
+  // Both of them, as photographs rather than placeholders.
   await page.getByRole('heading', { name: /^Photos/ }).first().waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/31-wizard-photos.png`, fullPage: false });
+});
+
+await step('a captured photograph is served back, and it is the photograph', async () => {
+  /*
+   * THE ASSERTION THAT WOULD HAVE CAUGHT THE OLD BEHAVIOUR. A tile rendered
+   * from an attachment row proves nothing — the old panel drew one over a
+   * storage key with nothing behind it. This waits for the browser to DECODE
+   * the bytes it fetched from `/api/jobs/:id/media/:id`: `naturalWidth` is
+   * non-zero only if real image data arrived through the authenticated route.
+   */
+  const thumbnail = page.locator('[data-testid="job-photo-thumbnail"]').first();
+  await thumbnail.waitFor({ timeout: 10000 });
+  await page.waitForFunction(
+    () => {
+      const image = document.querySelector('[data-testid="job-photo-thumbnail"]');
+      return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+    },
+    undefined,
+    { timeout: 15000 },
+  );
 });
 
 await step('a photograph taken by mistake can be removed before signature', async () => {
@@ -3619,6 +3734,262 @@ await step('a machine with job history is withdrawn, not destroyed', async () =>
   await page.getByText('LW-V40-70214').first().waitFor({ timeout: 10000 });
 });
 
+
+/* =========================================================================
+ * THE INSTALLED TABLET APPLICATION. PWA-1, PWA-2, PWA-4, PWA-5, PWA-6.
+ * CR-09 Phase 3.
+ *
+ * Last in the file, after the journey, because these checks register a service
+ * worker and take the browser offline — both of which change the conditions
+ * every earlier check runs under. The suite has already proved what the
+ * application does; this proves what survives an installed tablet losing
+ * signal.
+ *
+ * WHAT STILL NEEDS THE RUGGED TABLET AND CANNOT BE PROVED HERE: that Android
+ * offers the install (ACC-PWA-1), that the launcher shows EJE's icon, that it
+ * opens without browser furniture (ACC-PWA-2), that the real camera opens for
+ * `capture="environment"` (ACC-PWA-3), and that any of it is usable one-handed
+ * with gloves in daylight (ACC-PWA-6). Headless Chromium has no launcher, no
+ * home screen and no camera.
+ * ========================================================================= */
+
+await step('every document links a manifest, and the manifest is installable', async () => {
+  /*
+   * RIAAN, NOT SIPHO. By this point in the suite Sipho's job has been signed,
+   * submitted and closed, so his working list is empty — and a cache check
+   * against an empty list proves nothing. Riaan still has open work, which is
+   * what a technician starting a shift with a tablet actually has.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+
+  const href = await page.locator('link[rel="manifest"]').first().getAttribute('href');
+  if (href === null) throw new Error('no manifest link in the document');
+
+  const response = await page.request.get(new URL(href, BASE).href);
+  if (!response.ok()) throw new Error(`manifest answered ${response.status()}`);
+  const manifest = await response.json();
+
+  if (manifest.display !== 'standalone') throw new Error(`display is ${manifest.display}`);
+  if (manifest.start_url !== '/') throw new Error(`start_url is ${manifest.start_url}`);
+  if (!/EJE/.test(manifest.name ?? '')) throw new Error('the manifest does not name EJE');
+
+  // An icon of at least 192px that actually exists is what a browser requires
+  // before it will offer the install at all.
+  const icon = (manifest.icons ?? []).find((entry) => entry.sizes === '192x192');
+  if (icon === undefined) throw new Error('no 192px icon declared');
+  const iconResponse = await page.request.get(new URL(icon.src, BASE).href);
+  if (!iconResponse.ok()) throw new Error(`the 192px icon answered ${iconResponse.status()}`);
+  if ((await iconResponse.body()).length < 100) throw new Error('the 192px icon is empty');
+});
+
+await step('the service worker is served uncacheable, and it registers', async () => {
+  const worker = await page.request.get(`${BASE}/eje-sw.js`);
+  if (!worker.ok()) throw new Error(`/eje-sw.js answered ${worker.status()}`);
+  const cacheControl = worker.headers()['cache-control'] ?? '';
+  if (!/no-store/.test(cacheControl)) {
+    // A worker a browser serves from its own HTTP cache is a build that cannot
+    // be replaced.
+    throw new Error(`the worker is cacheable: ${cacheControl}`);
+  }
+
+  await page.waitForFunction(
+    async () => {
+      const registration = await navigator.serviceWorker?.getRegistration('/');
+      return registration?.active !== null && registration?.active !== undefined;
+    },
+    undefined,
+    { timeout: 30000 },
+  );
+});
+
+await step('the worker caches the shell and NOTHING authenticated', async () => {
+  // Give the activated worker a moment to have served this page's assets.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1500);
+
+  const cached = await page.evaluate(async () => {
+    const names = await caches.keys();
+    const urls = [];
+    for (const name of names) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) urls.push(request.url);
+    }
+    return { names, urls };
+  });
+
+  const offending = cached.urls.filter((url) => {
+    const { pathname } = new URL(url);
+    if (pathname.startsWith('/api/')) return true;
+    if (pathname === '/eje-sw.js') return true;
+    // Every page of this application is rendered for one signed-in person.
+    return pathname === '/' || pathname === '/jobs' || pathname.startsWith('/jobs/');
+  });
+  if (offending.length > 0) {
+    throw new Error(`cached what it must not: ${offending.join(', ')}`);
+  }
+
+  if (!cached.urls.some((url) => new URL(url).pathname === '/offline')) {
+    throw new Error('the offline page was not precached');
+  }
+  if (!cached.urls.some((url) => new URL(url).pathname.startsWith('/_next/static/'))) {
+    throw new Error('no build assets were cached, so the shell needs the network');
+  }
+});
+
+await step('the technician’s assigned jobs are cached on the device', async () => {
+  const stored = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['jobs', 'meta', 'device'], 'readonly');
+          const jobs = tx.objectStore('jobs').getAll();
+          const meta = tx.objectStore('meta').getAll();
+          const device = tx.objectStore('device').getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve({ jobs: jobs.result, meta: meta.result, device: device.result });
+          };
+          tx.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+
+  if (stored.jobs.length === 0) throw new Error('no jobs were cached');
+  if (stored.meta.length !== 1) throw new Error(`${stored.meta.length} meta rows, expected one`);
+  if (stored.device.length !== 1) throw new Error('the confirmed session was not recorded');
+
+  // Every record is keyed by the signed-in user, which is what stops one
+  // technician's jobs reaching the next person on the tablet.
+  const userId = stored.device[0].userId;
+  if (stored.jobs.some((job) => job.userId !== userId)) {
+    throw new Error('a cached job belongs to another user');
+  }
+
+  // And the projection is the narrow one: no ids, no refusals, no document.
+  const [first] = stored.jobs;
+  for (const forbidden of ['customerId', 'siteId', 'machineId', 'signatureRefusals', 'finalDocument', 'primaryTechnicianId']) {
+    if (Object.prototype.hasOwnProperty.call(first, forbidden)) {
+      throw new Error(`the cache holds ${forbidden}`);
+    }
+  }
+  if (typeof first.jobNumber !== 'string' || first.jobNumber.length === 0) {
+    throw new Error('a cached job has no job number');
+  }
+});
+
+await step('with the network off, the tablet still shows the cached jobs', async () => {
+  const cachedNumbers = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('jobs', 'readonly').objectStore('jobs').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result.map((job) => job.jobNumber));
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  try {
+    // A full navigation, which is what the worker's navigate handler answers.
+    await page.goto(`${BASE}/jobs`, { waitUntil: 'domcontentloaded' });
+
+    // THE PAGE SAYS WHAT IT IS. It does not render an empty job list that
+    // reads as "no jobs today".
+    await page.getByText('could not reach the EJE server', { exact: false })
+      .first().waitFor({ timeout: 20000 });
+
+    const list = page.locator('[data-testid="cached-job-list"]');
+    await list.waitFor({ timeout: 20000 });
+    const shown = await list.innerText();
+    const missing = cachedNumbers.filter((number) => !shown.includes(number));
+    if (missing.length > 0) {
+      throw new Error(`cached jobs not shown offline: ${missing.join(', ')}`);
+    }
+
+    // And it is honest about what cannot be done.
+    const body = await page.locator('main').innerText();
+    if (!/cannot be captured/i.test(body)) {
+      throw new Error('the offline page does not say that work cannot be captured');
+    }
+    await page.screenshot({ path: `${shots}/40-offline-jobs.png`, fullPage: false });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+});
+
+await step('reopening after an interruption offers the job that was open', async () => {
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+
+  const found = (await page.locator('table').first().innerText()).match(/EJE-\d+/);
+  if (found === null) throw new Error('no job on the technician’s list to open');
+  const jobNumber = found[0];
+
+  // Open the job, which is what records the place — on arrival, because a flat
+  // battery runs no code on the way out.
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Overview' }).first().waitFor({ timeout: 20000 });
+
+  // ...then come back as a cold launch would, with no history behind it.
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  const notice = page.locator('[data-testid="resume-notice"]');
+  await notice.waitFor({ timeout: 20000 });
+  const text = await notice.innerText();
+  if (!text.includes(jobNumber)) {
+    throw new Error(`the resume notice names ${text} rather than ${jobNumber}`);
+  }
+  // It promises a place, not kept work.
+  if (!/not kept/i.test(text)) throw new Error('the notice implies unsent work was kept');
+});
+
+await step('signing out leaves nothing of that technician on the tablet', async () => {
+  await signOut();
+
+  const remaining = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['jobs', 'meta', 'device', 'place'], 'readonly');
+          const jobs = tx.objectStore('jobs').count();
+          const meta = tx.objectStore('meta').count();
+          const device = tx.objectStore('device').count();
+          const place = tx.objectStore('place').count();
+          tx.oncomplete = () => {
+            db.close();
+            resolve({
+              jobs: jobs.result,
+              meta: meta.result,
+              device: device.result,
+              place: place.result,
+            });
+          };
+          tx.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+
+  // A tablet handed to the next technician holds nothing of the last one's.
+  const held = Object.entries(remaining).filter(([, count]) => count > 0);
+  if (held.length > 0) {
+    throw new Error(`the cache still holds ${held.map(([k, v]) => `${v} ${k}`).join(', ')}`);
+  }
+});
 
 await browser.close();
 

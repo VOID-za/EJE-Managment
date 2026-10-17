@@ -309,33 +309,16 @@ export const JOB_COMMANDS: CommandRegistry = {
     (context, job, input) => jobs.addNote(context.operation, job, input.body, input.internal),
   ),
 
-  /**
-   * Attaching media.
+  /*
+   * `add_media` USED TO BE HERE, and it is deliberately gone. PWA-3.
    *
-   * METADATA ONLY. No bytes cross this endpoint: production file storage is its
-   * own phase, and a JSON body is the wrong place for a photograph. The record
-   * carries the name, the caption and the size in exactly the shape the future
-   * uploader will produce.
+   * It took a file name, a caption and a size in a JSON body, recorded an
+   * attachment row and stored nothing — so the job card listed photographs that
+   * did not exist. A photograph now arrives as multipart bytes at
+   * `POST /api/jobs/:jobId/media`, which sniffs them, stores them and only then
+   * records the row. There is no JSON path to a photograph any more, because a
+   * JSON path to a photograph is a path to a photograph that is not there.
    */
-  add_media: withInput(
-    z
-      .object({
-        kind: z.enum(['photo', 'video']),
-        fileName: text(260),
-        caption: text(500),
-        sizeBytes: z.number().int().nonnegative().max(2_000_000_000),
-        /*
-         * WHO IT IS FOR. MEDIA-1.
-         *
-         * Optional, and absent means `customer_facing` — which is what every
-         * photograph already was, so an older client that does not send it keeps
-         * working and keeps its existing behaviour.
-         */
-        visibility: z.enum(['customer_facing', 'internal']).optional(),
-      })
-      .strict(),
-    (context, job, input) => jobs.addMedia(context.operation, job, input),
-  ),
 
   /**
    * Reclassifying a photograph after it was taken. MEDIA-1.

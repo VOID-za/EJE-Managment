@@ -23,6 +23,10 @@ import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/c
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { CachedJobList } from '@/components/pwa/CachedJobList';
+import { CacheStatusNotice } from '@/components/pwa/CacheStatusNotice';
+import { ResumeNotice } from '@/components/pwa/ResumeNotice';
+import { useJobCache } from '@/hooks/useJobCache';
 import { cn } from '@/lib/cn';
 import { reads } from '@/api/endpoints';
 import type { JobListRow } from '@/application/job-view';
@@ -103,6 +107,21 @@ const JobsPageContent = () => {
   // below are the user's own choices over what came back.
   const query = useQuery(`jobs:list:${user.id}`, () => reads.jobs());
 
+  /*
+   * The copy this tablet keeps. PWA-6.
+   *
+   * Write-through on every successful read, and read back only when the server
+   * could not be reached. It changes nothing about the screen below while there
+   * is signal — the list stays the server's answer, filtered — and it is why a
+   * technician in a yard with no coverage can still see which job is next.
+   */
+  const cache = useJobCache({
+    rows: query.data?.rows ?? null,
+    loading: query.loading,
+    refreshing: query.refreshing,
+    failed: query.error !== null,
+  });
+
   const rows = useMemo(() => {
     const all = query.data?.rows ?? [];
     const needle = term.trim().toLowerCase();
@@ -152,6 +171,33 @@ const JobsPageContent = () => {
   const refusalCount = visible.filter((row) => refusalAwaitingResolution(row.job)).length;
   const canSeeRefusalQueue = can(user.role, 'jobs.viewAnySignatureRefusal');
 
+  /*
+   * A FAILED READ WITH A CACHED COPY IS NOT A BLANK SCREEN — AND NOT A LIE
+   * EITHER. Only a connection failure falls back: a 403 means this person may
+   * not have the list, and answering a refusal from the cache would hand them
+   * data the server just declined. The cached list is read-only and labelled
+   * with when it arrived; there are no actions on it, because every action
+   * needs the server that cannot be reached.
+   */
+  if (query.error !== null && query.errorCode === 'network' && cache.cached.length > 0) {
+    return (
+      <>
+        <PageHeader
+          title="Jobs"
+          description="The copy this tablet last received from the EJE server."
+          breadcrumbs={[{ label: 'Jobs' }]}
+        />
+        <CacheStatusNotice status={cache.status} className="mb-4" />
+        <CachedJobList jobs={cache.cached} />
+        <div className="mt-4">
+          <Button type="button" onClick={query.refetch}>
+            Try again
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   if (query.error !== null) {
     return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
   }
@@ -168,6 +214,22 @@ const JobsPageContent = () => {
           </Link>
         }
       />
+
+      {/* Where this technician was when the tablet was last awake. PWA-4. */}
+      <ResumeNotice
+        available={visible.map((row) => row.job.jobNumber)}
+        loading={query.loading}
+      />
+
+      {/* Said only when it needs saying. While the server is answering, this
+          list IS the server's answer and a banner claiming so is noise — a
+          refresh in flight is not a staleness anybody needs warning about,
+          since the rows on screen came from the server minutes ago. The notice
+          appears for the two states that change what the technician should
+          believe: this tablet is offline, or the server could not be reached. */}
+      {(cache.status.kind === 'offline_cached' || cache.status.kind === 'refresh_failed') && (
+        <CacheStatusNotice status={cache.status} className="mb-4" />
+      )}
 
       <div className="eje-scrollbar mb-4 flex flex-wrap items-center gap-2">
         {/* The office's exception queue, beside the working lists it belongs

@@ -180,10 +180,20 @@ export const apiUpload = async <T>(
   path: string,
   file: File,
   caption = '',
+  /**
+   * The fields that belong WITH the file.
+   *
+   * A photograph's classification is decided at the moment of capture, so
+   * sending it as a second request would leave a window in which the job holds
+   * a customer-facing photograph the technician marked internal. The server
+   * validates each one; this only carries them.
+   */
+  fields: Readonly<Record<string, string>> = {},
 ): Promise<T> => {
   const form = new FormData();
   form.append('file', file);
   if (caption.length > 0) form.append('caption', caption);
+  for (const [name, value] of Object.entries(fields)) form.append(name, value);
 
   let response: Response;
   try {

@@ -69,6 +69,21 @@ export const ACCEPTED_CONTENT_TYPES: readonly string[] = [
 ];
 
 /**
+ * The subset a PHOTOGRAPH may be. PWA-3.
+ *
+ * A camera capture is an image and nothing else. The document path accepts a
+ * PDF because a customer's order arrives as one; a photograph of a machine does
+ * not, and an endpoint that would take one is an endpoint that will eventually
+ * be handed one by mistake. Both lists are sniffed, never declared.
+ */
+export const PHOTO_CONTENT_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/tiff',
+  'image/webp',
+];
+
+/**
  * A file name safe to record and safe to hand back in a download header.
  *
  * NOT A PATH, and never used as one: the storage key is generated and the name
@@ -139,4 +154,23 @@ export const validateUpload = (candidate: UploadCandidate): UploadedFile => {
     contentType: sniffed.contentType,
     bytes: candidate.bytes,
   };
+};
+
+/**
+ * The same validation, narrowed to what a photograph may be. PWA-3.
+ *
+ * Built on `validateUpload` rather than beside it, so a photograph cannot end
+ * up with a weaker size limit or a different sniffer than a document — the only
+ * difference is the final list, and it is checked against the SNIFFED type.
+ */
+export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile => {
+  const file = validateUpload(candidate);
+  if (!PHOTO_CONTENT_TYPES.includes(file.contentType)) {
+    throw refuse(
+      'That file is not a photograph.',
+      'unsupported_file_type',
+      'Attach an image (PNG, JPEG, TIFF or WebP). A PDF belongs under Documents.',
+    );
+  }
+  return file;
 };

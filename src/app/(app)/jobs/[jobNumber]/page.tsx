@@ -43,6 +43,7 @@ import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
+import { useRememberJob } from '@/hooks/useRememberJob';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
 
@@ -76,6 +77,15 @@ const JobDetailPage = ({
    */
   const searchParams = useSearchParams();
   const [completing, setCompleting] = useState(() => searchParams.get('continue') === '1');
+
+  /*
+   * WHERE TO COME BACK TO. PWA-4.
+   *
+   * Recorded on arrival rather than on leaving, because the interruptions this
+   * exists for — a flat battery, the launcher reclaiming memory, a dropped
+   * tablet — do not run any code on the way out.
+   */
+  useRememberJob(jobNumber);
 
   /*
    * The job, the people on it and its own history — one read, for THIS viewer.

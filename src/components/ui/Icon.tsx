@@ -28,6 +28,7 @@ export type IconName =
   | 'wrench'
   | 'box'
   | 'camera'
+  | 'image'
   | 'note'
   | 'signature'
   | 'document'
@@ -73,6 +74,9 @@ const PATHS: Record<IconName, string> = {
   box: 'M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 0v18M4 7l8 4 8-4',
   camera:
     'M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm8 9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
+  // The gallery, as distinct from the camera: a frame with a picture in it.
+  image:
+    'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm-1 11 4.5-4.5 3 3L15 11l6 5M9 9.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z',
   note: 'M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5',
   signature:
     'M3 18c3 0 3-9 6-9s3 6 5 6 2.5-3 4-3 2 1.5 3 1.5M3 21h18',

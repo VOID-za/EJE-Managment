@@ -10,6 +10,7 @@ import type {
   Customer,
   Job,
   Machine,
+  MediaVisibility,
   Site,
   SystemSettings,
   TechnicalDocument,
@@ -299,7 +300,34 @@ export const jobs = {
   setCallout: (jobId: string, applied: boolean) => jobAction(jobId, 'set_callout', { applied }),
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),
-  addMedia: (jobId: string, input: unknown) => jobAction(jobId, 'add_media', input),
+  /**
+   * ATTACHES A PHOTOGRAPH, BYTES AND ALL. PWA-3.
+   *
+   * It used to be `jobAction(jobId, 'add_media', …)`: a JSON body carrying a
+   * made-up file name and size, with no file anywhere in it. The bytes now go
+   * up through the same multipart path a document takes, and the server sniffs,
+   * stores and only then records them.
+   */
+  uploadMedia: (
+    jobId: string,
+    file: File,
+    options: { readonly caption?: string; readonly visibility?: MediaVisibility } = {},
+  ) =>
+    apiUpload<{
+      photos: readonly {
+        id: string;
+        fileName: string;
+        caption: string;
+        visibility: MediaVisibility;
+        sizeBytes: number;
+        uploadedAt: string;
+      }[];
+    }>(`/api/jobs/${segment(jobId)}/media`, file, options.caption ?? '', {
+      ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
+    }),
+  /** Where one photograph is read back from. Authorised on every request. */
+  mediaUrl: (jobId: string, attachmentId: string) =>
+    `/api/jobs/${segment(jobId)}/media/${segment(attachmentId)}`,
   /** Reclassifies a photograph as the customer's or as EJE's own. MEDIA-1. */
   setMediaVisibility: (jobId: string, attachmentId: string, visibility: string) =>
     jobAction(jobId, 'set_media_visibility', { attachmentId, visibility }),

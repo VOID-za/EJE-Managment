@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { AppProvider } from '@/providers/AppProvider';
-import { THEME_BOOT_SCRIPT } from '@/lib/theme';
+import { ServiceWorkerManager } from '@/components/pwa/ServiceWorkerManager';
+import { EJE_THEME_COLOR, THEME_BOOT_SCRIPT } from '@/lib/theme';
 import './globals.css';
 
 const inter = Inter({
@@ -24,6 +25,31 @@ export const metadata: Metadata = {
   description:
     'Job card management for EJE Industrial Electronics — jobs, customers, machines, checklists and technical documentation.',
   applicationName: 'EJE Job Card Management',
+  /*
+   * Installed on a tablet it is an application, not a browser tab: iOS reads
+   * these rather than the web manifest, so they are stated in both places and
+   * say the same thing.
+   */
+  /*
+   * Where the home-screen icons are, stated explicitly.
+   *
+   * iOS does not read the web manifest's icons: it looks for an Apple touch
+   * icon, and by default only at the origin root. Declaring it here keeps the
+   * files together under `/icons/` and still gets a proper icon on an iPad
+   * rather than a screenshot of the page.
+   */
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'EJE Job Cards',
+    statusBarStyle: 'black-translucent',
+  },
 };
 
 export const viewport: Viewport = {
@@ -31,7 +57,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Rugged tablets are the primary field device; the layout is built for them.
   maximumScale: 5,
-  themeColor: '#1b2434',
+  themeColor: EJE_THEME_COLOR,
 };
 
 const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
@@ -52,7 +78,10 @@ const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
     </head>
     <body className="min-h-dvh antialiased">
-      <AppProvider>{children}</AppProvider>
+      <AppProvider>
+        <ServiceWorkerManager />
+        {children}
+      </AppProvider>
     </body>
   </html>
 );

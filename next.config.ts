@@ -84,6 +84,25 @@ const nextConfig: NextConfig = {
     Promise.resolve([
       { source: '/:path*', headers: SECURITY_HEADERS },
       {
+        /*
+         * THE WORKER ITSELF IS NEVER CACHED. A service worker that a browser
+         * serves from its HTTP cache is a build that cannot be replaced — the
+         * tablet keeps asking for an update and keeps being handed the old
+         * file. `updateViaCache: 'none'` on the registration says the same
+         * thing from the other side; both are needed because only one of them
+         * covers the periodic update check.
+         */
+        source: '/eje-sw.js',
+        headers: [
+          ...SECURITY_HEADERS,
+          { key: 'Content-Type', value: 'text/javascript; charset=utf-8' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          // Its scope is the whole origin, which a worker served from /
+          // already has — stated so a reader does not have to infer it.
+          { key: 'Service-Worker-Allowed', value: '/' },
+        ],
+      },
+      {
         // The API is never cached: every response is scoped to one session.
         source: '/api/:path*',
         headers: [

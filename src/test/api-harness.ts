@@ -237,7 +237,15 @@ export class ApiTestClient {
    */
   async upload<T = unknown>(
     path: string,
-    file: { name: string; type: string; bytes: Uint8Array },
+    file: {
+      name: string;
+      type: string;
+      bytes: Uint8Array;
+      /** The other multipart fields, for a route that takes them — a caption,
+          a photograph's classification. Sent exactly as given, including a
+          value the route should refuse. */
+      fields?: Readonly<Record<string, string>>;
+    },
     options: SendOptions = {},
   ): Promise<ApiResponse<T>> {
     const url = new URL(path, ORIGIN);
@@ -248,6 +256,7 @@ export class ApiTestClient {
       'file',
       new File([file.bytes as unknown as BlobPart], file.name, { type: file.type }),
     );
+    for (const [name, value] of Object.entries(file.fields ?? {})) form.append(name, value);
 
     const headers = new Headers({ host: new URL(ORIGIN).host, ...options.headers });
     if (options.withoutFetchMetadata !== true) {

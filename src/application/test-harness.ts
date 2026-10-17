@@ -33,6 +33,28 @@ export const seedUser = (id: string): User => {
   return user;
 };
 
+/**
+ * A VALID JPEG, for the tests that attach a photograph. PWA-3.
+ *
+ * Minimal but real: SOI, an APP0/JFIF header, a comment segment carrying
+ * `label` so two fixtures differ byte for byte, and EOI. It has to be genuine
+ * because `validatePhotoUpload` sniffs the first three bytes and the capture
+ * path stores and serves what it finds — a fixture of arbitrary bytes would
+ * test a path production refuses.
+ */
+export const jpegFixture = (label = 'fixture'): Uint8Array => {
+  const text = new TextEncoder().encode(label);
+  const commentLength = text.length + 2;
+  return new Uint8Array([
+    0xff, 0xd8, // SOI
+    0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x00, 0x00, // APP0/JFIF
+    0xff, 0xfe, (commentLength >> 8) & 0xff, commentLength & 0xff, // COM
+    ...text,
+    0xff, 0xd9, // EOI
+  ]);
+};
+
 /** A date `days` from today, as the seed's own offsets produce. */
 export const dayOffset = (days: number): IsoDate => {
   const date = new Date();

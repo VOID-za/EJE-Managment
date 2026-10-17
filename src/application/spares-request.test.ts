@@ -8,7 +8,7 @@ import {
   saveCompletionReport,
 } from './job-operations';
 import { WorkflowError } from './errors';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, jpegFixture, seedUser, type Harness } from './test-harness';
 import type { Job } from '@/domain';
 
 /**
@@ -106,10 +106,9 @@ describe('a spares request', () => {
       kind: 'photo',
       fileName: 'nameplate.jpg',
       caption: 'Drive nameplate',
-      storageKey: 'uploads/nameplate.jpg',
-      sizeBytes: 2048,
       contentType: 'image/jpeg',
-    } as never);
+      bytes: jpegFixture('nameplate'),
+    });
     const photoId = job.photos[0]?.id ?? '';
     expect(photoId).not.toBe('');
 
