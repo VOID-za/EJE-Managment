@@ -13,6 +13,7 @@ import {
   readDeviceSession,
 } from '@/lib/pwa/job-cache';
 import { readPendingWork } from '@/lib/pwa/pending-work';
+import { heldMediaSummary, readPendingMedia } from '@/lib/pwa/pending-media';
 import type { CachedJob } from '@/lib/pwa/cached-job';
 import { auth } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
@@ -88,6 +89,8 @@ const OfflinePage = () => {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [identity, setIdentity] = useState<Identity>({ state: 'checking' });
   const [unsent, setUnsent] = useState(0);
+  /** Photographs this tablet is holding, which are bytes rather than rows. */
+  const [heldPhotos, setHeldPhotos] = useState({ count: 0, bytes: 0 });
   const online = useOnline();
 
   useEffect(() => {
@@ -99,15 +102,17 @@ const OfflinePage = () => {
       if (resolved.state !== 'server' && resolved.state !== 'device') return;
       if (!isJobCacheSupported()) return;
 
-      const [cached, meta, pending] = await Promise.all([
+      const [cached, meta, pending, photos] = await Promise.all([
         readCachedJobs(resolved.userId),
         readCacheMeta(resolved.userId),
         readPendingWork(resolved.userId).catch(() => []),
+        readPendingMedia(resolved.userId).catch(() => []),
       ]);
       if (cancelled) return;
       setJobs(cached);
       setLastRefreshedAt(meta?.lastRefreshedAt ?? null);
       setUnsent(pending.length);
+      setHeldPhotos(heldMediaSummary(photos));
     })();
 
     return () => {
@@ -156,6 +161,21 @@ const OfflinePage = () => {
           They are kept here — a flat battery or a closed application will not lose them — and are
           sent as soon as this tablet can reach the EJE server. They are{' '}
           <strong className="font-semibold">not on the job</strong> until then.
+          </p>
+        </Card>
+      )}
+
+      {/* The photographs, counted separately because they are bytes and the
+          technician needs to know this tablet is carrying them. OFF-MEDIA-1. */}
+      {heldPhotos.count > 0 && (
+        <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          <p data-testid="offline-held-photos">
+            <strong className="font-semibold">
+              {heldPhotos.count} {heldPhotos.count === 1 ? 'photograph is' : 'photographs are'}{' '}
+              waiting on this tablet.
+            </strong>{' '}
+            They are kept here with the captures above and are{' '}
+            <strong className="font-semibold">not on the job</strong> until the server has them.
           </p>
         </Card>
       )}

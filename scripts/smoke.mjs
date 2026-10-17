@@ -345,8 +345,15 @@ await step('acceptance requires confirmation and starts the job', async () => {
 
 await step('acceptance then OFFERS the site location, rather than sending it', async () => {
   await page.getByRole('heading', { name: 'Send Site Location?' }).waitFor({ timeout: 8000 });
+  /*
+   * WHERE IT GOES, SAID ON THE PROMPT. WHATSAPP-1: the destination used to be
+   * an optional field in the request body — a way to send an EJE-branded
+   * template to any number — and is now the actor's own, from their account.
+   */
   await page
-    .getByText('Would you like to send the site location to the technician via WhatsApp?')
+    .getByText('Would you like the site location sent to your own WhatsApp number?', {
+      exact: false,
+    })
     .waitFor({ timeout: 5000 });
 
   // The preview must carry everything the technician needs, and a maps link.
@@ -416,6 +423,16 @@ await step('accepting a second job and choosing "Send Location" queues one messa
     timeout: 8000,
   });
   await page.getByText('Site location queued', { exact: false }).waitFor({ timeout: 8000 });
+  /*
+   * QUEUED IS NOT SENT, and the screen has to say which it is. WHATSAPP-1: the
+   * message is written to the outbox with the request and handed to the
+   * provider afterwards, so a screen claiming it was sent would be claiming
+   * something nothing had established yet.
+   */
+  const outcome = await page.locator('main').innerText();
+  if (!/Queued is not sent/i.test(outcome)) {
+    throw new Error(`the outcome claims more than it knows: ${outcome.slice(0, 300)}`);
+  }
 
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByText('Site location requested via WhatsApp').first().waitFor({ timeout: 8000 });
@@ -4813,6 +4830,138 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
   });
   if (!saved.includes('Slab cracked')) {
     throw new Error(`the loaded draft did not reach the job: ${saved}`);
+  }
+});
+/* ---- OFF-MEDIA-1: a photograph taken with no signal --------------------- */
+
+await step('a photograph taken offline is kept on the tablet, bytes and all', async () => {
+  /*
+   * OFF-MEDIA-1. The failure this closes: a technician photographs a burnt
+   * contactor in a basement, the upload fails, the file lives in a React state
+   * variable — and the tablet locking loses the only photograph of the fault,
+   * taken at the only moment it could be taken.
+   *
+   * The bytes are now kept in IndexedDB, under their owner, with the key the
+   * attempt used; the flush sends them through the same authenticated
+   * multipart route the online capture uses.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  const { jobNumber } = await workableJob(page);
+
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Photos/ }).first().click();
+  await page.locator('[data-testid="job-photo-gallery"]').waitFor({ state: 'attached', timeout: 20000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  try {
+    await page.setInputFiles('[data-testid="job-photo-gallery"]', {
+      name: 'burnt-contactor.png',
+      mimeType: 'image/png',
+      buffer: pngBytes('burnt contactor'),
+    });
+    const caption = page.getByLabel('Caption');
+    if ((await caption.count()) > 0) await caption.first().fill('Burnt contactor');
+
+    // The modal's own send, which with no connection keeps the bytes instead
+    // of spending thirty seconds proving the obvious.
+    await page.getByRole('dialog').getByRole('button', { name: 'Attach photo' }).click();
+    await page.getByTestId('job-photo-held').waitFor({ timeout: 25000 });
+
+    const stored = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('media', 'readonly').objectStore('media').getAll();
+            request.onsuccess = () => {
+              db.close();
+              resolve(
+                request.result.map((row) => ({
+                  kind: row.destination?.kind,
+                  userId: row.userId,
+                  jobNumber: row.jobNumber,
+                  state: row.state,
+                  sizeBytes: row.sizeBytes,
+                  byteLength: row.bytes?.byteLength ?? 0,
+                  key: row.idempotencyKey,
+                  caption: row.caption,
+                })),
+              );
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    if (stored.length !== 1) throw new Error(`${stored.length} photographs held, expected 1`);
+    if (stored[0].kind !== 'job_photo') throw new Error(`held ${stored[0].kind}`);
+    if (stored[0].jobNumber !== jobNumber) throw new Error('the held photograph names the wrong job');
+    // THE BYTES, not a reference to a file the browser will forget.
+    if (stored[0].byteLength < 8) throw new Error('the held photograph has no bytes');
+    if (stored[0].sizeBytes !== stored[0].byteLength) {
+      throw new Error('the held size does not match the bytes');
+    }
+    if (typeof stored[0].key !== 'string' || stored[0].key.length === 0) {
+      throw new Error('the held photograph carries no idempotency key');
+    }
+    if (typeof stored[0].userId !== 'string' || stored[0].userId.length === 0) {
+      throw new Error('the held photograph names no owner');
+    }
+
+    // And the queue panel says so, in the same place the captures do.
+    await page.getByTestId('pending-media-heading').waitFor({ timeout: 20000 });
+    const panel = await page.getByTestId('pending-media-list').innerText();
+    if (!/Not sent/.test(panel)) throw new Error(`the panel does not say "Not sent": ${panel}`);
+
+    // It survives the application being closed, which is the whole point.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByTestId('offline-held-photos').waitFor({ timeout: 25000 });
+    await page.screenshot({ path: `${shots}/50-photo-held.png`, fullPage: false });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  /*
+   * THE SIGNAL RETURNS. The bytes go up through the ordinary route and the row
+   * leaves the tablet — and the photograph is on the job, fetched back through
+   * the authenticated media route, which is what proves the file is real.
+   */
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('media', 'readonly').objectStore('media').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result === 0);
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 40000 },
+  );
+
+  const landed = await page.evaluate(async (number) => {
+    const response = await fetch(`/api/jobs/${number}`, { headers: { accept: 'application/json' } });
+    const body = await response.json();
+    return body.data.view.job.photos.map((photo) => ({
+      caption: photo.caption,
+      sizeBytes: photo.sizeBytes,
+    }));
+  }, jobNumber);
+  if (landed.length === 0) throw new Error('the held photograph never reached the job');
+  if (!landed.some((photo) => photo.sizeBytes > 0)) {
+    throw new Error('the photograph on the job has no bytes behind it');
   }
 });
 /* ---- BD-16: a shared tablet, and work that belongs to one person -------- */

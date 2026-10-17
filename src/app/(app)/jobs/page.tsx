@@ -27,7 +27,9 @@ import { CachedJobList } from '@/components/pwa/CachedJobList';
 import { CacheStatusNotice } from '@/components/pwa/CacheStatusNotice';
 import { ResumeNotice } from '@/components/pwa/ResumeNotice';
 import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
+import { PendingMediaPanel } from '@/components/pwa/PendingMediaPanel';
 import { usePendingWork } from '@/hooks/usePendingWork';
+import { usePendingMedia } from '@/hooks/usePendingMedia';
 import { useJobCache } from '@/hooks/useJobCache';
 import { cn } from '@/lib/cn';
 import { reads } from '@/api/endpoints';
@@ -125,6 +127,7 @@ const JobsPageContent = () => {
    * job it was on. The panel renders nothing when the queue is empty.
    */
   const pending = usePendingWork();
+  const media = usePendingMedia();
 
   const cache = useJobCache({
     rows: query.data?.rows ?? null,
@@ -227,6 +230,7 @@ const JobsPageContent = () => {
       />
 
       <PendingWorkPanel pending={pending} className="mb-4" />
+      <PendingMediaPanel media={media} className="mb-4" />
 
       {/* Where this technician was when the tablet was last awake. PWA-4. */}
       <ResumeNotice

@@ -19,6 +19,7 @@ import { useOnline } from '@/hooks/useOnline';
 import { useOfflineCapture } from '@/hooks/useOfflineCapture';
 import { useOperation } from '@/hooks/useOperation';
 import { usePendingWork } from '@/hooks/usePendingWork';
+import { holdMedia } from '@/lib/pwa/pending-media';
 import { supersedePendingAnswer, type PendingWork } from '@/lib/pwa/pending-work';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { usePhotoUpload } from '@/hooks/usePhotoUpload';
@@ -196,8 +197,29 @@ export const ChecklistRunner = ({
    * item in it. The id is part of the capture, so it is passed as the capture's
    * context — which also means a RETRY cannot drift onto another item.
    */
-  const evidence = usePhotoUpload<string>((file, idempotencyKey, itemId) =>
-    jobs.addChecklistPhoto(job.id, itemId, file, { idempotencyKey }),
+  const evidence = usePhotoUpload<string>(
+    (file, idempotencyKey, itemId) =>
+      jobs.addChecklistPhoto(job.id, itemId, file, { idempotencyKey }),
+    /*
+     * AND IT IS KEPT WHEN IT CANNOT BE SENT. OFF-MEDIA-1.
+     *
+     * Evidence was online-only because the queue carries requests and this is
+     * bytes — so it got its own store rather than being forced into that one.
+     * The item id travels WITH the capture, exactly as it does on the way up,
+     * which is what stops a held photograph drifting onto another question.
+     */
+    async (file, idempotencyKey, itemId) => {
+      const outcome = await holdMedia({
+        userId: currentUser?.id ?? '',
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        destination: { kind: 'checklist_evidence', itemId },
+        file,
+        caption: '',
+        idempotencyKey,
+      });
+      return outcome.held;
+    },
   );
   const captureEvidence = async (itemId: string, file: File) => {
     setCapturingFor(itemId);
@@ -352,6 +374,23 @@ export const ChecklistRunner = ({
           </ul>
         </Card>
       ))}
+
+      {/*
+        HELD, NOT FAILED, AND THE DIFFERENCE IS THE WHOLE POINT. OFF-MEDIA-1.
+        One says "take it again", the other says "carry on". The queue panel
+        above the tabs is where it is listed and sent from.
+      */}
+      {evidence.state === 'held' && (
+        <Card>
+          <p className="text-sm font-semibold text-amber-eje-800" data-testid="evidence-held">
+            The evidence photograph is kept on this tablet.
+          </p>
+          <p className="mt-1 text-sm text-steel-600">
+            It is NOT on the job yet and does not satisfy the question that requires it until the
+            server has it. It is sent when there is a signal.
+          </p>
+        </Card>
+      )}
 
       {evidence.state === 'failed' && (
         <UploadFailureNotice
@@ -740,18 +779,19 @@ const ChecklistItemRow = ({
                 testIdPrefix={`checklist-photo-${item.id}`}
                 cameraLabel="Take evidence photo"
                 galleryLabel="Choose photo"
-                disabled={busy || offline}
+                disabled={busy}
                 busy={uploading}
                 onFile={onCapture}
               />
               {/*
-                EVIDENCE IS BYTES, AND THIS QUEUE CARRIES REQUESTS. OFF-12,
-                OFF-CHK-1. An answer can be held; a photograph cannot, and
-                saying so is better than a button that fails in a basement.
+                EVIDENCE IS BYTES, AND IT HAS ITS OWN STORE NOW. OFF-MEDIA-1.
+                The answer goes in the capture queue; the photograph's bytes go
+                in the media queue, and both say they are on the tablet rather
+                than on the job.
               */}
               {offline && (
                 <span className="text-xs font-medium text-amber-eje-700">
-                  A photograph needs a connection — the answer can still be held.
+                  Kept on this tablet until there is a signal — not on the job yet.
                 </span>
               )}
               {uploading && (

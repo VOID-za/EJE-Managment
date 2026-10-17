@@ -21,6 +21,9 @@ import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { jobs } from '@/api/endpoints';
 import { newIdempotencyKey } from '@/api/client';
 import { useOperation } from '@/hooks/useOperation';
+import { useOnline } from '@/hooks/useOnline';
+import { holdMedia } from '@/lib/pwa/pending-media';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { formatFileSize, formatRelative } from '@/lib/format';
 
 /**
@@ -61,6 +64,11 @@ export const JobMediaPanel = ({
   readonly onChanged: () => void;
 }) => {
   const operation = useOperation();
+  const online = useOnline();
+  const currentUser = useCurrentUser();
+  /** Said on the panel when the device could not keep a photograph. */
+  const [holdProblem, setHoldProblem] = useState<string | null>(null);
+  const [heldJustNow, setHeldJustNow] = useState(false);
   const [selection, setSelection] = useState<{
     readonly file: File;
     readonly preview: string;
@@ -125,6 +133,7 @@ export const JobMediaPanel = ({
     setCaption('');
     setVisibility('customer_facing');
     setAttempted(false);
+    setHoldProblem(null);
     operation.clearError();
   };
 
@@ -138,9 +147,44 @@ export const JobMediaPanel = ({
     event.target.value = '';
   };
 
+  /**
+   * KEEPS THE PHOTOGRAPH ON THE DEVICE. OFF-MEDIA-1.
+   *
+   * The bytes, the caption, the classification the technician chose and the
+   * key the attempt used — so the queue's send is a retry of THIS capture and
+   * the server replays it if the bytes had already landed.
+   */
+  const hold = async (): Promise<boolean> => {
+    if (selection === null) return false;
+    const outcome = await holdMedia({
+      userId: currentUser?.id ?? '',
+      jobId: job.id,
+      jobNumber: job.jobNumber,
+      destination: { kind: 'job_photo', visibility },
+      file: selection.file,
+      caption: caption.trim(),
+      idempotencyKey: selection.idempotencyKey,
+    });
+    if (!outcome.held) {
+      setHoldProblem(outcome.reason);
+      return false;
+    }
+    setHeldJustNow(true);
+    close();
+    return true;
+  };
+
   const submit = async () => {
     if (selection === null) return;
     setAttempted(true);
+    setHoldProblem(null);
+
+    /*
+     * NO NETWORK, NO ATTEMPT. Two megabytes at a dead connection costs a
+     * technician thirty seconds and tells them nothing the queue does not.
+     */
+    if (!online && (await hold())) return;
+
     const result = await operation.runFor(() =>
       jobs.uploadMedia(job.id, selection.file, {
         caption: caption.trim(),
@@ -148,6 +192,14 @@ export const JobMediaPanel = ({
         idempotencyKey: selection.idempotencyKey,
       }),
     );
+
+    /*
+     * THE REQUEST NEVER ARRIVED, so the photograph is kept rather than lost.
+     * A refusal the SERVER made is a different thing entirely and is left on
+     * screen for the technician to read: the tablet holding it would not make
+     * it acceptable to the job.
+     */
+    if (result === null && operation.code === 'network' && (await hold())) return;
     /*
      * A RETRY IS THE SAME FILE, NOT A SECOND ONE. The selection is cleared only
      * on success, so "Try again" re-sends what was already chosen rather than
@@ -165,6 +217,31 @@ export const JobMediaPanel = ({
 
   return (
     <div className="space-y-4">
+      {/*
+        HELD IS NOT ATTACHED, and the panel says which. OFF-MEDIA-1. The grid
+        below shows what the JOB has; a held photograph is on the tablet, in
+        the queue panel above the tabs, until the server takes it.
+      */}
+      {heldJustNow && (
+        <div
+          className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-3 text-sm font-medium text-amber-eje-800"
+          data-testid="job-photo-held"
+        >
+          The photograph is kept on this tablet and is NOT on the job yet. It is sent when there is
+          a signal, and it stays under your name until then.
+        </div>
+      )}
+
+      {holdProblem !== null && (
+        <div
+          role="alert"
+          className="rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-4 py-3 text-sm font-medium text-signal-700"
+          data-testid="job-photo-hold-refused"
+        >
+          {holdProblem}
+        </div>
+      )}
+
       {photosRequired && (
         <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-3 text-sm font-medium text-amber-eje-700">
           At least one photo is required before an {definition.label.toLowerCase()} job can be

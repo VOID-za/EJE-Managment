@@ -7,6 +7,7 @@ import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
 import { UploadFailureNotice } from '@/components/media/UploadFailureNotice';
 import { machines } from '@/api/endpoints';
 import { usePhotoUpload } from '@/hooks/usePhotoUpload';
+import { holdMedia } from '@/lib/pwa/pending-media';
 import { useCurrentUser } from '@/providers/AppProvider';
 
 /**
@@ -42,14 +43,37 @@ export const MachinePhotoFromJob = ({
   const currentUser = useCurrentUser();
   const [open, setOpen] = useState(false);
   const [caption, setCaption] = useState('');
-  const upload = usePhotoUpload<string>((file, idempotencyKey, withCaption) =>
-    machines.addPhoto(machine.id, file, {
-      caption: withCaption,
-      idempotencyKey,
-      // The authorising job. Verified server-side against the machine, the
-      // crew and the job's status; sending it is not what makes it true.
-      jobId: job.id,
-    }),
+  const upload = usePhotoUpload<string>(
+    (file, idempotencyKey, withCaption) =>
+      machines.addPhoto(machine.id, file, {
+        caption: withCaption,
+        idempotencyKey,
+        // The authorising job. Verified server-side against the machine, the
+        // crew and the job's status; sending it is not what makes it true.
+        jobId: job.id,
+      }),
+    /*
+     * KEPT ON THE TABLET WHEN THERE IS NO SIGNAL. OFF-MEDIA-1, BD-14.
+     *
+     * A rating plate is photographed where the machine is, which is where the
+     * coverage is not. The AUTHORISATION is not cached with it: the replay
+     * sends the same job id and the server checks again that the job is on
+     * this machine, is this technician's and is still live — so a job that
+     * moved on while the tablet was away refuses the photograph, which is the
+     * correct answer and not something this queue may override.
+     */
+    async (file, idempotencyKey, withCaption) => {
+      const outcome = await holdMedia({
+        userId: currentUser.id,
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        destination: { kind: 'machine_photo', machineId: machine.id },
+        file,
+        caption: withCaption,
+        idempotencyKey,
+      });
+      return outcome.held;
+    },
   );
 
   const live = job.status !== 'closed' && job.status !== 'cancelled';
@@ -113,6 +137,13 @@ export const MachinePhotoFromJob = ({
               record.
             </p>
           )}
+          {upload.state === 'held' && (
+            <p className="text-xs font-semibold text-amber-eje-800" data-testid="machine-photo-held">
+              Kept on this tablet — not on the machine&rsquo;s record yet. It is sent when there is
+              a signal, and the server checks then that this job still authorises it.
+            </p>
+          )}
+
           {upload.state === 'failed' && (
             <UploadFailureNotice
               message={upload.error ?? 'The photograph could not be attached.'}

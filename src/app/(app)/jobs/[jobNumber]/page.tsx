@@ -45,7 +45,9 @@ import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
 import { useRememberJob } from '@/hooks/useRememberJob';
 import { usePendingWork } from '@/hooks/usePendingWork';
+import { usePendingMedia } from '@/hooks/usePendingMedia';
 import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
+import { PendingMediaPanel } from '@/components/pwa/PendingMediaPanel';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
 
@@ -98,6 +100,7 @@ const JobDetailPage = ({
    * happened to use.
    */
   const pending = usePendingWork();
+  const media = usePendingMedia();
 
   /*
    * The job, the people on it and its own history — one read, for THIS viewer.
@@ -341,6 +344,10 @@ const JobDetailPage = ({
           whether the work on screen has reached the server is the first thing
           a technician needs to know about this job. OFF-8. */}
       <PendingWorkPanel pending={pending} jobId={job.id} className="mb-5" />
+
+      {/* And the photographs, for the same reason and in the same place:
+          bytes this tablet is holding are not on the job. OFF-MEDIA-1. */}
+      <PendingMediaPanel media={media} jobId={job.id} className="mb-5" />
 
       <Card className="mb-5">
         <JobProgressRail

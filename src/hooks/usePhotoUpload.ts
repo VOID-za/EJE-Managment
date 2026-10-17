@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiRequestError, newIdempotencyKey } from '@/api/client';
 import { useApp } from '@/providers/AppProvider';
+import { useOnline } from '@/hooks/useOnline';
 
 /**
  * ONE PHOTOGRAPH, SENT ONCE, RETRIED SAFELY. TAB-UPLOAD-1.
@@ -24,7 +25,20 @@ import { useApp } from '@/providers/AppProvider';
  * a cleared state means the server confirmed it. Nothing here ever says
  * "saved" on its own authority.
  */
-export type PhotoUploadState = 'idle' | 'uploading' | 'failed';
+export type PhotoUploadState =
+  | 'idle'
+  | 'uploading'
+  /** NOT on the server, and nobody is holding it. The technician decides. */
+  | 'failed'
+  /**
+   * NOT on the server, and this tablet is keeping the bytes. OFF-MEDIA-1.
+   *
+   * Distinct from `failed` because the two mean opposite things to the person
+   * standing at the machine: one says "take it again", the other says "carry
+   * on, it goes when you have signal". Only a caller that supplied a `hold`
+   * can reach it.
+   */
+  | 'held';
 
 export interface PhotoUploadResult<TContext = void> {
   readonly state: PhotoUploadState;
@@ -51,8 +65,23 @@ export interface PhotoUploadResult<TContext = void> {
 
 export const usePhotoUpload = <TContext = void,>(
   upload: (file: File, idempotencyKey: string, context: TContext) => Promise<unknown>,
+  /**
+   * Keeps the bytes on the device when they could not be sent. OFF-MEDIA-1.
+   *
+   * Optional, and each caller supplies its own because only the caller knows
+   * where the photograph is going — a job's media, a checklist item's evidence,
+   * or a machine's record. It is given the SAME key the attempt used, so the
+   * queue's eventual send is a retry of this capture and not a second one.
+   *
+   * Without it, a failed upload behaves exactly as it always did: the file is
+   * kept in this hook's state for a manual retry and lost if the tablet is
+   * closed. That is still the right behaviour for anything that is not a
+   * technician's photograph of work in front of them.
+   */
+  hold?: (file: File, idempotencyKey: string, context: TContext) => Promise<boolean>,
 ): PhotoUploadResult<TContext> => {
   const { invalidate, reportConnectionError } = useApp();
+  const online = useOnline();
   const [state, setState] = useState<PhotoUploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [attempts, setAttempts] = useState(0);
@@ -75,11 +104,54 @@ export const usePhotoUpload = <TContext = void,>(
     uploader.current = upload;
   });
 
+  const holder = useRef(hold);
+  useEffect(() => {
+    holder.current = hold;
+  });
+
+  /** Hands the bytes to the device's queue, if this caller has one. */
+  const keep = useCallback(
+    async (file: File, key: string, context: TContext, message: string): Promise<boolean> => {
+      const keeper = holder.current;
+      if (keeper === undefined) return false;
+      const kept = await keeper(file, key, context).catch(() => false);
+      if (!kept) return false;
+      /*
+       * The queue owns the capture now, so this hook lets go of it: leaving it
+       * here as well would give the technician two ways to send one
+       * photograph, and a *Try again* that raced the flush.
+       */
+      setCapture(null);
+      setError(message);
+      setState('held');
+      setAttempts(0);
+      return true;
+    },
+    [],
+  );
+
   const run = useCallback(
     async (file: File, key: string, context: TContext): Promise<boolean> => {
       setState('uploading');
       setError(null);
       setAttempts((count) => count + 1);
+
+      /*
+       * NO NETWORK AT ALL, NO ATTEMPT — where there is somewhere to keep it.
+       * Spending thirty seconds pushing two megabytes at a tablet's dead
+       * connection, while somebody stands in a plant basement, buys nothing
+       * that the queue does not already give.
+       */
+      if (!online && holder.current !== undefined) {
+        const kept = await keep(
+          file,
+          key,
+          context,
+          'No connection to the EJE server. The photograph is kept on this tablet and is not on the job yet.',
+        );
+        if (kept) return false;
+      }
+
       try {
         await uploader.current(file, key, context);
         setCapture(null);
@@ -96,13 +168,26 @@ export const usePhotoUpload = <TContext = void,>(
             : 'The photograph could not be attached.';
         if (cause instanceof ApiRequestError && cause.code === 'network') {
           reportConnectionError(message);
+          /*
+           * THE SAME KEY, AND THIS IS THE DANGEROUS CASE. The bytes may have
+           * reached the server and the answer may have been lost on the way
+           * back; the queue sends them again under the key this attempt used,
+           * which the server replays rather than attaching twice.
+           */
+          const kept = await keep(
+            file,
+            key,
+            context,
+            'No connection to the EJE server. The photograph is kept on this tablet and is not on the job yet.',
+          );
+          if (kept) return false;
         }
         setError(message);
         setState('failed');
         return false;
       }
     },
-    [invalidate, reportConnectionError],
+    [invalidate, keep, online, reportConnectionError],
   );
 
   const send = useCallback(

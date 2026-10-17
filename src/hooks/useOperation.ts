@@ -9,6 +9,17 @@ export interface OperationState {
   readonly running: boolean;
   readonly error: string | null;
   readonly violations: readonly RuleViolation[];
+  /**
+   * The server's own code for the last refusal, or `network` when there was no
+   * answer at all. Null when nothing has failed.
+   *
+   * Exposed because one caller has to tell those two apart: a screen that can
+   * KEEP a capture on the device needs to know whether the server refused the
+   * work (a person must decide) or whether the request never arrived (the
+   * tablet holds it and sends it later). Everything else should keep rendering
+   * `error` and `violations` and ignore this.
+   */
+  readonly code: string | null;
   clearError(): void;
 }
 
@@ -48,12 +59,14 @@ export const useOperation = (): UseOperationResult => {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [violations, setViolations] = useState<readonly RuleViolation[]>([]);
+  const [code, setCode] = useState<string | null>(null);
 
   const execute = useCallback(
     async <T,>(command: () => Promise<T>): Promise<{ ok: boolean; value: T | null }> => {
       setRunning(true);
       setError(null);
       setViolations([]);
+      setCode(null);
       try {
         const value = await command();
         // Something changed on the server, so everything on screen is stale.
@@ -64,6 +77,7 @@ export const useOperation = (): UseOperationResult => {
         if (cause instanceof ApiRequestError) {
           setError(cause.message);
           setViolations(cause.violations);
+          setCode(cause.code);
           /*
            * A network failure is reported, never disguised.
            *
@@ -74,6 +88,7 @@ export const useOperation = (): UseOperationResult => {
           if (cause.code === 'network') reportConnectionError(cause.message);
         } else {
           setError(cause instanceof Error ? cause.message : 'The action could not be completed.');
+          setCode('internal_error');
         }
         return { ok: false, value: null };
       } finally {
@@ -96,7 +111,8 @@ export const useOperation = (): UseOperationResult => {
   const clearError = useCallback(() => {
     setError(null);
     setViolations([]);
+    setCode(null);
   }, []);
 
-  return { run, runFor, running, error, violations, clearError };
+  return { run, runFor, running, error, violations, code, clearError };
 };

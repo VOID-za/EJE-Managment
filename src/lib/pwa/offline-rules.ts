@@ -89,16 +89,31 @@ export const isOfflineAction = (action: string): action is OfflineAction =>
  *
  * Data rather than prose so a screen can say WHY something needs a connection,
  * and so a test can assert that nothing has quietly joined the allowed list.
+ *
+ * TWO OF THESE ARE NOW "NOT HERE" RATHER THAN "NOT POSSIBLE": a photograph is
+ * held by the media queue (OFF-MEDIA-1), which is a different mechanism with
+ * its own store, its own ceiling and its own flush — not a member of this
+ * queue's allowlist. Their reasons say so.
  */
 export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   complete_checklist: 'Completing the checklist is checked against the template on the server.',
-  add_checklist_photo: 'A photograph has to be uploaded, which needs a connection.',
+  /*
+   * BYTES ARE NOT A QUEUED REQUEST, and that is still true — but they are no
+   * longer lost. OFF-MEDIA-1: a photograph taken with no signal is kept in its
+   * own store with its own flush (`pending-media.ts`), because this queue
+   * carries JSON bodies and a 2 MB file is not one. So the ANSWER to the
+   * checklist question goes here and the PHOTOGRAPH goes there, both saying
+   * they are on the tablet rather than on the job.
+   */
+  add_checklist_photo:
+    'A photograph is not sent with the other captures. It is kept on this tablet and uploaded on its own when there is a signal.',
   save_report:
     'The completion report replaces what is on the server, so it cannot be written offline.',
   set_callout: 'The call-out flag replaces a value on the job, so it needs a connection.',
   set_collection: 'The collection method replaces a value on the job, so it needs a connection.',
   set_media_visibility: 'Reclassifying a photograph changes a stored value, so it needs a connection.',
-  add_media: 'A photograph has to be uploaded, which needs a connection.',
+  add_media:
+    'A photograph is not sent with the other captures. It is kept on this tablet and uploaded on its own when there is a signal.',
   remove_media: 'Removing a photograph changes the record on the server.',
   capture_signature: 'A customer signature is only ever taken with a connection.',
   record_signature_refusal: 'A signature refusal is only ever recorded with a connection.',
