@@ -84,12 +84,18 @@ export const ResumeNotice = ({
         accessible name on one screen is an ambiguity for anybody driving by
         label: a screen reader, a test, or a person being told what to tap.
       */}
+      {/*
+        The DEFAULT size, not `sm`. These are the first two things a technician
+        taps after picking the tablet back up, in the field, with gloves on —
+        `md` is the 44px target the button sizes are built around (UX-1), and
+        `sm` is 36px.
+      */}
       <span className="flex shrink-0 gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={dismiss}>
+        <Button type="button" variant="ghost" onClick={dismiss}>
           Not now
         </Button>
         <Link href={`/jobs/${jobNumber}`} prefetch={false}>
-          <Button type="button" size="sm" onClick={dismiss}>
+          <Button type="button" onClick={dismiss}>
             Resume {jobNumber}
           </Button>
         </Link>
