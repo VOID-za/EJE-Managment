@@ -1,0 +1,208 @@
+# EJE Job Card Management — continuous integration. ARCH-6, QA-4, AUD-5.
+#
+# WHY THIS EXISTS. Every verification gate was run by hand, which AUD-5 graded
+# an ACCEPTANCE BLOCKER for exactly the reason it says: a gate that depends on
+# somebody remembering to run it is a gate a regression walks past. QA-4 names
+# the five that must run on every push — lint, typecheck, `npm test`,
+# `npm run db:test` and `npm run build` — and all five are below, as the
+# project's own commands rather than re-implementations of them.
+#
+# WHAT IT RUNS, AND WHY IT IS SPLIT IN THREE.
+#
+#   checks    the gates that need nothing but the project: lint, strict
+#             typecheck, the 1900-odd unit and application tests, and the
+#             production build.
+#   database  the PostgreSQL-backed suite, against a real PostgreSQL 16 — the
+#             version production runs — in a disposable service container.
+#             These are the tests AUD-6 exists about: a path that has never run
+#             against PostgreSQL is a path nobody has tested.
+#   browser   the gates that need a built, running application and a real
+#             Chromium: the route and permission check, the end-to-end workflow,
+#             and the smoke suite. QA-4 left this as a decision to record, and
+#             the decision is IN CI: these are the only gates that exercise the
+#             worker, IndexedDB, the offline queue and the tablet flows, and a
+#             manual-only gate for the features most likely to break is not a
+#             gate. They run against the DEMONSTRATION backend, in the runner,
+#             and reach nothing outside it.
+#
+# NO SECRETS, AND NOTHING REAL. This workflow declares no secrets, reads none
+# and needs none. The database is a throwaway container inside the job, created
+# empty and destroyed with it; the application runs on its demonstration data;
+# WhatsApp and email are unconfigured, so their adapters refuse rather than
+# pretend — which is the behaviour the tests assert. Nothing here connects to
+# the VPS, to a production or development database, or to any provider.
+#
+# NOTHING IS WEAKENED TO GET A GREEN TICK. No `continue-on-error`, no skipped
+# suite, no `--passWithNoTests`, no quarantine list. A failing gate fails the
+# run, which is the entire point of having one.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# A later push supersedes an earlier run on the same branch; a run on the
+# default branch is left to finish, because that is the one people read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  # Reproducible installs and no interactive prompts anywhere.
+  CI: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  checks:
+    name: Lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `npm ci` and not `npm install`: the lockfile is the input, and an
+      # install that may resolve a different tree is not a reproducible build.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and application tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  database:
+    name: PostgreSQL integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        # The version production runs. A suite that passes on another major
+        # version has not tested production's behaviour.
+        image: postgres:16
+        env:
+          POSTGRES_USER: eje
+          POSTGRES_PASSWORD: eje
+          POSTGRES_DB: eje_test
+        ports:
+          - 5432:5432
+        # The job must not start until the server is actually accepting
+        # connections, or the first test file races the container's startup.
+        options: >-
+          --health-cmd "pg_isready -U eje -d eje_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Disposable, named as a test database — which `testDatabaseUrl` insists
+      # on, because these tests TRUNCATE every table.
+      TEST_DATABASE_URL: postgres://eje:eje@127.0.0.1:5432/eje_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The suite builds its own schema from the migrations on every run
+      # (`openTestDatabase` drops and recreates `public`), so the migrations
+      # themselves are exercised here rather than assumed to have worked once.
+      - name: Database-backed tests
+        run: npm run db:test
+
+  browser:
+    name: Routes, workflow and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EJE_CHECK_URL: http://127.0.0.1:3210
+      EJE_E2E_URL: http://127.0.0.1:3210
+      EJE_SMOKE_BASE_URL: http://127.0.0.1:3210
+      # Stated rather than inferred. These suites drive the DEMONSTRATION
+      # backend — they reset it between runs — and must never be able to pick
+      # up a `DATABASE_URL` that happens to be in the runner's environment.
+      EJE_PERSISTENCE: demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Playwright's own Chromium, with the system libraries a headless browser
+      # needs on a bare runner. Chromium only: nothing here tests Firefox or
+      # WebKit, and installing them would cost minutes for no coverage.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Production build
+        run: npm run build
+
+      # Started as a background process and waited for through the health
+      # route, which answers only once the process can serve: `sleep` would be
+      # a guess, and a guess that is too short fails the run for no reason.
+      - name: Start the application
+        run: |
+          npm start -- -p 3210 > /tmp/eje-server.log 2>&1 &
+          echo "server_pid=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3210/api/health > /dev/null; then
+              echo "the application is serving"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the application did not start"
+          cat /tmp/eje-server.log
+          exit 1
+
+      - name: Route and permission check
+        run: npm run check-routes
+
+      - name: End-to-end workflow
+        run: npm run e2e
+
+      - name: Smoke suite
+        run: npm run smoke
+
+      # The screenshots and the server log, for a failure somebody has to
+      # diagnose from a transcript rather than a browser.
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-gate-evidence
+          path: |
+            .smoke/
+            /tmp/eje-server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop the application
+        if: always()
+        run: kill "${server_pid}" 2>/dev/null || true
