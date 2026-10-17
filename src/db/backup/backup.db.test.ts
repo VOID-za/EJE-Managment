@@ -10,8 +10,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { testDatabaseUrl } from '@/data/postgres/test-database';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { Database } from '@/db/client';
+import * as schema from '@/db/schema';
+import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
+import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
 import { decryptFile } from './crypto';
 
 /**
@@ -354,40 +357,95 @@ describeDb('npm run backup', () => {
  *     failure and the only way to find it is to look.
  */
 describeDb('npm run backup:verify and backup:restore-test', () => {
+  let db: Database;
   let storage: string;
   let into: string;
 
-  /** A storage directory holding exactly the documents the database refers to. */
+  /**
+   * THIS BLOCK SEEDS ITS OWN ROWS, AND THAT IS THE POINT.
+   *
+   * It used to read whatever storage keys happened to be in `eje_test` and
+   * build a storage directory from them — so it depended on which OTHER test
+   * file had run before it and what that file had left behind. Every db test
+   * file drops and rebuilds the schema in its own `beforeAll`, so "before" is
+   * decided by vitest's file order, which is not stable: it uses the previous
+   * run's timings, and a run with no cache orders them differently.
+   *
+   * On such a run this block found NO storage keys, wrote NO files, and `npm
+   * run backup` then refused — correctly — with "holds no files at all",
+   * failing 8 tests and blaming the backup command for the test's own empty
+   * fixture. That is the `8 failed | 194 passed` run recorded on issue #23,
+   * reproduced on 17 October 2026 by restarting PostgreSQL and running the
+   * suite with a cold vitest cache.
+   */
+  const SEEDED_KEYS = [
+    'machines/eje-m-0001-plate.jpg',
+    'machines/eje-m-0001-controller.jpg',
+  ] as const;
+
+  /** Writes the file each seeded row points at, and proves it wrote some. */
   const documentsTheDatabaseRefersTo = (root: string): number => {
-    const tables = spawnSync(
+    const keys = spawnSync(
       'psql',
       [
         url ?? '',
         '-At',
         '-c',
-        "select table_name from information_schema.columns where column_name = 'storage_key' and table_schema = 'public'",
+        "select storage_key from public.machine_photos union all select storage_key from public.job_media union all select storage_key from public.final_documents",
       ],
       { encoding: 'utf8' },
     ).stdout.split('\n').filter((line) => line.length > 0);
 
-    let written = 0;
-    for (const table of tables) {
-      const keys = spawnSync('psql', [url ?? '', '-At', '-c', `select storage_key from public.${table}`], {
-        encoding: 'utf8',
-      }).stdout.split('\n').filter((line) => line.length > 0);
-      for (const key of keys) {
-        mkdirSync(join(root, key.split('/').slice(0, -1).join('/')), { recursive: true });
-        writeFileSync(join(root, key), `%PDF-1.4 ${key}`);
-        written += 1;
-      }
+    for (const key of keys) {
+      mkdirSync(join(root, key.split('/').slice(0, -1).join('/')), { recursive: true });
+      writeFileSync(join(root, key), `%PDF-1.4 ${key}`);
     }
-    return written;
+
+    /*
+     * The guard that makes the old failure impossible to misread. An empty
+     * fixture is this test's bug, and it now says so here rather than being
+     * reported as a refusal by the command under test.
+     */
+    if (keys.length === 0) {
+      throw new Error(
+        'the test database holds no storage keys, so there is nothing for a backup to archive — ' +
+          'the fixture did not seed. This block must not depend on another test file.',
+      );
+    }
+    return keys.length;
   };
 
-  beforeEach(() => {
+  beforeAll(async () => {
+    db = await openTestDatabase(url ?? '');
+  });
+
+  afterAll(async () => {
+    await db.$client.end({ timeout: 5 });
+  });
+
+  beforeEach(async () => {
     storage = mkdtempSync(join(tmpdir(), 'eje-docs2-'));
     into = mkdtempSync(join(tmpdir(), 'eje-backups2-'));
     roots.push(storage, into);
+
+    // Deterministic, and owned by this block: two machine photographs, which
+    // are rows carrying a `storage_key` and needing nothing but the seeded
+    // machine. That is all the cross-check needs to have something to resolve.
+    await truncateAll(db);
+    await seedBaseline(db);
+    await db.insert(schema.machinePhotos).values(
+      SEEDED_KEYS.map((key, index) => ({
+        id: `00000000-0000-4000-8000-0000000009${String(index + 10).padStart(2, '0')}`,
+        machineId: IDS.machine,
+        fileName: key.split('/').pop() ?? key,
+        caption: `Seeded for the backup tests (${index + 1})`,
+        storageKey: key,
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+        uploadedAt: '2026-10-17T08:00:00.000Z',
+        uploadedBy: IDS.master,
+      })),
+    );
   });
 
   const freshBackup = (): string => {
@@ -528,8 +586,9 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
      * is taken; the database row that names it is still in the dump.
      */
     documentsTheDatabaseRefersTo(storage);
-    const [first] = readdirSync(join(storage, 'jobcards', 'final'));
-    rmSync(join(storage, 'jobcards', 'final', first!));
+    // One of the rows this block seeded, taken away before the backup is made.
+    const missing = SEEDED_KEYS[0];
+    rmSync(join(storage, missing));
 
     const taken = runBackup({
       DATABASE_URL: url ?? '',
@@ -542,13 +601,14 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
     const restored = runRestoreTest(directory);
     expect(restored.status).toBe(1);
     expect(restored.stderr).toMatch(/point at documents that are not in the backup/u);
-    expect(restored.stderr).toContain(first!);
+    expect(restored.stderr).toContain(missing);
   });
 
   it('records the unresolved count rather than hiding it when orphans are accepted', () => {
     documentsTheDatabaseRefersTo(storage);
-    const [first] = readdirSync(join(storage, 'jobcards', 'final'));
-    rmSync(join(storage, 'jobcards', 'final', first!));
+    // One of the rows this block seeded, taken away before the backup is made.
+    const missing = SEEDED_KEYS[0];
+    rmSync(join(storage, missing));
 
     expect(
       runBackup({ DATABASE_URL: url ?? '', EJE_STORAGE_DIR: storage, EJE_BACKUP_DIR: into }).status,
