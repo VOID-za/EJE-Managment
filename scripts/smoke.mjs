@@ -5257,6 +5257,40 @@ await step('unsent work survives a sign-out and stays with its owner', async () 
   if (stillThere.length !== 1) {
     throw new Error(`${stillThere.length} captures held while another user is signed in`);
   }
+
+  /*
+   * AND NOTHING OF THE LAST PERSON'S READ CACHE, which pulls the other way.
+   * OFF-DETAIL-1 cached one job's detail for its owner; signing in as somebody
+   * else clears every record that is not theirs, because that is a copy of
+   * server data and costs nothing to lose — unlike the capture above.
+   */
+  const cachedForOthers = await page.evaluate(
+    (owner) =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['details', 'jobs'], 'readonly');
+          const details = tx.objectStore('details').getAll();
+          const jobs = tx.objectStore('jobs').getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve({
+              details: details.result.filter((row) => row.userId === owner).length,
+              jobs: jobs.result.filter((row) => row.userId === owner).length,
+            });
+          };
+          tx.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+    owner,
+  );
+  if (cachedForOthers.details !== 0 || cachedForOthers.jobs !== 0) {
+    throw new Error(
+      `the next technician's session still holds ${cachedForOthers.details} job details and ${cachedForOthers.jobs} cached jobs belonging to somebody else`,
+    );
+  }
   if (stillThere[0].userId === owner) {
     // Correct: it is still Sipho's. Riaan signing in neither sent it nor
     // claimed it.

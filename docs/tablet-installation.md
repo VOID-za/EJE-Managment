@@ -107,9 +107,17 @@ Four sentences, because anything longer will not be read:
   as a draft on the tablet. A held answer is not on the job and is not counted
   in the percentage; the draft is not on the job either, and you put it there
   yourself when you have signal.
-- You **cannot** complete the checklist, take a photograph or take the
-  customer's signature without a connection. If one of those fails it did not
-  happen, and the application says so rather than pretending.
+- With no signal you can **photograph** the work, the evidence a checklist
+  question asks for, and the machine you are on. The photographs are kept on
+  this tablet — the screen says *Not sent* and counts them — and go up when
+  there is a signal. The tablet will hold up to 25 of them; past that it says
+  so plainly rather than quietly dropping one.
+- And the job you had open stays **readable** with no signal: the hours, parts,
+  notes and the checklist questions still outstanding. It is marked as a copy,
+  with the time it came from, and nothing on it can be changed from there.
+- You **cannot** complete the checklist or take the customer's signature
+  without a connection. If one of those fails it did not happen, and the
+  application says so rather than pretending.
 - If the job was signed, closed or given to somebody else while you were out of
   signal, the server will not take your capture — and it is **not lost**. It
   goes to the office, who decide what happens to it, and the tablet tells you
@@ -138,15 +146,17 @@ nothing resolves itself.
 shifts, because it is the part a device policy has to cover.*
 
 - **Unsent work stays on the tablet, under the name of whoever captured it.**
-  Hours, kilometres, parts, notes, held checklist answers and a write-up draft
-  are the only record of work the server has not seen, so signing out does not
-  destroy them. They are keyed to their owner: the next person to sign in does
+  Hours, kilometres, parts, notes, held checklist answers, a write-up draft and
+  held photographs are the only record of work the server has not seen, so
+  signing out does not destroy them. They are keyed to their owner: the next person to sign in does
   not see them, cannot send them, cannot retry them and cannot discard them.
   They are sent when their owner signs in again, with a connection.
-- **The read cache is not kept.** The cached job list, who the device last saw
-  signed in and which job was open are all cleared on sign-out, and again when
-  the next person signs in. Those are copies of what the server has; losing
-  them costs nothing.
+- **The read cache is not kept.** The cached job list, the cached detail of a
+  job that was open, who the device last saw signed in and which job it was are
+  all cleared on sign-out, and again when the next person signs in. Those are
+  copies of what the server has; losing them costs nothing. The cached copy
+  holds no prices, no signature, no document and no customer contact details in
+  the first place.
 - **No password, session cookie or access token is ever written to the device
   by this application.** The session is a cookie the page itself cannot read.
 - **This is not encryption, and the application does not claim it is.** Unsent
@@ -174,10 +184,11 @@ travel, parts and notes — are now held and sent (OFF-QUEUE-1…10, scoped in
 `docs/SCOPE.md` before being built). Everything else in that sentence still
 stands:
 
-- **No offline photograph or signature**, and the checklist cannot be
-  COMPLETED offline. Each needs a connection and says so. *(Amended 18 October
-  2026: answering the checklist and typing the write-up as a draft are now
-  possible — OFF-CHK-1, OFF-WRITEUP-1.)*
+- **No offline signature**, and the checklist cannot be COMPLETED offline.
+  Each needs a connection and says so. *(Amended 18 October 2026: answering the
+  checklist, typing the write-up as a draft and taking photographs are now all
+  possible — OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1 — and the job you had open
+  is readable from this tablet's own copy, OFF-DETAIL-1.)*
 - ~~**No conflict resolution policy.**~~ *Answered 18 October 2026 by BD-15.*
   If a job was signed, closed or reassigned while the tablet was away, the
   server refuses the capture, the capture is retained with the server's own
