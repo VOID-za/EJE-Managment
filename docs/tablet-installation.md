@@ -87,7 +87,10 @@ can do from a desk. Write down what was awkward rather than whether it
 ## What the technician should be told
 
 *Amended 17 October 2026: offline capture of four things now exists, so the
-middle sentence has changed. The rest is unaltered.*
+middle sentence has changed. Amended again 18 October 2026: the checklist can
+be answered and the write-up typed with no signal, a refused capture goes to
+the office, and signing out with no signal is now honest about what it could
+not do.*
 
 Four sentences, because anything longer will not be read:
 
@@ -99,10 +102,18 @@ Four sentences, because anything longer will not be read:
   a job you are working on. They are kept on the tablet and sent the moment you
   have signal — the screen says *held on this tablet* until then, and that is
   the truth: they are not on the job yet. Nothing is lost by the battery dying.
-- You **cannot** run the checklist, write the completion report, take a
-  photograph or take the customer's signature without a connection. If one of
-  those fails it did not happen, and the application says so rather than
-  pretending.
+- With no signal you can also **answer the checklist** — one item at a time,
+  tapping *Hold answer* — and **type the completion write-up**, which is kept
+  as a draft on the tablet. A held answer is not on the job and is not counted
+  in the percentage; the draft is not on the job either, and you put it there
+  yourself when you have signal.
+- You **cannot** complete the checklist, take a photograph or take the
+  customer's signature without a connection. If one of those fails it did not
+  happen, and the application says so rather than pretending.
+- If the job was signed, closed or given to somebody else while you were out of
+  signal, the server will not take your capture — and it is **not lost**. It
+  goes to the office, who decide what happens to it, and the tablet tells you
+  it is with them. You do not have to do anything else about it.
 - When a new version is ready a bar appears. Finish what you are doing, then
   tap it.
 
@@ -112,6 +123,46 @@ A held capture is **not on the job**. If a technician tells the office "the
 hours are captured" while the tablet is still holding them, the office will not
 see them. The job screen and the job list both show what is still waiting, and
 signing out asks before leaving anything unsent.
+
+The office has one new screen for this: **Field Captures**, for Masters and
+Coordinators. Work a tablet could not get onto a job appears there with the
+technician's name, the job, and the server's own reason for refusing it, and
+somebody decides — either applying it to the job, which goes through exactly
+the same rules as a line typed at a desk, or recording that nothing further
+will happen and why. Nothing on that screen edits the technician's capture, and
+nothing resolves itself.
+
+## The shared tablet: what is kept on the device, and what that means
+
+*Added 18 October 2026, with BD-16. Read this before a tablet is shared between
+shifts, because it is the part a device policy has to cover.*
+
+- **Unsent work stays on the tablet, under the name of whoever captured it.**
+  Hours, kilometres, parts, notes, held checklist answers and a write-up draft
+  are the only record of work the server has not seen, so signing out does not
+  destroy them. They are keyed to their owner: the next person to sign in does
+  not see them, cannot send them, cannot retry them and cannot discard them.
+  They are sent when their owner signs in again, with a connection.
+- **The read cache is not kept.** The cached job list, who the device last saw
+  signed in and which job was open are all cleared on sign-out, and again when
+  the next person signs in. Those are copies of what the server has; losing
+  them costs nothing.
+- **No password, session cookie or access token is ever written to the device
+  by this application.** The session is a cookie the page itself cannot read.
+- **This is not encryption, and the application does not claim it is.** Unsent
+  work is held in the browser's ordinary storage. Somebody with the tablet
+  unlocked and a browser console could read it. The protection the application
+  gives is that nobody can reach another person's work *through the
+  application*; the protection for the device itself is the tablet's own screen
+  lock, EJE's device policy, and not leaving an unlocked tablet with a customer.
+- **Signing out with no signal cannot end the session on the server**, because
+  the message cannot be sent. The tablet now refuses to use that session
+  afterwards and finishes the sign-out as soon as it has a connection — and the
+  sign-in screen says so while it is waiting. Before this it signed the
+  previous technician straight back in on the next page load, so a tablet
+  handed over in a yard with no coverage carried their identity. **If a tablet
+  is lost, the office must still disable the account** — that is what revokes
+  the session, not anything the device can do.
 
 ---
 
@@ -123,12 +174,16 @@ travel, parts and notes — are now held and sent (OFF-QUEUE-1…10, scoped in
 `docs/SCOPE.md` before being built). Everything else in that sentence still
 stands:
 
-- **No offline checklist, write-up, photograph or signature.** Each needs a
-  connection and says so.
-- **No conflict resolution policy.** If a job was signed, closed or reassigned
-  while the tablet was away, the server refuses the capture, the tablet keeps it
-  with the server's own words on it, and a person decides. What SHOULD happen to
-  those hours is an open business decision (BD-15).
+- **No offline photograph or signature**, and the checklist cannot be
+  COMPLETED offline. Each needs a connection and says so. *(Amended 18 October
+  2026: answering the checklist and typing the write-up as a draft are now
+  possible — OFF-CHK-1, OFF-WRITEUP-1.)*
+- ~~**No conflict resolution policy.**~~ *Answered 18 October 2026 by BD-15.*
+  If a job was signed, closed or reassigned while the tablet was away, the
+  server refuses the capture, the capture is retained with the server's own
+  words on it and referred to the OFFICE, and a Master or Coordinator decides
+  on the Field Captures screen. Nothing retries by itself, and nothing resolves
+  itself.
 - **No background sync.** The queue is sent by the application while somebody
   is looking at it, never by a service worker with no screen to report to.
 
