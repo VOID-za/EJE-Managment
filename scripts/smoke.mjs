@@ -21,6 +21,27 @@ import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
 
 const BASE = process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+
+/**
+ * A calendar date IN THE BUSINESS ZONE, offset by `days`.
+ *
+ * The zone matters, and getting it from the runner's clock was a real defect
+ * (QA-5's shape). Every rule that asks "is this person away today?" asks it of
+ * the business date — South African time — so a script that typed the runner's
+ * own date into an availability dialog disagreed with the server for two hours
+ * out of every twenty-four on a machine running UTC: the takeover step passed
+ * all day and failed between 22:00 and midnight, which reads as a flake.
+ */
+const businessDate = (days = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Johannesburg',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
 const shots = process.argv[2] ?? process.env.EJE_SMOKE_SHOTS ?? '.smoke';
 mkdirSync(shots, { recursive: true });
 const errors = [];
@@ -2045,9 +2066,7 @@ await step('the Master records the availability from the message', async () => {
   await dialog.getByText('doctor appointment tomorrow', { exact: false })
     .waitFor({ timeout: 5000 });
 
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const iso = `${tomorrow.getFullYear()}-${`${tomorrow.getMonth() + 1}`.padStart(2, '0')}-${`${tomorrow.getDate()}`.padStart(2, '0')}`;
+  const iso = businessDate(1);
   await dialog.getByLabel('Start date').fill(iso);
   await dialog.getByLabel('End date').fill(iso);
   await dialog.getByLabel('From').fill('14:00');
@@ -2064,15 +2083,8 @@ await step('a full-day and a multi-day period can both be recorded', async () =>
 
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
-  const start = new Date();
-  start.setDate(start.getDate() + 40);
-  const end = new Date();
-  end.setDate(end.getDate() + 44);
-  const iso = (date) =>
-    `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
-
-  await dialog.getByLabel('Start date').fill(iso(start));
-  await dialog.getByLabel('End date').fill(iso(end));
+  await dialog.getByLabel('Start date').fill(businessDate(40));
+  await dialog.getByLabel('End date').fill(businessDate(44));
   // A multi-day period forces all-day: a time window across days is meaningless.
   await dialog.getByText('always all-day', { exact: false }).waitFor({ timeout: 5000 });
   await dialog.getByRole('button', { name: 'Record availability' }).click();

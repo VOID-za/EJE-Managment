@@ -23,6 +23,38 @@ import { chromium } from 'playwright';
 import { resetDemonstration, signInAs as signInWith } from './sign-in.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? 'http://localhost:3000';
+
+/**
+ * A calendar date IN THE BUSINESS ZONE, offset by `days`.
+ *
+ * The zone matters, and getting it from the runner's clock was a real defect
+ * (QA-5's shape). Every rule that asks "is this person away today?" asks it of
+ * the business date — South African time — so a script that typed the runner's
+ * own date into an availability dialog disagreed with the server for two hours
+ * out of every twenty-four on a machine running UTC: the takeover step passed
+ * all day and failed between 22:00 and midnight, which reads as a flake.
+ */
+/** The date as the screens print it — "18 Oct 2026". */
+const formatBusinessDate = (iso) => {
+  const [year, month, day] = iso.split('-').map((part) => Number(part));
+  return new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Africa/Johannesburg',
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+};
+
+const businessDate = (days = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Johannesburg',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
 
 const failures = [];
@@ -917,8 +949,7 @@ await step('the office records that the technician is away all day', async () =>
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 10000 });
 
-  const now = new Date();
-  const today = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+  const today = businessDate();
   await dialog.getByLabel('Start date').fill(today);
   await dialog.getByLabel('End date').fill(today);
   /*
@@ -929,9 +960,32 @@ await step('the office records that the technician is away all day', async () =>
    */
   await dialog.getByText('All day', { exact: true }).click();
   await dialog.getByRole('button', { name: 'Record availability' }).click();
-  await page.getByText('Availability recorded', { exact: false }).first().waitFor({
-    timeout: 15000,
-  });
+
+  /*
+   * WHAT IS ASSERTED IS THE RECORD, NOT A MESSAGE THAT MAY NOT APPEAR.
+   *
+   * This waited for the text "Availability recorded", which turns out to be
+   * the title of the CLASH dialog — shown only when the absence overlaps work
+   * already booked for that technician, because nothing is ever reassigned on
+   * the office's behalf. Whether it appears therefore depends on what the seed
+   * has scheduled for the business date, and the step was quietly asserting
+   * the seed's calendar rather than the behaviour: it passed while "today" was
+   * a day Lerato had work on, and failed the moment the business date rolled
+   * over to one she did not.
+   *
+   * So the clash dialog is dismissed if it is there, and the assertion is that
+   * the absence is ON the technician's record, all day, for that date.
+   */
+  const clash = page.getByRole('button', { name: 'I’ll deal with these' });
+  if (await clash.isVisible().catch(() => false)) await clash.click();
+  await dialog.waitFor({ state: 'hidden', timeout: 15000 });
+
+  const recorded = page.locator('main');
+  await recorded.getByText('All day', { exact: false }).first().waitFor({ timeout: 15000 });
+  const listed = await recorded.innerText();
+  if (!listed.includes(formatBusinessDate(today))) {
+    throw new Error(`the absence for ${today} is not on the technician's record`);
+  }
 });
 
 await step('NOW the office may take over — and it says the card cannot be edited', async () => {
