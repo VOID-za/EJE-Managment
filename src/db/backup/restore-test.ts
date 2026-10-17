@@ -6,7 +6,12 @@ import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { recordVerification, verifyInto } from './integrity';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
-import { assertSafeToDrop, scratchDatabaseName, withDatabase } from './scratch';
+import {
+  assertSafeToDrop,
+  claimScratchDatabase,
+  postgresScratchServer,
+  withDatabase,
+} from './scratch';
 
 /**
  * `npm run backup:restore-test <directory>` — PROVING A BACKUP CAN BE
@@ -92,13 +97,14 @@ const main = async (): Promise<void> => {
 
   const now = new Date();
   const source = databaseNameFrom(databaseUrl);
-  const scratch = scratchDatabaseName(now);
-  assertSafeToDrop(scratch, source);
-
   const admin = withDatabase(databaseUrl, 'postgres');
-  const target = withDatabase(databaseUrl, scratch);
+  const server = postgresScratchServer(admin);
   const workspace = mkdtempSync(join(tmpdir(), 'eje-restore-'), { mode: 0o700 } as never);
-  let created = false;
+  /*
+   * Named only once it has been CLAIMED, so there is no window in which this
+   * command believes it owns a database it has not created.
+   */
+  let scratch: string | null = null;
 
   try {
     // ---- 1. integrity, and the decrypted artefacts ------------------------
@@ -113,26 +119,8 @@ const main = async (): Promise<void> => {
     }
 
     // ---- 2. a database of its own ----------------------------------------
-    const exists = psql(admin, `SELECT 1 FROM pg_database WHERE datname = '${scratch}'`);
-    if (!exists.ok) {
-      throw new BackupRefused(
-        `could not reach the server: ${redactSecrets(exists.stderr, databaseUrl)}`,
-      );
-    }
-    if (exists.stdout.trim() === '1') {
-      throw new BackupRefused(
-        `${scratch} already exists. Refused rather than replaced — drop it by hand if it is ` +
-          'left over from an interrupted run.',
-      );
-    }
-
-    const create = psql(admin, `CREATE DATABASE ${scratch}`);
-    if (!create.ok) {
-      throw new BackupRefused(
-        `could not create ${scratch}: ${redactSecrets(create.stderr, databaseUrl)}`,
-      );
-    }
-    created = true;
+    scratch = claimScratchDatabase(server, source, now);
+    const target = withDatabase(databaseUrl, scratch);
 
     // ---- 3. the restore itself -------------------------------------------
     const restored = run('pg_restore', [
@@ -260,20 +248,20 @@ const main = async (): Promise<void> => {
         'restore  RESTORE-TESTED — recorded in manifest.json\n',
     );
   } finally {
-    if (created) {
-      // Checked again here, next to the DROP itself. The first check was fifty
-      // lines ago and this is the line that destroys something.
-      assertSafeToDrop(scratch, source);
+    if (scratch !== null) {
       /*
-       * Dropped whatever happened above, and only this one. A failed restore
+       * ONLY THE DATABASE THIS INVOCATION CLAIMED, and checked again right
+       * here: the first check was fifty lines ago and this is the line that
+       * destroys something. Dropped whatever happened above — a failed restore
        * test that leaves a copy of the production database on the server has
        * created the very exposure the encryption was for.
        */
-      const dropped = psql(admin, `DROP DATABASE IF EXISTS ${scratch}`);
-      if (!dropped.ok) {
+      assertSafeToDrop(scratch, source);
+      try {
+        server.drop(scratch);
+      } catch (cause: unknown) {
         process.stderr.write(
-          `restore  WARNING: ${scratch} could not be dropped and is still on the server: ` +
-            `${redactSecrets(dropped.stderr, databaseUrl)}\n`,
+          `restore  WARNING: ${cause instanceof Error ? cause.message : String(cause)}\n`,
         );
       }
     }

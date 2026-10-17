@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtempSync,
   mkdirSync,
@@ -16,6 +16,12 @@ import * as schema from '@/db/schema';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
 import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
 import { decryptFile } from './crypto';
+import {
+  claimScratchDatabase,
+  postgresScratchServer,
+  scratchDatabaseName,
+  withDatabase,
+} from './scratch';
 
 /**
  * A BACKUP THAT CAN ACTUALLY BE RESTORED FROM. BACKUP-1.
@@ -623,6 +629,104 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
     expect(restored.stdout).toMatch(/WARNING/u);
     const record = manifestOf(directory).verifications?.find((entry) => entry.kind === 'restore');
     expect(record?.detail).toMatch(/1 UNRESOLVED/u);
+  });
+
+  /* -- the scratch database, on the real server -------------------------- */
+
+  /**
+   * AN EXISTING DATABASE IS REFUSED, AND NOT TOUCHED. BACKUP-2, issue #23.
+   *
+   * The claim logic is unit-tested against a fake server; this is the same
+   * logic against a real PostgreSQL, with real rows inside the database it
+   * refuses to take. The name is generated with a FIXED suffix so the test can
+   * put something in the way — which is the only reason the suffix is
+   * injectable.
+   */
+  it('REFUSES an existing scratch database on real PostgreSQL, leaving it untouched', () => {
+    const fixedNow = new Date('2026-10-17T09:14:03.000Z');
+    const occupied = scratchDatabaseName(fixedNow, () => 'f00dbabe');
+    const admin = withDatabase(url ?? '', 'postgres');
+    const server = postgresScratchServer(admin);
+
+    const sqlIn = (database: string, statement: string): string => {
+      const result = spawnSync(
+        'psql',
+        [withDatabase(url ?? '', database), '-v', 'ON_ERROR_STOP=1', '-At', '-c', statement],
+        { encoding: 'utf8' },
+      );
+      expect(result.status, result.stderr ?? '').toBe(0);
+      return (result.stdout ?? '').trim();
+    };
+
+    server.create(occupied);
+    try {
+      sqlIn(occupied, 'create table marker (id integer primary key)');
+      sqlIn(occupied, 'insert into marker values (42)');
+
+      expect(() =>
+        claimScratchDatabase(server, 'eje_test', fixedNow, () => 'f00dbabe'),
+      ).toThrow(/Refused rather than replaced/u);
+
+      // THE ROWS ARE STILL THERE. Refusing is only worth anything if the
+      // database it refused is exactly as it was.
+      expect(sqlIn(occupied, 'select id from marker')).toBe('42');
+    } finally {
+      server.drop(occupied);
+    }
+
+    expect(
+      spawnSync('psql', [admin, '-At', '-c', `select 1 from pg_database where datname = '${occupied}'`], {
+        encoding: 'utf8',
+      }).stdout.trim(),
+    ).toBe('');
+  });
+
+  /**
+   * TWO RESTORE TESTS AT ONCE, FOR REAL. BACKUP-2, issue #23.
+   *
+   * The deterministic proof is in `scratch.test.ts`; this is the integration
+   * check that the two processes really do take different databases. Before
+   * the fix the name was the timestamp to the second, so two invocations
+   * starting in the same second computed the same name and the second was
+   * refused for a collision rather than a real conflict.
+   */
+  it('runs two restore tests in parallel without either claiming the other name', async () => {
+    const directory = freshBackup();
+
+    const invoke = (): Promise<{ status: number; stderr: string }> =>
+      new Promise((resolve) => {
+        const child = spawn('npx', ['tsx', 'src/db/backup/restore-test.ts', directory], {
+          env: { ...process.env, EJE_BACKUP_KEY: TEST_KEY, DATABASE_URL: url ?? '' },
+          cwd: process.cwd(),
+        });
+        let stderr = '';
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+        });
+        child.stdout.on('data', () => {
+          /* drained so the pipe cannot fill and stall the child */
+        });
+        child.on('close', (status) => resolve({ status: status ?? -1, stderr }));
+      });
+
+    const [first, second] = await Promise.all([invoke(), invoke()]);
+
+    for (const [label, result] of [
+      ['first', first],
+      ['second', second],
+    ] as const) {
+      expect(result.stderr, `${label} collided on a scratch name`).not.toMatch(/already exists/u);
+      expect(result.status, `${label}: ${result.stderr}`).toBe(0);
+    }
+
+    // And neither left its database behind.
+    expect(
+      spawnSync(
+        'psql',
+        [url ?? '', '-At', '-c', "select datname from pg_database where datname like 'eje_restore_test_%'"],
+        { encoding: 'utf8' },
+      ).stdout.trim(),
+    ).toBe('');
   });
 
   it('REFUSES a directory with no manifest at all', () => {
