@@ -16,6 +16,10 @@ const ICONS: Partial<Record<ActivityEvent['type'], IconName>> = {
   labour_added: 'clock',
   travel_added: 'truck',
   part_added: 'box',
+  // AUDIT-3. A removal reads as a removal at a glance, and a charge changing
+  // reads as an edit — neither is another "line captured".
+  line_item_removed: 'trash',
+  callout_changed: 'edit',
   checklist_completed: 'check',
   moved_to_awaiting_spares: 'warning',
   returned_to_in_progress: 'refresh',

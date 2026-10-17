@@ -37,7 +37,17 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
     {
       value: 'capture',
       label: 'Work captured',
-      types: ['labour_added', 'travel_added', 'part_added', 'photo_uploaded', 'note_added'],
+      types: [
+        'labour_added',
+        'travel_added',
+        'part_added',
+        // AUDIT-3: what was taken off a job belongs with what was put on it —
+        // the office looking for "why is this invoice lower" filters here.
+        'line_item_removed',
+        'callout_changed',
+        'photo_uploaded',
+        'note_added',
+      ],
     },
     {
       value: 'assignment',

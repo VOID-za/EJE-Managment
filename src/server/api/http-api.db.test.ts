@@ -341,6 +341,148 @@ describeDb('the HTTP API on PostgreSQL', () => {
   });
 
   /**
+   * WHAT WAS TAKEN OFF A JOB'S CHARGES, THROUGH THE REAL STACK. AUDIT-3.
+   *
+   * The application tests prove the operations record a removal and a call-out
+   * change. They cannot prove it SURVIVES: `changes` lands in `audit_events`
+   * `metadata`, which is untyped `jsonb`, and the demonstration store holds the
+   * event object itself. So the route, the operation, the audit write and the
+   * column are exercised together here — which is also the only place that can
+   * show the trail outlives the row it describes.
+   */
+  it('records a removed labour line in PostgreSQL, with the values it carried', async () => {
+    const master = await signIn(EMAILS.master);
+    const jobNumber = (await raiseJob(master)).data.jobNumber;
+    const technician = await signIn(EMAILS.technician);
+    expect((await technician.post(`/api/jobs/${jobNumber}/accept`)).status).toBe(200);
+
+    expect(
+      (
+        await technician.post(`/api/jobs/${jobNumber}/add_labour`, {
+          date: '2026-09-20',
+          rateType: 'overtime',
+          hours: 3,
+          description: 'Stripped the spindle housing.',
+        })
+      ).status,
+    ).toBe(200);
+
+    const [line] = await db.select().from(schema.jobLabour);
+    expect(line).toBeDefined();
+
+    const removed = await technician.post(`/api/jobs/${jobNumber}/remove_line`, {
+      kind: 'labour',
+      lineId: line?.id ?? '',
+    });
+    expect(removed.status, JSON.stringify(removed.raw)).toBe(200);
+
+    // The line is gone from the database...
+    expect(await db.select().from(schema.jobLabour)).toHaveLength(0);
+
+    // ...and the trail says what went, in the jsonb column.
+    const events = await db.select().from(schema.auditEvents);
+    const event = events.find((candidate) => candidate.type === 'line_item_removed');
+    expect(event, JSON.stringify(events.map((row) => row.type))).toBeDefined();
+    expect(event?.actorId).toBe(IDS.technician);
+    expect(event?.summary).toContain('Labour removed');
+
+    const changes = ((event?.metadata as { changes?: { field: string; from: unknown; to: unknown }[] })
+      ?.changes ?? []);
+    const byField = Object.fromEntries(changes.map((change) => [change.field, change]));
+    expect(byField['labour.hours']).toEqual({ field: 'labour.hours', from: 3, to: null });
+    expect(byField['labour.rateType']?.from).toBe('overtime');
+    expect(byField['labour.description']?.from).toBe('Stripped the spindle housing.');
+    // Numbers came back as numbers, not as "3".
+    expect(typeof byField['labour.hours']?.from).toBe('number');
+  });
+
+  it('records the call-out fee going on and coming off, and nothing when it does not move', async () => {
+    const master = await signIn(EMAILS.master);
+    const jobNumber = (await raiseJob(master)).data.jobNumber;
+    const technician = await signIn(EMAILS.technician);
+    await technician.post(`/api/jobs/${jobNumber}/accept`);
+    await technician.post(`/api/jobs/${jobNumber}/add_labour`, {
+      date: '2026-09-20',
+      rateType: 'normal',
+      hours: 1,
+      description: 'Diagnosed the fault.',
+    });
+
+    expect((await technician.post(`/api/jobs/${jobNumber}/set_callout`, { applied: true })).status)
+      .toBe(200);
+    // Posted again with the value it already has: no second event.
+    expect((await technician.post(`/api/jobs/${jobNumber}/set_callout`, { applied: true })).status)
+      .toBe(200);
+    expect((await technician.post(`/api/jobs/${jobNumber}/set_callout`, { applied: false })).status)
+      .toBe(200);
+
+    const events = (await db.select().from(schema.auditEvents)).filter(
+      (row) => row.type === 'callout_changed',
+    );
+    expect(events).toHaveLength(2);
+
+    const metadataOf = (summary: string) =>
+      (
+        events.find((row) => row.summary === summary)?.metadata as {
+          changes?: { field: string; from: unknown; to: unknown }[];
+        }
+      )?.changes ?? [];
+
+    expect(metadataOf('Call-out fee applied')).toEqual([
+      { field: 'callout.applied', from: false, to: true },
+    ]);
+    expect(metadataOf('Call-out fee removed')).toEqual([
+      { field: 'callout.applied', from: true, to: false },
+    ]);
+    // Booleans survived the jsonb round trip as booleans.
+    expect(typeof metadataOf('Call-out fee applied')[0]?.to).toBe('boolean');
+  });
+
+  it('keeps the removal in the trail after the job itself is deleted', async () => {
+    /*
+     * IMMUT-8 and DELETE-5, for this event: the audit trail outlives the job.
+     * A removal recorded against a job that no longer exists is exactly what an
+     * invoice dispute reads months later.
+     */
+    const master = await signIn(EMAILS.master);
+    const jobNumber = (await raiseJob(master)).data.jobNumber;
+    const technician = await signIn(EMAILS.technician);
+    await technician.post(`/api/jobs/${jobNumber}/accept`);
+    await technician.post(`/api/jobs/${jobNumber}/add_travel`, {
+      date: '2026-09-20',
+      kilometres: 120,
+      description: 'Benoni and back.',
+    });
+    const [travel] = await db.select().from(schema.jobTravel);
+    await technician.post(`/api/jobs/${jobNumber}/remove_line`, {
+      kind: 'travel',
+      lineId: travel?.id ?? '',
+    });
+
+    const before = (await db.select().from(schema.auditEvents)).filter(
+      (row) => row.type === 'line_item_removed',
+    );
+    expect(before).toHaveLength(1);
+
+    // An accepted job cannot be deleted, so it is cancelled — the other way a
+    // job leaves the workflow, and the one that keeps the record.
+    expect(
+      (
+        await master.post(`/api/jobs/${jobNumber}/cancel`, {
+          reason: 'duplicate',
+          description: 'Raised twice.',
+        })
+      ).status,
+    ).toBe(422);
+
+    const after = (await db.select().from(schema.auditEvents)).filter(
+      (row) => row.type === 'line_item_removed',
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0]?.summary).toContain('Travel removed');
+  });
+
+  /**
    * A REFUSED DELETION, ON REAL POSTGRESQL. AUD-9.
    *
    * Deletion is the one operation in this system that destroys a row, so the

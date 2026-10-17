@@ -42,6 +42,33 @@ export type ActivityEventType =
   | 'labour_added'
   | 'travel_added'
   | 'part_added'
+  /**
+   * A LABOUR, TRAVEL OR PARTS LINE TAKEN OFF A JOB. AUDIT-3.
+   *
+   * Its own type, and not a second `labour_added` with different wording,
+   * because this is the one edit that takes money OFF what the customer is
+   * asked to pay. Until this existed a Coordinator could delete a three-hour
+   * labour line and nothing anywhere recorded that it had ever been there —
+   * which is precisely the question an invoice dispute asks six months later.
+   *
+   * It carries the removed line's values as `changes`, each going to null, so
+   * the trail says what was taken away and not merely that something was.
+   */
+  | 'line_item_removed'
+  /**
+   * THE CALL-OUT FEE APPLIED OR REMOVED. AUDIT-3.
+   *
+   * Whether a call-out is charged is a commercial decision per job
+   * (COST-CALLOUT), so it is a fixed sum appearing on or disappearing from the
+   * customer's document at somebody's discretion. It recorded nothing at all
+   * before this, in any job state.
+   *
+   * The event carries the flag moving, not an amount: the fee itself comes from
+   * the charge-out rates and is frozen into the pricing snapshot at submission,
+   * and inventing a figure here would put a second, unreconciled number in the
+   * trail.
+   */
+  | 'callout_changed'
   | 'checklist_completed'
   | 'moved_to_awaiting_spares'
   | 'returned_to_in_progress'

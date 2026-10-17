@@ -44,8 +44,12 @@ import {
   type ChecklistResponse,
   type ChecklistTemplate,
   type CancellationReason,
+  type AuditValue,
   type Job,
   type JobCompletionReport,
+  type LabourEntry,
+  type TravelEntry,
+  type PartEntry,
   type JobStatus,
   type LabourRateType,
   type Machine,
@@ -901,6 +905,70 @@ export const updatePart = async (
 
 export type LineItemKind = 'labour' | 'travel' | 'part';
 
+/**
+ * A removed line, in the three shapes the audit trail needs. AUDIT-3.
+ *
+ * Kept beside `removeLineItem` rather than inside it so each kind's fields are
+ * listed once, next to each other, where a reader can see that the trail
+ * records the WHOLE line and not the part the sentence happens to mention.
+ */
+const lineItemLabel = (kind: LineItemKind): string =>
+  kind === 'labour' ? 'Labour' : kind === 'travel' ? 'Travel' : 'Part';
+
+const describeLineItem = (kind: LineItemKind, line: LabourEntry | TravelEntry | PartEntry): string => {
+  if (kind === 'labour') {
+    const labour = line as LabourEntry;
+    return `${formatHours(labour.hours)} ${labourRateLabel(labour.rateType).toLowerCase()}`;
+  }
+  if (kind === 'travel') return formatKilometres((line as TravelEntry).kilometres);
+  return (line as PartEntry).partNumber;
+};
+
+const lineItemValues = (
+  kind: LineItemKind,
+  line: LabourEntry | TravelEntry | PartEntry,
+): Readonly<Record<string, AuditValue>> => {
+  if (kind === 'labour') {
+    const labour = line as LabourEntry;
+    return {
+      date: labour.date,
+      rateType: labour.rateType,
+      hours: labour.hours,
+      description: labour.description,
+    };
+  }
+  if (kind === 'travel') {
+    const travel = line as TravelEntry;
+    return { date: travel.date, kilometres: travel.kilometres, description: travel.description };
+  }
+  const part = line as PartEntry;
+  return {
+    partNumber: part.partNumber,
+    description: part.description,
+    quantity: part.quantity,
+    unitPrice: part.unitPrice,
+  };
+};
+
+/**
+ * The fields each kind of line carries, named once. AUDIT-3.
+ *
+ * `changesBetween` reports the keys of the value it is given, so a removal has
+ * to hand it every field going to null — and the key set has to come from
+ * somewhere. It is listed here rather than derived from a fabricated empty
+ * line, and `line-editing.test.ts` holds that this list and `lineItemValues`
+ * cannot drift apart.
+ */
+const LINE_FIELDS: Record<LineItemKind, readonly string[]> = {
+  labour: ['date', 'rateType', 'hours', 'description'],
+  travel: ['date', 'kilometres', 'description'],
+  part: ['partNumber', 'description', 'quantity', 'unitPrice'],
+};
+
+/** The same keys, all null: what a removal moves every field TO. */
+const lineItemNulls = (kind: LineItemKind): Readonly<Record<string, AuditValue>> =>
+  Object.fromEntries(LINE_FIELDS[kind].map((key) => [key, null]));
+
 /** Line removal is always confirmed by the caller before reaching this point. */
 export const removeLineItem = async (
   context: OperationContext,
@@ -910,6 +978,32 @@ export const removeLineItem = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+
+  /*
+   * THE LINE IS READ BEFORE IT IS REMOVED, FOR TWO REASONS. AUDIT-3.
+   *
+   * Its values are what the audit event has to carry — "a labour line was
+   * removed" tells a dispute nothing without saying which one. And a removal
+   * of a line that is not on the job is a refusal, not a success: it used to
+   * filter nothing, save, and report that it had worked, which is how a stale
+   * screen could be told its deletion went through twice.
+   */
+  const existing =
+    kind === 'labour'
+      ? job.labour.find((entry) => entry.id === lineId)
+      : kind === 'travel'
+        ? job.travel.find((entry) => entry.id === lineId)
+        : job.parts.find((entry) => entry.id === lineId);
+
+  if (existing === undefined) {
+    throw new WorkflowError(`That ${kind} line is no longer on this job.`, [
+      {
+        code: 'line_not_on_job',
+        message: 'It may already have been removed. Reload the job and look again.',
+      },
+    ]);
+  }
+
   const next: Job =
     kind === 'labour'
       ? { ...job, labour: job.labour.filter((entry) => entry.id !== lineId) }
@@ -918,8 +1012,23 @@ export const removeLineItem = async (
         : { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) };
 
   const saved = await context.repos.jobs.save(next);
-  // Removing a line from a job the customer has already been shown changes what
-  // they are being asked to pay, so it is recorded the same way an amendment is.
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'line_item_removed',
+    summary: `${lineItemLabel(kind)} removed: ${describeLineItem(kind, existing)}`,
+    detail: 'It no longer appears on the job card or in its totals.',
+    /*
+     * Every field of the removed line, each going to null. AUDIT-2's shape,
+     * used for a disappearance rather than an amendment: `changesBetween`
+     * reads the keys of the AFTER value, so the nulls are what make the
+     * removed values appear in the trail at all.
+     */
+    changes: changesBetween(kind, lineItemValues(kind, existing), lineItemNulls(kind)),
+  });
+
+  // Unchanged: the refusal-resolution path still records an amendment of its
+  // own. `assertEditable` has already refused a signed job outright.
   await recordPostSignatureChange(context, saved, `A ${kind} line was removed.`);
   return saved;
 };
@@ -939,8 +1048,33 @@ export const setCalloutApplied = async (
   // Turning it OFF is always allowed: it is how a job wrongly charged a
   // call-out is put right, and it takes money off rather than adding it.
   if (applied) assertCapturesLabourAndTravel(context, job, 'A call-out fee');
+  /*
+   * Nothing moved, so nothing is written and nothing is recorded. A screen
+   * posting the current value back is not a change to audit. AUDIT-2.
+   */
   if (job.calloutApplied === applied) return job;
-  return context.repos.jobs.save({ ...job, calloutApplied: applied });
+
+  const saved = await context.repos.jobs.save({ ...job, calloutApplied: applied });
+
+  /*
+   * A FIXED SUM APPEARING ON OR DISAPPEARING FROM THE CUSTOMER'S DOCUMENT, AT
+   * SOMEBODY'S DISCRETION — AND IT RECORDED NOTHING AT ALL BEFORE THIS.
+   * AUDIT-3.
+   *
+   * Flagged while implementing AUDIT-2 and deliberately left for its own
+   * change rather than widened into that one.
+   */
+  await audit(context, {
+    jobId: job.id,
+    type: 'callout_changed',
+    summary: applied ? 'Call-out fee applied' : 'Call-out fee removed',
+    detail: applied
+      ? 'The job card now carries the call-out fee from the current charge-out rates.'
+      : 'The call-out fee no longer appears on the job card or in its totals.',
+    changes: changesBetween('callout', { applied: job.calloutApplied }, { applied }),
+  });
+
+  return saved;
 };
 
 export const addNote = async (

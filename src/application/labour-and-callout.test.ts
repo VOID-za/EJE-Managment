@@ -163,6 +163,67 @@ describe('the call-out fee, after moving under Parts', () => {
     expect(after.partsTotal).toBe(before.partsTotal);
   });
 
+  /**
+   * WHO PUT THE CALL-OUT FEE ON THIS JOB, AND WHEN. AUDIT-3.
+   *
+   * It is a fixed sum appearing on or disappearing from the customer's document
+   * at somebody's discretion (COST-CALLOUT), and it recorded NOTHING at all
+   * before this — in any job state. Flagged while implementing AUDIT-2 and
+   * left for its own change rather than widened into that one.
+   */
+  it('records who applied it, and that it was off before', async () => {
+    const charged = await setCalloutApplied(harness.as(technician), job, true);
+    const events = (await harness.repos.activity.list(charged.id)).filter(
+      (event) => event.type === 'callout_changed',
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.summary).toBe('Call-out fee applied');
+    expect(events[0]?.actorId).toBe(technician.id);
+    expect(events[0]?.changes).toEqual([
+      { field: 'callout.applied', from: false, to: true },
+    ]);
+  });
+
+  it('records it being taken off as its own event, the other way round', async () => {
+    const charged = await setCalloutApplied(harness.as(technician), job, true);
+    const cleared = await setCalloutApplied(harness.as(technician), charged, false);
+
+    const events = (await harness.repos.activity.list(cleared.id)).filter(
+      (event) => event.type === 'callout_changed',
+    );
+    expect(events).toHaveLength(2);
+
+    const removal = events.find((event) => event.summary === 'Call-out fee removed');
+    expect(removal?.changes).toEqual([{ field: 'callout.applied', from: true, to: false }]);
+  });
+
+  it('carries no money amount, because the fee lives in the rates', async () => {
+    /*
+     * Deliberate. The fee comes from the charge-out rates and is frozen into
+     * the pricing snapshot at submission; a figure copied in here would be a
+     * second, unreconciled number in the trail.
+     */
+    const charged = await setCalloutApplied(harness.as(technician), job, true);
+    const [event] = (await harness.repos.activity.list(charged.id)).filter(
+      (candidate) => candidate.type === 'callout_changed',
+    );
+
+    expect(event?.changes.map((change) => change.field)).toEqual(['callout.applied']);
+    expect(JSON.stringify(event)).not.toContain(String(totals(charged).pricing.calloutRate));
+  });
+
+  it('records NOTHING when the value posted back is the one already set', async () => {
+    // A screen re-posting the current value is not a change to audit. AUDIT-2.
+    const again = await setCalloutApplied(harness.as(technician), job, false);
+    expect(again.calloutApplied).toBe(false);
+    expect(
+      (await harness.repos.activity.list(again.id)).filter(
+        (event) => event.type === 'callout_changed',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('can be taken off again, restoring the original total to the cent', async () => {
     const before = totals(job);
     const charged = await setCalloutApplied(harness.as(technician), job, true);
