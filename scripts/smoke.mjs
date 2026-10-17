@@ -4832,6 +4832,134 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
     throw new Error(`the loaded draft did not reach the job: ${saved}`);
   }
 });
+/* ---- OFF-DETAIL-1: the job detail, from this device's own copy ----------- */
+
+await step('the job a technician had open is readable with the network off', async () => {
+  /*
+   * OFF-DETAIL-1. Until now a tablet with no coverage could show the job LIST
+   * and nothing else: a technician who had the job open and whose application
+   * reloaded in a basement lost sight of the hours they had captured and of
+   * which checklist questions were still outstanding.
+   *
+   * No authenticated PAGE is cached, and none is now — the worker still
+   * refuses that. What is cached is the job's own detail, written when the
+   * server answered, and read back on the one screen a tablet with no signal
+   * can reach.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  const { jobNumber } = await workableJob(page);
+
+  // Opening the job online is what writes the copy.
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Overview' }).first().waitFor({ timeout: 20000 });
+
+  const cached = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('details', 'readonly').objectStore('details').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (cached.length === 0) throw new Error('the job detail was not cached');
+  const mine = cached.find((row) => row.jobNumber === jobNumber);
+  if (mine === undefined) throw new Error(`no cached copy of ${jobNumber}`);
+  if (typeof mine.userId !== 'string' || mine.userId.length === 0) {
+    throw new Error('the cached detail names no owner');
+  }
+  if (mine.key !== `${mine.userId}:${jobNumber}`) {
+    throw new Error(`the cached detail is keyed ${mine.key}`);
+  }
+
+  /*
+   * WHAT IT MUST NOT CARRY, read out of the record itself rather than trusted
+   * from the projection's unit test: prices, the signature, a document
+   * pointer, the customer's staff, or any identifier the client could hand
+   * back as authority.
+   */
+  const blob = JSON.stringify(mine);
+  for (const forbidden of ['unitPrice', 'pricingSnapshot', 'strokeData', 'finalDocument', 'storageKey', 'calloutApplied']) {
+    if (blob.includes(forbidden)) throw new Error(`the cached detail holds ${forbidden}`);
+  }
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  try {
+    // A full navigation to the job, which the worker answers with the offline
+    // page — it still caches no authenticated page, and that has not changed.
+    await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('cached-job-detail').waitFor({ timeout: 25000 });
+    /*
+     * The whole copy, not just its header: the id sits on an element inside
+     * the card because `Card` forwards only its own props.
+     */
+    const card = page
+      .locator('section', { has: page.getByTestId('cached-job-detail') })
+      .first();
+    const text = await card.innerText();
+
+    if (!text.includes(jobNumber)) throw new Error(`the copy names ${text.slice(0, 80)}`);
+    if (!/Copy on this tablet/i.test(text)) {
+      throw new Error('the copy does not say it is a copy');
+    }
+    if (!/As the server had it/i.test(text)) {
+      throw new Error('the copy does not say how old it is');
+    }
+    if (!/Nothing on this copy can be changed from here/i.test(text)) {
+      throw new Error('the copy does not say it is read-only');
+    }
+    if (!/no prices, no signature/i.test(text)) {
+      throw new Error('the copy does not say what it leaves out');
+    }
+    // No action on it at all: a cached page may not offer what the server has
+    // not agreed to.
+    if ((await card.getByRole('button').count()) !== 0) {
+      throw new Error('the cached copy offers an action');
+    }
+    await page.screenshot({ path: `${shots}/51-cached-detail.png`, fullPage: false });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  /*
+   * And it goes when the tablet changes hands: it is a copy of server data, so
+   * sign-out clears it — unlike held work, which deliberately survives.
+   *
+   * Back into the application first: the previous navigation was answered by
+   * the worker with the offline page, which has no profile menu to sign out
+   * from.
+   */
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await signOut();
+  const after = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('details', 'readonly').objectStore('details').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (after !== 0) throw new Error(`${after} cached job details survived the sign-out`);
+});
 /* ---- OFF-MEDIA-1: a photograph taken with no signal --------------------- */
 
 await step('a photograph taken offline is kept on the tablet, bytes and all', async () => {

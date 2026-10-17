@@ -9,12 +9,14 @@ import { describeCacheStatus } from '@/lib/pwa/cache-state';
 import {
   isJobCacheSupported,
   readCacheMeta,
+  readCachedJobDetails,
   readCachedJobs,
   readDeviceSession,
 } from '@/lib/pwa/job-cache';
 import { readPendingWork } from '@/lib/pwa/pending-work';
 import { heldMediaSummary, readPendingMedia } from '@/lib/pwa/pending-media';
-import type { CachedJob } from '@/lib/pwa/cached-job';
+import type { CachedJob, CachedJobDetail } from '@/lib/pwa/cached-job';
+import { CachedJobDetailCard } from '@/components/pwa/CachedJobDetail';
 import { auth } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
 import { useOnline } from '@/hooks/useOnline';
@@ -91,6 +93,8 @@ const OfflinePage = () => {
   const [unsent, setUnsent] = useState(0);
   /** Photographs this tablet is holding, which are bytes rather than rows. */
   const [heldPhotos, setHeldPhotos] = useState({ count: 0, bytes: 0 });
+  /** The job this technician had open, from this device's own copy. */
+  const [details, setDetails] = useState<readonly CachedJobDetail[]>([]);
   const online = useOnline();
 
   useEffect(() => {
@@ -102,17 +106,19 @@ const OfflinePage = () => {
       if (resolved.state !== 'server' && resolved.state !== 'device') return;
       if (!isJobCacheSupported()) return;
 
-      const [cached, meta, pending, photos] = await Promise.all([
+      const [cached, meta, pending, photos, kept] = await Promise.all([
         readCachedJobs(resolved.userId),
         readCacheMeta(resolved.userId),
         readPendingWork(resolved.userId).catch(() => []),
         readPendingMedia(resolved.userId).catch(() => []),
+        readCachedJobDetails(resolved.userId).catch(() => []),
       ]);
       if (cancelled) return;
       setJobs(cached);
       setLastRefreshedAt(meta?.lastRefreshedAt ?? null);
       setUnsent(pending.length);
       setHeldPhotos(heldMediaSummary(photos));
+      setDetails(kept);
     })();
 
     return () => {
@@ -186,6 +192,17 @@ const OfflinePage = () => {
           there is signal, and nothing below can be changed from here.
         </p>
       )}
+
+      {/*
+        THE JOB THEY WERE STANDING AT. OFF-DETAIL-1.
+        Most recent first, and only the two most recent: this page is a rescue,
+        not a second job screen, and a technician in a basement is looking for
+        the job in front of them rather than a browsable history.
+      */}
+      {status.showsCachedData &&
+        details.slice(0, 2).map((detail) => (
+          <CachedJobDetailCard key={detail.key} detail={detail} />
+        ))}
 
       {status.showsCachedData ? (
         <CachedJobList jobs={jobs} />

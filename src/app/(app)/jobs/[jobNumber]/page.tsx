@@ -6,6 +6,7 @@ import {
   getJobTypeDefinition,
   canEditJobRecord,
   cancellationReasonLabel,
+  isJobTechnician,
   isJobWorkable,
   refusalAwaitingResolution,
   signatureExceptionLabel,
@@ -44,6 +45,7 @@ import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
 import { useRememberJob } from '@/hooks/useRememberJob';
+import { useCacheJobDetail } from '@/hooks/useCacheJobDetail';
 import { usePendingWork } from '@/hooks/usePendingWork';
 import { usePendingMedia } from '@/hooks/usePendingMedia';
 import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
@@ -120,6 +122,24 @@ const JobDetailPage = ({
   );
   const viewQuery = { ...screenQuery, data: screenQuery.data?.view ?? null };
   const supportQuery = { ...screenQuery, data: screenQuery.data ?? null };
+
+  /*
+   * AND THE JOB'S DETAIL ITSELF, FOR WHEN THE SIGNAL GOES. OFF-DETAIL-1.
+   *
+   * Before this, a tablet with no coverage could show the job LIST and nothing
+   * else: a technician who had the job open and whose application reloaded in
+   * a basement lost sight of the hours they had captured and of which
+   * checklist questions were still outstanding. The copy is written when the
+   * server answers, narrowed to what `toCachedJobDetail` allows, and read back
+   * on the offline page — which says, every time, that it is a copy and when
+   * it arrived.
+   *
+   * Called before this component's early returns, because a hook must be.
+   */
+  useCacheJobDetail(
+    viewQuery.data,
+    viewQuery.data !== null && isJobTechnician(currentUser, viewQuery.data.job),
+  );
 
   /*
    * THE JOB STAYS ON SCREEN WHEN THE CONNECTION GOES. OFF-8.

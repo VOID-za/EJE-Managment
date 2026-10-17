@@ -1,4 +1,4 @@
-import { toCachedJob, type CachedJob } from './cached-job';
+import { toCachedJob, type CachedJob, type CachedJobDetail } from './cached-job';
 import type { JobListRow } from '@/application/job-view';
 
 /**
@@ -26,7 +26,7 @@ import type { JobListRow } from '@/application/job-view';
  */
 
 const DATABASE = 'eje-job-cache';
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const JOB_STORE = 'jobs';
 const META_STORE = 'meta';
 const DEVICE_STORE = 'device';
@@ -34,6 +34,7 @@ const PLACE_STORE = 'place';
 const PENDING_STORE = 'pending';
 const DRAFT_STORE = 'drafts';
 const MEDIA_STORE = 'media';
+const DETAIL_STORE = 'details';
 /** One row, so the key is fixed: this device has one last-confirmed session. */
 const DEVICE_KEY = 'last_confirmed_session';
 /**
@@ -181,6 +182,17 @@ const openDatabase = (): Promise<IDBDatabase> =>
         media.createIndex('userId', 'userId', { unique: false });
         media.createIndex('jobId', 'jobId', { unique: false });
       }
+      /*
+       * ONE JOB'S DETAIL, AS THE SERVER LAST GAVE IT. OFF-DETAIL-1.
+       *
+       * A READ cache like `jobs` and `meta`, not held work — so unlike
+       * `pending`, `drafts` and `media` it IS cleared on sign-out and when
+       * another user signs in, and `clearCachedJobs` names it below.
+       */
+      if (!db.objectStoreNames.contains(DETAIL_STORE)) {
+        const details = db.createObjectStore(DETAIL_STORE, { keyPath: 'key' });
+        details.createIndex('userId', 'userId', { unique: false });
+      }
     };
     open.onsuccess = () => resolve(open.result);
     open.onerror = () => reject(open.error ?? new Error('IndexedDB could not be opened'));
@@ -193,12 +205,13 @@ const withStores = async <T>(
     meta: IDBObjectStore,
     device: IDBObjectStore,
     place: IDBObjectStore,
+    details: IDBObjectStore,
   ) => Promise<T> | T,
 ): Promise<T> => {
   const db = await openDatabase();
   try {
     const transaction = db.transaction(
-      [JOB_STORE, META_STORE, DEVICE_STORE, PLACE_STORE],
+      [JOB_STORE, META_STORE, DEVICE_STORE, PLACE_STORE, DETAIL_STORE],
       mode,
     );
     const result = await work(
@@ -206,6 +219,7 @@ const withStores = async <T>(
       transaction.objectStore(META_STORE),
       transaction.objectStore(DEVICE_STORE),
       transaction.objectStore(PLACE_STORE),
+      transaction.objectStore(DETAIL_STORE),
     );
     await new Promise<void>((resolve, reject) => {
       transaction.oncomplete = () => resolve();
@@ -395,14 +409,18 @@ export const clearLastPlace = async (userId: string): Promise<void> => {
  * technician's jobs "because they might come back" is how one person's work
  * ends up on another person's screen.
  *
- * The transaction below names four stores; `pending`, `drafts` and `media` are
- * not among them, so this cannot reach any of them even by accident.
+ * The transaction below names the read-cache stores only; `pending`, `drafts`
+ * and `media` are not among them, so this cannot reach any of them even by
+ * accident.
  */
 export const clearCachedJobs = async (): Promise<void> => {
   if (!isJobCacheSupported()) return;
-  await withStores('readwrite', (jobs, meta, device, place) => {
+  await withStores('readwrite', (jobs, meta, device, place, details) => {
     jobs.clear();
     meta.clear();
+    // The one job's detail this device kept, which is a copy of what the
+    // server said and therefore costs nothing to lose. OFF-DETAIL-1.
+    details.clear();
     // Including the pointer: a signed-out tablet does not know whose it was.
     device.clear();
     // And where anybody was. A job number is small, and it is still a fact
@@ -420,7 +438,7 @@ export const clearCachedJobs = async (): Promise<void> => {
  */
 export const clearOtherUsers = async (userId: string): Promise<void> => {
   if (!isJobCacheSupported() || userId.length === 0) return;
-  await withStores('readwrite', async (jobs, meta, device, place) => {
+  await withStores('readwrite', async (jobs, meta, device, place, details) => {
     const keys = await request(jobs.getAllKeys());
     const records = await request<CachedJobRecord[]>(
       jobs.getAll() as IDBRequest<CachedJobRecord[]>,
@@ -441,5 +459,53 @@ export const clearOtherUsers = async (userId: string): Promise<void> => {
 
     const places = await request<LastPlace[]>(place.getAll() as IDBRequest<LastPlace[]>);
     for (const entry of places) if (entry.userId !== userId) place.delete(entry.userId);
+
+    // And anybody else's cached job detail. OFF-DETAIL-1: the key carries the
+    // user, so this is the same rule the job list is held to.
+    const kept = await request<CachedJobDetail[]>(
+      details.getAll() as IDBRequest<CachedJobDetail[]>,
+    );
+    for (const entry of kept) if (entry.userId !== userId) details.delete(entry.key);
   });
+};
+
+/**
+ * Keeps one job's detail for this user, replacing whatever was there.
+ *
+ * Called from the job screen when the SERVER has answered, so the record is
+ * only ever a copy of something this user was entitled to read moments ago.
+ */
+export const cacheJobDetail = async (detail: CachedJobDetail): Promise<void> => {
+  if (!isJobCacheSupported() || detail.userId.length === 0) return;
+  await withStores('readwrite', (_jobs, _meta, _device, _place, details) => {
+    details.put(detail);
+  });
+};
+
+/** This user's cached copy of one job, or null. Never anybody else's. */
+export const readCachedJobDetail = async (
+  userId: string,
+  jobNumber: string,
+): Promise<CachedJobDetail | null> => {
+  if (!isJobCacheSupported() || userId.length === 0) return null;
+  return withStores('readonly', async (_jobs, _meta, _device, _place, details) => {
+    const found = await request<CachedJobDetail | undefined>(
+      details.get(`${userId}:${jobNumber}`) as IDBRequest<CachedJobDetail | undefined>,
+    );
+    // The key carries the user id, and this is the second check of it.
+    return found !== undefined && found.userId === userId ? found : null;
+  }).catch(() => null);
+};
+
+/** Every job detail this user has cached, newest first. */
+export const readCachedJobDetails = async (
+  userId: string,
+): Promise<readonly CachedJobDetail[]> => {
+  if (!isJobCacheSupported() || userId.length === 0) return [];
+  const rows = await withStores('readonly', (_jobs, _meta, _device, _place, details) =>
+    request<CachedJobDetail[]>(
+      details.index('userId').getAll(IDBKeyRange.only(userId)) as IDBRequest<CachedJobDetail[]>,
+    ),
+  ).catch(() => [] as CachedJobDetail[]);
+  return [...rows].sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
 };
