@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ApiRequestError } from '@/api/client';
-import { jobs as jobsApi } from '@/api/endpoints';
+import { captures as capturesApi, jobs as jobsApi } from '@/api/endpoints';
 import { classifyRefusal } from '@/lib/pwa/offline-rules';
 import {
   PENDING_SCHEMA_VERSION,
@@ -11,6 +11,7 @@ import {
   isPendingSupported,
   markAttempt,
   markConflict,
+  markReferred,
   markUnsent,
   onPendingWorkChanged,
   readPendingWork,
@@ -51,8 +52,18 @@ export interface PendingWorkResult {
   readonly waiting: readonly PendingWork[];
   /** Captures the server has refused, which need a person. */
   readonly conflicts: readonly PendingWork[];
+  /** Captures the office now has, and is deciding about. BD-15. */
+  readonly referred: readonly PendingWork[];
   readonly flushing: boolean;
   readonly supported: boolean;
+  /**
+   * True where the server would not even consider the work, because there is
+   * no session. BD-16: the remedy is signing in again, not an office decision,
+   * so the queue says so instead of marking the work refused.
+   */
+  readonly blockedBySession: boolean;
+  /** Referrals the office resolved since this screen opened. BD-15. */
+  readonly resolvedCount: number;
   /** Sends everything waiting, oldest first. */
   flush(): Promise<void>;
   /** Puts one refused capture back in the queue, unchanged, and sends. */
@@ -71,6 +82,8 @@ export const usePendingWork = (): PendingWorkResult => {
 
   const [rows, setRows] = useState<readonly PendingWork[]>([]);
   const [flushing, setFlushing] = useState(false);
+  const [blockedBySession, setBlockedBySession] = useState(false);
+  const [resolvedCount, setResolvedCount] = useState(0);
 
   const refresh = useCallback(async () => {
     if (userId.length === 0 || !isPendingSupported()) {
@@ -100,14 +113,80 @@ export const usePendingWork = (): PendingWorkResult => {
     };
   }, [userId]);
 
+  /**
+   * Hands one refused capture to the office. BD-15.
+   *
+   * Called the moment a capture is refused, because at that moment the tablet
+   * demonstrably HAS a connection — the refusal came from the server. If the
+   * referral itself cannot be sent the row stays `conflict` and the next flush
+   * tries again, which is why this reports success rather than throwing.
+   */
+  const refer = useCallback(
+    async (row: PendingWork, refusal: { message: string; code: string | null }) => {
+      try {
+        const referred = await capturesApi.refer({
+          jobId: row.jobId,
+          action: row.action,
+          payload: row.payload,
+          summary: row.summary,
+          capturedAt: row.capturedAt,
+          idempotencyKey: row.idempotencyKey,
+          refusalCode: refusal.code ?? '',
+          refusalMessage: refusal.message,
+        });
+        await markReferred(userId, row.id, referred.referral.id);
+        return true;
+      } catch {
+        // The office has not got it, so the row keeps saying so.
+        return false;
+      }
+    },
+    [userId],
+  );
+
+  /**
+   * Clears local rows the office has finished with. BD-15.
+   *
+   * The referral is the record now, server-side. Once it is resolved the local
+   * row has nothing left to say, so it goes — and the count is kept so the
+   * screen can tell the technician their work was dealt with rather than
+   * having a row vanish silently.
+   */
+  const reconcileReferred = useCallback(
+    async (held: readonly PendingWork[]) => {
+      const referred = held.filter((row) => row.state === 'referred');
+      if (referred.length === 0) return 0;
+
+      const mine = await capturesApi.referrals({ mine: true }).catch(() => null);
+      if (mine === null) return 0;
+
+      const resolved = new Set(
+        mine.rows
+          .filter((entry) => entry.referral.state === 'resolved')
+          .map((entry) => entry.referral.id),
+      );
+      let cleared = 0;
+      for (const row of referred) {
+        if (row.referralId !== undefined && resolved.has(row.referralId)) {
+          await completeWork(userId, row.id);
+          cleared += 1;
+        }
+      }
+      return cleared;
+    },
+    [userId],
+  );
+
   const flush = useCallback(async () => {
     if (userId.length === 0 || !isPendingSupported()) return;
     setFlushing(true);
     try {
-      const queued = (await readPendingWork(userId)).filter((row) => row.state === 'pending');
+      const held = await readPendingWork(userId);
+      const queued = held.filter((row) => row.state === 'pending');
       /** Jobs whose queue has stopped on a refusal during THIS flush. */
       const blocked = new Set<string>();
       let sentAny = false;
+      let sessionBlocked = false;
 
       for (const row of queued) {
         if (blocked.has(row.jobId)) continue;
@@ -118,10 +197,10 @@ export const usePendingWork = (): PendingWorkResult => {
          */
         if (row.schemaVersion > PENDING_SCHEMA_VERSION) continue;
 
-        await markAttempt(row.id);
+        await markAttempt(userId, row.id);
         try {
           await jobsApi.sendCaptured(row.jobId, row.action, row.payload, row.idempotencyKey);
-          await completeWork(row.id);
+          await completeWork(userId, row.id);
           sentAny = true;
         } catch (cause) {
           const code = cause instanceof ApiRequestError ? cause.code : null;
@@ -129,19 +208,53 @@ export const usePendingWork = (): PendingWorkResult => {
             cause instanceof ApiRequestError
               ? cause.message
               : 'The EJE server could not be reached.';
+          const kind = classifyRefusal(code);
 
-          if (classifyRefusal(code) === 'conflict') {
-            await markConflict(row.id, { message, code });
+          if (kind === 'blocked') {
+            /*
+             * NO SESSION, SO THE SERVER SAID NOTHING ABOUT THE WORK. BD-16.
+             * The capture is untouched — not refused, not referred, not
+             * attempted again — and the flush stops: everything after this
+             * would get the same 401. Signing in again is the remedy.
+             */
+            sessionBlocked = true;
+            break;
+          }
+
+          if (kind === 'conflict') {
+            await markConflict(userId, row.id, { message, code });
+            // BD-15: the server has decided, so the capture is retained and
+            // handed to the office rather than left on one tablet.
+            await refer(row, { message, code });
             // Everything else queued against this job would be refused for the
-            // same reason; one row to resolve is better than five.
+            // same reason; one problem referred is better than five.
             blocked.add(row.jobId);
           } else {
-            await markUnsent(row.id, { message, code });
+            await markUnsent(userId, row.id, { message, code });
             // The network is the problem, so nothing further will get through
             // this flush either.
             break;
           }
         }
+      }
+
+      setBlockedBySession(sessionBlocked);
+
+      /*
+       * Captures referred EARLIER that could not be handed over at the time,
+       * and referrals the office has since resolved. Both are skipped entirely
+       * when there is no session: nothing is asked of a server that has just
+       * refused to talk to us.
+       */
+      if (!sessionBlocked) {
+        for (const row of held.filter((entry) => entry.state === 'conflict')) {
+          await refer(row, {
+            message: row.lastError ?? 'The server refused this capture.',
+            code: row.lastErrorCode,
+          });
+        }
+        const cleared = await reconcileReferred(await readPendingWork(userId));
+        if (cleared > 0) setResolvedCount((count) => count + cleared);
       }
 
       // Anything that landed changed the job on the server, so every screen
@@ -151,7 +264,7 @@ export const usePendingWork = (): PendingWorkResult => {
     } finally {
       setFlushing(false);
     }
-  }, [userId, invalidate]);
+  }, [userId, invalidate, refer, reconcileReferred]);
 
   /*
    * SENT WHEN THE SIGNAL COMES BACK, and on arrival at a screen that shows the
@@ -173,26 +286,29 @@ export const usePendingWork = (): PendingWorkResult => {
 
   const retry = useCallback(
     async (id: string) => {
-      await requeueWork(id);
+      await requeueWork(userId, id);
       await flush();
     },
-    [flush],
+    [userId, flush],
   );
 
   const discard = useCallback(
     async (id: string) => {
-      await discardWork(id);
+      await discardWork(userId, id);
       await refresh();
     },
-    [refresh],
+    [userId, refresh],
   );
 
   return {
     rows,
     waiting: rows.filter((row) => row.state === 'pending'),
     conflicts: rows.filter((row) => row.state === 'conflict'),
+    referred: rows.filter((row) => row.state === 'referred'),
     flushing,
     supported: isPendingSupported(),
+    blockedBySession,
+    resolvedCount,
     flush,
     retry,
     discard,

@@ -52,6 +52,7 @@ export const PendingWorkPanel = ({
 
   const waiting = rows.filter((row) => row.state === 'pending');
   const conflicts = rows.filter((row) => row.state === 'conflict');
+  const referred = rows.filter((row) => row.state === 'referred');
 
   return (
     <Card className={className}>
@@ -71,11 +72,18 @@ export const PendingWorkPanel = ({
                 this tablet and <strong className="font-semibold">not on the server</strong>.
               </>
             )}
-            {waiting.length > 0 && conflicts.length > 0 && ' '}
+            {waiting.length > 0 && (conflicts.length > 0 || referred.length > 0) && ' '}
             {conflicts.length > 0 && (
               <>
                 {conflicts.length} {conflicts.length === 1 ? 'was' : 'were'} refused by the server
-                and {conflicts.length === 1 ? 'needs' : 'need'} a decision.
+                and {conflicts.length === 1 ? 'is' : 'are'} being passed to the office.
+              </>
+            )}
+            {referred.length > 0 && (
+              <>
+                {' '}
+                {referred.length} {referred.length === 1 ? 'is' : 'are'} with the office, who will
+                decide what happens to {referred.length === 1 ? 'it' : 'them'}.
               </>
             )}
           </p>
@@ -98,8 +106,17 @@ export const PendingWorkPanel = ({
           <li key={row.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={row.state === 'conflict' ? 'red' : 'amber'} size="sm">
-                  {row.state === 'conflict' ? 'Refused' : 'Not sent'}
+                <Badge
+                  tone={
+                    row.state === 'conflict' ? 'red' : row.state === 'referred' ? 'blue' : 'amber'
+                  }
+                  size="sm"
+                >
+                  {row.state === 'conflict'
+                    ? 'Refused'
+                    : row.state === 'referred'
+                      ? 'With the office'
+                      : 'Not sent'}
                 </Badge>
                 <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
                   {ACTION_LABEL[row.action] ?? row.action}
@@ -118,9 +135,14 @@ export const PendingWorkPanel = ({
               )}
               {row.state === 'conflict' && (
                 <p className="mt-1 text-xs text-steel-500">
-                  The job changed while this tablet was away. Read what the server said, then
-                  either try again — if whatever blocked it has been resolved — or discard this
-                  capture and raise it with the office. Nothing is sent until you choose.
+                  The job changed while this tablet was away. This capture is being passed to the
+                  office, who will decide what happens to it — your work is kept either way.
+                </p>
+              )}
+              {row.state === 'referred' && (
+                <p className="mt-1 text-xs text-steel-500">
+                  The office has this capture and is deciding what happens to it. Nothing further
+                  is sent from this tablet, and your work is not lost.
                 </p>
               )}
             </div>
@@ -136,13 +158,37 @@ export const PendingWorkPanel = ({
                   Try again
                 </Button>
               )}
+              {/*
+                NO RETRY ON A REFERRED CAPTURE. The office has it, and a second
+                attempt from here would either be refused again or race their
+                decision. BD-15 stops the automatic replay; this stops the
+                manual one.
+              */}
               <Button type="button" variant="ghost" onClick={() => setDiscarding(row)}>
-                Discard
+                {row.state === 'referred' ? 'Remove from tablet' : 'Discard'}
               </Button>
             </div>
           </li>
         ))}
       </ul>
+
+      {pending.blockedBySession && (
+        <p
+          role="alert"
+          data-testid="pending-session-blocked"
+          className="mt-3 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3 py-2 text-xs font-medium text-amber-eje-800"
+        >
+          Your session has ended, so nothing can be sent until you sign in again. The work above is
+          kept on this tablet under your own name and nobody else can send it.
+        </p>
+      )}
+
+      {pending.resolvedCount > 0 && (
+        <p className="mt-3 text-xs text-steel-500" data-testid="pending-resolved-notice">
+          The office has dealt with {pending.resolvedCount}{' '}
+          {pending.resolvedCount === 1 ? 'capture' : 'captures'} referred from this tablet.
+        </p>
+      )}
 
       {!online && (
         <p className="mt-3 text-xs text-steel-500">
@@ -153,18 +199,33 @@ export const PendingWorkPanel = ({
 
       <ConfirmDialog
         open={discarding !== null}
-        title="Discard this capture?"
+        title={
+          discarding?.state === 'referred' ? 'Remove it from this tablet?' : 'Discard this capture?'
+        }
         message={
-          <>
-            <p>
-              <span className="font-semibold">{discarding?.summary}</span> has not reached the EJE
-              server, and this tablet is the only place it exists.
-            </p>
-            <p className="mt-2 text-steel-500">
-              Discarding it loses it for good. If the work was really done, capture it again once
-              the job allows it, or tell the office.
-            </p>
-          </>
+          discarding?.state === 'referred' ? (
+            <>
+              <p>
+                <span className="font-semibold">{discarding.summary}</span> is with the office,
+                which has its own record of it.
+              </p>
+              <p className="mt-2 text-steel-500">
+                This only removes it from your tablet. The office&rsquo;s copy, and whatever they
+                decide, are unaffected.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                <span className="font-semibold">{discarding?.summary}</span> has not reached the
+                EJE server, and this tablet is the only place it exists.
+              </p>
+              <p className="mt-2 text-steel-500">
+                Discarding it loses it for good. If the work was really done, capture it again once
+                the job allows it, or tell the office.
+              </p>
+            </>
+          )
         }
         confirmLabel="Discard the capture"
         confirmVariant="danger"

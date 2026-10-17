@@ -9,6 +9,7 @@ import { PostgresDocumentRepository } from './document-repository';
 import { PostgresJobRepository } from './job-repository';
 import { PostgresMachineRepository } from './machine-repository';
 import { PostgresNotificationRepository } from './notification-repository';
+import { PostgresCaptureReferralRepository } from './capture-referral-repository';
 import { PostgresOutboxRepository } from './outbox-repository';
 import { PostgresSettingsRepository } from './settings-repository';
 import { PostgresUserRepository } from './user-repository';
@@ -41,4 +42,5 @@ export const createPostgresRepositories = (db: DatabaseExecutor): RepositoryBund
   availability: new PostgresAvailabilityRepository(db),
   chat: new PostgresChatRepository(db),
   outbox: new PostgresOutboxRepository(db),
+  captureReferrals: new PostgresCaptureReferralRepository(db),
 });

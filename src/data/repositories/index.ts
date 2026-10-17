@@ -1,6 +1,8 @@
 import type {
   ActivityEvent,
   AppNotification,
+  CaptureReferral,
+  CaptureReferralState,
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
@@ -324,6 +326,41 @@ export interface OutboxRepository {
   list(limit?: number): Promise<readonly OutboxMessage[]>;
 }
 
+/**
+ * Captures a tablet held that the server refused, waiting for the office.
+ * BD-15.
+ *
+ * A small interface on purpose. Nothing here applies a capture or decides
+ * anything about a job: the referral is a RECORD that work could not be
+ * applied, and applying it later goes through the ordinary job operations with
+ * the ordinary rules. This stores, finds and updates that record.
+ */
+export interface CaptureReferralRepository {
+  /** Open referrals first, newest first within each state. For the office. */
+  list(filter?: { readonly state?: CaptureReferralState }): Promise<readonly CaptureReferral[]>;
+  /** One technician's own referrals, newest first. Their own work. */
+  listForTechnician(technicianId: UserId): Promise<readonly CaptureReferral[]>;
+  findById(id: string): Promise<CaptureReferral | null>;
+  /**
+   * The referral for a capture this technician already handed over.
+   *
+   * What makes referring idempotent: a tablet that refers the same capture
+   * twice gets back the referral that already exists rather than creating a
+   * second copy of one problem.
+   */
+  findByCapture(technicianId: UserId, idempotencyKey: string): Promise<CaptureReferral | null>;
+  save(referral: CaptureReferral): Promise<CaptureReferral>;
+  /**
+   * Records the office's decision, and only on a referral still OPEN.
+   *
+   * Returns null when the referral was already resolved, which is how two
+   * office users resolving the same one at once is settled: the second is told
+   * it has been dealt with rather than overwriting the first decision. The
+   * condition is in the WRITE — a read-then-write check would be a race.
+   */
+  resolve(referral: CaptureReferral): Promise<CaptureReferral | null>;
+}
+
 /** The full set of repositories the application is wired against. */
 export interface RepositoryBundle {
   readonly jobs: JobRepository;
@@ -338,4 +375,6 @@ export interface RepositoryBundle {
   readonly availability: AvailabilityRepository;
   readonly chat: ChatRepository;
   readonly outbox: OutboxRepository;
+  /** Work a tablet held that the server refused. BD-15. */
+  readonly captureReferrals: CaptureReferralRepository;
 }

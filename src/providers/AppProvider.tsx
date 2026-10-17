@@ -12,7 +12,13 @@ import {
 import type { User, UserId, UserRole } from '@/domain';
 import { auth, type SafeUser } from '@/api/endpoints';
 import { ApiRequestError, onSessionEnded } from '@/api/client';
-import { clearCachedJobs, clearOtherUsers } from '@/lib/pwa/job-cache';
+import {
+  clearCachedJobs,
+  clearOtherUsers,
+  clearUnconfirmedSignOut,
+  markUnconfirmedSignOut,
+  readUnconfirmedSignOut,
+} from '@/lib/pwa/job-cache';
 
 /**
  * The browser's state, which is now almost none of it.
@@ -49,6 +55,12 @@ interface AppContextValue {
   readonly version: number;
   /** Set when the last request could not reach the server. */
   readonly connectionError: string | null;
+  /**
+   * True when this device signed out with no signal and the server has not
+   * been told yet. BD-16: the session is not adopted while this holds, and the
+   * sign-in screen says why rather than looking like an ordinary sign-out.
+   */
+  readonly signOutPending: boolean;
   signIn(email: string, password: string): Promise<{ ok: boolean; message: string | null }>;
   signOut(): Promise<void>;
   /**
@@ -65,6 +77,23 @@ interface AppContextValue {
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
+
+/**
+ * This device was signed out and the server has not been told yet. BD-16.
+ *
+ * A control-flow signal rather than a failure: it means "do not adopt the
+ * session", and the sign-in screen is the correct outcome.
+ */
+class SignedOutOnThisDevice extends Error {
+  /** False while the server still has not been told, which the screen says. */
+  readonly delivered: boolean;
+
+  constructor(delivered: boolean) {
+    super('This tablet was signed out.');
+    this.name = 'SignedOutOnThisDevice';
+    this.delivered = delivered;
+  }
+}
 
 /** The API's safe projection is exactly the domain `User` minus nothing it needs. */
 const toUser = (safe: SafeUser): User => ({
@@ -86,13 +115,38 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
   const [ready, setReady] = useState(false);
   const [version, setVersion] = useState(0);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  /** A sign-out this device made with no signal, still owed to the server. */
+  const [signOutPending, setSignOutPending] = useState(false);
 
-  // Who the server says we are. Asked once on mount; the cookie is what carries
-  // the session across a reload, so there is nothing to restore from storage.
+  /*
+   * Who the server says we are. Asked once on mount; the cookie is what
+   * carries the session across a reload, so there is nothing to restore from
+   * storage.
+   *
+   * EXCEPT ONE THING. BD-16. A sign-out made with no signal could not revoke
+   * the session, and the cookie this page cannot read is still valid — so the
+   * device records that it was signed out, and this is where that record is
+   * honoured: the session is NOT adopted, and the sign-out is finished as soon
+   * as the server can be reached. Without it, a technician who handed the
+   * tablet over after tapping Sign out in a basement was signed straight back
+   * in on the next page load, and the next person had their identity.
+   */
   useEffect(() => {
     let cancelled = false;
-    auth
-      .me()
+    const owed = readUnconfirmedSignOut().catch(() => null);
+
+    owed
+      .then(async (held) => {
+        if (held === null) return auth.me();
+        // Finish what the sign-out could not do. If it still cannot be
+        // delivered the record stays and this device stays signed out.
+        const delivered = await auth
+          .signOut()
+          .then(() => true)
+          .catch(() => false);
+        if (delivered) await clearUnconfirmedSignOut().catch(() => undefined);
+        throw new SignedOutOnThisDevice(delivered);
+      })
       .then((result) => {
         if (cancelled) return;
         setCurrentUser(toUser(result.user));
@@ -100,9 +154,16 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        // Not signed in is the ordinary case on a first visit, and is not an
-        // error to report; anything else is a connection the person should know
-        // about.
+        /*
+         * Not signed in is the ordinary case on a first visit, and is not an
+         * error to report; anything else is a connection the person should
+         * know about. A sign-out this device is still holding is neither — it
+         * is a decision already taken, so the screen simply shows sign-in.
+         */
+        if (cause instanceof SignedOutOnThisDevice) {
+          if (!cause.delivered) setSignOutPending(true);
+          return;
+        }
         if (cause instanceof ApiRequestError && cause.code === 'network') {
           setConnectionError(cause.message);
         }
@@ -151,6 +212,12 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
          * sign-in is the second chance to get this right.
          */
         void clearOtherUsers(result.user.id).catch(() => undefined);
+        /*
+         * A sign-in reached the server, so any sign-out this device was still
+         * holding is moot: the previous session was replaced by this one.
+         */
+        void clearUnconfirmedSignOut().catch(() => undefined);
+        setSignOutPending(false);
         const me = await auth.me().catch(() => null);
         if (me !== null) setBackend(me.backend);
         return { ok: true, message: null };
@@ -168,7 +235,11 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
   const signOut = useCallback(async () => {
     // Told to the server first, so the session is revoked rather than merely
     // forgotten by this browser.
-    await auth.signOut().catch(() => undefined);
+    const signedOutUser = currentUser;
+    const delivered = await auth
+      .signOut()
+      .then(() => true)
+      .catch(() => false);
     setCurrentUser(null);
     setVersion((current) => current + 1);
     /*
@@ -179,7 +250,18 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
      * of value to lose by emptying it.
      */
     await clearCachedJobs().catch(() => undefined);
-  }, []);
+
+    /*
+     * THE SIGN-OUT THE SERVER NEVER HEARD. BD-16. Written after the cache is
+     * emptied, because emptying it takes this store with it. While the record
+     * is there the application will not adopt the session, and the next load
+     * finishes the sign-out.
+     */
+    if (!delivered) {
+      await markUnconfirmedSignOut(signedOutUser?.id ?? '').catch(() => undefined);
+      setSignOutPending(true);
+    }
+  }, [currentUser]);
 
   const adoptSession = useCallback(async () => {
     const result = await auth.me();
@@ -205,6 +287,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       backend,
       version,
       connectionError,
+      signOutPending,
       signIn,
       signOut,
       adoptSession,
@@ -217,6 +300,7 @@ export const AppProvider = ({ children }: { readonly children: ReactNode }) => {
       backend,
       version,
       connectionError,
+      signOutPending,
       signIn,
       signOut,
       adoptSession,

@@ -25,7 +25,7 @@ import { ThemeToggle } from './ThemeToggle';
  * cannot be used to ask which of EJE's addresses are real.
  */
 export const SignInGate = () => {
-  const { signIn, backend } = useApp();
+  const { signIn, backend, signOutPending } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +105,25 @@ export const SignInGate = () => {
               Use the email address EJE issued you. Your role comes from your account.
             </p>
           </div>
+
+          {/*
+            A SIGN-OUT THIS TABLET IS STILL HOLDING. BD-16. Said plainly,
+            because the alternative reads as the application having forgotten
+            who was using it: the previous session has NOT been ended on the
+            server yet, and anything that technician had not sent is still
+            kept — for them, not for whoever signs in next.
+          */}
+          {signOutPending && (
+            <p
+              role="status"
+              data-testid="sign-out-pending"
+              className="mb-4 rounded-[var(--radius-control)] bg-amber-eje-50 px-3 py-2.5 text-xs leading-relaxed text-amber-eje-800"
+            >
+              This tablet was signed out with no connection, so EJE has not been told yet. It
+              will be as soon as there is a signal. Any work the last technician had not sent is
+              still kept on this tablet for them — signing in here will not send it or show it.
+            </p>
+          )}
 
           <form onSubmit={submit} className="space-y-4" noValidate>
             <TextField

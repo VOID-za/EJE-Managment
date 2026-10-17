@@ -21,16 +21,22 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
   const { currentUser, signOut } = useApp();
   const [term, setTerm] = useState('');
   /*
-   * SIGNING OUT WITH UNSENT WORK IS NOT SILENT. OFF-6, CR-02.
+   * SIGNING OUT WITH UNSENT WORK IS NOT SILENT. OFF-6, CR-02, BD-16.
    *
    * The captures stay on the tablet — `clearCachedJobs` deliberately does not
    * touch them — but a technician who signs out believing their hours went to
    * the server has been misled by omission. So the menu asks, names the
-   * number, and says what happens to them.
+   * number, and says what happens to them: retained under their own name,
+   * shown to nobody else, and sent when THEY sign in here again.
+   *
+   * Referred captures are not counted. The office has those (BD-15), so
+   * "has not reached the EJE server" would be untrue of them — and a
+   * technician who has already handed their problem over should not be warned
+   * about it again every time they sign out.
    */
   const pending = usePendingWork();
   const [confirmSignOut, setConfirmSignOut] = useState(false);
-  const unsent = pending.rows.length;
+  const unsent = pending.waiting.length + pending.conflicts.length;
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
@@ -140,9 +146,13 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
               {unsent} {unsent === 1 ? 'capture has' : 'captures have'} not reached the EJE server.
             </p>
             <p className="mt-2 text-steel-500">
-              They stay on this tablet and are sent the next time you sign in here with a
-              connection. Nothing is lost by signing out — but nothing is on the job yet either,
-              so do not tell the office it is captured until it has gone.
+              They stay on this tablet under your name and are sent the next time{' '}
+              <strong>you</strong> sign in here with a connection. The next person to use this
+              tablet will not see them and cannot send them.
+            </p>
+            <p className="mt-2 text-steel-500">
+              Nothing is lost by signing out — but nothing is on the job yet either, so do not
+              tell the office it is captured until it has gone.
             </p>
           </>
         }

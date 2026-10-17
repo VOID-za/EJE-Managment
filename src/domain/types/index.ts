@@ -11,4 +11,5 @@ export * from './library';
 export * from './activity';
 export * from './notification';
 export * from './outbox';
+export * from './capture';
 export * from './settings';

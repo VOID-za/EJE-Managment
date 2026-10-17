@@ -35,7 +35,26 @@ const PENDING_STORE = 'pending';
 /** The shape this build writes. Bumped when the row's meaning changes. */
 export const PENDING_SCHEMA_VERSION = 1;
 
-export type PendingState = 'pending' | 'conflict';
+export type PendingState =
+  /** On this tablet, waiting for a connection. */
+  | 'pending'
+  /**
+   * The server refused it and a person has to decide. BD-15.
+   *
+   * A transient state now: the tablet refers it to the office immediately,
+   * because it has a connection — the refusal came from the server. It stays
+   * only when the referral itself could not be sent, so the next flush tries
+   * again.
+   */
+  | 'conflict'
+  /**
+   * Referred to the office, which has it. BD-15.
+   *
+   * Nothing retries from here: the capture is server-side now and the office
+   * decides. The local row is kept so the technician can see what became of
+   * their work, and is removed once the referral is resolved.
+   */
+  | 'referred';
 
 export interface PendingWork {
   /** This device's own id for the capture. Not a server id. */
@@ -58,6 +77,8 @@ export interface PendingWork {
   /** The server's own words, when it refused. */
   readonly lastError: string | null;
   readonly lastErrorCode: string | null;
+  /** The office's record of this capture, once it has been referred. BD-15. */
+  readonly referralId?: string;
   /** What the device believed about the job when this was captured. */
   readonly context: CaptureContext;
 }
@@ -208,21 +229,53 @@ export const readPendingForJob = async (
 ): Promise<readonly PendingWork[]> =>
   (await readPendingWork(userId)).filter((row) => row.jobId === jobId);
 
-const update = async (id: string, change: (row: PendingWork) => PendingWork): Promise<void> => {
-  if (!isPendingSupported()) return;
+/**
+ * WHOSE ROW THIS IS. BD-16.
+ *
+ * A tablet is shared. Sipho captures three hours in a basement, hands the
+ * tablet to Riaan at the gate, and Riaan signs in — and from that moment the
+ * only honest thing to do with Sipho's unsent hours is keep them and show them
+ * to nobody. `readPendingWork` has always filtered by user, so they are not
+ * DISPLAYED to Riaan; this is the other half, which is that they cannot be
+ * REACHED either.
+ *
+ * Every write below names the user it is acting for, and a row belonging to
+ * somebody else is left exactly as it is. Enforced here rather than in the
+ * screen that lists the rows, because hiding a control is not authorisation:
+ * a row id that leaked into a log, a stale component or a future caller must
+ * not be a way to send, retry, requeue or discard another technician's work.
+ *
+ * WHAT THIS IS NOT. It is not encryption and this file does not pretend
+ * otherwise: the rows are ordinary IndexedDB records, and anyone with the
+ * device and a browser console can read the database directly. It is an
+ * application-level account boundary, and the device-level one is the tablet's
+ * own screen lock and EJE's device policy — see `docs/tablet-installation.md`.
+ * What is NOT here is anything worth stealing twice: no password, no session
+ * cookie and no access token is ever written to this store (OFF-SEC-1).
+ */
+const ownedBy = (userId: string, row: PendingWork | undefined): row is PendingWork =>
+  row !== undefined && row.userId === userId;
+
+const update = async (
+  userId: string,
+  id: string,
+  change: (row: PendingWork) => PendingWork,
+): Promise<void> => {
+  if (!isPendingSupported() || userId.length === 0) return;
   await withStore('readwrite', async (store) => {
     const found = await request<PendingWork | undefined>(
       store.get(id) as IDBRequest<PendingWork | undefined>,
     );
-    if (found === undefined) return;
+    // Somebody else's capture, or none. Either way nothing is written.
+    if (!ownedBy(userId, found)) return;
     store.put(change(found));
   });
   announce();
 };
 
 /** Counts an attempt, keeping the row queued. Used before each send. */
-export const markAttempt = (id: string): Promise<void> =>
-  update(id, (row) => ({ ...row, attempts: row.attempts + 1 }));
+export const markAttempt = (userId: string, id: string): Promise<void> =>
+  update(userId, id, (row) => ({ ...row, attempts: row.attempts + 1 }));
 
 /**
  * The server refused it, and saying it again will not help.
@@ -232,10 +285,11 @@ export const markAttempt = (id: string): Promise<void> =>
  * technician is looking at.
  */
 export const markConflict = (
+  userId: string,
   id: string,
   error: { readonly message: string; readonly code: string | null },
 ): Promise<void> =>
-  update(id, (row) => ({
+  update(userId, id, (row) => ({
     ...row,
     state: 'conflict',
     lastError: error.message,
@@ -244,10 +298,11 @@ export const markConflict = (
 
 /** Nothing was decided — the request did not arrive. It stays queued. */
 export const markUnsent = (
+  userId: string,
   id: string,
   error: { readonly message: string; readonly code: string | null },
 ): Promise<void> =>
-  update(id, (row) => ({
+  update(userId, id, (row) => ({
     ...row,
     state: 'pending',
     lastError: error.message,
@@ -255,8 +310,18 @@ export const markUnsent = (
   }));
 
 /** A conflicted row the technician wants to try once more, as it stands. */
-export const requeueWork = (id: string): Promise<void> =>
-  update(id, (row) => ({ ...row, state: 'pending', lastError: null, lastErrorCode: null }));
+export const requeueWork = (userId: string, id: string): Promise<void> =>
+  update(userId, id, (row) => ({ ...row, state: 'pending', lastError: null, lastErrorCode: null }));
+
+/**
+ * The office has it. BD-15.
+ *
+ * The row stops being the tablet's problem and becomes a record of where the
+ * work went. Nothing replays from this state — that is the point of referring
+ * it — and the row leaves only when the referral is resolved.
+ */
+export const markReferred = (userId: string, id: string, referralId: string): Promise<void> =>
+  update(userId, id, (row) => ({ ...row, state: 'referred', referralId }));
 
 /**
  * The server has it. This is the ONLY automatic removal.
@@ -264,9 +329,15 @@ export const requeueWork = (id: string): Promise<void> =>
  * Called after a 2xx, which — because the key is the capture's own — also
  * covers the replay of a request that had already committed.
  */
-export const completeWork = async (id: string): Promise<void> => {
-  if (!isPendingSupported()) return;
-  await withStore('readwrite', (store) => {
+export const completeWork = async (userId: string, id: string): Promise<void> => {
+  if (!isPendingSupported() || userId.length === 0) return;
+  await withStore('readwrite', async (store) => {
+    const found = await request<PendingWork | undefined>(
+      store.get(id) as IDBRequest<PendingWork | undefined>,
+    );
+    // BD-16: deleting is a write like any other, and the loudest one — a row
+    // belonging to another technician is not this user's to destroy.
+    if (!ownedBy(userId, found)) return;
     store.delete(id);
   });
   announce();
@@ -283,6 +354,8 @@ export const discardWork = completeWork;
 /** Emptied only where a technician's device is being wiped deliberately. */
 export const clearPendingWork = async (userId: string): Promise<void> => {
   if (!isPendingSupported() || userId.length === 0) return;
+  // Already owner-scoped: `readPendingWork` answers this user's rows and no
+  // others, so a wipe cannot reach past the account it was asked for.
   const rows = await readPendingWork(userId);
   await withStore('readwrite', (store) => {
     for (const row of rows) store.delete(row.id);

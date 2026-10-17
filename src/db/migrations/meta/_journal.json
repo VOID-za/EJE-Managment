@@ -71,6 +71,13 @@
       "when": 1790516112512,
       "tag": "0009_media_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792265202437,
+      "tag": "0010_capture_referrals",
+      "breakpoints": true
     }
   ]
 }

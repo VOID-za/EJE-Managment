@@ -1,4 +1,6 @@
 import type {
+  CaptureReferral,
+  CaptureReferralState,
   ActivityEvent,
   AppNotification,
   AvailabilityRecord,
@@ -44,6 +46,7 @@ import type {
   RepositoryBundle,
   SettingsRepository,
   UserRepository,
+  CaptureReferralRepository,
 } from '../repositories';
 import type { DemoDatabase } from './store';
 
@@ -153,6 +156,16 @@ class DemoJobRepository implements JobRepository {
     return Promise.resolve(match ?? null);
   }
 
+  /**
+   * Stores the job, and records who is on it.
+   *
+   * The participation is written HERE, with the job, for the same reason the
+   * PostgreSQL repository writes it in `recordParticipation`: who is on a job
+   * is a fact the operations have already established, and this only makes sure
+   * the record of it survives the next reassignment. Append-only — a crew
+   * member removed from the job keeps the pair, because the pair is the
+   * history.
+   */
   save(job: Job): Promise<Job> {
     this.context.commit((draft) => {
       const index = draft.jobs.findIndex((candidate) => candidate.id === job.id);
@@ -160,6 +173,23 @@ class DemoJobRepository implements JobRepository {
         draft.jobs = [job, ...draft.jobs];
       } else {
         draft.jobs = draft.jobs.map((candidate) => (candidate.id === job.id ? job : candidate));
+      }
+
+      const crew = [
+        ...(job.primaryTechnicianId === null ? [] : [job.primaryTechnicianId as string]),
+        ...job.additionalTechnicianIds.map((userId) => userId as string),
+      ];
+      const added = crew.filter(
+        (userId) =>
+          !draft.jobParticipation.some(
+            (entry) => entry.jobId === (job.id as string) && entry.userId === userId,
+          ),
+      );
+      if (added.length > 0) {
+        draft.jobParticipation = [
+          ...draft.jobParticipation,
+          ...added.map((userId) => ({ jobId: job.id as string, userId })),
+        ];
       }
     });
     return Promise.resolve(job);
@@ -180,22 +210,28 @@ class DemoJobRepository implements JobRepository {
   }
 
   /**
-   * Every job this person has ever been on.
+   * Every job this person has ever been on, whether or not they still are.
    *
-   * The demo store keeps no participation history — it is a fixture, not a
-   * system of record — so this answers from the CURRENT assignment, which is
-   * the closest true statement it can make. The PostgreSQL repository reads
-   * `job_participants`, which is what survives a reassignment, and the
-   * visibility tests that matter run against it.
+   * Read from the participation history rather than the current assignment,
+   * which is the same contract the PostgreSQL repository satisfies from
+   * `job_participants`. It used to answer from the crew the job carries NOW,
+   * and the difference is not academic: a technician whose job was reassigned
+   * lost access to the work they had captured on it, and — once BD-15 gave
+   * them somewhere to send a refused capture — could no longer hand the office
+   * the hours the reassignment itself had caused the server to refuse.
    */
   listParticipatedJobs(userId: UserId): Promise<readonly Job[]> {
+    const data = this.context.read();
+    const everOn = new Set(
+      data.jobParticipation.filter((entry) => entry.userId === userId).map((entry) => entry.jobId),
+    );
     return Promise.resolve(
-      this.context
-        .read()
-        .jobs.filter(
-          (job) =>
-            job.primaryTechnicianId === userId || job.additionalTechnicianIds.includes(userId),
-        ),
+      data.jobs.filter(
+        (job) =>
+          everOn.has(job.id as string) ||
+          job.primaryTechnicianId === userId ||
+          job.additionalTechnicianIds.includes(userId),
+      ),
     );
   }
 }
@@ -748,6 +784,117 @@ class DemoSettingsRepository implements SettingsRepository {
   }
 }
 
+/**
+ * Referred captures, in the demonstration snapshot. BD-15.
+ *
+ * Same contract as PostgreSQL's, including the two rules that matter: a second
+ * referral of the same capture updates the one that exists rather than adding
+ * another, and `resolve` only ever acts on a referral that is still open — so a
+ * demonstration behaves the way the real thing does when two people reach for
+ * the same one.
+ */
+class DemoCaptureReferralRepository implements CaptureReferralRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  list(filter: { readonly state?: CaptureReferralState } = {}): Promise<
+    readonly CaptureReferral[]
+  > {
+    const all = this.context.read().captureReferrals;
+    const matching =
+      filter.state === undefined ? all : all.filter((entry) => entry.state === filter.state);
+    // Open first — that is what the office acts on — then newest first.
+    return Promise.resolve(
+      [...matching].sort((left, right) =>
+        left.state === right.state
+          ? right.referredAt.localeCompare(left.referredAt)
+          : left.state === 'open'
+            ? -1
+            : 1,
+      ),
+    );
+  }
+
+  listForTechnician(technicianId: UserId): Promise<readonly CaptureReferral[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .captureReferrals.filter((entry) => entry.technicianId === technicianId)
+        .sort((left, right) => right.referredAt.localeCompare(left.referredAt)),
+    );
+  }
+
+  findById(id: string): Promise<CaptureReferral | null> {
+    return Promise.resolve(
+      this.context.read().captureReferrals.find((entry) => entry.id === id) ?? null,
+    );
+  }
+
+  findByCapture(technicianId: UserId, idempotencyKey: string): Promise<CaptureReferral | null> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .captureReferrals.find(
+          (entry) =>
+            entry.technicianId === technicianId && entry.idempotencyKey === idempotencyKey,
+        ) ?? null,
+    );
+  }
+
+  save(referral: CaptureReferral): Promise<CaptureReferral> {
+    const existing = this.context
+      .read()
+      .captureReferrals.find(
+        (entry) =>
+          entry.technicianId === referral.technicianId &&
+          entry.idempotencyKey === referral.idempotencyKey,
+      );
+
+    // Already dealt with: the office's decision stands, and a tablet that never
+    // heard the answer cannot rewrite it.
+    if (existing !== undefined && existing.state === 'resolved') return Promise.resolve(existing);
+
+    if (existing !== undefined) {
+      const updated: CaptureReferral = {
+        ...existing,
+        refusalCode: referral.refusalCode,
+        refusalMessage: referral.refusalMessage,
+        summary: referral.summary,
+      };
+      this.context.commit((draft) => {
+        draft.captureReferrals = draft.captureReferrals.map((entry) =>
+          entry.id === existing.id ? updated : entry,
+        );
+      });
+      return Promise.resolve(updated);
+    }
+
+    this.context.commit((draft) => {
+      draft.captureReferrals = [...draft.captureReferrals, referral];
+    });
+    return Promise.resolve(referral);
+  }
+
+  resolve(referral: CaptureReferral): Promise<CaptureReferral | null> {
+    const stored = this.context.read().captureReferrals.find((entry) => entry.id === referral.id);
+    if (stored === undefined || stored.state !== 'open') return Promise.resolve(null);
+
+    const resolved: CaptureReferral = {
+      ...stored,
+      state: 'resolved',
+      resolvedBy: referral.resolvedBy,
+      resolvedAt: referral.resolvedAt,
+      resolution: referral.resolution,
+      resolutionNote: referral.resolutionNote,
+    };
+    this.context.commit((draft) => {
+      draft.captureReferrals = draft.captureReferrals.map((entry) =>
+        entry.id === resolved.id ? resolved : entry,
+      );
+    });
+    return Promise.resolve(resolved);
+  }
+}
+
 export const createDemoRepositories = (context: DemoContext): RepositoryBundle => ({
   jobs: new DemoJobRepository(context),
   customers: new DemoCustomerRepository(context),
@@ -757,6 +904,7 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   checklistTemplates: new DemoChecklistTemplateRepository(context),
   activity: new DemoActivityRepository(context),
   outbox: new DemoOutboxRepository(context),
+  captureReferrals: new DemoCaptureReferralRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),

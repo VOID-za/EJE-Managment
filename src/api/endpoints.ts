@@ -9,6 +9,7 @@ import type {
   Contact,
   Customer,
   Job,
+  CaptureReferral,
   Machine,
   MediaVisibility,
   Site,
@@ -19,6 +20,7 @@ import type {
   User,
 } from '@/domain';
 import type { ActivityFeed } from '@/application/activity-read';
+import type { CaptureReferralRow } from '@/application/capture-referral-view';
 import type { CalendarData } from '@/application/calendar';
 import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs';
 import type { ConversationSummary } from '@/application/chat-operations';
@@ -465,6 +467,40 @@ export const customers = {
     command<RemovalOutcome>(`/api/contacts/${segment(contactId)}/remove`),
 };
 
+/**
+ * WORK A TABLET COULD NOT GET ONTO A JOB. BD-15.
+ *
+ * Three calls: a tablet hands over a capture the server refused, anybody reads
+ * the referrals they are entitled to (their own, or all of them for the
+ * office), and the office records a decision. The server decides which of those
+ * the caller may do; these only ask.
+ */
+export const captures = {
+  refer: (input: {
+    readonly jobId: string;
+    readonly action: string;
+    readonly payload: Readonly<Record<string, unknown>>;
+    readonly summary: string;
+    readonly capturedAt: string;
+    readonly idempotencyKey: string;
+    readonly refusalCode: string;
+    readonly refusalMessage: string;
+  }) => command<{ referral: CaptureReferral }>('/api/captures/referrals', input),
+  /** `mine` for a technician's own; omitted for the office's whole list. */
+  referrals: (options: { readonly mine?: boolean; readonly state?: string } = {}) =>
+    query<{ rows: readonly CaptureReferralRow[] }>(
+      `/api/captures/referrals${search({
+        mine: options.mine === true ? '1' : undefined,
+        state: options.state,
+      })}`,
+    ),
+  resolve: (referralId: string, decision: { resolution: string; note?: string }) =>
+    command<{ referral: CaptureReferral }>(
+      `/api/captures/referrals/${segment(referralId)}/resolve`,
+      decision,
+    ),
+};
+
 export const machines = {
   create: (input: unknown) => command<Machine>('/api/machines', input),
   update: (machineId: string, input: unknown) =>
@@ -479,7 +515,12 @@ export const machines = {
   addPhoto: (
     machineId: string,
     file: File,
-    options: { readonly caption?: string; readonly idempotencyKey?: string } = {},
+    options: {
+      readonly caption?: string;
+      readonly idempotencyKey?: string;
+      /** The job that authorises a technician's photograph. BD-14. */
+      readonly jobId?: string;
+    } = {},
   ) =>
     apiUpload<{
       approval: Machine['approval'];
@@ -494,7 +535,7 @@ export const machines = {
       `/api/machines/${segment(machineId)}/photos`,
       file,
       options.caption ?? '',
-      {},
+      { ...(options.jobId === undefined ? {} : { jobId: options.jobId }) },
       options.idempotencyKey,
     ),
   /** Where one machine photograph is read back from. Authorised per request. */

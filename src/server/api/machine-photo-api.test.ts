@@ -10,13 +10,15 @@ import { ApiTestClient, DEMO_USERS, signedInAs, startTestServer } from '@/test/a
  * size the client made up and call `storage.put(…, null)`, so the register
  * displayed photographs that did not exist.
  *
- * (2) NOTHING ABOUT THE REGISTER'S PERMISSIONS WAS WIDENED to make that
- * possible. A technician may not change an official machine record — that is
- * the change-request process — so a technician may photograph only a machine
- * THEY raised, while it is still awaiting approval. On an approved machine they
- * are refused, and whether that should ever be allowed is a business decision
- * nobody has made (MACH-PHOTO-2). A photograph never approves a machine and
- * never alters its data.
+ * (2) NOTHING ABOUT THE REGISTER'S PERMISSIONS TO *CHANGE* A MACHINE WAS
+ * WIDENED. *Amended 18 October 2026: EJE answered BD-14* — a technician may
+ * photograph an official machine when the photograph belongs to their work, and
+ * "belongs to their work" is a fact the server checks rather than a claim the
+ * client makes: the request names a job, and that job must be on this machine,
+ * assigned to this actor, and still live. Everything else is unchanged and
+ * asserted below: a technician still cannot edit a machine, cannot approve one,
+ * and cannot photograph a machine they have no job on. A photograph never
+ * alters a field and never alters approval.
  */
 const png = (label: string): Uint8Array => {
   const text = new TextEncoder().encode(label);
@@ -135,6 +137,51 @@ describe('photographing a machine', () => {
     expect(uploaded.data.photos[0]?.sizeBytes).toBe(bytes.length);
   });
 
+  /**
+   * A live job for Sipho on a machine that is ALREADY on the official register.
+   *
+   * The seeded `machine-abc-lv40` is approved, which is the point: BD-14 is
+   * about official machines, and a fixture that used a pending one would prove
+   * nothing.
+   */
+  const jobOnSeededMachine = async (): Promise<{
+    machineId: string;
+    jobId: string;
+    jobNumber: string;
+  }> => {
+    const siphoId =
+      (
+        await master.get<{ users: readonly { id: string; email: string }[] }>('/api/admin')
+      ).data.users.find((user) => user.email === DEMO_USERS.technician)?.id ?? '';
+
+    const created = await master.post<{ id: string; jobNumber: string; machineId: string }>(
+      '/api/jobs',
+      {
+        customerId: 'cust-abc',
+        siteId: 'site-abc-jhb',
+        contactId: 'contact-abc-jhb',
+        machineId: 'machine-abc-lv40',
+        jobType: 'breakdown',
+        priority: 'urgent',
+        scheduledDate: null,
+        scheduledEndDate: null,
+        orderNumber: 'PO-77990',
+        referenceNumber: '',
+        faultDescription: 'Spindle drive tripping.',
+        primaryTechnicianId: siphoId,
+        courierCollection: false,
+        deliveryNote: '',
+      },
+    );
+    expect(created.status).toBe(200);
+    expect((await sipho.post(`/api/jobs/${created.data.id}/accept`)).status).toBe(200);
+    return {
+      machineId: 'machine-abc-lv40',
+      jobId: created.data.id,
+      jobNumber: created.data.jobNumber,
+    };
+  };
+
   /* -- the technician's own submission ------------------------------------- */
 
   it('lets a technician photograph a machine THEY raised, while it awaits approval', async () => {
@@ -152,19 +199,112 @@ describe('photographing a machine', () => {
     expect(uploaded.data.approval).toBe('pending_approval');
   });
 
-  it('refuses a technician photographing an APPROVED machine — MACH-PHOTO-2', async () => {
+  it('refuses a technician photographing an official machine with NO job on it', async () => {
     const official = await raise(master, 'QT200-OFFICIAL-4');
 
     const response = await photograph(sipho, official.data.id);
 
     /*
-     * 403 AND NOT 422, and the distinction is the project's own: 403 means
-     * permanent for this actor, 422 means not yet. A technician photographing
-     * an official machine is not a thing that becomes possible later — it is a
-     * decision nobody has made (MACH-PHOTO-2) — so the refusal says so.
+     * BD-14 allows the photograph when it belongs to the technician's work. It
+     * does not allow photographing any machine in the register, and this is
+     * where that line sits: no job named, no photograph.
+     *
+     * 403 and not 422, which is the project's own distinction: 403 means
+     * permanent for this actor as things stand, 422 means not yet.
      */
     expect(response.status).toBe(403);
-    expect(JSON.stringify(response.raw)).toMatch(/official register|change request/iu);
+    expect(JSON.stringify(response.raw)).toMatch(/job of yours|change request/iu);
+  });
+
+  /* -- BD-14: the technician's own live job on that machine ---------------- */
+
+  it('LETS a technician photograph an official machine from a live job of theirs', async () => {
+    // The case BD-14 decided: the technician is standing at the machine
+    // because a job of theirs is on it.
+    const { machineId, jobId } = await jobOnSeededMachine();
+    const bytes = png('rating plate, from the job');
+
+    const uploaded = await photograph(sipho, machineId, {
+      bytes,
+      fields: { jobId, caption: 'Rating plate' },
+    });
+
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.data.photos.at(-1)?.caption).toBe('Rating plate');
+    // The official record is untouched: still approved, nothing else changed.
+    expect(uploaded.data.approval).toBe('approved');
+
+    const download = await sipho.download(
+      `/api/machines/${machineId}/photos/${uploaded.data.photos.at(-1)?.id ?? ''}`,
+    );
+    expect(download.status).toBe(200);
+    expect(Array.from(download.bytes)).toEqual(Array.from(bytes));
+  });
+
+  it('refuses a job id that is not on THIS machine', async () => {
+    const { jobId } = await jobOnSeededMachine();
+    const other = await raise(master, 'QT200-ELSEWHERE-1');
+
+    // A real job of this technician's, and a real machine, which are not
+    // related. Naming a job does not make a photograph relevant to it.
+    const response = await photograph(sipho, other.data.id, { fields: { jobId } });
+    expect(response.status).toBe(403);
+  });
+
+  it('refuses a job id belonging to ANOTHER technician', async () => {
+    const { machineId, jobId } = await jobOnSeededMachine();
+    const riaan = await signedInAs(DEMO_USERS.otherTechnician);
+
+    const response = await photograph(riaan, machineId, { fields: { jobId } });
+    expect(response.status).toBe(403);
+  });
+
+  it('refuses a job that has been closed or cancelled', async () => {
+    const { machineId, jobId, jobNumber } = await jobOnSeededMachine();
+    // Cancellation is not available on an in-progress job, so this uses the
+    // one route out that IS: the technician hands it back to the pool, which
+    // takes them off the crew.
+    expect(
+      (
+        await sipho.post(`/api/jobs/${jobId}/transfer_to_open`, {
+          reason: 'requires_another_technician',
+          description: 'Needs the drive specialist.',
+        })
+      ).status,
+    ).toBe(200);
+
+    const response = await photograph(sipho, machineId, { fields: { jobId } });
+    expect(response.status).toBe(403);
+    expect(jobNumber.length).toBeGreaterThan(0);
+  });
+
+  it('records the photograph against the job that authorised it', async () => {
+    const { machineId, jobId, jobNumber } = await jobOnSeededMachine();
+    await photograph(sipho, machineId, { fields: { jobId, caption: 'Nameplate' } });
+
+    const view = await sipho.get<{
+      activity: readonly { type: string; detail: string; summary: string }[];
+    }>(`/api/jobs/${jobNumber}`);
+
+    const event = view.data.activity.find((entry) => entry.type === 'machine_photographed');
+    expect(event, JSON.stringify(view.data.activity.map((entry) => entry.type))).toBeDefined();
+    // `machine_photographed`, NOT `machine_updated`: the record did not change.
+    expect(event?.detail).toContain(jobNumber);
+  });
+
+  it('still refuses a technician CHANGING the machine they just photographed', async () => {
+    // BD-14 granted a photograph and nothing else. This is the assertion that
+    // keeps it that way.
+    const { machineId, jobId } = await jobOnSeededMachine();
+    expect((await photograph(sipho, machineId, { fields: { jobId } })).status).toBe(200);
+
+    const edit = await sipho.post(`/api/machines/${machineId}/update`, {
+      ...NEW_MACHINE,
+      serialNumber: 'HA-ST20-33907',
+      notes: 'Technician changed this.',
+    });
+    expect(edit.status).not.toBe(200);
+    expect(edit.status).toBeLessThan(500);
   });
 
   it('refuses a technician photographing ANOTHER technician’s pending machine', async () => {
@@ -173,7 +313,8 @@ describe('photographing a machine', () => {
 
     const response = await photograph(riaan, theirs.data.id);
     expect(response.status).toBe(403);
-    expect(JSON.stringify(response.raw)).toMatch(/added by somebody else/iu);
+    // Not their submission, and no job of theirs on it either.
+    expect(JSON.stringify(response.raw)).toMatch(/job of yours|added yourself/iu);
   });
 
   it('still refuses a technician CHANGING the machine record', async () => {

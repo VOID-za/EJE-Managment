@@ -52,6 +52,25 @@ export const NAVIGATION: readonly NavigationItem[] = [
     capability: 'jobs.viewAll',
     group: 'work',
   },
+  /**
+   * Work a tablet could not get onto a job. THE OFFICE. BD-15.
+   *
+   * In *Work* rather than *System* because that is what it is: hours a
+   * technician worked that are not on a job yet, waiting for somebody to
+   * decide. It is not an administrative setting and it is not a log.
+   *
+   * The capability is the one the READ enforces (`captures.resolveReferral`),
+   * for the same reason Activity's and the Calendar's are: offering a
+   * technician a screen that then refuses them is how "Something went wrong"
+   * ends up on a sidebar item they were invited to click.
+   */
+  {
+    href: '/captures',
+    label: 'Field Captures',
+    icon: 'clock',
+    capability: 'captures.resolveReferral',
+    group: 'work',
+  },
   {
     href: '/customers',
     label: 'Customers',

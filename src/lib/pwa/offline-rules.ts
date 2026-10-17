@@ -172,18 +172,27 @@ export const canCaptureOffline = (
 };
 
 /**
- * How a server refusal of queued work is classified.
+ * How a server refusal of queued work is classified. OFF-9, BD-15, BD-16.
  *
- * `conflict` means the server said no and saying it again will not help: the
- * job was signed, closed, cancelled or reassigned, the actor may no longer
- * touch it, or the details are not valid. A person has to decide what happens
- * to that capture, which is why it is never retried automatically and never
- * discarded on the technician's behalf (OFF-9, CR-02).
+ * `retry` — nothing was decided. The request did not arrive, or the server had
+ * a fault, so the work stays queued exactly as it was.
  *
- * `retry` means nothing was decided — the request did not arrive, or the server
- * had a fault — so the work stays queued exactly as it was.
+ * `blocked` — the server would not even consider it, because there is no
+ * session. *Added 18 October 2026 for BD-16, and it is a defect fix:* a 401
+ * used to be classified as a conflict, which meant a technician whose session
+ * expired mid-flush had their captures marked as refused by the server and
+ * referred to the office — when in fact the server had said nothing about them
+ * at all. The work now stays queued, untouched, and the flush stops: the
+ * remedy is signing in again, not an office decision.
+ *
+ * `conflict` — the server considered it and said no, and saying it again will
+ * not help: the job was signed, closed, cancelled or reassigned, this actor may
+ * no longer touch it, or the details are not valid. A person has to decide what
+ * happens to that capture, which is why it is never retried automatically and
+ * never discarded on the technician's behalf (OFF-9, CR-02). Under BD-15 it is
+ * referred to the office.
  */
-export type RefusalKind = 'conflict' | 'retry';
+export type RefusalKind = 'conflict' | 'retry' | 'blocked';
 
 export const classifyRefusal = (code: string | null): RefusalKind => {
   switch (code) {
@@ -192,11 +201,18 @@ export const classifyRefusal = (code: string | null): RefusalKind => {
     case 'rate_limited':
     case null:
       return 'retry';
+    case 'unauthenticated':
+      /*
+       * THE SESSION, NOT THE CAPTURE. A revoked or expired session is a fact
+       * about who is holding the tablet, and the work it is holding is still
+       * perfectly good — see BD-16, which is why this is its own kind.
+       */
+      return 'blocked';
     default:
       /*
        * Everything else is the server having decided: 403 (not this actor's to
        * do), 422 (the workflow refuses it), 409 (somebody wrote first), 404
-       * (the job is no longer visible to them), 401 (the session is over).
+       * (the job is no longer visible to them).
        */
       return 'conflict';
   }

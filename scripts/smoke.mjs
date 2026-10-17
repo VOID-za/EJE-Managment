@@ -4265,6 +4265,477 @@ await step('signing out leaves nothing of that technician on the tablet', async 
   }
 });
 
+/**
+ * A job this signed-in technician can capture work on, right now.
+ *
+ * Found rather than hard-coded: by the time these checks run, earlier steps
+ * have transferred, accepted and closed their way through the seeded jobs, so
+ * a job number written here would be a different job's by the end of the file.
+ * The technician's own in-progress work comes first; failing that, one is
+ * accepted out of the open pool through the real route, which is how a
+ * technician gets a job in the first place.
+ *
+ * A parts collection is excluded: it captures no labour at all (CR-12), so it
+ * is the one job type on which this suite's capture would be refused for a
+ * reason that has nothing to do with what is being tested.
+ */
+const workableJob = async (target) => {
+  const found = await target.evaluate(async () => {
+    const read = async (path) => {
+      const response = await fetch(path, { headers: { accept: 'application/json' } });
+      if (!response.ok) throw new Error(`${path} answered ${response.status}`);
+      return response.json();
+    };
+    const me = (await read('/api/auth/me')).data.user;
+    const rows = ((await read('/api/jobs')).data.rows ?? []).map((row) => row.job);
+    const suitable = (job) => job.jobType !== 'parts';
+
+    const mine = rows.find(
+      (job) => job.primaryTechnicianId === me.id && job.status === 'in_progress' && suitable(job),
+    );
+    if (mine !== undefined) return { id: mine.id, jobNumber: mine.jobNumber };
+
+    const open = rows.find(
+      (job) => job.status === 'open' && job.primaryTechnicianId === null && suitable(job),
+    );
+    if (open === undefined) return null;
+    const accepted = await fetch(`/api/jobs/${open.id}/accept`, { method: 'POST' });
+    if (!accepted.ok) return null;
+    return { id: open.id, jobNumber: open.jobNumber };
+  });
+  if (found === null) throw new Error('no job this technician can capture work on');
+  return found;
+};
+
+/* ---- BD-14: photographing the machine from the job you are on ----------- */
+
+await step('a technician photographs the machine from their own job', async () => {
+  /*
+   * BD-14, MACH-PHOTO-2. The register stays out of reach (asserted above); the
+   * path EJE approved is the technician standing at the machine, on their own
+   * job. The server checks the job is on this machine, is theirs and is live —
+   * `machine-photo-api.test.ts` proves the refusals. This proves the path
+   * exists at all, and that the panel says what it does NOT do.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  const mine = await workableJob(page);
+
+  await page.goto(`${BASE}/jobs/${mine.jobNumber}`, { waitUntil: 'networkidle' });
+  const open = page.getByTestId('machine-photo-from-job-open');
+  await open.waitFor({ timeout: 20000 });
+  await open.click();
+
+  const panel = await page.locator('main').innerText();
+  if (!/does\s+not\s+change the machine record/i.test(panel)) {
+    throw new Error('the panel does not say a photograph changes nothing');
+  }
+
+  await page.getByLabel('Caption for the machine photograph').fill('Rating plate');
+  await page.setInputFiles(
+    '[data-testid="machine-from-job-photo-gallery"]',
+    { name: 'plate.png', mimeType: 'image/png', buffer: pngBytes('plate') },
+  );
+  await page.getByTestId('machine-photo-count').waitFor({ timeout: 25000 });
+  const count = await page.getByTestId('machine-photo-count').innerText();
+  if (!/photograph/.test(count)) throw new Error(`the count reads ${count}`);
+
+  // And the register is still refused: a photograph is not a way in. The
+  // machine record itself is unreachable from here.
+  await page.goto(`${BASE}/machines`, { waitUntil: 'networkidle' });
+  await page.getByText('Your role does not include this screen', { exact: false }).first().waitFor({
+    timeout: 20000,
+  });
+});
+
+/* ---- BD-15: a capture the job will not take, and the office's decision --- */
+
+await step('a capture the job refuses is referred to the office, not lost', async () => {
+  /*
+   * BD-15, end to end, in a real browser.
+   *
+   * Riaan captures an hour offline. While the tablet is away the office moves
+   * the job to somebody else — which is the commonest reason a late capture is
+   * refused. On reconnection the server refuses it, the tablet hands it to the
+   * office instead of retrying for ever, and the panel says who has it.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  const { jobNumber } = await workableJob(page);
+
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Labour & Parts' }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().waitFor({ timeout: 15000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByLabel('Or enter hours').fill('1.5');
+  await dialog.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByTestId('pending-work-heading').waitFor({ timeout: 15000 });
+
+  /*
+   * The office, in its own browser, while the tablet is still offline — the
+   * situation this feature exists for. A second context so the tablet's
+   * session, cache and offline state are untouched.
+   */
+  const officeContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const office = await officeContext.newPage();
+  try {
+    await signInAs(office, 'Elmarie Coetzee', { base: BASE });
+    const moved = await office.evaluate(async (number) => {
+      const view = await fetch(`/api/jobs/${number}`, { headers: { accept: 'application/json' } });
+      if (!view.ok) return { ok: false, why: `read ${view.status}` };
+      const jobId = (await view.json()).data.view.job.id;
+
+      const people = await fetch('/api/admin', { headers: { accept: 'application/json' } });
+      if (!people.ok) return { ok: false, why: `admin ${people.status}` };
+      const users = (await people.json()).data.users;
+      const other = users.find(
+        (user) => user.role === 'technician' && user.email !== 'riaan.vanwyk@eje-demo.co.za',
+      );
+      if (other === undefined) return { ok: false, why: 'no other technician' };
+
+      /*
+       * Reassignment, not a transfer: a transfer checks the receiving
+       * technician's availability, and half the seeded technicians are on
+       * leave on the day this suite runs. What matters here is only that the
+       * job stops being Riaan's while his tablet is away.
+       */
+      const response = await fetch(`/api/jobs/${jobId}/assign_primary`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ technicianId: other.id }),
+      });
+      const body = response.ok ? null : await response.text();
+      return { ok: response.ok, why: `assign ${response.status} ${body ?? ''}`, jobId };
+    }, jobNumber);
+    if (!moved.ok) throw new Error(`the office could not move the job: ${moved.why}`);
+
+    // The signal comes back. The server refuses the capture, and the tablet
+    // refers it rather than keeping it to itself or trying again for ever.
+    await page.context().setOffline(false);
+    offlineExpected = false;
+    await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+
+    await page.waitForFunction(
+      () =>
+        new Promise((resolve) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => resolve(false);
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result.some((row) => row.state === 'referred'));
+            };
+            request.onerror = () => resolve(false);
+          };
+        }),
+      undefined,
+      { timeout: 40000 },
+    );
+
+    const held = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result);
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    const referred = held.filter((row) => row.state === 'referred');
+    if (referred.length !== 1) throw new Error(`${referred.length} referred rows, expected 1`);
+    if (typeof referred[0].referralId !== 'string' || referred[0].referralId.length === 0) {
+      throw new Error('a referred capture carries no referral id');
+    }
+    // The office's record was made under the capture's OWN key, which is what
+    // keeps the attempt traceable to the work.
+    if (typeof referred[0].idempotencyKey !== 'string' || referred[0].idempotencyKey.length === 0) {
+      throw new Error('the referred capture lost its idempotency key');
+    }
+
+    /*
+     * THE OFFICE'S SCREEN. The capture is on it, named, with the server's own
+     * refusal — and applying it runs the ordinary capture, so the hours land
+     * on the job.
+     */
+    await office.goto(`${BASE}/captures`, { waitUntil: 'networkidle' });
+    const list = office.getByTestId('open-referrals');
+    await list.waitFor({ timeout: 25000 });
+    const waiting = await list.innerText();
+    if (!waiting.includes(jobNumber)) throw new Error(`the office list omits ${jobNumber}`);
+    if (!/1\.5/.test(waiting)) throw new Error(`the office list omits the hours: ${waiting}`);
+    if (!/Riaan/.test(waiting)) throw new Error('the office list does not name the technician');
+    if (!/not .*(assigned|capture)/i.test(waiting)) {
+      throw new Error(`the server's refusal is not shown: ${waiting}`);
+    }
+    await office.screenshot({ path: `${shots}/46-office-captures.png`, fullPage: false });
+
+    await office.getByRole('button', { name: 'Decide' }).first().click();
+    await office.getByRole('dialog').waitFor({ timeout: 10000 });
+    await office.getByRole('button', { name: 'Record the decision' }).click();
+    await office.getByTestId('resolved-referrals').waitFor({ timeout: 25000 });
+    const dealt = await office.getByTestId('resolved-referrals').innerText();
+    if (!/Applied/.test(dealt)) throw new Error(`the decision was not recorded: ${dealt}`);
+
+    // The hours are on the job, through the ordinary capture.
+    const landed = await office.evaluate(async (number) => {
+      const view = await fetch(`/api/jobs/${number}`, { headers: { accept: 'application/json' } });
+      const body = await view.json();
+      return body.data.view.job.labour.map((line) => Number(line.hours));
+    }, jobNumber);
+    if (!landed.includes(1.5)) {
+      throw new Error(`the applied capture is not on the job: ${JSON.stringify(landed)}`);
+    }
+
+    // And the tablet's own row goes once the office has finished with it.
+    await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(
+      () =>
+        new Promise((resolve) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => resolve(false);
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('pending', 'readonly').objectStore('pending').count();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result === 0);
+            };
+            request.onerror = () => resolve(false);
+          };
+        }),
+      undefined,
+      { timeout: 40000 },
+    );
+  } finally {
+    await officeContext.close();
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+});
+
+/* ---- BD-16: a shared tablet, and work that belongs to one person -------- */
+
+await step('unsent work survives a sign-out and stays with its owner', async () => {
+  /*
+   * BD-16. A tablet is handed over at the gate. Sipho's unsent hours must
+   * still be there, must not be visible to Riaan, and must come back to Sipho
+   * when he signs in again.
+   *
+   * The sign-out is the part that used to be silent: the dialog now says where
+   * the work went and whose it is.
+   */
+  await signInAs(page, 'Sipho Mahlangu', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  const { jobNumber } = await workableJob(page);
+
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Labour & Parts' }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().waitFor({ timeout: 15000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByLabel('Or enter hours').fill('3.5');
+  await dialog.getByRole('button', { name: 'Add labour' }).last().click();
+  await page.getByTestId('pending-work-heading').waitFor({ timeout: 15000 });
+
+  // Signing out with work unsent asks first, and says what happens to it.
+  await page.locator('header [aria-haspopup="menu"]').click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  const confirm = page.getByRole('dialog');
+  await confirm.waitFor({ timeout: 10000 });
+  const warning = await confirm.innerText();
+  if (!/not reached the EJE server/i.test(warning)) {
+    throw new Error(`the sign-out warning does not say the work is unsent: ${warning}`);
+  }
+  if (!/under your name/i.test(warning)) {
+    throw new Error(`the sign-out warning does not say whose the work is: ${warning}`);
+  }
+  if (!/will not see them|cannot send them/i.test(warning)) {
+    throw new Error(`the sign-out warning does not say it is private: ${warning}`);
+  }
+  await page.screenshot({ path: `${shots}/47-signout-unsent.png`, fullPage: false });
+  await confirm.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('heading', { name: 'Sign in' }).waitFor({ timeout: 20000 });
+
+  /*
+   * THE SIGN-OUT THE SERVER HAS NOT HEARD. BD-16. It was made with no signal,
+   * so the session cannot have been revoked — and the screen says so rather
+   * than looking like an ordinary sign-out, because until the server is told
+   * the cookie this page cannot read is still valid.
+   */
+  const held = page.getByTestId('sign-out-pending');
+  await held.waitFor({ timeout: 15000 });
+  const heldText = await held.innerText();
+  if (!/not been told/i.test(heldText)) {
+    throw new Error(`the sign-in screen does not say the sign-out is undelivered: ${heldText}`);
+  }
+
+  await page.context().setOffline(false);
+  offlineExpected = false;
+
+  // The work is still on the tablet, under Sipho's id, and the read cache is
+  // gone — the two halves of the policy, which pull in opposite directions.
+  const afterSignOut = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['pending', 'jobs', 'device'], 'readonly');
+          const pending = tx.objectStore('pending').getAll();
+          const jobs = tx.objectStore('jobs').count();
+          const device = tx.objectStore('device').getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve({ pending: pending.result, jobs: jobs.result, device: device.result });
+          };
+          tx.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (afterSignOut.pending.length !== 1) {
+    throw new Error(`${afterSignOut.pending.length} captures survived the sign-out, expected 1`);
+  }
+  if (afterSignOut.jobs !== 0) throw new Error('the cached job list survived the sign-out');
+  // The device no longer knows whose session it held — the only row left is
+  // the record of the sign-out itself, which is what keeps it signed out.
+  const confirmed = afterSignOut.device.filter((row) => row.key === 'last_confirmed_session');
+  if (confirmed.length > 0) throw new Error('the device still names the last session');
+  const owed = afterSignOut.device.filter((row) => row.key === 'unconfirmed_sign_out');
+  if (owed.length !== 1) throw new Error('the undelivered sign-out was not recorded');
+  const owner = afterSignOut.pending[0].userId;
+  if (typeof owner !== 'string' || owner.length === 0) {
+    throw new Error('the retained capture names no owner');
+  }
+
+  /*
+   * NOTHING WORTH STEALING TWICE. No password, session cookie or token is
+   * written to the device — the session is an HttpOnly cookie the page cannot
+   * read, and this is the assertion that keeps it that way.
+   */
+  const secrets = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const names = [...db.objectStoreNames];
+          const tx = db.transaction(names, 'readonly');
+          const reads = names.map((name) => tx.objectStore(name).getAll());
+          tx.oncomplete = () => {
+            db.close();
+            resolve({
+              indexedDb: JSON.stringify(reads.map((read) => read.result)),
+              local: JSON.stringify(
+                Object.fromEntries(
+                  Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]),
+                ),
+              ),
+            });
+          };
+          tx.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  for (const [where, blob] of Object.entries(secrets)) {
+    const offending = ['password', 'eje-demo', 'passwordHash', 'accessToken', 'sessionToken', 'bearer']
+      .filter((needle) => new RegExp(needle, 'i').test(blob));
+    if (offending.length > 0) {
+      throw new Error(`${where} holds ${offending.join(', ')}`);
+    }
+  }
+
+  // The next technician on the tablet. The work is not theirs, so they are not
+  // shown it and cannot reach it.
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('pending-work-heading').count()) > 0) {
+    throw new Error('the next technician was shown the last one’s unsent work');
+  }
+  const stillThere = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (stillThere.length !== 1) {
+    throw new Error(`${stillThere.length} captures held while another user is signed in`);
+  }
+  if (stillThere[0].userId === owner) {
+    // Correct: it is still Sipho's. Riaan signing in neither sent it nor
+    // claimed it.
+  } else {
+    throw new Error('the retained capture changed owner when somebody else signed in');
+  }
+  // And it was not sent on Riaan's session either: still waiting, no attempt
+  // made under the wrong identity.
+  if (stillThere[0].state !== 'pending') {
+    throw new Error(`the retained capture is in state ${stillThere[0].state}`);
+  }
+
+  /*
+   * AND IT COMES BACK TO ITS OWNER. Sipho signs in again, with a connection,
+   * and the tablet sends what it was holding — which is also the proof that
+   * the work was never lost, only withheld.
+   */
+  await signInAs(page, 'Sipho Mahlangu', { base: BASE });
+  await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result === 0);
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 40000 },
+  );
+
+  await page.getByRole('tab', { name: 'Labour & Parts' }).click();
+  await page.locator('main').getByText('3.5', { exact: false }).first().waitFor({ timeout: 25000 });
+});
+
 await browser.close();
 
 console.log('\n=== SUMMARY ===');

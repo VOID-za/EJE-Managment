@@ -34,6 +34,25 @@ const PLACE_STORE = 'place';
 const PENDING_STORE = 'pending';
 /** One row, so the key is fixed: this device has one last-confirmed session. */
 const DEVICE_KEY = 'last_confirmed_session';
+/**
+ * A SIGN-OUT THE SERVER NEVER HEARD ABOUT. BD-16.
+ *
+ * Signing out posts to the server, which revokes the session; offline that
+ * post cannot be made, and the cookie — which this page cannot read, let alone
+ * delete — stays valid. Until this row existed, the next page load asked
+ * `/api/auth/me`, got the previous technician's session back, and signed them
+ * in again: a technician who handed the tablet over at the gate after tapping
+ * Sign out had not signed out at all.
+ *
+ * So the device records that it was signed out. The application refuses to
+ * adopt the session while the row is there and finishes the sign-out the
+ * moment it can reach the server. It is not a revocation and this file does
+ * not pretend it is: the cookie remains valid until the server is told, so
+ * somebody with the tablet and a browser console could still use it. What it
+ * gives is that the APPLICATION cannot, which is what stops the ordinary
+ * hand-over from becoming an impersonation.
+ */
+const SIGN_OUT_KEY = 'unconfirmed_sign_out';
 
 export interface CachedJobRecord extends CachedJob {
   /** `<userId>:<jobNumber>`. The user id is part of the key, not a column. */
@@ -251,6 +270,43 @@ export const readDeviceSession = async (): Promise<DeviceSession | null> => {
       device.get(DEVICE_KEY) as IDBRequest<DeviceSession | undefined>,
     );
     return found ?? null;
+  });
+};
+
+/**
+ * Remembers that this device was signed out before the server was told. BD-16.
+ *
+ * Written only when the sign-out request itself failed. Deliberately AFTER
+ * `clearCachedJobs`, which empties this store — the order is the caller's
+ * responsibility and `signOut` in `AppProvider` is the one caller.
+ */
+export const markUnconfirmedSignOut = async (userId: string): Promise<void> => {
+  if (!isJobCacheSupported()) return;
+  await withStores('readwrite', (_jobs, _meta, device) => {
+    device.put({
+      key: SIGN_OUT_KEY,
+      userId,
+      confirmedAt: new Date().toISOString(),
+    } satisfies DeviceSession);
+  });
+};
+
+/** Whether a sign-out on this device is still owed to the server. BD-16. */
+export const readUnconfirmedSignOut = async (): Promise<DeviceSession | null> => {
+  if (!isJobCacheSupported()) return null;
+  return withStores('readonly', async (_jobs, _meta, device) => {
+    const found = await request<DeviceSession | undefined>(
+      device.get(SIGN_OUT_KEY) as IDBRequest<DeviceSession | undefined>,
+    );
+    return found ?? null;
+  });
+};
+
+/** The server has been told. BD-16. */
+export const clearUnconfirmedSignOut = async (): Promise<void> => {
+  if (!isJobCacheSupported()) return;
+  await withStores('readwrite', (_jobs, _meta, device) => {
+    device.delete(SIGN_OUT_KEY);
   });
 };
 

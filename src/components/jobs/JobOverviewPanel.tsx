@@ -24,6 +24,7 @@ import {
   PriorityBadge,
   SelectField,
 } from '@/components/ui';
+import { MachinePhotoFromJob } from '@/components/machines/MachinePhotoFromJob';
 import { JobCostSummary } from './JobCostSummary';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { jobs } from '@/api/endpoints';
@@ -281,6 +282,10 @@ export const JobOverviewPanel = ({
                   {machine.notes}
                 </p>
               )}
+              {/* BD-14: the technician at the machine photographs it from the
+                  job that put them there. The register itself stays the
+                  office's screen and the record stays unchanged. */}
+              <MachinePhotoFromJob job={job} machine={machine} onChanged={onChanged} />
             </Card>
           )}
         </div>

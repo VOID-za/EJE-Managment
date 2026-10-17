@@ -129,18 +129,29 @@ describe('classifying what the server said', () => {
   it('treats a DECISION as a conflict a person has to resolve', () => {
     // Each of these means the server considered the request and refused it:
     // the job was signed or closed, it is not this actor's, it is no longer
-    // visible to them, somebody wrote first, or the session is over. Retrying
-    // would produce the same answer.
+    // visible to them, somebody wrote first, or the details are invalid.
+    // Retrying would produce the same answer, so a person decides — and under
+    // BD-15 the capture is referred to the office.
     for (const code of [
       'workflow_refused',
       'not_permitted',
       'not_found',
       'version_conflict',
-      'unauthenticated',
       'validation_failed',
       'conflict',
     ]) {
       expect(classifyRefusal(code), code).toBe('conflict');
     }
+  });
+
+  it('treats a REVOKED SESSION as blocked, not as a refusal of the work', () => {
+    /*
+     * BD-16, and a defect this fixes. A 401 used to be classified as a
+     * conflict, so a technician whose session expired mid-flush had their
+     * captures marked refused-by-the-server and referred to the office — when
+     * the server had said nothing about the work at all. The remedy is signing
+     * in again, not an office decision, so the work stays queued untouched.
+     */
+    expect(classifyRefusal('unauthenticated')).toBe('blocked');
   });
 });

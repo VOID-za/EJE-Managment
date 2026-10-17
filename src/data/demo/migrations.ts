@@ -214,12 +214,48 @@ const v12ToV13 = (data: Loose): Loose => {
   };
 };
 
+/**
+ * v13 -> v14. BD-15.
+ *
+ * Adds two collections.
+ *
+ * `captureReferrals` is empty: a snapshot from before the office could be
+ * referred a refused capture has none, by definition — there was nowhere to
+ * put one.
+ *
+ * `jobParticipation` is DERIVED FROM THE CREWS THE SNAPSHOT ALREADY HAS, which
+ * is the most this upgrade can honestly claim. A technician taken off a job
+ * before the upgrade left no trace of having been on it, so that history
+ * cannot be recovered; from here on it is recorded as it happens. Nothing else
+ * is touched.
+ */
+const v13ToV14 = (data: Loose): Loose => {
+  const jobs = Array.isArray(data.jobs) ? (data.jobs as Loose[]) : [];
+  return {
+    ...data,
+    captureReferrals: Array.isArray(data.captureReferrals) ? data.captureReferrals : [],
+    jobParticipation: Array.isArray(data.jobParticipation)
+      ? data.jobParticipation
+      : jobs.flatMap((job) => {
+          const additional = Array.isArray(job.additionalTechnicianIds)
+            ? (job.additionalTechnicianIds as string[])
+            : [];
+          const crew =
+            typeof job.primaryTechnicianId === 'string'
+              ? [job.primaryTechnicianId, ...additional]
+              : additional;
+          return crew.map((userId) => ({ jobId: job.id as string, userId }));
+        }),
+  };
+};
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
   10: v10ToV11,
   11: v11ToV12,
   12: v12ToV13,
+  13: v13ToV14,
 };
 
 /**

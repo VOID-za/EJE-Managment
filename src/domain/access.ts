@@ -191,7 +191,19 @@ export type Capability =
   | 'users.manageMasters'
   /** Charge-out rates, VAT, checklist templates, system settings. */
   | 'settings.manage'
-  | 'activity.viewAll';
+  | 'activity.viewAll'
+  /**
+   * Resolve a capture a tablet held that the server refused. BD-15.
+   *
+   * THE NARROWEST PERMISSION THAT DOES THE JOB, deliberately. It is not
+   * `admin.access` (which also opens the system screens), not
+   * `jobs.captureAdministratively` (which is about capturing on a job directly)
+   * and not a new ROLE. It answers exactly one question: may this person look
+   * at work a technician could not get onto a job, and decide what happens to
+   * it? The office — Master and Coordinator — may. A technician may see their
+   * OWN referrals, which needs no capability because it is their own work.
+   */
+  | 'captures.resolveReferral';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -223,6 +235,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'users.manageMasters',
   'settings.manage',
   'activity.viewAll',
+  'captures.resolveReferral',
 ];
 
 /**
@@ -267,6 +280,8 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'admin.access',
   'users.manageTechnicians',
   'activity.viewAll',
+  // The office deals with work a tablet could not get onto a job. BD-15.
+  'captures.resolveReferral',
 ];
 
 /**

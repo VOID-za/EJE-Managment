@@ -4,10 +4,13 @@ import {
   asMachineId,
   can,
   findSerialClash,
+  isJobTechnician,
   machineDisplayName,
   userFullName,
   type Attachment,
   type CustomerId,
+  type Job,
+  type JobId,
   type Machine,
   type MachineType,
   type SiteId,
@@ -179,61 +182,78 @@ export const createMachine = async (
 };
 
 /**
- * A PHOTOGRAPH OF THE MACHINE, BYTES AND ALL. MACH-PHOTO-1.
+ * A PHOTOGRAPH OF THE MACHINE, BYTES AND ALL. MACH-PHOTO-1, MACH-PHOTO-2.
  *
- * WHO MAY, and this is the whole of the care in this function. The register's
- * existing rules are not widened by a hair:
+ * WHO MAY. *Amended 18 October 2026: EJE answered BD-14.* The register's rules
+ * about CHANGING a machine are not widened by a hair; what changed is that
+ * photographing one is no longer treated as changing it.
  *
  *   - the OFFICE (`machines.manage`) may attach a photograph to any machine,
  *     because they may change the official record outright;
- *   - a TECHNICIAN may attach one only to a machine THEY raised that is still
+ *   - a TECHNICIAN may attach one to a machine THEY raised that is still
  *     `pending_approval` — their own unapproved submission, which they are
- *     already allowed to raise WITH photographs (`createMachine`), so this adds
- *     no permission, it only lets the same act carry real bytes;
- *   - a technician attaching a photograph to an APPROVED machine is REFUSED.
+ *     already allowed to raise WITH photographs;
+ *   - **a TECHNICIAN may attach one to an OFFICIAL machine when it is the
+ *     machine on a job of theirs that is still live.** BD-14's own words:
+ *     *"where the photograph is relevant to the technician's authorized
+ *     work"* — so relevance is not a claim the client makes, it is a fact the
+ *     server checks. The authorising job is named in the request, must be on
+ *     THIS machine, must be assigned to this actor, and must not be closed or
+ *     cancelled. It is recorded on the audit line, so every photograph of an
+ *     official machine can be traced to the work that justified it.
+ *   - anything else is REFUSED.
  *
- * WHY THAT LAST ONE IS A REFUSAL AND NOT A FEATURE. A photograph of a rating
- * plate on an official machine is obviously useful, and it is just as obviously
- * a change to a record the scope says technicians may not change outside the
- * change-request process (MACH-CR). Whether a photograph counts as such a
- * change — and whether it should queue for Master approval like a discovered
- * machine does — is a business decision nobody has made. It is recorded in
- * `docs/SCOPE.md` as MACH-PHOTO-2 and refused until it is answered, because the
- * one thing implementation must not do is answer it by shipping (PROC-4).
- *
- * A photograph NEVER changes machine data and never alters approval: it is
- * appended to the machine's photo list, and the record's manufacturer, model,
- * serial, site and approval all come back exactly as they were.
+ * WHAT BD-14 EXPLICITLY DID NOT GRANT, and this function is where that is
+ * enforced rather than hoped for: the photograph does not touch a single field
+ * of the machine record, does not alter `approval`, `approvedBy`, `approvedAt`,
+ * `createdBy` or `archivedAt`, and does not shorten the change-request route
+ * for anything else. `updateMachine` and `approveMachine` are untouched and
+ * still refuse a technician outright. A pending machine stays pending after
+ * being photographed, which `evidence-persistence.db.test.ts` asserts against
+ * PostgreSQL.
  */
+export interface MachinePhotoAuthorisation {
+  /**
+   * The job that makes this photograph part of the technician's work.
+   *
+   * Required for a technician photographing an OFFICIAL machine and ignored
+   * for the office. A job id the actor is not on, or that is not on this
+   * machine, or that has left the workflow, is the same refusal as none at
+   * all — the client cannot talk its way past this by sending a job number.
+   */
+  readonly jobId?: JobId;
+}
+
 export const addMachinePhoto = async (
   context: OperationContext,
   machine: Machine,
   photo: MachinePhotoInput,
+  authorisation: MachinePhotoAuthorisation = {},
 ): Promise<Machine> => {
   const office = can(context.actor.role, 'machines.manage');
+  /** The job that authorised a technician's photograph, for the audit line. */
+  let viaJob: Job | null = null;
+
   if (!office) {
-    if (machine.approval === 'approved') {
-      throw new WorkflowError(
-        `${machineDisplayName(machine)} is on the official register and only the office may add photographs to it.`,
-        [
-          {
-            code: 'not_permitted',
-            message:
-              'Raise a change request for an official machine record. A machine you added yourself can still be photographed while it is awaiting approval.',
-          },
-        ],
-      );
-    }
-    if (machine.createdBy !== context.actor.id) {
-      throw new WorkflowError(
-        `${machineDisplayName(machine)} was added by somebody else and is awaiting approval.`,
-        [
-          {
-            code: 'not_permitted',
-            message: 'You can photograph a machine you added yourself, or ask the office.',
-          },
-        ],
-      );
+    const ownPending =
+      machine.approval === 'pending_approval' && machine.createdBy === context.actor.id;
+
+    if (!ownPending) {
+      viaJob = await jobAuthorisingPhoto(context, machine, authorisation.jobId);
+      if (viaJob === null) {
+        throw new WorkflowError(
+          `You can photograph ${machineDisplayName(machine)} from a job of yours that is on it.`,
+          [
+            {
+              code: 'not_permitted',
+              message:
+                machine.approval === 'approved'
+                  ? 'Open the job you are working on this machine and photograph it from there. Changing the machine record itself is still a change request.'
+                  : 'You can photograph a machine you added yourself, or one on a job of yours.',
+            },
+          ],
+        );
+      }
     }
   }
 
@@ -263,16 +283,52 @@ export const addMachinePhoto = async (
     photos: [...machine.photos, attachment],
   });
 
+  /*
+   * ON THE TRAIL, AND NAMING THE JOB THAT ALLOWED IT. BD-14.
+   *
+   * `machine_photographed` rather than `machine_updated`: the record did NOT
+   * change, and an audit line that says it did is the same lie the old
+   * simulated photographs told about the files. `audit_events.type` is a text
+   * column, so this needs no migration.
+   *
+   * The event is written against the authorising JOB when there is one, which
+   * is what makes a technician's photograph of an official machine auditable
+   * as part of that work rather than as an unexplained touch of the register.
+   */
   await audit(context, {
-    jobId: null,
-    type: 'machine_updated',
+    jobId: viaJob === null ? null : viaJob.id,
+    type: 'machine_photographed',
     summary: `Machine photograph added: ${machineDisplayName(saved)}`,
     detail:
       `${attachment.fileName} attached by ${userFullName(context.actor)}.` +
+      (viaJob === null ? '' : ` Photographed from ${viaJob.jobNumber}.`) +
       (saved.approval === 'pending_approval' ? ' The machine is still awaiting approval.' : ''),
   });
 
   return saved;
+};
+
+/**
+ * The job that makes a technician's photograph of this machine legitimate.
+ *
+ * Returns the job, or null — and null is a refusal, not a fallback. Four things
+ * have to be true at once, and each one closes a specific way of getting at a
+ * machine that is none of your business: the request names a job; that job
+ * exists; it is on THIS machine; and this actor is on its crew. A closed or
+ * cancelled job does not count, because the work it authorised is over.
+ */
+const jobAuthorisingPhoto = async (
+  context: OperationContext,
+  machine: Machine,
+  jobId: JobId | undefined,
+): Promise<Job | null> => {
+  if (jobId === undefined) return null;
+  const job = await context.repos.jobs.findById(jobId);
+  if (job === null) return null;
+  if (job.machineId !== machine.id) return null;
+  if (!isJobTechnician(context.actor, job)) return null;
+  if (job.status === 'closed' || job.status === 'cancelled') return null;
+  return job;
 };
 
 export const approveMachine = async (

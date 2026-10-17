@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  CaptureReferral,
   OutboxMessage,
   AppNotification,
   ChecklistTemplate,
@@ -60,6 +61,26 @@ export interface DemoDatabase {
   notifications: AppNotification[];
   /** Messages waiting to leave the building. See `types/outbox.ts`. */
   outbox: OutboxMessage[];
+  /**
+   * Captures a tablet held that the server refused, waiting for the office.
+   * BD-15. See `types/capture.ts`.
+   */
+  captureReferrals: CaptureReferral[];
+  /**
+   * WHO HAS EVER BEEN ON A JOB, which is not the same question as who is on it
+   * now.
+   *
+   * The visibility rule reads participation history (`jobVisibilityFor`'s
+   * `participated`), because a technician who captured half a job on Tuesday
+   * must not lose access to their own work when the office reassigns it on
+   * Wednesday — and, since BD-15, must still be able to hand the office a
+   * capture the job refused for exactly that reason.
+   *
+   * PostgreSQL keeps this in `job_participants`, with the period each person
+   * was on the job. This store keeps only the pairs, because only "ever" is
+   * ever read from it.
+   */
+  jobParticipation: { jobId: string; userId: string }[];
   availability: AvailabilityRecord[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
@@ -115,7 +136,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -136,6 +157,14 @@ export const createSeededDatabase = (): DemoDatabase => ({
   // Nothing outstanding in a fresh demonstration: the seed's notifications
   // describe messages that already happened, not ones still to be sent.
   outbox: [],
+  captureReferrals: [],
+  // Derived from the seed's own crews: a seeded job's technicians have been on
+  // it since it was created, which is the only true statement a fixture can
+  // make about work that was never reassigned.
+  jobParticipation: seedJobs.flatMap((job) => [
+    ...(job.primaryTechnicianId === null ? [] : [{ jobId: job.id as string, userId: job.primaryTechnicianId as string }]),
+    ...job.additionalTechnicianIds.map((userId) => ({ jobId: job.id as string, userId: userId as string })),
+  ]),
   availability: seedAvailability.map((record) => ({ ...record })),
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at

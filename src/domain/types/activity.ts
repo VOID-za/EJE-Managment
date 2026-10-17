@@ -126,6 +126,28 @@ export type ActivityEventType =
   | 'machine_created'
   | 'machine_approved'
   | 'machine_updated'
+  /**
+   * A photograph was attached to a machine. BD-14, MACH-PHOTO-2.
+   *
+   * Its own type rather than a second `machine_updated`, because the record did
+   * NOT change — and an audit line claiming it did would be the same kind of
+   * lie the simulated photographs used to tell about the files. Where a
+   * technician photographed an OFFICIAL machine, the event is written against
+   * the job that authorised it, so the photograph is traceable to the work.
+   */
+  | 'machine_photographed'
+  /**
+   * A capture the tablet held was refused by the server and referred to the
+   * office. BD-15.
+   *
+   * Written against the JOB, because that is where somebody reading the trail
+   * will be looking: "three hours were captured for this job on the 17th and
+   * the job would not take them" is part of this job's history even though no
+   * line was ever added to it.
+   */
+  | 'capture_referred'
+  /** The office decided what happens to a referred capture. BD-15. */
+  | 'capture_referral_resolved'
   | 'machine_deleted'
   | 'machine_archived'
   | 'user_created'
