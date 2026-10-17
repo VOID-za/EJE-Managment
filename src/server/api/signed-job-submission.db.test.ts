@@ -8,6 +8,7 @@ import * as schema from '@/db/schema';
 import type { Job } from '@/domain';
 import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
+import { businessToday } from '@/lib/business-time';
 import { hashPassword } from '@/server/auth/passwords';
 import { ApiTestClient, startPostgresTestServer } from '@/test/api-harness';
 
@@ -548,7 +549,15 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
      * the office may submit for them. A PART-day absence deliberately does not
      * open this door, which is why `allDay` is true here.
      */
-    const today = new Date().toISOString().slice(0, 10);
+    /*
+     * THE BUSINESS DATE, NOT THE UTC ONE. QA-5's shape, found by this test
+     * failing at 00:37 South African time: `submissionCover` asks whether the
+     * technician is away on `businessDateOf(now)`, and between 22:00 and
+     * midnight UTC that is TOMORROW in Johannesburg — so an absence recorded
+     * for the UTC date did not cover the business day, the job stayed covered,
+     * and the takeover was correctly refused. The test was wrong, not the rule.
+     */
+    const today = businessToday();
     const absence = await master.post('/api/availability', {
       userId: IDS.technician,
       type: 'sick_leave',

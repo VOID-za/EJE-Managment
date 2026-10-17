@@ -10,6 +10,7 @@ import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { seedUsers } from '@/data/seed';
 import type { IsoDate, IsoDateTime, Job, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { businessDateOf } from '@/lib/business-time';
 import { confirmJobCardDelivery } from './job-operations';
 import type { AppServices } from './context';
 
@@ -55,12 +56,22 @@ export const jpegFixture = (label = 'fixture'): Uint8Array => {
   ]);
 };
 
-/** A date `days` from today, as the seed's own offsets produce. */
+/**
+ * A date `days` from today, IN THE BUSINESS ZONE.
+ *
+ * The zone matters and used to be the runner's. Every rule that asks "is this
+ * person away today?" or "is this job overdue?" asks it of
+ * `businessDateOf(clock.now())` — South African time — so a test that built
+ * "today" from the runner's own clock disagreed with the application for two
+ * hours out of every twenty-four, on a machine running UTC. A suite that fails
+ * between 22:00 and midnight and passes the rest of the day is worse than one
+ * that fails always: it looks like a flake. QA-5, and the same defect
+ * `signed-job-submission.db.test.ts` carried.
+ */
 export const dayOffset = (days: number): IsoDate => {
   const date = new Date();
-  date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + days);
-  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+  return businessDateOf(date.toISOString()) ?? '1970-01-01';
 };
 
 /**
