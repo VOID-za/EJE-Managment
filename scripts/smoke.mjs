@@ -4529,6 +4529,292 @@ await step('a capture the job refuses is referred to the office, not lost', asyn
   }
 });
 
+/* ---- OFF-CHK-1: a checklist answer held with no signal ------------------- */
+
+await step('a checklist answer is held on the tablet, with what it was answering', async () => {
+  /*
+   * OFF-CHK-1. The headline of this batch's offline work: the body of a
+   * service or installation job is its checklist, and a technician in a plant
+   * basement could not answer a single question of it.
+   *
+   * EJE-1050 is the seeded installation job Thabo accepted and started a
+   * checklist on earlier in this file — an installation, because that is the
+   * job type whose template has the items this exercises.
+   */
+  await signInAs(page, 'Thabo Nkosi', { base: BASE });
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Checklist/ }).click();
+  const start = page.getByRole('button', { name: 'Start checklist' });
+  if ((await start.count()) > 0) await start.click();
+  await page.getByRole('button', { name: 'Pass', exact: true }).first().waitFor({ timeout: 20000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
+  await page.context().setOffline(false);
+  offlineExpected = false;
+
+  // Back on the job with a connection, then the signal goes while the
+  // technician is standing at the machine — which is the real sequence: the
+  // template is on screen because they are looking at it.
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Checklist/ }).click();
+  await page.getByRole('button', { name: 'Fail', exact: true }).first().waitFor({ timeout: 20000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  try {
+    await page.getByTestId('checklist-offline-notice').waitFor({ timeout: 20000 });
+
+    // THE TEMPLATE'S OWN RULE, BEFORE ANYTHING IS HELD. A failure with no note
+    // is not held — the same rule that gates the completion, applied at the
+    // moment of capture rather than hours later.
+    await page.getByRole('button', { name: 'Fail', exact: true }).first().click();
+    const hold = page.locator('[data-testid^="checklist-hold-"]').first();
+    await hold.waitFor({ timeout: 10000 });
+    await hold.click();
+    await page.getByText('the note has to be written before it can be held', { exact: false })
+      .first().waitFor({ timeout: 15000 });
+
+    const stillEmpty = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('pending', 'readonly').objectStore('pending').count();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result);
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    if (stillEmpty !== 0) throw new Error('an answer with no note was held anyway');
+
+    // With the finding written down, the answer is held — and the row says
+    // what it was answering, which is what lets the server refuse a stale one.
+    const notes = page.getByPlaceholder('What was found, and what is recommended?').first();
+    await notes.fill('Floor slab cracked under the left-hand foot.');
+    await notes.blur();
+    await hold.click();
+    await page.locator('[data-testid^="checklist-held-"]').first().waitFor({ timeout: 20000 });
+
+    const row = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result);
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    const answers = row.filter((entry) => entry.action === 'answer_checklist');
+    if (answers.length !== 1) throw new Error(`${answers.length} held answers, expected 1`);
+    const payload = answers[0].payload;
+    if (payload.choice !== 'fail') throw new Error(`held ${JSON.stringify(payload.choice)}`);
+    if ((payload.notes ?? '').length === 0) throw new Error('the held answer lost its note');
+    if (typeof payload.templateVersion !== 'string' || payload.templateVersion.length === 0) {
+      throw new Error('the held answer does not say which version it answered');
+    }
+    if (!Object.prototype.hasOwnProperty.call(payload, 'expectedAnsweredAt')) {
+      throw new Error('the held answer does not say which answer it replaces');
+    }
+
+    // The progress figure counts what the SERVER has, so a held answer does
+    // not inflate it, and completing the checklist needs a connection.
+    const body = await page.locator('main').innerText();
+    if (!/needs a connection/i.test(body)) {
+      throw new Error('the runner does not say that completing needs a connection');
+    }
+    await page.screenshot({ path: `${shots}/48-checklist-held.png`, fullPage: false });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  // The signal returns: the answer goes to the job through the ordinary route
+  // and the row leaves the tablet.
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result.filter((row) => row.action === 'answer_checklist').length === 0);
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 40000 },
+  );
+
+  /*
+   * Read through the API rather than off the screen: the note lives in a
+   * textarea, whose text is a VALUE and not page text, so a screen-scrape
+   * would pass whatever happened.
+   */
+  const applied = await page.evaluate(async () => {
+    const response = await fetch('/api/jobs/EJE-1050', {
+      headers: { accept: 'application/json' },
+    });
+    const body = await response.json();
+    return (body.data.view.job.checklist?.responses ?? []).map((entry) => ({
+      itemId: entry.itemId,
+      choice: entry.choice,
+      notes: entry.notes,
+      answeredAt: entry.answeredAt,
+    }));
+  });
+  const landed = applied.find((entry) => (entry.notes ?? '').includes('Floor slab cracked'));
+  if (landed === undefined) {
+    throw new Error(`the held answer did not reach the job: ${JSON.stringify(applied)}`);
+  }
+  if (landed.choice !== 'fail') throw new Error(`it landed as ${landed.choice}`);
+  if (landed.answeredAt === null) throw new Error('the applied answer carries no stamp');
+});
+
+/* ---- OFF-WRITEUP-1: the write-up typed with no signal -------------------- */
+
+await step('a write-up typed with no signal is kept on the tablet, as a draft', async () => {
+  /*
+   * OFF-WRITEUP-1. The write-up saves itself as it is typed, and offline every
+   * one of those saves fails. It used to live in a React state variable, so a
+   * tablet locking took three paragraphs of fault findings with it.
+   *
+   * It is a DRAFT and the screen says so: nothing sends it by itself, because
+   * a write-up replaces a value on the job and replaying a replacement hours
+   * later is the silent overwrite CR-02 forbids.
+   */
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  const findings = page.getByLabel('Fault findings');
+  await findings.waitFor({ timeout: 20000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  const typed = 'Slab cracked under the left-hand foot; levelling impossible until it is repaired.';
+  try {
+    await findings.fill(typed);
+    await findings.blur();
+    await page.getByRole('button', { name: 'Save now' }).click();
+
+    // Said honestly: not saved, and kept here.
+    await page.getByText('kept on this tablet', { exact: false }).first().waitFor({
+      timeout: 25000,
+    });
+
+    const drafts = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('drafts', 'readonly').objectStore('drafts').getAll();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result);
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    if (drafts.length !== 1) throw new Error(`${drafts.length} drafts kept, expected 1`);
+    if (!drafts[0].report.faultFindings.includes('Slab cracked')) {
+      throw new Error('the draft does not hold what was typed');
+    }
+    if (typeof drafts[0].userId !== 'string' || drafts[0].userId.length === 0) {
+      throw new Error('the draft names no owner');
+    }
+
+    // IT SURVIVES THE TABLET BEING CLOSED, which is the whole point.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByTestId('offline-unsent').waitFor({ timeout: 25000 }).catch(() => undefined);
+    const stillKept = await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('eje-job-cache');
+          open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db.transaction('drafts', 'readonly').objectStore('drafts').count();
+            request.onsuccess = () => {
+              db.close();
+              resolve(request.result);
+            };
+            request.onerror = () => reject(new Error('the read failed'));
+          };
+        }),
+    );
+    if (stillKept !== 1) throw new Error('the draft did not survive the reload');
+    await page.screenshot({ path: `${shots}/49-writeup-draft.png`, fullPage: false });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  /*
+   * AND THE TECHNICIAN PUTS IT ON THE JOB. Nothing replayed it: the notice
+   * offers it back, and loading it saves the ordinary way.
+   */
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  const notice = page.getByTestId('writeup-local-draft');
+  await notice.waitFor({ timeout: 25000 });
+  const noticeText = await notice.innerText();
+  if (!/NOT on the server/i.test(noticeText)) {
+    throw new Error(`the draft notice does not say it is unsaved: ${noticeText}`);
+  }
+
+  await page.getByTestId('writeup-use-draft').click();
+  await page.getByRole('button', { name: 'Save now' }).click();
+  await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
+
+  // On the server now, so the device's copy is gone and the notice with it.
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('drafts', 'readonly').objectStore('drafts').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result === 0);
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 30000 },
+  );
+
+  const saved = await page.evaluate(async () => {
+    const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
+    const body = await response.json();
+    return body.data.view.job.completionReport.faultFindings;
+  });
+  if (!saved.includes('Slab cracked')) {
+    throw new Error(`the loaded draft did not reach the job: ${saved}`);
+  }
+});
 /* ---- BD-16: a shared tablet, and work that belongs to one person -------- */
 
 await step('unsent work survives a sign-out and stays with its owner', async () => {

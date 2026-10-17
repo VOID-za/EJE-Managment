@@ -18,6 +18,36 @@ const DECISION = z
   .strict();
 
 /**
+ * THE ONE FIELD THE OFFICE'S DECISION REPLACES. OFF-CHK-1, BD-15.
+ *
+ * A held checklist answer carries `expectedAnsweredAt`: the answer it was
+ * replacing, as the tablet last saw it. Its whole purpose is to stop a DEVICE
+ * silently overwriting an answer somebody gave while it was away — and that is
+ * exactly the refusal that brings the capture here.
+ *
+ * So applying it from this screen drops that field, and nothing else. The
+ * office is looking at the technician's answer, at the refusal in the server's
+ * own words ("somebody answered this item while this tablet was away"), and at
+ * the job; their decision is recorded, attributed and audited. That is the
+ * opposite of silent, and it is what a resolution IS.
+ *
+ * WHAT IS NOT DROPPED: `templateId` and `templateVersion`. An answer may never
+ * be moved onto a different version of the checklist — the wording the
+ * technician answered is the wording the customer's document reports
+ * (CHK-VER-1) — and no office decision makes that acceptable. If the job has
+ * moved to another version, the apply fails here too and `no_action` with a
+ * reason is the honest outcome.
+ */
+const payloadToApply = (referral: {
+  readonly action: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+}): Readonly<Record<string, unknown>> => {
+  if (referral.action !== 'answer_checklist') return referral.payload;
+  const { expectedAnsweredAt: _replaced, ...rest } = referral.payload;
+  return rest;
+};
+
+/**
  * `POST /api/captures/referrals/:referralId/resolve` — the office decides what
  * happens to work a tablet could not get onto a job. BD-15.
  *
@@ -89,7 +119,7 @@ export const POST = writeRoute({
       const command = lookupCommand(JOB_COMMANDS, referral.action);
       if (command === null) throw notFound('That capture cannot be applied from here.');
 
-      const parsed = command.schema.safeParse(referral.payload);
+      const parsed = command.schema.safeParse(payloadToApply(referral));
       if (!parsed.success) {
         throw new ApiError('validation_failed', 'That capture is not valid for this job.', [
           {

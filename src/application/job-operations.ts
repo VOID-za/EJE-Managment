@@ -13,6 +13,7 @@ import {
   checkReadyForSubmission,
   checkSignatureOutcome,
   emptyChecklistResponse,
+  evaluateChecklist,
   cancelJobRefusal,
   cancellationReasonLabel,
   deleteJobRefusal,
@@ -1609,11 +1610,89 @@ export interface ChecklistAnswer {
   readonly photos?: readonly Attachment[];
 }
 
+/**
+ * WHAT THE ANSWERING DEVICE BELIEVED IT WAS ANSWERING. OFF-CHK-1, BD-15.
+ *
+ * Optional, and only a tablet that held the answer with no signal sends it —
+ * which is the only situation in which it can be wrong. An answer REPLACES the
+ * previous one, so a capture made in a basement at 10:40 and sent at 15:00
+ * could quietly erase what somebody else answered at 11:00, and CR-02 forbids
+ * exactly that. So the capture carries what it was answering against:
+ *
+ *   - the checklist INSTANCE it was answered on — `templateId` and
+ *     `templateVersion`. A job whose checklist is now a different version is
+ *     not the document the technician filled in, and an answer must never be
+ *     moved onto one (CHK-VER-1).
+ *   - the answer it is replacing — `expectedAnsweredAt`, the stamp the device
+ *     last saw, or null for an item nobody had answered. Anything else means
+ *     somebody answered in between, and their answer stands.
+ *
+ * Both refusals are `conflict`-shaped, so the tablet retains the capture and
+ * refers it to the office rather than retrying or dropping it (BD-15). Neither
+ * is a version token for the job: a job has no client-visible version, and
+ * this claims nothing beyond the one response it names.
+ *
+ * ONLINE CALLERS SEND NEITHER, deliberately. The screen reads the job it is
+ * displaying and writes one field at a time as the technician taps; adding an
+ * expectation to that would turn an ordinary double-tap into a refusal while
+ * protecting nothing — there is no interval for anybody to write in.
+ */
+export interface ChecklistExpectation {
+  readonly templateId?: string;
+  readonly templateVersion?: string;
+  /** The stamp on the answer being replaced; null for an unanswered item. */
+  readonly expectedAnsweredAt?: string | null;
+}
+
+const assertChecklistUnchanged = (
+  job: Job,
+  checklist: NonNullable<Job['checklist']>,
+  existing: ChecklistResponse | undefined,
+  expectation: ChecklistExpectation,
+): void => {
+  if (
+    (expectation.templateId !== undefined &&
+      expectation.templateId !== (checklist.templateId as string)) ||
+    (expectation.templateVersion !== undefined &&
+      expectation.templateVersion !== checklist.templateVersion)
+  ) {
+    throw new WorkflowError(
+      `${job.jobNumber} is not on the checklist version this answer was given against.`,
+      [
+        {
+          code: 'checklist_version_changed',
+          message:
+            'The job now carries a different checklist, so this answer cannot be moved onto it. The office will decide what happens to it.',
+        },
+      ],
+    );
+  }
+
+  if (expectation.expectedAnsweredAt === undefined) return;
+
+  const current = existing?.answeredAt ?? null;
+  if (current === expectation.expectedAnsweredAt) return;
+
+  throw new WorkflowError(
+    `That checklist item on ${job.jobNumber} has been answered since this tablet last saw it.`,
+    [
+      {
+        code: 'checklist_answer_changed',
+        message:
+          current === null
+            ? 'The answer this capture was replacing is no longer on the job.'
+            : 'Somebody answered this item while this tablet was away, and their answer stands.',
+      },
+    ],
+  );
+};
+
 export const answerChecklistItem = async (
   context: OperationContext,
   job: Job,
   itemId: string,
   answer: ChecklistAnswer,
+  expectation: ChecklistExpectation = {},
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
@@ -1623,6 +1702,7 @@ export const answerChecklistItem = async (
 
   const now = context.services.clock.now();
   const existing = job.checklist.responses.find((response) => response.itemId === itemId);
+  assertChecklistUnchanged(job, job.checklist, existing, expectation);
   const base: ChecklistResponse = existing ?? emptyChecklistResponse(itemId);
 
   const updated: ChecklistResponse = {
@@ -1747,6 +1827,35 @@ export const completeChecklist = async (
   assertCanCapture(context, job);
   if (job.checklist === null) {
     throw new WorkflowError('The checklist has not been started for this job.');
+  }
+
+  /*
+   * THE TEMPLATE DECIDES WHETHER IT IS FINISHED, AND IT IS CHECKED HERE.
+   * CHK-GATE-1, and this is a defect fix.
+   *
+   * This operation used to stamp `completedAt` on request and evaluate
+   * nothing. The runner disabled its own button while items were outstanding,
+   * which is not the same thing at all: a request made by hand, by an older
+   * client, or by a tablet replaying a queue could complete a checklist with
+   * every question blank — and `checkReadyForCompletion` accepts a job whose
+   * mandatory checklist carries a `completedAt`, so the customer's job card
+   * would report a completed installation checklist that nobody filled in.
+   *
+   * `evaluateChecklist` is the same function the screen draws its progress
+   * from, so the refusal and the outstanding list a technician is looking at
+   * cannot disagree: unanswered required items, a failure with no note, a
+   * reading outside its range with no note, and a question whose evidence
+   * photograph is missing are each named, with the item's own wording.
+   */
+  const progress = evaluateChecklist(template, job.checklist);
+  if (!progress.complete) {
+    throw new WorkflowError(
+      `${template.name} is not finished, so it cannot be completed on ${job.jobNumber}.`,
+      progress.issues.map((issue) => ({
+        code: `checklist_${issue.reason}`,
+        message: issue.message,
+      })),
+    );
   }
 
   const saved = await context.repos.jobs.save({

@@ -12,6 +12,7 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   add_travel: 'Travel',
   add_part: 'Part',
   add_note: 'Note',
+  answer_checklist: 'Checklist',
 };
 
 /**

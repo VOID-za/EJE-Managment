@@ -1,11 +1,19 @@
 'use client';
 
 import { jobs } from '@/api/endpoints';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Job, JobCompletionReport } from '@/domain';
-import { Badge, Button, Card, CardHeader, TextAreaField } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, ConfirmDialog, TextAreaField } from '@/components/ui';
 import { createAutosaver, type AutosaveStatus } from '@/lib/autosave';
-import { formatTime } from '@/lib/format';
+import {
+  discardReportDraft,
+  draftDiffersFrom,
+  readReportDraft,
+  saveReportDraft,
+  type ReportDraft,
+} from '@/lib/pwa/report-draft';
+import { useCurrentUser } from '@/providers/AppProvider';
+import { formatDateTime, formatTime } from '@/lib/format';
 
 const FIELDS: readonly {
   key: keyof JobCompletionReport;
@@ -102,13 +110,52 @@ export const CompletionReportPanel = ({
    */
   const [saves, setSaves] = useState(0);
 
+  /*
+   * THE TEXT THAT COULD NOT BE SAVED, KEPT ON THE DEVICE. OFF-WRITEUP-1.
+   *
+   * Offline every autosave fails, and until this existed the only copy of the
+   * write-up was this component's state — so a tablet locking took it. A
+   * failed save now also writes a LOCAL DRAFT, which is the technician's own
+   * text under their own id and is never sent by anything: a write-up replaces
+   * a value on the job, so replaying one hours later is the silent overwrite
+   * CR-02 forbids. `report-draft.ts` is where that reasoning lives.
+   *
+   * Putting it on the job is the ordinary online save, made deliberately by
+   * the technician — see the notice below.
+   */
+  const currentUser = useCurrentUser();
+  const userId = currentUser?.id ?? '';
+  const [localDraft, setLocalDraft] = useState<ReportDraft | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+
   const saver = useMemo(
     () =>
       createAutosaver<JobCompletionReport>(job.completionReport, {
         equal: sameReport,
         onStatus: setStatus,
         save: async (report) => {
-          await jobs.saveReport(job.id, report);
+          try {
+            await jobs.saveReport(job.id, report);
+          } catch (cause) {
+            /*
+             * Kept BEFORE the failure is reported, so the status the technician
+             * reads and the bytes on the device cannot disagree. The error is
+             * rethrown: the autosaver owns what "not saved" means and will try
+             * again — this only makes sure the text outlives the attempt.
+             */
+            await saveReportDraft({
+              userId,
+              jobId: job.id,
+              jobNumber: job.jobNumber,
+              report,
+            })
+              .then((kept) => setLocalDraft(kept))
+              .catch(() => undefined);
+            throw cause;
+          }
+          // The server has the text, so the device's copy has nothing to say.
+          await discardReportDraft(userId, job.id).catch(() => undefined);
+          setLocalDraft(null);
           setSaves((count) => count + 1);
         },
       }),
@@ -118,6 +165,14 @@ export const CompletionReportPanel = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [job.id],
   );
+
+  /** A draft this tablet kept earlier — on this job, for this technician. */
+  const reloadDraft = useCallback(() => {
+    if (userId.length === 0) return;
+    void readReportDraft(userId, job.id).then(setLocalDraft);
+  }, [userId, job.id]);
+
+  useEffect(reloadDraft, [reloadDraft]);
 
   useEffect(() => {
     if (saves === 0) return;
@@ -189,10 +244,72 @@ export const CompletionReportPanel = ({
 
       {status.kind === 'failed' && (
         <p role="alert" className="mt-3 text-sm text-signal-600">
-          {status.message} Your text is still here and has not been lost — it will be saved on the
-          next attempt.
+          {status.message} Your text is still here and has not been lost — it is kept on this
+          tablet and will be saved on the next attempt.
         </p>
       )}
+
+      {/*
+        A LOCAL DRAFT IS NOT A SAVED WRITE-UP, and the notice says which it is.
+        OFF-WRITEUP-1. Shown only while the device's copy says something the
+        server's does not — once the text is on the job there is nothing to
+        offer back.
+      */}
+      {localDraft !== null && draftDiffersFrom(localDraft, job.completionReport) && (
+        <div
+          className="mt-4 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3.5 py-3"
+          data-testid="writeup-local-draft"
+        >
+          <p className="text-sm font-semibold text-amber-eje-800">
+            A write-up typed on this tablet is NOT on the server.
+          </p>
+          <p className="mt-1 text-xs text-amber-eje-800">
+            Kept here since {formatDateTime(localDraft.savedAt)}, under your name and visible to
+            nobody else. Nothing sends it by itself: load it into the form and it saves to the job
+            the ordinary way, with every rule that applies to a write-up typed at a desk.
+          </p>
+          {editable && (
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                data-testid="writeup-use-draft"
+                onClick={() => {
+                  setDraft(localDraft.report);
+                  saver.change(localDraft.report);
+                }}
+              >
+                Load the draft into the form
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setDiscarding(true)}>
+                Discard the draft
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={discarding}
+        title="Throw this draft away?"
+        message={
+          <>
+            <p>
+              The write-up kept on this tablet will be deleted. It has never reached the EJE
+              server, so there is no other copy of it.
+            </p>
+            <p className="mt-2 text-steel-500">
+              What is on the job now stays exactly as it is.
+            </p>
+          </>
+        }
+        confirmLabel="Delete the draft"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setDiscarding(false);
+          void discardReportDraft(userId, job.id).then(() => setLocalDraft(null));
+        }}
+        onCancel={() => setDiscarding(false)}
+      />
 
       {editable && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-steel-100 pt-4">

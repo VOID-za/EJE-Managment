@@ -25,8 +25,23 @@ const context = (overrides: Partial<CaptureContext> = {}): CaptureContext => ({
 });
 
 describe('what may be captured offline', () => {
-  it('allows exactly the four append-only captures', () => {
-    expect([...OFFLINE_ACTIONS]).toEqual(['add_labour', 'add_travel', 'add_part', 'add_note']);
+  it('allows exactly the four append-only captures and the checklist answer', () => {
+    /*
+     * THE WHOLE LIST, ASSERTED AS A LIST. An action that joins it has to be
+     * added here as well, which is the point: widening what a tablet may hold
+     * is a decision, not a refactor.
+     *
+     * `answer_checklist` joined it for OFF-CHK-1, and it is the one entry that
+     * is not append-only — see the file's own header, and the expectation the
+     * capture has to carry for the server to accept it.
+     */
+    expect([...OFFLINE_ACTIONS]).toEqual([
+      'add_labour',
+      'add_travel',
+      'add_part',
+      'add_note',
+      'answer_checklist',
+    ]);
     for (const action of OFFLINE_ACTIONS) {
       expect(canCaptureOffline(action, context()).allowed).toBe(true);
     }
@@ -50,10 +65,36 @@ describe('what may be captured offline', () => {
     }
   });
 
-  it('refuses the checklist, which needs a conflict rule that does not exist', () => {
-    expect(canCaptureOffline('answer_checklist', context()).allowed).toBe(false);
-    expect(canCaptureOffline('complete_checklist', context()).allowed).toBe(false);
-    expect(canCaptureOffline('add_checklist_photo', context()).allowed).toBe(false);
+  it('allows a checklist ANSWER and still refuses completing it, or its evidence', () => {
+    /*
+     * OFF-CHK-1. The answer became holdable once the capture could say what it
+     * was answering — the instance and the answer it replaces — so a stale one
+     * is refused by the server instead of overwriting (`ChecklistExpectation`).
+     *
+     * The other two did not, and the reasons are different: COMPLETING the
+     * checklist is a gate evaluated against the template, which is a decision
+     * for the server and not a row to be held; EVIDENCE is bytes, which this
+     * queue does not carry (OFF-12).
+     */
+    expect(canCaptureOffline('answer_checklist', context()).allowed).toBe(true);
+
+    const completing = canCaptureOffline('complete_checklist', context());
+    expect(completing.allowed).toBe(false);
+    expect(completing.reason).toBe(ONLINE_ONLY['complete_checklist']);
+
+    const evidence = canCaptureOffline('add_checklist_photo', context());
+    expect(evidence.allowed).toBe(false);
+    expect(evidence.reason).toBe(ONLINE_ONLY['add_checklist_photo']);
+  });
+
+  it('still refuses a checklist answer on a job that is not this technician’s, or signed', () => {
+    // The capture context narrows the answer exactly as it narrows labour:
+    // being holdable is not being holdable on anything.
+    expect(canCaptureOffline('answer_checklist', context({ mine: false })).allowed).toBe(false);
+    expect(canCaptureOffline('answer_checklist', context({ signed: true })).allowed).toBe(false);
+    expect(canCaptureOffline('answer_checklist', context({ status: 'completion' })).allowed).toBe(
+      false,
+    );
   });
 
   it('refuses a signature and a refusal outright. OFF-5', () => {

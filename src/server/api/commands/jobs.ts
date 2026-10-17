@@ -389,6 +389,16 @@ export const JOB_COMMANDS: CommandRegistry = {
     jobs.startChecklist(context.operation, job, await checklistTemplate(context, job)),
   ),
 
+  /**
+   * One checklist answer. ONLINE, OR HELD ON A TABLET. OFF-CHK-1.
+   *
+   * The last three fields are the expectation a held capture carries — the
+   * checklist instance it was answered on, and the answer it is replacing.
+   * They are optional because an online screen has nothing to expect: see
+   * `ChecklistExpectation`, which is where the rule is written. A tablet that
+   * sends them gets a refusal rather than overwriting somebody else's answer
+   * or being moved onto a different version of the document.
+   */
   answer_checklist: withInput(
     z
       .object({
@@ -398,10 +408,21 @@ export const JOB_COMMANDS: CommandRegistry = {
         measurement: z.number().nullable().optional(),
         text: text(4000).optional(),
         notes: text(4000).optional(),
+        templateId: z.string().min(1).max(100).optional(),
+        templateVersion: z.string().min(1).max(40).optional(),
+        expectedAnsweredAt: z.string().min(10).max(40).nullable().optional(),
       })
       .strict(),
-    (context, job, { itemId, ...answer }) =>
-      jobs.answerChecklistItem(context.operation, job, itemId, answer),
+    (
+      context,
+      job,
+      { itemId, templateId, templateVersion, expectedAnsweredAt, ...answer },
+    ) =>
+      jobs.answerChecklistItem(context.operation, job, itemId, answer, {
+        ...(templateId === undefined ? {} : { templateId }),
+        ...(templateVersion === undefined ? {} : { templateVersion }),
+        ...(expectedAnsweredAt === undefined ? {} : { expectedAnsweredAt }),
+      }),
   ),
 
   /*

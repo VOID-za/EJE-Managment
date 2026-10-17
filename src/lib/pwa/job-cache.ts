@@ -26,12 +26,13 @@ import type { JobListRow } from '@/application/job-view';
  */
 
 const DATABASE = 'eje-job-cache';
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const JOB_STORE = 'jobs';
 const META_STORE = 'meta';
 const DEVICE_STORE = 'device';
 const PLACE_STORE = 'place';
 const PENDING_STORE = 'pending';
+const DRAFT_STORE = 'drafts';
 /** One row, so the key is fixed: this device has one last-confirmed session. */
 const DEVICE_KEY = 'last_confirmed_session';
 /**
@@ -154,6 +155,17 @@ const openDatabase = (): Promise<IDBDatabase> =>
         const pending = db.createObjectStore(PENDING_STORE, { keyPath: 'id' });
         pending.createIndex('userId', 'userId', { unique: false });
         pending.createIndex('jobId', 'jobId', { unique: false });
+      }
+      /*
+       * A WRITE-UP TYPED WITH NO SIGNAL. OFF-WRITEUP-1. The second store whose
+       * contents are not a copy of anything the server has — so, like
+       * `pending`, it is not cleared on sign-out and is owner-scoped. See
+       * `report-draft.ts`, which owns it, and `clearCachedJobs`, whose
+       * transaction names neither.
+       */
+      if (!db.objectStoreNames.contains(DRAFT_STORE)) {
+        const drafts = db.createObjectStore(DRAFT_STORE, { keyPath: 'key' });
+        drafts.createIndex('userId', 'userId', { unique: false });
       }
     };
     open.onsuccess = () => resolve(open.result);
@@ -354,11 +366,12 @@ export const clearLastPlace = async (userId: string): Promise<void> => {
  * file. Everything cleared below is a copy of something the server already
  * has — a job list, when it arrived, whose session this was, which job was
  * open — so throwing it away costs nothing. `pending` holds hours a technician
- * worked and parts they fitted that the server has NOT seen; clearing it on a
+ * worked and parts they fitted that the server has NOT seen, and `drafts`
+ * holds a completion write-up they typed with no signal; clearing either on a
  * sign-out would destroy the only record of that work, which is precisely what
- * CR-02 forbids. It is keyed by user, shown only to its owner, and leaves only
- * when the server confirms it or the technician explicitly discards it. See
- * `pending-work.ts`.
+ * CR-02 forbids. Both are keyed by user, shown only to their owner, and leave
+ * only when the server has the work or the technician explicitly discards it.
+ * See `pending-work.ts` and `report-draft.ts`.
  *
  *
  * EVERYBODY, not just the user signing out: a tablet that has been used by
@@ -367,8 +380,8 @@ export const clearLastPlace = async (userId: string): Promise<void> => {
  * technician's jobs "because they might come back" is how one person's work
  * ends up on another person's screen.
  *
- * The transaction below names four stores and `pending` is not one of them, so
- * this cannot reach it even by accident.
+ * The transaction below names four stores; neither `pending` nor `drafts` is
+ * one of them, so this cannot reach either even by accident.
  */
 export const clearCachedJobs = async (): Promise<void> => {
   if (!isJobCacheSupported()) return;

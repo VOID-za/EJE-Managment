@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import {
   evaluateChecklist,
+  isChecklistItemAnswered,
   isMeasurementOutOfRange,
   requiresNote,
   type ChecklistItem,
@@ -14,12 +15,38 @@ import {
 import type { ChecklistAnswer } from '@/application/job-operations';
 import { Badge, Button, Card, ConfirmDialog, Icon } from '@/components/ui';
 import { jobs } from '@/api/endpoints';
+import { useOnline } from '@/hooks/useOnline';
+import { useOfflineCapture } from '@/hooks/useOfflineCapture';
 import { useOperation } from '@/hooks/useOperation';
+import { usePendingWork } from '@/hooks/usePendingWork';
+import { supersedePendingAnswer, type PendingWork } from '@/lib/pwa/pending-work';
+import { useCurrentUser } from '@/providers/AppProvider';
 import { usePhotoUpload } from '@/hooks/usePhotoUpload';
 import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
 import { UploadFailureNotice } from '@/components/media/UploadFailureNotice';
 import { cn } from '@/lib/cn';
 import { RuleViolationNotice } from './RuleViolationNotice';
+
+/**
+ * One line naming the answer, for the queue a technician reads later.
+ *
+ * The item's own wording and the value, because "answer_checklist" tells
+ * nobody which of forty questions is being held.
+ */
+const answerLabel = (item: ChecklistItem, response: ChecklistResponse): string => {
+  switch (item.responseType) {
+    case 'pass_fail_na':
+      return response.choice === null ? 'no answer' : response.choice.toUpperCase();
+    case 'yes_no':
+      return response.yesNo === null ? 'no answer' : response.yesNo ? 'Yes' : 'No';
+    case 'measurement':
+      return response.measurement === null
+        ? 'no reading'
+        : `${response.measurement}${item.unit === null ? '' : ` ${item.unit}`}`;
+    case 'text':
+      return response.text.trim().length === 0 ? 'no answer' : response.text.trim().slice(0, 80);
+  }
+};
 
 /**
  * Tablet-first checklist.
@@ -59,6 +86,95 @@ export const ChecklistRunner = ({
   const answer = async (itemId: string, value: ChecklistAnswer) => {
     const ok = await operation.run(() => jobs.answerChecklist(job.id, { itemId, ...value }));
     if (ok) onChanged();
+  };
+
+  /*
+   * ANSWERING WITH NO SIGNAL. OFF-CHK-1.
+   *
+   * Online, each control writes its own field as it is tapped, which is what
+   * makes the runner feel like paper. Offline that would be wrong twice over:
+   * a `fail` would be held with no note (the note arrives on the next blur, as
+   * a second capture), and two captures for one item would race each other on
+   * the way back. So with no connection the row collects the WHOLE answer and
+   * the technician holds it deliberately, and this is where it is validated
+   * against the template before anything is written to the device.
+   *
+   * The template is in memory because the technician is looking at it. Nothing
+   * here caches it, infers it or invents an answer — an item with no value is
+   * refused, and so is a failure with no note.
+   */
+  const online = useOnline();
+  const currentUser = useCurrentUser();
+  const capture = useOfflineCapture(job);
+  const pending = usePendingWork();
+
+  const held = useMemo(() => {
+    const map = new Map<string, PendingWork>();
+    for (const row of pending.rows) {
+      if (row.jobId !== job.id || row.action !== 'answer_checklist') continue;
+      const itemId = row.payload.itemId;
+      if (typeof itemId === 'string') map.set(itemId, row);
+    }
+    return map;
+  }, [pending.rows, job.id]);
+
+  /** Held, not saved. Returns what to tell the technician, or null if it went. */
+  const hold = async (item: ChecklistItem, draft: ChecklistAnswer): Promise<string | null> => {
+    const checklist = job.checklist;
+    if (checklist === null) return 'The checklist has not been started on this tablet.';
+
+    const existing = responses.get(item.id);
+    const candidate: ChecklistResponse = {
+      itemId: item.id,
+      choice: draft.choice !== undefined ? draft.choice : (existing?.choice ?? null),
+      yesNo: draft.yesNo !== undefined ? draft.yesNo : (existing?.yesNo ?? null),
+      measurement:
+        draft.measurement !== undefined ? draft.measurement : (existing?.measurement ?? null),
+      text: draft.text !== undefined ? draft.text : (existing?.text ?? ''),
+      notes: draft.notes !== undefined ? draft.notes : (existing?.notes ?? ''),
+      photos: existing?.photos ?? [],
+      answeredAt: null,
+      answeredBy: null,
+    };
+
+    // The template's own rules, asked before the device holds anything.
+    if (!isChecklistItemAnswered(item, candidate)) {
+      return 'Answer the item before this tablet can hold it.';
+    }
+    if (requiresNote(item, candidate) && candidate.notes.trim().length === 0) {
+      return 'This item was not passed, so the note has to be written before it can be held.';
+    }
+
+    // One answer per item: the unsent one this replaces is the same answer,
+    // corrected. Nothing that reached the server is touched — see the store.
+    await supersedePendingAnswer(currentUser?.id ?? '', job.id, item.id).catch(() => 0);
+
+    const outcome = await capture.capture(
+      'answer_checklist',
+      {
+        itemId: item.id,
+        choice: candidate.choice,
+        yesNo: candidate.yesNo,
+        measurement: candidate.measurement,
+        text: candidate.text,
+        notes: candidate.notes,
+        /*
+         * WHAT THIS ANSWER IS AN ANSWER TO. The instance it was given on, and
+         * the answer it replaces. The server refuses the capture if either has
+         * moved on, so a stale answer is referred to the office rather than
+         * overwriting somebody else's (`ChecklistExpectation`).
+         */
+        templateId: checklist.templateId,
+        templateVersion: checklist.templateVersion,
+        expectedAnsweredAt: existing?.answeredAt ?? null,
+      },
+      `${item.text} — ${answerLabel(item, candidate)}`,
+    );
+
+    if (outcome.kind === 'refused') return outcome.message;
+    if (outcome.kind === 'sent') onChanged();
+    await pending.refresh();
+    return null;
   };
 
   /*
@@ -177,6 +293,30 @@ export const ChecklistRunner = ({
         </div>
       </Card>
 
+      {/*
+        WHAT THE PERCENTAGE ABOVE IS, AND IS NOT. OFF-CHK-1. It counts what the
+        SERVER holds. A held answer is not on the job yet and is not counted
+        here, because a progress bar that includes work nobody has received is
+        how a technician comes to believe a checklist is finished when it is
+        not.
+      */}
+      {!online && (
+        <Card>
+          <p
+            className="text-sm font-semibold text-amber-eje-800"
+            data-testid="checklist-offline-notice"
+          >
+            No connection to the EJE server.
+          </p>
+          <p className="mt-1 text-sm text-steel-600">
+            Answer each item and tap <strong>Hold answer</strong>. Answers are kept on this tablet
+            under your name and sent when there is a signal — they are not on the job, and are not
+            counted in the progress above. Evidence photographs and completing the checklist both
+            need a connection.
+          </p>
+        </Card>
+      )}
+
       {template.sections.map((section, sectionIndex) => (
         <Card key={section.id} padded={false}>
           <header className="border-b border-steel-100 px-5 py-4">
@@ -198,8 +338,11 @@ export const ChecklistRunner = ({
                 item={item}
                 response={responses.get(item.id)}
                 editable={editable && !completed}
-                busy={operation.running}
+                busy={operation.running || capture.running}
                 onAnswer={(value) => answer(item.id, value)}
+                offline={!online}
+                held={held.get(item.id)}
+                onHold={(draft) => hold(item, draft)}
                 jobId={job.id}
                 onCapture={(file) => void captureEvidence(item.id, file)}
                 uploading={evidence.state === 'uploading' && capturingFor === item.id}
@@ -247,15 +390,17 @@ export const ChecklistRunner = ({
             <div>
               <p className="text-sm font-semibold text-steel-900">Finish the checklist</p>
               <p className="mt-0.5 text-sm text-steel-500">
-                {progress.complete
-                  ? 'Every required item has been answered.'
-                  : 'All required items must be answered before the checklist can be completed.'}
+                {!online
+                  ? 'Completing the checklist is checked against the template on the server, so it needs a connection.'
+                  : progress.complete
+                    ? 'Every required item has been answered.'
+                    : 'All required items must be answered before the checklist can be completed.'}
               </p>
             </div>
             <Button
               size="lg"
               variant="success"
-              disabled={!progress.complete}
+              disabled={!progress.complete || !online}
               onClick={() => setConfirmComplete(true)}
             >
               Complete checklist
@@ -307,6 +452,9 @@ const ChecklistItemRow = ({
   busy,
   jobId,
   onAnswer,
+  offline,
+  held,
+  onHold,
   onCapture,
   uploading,
   failed: uploadFailed,
@@ -318,6 +466,11 @@ const ChecklistItemRow = ({
   /** For the authenticated media route each thumbnail is read through. */
   readonly jobId: string;
   readonly onAnswer: (value: ChecklistAnswer) => void;
+  /** No connection: collect the whole answer and hold it. OFF-CHK-1. */
+  readonly offline: boolean;
+  /** An answer this tablet is holding for this item, if there is one. */
+  readonly held: PendingWork | undefined;
+  readonly onHold: (draft: ChecklistAnswer) => Promise<string | null>;
   readonly onCapture: (file: File) => void;
   readonly uploading: boolean;
   readonly failed: boolean;
@@ -329,14 +482,61 @@ const ChecklistItemRow = ({
   );
   const [text, setText] = useState(response?.text ?? '');
   const [notes, setNotes] = useState(response?.notes ?? '');
+  /*
+   * THE ANSWER THIS ROW IS COLLECTING WHILE THERE IS NO SIGNAL. OFF-CHK-1.
+   *
+   * Online every control writes as it is tapped. Offline nothing is written
+   * until the technician holds it, so the taps have to live somewhere — and it
+   * has to be somewhere that is visibly NOT the server's answer, which is why
+   * the row shows the two apart.
+   */
+  const [draft, setDraft] = useState<ChecklistAnswer>({});
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [holding, setHolding] = useState(false);
+
+  /** What the technician has typed or tapped but not yet held. */
+  const pendingDraft = offline && Object.keys(draft).length > 0;
+
+  const commit = (value: ChecklistAnswer) => {
+    if (offline) {
+      setDraft((current) => ({ ...current, ...value }));
+      setHoldError(null);
+      return;
+    }
+    onAnswer(value);
+  };
+
+  const shown: ChecklistResponse = {
+    itemId: item.id,
+    choice: draft.choice !== undefined ? draft.choice : (response?.choice ?? null),
+    yesNo: draft.yesNo !== undefined ? draft.yesNo : (response?.yesNo ?? null),
+    measurement:
+      draft.measurement !== undefined ? draft.measurement : (response?.measurement ?? null),
+    text: draft.text !== undefined ? draft.text : (response?.text ?? ''),
+    notes: draft.notes !== undefined ? draft.notes : (response?.notes ?? ''),
+    photos: response?.photos ?? [],
+    answeredAt: response?.answeredAt ?? null,
+    answeredBy: response?.answeredBy ?? null,
+  };
 
   const failed =
-    (item.responseType === 'pass_fail_na' && response?.choice === 'fail') ||
-    (item.responseType === 'yes_no' && response?.yesNo === false);
-  const outOfRange = isMeasurementOutOfRange(item, response);
+    (item.responseType === 'pass_fail_na' && shown.choice === 'fail') ||
+    (item.responseType === 'yes_no' && shown.yesNo === false);
+  const outOfRange = isMeasurementOutOfRange(item, shown);
   const photoMissing = item.photoRequired && (response?.photos.length ?? 0) === 0;
-  const noteRequired = requiresNote(item, response);
-  const noteMissing = noteRequired && (response?.notes ?? '').trim().length === 0;
+  const noteRequired = requiresNote(item, shown);
+  const noteMissing = noteRequired && shown.notes.trim().length === 0;
+
+  const hold = async () => {
+    setHolding(true);
+    try {
+      const problem = await onHold(draft);
+      setHoldError(problem);
+      if (problem === null) setDraft({});
+    } finally {
+      setHolding(false);
+    }
+  };
 
   return (
     <li className={cn('px-5 py-4', failed && 'bg-signal-50/40')}>
@@ -350,28 +550,42 @@ const ChecklistItemRow = ({
             <p className="mt-0.5 text-xs text-steel-500">{item.helpText}</p>
           )}
         </div>
-        {item.photoRequired && (
-          <Badge tone={photoMissing ? 'amber' : 'green'} size="sm">
-            <Icon name="camera" className="size-3" />
-            Photo
-          </Badge>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {/*
+            HELD IS NOT ANSWERED. OFF-CHK-1. The badge is the only honest way
+            to show a row whose answer is on the tablet and not on the job:
+            the server's copy still says whatever it said.
+          */}
+          {held !== undefined && (
+            <span data-testid={`checklist-held-${item.id}`}>
+              <Badge tone="amber" size="sm">
+                {held.state === 'referred' ? 'With the office' : 'Held on this tablet'}
+              </Badge>
+            </span>
+          )}
+          {item.photoRequired && (
+            <Badge tone={photoMissing ? 'amber' : 'green'} size="sm">
+              <Icon name="camera" className="size-3" />
+              Photo
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="mt-3">
         {item.responseType === 'pass_fail_na' && (
           <ChoiceButtons
-            value={response?.choice ?? null}
+            value={shown.choice}
             disabled={!editable}
-            onChange={(choice) => onAnswer({ choice })}
+            onChange={(choice) => commit({ choice })}
           />
         )}
 
         {item.responseType === 'yes_no' && (
           <YesNoButtons
-            value={response?.yesNo ?? null}
+            value={shown.yesNo}
             disabled={!editable}
-            onChange={(yesNo) => onAnswer({ yesNo })}
+            onChange={(yesNo) => commit({ yesNo })}
           />
         )}
 
@@ -390,7 +604,7 @@ const ChecklistItemRow = ({
                 onChange={(event) => setMeasurement(event.target.value)}
                 onBlur={() => {
                   const parsed = Number.parseFloat(measurement);
-                  onAnswer({ measurement: Number.isFinite(parsed) ? parsed : null });
+                  commit({ measurement: Number.isFinite(parsed) ? parsed : null });
                 }}
                 className={cn(
                   'tabular h-14 w-full rounded-[var(--radius-control)] border px-3 text-lg font-semibold',
@@ -422,7 +636,7 @@ const ChecklistItemRow = ({
             value={text}
             disabled={!editable || busy}
             onChange={(event) => setText(event.target.value)}
-            onBlur={() => onAnswer({ text })}
+            onBlur={() => commit({ text })}
             placeholder="Type your answer"
             className="w-full rounded-[var(--radius-control)] border border-steel-300 px-3 py-2.5 text-sm focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none disabled:bg-steel-50"
           />
@@ -444,7 +658,7 @@ const ChecklistItemRow = ({
           value={notes}
           disabled={!editable || busy}
           onChange={(event) => setNotes(event.target.value)}
-          onBlur={() => onAnswer({ notes })}
+          onBlur={() => commit({ notes })}
           placeholder={
             noteRequired
               ? 'What was found, and what is recommended?'
@@ -465,6 +679,40 @@ const ChecklistItemRow = ({
           </p>
         )}
       </div>
+
+      {/* -- holding the answer, with no signal. OFF-CHK-1 ------------------ */}
+      {offline && editable && (
+        <div className="mt-3 space-y-2">
+          {held !== undefined && (
+            <p className="text-xs text-steel-500" data-testid={`checklist-held-note-${item.id}`}>
+              {held.state === 'referred'
+                ? 'The office has this answer and is deciding what happens to it.'
+                : `Held: ${held.summary}. It is on this tablet, not on the job, and is sent when there is a signal.`}
+            </p>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={!pendingDraft || busy}
+            loading={holding}
+            onClick={() => void hold()}
+            data-testid={`checklist-hold-${item.id}`}
+          >
+            {held === undefined ? 'Hold answer' : 'Replace held answer'}
+          </Button>
+          {holdError !== null && (
+            <p role="alert" className="text-xs font-semibold text-signal-600">
+              {holdError}
+            </p>
+          )}
+          {pendingDraft && holdError === null && (
+            <p className="text-xs font-medium text-amber-eje-700">
+              Not held yet — tap Hold answer, or it stays on this screen only.
+            </p>
+          )}
+        </div>
+      )}
 
       {item.photoRequired && (
         <div className="mt-3 space-y-2">
@@ -492,10 +740,20 @@ const ChecklistItemRow = ({
                 testIdPrefix={`checklist-photo-${item.id}`}
                 cameraLabel="Take evidence photo"
                 galleryLabel="Choose photo"
-                disabled={busy}
+                disabled={busy || offline}
                 busy={uploading}
                 onFile={onCapture}
               />
+              {/*
+                EVIDENCE IS BYTES, AND THIS QUEUE CARRIES REQUESTS. OFF-12,
+                OFF-CHK-1. An answer can be held; a photograph cannot, and
+                saying so is better than a button that fails in a basement.
+              */}
+              {offline && (
+                <span className="text-xs font-medium text-amber-eje-700">
+                  A photograph needs a connection — the answer can still be held.
+                </span>
+              )}
               {uploading && (
                 <span className="text-xs font-medium text-steel-500">
                   Uploading to the EJE server…

@@ -247,9 +247,11 @@ const CapturesPage = () => {
               { value: 'no_action', label: 'No action — record why' },
             ]}
             hint={
-              resolution === 'applied'
-                ? 'Captured onto the job through the ordinary operation, with every rule that applies to a line captured by hand. If the job refuses it, nothing happens and you will be told why.'
-                : 'Nothing further happens to the capture. The reason is kept against it and the technician can see it.'
+              resolution === 'no_action'
+                ? 'Nothing further happens to the capture. The reason is kept against it and the technician can see it.'
+                : resolving?.referral.action === 'answer_checklist'
+                  ? 'Answered onto the job through the ordinary operation. A checklist answer REPLACES whatever answer is on the job now, and your decision is recorded against it — so read the refusal below first. An answer can never be moved onto a different version of the checklist.'
+                  : 'Captured onto the job through the ordinary operation, with every rule that applies to a line captured by hand. If the job refuses it, nothing happens and you will be told why.'
             }
           />
           <TextAreaField

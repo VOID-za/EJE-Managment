@@ -34,7 +34,18 @@ export interface ChecklistProgress {
   readonly complete: boolean;
 }
 
-const isAnswered = (item: ChecklistItem, response: ChecklistResponse | undefined): boolean => {
+/**
+ * Whether this item has an answer at all, by its own response type.
+ *
+ * Exported because the tablet needs the same question before it will HOLD an
+ * answer with no signal (OFF-CHK-1): a capture with nothing in it is not an
+ * answer, and the device must refuse to hold one rather than queue a row that
+ * the server would then be asked to write. One rule, asked in both places.
+ */
+export const isChecklistItemAnswered = (
+  item: ChecklistItem,
+  response: ChecklistResponse | undefined,
+): boolean => {
   if (response === undefined) return false;
   switch (item.responseType) {
     case 'pass_fail_na':
@@ -100,7 +111,7 @@ export const evaluateChecklist = (
     for (const item of section.items) {
       total += 1;
       const response = responsesById.get(item.id);
-      const itemAnswered = isAnswered(item, response);
+      const itemAnswered = isChecklistItemAnswered(item, response);
 
       if (itemAnswered) {
         answered += 1;

@@ -1,6 +1,6 @@
 /**
- * WHAT MAY BE CAPTURED WITH NO SIGNAL, AND WHAT MAY NOT. OFF-2, OFF-8, OFF-9.
- * CR-09 Phase 4, step one.
+ * WHAT MAY BE CAPTURED WITH NO SIGNAL, AND WHAT MAY NOT. OFF-2, OFF-8, OFF-9,
+ * OFF-CHK-1. CR-09 Phase 4, steps one and two.
  *
  * THE RULE THIS FILE EXISTS TO MAKE EXPLICIT. A job card is a document a
  * customer signs and a business invoices from. Phase 3 refused every offline
@@ -18,6 +18,25 @@
  * the replay exactly as they do online, which is what makes a job that was
  * signed, closed, cancelled or reassigned while the tablet was away refuse the
  * work rather than absorb it.
+ *
+ * AND ONE ANSWER THAT IS NOT APPEND-ONLY: A CHECKLIST ITEM. OFF-CHK-1, added
+ * once there was an answer to OFF-9. A service or installation checklist is
+ * the body of the work, and refusing it offline meant a technician in a plant
+ * basement either wrote the readings on their hand or did the job twice.
+ *
+ * It is allowed because the capture is no longer a bare instruction to
+ * overwrite. It names the checklist INSTANCE it was answered on — the template
+ * and the version — and the answer it is replacing, as the stamp the tablet
+ * last saw. The server refuses it if either has moved (`ChecklistExpectation`
+ * in `job-operations.ts`), so a stale answer is retained and referred to the
+ * office rather than silently erasing somebody else's. That is the conflict
+ * rule OFF-9 asked for, and nothing else was widened to get it: COMPLETING a
+ * checklist and attaching EVIDENCE to one stay online-only below.
+ *
+ * The validation a held answer must satisfy is the template's own, applied
+ * before it is held: an answer with no value is not held, and a failure with
+ * no note is not held. The tablet has the template in memory because the
+ * technician is looking at it — nothing is cached, inferred or fabricated.
  *
  * WHAT IS REFUSED, and why each one is a different kind of problem:
  *
@@ -47,13 +66,19 @@
 import type { JobStatus } from '@/domain';
 
 /** The actions this device may hold on behalf of the server. */
-export type OfflineAction = 'add_labour' | 'add_travel' | 'add_part' | 'add_note';
+export type OfflineAction =
+  | 'add_labour'
+  | 'add_travel'
+  | 'add_part'
+  | 'add_note'
+  | 'answer_checklist';
 
 export const OFFLINE_ACTIONS: readonly OfflineAction[] = [
   'add_labour',
   'add_travel',
   'add_part',
   'add_note',
+  'answer_checklist',
 ];
 
 export const isOfflineAction = (action: string): action is OfflineAction =>
@@ -66,8 +91,6 @@ export const isOfflineAction = (action: string): action is OfflineAction =>
  * and so a test can assert that nothing has quietly joined the allowed list.
  */
 export const ONLINE_ONLY: Readonly<Record<string, string>> = {
-  answer_checklist:
-    'A checklist answer replaces the previous one, and completing the checklist is checked against the template. Both need a connection.',
   complete_checklist: 'Completing the checklist is checked against the template on the server.',
   add_checklist_photo: 'A photograph has to be uploaded, which needs a connection.',
   save_report:

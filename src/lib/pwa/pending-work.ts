@@ -324,6 +324,46 @@ export const markReferred = (userId: string, id: string, referralId: string): Pr
   update(userId, id, (row) => ({ ...row, state: 'referred', referralId }));
 
 /**
+ * A HELD ANSWER THE TECHNICIAN HAS JUST REPLACED. OFF-CHK-1.
+ *
+ * A checklist answer is the one capture in this store that is not a new row:
+ * answering the same item twice offline is one answer, corrected, not two
+ * findings. So holding an answer removes the UNSENT one it replaces.
+ *
+ * NARROW ON PURPOSE, and the conditions are the whole safety of it: the same
+ * user, the same job, the same item, the same action, and `pending` — a
+ * capture the server has refused (`conflict`) or the office is deciding about
+ * (`referred`) is nobody's to tidy away from here, and is left exactly where
+ * it is. Nothing that ever reached the server can be removed by this.
+ *
+ * Without it, two answers for one item would both be sent: the first would
+ * land and the second would be refused for replacing an answer that is no
+ * longer the one it expected — a conflict the technician would have to have
+ * explained to them, caused entirely by them changing their mind.
+ */
+export const supersedePendingAnswer = async (
+  userId: string,
+  jobId: string,
+  itemId: string,
+): Promise<number> => {
+  if (!isPendingSupported() || userId.length === 0) return 0;
+  const superseded = (await readPendingWork(userId)).filter(
+    (row) =>
+      row.jobId === jobId &&
+      row.action === 'answer_checklist' &&
+      row.state === 'pending' &&
+      row.payload.itemId === itemId,
+  );
+  if (superseded.length === 0) return 0;
+
+  await withStore('readwrite', (store) => {
+    for (const row of superseded) store.delete(row.id);
+  });
+  announce();
+  return superseded.length;
+};
+
+/**
  * The server has it. This is the ONLY automatic removal.
  *
  * Called after a 2xx, which — because the key is the capture's own — also
