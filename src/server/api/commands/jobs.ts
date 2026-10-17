@@ -10,6 +10,7 @@ import {
   can,
   canSeeJob,
   getJobTypeDefinition,
+  isJobTechnician,
   redactRefusalsForViewer,
   technicianHistoryFrom,
   userFullName,
@@ -18,7 +19,7 @@ import {
 } from '@/domain';
 import * as jobs from '@/application/job-operations';
 import { createJob } from '@/application/job-creation';
-import { notFound } from '../errors';
+import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
 
 /**
@@ -140,6 +141,37 @@ const checklistTemplate = async (context: CommandContext, job: Job) => {
   return template;
 };
 
+/**
+ * THE FIELD-LOCATION PROMPT IS FOR THE FIELD. CR-03, MASTER SCOPE §3.3.
+ *
+ * Two questions, both of them about this actor on THIS job: do they carry out
+ * field work at all (`jobs.acceptField` — a Coordinator runs the office and
+ * does not attend machines), and are they on the job's crew? Neither is asked
+ * by the dialog that offers the prompt, because a dialog is not authorisation:
+ * the route is reachable by anybody who can see the job, and the message is
+ * sent under EJE's WhatsApp account at EJE's cost.
+ *
+ * A Master is refused for the same reason a Coordinator is. They have the
+ * site address on the screen in front of them; what they do not have is a
+ * reason for EJE to send themselves a navigation link from a technician's
+ * acceptance prompt.
+ */
+const assertFieldTechnicianOnJob = (
+  context: CommandContext,
+  job: Job,
+  what: string,
+): void => {
+  if (can(context.actor.role, 'jobs.acceptField') && isJobTechnician(context.actor, job)) return;
+  throw forbidden(`You cannot ${what} ${job.jobNumber}.`, [
+    {
+      code: 'not_field_technician',
+      message: can(context.actor.role, 'jobs.acceptField')
+        ? 'Only a technician working on the job can ask for its site location.'
+        : 'The site location is sent to the technician attending the machine, not to the office.',
+    },
+  ]);
+};
+
 export const JOB_COMMANDS: CommandRegistry = {
   accept: simple((context, job) => jobs.acceptJob(context.operation, job)),
 
@@ -151,28 +183,35 @@ export const JOB_COMMANDS: CommandRegistry = {
    * request supply them would let it send a technician to an address of its
    * choosing under EJE's name.
    */
-  send_site_location: withInput(
-    z.object({ recipientMobile: text(40).optional() }).strict(),
-    async (context, job, input) => {
-      const [site, machine, customer] = await Promise.all([
-        context.repos.customers.findSiteById(job.siteId),
-        job.machineId === null
-          ? Promise.resolve(null)
-          : context.repos.machines.findById(job.machineId),
-        context.repos.customers.findById(job.customerId),
-      ]);
-      if (site === null || customer === null) throw notFound('That job does not exist.');
+  /*
+   * THE DESTINATION IS NOT IN THE REQUEST, and `recipientMobile` is gone.
+   *
+   * It used to be an optional field on this body, which made this route a way
+   * to send an EJE-branded WhatsApp template to any number somebody chose, at
+   * EJE's cost and under EJE's name. No screen ever sent it. The message now
+   * goes to the actor's own mobile, read from their account by the operation.
+   */
+  send_site_location: withInput(z.object({}).strict(), async (context, job) => {
+    assertFieldTechnicianOnJob(context, job, 'ask for the site location of');
 
-      return jobs.sendSiteLocation(context.operation, job, {
-        site,
-        machine,
-        customerName: customer.name,
-        ...(input.recipientMobile === undefined ? {} : { recipientMobile: input.recipientMobile }),
-      });
-    },
-  ),
+    const [site, machine, customer] = await Promise.all([
+      context.repos.customers.findSiteById(job.siteId),
+      job.machineId === null
+        ? Promise.resolve(null)
+        : context.repos.machines.findById(job.machineId),
+      context.repos.customers.findById(job.customerId),
+    ]);
+    if (site === null || customer === null) throw notFound('That job does not exist.');
+
+    return jobs.sendSiteLocation(context.operation, job, {
+      site,
+      machine,
+      customerName: customer.name,
+    });
+  }),
 
   decline_site_location: simple(async (context, job) => {
+    assertFieldTechnicianOnJob(context, job, 'decline the site location of');
     await jobs.declineSiteLocation(context.operation, job);
     return job;
   }),

@@ -411,10 +411,24 @@ export interface SiteLocationInput {
   readonly recipientMobile?: string;
 }
 
+/** The approved WhatsApp template the site location is sent through. */
+export const SITE_LOCATION_TEMPLATE = 'eje_site_location';
+
 export interface SiteLocationResult {
-  readonly sent: boolean;
+  /**
+   * QUEUED, NOT SENT, AND THE NAME IS THE POINT.
+   *
+   * The message is written to the outbox inside the transaction that is
+   * recording the request, and the provider is called AFTER the commit — so at
+   * the moment this result is produced, nothing has left the building. A
+   * `sent: true` here would have been a claim this code is in no position to
+   * make, which is why the field is called `queued`.
+   */
+  readonly queued: boolean;
   readonly navigationUrl: string;
-  /** Set when the send was attempted and failed. The job is unaffected. */
+  /** False when this deployment has no WhatsApp credentials at all. */
+  readonly configured: boolean;
+  /** Set when nothing was queued. The job is unaffected either way. */
   readonly failureReason: string | null;
 }
 
@@ -436,11 +450,28 @@ export const buildSiteLocationMessage = (input: SiteLocationInput, jobNumber: st
     .join('\n');
 
 /**
- * Sends the site location to the technician, on request.
+ * Puts the site location on the outbox, for the technician who asked for it.
  *
- * Called AFTER acceptance has already succeeded and committed, never as part of
- * it. Any failure is swallowed into the result and recorded on the audit trail:
- * a job that has been accepted stays accepted whatever WhatsApp does.
+ * WHO MAY ASK. Only a technician who is ON this job and does field work. It is
+ * the prompt a technician gets at the moment they accept a job and start
+ * driving; a Coordinator does not attend machines, and the office has the
+ * address on the screen in front of them. Enforced here rather than by the
+ * dialog that offers it, because a dialog is not authorisation.
+ *
+ * WHERE IT GOES. To the ACTOR'S OWN mobile number, from their account — never
+ * to a number in the request. A route that takes a destination is a route for
+ * sending EJE-branded WhatsApp messages to arbitrary numbers, at EJE's cost.
+ *
+ * QUEUED INSIDE THE TRANSACTION, SENT AFTER IT — the same mechanism as the
+ * assignment notice, and for the same two reasons: no transaction is held open
+ * across a call to Meta, and a commit cannot lose the obligation. `writeRoute`
+ * drains the outbox once the response has been decided, so a provider failure
+ * updates the outbox row and can be retried, instead of leaving one sentence
+ * on the audit trail and nothing to retry from.
+ *
+ * It never throws, and nothing it does can affect the acceptance that
+ * preceded it: a job that has been accepted stays accepted whatever WhatsApp
+ * does, which is the commercial rule this whole flow exists to respect.
  */
 export const sendSiteLocation = async (
   context: OperationContext,
@@ -448,46 +479,77 @@ export const sendSiteLocation = async (
   input: SiteLocationInput,
 ): Promise<SiteLocationResult> => {
   const navigationUrl = siteNavigationUrl(input.site);
-  const recipient = input.recipientMobile ?? context.actor.mobile;
+  const configured = context.services.whatsapp.configured;
 
-  try {
-    await context.services.whatsapp.send({
-      to: recipient,
-      templateName: 'eje_site_location',
-      parameters: [
-        job.jobNumber,
-        input.customerName,
-        input.machine === null
-          ? input.site.name
-          : `${input.machine.manufacturer} ${input.machine.model}`,
-        input.site.name,
-        navigationUrl,
-      ],
-      preview: buildSiteLocationMessage(input, job.jobNumber),
-    });
-
-    await audit(context, {
-      jobId: job.id,
-      type: 'site_location_sent',
-      summary: 'Site location requested via WhatsApp',
-      detail: `${input.site.name} sent to ${userFullName(context.actor)} with a navigation link.`,
-    });
-
-    return { sent: true, navigationUrl, failureReason: null };
-  } catch (cause: unknown) {
-    const failureReason =
-      cause instanceof Error ? cause.message : 'The message could not be queued.';
-
-    // Deliberately not rethrown. The job is already accepted and must stay so.
+  const refuse = async (
+    failureReason: string,
+    detail: string,
+  ): Promise<SiteLocationResult> => {
     await audit(context, {
       jobId: job.id,
       type: 'site_location_failed',
       summary: 'Site location could not be sent',
-      detail: `${failureReason} The job remains accepted and in progress.`,
+      detail: `${detail} The job remains accepted and in progress.`,
     });
+    return { queued: false, navigationUrl, configured, failureReason };
+  };
 
-    return { sent: false, navigationUrl, failureReason };
+  if (!configured) {
+    /*
+     * NOTHING IS QUEUED ON A DEPLOYMENT THAT CANNOT SEND. A row that can never
+     * go would be retried until its attempts ran out and would sit on the
+     * office's outbox screen as a failure nobody can act on. The honest answer
+     * is to say so now — the technician still has the link on their screen.
+     */
+    return refuse(
+      'WhatsApp is not set up on this system, so nothing was sent.',
+      'WhatsApp is not configured on this deployment, so no message was queued.',
+    );
   }
+
+  const recipient = context.actor.mobile.trim();
+  if (recipient.length === 0) {
+    // A thing the office can fix, so it is recorded rather than ignored.
+    return refuse(
+      'There is no mobile number on your account, so nothing was sent.',
+      `${userFullName(context.actor)} has no mobile number on their account, so no message was queued.`,
+    );
+  }
+
+  await context.repos.outbox.enqueue({
+    id: context.services.ids.next('outbox'),
+    channel: 'whatsapp',
+    template: SITE_LOCATION_TEMPLATE,
+    recipient,
+    parameters: [
+      job.jobNumber,
+      input.customerName,
+      input.machine === null
+        ? input.site.name
+        : `${input.machine.manufacturer} ${input.machine.model}`,
+      input.site.name,
+      navigationUrl,
+    ],
+    preview: buildSiteLocationMessage(input, job.jobNumber),
+    jobId: job.id,
+    state: 'pending',
+    attempts: 0,
+    providerMessageId: null,
+    failureReason: '',
+    createdAt: context.services.clock.now(),
+    lastAttemptAt: null,
+  });
+
+  await audit(context, {
+    jobId: job.id,
+    type: 'site_location_sent',
+    summary: 'Site location requested via WhatsApp',
+    detail:
+      `${input.site.name} queued for ${userFullName(context.actor)} with a navigation link. ` +
+      'Queued is not sent and sent is not delivered — the outbox records what the provider actually says.',
+  });
+
+  return { queued: true, navigationUrl, configured, failureReason: null };
 };
 
 /** Records that the technician was offered the site location and declined it. */
@@ -2528,7 +2590,7 @@ export const generateJobCardDocument = async (context: OperationContext, job: Jo
     jobId: job.id,
     type: 'pdf_generated',
     summary: 'Job card document generated',
-    detail: `${generated.fileName} (${generated.pageCount} pages)${generated.simulated ? ' — simulated in demo mode.' : '.'}`,
+    detail: `${generated.fileName} (${generated.pageCount} pages)${generated.renderedLocally ? ' — rendered by the application itself, which is the demonstration build. The file is real; what it says about delivery is nothing.' : '.'}`,
   });
   return generated;
 };
@@ -2648,7 +2710,7 @@ const renderAndStoreFinalDocument = async (
     jobId: job.id,
     type: 'pdf_generated',
     summary: 'Final job card document generated',
-    detail: `${document.fileName} (${pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
+    detail: `${document.fileName} (${pageCount} pages)${document.renderedLocally ? ' — rendered by the application itself, which is the demonstration build. The file is real; delivery is recorded separately.' : '.'}`,
   });
 
   return {
@@ -2659,7 +2721,7 @@ const renderAndStoreFinalDocument = async (
       pageCount,
       generatedAt: document.generatedAt,
       generatedBy: context.actor.id,
-      simulated: document.simulated,
+      renderedLocally: document.renderedLocally,
       issuedTo: '',
     },
   };
@@ -2868,7 +2930,7 @@ const performIssue = async (
     jobId: job.id,
     type: 'pdf_generated',
     summary: 'Final job card document generated',
-    detail: `${document.fileName} (${pageCount} pages)${document.simulated ? ' — simulated in demo mode.' : '.'}`,
+    detail: `${document.fileName} (${pageCount} pages)${document.renderedLocally ? ' — rendered by the application itself, which is the demonstration build. The file is real; delivery is recorded separately.' : '.'}`,
   });
 
   const issued = await context.repos.jobs.save({
@@ -2882,7 +2944,7 @@ const performIssue = async (
       pageCount,
       generatedAt: document.generatedAt,
       generatedBy: context.actor.id,
-      simulated: document.simulated,
+      renderedLocally: document.renderedLocally,
       issuedTo: customerEmail,
     },
     delivery: emptyDelivery(customerEmail, now),

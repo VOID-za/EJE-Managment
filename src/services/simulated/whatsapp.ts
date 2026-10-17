@@ -9,6 +9,13 @@ import type { SimulatedOutbox } from './outbox';
  * Cloud API and reconcile delivery receipts.
  */
 export class SimulatedWhatsAppService implements WhatsAppService {
+  /**
+   * True: the demonstration channel is a working channel. It records exactly
+   * what it was given, marked `simulated`, and the screens say so — which is a
+   * configured sender of simulated messages, not an absent one.
+   */
+  readonly configured = true;
+
   constructor(
     private readonly outbox: SimulatedOutbox,
     private readonly clock: Clock,

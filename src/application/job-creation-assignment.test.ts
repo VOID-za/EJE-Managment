@@ -343,6 +343,7 @@ describe('who the job is given to', () => {
       services: {
         ...harness.services,
         whatsapp: {
+          configured: true,
           send: () => {
             calls += 1;
             return Promise.reject(new Error('the transaction called the provider'));

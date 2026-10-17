@@ -239,10 +239,17 @@ export const AcceptJobFlow = ({
                 const result = await api.sendSiteLocation(accepted.id);
                 setLocationBusy(false);
                 setLocationPrompt(null);
+                /*
+                 * QUEUED IS NOT SENT, and the sentence says which it is. The
+                 * message is written to the outbox with the request and goes
+                 * to the provider afterwards, so the only honest claim here is
+                 * that it has been queued — the office's outbox screen is
+                 * where what WhatsApp actually said appears.
+                 */
                 setLocationOutcome(
-                  result.sent
-                    ? `Site location queued to ${view.primaryTechnician?.mobile ?? 'the technician'}.`
-                    : `The site location could not be sent: ${result.failureReason ?? 'unknown error'}. ${job.jobNumber} is still accepted and in progress.`,
+                  result.queued
+                    ? 'Site location queued to your own WhatsApp number. Queued is not sent: the outbox will show what WhatsApp did with it.'
+                    : `${result.failureReason ?? 'The site location could not be queued.'} ${job.jobNumber} is still accepted and in progress — the link is on this screen if you need it.`,
                 );
                 onAccepted();
               }}
@@ -253,7 +260,10 @@ export const AcceptJobFlow = ({
         }
       >
         <div className="space-y-4 text-sm text-steel-700">
-          <p>Would you like to send the site location to the technician via WhatsApp?</p>
+          <p>
+            Would you like the site location sent to your own WhatsApp number? It goes to the
+            mobile number on your EJE account.
+          </p>
 
           <div className="rounded-[var(--radius-control)] bg-steel-50 p-3">
             <div className="mb-2 flex items-center justify-between gap-2">

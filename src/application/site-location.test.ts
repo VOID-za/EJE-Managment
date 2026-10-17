@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  SITE_LOCATION_TEMPLATE,
   acceptJob,
   buildSiteLocationMessage,
   declineSiteLocation,
@@ -26,14 +27,33 @@ import type { User } from '@/domain';
  * The rule that matters commercially: accepting a job and sending a WhatsApp are
  * two separate things. The job is accepted first and stays accepted whatever
  * happens to the message — including when WhatsApp is completely broken.
+ *
+ * *Amended 18 October 2026, WHATSAPP-1.* The message is no longer handed to the
+ * provider inside the operation. It is ENQUEUED on the durable outbox with the
+ * transaction that records the request, and sent afterwards by the dispatcher —
+ * the same mechanism the assignment notice uses, and for the same two reasons:
+ * no database transaction is held open across a call to Meta, and a commit can
+ * no longer lose the obligation. So these tests assert the OUTBOX ROW, and that
+ * the result says `queued` rather than claiming a send nobody has made yet.
  */
 
 const actor: User = seedUsers.find((user) => user.id === 'user-tech-sipho')!;
 
 /** A WhatsApp adapter that always fails, standing in for a provider outage. */
 class FailingWhatsAppService implements WhatsAppService {
+  readonly configured = true;
+
   send(_message: WhatsAppMessage): Promise<OutboxEntry> {
     return Promise.reject(new Error('WhatsApp Cloud API unavailable (503)'));
+  }
+}
+
+/** A deployment with no WhatsApp credentials at all. */
+class UnconfiguredService implements WhatsAppService {
+  readonly configured = false;
+
+  send(_message: WhatsAppMessage): Promise<OutboxEntry> {
+    return Promise.reject(new Error('WhatsApp is not configured on this deployment.'));
   }
 }
 
@@ -113,30 +133,55 @@ describe('choosing "Send Location"', () => {
     harness = build();
   });
 
-  it('queues exactly one WhatsApp message', async () => {
+  it('queues exactly one WhatsApp message on the durable outbox', async () => {
     const { job, input } = await acceptEje1048(harness);
     const result = await sendSiteLocation(harness.context, job, input);
 
-    expect(result.sent).toBe(true);
+    expect(result.queued).toBe(true);
+    expect(result.configured).toBe(true);
     expect(result.failureReason).toBeNull();
 
-    const sent = harness.outbox.listSync();
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.channel).toBe('whatsapp');
-    expect(sent[0]?.to).toBe(actor.mobile);
-    expect(sent[0]?.simulated).toBe(true);
+    const queued = (await harness.repos.outbox.list()).filter((row) => row.jobId === job.id);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.channel).toBe('whatsapp');
+    expect(queued[0]?.template).toBe(SITE_LOCATION_TEMPLATE);
+    // The actor's OWN number, from their account — never one in a request.
+    expect(queued[0]?.recipient).toBe(actor.mobile);
+    expect(queued[0]?.state).toBe('pending');
+    expect(queued[0]?.attempts).toBe(0);
+    expect(queued[0]?.providerMessageId).toBeNull();
+  });
+
+  it('hands the provider NOTHING while the operation is running', async () => {
+    /*
+     * The architectural point, asserted: a provider that rejects every call
+     * cannot affect this operation, because the operation does not call it.
+     * The row is written, and the dispatcher sends it after the commit.
+     */
+    const outage = build(new FailingWhatsAppService());
+    const { job, input } = await acceptEje1048(outage);
+
+    const result = await sendSiteLocation(outage.context, job, input);
+
+    expect(result.queued).toBe(true);
+    expect(outage.outbox.listSync()).toHaveLength(0);
+    expect((await outage.repos.outbox.list()).filter((row) => row.jobId === job.id)).toHaveLength(1);
   });
 
   it('includes the job number, customer, machine, site and a navigation link', async () => {
     const { job, input } = await acceptEje1048(harness);
     await sendSiteLocation(harness.context, job, input);
 
-    const body = harness.outbox.listSync()[0]?.body ?? '';
+    const row = (await harness.repos.outbox.list()).find((entry) => entry.jobId === job.id);
+    const body = row?.preview ?? '';
     expect(body).toContain('EJE-1048');
     expect(body).toContain('ABC Engineering (Pty) Ltd');
     expect(body).toContain('Leadwell V-40');
     expect(body).toContain('Johannesburg');
     expect(body).toContain('https://www.google.com/maps/dir/?api=1&destination=');
+    // The template's placeholders, in the order the approved template expects.
+    expect(row?.parameters[0]).toBe('EJE-1048');
+    expect(row?.parameters[4]).toContain('google.com/maps');
   });
 
   it('keeps the message short, to limit notifications and messaging cost', async () => {
@@ -147,13 +192,55 @@ describe('choosing "Send Location"', () => {
     expect(body.length).toBeLessThan(320);
   });
 
-  it('records it on the audit trail', async () => {
+  it('records it on the audit trail, saying queued is not sent', async () => {
     const { job, input } = await acceptEje1048(harness);
     await sendSiteLocation(harness.context, job, input);
 
     const trail = await harness.repos.activity.list(job.id);
     const entry = trail.find((event) => event.type === 'site_location_sent');
     expect(entry?.summary).toBe('Site location requested via WhatsApp');
+    expect(entry?.detail).toContain('Queued is not sent');
+  });
+
+  it('queues NOTHING on a deployment with no WhatsApp configuration, and says so', async () => {
+    /*
+     * A row that can never be sent would be retried until its attempts ran out
+     * and would sit on the office's outbox screen as a failure nobody can act
+     * on. The honest answer is given now, and the technician still has the
+     * link on their screen.
+     */
+    const unconfigured = build(new UnconfiguredService());
+    const { job, input } = await acceptEje1048(unconfigured);
+
+    const result = await sendSiteLocation(unconfigured.context, job, input);
+
+    expect(result.queued).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(result.failureReason).toMatch(/not set up/iu);
+    expect(result.navigationUrl).toContain('google.com/maps');
+    expect(await unconfigured.repos.outbox.list()).toHaveLength(0);
+
+    const trail = await unconfigured.repos.activity.list(job.id);
+    const failure = trail.find((event) => event.type === 'site_location_failed');
+    expect(failure?.detail).toMatch(/not configured/iu);
+    expect(failure?.detail).toContain('remains accepted');
+  });
+
+  it('queues nothing, and says so, when the technician has no mobile number', async () => {
+    const harnessWithoutNumber = build();
+    const { job, input } = await acceptEje1048(harnessWithoutNumber);
+    const withoutNumber: OperationContext = {
+      ...harnessWithoutNumber.context,
+      actor: { ...actor, mobile: '   ' },
+    };
+
+    const result = await sendSiteLocation(withoutNumber, job, input);
+
+    expect(result.queued).toBe(false);
+    // Configured, but unreachable: a thing the office can fix, so it is said.
+    expect(result.configured).toBe(true);
+    expect(result.failureReason).toMatch(/no mobile number/iu);
+    expect(await harnessWithoutNumber.repos.outbox.list()).toHaveLength(0);
   });
 });
 
@@ -185,30 +272,27 @@ describe('choosing "No, Thanks"', () => {
 });
 
 describe('WhatsApp failure never affects the job', () => {
-  it('leaves the job accepted and in progress when the send fails', async () => {
+  it('leaves the job accepted and in progress, with the message still queued', async () => {
+    /*
+     * The provider is down. The job was accepted before any of this and stays
+     * accepted — and because the message is a durable row rather than an HTTP
+     * call made inside the operation, the obligation survives the outage
+     * instead of becoming one sentence on the audit trail with nothing to
+     * retry from. `outbox-dispatch.test.ts` covers what the dispatcher then
+     * does with it.
+     */
     const harness = build(new FailingWhatsAppService());
     const { job, input } = await acceptEje1048(harness);
 
     const result = await sendSiteLocation(harness.context, job, input);
-
-    // The operation reports the failure rather than throwing it at the caller.
-    expect(result.sent).toBe(false);
-    expect(result.failureReason).toContain('503');
+    expect(result.queued).toBe(true);
 
     const reloaded = await harness.repos.jobs.findByJobNumber('EJE-1048');
     expect(reloaded?.status).toBe('in_progress');
     expect(reloaded?.acceptedAt).not.toBeNull();
-  });
 
-  it('records the failure on the trail so it is not lost', async () => {
-    const harness = build(new FailingWhatsAppService());
-    const { job, input } = await acceptEje1048(harness);
-    await sendSiteLocation(harness.context, job, input);
-
-    const trail = await harness.repos.activity.list(job.id);
-    const failure = trail.find((event) => event.type === 'site_location_failed');
-    expect(failure?.summary).toBe('Site location could not be sent');
-    expect(failure?.detail).toContain('remains accepted');
+    const row = (await harness.repos.outbox.list()).find((entry) => entry.jobId === job.id);
+    expect(row?.state).toBe('pending');
   });
 
   it('does not reject, so a caller cannot accidentally roll acceptance back', async () => {

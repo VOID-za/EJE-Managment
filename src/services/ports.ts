@@ -109,6 +109,21 @@ export interface WhatsAppMessage {
 
 export interface WhatsAppService {
   send(message: WhatsAppMessage): Promise<OutboxEntry>;
+  /**
+   * Whether this deployment can send at all.
+   *
+   * Asked BEFORE anything is queued, so an operation can tell a technician
+   * "WhatsApp is not set up on this system" instead of writing a message that
+   * can never go and retrying it until its attempts run out. A deployment with
+   * no configuration has `UnconfiguredWhatsAppService`, which answers false
+   * and refuses every send; the simulated adapter answers true, because the
+   * demonstration channel really does record what it was given.
+   *
+   * It is NOT a health check and must not be read as one: configured says the
+   * credentials exist, never that Meta is reachable. Only a send finds that
+   * out, which is what the outbox row is for.
+   */
+  readonly configured: boolean;
 }
 
 export interface OutboxReader {
@@ -120,7 +135,13 @@ export interface GeneratedPdf {
   readonly fileName: string;
   readonly pageCount: number;
   readonly generatedAt: IsoDateTime;
-  readonly simulated: boolean;
+  /**
+   * True when this renderer is the application itself rather than a
+   * server-side one. See `FinalDocument.renderedLocally`, which this becomes:
+   * it describes the RENDERER, never the bytes (which are real either way) and
+   * never the delivery (which is `job.delivery`).
+   */
+  readonly renderedLocally: boolean;
 }
 
 /**

@@ -294,11 +294,20 @@ export const jobs = {
   sendCaptured: (jobId: string, action: string, payload: unknown, idempotencyKey: string) =>
     apiPost<Job>(`/api/jobs/${segment(jobId)}/${action}`, payload, idempotencyKey),
   accept: (jobId: string) => jobAction(jobId, 'accept'),
-  sendSiteLocation: (jobId: string, recipientMobile?: string) =>
-    command<{ sent: boolean; navigationUrl: string; failureReason: string | null }>(
-      `/api/jobs/${segment(jobId)}/send_site_location`,
-      recipientMobile === undefined ? {} : { recipientMobile },
-    ),
+  /**
+   * Asks for the site location. NO DESTINATION — see the command.
+   *
+   * It goes to the signed-in technician's own mobile, from their account. The
+   * answer says `queued`, because at the moment it is given nothing has left
+   * the building: the outbox is drained after the response is decided.
+   */
+  sendSiteLocation: (jobId: string) =>
+    command<{
+      queued: boolean;
+      navigationUrl: string;
+      configured: boolean;
+      failureReason: string | null;
+    }>(`/api/jobs/${segment(jobId)}/send_site_location`, {}),
   declineSiteLocation: (jobId: string) => jobAction(jobId, 'decline_site_location'),
   assignPrimary: (jobId: string, technicianId: string) =>
     jobAction(jobId, 'assign_primary', { technicianId }),

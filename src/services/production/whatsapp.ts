@@ -100,6 +100,9 @@ interface CloudApiResponse {
 }
 
 export class CloudApiWhatsAppService implements WhatsAppService {
+  /** It exists because `readWhatsAppConfiguration` returned credentials. */
+  readonly configured = true;
+
   constructor(
     private readonly config: WhatsAppConfiguration,
     private readonly clock: Clock,
@@ -214,6 +217,8 @@ export class CloudApiWhatsAppService implements WhatsAppService {
  * is the single worst outcome available to an integration.
  */
 export class UnconfiguredWhatsAppService implements WhatsAppService {
+  readonly configured = false;
+
   send(): Promise<OutboxEntry> {
     return Promise.reject(new WhatsAppNotConfigured());
   }
