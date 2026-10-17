@@ -69,7 +69,11 @@ easiest to run them. Record the result against the criterion in
 | 4 | **Choose photo** instead | The gallery opens and the chosen image uploads the same way | ACC-PWA-3 |
 | 5 | Open a job, then kill the application from the task switcher and relaunch | The job list offers **Resume EJE-…** for the job that was open. It also says that anything not sent was not kept — which is true, and is Phase 3's boundary | ACC-PWA-4 |
 | 6 | Turn flight mode on and relaunch | The job list appears with an amber notice naming the time the copy arrived. No empty list, no spinner that never ends | PWA-6 |
-| 7 | Still offline, open a job from the list | It does **not** open. Phase 3 caches the list only; this is expected and is Phase 4's work | — |
+| 7 | Still offline, open a job from the list | It does **not** open. The list is cached; a job's own record is not. Expected, and still Phase 4's work | — |
+| 7a | With a job already open, turn flight mode on and add labour, travel, a part and a note | Each is accepted and marked *held on this tablet… not on the server yet*. The job keeps showing the record it already had rather than an error page | OFF-QUEUE-1…3 |
+| 7b | Still offline, kill the application and relaunch it | The offline page says how many captures are waiting and that they are not on the job | OFF-QUEUE-8 |
+| 7c | Turn flight mode off and open the job | The captures send themselves, leave the queue, and appear on the job — each exactly once | OFF-QUEUE-4…5 |
+| 7d | Offline, try the checklist, the write-up, a photograph or the signature | Each says it needs a connection, and says which thing it is. Nothing is accepted and dropped | OFF-QUEUE-10 |
 | 8 | Deploy a new build, then reopen the application twice | A bar offers the new version and nothing reloads until it is tapped — including while a capture is open | ACC-PWA-5 |
 | 9 | Sign out, then reopen the application and check with DevTools → Application → IndexedDB | `eje-job-cache` is empty: no jobs, no meta, no device pointer, no last place | PWA-6 |
 | 10 | Use it one-handed, with work gloves, outside in daylight | Every control is reachable and hittable; nothing is a 20px target; the screen is legible | ACC-PWA-6 |
@@ -82,22 +86,51 @@ can do from a desk. Write down what was awkward rather than whether it
 
 ## What the technician should be told
 
-Three sentences, because anything longer will not be read:
+*Amended 17 October 2026: offline capture of four things now exists, so the
+middle sentence has changed. The rest is unaltered.*
+
+Four sentences, because anything longer will not be read:
 
 - It installs like an app and opens like an app; sign in once and stay signed
   in.
 - With no signal you can still see your job list, and the screen tells you how
-  old it is. **You cannot capture work offline yet** — if a photograph or a
-  signature fails, it did not happen, and the application will say so rather
-  than pretending.
+  old it is.
+- With no signal you can still record **hours, kilometres, parts and notes** on
+  a job you are working on. They are kept on the tablet and sent the moment you
+  have signal — the screen says *held on this tablet* until then, and that is
+  the truth: they are not on the job yet. Nothing is lost by the battery dying.
+- You **cannot** run the checklist, write the completion report, take a
+  photograph or take the customer's signature without a connection. If one of
+  those fails it did not happen, and the application says so rather than
+  pretending.
 - When a new version is ready a bar appears. Finish what you are doing, then
   tap it.
+
+### And one thing to be clear about with the office
+
+A held capture is **not on the job**. If a technician tells the office "the
+hours are captured" while the tablet is still holding them, the office will not
+see them. The job screen and the job list both show what is still waiting, and
+signing out asks before leaving anything unsent.
 
 ---
 
 ## What this document does not cover
 
-Offline capture, the mutation queue, sync and conflict handling. None of it is
-built, and none of it may be built before Phase 4 is scoped in `docs/SCOPE.md`
-— see the Phase 3 / Phase 4 boundary table there. If a technician is told the
-tablet will "sync later", they have been told something this build does not do.
+*Amended 17 October 2026.* It used to say that offline capture, the queue, sync
+and conflict handling were all absent. Four append-only captures — labour,
+travel, parts and notes — are now held and sent (OFF-QUEUE-1…10, scoped in
+`docs/SCOPE.md` before being built). Everything else in that sentence still
+stands:
+
+- **No offline checklist, write-up, photograph or signature.** Each needs a
+  connection and says so.
+- **No conflict resolution policy.** If a job was signed, closed or reassigned
+  while the tablet was away, the server refuses the capture, the tablet keeps it
+  with the server's own words on it, and a person decides. What SHOULD happen to
+  those hours is an open business decision (BD-15).
+- **No background sync.** The queue is sent by the application while somebody
+  is looking at it, never by a service worker with no screen to report to.
+
+If a technician is told the tablet will "sync everything later", they have been
+told something this build does not do.

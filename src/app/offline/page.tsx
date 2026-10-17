@@ -12,6 +12,7 @@ import {
   readCachedJobs,
   readDeviceSession,
 } from '@/lib/pwa/job-cache';
+import { readPendingWork } from '@/lib/pwa/pending-work';
 import type { CachedJob } from '@/lib/pwa/cached-job';
 import { auth } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
@@ -86,6 +87,7 @@ const OfflinePage = () => {
   const [jobs, setJobs] = useState<readonly CachedJob[]>([]);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [identity, setIdentity] = useState<Identity>({ state: 'checking' });
+  const [unsent, setUnsent] = useState(0);
   const online = useOnline();
 
   useEffect(() => {
@@ -97,13 +99,15 @@ const OfflinePage = () => {
       if (resolved.state !== 'server' && resolved.state !== 'device') return;
       if (!isJobCacheSupported()) return;
 
-      const [cached, meta] = await Promise.all([
+      const [cached, meta, pending] = await Promise.all([
         readCachedJobs(resolved.userId),
         readCacheMeta(resolved.userId),
+        readPendingWork(resolved.userId).catch(() => []),
       ]);
       if (cancelled) return;
       setJobs(cached);
       setLastRefreshedAt(meta?.lastRefreshedAt ?? null);
+      setUnsent(pending.length);
     })();
 
     return () => {
@@ -132,6 +136,29 @@ const OfflinePage = () => {
       </header>
 
       <CacheStatusNotice status={status} />
+
+      {/*
+        WORK THIS TABLET IS STILL HOLDING. OFF-6, OFF-8.
+        A technician whose tablet rebooted in a plant basement lands here, and
+        the first thing they need to know is that the hours they captured are
+        not lost. They are held, they are not on the job, and they go the
+        moment there is signal — said here because this page may be the only
+        screen they can reach.
+      */}
+      {unsent > 0 && (
+        <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          {/* The id is on the paragraph because `Card` renders a section and
+              forwards only its own props — a test needs something to hold. */}
+          <p data-testid="offline-unsent">
+          <strong className="font-semibold">
+            {unsent} {unsent === 1 ? 'capture is' : 'captures are'} waiting on this tablet.
+          </strong>{' '}
+          They are kept here — a flat battery or a closed application will not lose them — and are
+          sent as soon as this tablet can reach the EJE server. They are{' '}
+          <strong className="font-semibold">not on the job</strong> until then.
+          </p>
+        </Card>
+      )}
 
       {identity.state === 'device' && (
         <p className="text-xs text-slate-500 dark:text-slate-400">

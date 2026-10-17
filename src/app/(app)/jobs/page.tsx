@@ -26,6 +26,8 @@ import { JobListTable } from '@/components/jobs/JobListTable';
 import { CachedJobList } from '@/components/pwa/CachedJobList';
 import { CacheStatusNotice } from '@/components/pwa/CacheStatusNotice';
 import { ResumeNotice } from '@/components/pwa/ResumeNotice';
+import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
+import { usePendingWork } from '@/hooks/usePendingWork';
 import { useJobCache } from '@/hooks/useJobCache';
 import { cn } from '@/lib/cn';
 import { reads } from '@/api/endpoints';
@@ -115,6 +117,15 @@ const JobsPageContent = () => {
    * is signal — the list stays the server's answer, filtered — and it is why a
    * technician in a yard with no coverage can still see which job is next.
    */
+  /*
+   * Everything this tablet is holding, across every job. OFF-8.
+   *
+   * On the job list because that is where a technician starts a shift: unsent
+   * work from yesterday's basement has to be visible without remembering which
+   * job it was on. The panel renders nothing when the queue is empty.
+   */
+  const pending = usePendingWork();
+
   const cache = useJobCache({
     rows: query.data?.rows ?? null,
     loading: query.loading,
@@ -214,6 +225,8 @@ const JobsPageContent = () => {
           </Link>
         }
       />
+
+      <PendingWorkPanel pending={pending} className="mb-4" />
 
       {/* Where this technician was when the tablet was last awake. PWA-4. */}
       <ResumeNotice

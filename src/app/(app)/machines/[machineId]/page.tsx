@@ -16,9 +16,10 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { MachinePhotoPanel } from '@/components/machines/MachinePhotoPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { formatDate, formatFileSize } from '@/lib/format';
+import { formatDate } from '@/lib/format';
 
 const MachineDetailPage = ({
   params,
@@ -169,28 +170,9 @@ const MachineDetailPage = ({
             </dl>
           </Card>
 
-          <Card>
-            <CardHeader title="Photos" description={`${machine.photos.length} on file`} />
-            {machine.photos.length === 0 ? (
-              <p className="mt-4 text-sm text-steel-500">No photographs on file.</p>
-            ) : (
-              <ul className="mt-4 grid grid-cols-2 gap-3">
-                {machine.photos.map((photo) => (
-                  <li key={photo.id}>
-                    <div className="flex aspect-4/3 items-center justify-center rounded-[var(--radius-control)] border border-steel-200 bg-steel-100 text-steel-400">
-                      <Icon name="camera" className="size-6" />
-                    </div>
-                    <p className="mt-1.5 truncate text-xs font-medium text-steel-800">
-                      {photo.caption}
-                    </p>
-                    <p className="truncate text-[11px] text-steel-400">
-                      {formatFileSize(photo.sizeBytes)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          {/* Real photographs, and the camera for whoever the register's own
+              rules allow to add one. MACH-PHOTO-1. */}
+          <MachinePhotoPanel machine={machine} onChanged={query.refetch} />
         </div>
       </div>
 

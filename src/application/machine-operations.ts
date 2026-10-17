@@ -42,10 +42,17 @@ export interface NewMachineInput {
   /**
    * Photographs of the machine as found.
    *
-   * Demo note: no file is transferred. Each entry becomes an attachment record
-   * with the storage key the production uploader will produce, which is what
-   * the machine screen renders, so the model does not change when real uploads
-   * arrive.
+   * *Amended for MACH-PHOTO-1.* This used to take a file name, a caption and a
+   * size the client made up, and `createMachine` called
+   * `storage.put(fileName, 'image/jpeg', null)` on each one — a storage key
+   * with nothing behind it. The register showed photographs that did not exist.
+   *
+   * The field is kept so a caller may still raise a machine with no
+   * photographs, and it now carries BYTES. A machine is created first and its
+   * photographs are uploaded to it afterwards, through
+   * `POST /api/machines/:machineId/photos`, because a multipart create carrying
+   * a machine record and several megabytes of images is a worse shape than two
+   * requests that each do one thing.
    */
   readonly photos?: readonly MachinePhotoInput[];
 }
@@ -53,7 +60,9 @@ export interface NewMachineInput {
 export interface MachinePhotoInput {
   readonly fileName: string;
   readonly caption: string;
-  readonly sizeBytes: number;
+  /** What the server SNIFFED the bytes to be, never the browser's claim. */
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
 }
 
 const required = (value: string, code: string, message: string): string => {
@@ -98,7 +107,13 @@ export const createMachine = async (
 
   const photos: Attachment[] = [];
   for (const photo of input.photos ?? []) {
-    const stored = await context.services.storage.put(photo.fileName, 'image/jpeg', null);
+    // Bytes first, record second — the order every upload in this system uses,
+    // so a machine cannot claim a photograph that was never written.
+    const stored = await context.services.storage.storeUpload({
+      fileName: photo.fileName,
+      contentType: photo.contentType,
+      bytes: photo.bytes,
+    });
     photos.push({
       id: asAttachmentId(context.services.ids.next('att')),
       kind: 'photo',
@@ -109,7 +124,7 @@ export const createMachine = async (
       storageKey: stored.storageKey,
       uploadedAt: context.services.clock.now(),
       uploadedBy: context.actor.id,
-      sizeBytes: photo.sizeBytes,
+      sizeBytes: photo.bytes.length,
     });
   }
 
@@ -159,6 +174,103 @@ export const createMachine = async (
       body: `${userFullName(context.actor)} added ${machineDisplayName(saved)} (serial ${saved.serialNumber}) on site. Confirm it onto the register.`,
     });
   }
+
+  return saved;
+};
+
+/**
+ * A PHOTOGRAPH OF THE MACHINE, BYTES AND ALL. MACH-PHOTO-1.
+ *
+ * WHO MAY, and this is the whole of the care in this function. The register's
+ * existing rules are not widened by a hair:
+ *
+ *   - the OFFICE (`machines.manage`) may attach a photograph to any machine,
+ *     because they may change the official record outright;
+ *   - a TECHNICIAN may attach one only to a machine THEY raised that is still
+ *     `pending_approval` — their own unapproved submission, which they are
+ *     already allowed to raise WITH photographs (`createMachine`), so this adds
+ *     no permission, it only lets the same act carry real bytes;
+ *   - a technician attaching a photograph to an APPROVED machine is REFUSED.
+ *
+ * WHY THAT LAST ONE IS A REFUSAL AND NOT A FEATURE. A photograph of a rating
+ * plate on an official machine is obviously useful, and it is just as obviously
+ * a change to a record the scope says technicians may not change outside the
+ * change-request process (MACH-CR). Whether a photograph counts as such a
+ * change — and whether it should queue for Master approval like a discovered
+ * machine does — is a business decision nobody has made. It is recorded in
+ * `docs/SCOPE.md` as MACH-PHOTO-2 and refused until it is answered, because the
+ * one thing implementation must not do is answer it by shipping (PROC-4).
+ *
+ * A photograph NEVER changes machine data and never alters approval: it is
+ * appended to the machine's photo list, and the record's manufacturer, model,
+ * serial, site and approval all come back exactly as they were.
+ */
+export const addMachinePhoto = async (
+  context: OperationContext,
+  machine: Machine,
+  photo: MachinePhotoInput,
+): Promise<Machine> => {
+  const office = can(context.actor.role, 'machines.manage');
+  if (!office) {
+    if (machine.approval === 'approved') {
+      throw new WorkflowError(
+        `${machineDisplayName(machine)} is on the official register and only the office may add photographs to it.`,
+        [
+          {
+            code: 'not_permitted',
+            message:
+              'Raise a change request for an official machine record. A machine you added yourself can still be photographed while it is awaiting approval.',
+          },
+        ],
+      );
+    }
+    if (machine.createdBy !== context.actor.id) {
+      throw new WorkflowError(
+        `${machineDisplayName(machine)} was added by somebody else and is awaiting approval.`,
+        [
+          {
+            code: 'not_permitted',
+            message: 'You can photograph a machine you added yourself, or ask the office.',
+          },
+        ],
+      );
+    }
+  }
+
+  // Bytes first. `storeUpload` writes them or raises, so the row below cannot
+  // exist over a file that is not there.
+  const stored = await context.services.storage.storeUpload({
+    fileName: photo.fileName,
+    contentType: photo.contentType,
+    bytes: photo.bytes,
+  });
+
+  const attachment: Attachment = {
+    id: asAttachmentId(context.services.ids.next('att')),
+    kind: 'photo',
+    // A machine register photograph, not job media. See MEDIA-1.
+    visibility: 'customer_facing',
+    fileName: photo.fileName,
+    caption: photo.caption,
+    storageKey: stored.storageKey,
+    uploadedAt: context.services.clock.now(),
+    uploadedBy: context.actor.id,
+    sizeBytes: photo.bytes.length,
+  };
+
+  const saved = await context.repos.machines.save({
+    ...machine,
+    photos: [...machine.photos, attachment],
+  });
+
+  await audit(context, {
+    jobId: null,
+    type: 'machine_updated',
+    summary: `Machine photograph added: ${machineDisplayName(saved)}`,
+    detail:
+      `${attachment.fileName} attached by ${userFullName(context.actor)}.` +
+      (saved.approval === 'pending_approval' ? ' The machine is still awaiting approval.' : ''),
+  });
 
   return saved;
 };

@@ -83,13 +83,27 @@ export const useQuery = <T,>(key: string, loader: () => Promise<T>): QueryResult
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        setSettled({
+        const code = cause instanceof ApiRequestError ? cause.code : null;
+        setSettled((previous) => ({
           key,
           token,
-          data: null,
+          /*
+           * A TRANSPORT FAILURE DOES NOT EMPTY THE SCREEN. OFF-8, ACC-OFF-1.
+           *
+           * The distinction is between the server DECIDING and the server not
+           * being reachable. A refusal replaces what is on screen, and it has
+           * to — a 403 or a 404 may mean this actor may no longer see the data
+           * they are looking at. A dropped connection decides nothing: the
+           * last answer is still the last answer, and throwing it away takes a
+           * technician's place in the job with it, mid-capture, on a tablet
+           * that has just gone out of signal. The failure is still reported —
+           * `error` is set, and the connection banner is global — the DATA is
+           * simply kept.
+           */
+          data: code === 'network' && previous.key === key ? previous.data : null,
           error: cause instanceof Error ? cause.message : 'Unable to load this data.',
-          errorCode: cause instanceof ApiRequestError ? cause.code : null,
-        });
+          errorCode: code,
+        }));
       });
 
     return () => {

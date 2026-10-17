@@ -1265,9 +1265,20 @@ export const readJobMedia = async (
   job: Job,
   attachmentId: string,
 ): Promise<{ attachment: Attachment; document: StoredDocument } | null> => {
+  /*
+   * CHECKLIST EVIDENCE IS READ THROUGH HERE TOO, deliberately rather than
+   * through a route of its own. It is a photograph on this job, authorised by
+   * this job, and an attachment id is unique within the job — so a second
+   * route would duplicate the authorisation rule, which is the one thing worth
+   * having in a single place.
+   */
+  const checklistPhotos = (job.checklist?.responses ?? []).flatMap(
+    (response) => response.photos,
+  );
   const attachment =
     job.photos.find((candidate) => candidate.id === attachmentId) ??
-    job.videos.find((candidate) => candidate.id === attachmentId);
+    job.videos.find((candidate) => candidate.id === attachmentId) ??
+    checklistPhotos.find((candidate) => candidate.id === attachmentId);
   if (attachment === undefined) return null;
 
   const document = await context.services.storage.getDocument(attachment.storageKey);
@@ -1639,11 +1650,37 @@ export const answerChecklistItem = async (
   });
 };
 
+/**
+ * EVIDENCE AGAINST ONE CHECKLIST QUESTION, BYTES AND ALL. CHK-EVIDENCE-1.
+ *
+ * WHAT THIS USED TO BE: `storage.put(fileName, 'image/jpeg', null)` — a key
+ * with nothing behind it — a caption of "Checklist evidence" and a hard-coded
+ * `sizeBytes: 1_650_000`. The runner drew a green chip bearing the file name
+ * the CLIENT had made up, with "(simulated)" on the button. An installation
+ * job type whose `photoRequired` items gate `completeChecklist` could
+ * therefore be completed on photographs that did not exist, and the customer's
+ * document cited them.
+ *
+ * It now goes through `storeUpload`, which writes the bytes or raises, in the
+ * same order as `addMedia` and `attachDocument`: store, then record. The size
+ * is measured off the bytes.
+ *
+ * WHERE IT LANDS, and why that matters for the historical record: the
+ * attachment is appended to the response for `itemId` on the job's checklist
+ * INSTANCE, which carries its own `templateId` and `templateVersion`. So the
+ * evidence stays bound to the wording the technician actually answered — a
+ * later version of the checklist cannot re-point it, and `checklist_versions`
+ * is write-once once used.
+ *
+ * It does NOT answer the question. Answering is `answerChecklistItem`, which
+ * also clears the completion stamp; attaching evidence to an answered item
+ * leaves the answer exactly as it was.
+ */
 export const addChecklistPhoto = async (
   context: OperationContext,
   job: Job,
   itemId: string,
-  fileName: string,
+  file: { fileName: string; contentType: string; bytes: Uint8Array; caption?: string },
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
@@ -1651,18 +1688,23 @@ export const addChecklistPhoto = async (
     throw new WorkflowError('The checklist has not been started for this job.');
   }
 
-  const stored = await context.services.storage.put(fileName, 'image/jpeg', null);
+  const stored = await context.services.storage.storeUpload({
+    fileName: file.fileName,
+    contentType: file.contentType,
+    bytes: file.bytes,
+  });
+
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: 'photo',
     // Evidence against a checklist question the customer's document reports.
     visibility: 'customer_facing',
-    fileName,
-    caption: 'Checklist evidence',
+    fileName: file.fileName,
+    caption: (file.caption ?? '').trim().length > 0 ? file.caption!.trim() : 'Checklist evidence',
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: 1_650_000,
+    sizeBytes: file.bytes.length,
   };
 
   const existing = job.checklist.responses.find((response) => response.itemId === itemId);
@@ -1676,10 +1718,24 @@ export const addChecklistPhoto = async (
           response.itemId === itemId ? updated : response,
         );
 
-  return context.repos.jobs.save({
+  const saved = await context.repos.jobs.save({
     ...job,
     checklist: { ...job.checklist, responses },
   });
+
+  /*
+   * ON THE TRAIL, which it was not before. A photograph that gates the
+   * completion of a checklist is evidence, and evidence that appears with no
+   * record of who attached it or when is worth less than none.
+   */
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_uploaded',
+    summary: 'Checklist evidence attached',
+    detail: `${attachment.fileName} against checklist item ${itemId}.`,
+  });
+  await recordPostSignatureChange(context, saved, 'Checklist evidence was added.');
+  return saved;
 };
 
 export const completeChecklist = async (

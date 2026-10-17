@@ -15,6 +15,9 @@ import type { ChecklistAnswer } from '@/application/job-operations';
 import { Badge, Button, Card, ConfirmDialog, Icon } from '@/components/ui';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
+import { usePhotoUpload } from '@/hooks/usePhotoUpload';
+import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
+import { UploadFailureNotice } from '@/components/media/UploadFailureNotice';
 import { cn } from '@/lib/cn';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
@@ -56,6 +59,37 @@ export const ChecklistRunner = ({
   const answer = async (itemId: string, value: ChecklistAnswer) => {
     const ok = await operation.run(() => jobs.answerChecklist(job.id, { itemId, ...value }));
     if (ok) onChanged();
+  };
+
+  /*
+   * EVIDENCE GOES UP AS BYTES. CHK-EVIDENCE-1.
+   *
+   * One uploader for the whole runner rather than one per row: a technician
+   * attaches evidence to one item at a time, and a single in-flight capture is
+   * what keeps the retry unambiguous — the failure notice can only ever be
+   * about the photograph that just failed. `capturingFor` is what the row uses
+   * to show its own spinner rather than every row showing one.
+   */
+  const [capturingFor, setCapturingFor] = useState<string | null>(null);
+  /*
+   * THE ITEM ID TRAVELS WITH THE FILE, not through state.
+   *
+   * It was read from `capturingFor` inside the uploader at first, and that was
+   * a stale-closure bug with teeth: the id was set and the send started in the
+   * same tick, so the uploader still saw `null` and posted to a URL with no
+   * item in it. The id is part of the capture, so it is passed as the capture's
+   * context — which also means a RETRY cannot drift onto another item.
+   */
+  const evidence = usePhotoUpload<string>((file, idempotencyKey, itemId) =>
+    jobs.addChecklistPhoto(job.id, itemId, file, { idempotencyKey }),
+  );
+  const captureEvidence = async (itemId: string, file: File) => {
+    setCapturingFor(itemId);
+    const ok = await evidence.send(file, itemId);
+    if (ok) {
+      setCapturingFor(null);
+      onChanged();
+    }
   };
 
   if (!started) {
@@ -166,17 +200,36 @@ export const ChecklistRunner = ({
                 editable={editable && !completed}
                 busy={operation.running}
                 onAnswer={(value) => answer(item.id, value)}
-                onAddPhoto={async () => {
-                  const ok = await operation.run(() =>
-                    jobs.addChecklistPhoto(job.id, item.id, `${item.id}-evidence.jpg`),
-                  );
-                  if (ok) onChanged();
-                }}
+                jobId={job.id}
+                onCapture={(file) => void captureEvidence(item.id, file)}
+                uploading={evidence.state === 'uploading' && capturingFor === item.id}
+                failed={evidence.state === 'failed' && capturingFor === item.id}
               />
             ))}
           </ul>
         </Card>
       ))}
+
+      {evidence.state === 'failed' && (
+        <UploadFailureNotice
+          message={evidence.error ?? 'The photograph could not be attached.'}
+          fileName={evidence.fileName}
+          attempts={evidence.attempts}
+          busy={false}
+          onRetry={() => {
+            void evidence.retry().then((ok) => {
+              if (ok) {
+                setCapturingFor(null);
+                onChanged();
+              }
+            });
+          }}
+          onDismiss={() => {
+            evidence.dismiss();
+            setCapturingFor(null);
+          }}
+        />
+      )}
 
       {!progress.complete && (
         <RuleViolationNotice
@@ -252,15 +305,22 @@ const ChecklistItemRow = ({
   response,
   editable,
   busy,
+  jobId,
   onAnswer,
-  onAddPhoto,
+  onCapture,
+  uploading,
+  failed: uploadFailed,
 }: {
   readonly item: ChecklistItem;
   readonly response: ChecklistResponse | undefined;
   readonly editable: boolean;
   readonly busy: boolean;
+  /** For the authenticated media route each thumbnail is read through. */
+  readonly jobId: string;
   readonly onAnswer: (value: ChecklistAnswer) => void;
-  readonly onAddPhoto: () => void;
+  readonly onCapture: (file: File) => void;
+  readonly uploading: boolean;
+  readonly failed: boolean;
 }) => {
   const [measurement, setMeasurement] = useState(
     response?.measurement === null || response?.measurement === undefined
@@ -407,27 +467,51 @@ const ChecklistItemRow = ({
       </div>
 
       {item.photoRequired && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {(response?.photos ?? []).map((photo) => (
-            <span
-              key={photo.id}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-verdant-50 px-2.5 py-1.5 text-xs font-medium text-verdant-700"
-            >
-              <Icon name="camera" className="size-3.5" />
-              {photo.fileName}
-            </span>
-          ))}
+        <div className="mt-3 space-y-2">
+          {/*
+            THE EVIDENCE, AS EVIDENCE. CHK-EVIDENCE-1.
+            It used to be a green chip bearing the file name the client had
+            invented, over a storage key with nothing behind it. These are the
+            photographs, read back through the authenticated media route — so
+            the technician can see that the frame is the thing the question
+            asks about before the checklist is completed on it.
+          */}
+          {(response?.photos ?? []).length > 0 && (
+            <ul className="flex flex-wrap gap-2" data-testid="checklist-evidence">
+              {(response?.photos ?? []).map((photo) => (
+                <li key={photo.id}>
+                  <EvidenceThumbnail jobId={jobId} photo={photo} />
+                </li>
+              ))}
+            </ul>
+          )}
           {editable && (
-            <Button
-              size="sm"
-              variant="secondary"
-              leadingIcon={<Icon name="camera" className="size-4" />}
-              onClick={onAddPhoto}
-              disabled={busy}
-            >
-              Add photo
-              <span className="ml-1 text-[10px] font-normal text-steel-400">(simulated)</span>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <PhotoCaptureButtons
+                size="sm"
+                testIdPrefix={`checklist-photo-${item.id}`}
+                cameraLabel="Take evidence photo"
+                galleryLabel="Choose photo"
+                disabled={busy}
+                busy={uploading}
+                onFile={onCapture}
+              />
+              {uploading && (
+                <span className="text-xs font-medium text-steel-500">
+                  Uploading to the EJE server…
+                </span>
+              )}
+              {uploadFailed && (
+                <span className="text-xs font-semibold text-signal-600">
+                  Not attached — see below.
+                </span>
+              )}
+            </div>
+          )}
+          {(response?.photos ?? []).length === 0 && !uploading && (
+            <p className="text-xs text-steel-500">
+              This item needs a photograph before the checklist can be completed.
+            </p>
           )}
         </div>
       )}
@@ -510,3 +594,46 @@ const YesNoButtons = ({
     })}
   </div>
 );
+
+/**
+ * One piece of checklist evidence, or an honest admission there are no bytes.
+ *
+ * Every row captured before CHK-EVIDENCE-1 has a storage key with nothing
+ * behind it, and the authenticated route answers 404 for those — so the tile
+ * falls back to naming the file rather than showing a broken image. A
+ * placeholder is only dishonest when it is indistinguishable from a
+ * photograph, which is exactly what the old green chip was.
+ */
+const EvidenceThumbnail = ({
+  jobId,
+  photo,
+}: {
+  readonly jobId: string;
+  readonly photo: { readonly id: string; readonly fileName: string; readonly caption: string };
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-steel-100 px-2.5 py-1.5 text-xs font-medium text-steel-500"
+        title="This record has no stored file."
+      >
+        <Icon name="camera" className="size-3.5" />
+        {photo.fileName}
+      </span>
+    );
+  }
+
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element -- an authenticated API route, not an optimisable asset: the optimiser would fetch it server-side without the session cookie */
+    <img
+      src={jobs.mediaUrl(jobId, photo.id)}
+      alt={photo.caption.length > 0 ? photo.caption : photo.fileName}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="size-20 rounded-[var(--radius-control)] border border-steel-200 object-cover"
+      data-testid="checklist-evidence-thumbnail"
+    />
+  );
+};

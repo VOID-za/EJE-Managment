@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createCustomer, createSite } from './customer-operations';
 import { approveMachine, createMachine, updateMachine } from './machine-operations';
 import { WorkflowError } from './errors';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, jpegFixture, seedUser, type Harness } from './test-harness';
 import { asCustomerId, asSiteId, isMachineConfirmed, pendingMachines } from '@/domain';
 
 /**
@@ -229,22 +229,46 @@ describe('duplicate serial protection', () => {
     expect(saved.notes).toBe('Under warranty.');
   });
 
-  it('attaches photographs captured with the machine', async () => {
+  it('attaches photographs captured with the machine, bytes and all', async () => {
+    /*
+     * REAL BYTES. MACH-PHOTO-1 replaced the metadata-only path — a file name
+     * and a size the client made up over `storage.put(…, null)` — so a fixture
+     * without a file no longer reaches the code under test.
+     */
+    const plate = jpegFixture('rating plate');
     const machine = await createMachine(harness.as(sipho), {
       ...NEW_MACHINE,
       photos: [
-        { fileName: 'mazak-qt200-plate.jpg', caption: 'Rating plate', sizeBytes: 1_840_000 },
-        { fileName: 'mazak-qt200-cabinet.jpg', caption: 'Control cabinet', sizeBytes: 1_640_000 },
+        {
+          fileName: 'mazak-qt200-plate.jpg',
+          caption: 'Rating plate',
+          contentType: 'image/jpeg',
+          bytes: plate,
+        },
+        {
+          fileName: 'mazak-qt200-cabinet.jpg',
+          caption: 'Control cabinet',
+          contentType: 'image/jpeg',
+          bytes: jpegFixture('control cabinet'),
+        },
       ],
     });
 
     expect(machine.photos).toHaveLength(2);
     expect(machine.photos[0]?.caption).toBe('Rating plate');
     expect(machine.photos[0]?.kind).toBe('photo');
-    // The storage key is the shape the production uploader will produce, so the
-    // model does not change when real uploads arrive.
     expect(machine.photos[0]?.storageKey.length).toBeGreaterThan(0);
     expect(machine.photos[0]?.uploadedBy).toBe(sipho.id);
+    // Measured off the bytes rather than accepted from the caller.
+    expect(machine.photos[0]?.sizeBytes).toBe(plate.length);
+
+    // AND THE BYTES ARE THERE. The old path stored none, which is the whole
+    // reason this row existed.
+    const document = await harness.services.storage.getDocument(
+      machine.photos[0]?.storageKey ?? '',
+    );
+    expect(document).not.toBeNull();
+    expect(Array.from(document?.bytes ?? [])).toEqual(Array.from(plate));
 
     const stored = await harness.repos.machines.findById(machine.id);
     expect(stored?.photos).toHaveLength(2);

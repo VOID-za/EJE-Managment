@@ -11,7 +11,10 @@ import {
 import { Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { machines } from '@/api/endpoints';
+import { newIdempotencyKey } from '@/api/client';
+import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
 import { useOperation } from '@/hooks/useOperation';
+import { formatFileSize } from '@/lib/format';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 
@@ -24,8 +27,17 @@ const MACHINE_TYPES: readonly MachineType[] = [
   'Other',
 ];
 
+/**
+ * A photograph chosen but not yet sent. MACH-PHOTO-1.
+ *
+ * It used to be a file NAME and a caption typed into two text fields — the
+ * dialog never touched a file, and the register ended up displaying
+ * photographs that did not exist. This holds the real `File`, and the upload
+ * happens after the machine has been raised, because a photograph needs a
+ * machine id to belong to.
+ */
 interface PhotoDraft {
-  readonly fileName: string;
+  readonly file: File;
   readonly caption: string;
 }
 
@@ -110,8 +122,17 @@ export const MachineDialog = ({
     machine === null ? emptyDraft(sites) : draftFrom(machine),
   );
   const [photos, setPhotos] = useState<readonly PhotoDraft[]>([]);
-  const [photoName, setPhotoName] = useState('');
   const [photoCaption, setPhotoCaption] = useState('');
+  /** Photographs the machine was raised without, named so nobody is misled. */
+  const [photoFailures, setPhotoFailures] = useState<readonly string[]>([]);
+  /*
+   * The same list, readable straight after the upload loop.
+   *
+   * `submit` has to decide whether to close the dialog, and a `useState` value
+   * captured by that closure is the one from before the loop ran. The ref is
+   * written where the failures are collected, which is not during render.
+   */
+  const photoFailuresRef = useRef<readonly string[]>([]);
 
   /*
    * Reload the form when the dialog is opened on a different record.
@@ -136,8 +157,8 @@ export const MachineDialog = ({
     const { machine: current, sites: currentSites } = latest.current;
     setDraft(current === null ? emptyDraft(currentSites) : draftFrom(current));
     setPhotos([]);
-    setPhotoName('');
     setPhotoCaption('');
+    setPhotoFailures([]);
   }, [open, machineId]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
@@ -150,6 +171,8 @@ export const MachineDialog = ({
 
   const submit = async (): Promise<void> => {
     let savedId: string | null = null;
+    setPhotoFailures([]);
+    photoFailuresRef.current = [];
     const ok = await operation.run(async () => {
       const year = Number.parseInt(draft.year, 10) || new Date().getFullYear();
       if (machine !== null) {
@@ -183,11 +206,35 @@ export const MachineDialog = ({
         installationDate: draft.installationDate,
         controlSystem: draft.controlSystem,
         notes: draft.notes,
-        photos: photos.map((photo) => ({ ...photo, sizeBytes: 1_840_000 })),
       });
       savedId = created.id;
+
+      /*
+       * THE MACHINE IS RAISED FIRST, THEN PHOTOGRAPHED.
+       *
+       * Each upload is its own request against the machine that now exists.
+       * A photograph that fails does NOT fail the machine — it is already on
+       * the register and losing it would be far worse — so the failures are
+       * collected and named instead of being swallowed. Each carries its own
+       * idempotency key, so this loop is safe to re-enter.
+       */
+      const failed: string[] = [];
+      for (const photo of photos) {
+        try {
+          await machines.addPhoto(created.id, photo.file, {
+            caption: photo.caption,
+            idempotencyKey: newIdempotencyKey(),
+          });
+        } catch {
+          failed.push(photo.file.name);
+        }
+      }
+      photoFailuresRef.current = failed;
+      if (failed.length > 0) setPhotoFailures(failed);
     });
-    if (ok && savedId !== null) onSaved(savedId);
+    // Held open on a photograph failure, so the technician sees which ones did
+    // not go rather than finding out from the register later.
+    if (ok && savedId !== null && photoFailuresRef.current.length === 0) onSaved(savedId);
   };
 
   return (
@@ -325,23 +372,32 @@ export const MachineDialog = ({
           <div className="border-t border-steel-100 pt-4">
             <p className="text-sm font-semibold text-steel-700">Photographs</p>
             <p className="mt-0.5 text-xs text-steel-500">
-              The machine as found — rating plate, control cabinet, anything that identifies it.{' '}
-              <span className="font-medium">
-                Demo mode: no file is transferred. The record is created exactly as the production
-                uploader will create it.
-              </span>
+              The machine as found — rating plate, control cabinet, anything that identifies it.
+              Each photograph is uploaded to the EJE server once the machine has been added.
             </p>
+
+            {photoFailures.length > 0 && (
+              <p
+                role="alert"
+                className="mt-3 rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-3 py-2 text-xs font-medium text-signal-900"
+              >
+                The machine was added, but {photoFailures.length}{' '}
+                {photoFailures.length === 1 ? 'photograph' : 'photographs'} did not reach the
+                server ({photoFailures.join(', ')}). Open the machine and add{' '}
+                {photoFailures.length === 1 ? 'it' : 'them'} again.
+              </p>
+            )}
 
             {photos.length > 0 && (
               <ul className="mt-3 divide-y divide-steel-100 rounded-[var(--radius-control)] border border-steel-200">
                 {photos.map((photo, index) => (
                   <li
-                    key={`${photo.fileName}-${index}`}
+                    key={`${photo.file.name}-${index}`}
                     className="flex items-center justify-between gap-3 px-3 py-2"
                   >
                     <span className="min-w-0">
                       <span className="block truncate font-mono text-xs text-steel-800">
-                        {photo.fileName}
+                        {photo.file.name} · {formatFileSize(photo.file.size)}
                       </span>
                       {photo.caption.length > 0 && (
                         <span className="block truncate text-xs text-steel-500">
@@ -365,33 +421,24 @@ export const MachineDialog = ({
 
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <TextField
-                label="File name"
-                value={photoName}
-                onChange={(event) => setPhotoName(event.target.value)}
-                placeholder="mazak-qt200-rating-plate.jpg"
-                containerClassName="min-w-[14rem] flex-1"
-              />
-              <TextField
-                label="Caption"
+                label="Caption for the next photograph"
                 value={photoCaption}
                 onChange={(event) => setPhotoCaption(event.target.value)}
                 placeholder="Rating plate"
-                containerClassName="min-w-[10rem] flex-1"
+                containerClassName="min-w-[12rem] flex-1"
               />
-              <Button
-                variant="secondary"
-                disabled={photoName.trim().length === 0}
-                onClick={() => {
-                  setPhotos((current) => [
-                    ...current,
-                    { fileName: photoName.trim(), caption: photoCaption.trim() },
-                  ]);
-                  setPhotoName('');
+              {/* The camera for a machine found on site; the gallery for one
+                  photographed earlier. Same control as everywhere else. */}
+              <PhotoCaptureButtons
+                testIdPrefix="machine-photo"
+                cameraLabel="Photograph machine"
+                galleryLabel="Choose photograph"
+                disabled={operation.running}
+                onFile={(file) => {
+                  setPhotos((current) => [...current, { file, caption: photoCaption.trim() }]);
                   setPhotoCaption('');
                 }}
-              >
-                Add photograph
-              </Button>
+              />
             </div>
           </div>
         )}

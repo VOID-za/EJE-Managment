@@ -109,16 +109,22 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
     /*
      * The network, not the server.
      *
-     * Said plainly rather than swallowed. This phase is ONLINE-FIRST: nothing
-     * is queued, nothing is written to local storage, and nobody is told a
-     * capture succeeded when it never left the tablet. Offline support is its
-     * own phase and will be built deliberately.
+     * Said plainly rather than swallowed. The application is ONLINE-FIRST: a
+     * request that did not arrive did not happen, and nobody is told a capture
+     * succeeded when it never left the tablet.
+     *
+     * THE MESSAGE SAYS WHAT HAPPENED AND NOT WHAT IT MEANS. *Amended for the
+     * offline-capture batch;* it used to read "No connection to the EJE
+     * server. Your change has not been saved." That was true of every caller
+     * when it was written and is now false for one of them: the four
+     * append-only captures are HELD on the device when this throws (OFF-2),
+     * and a banner telling a technician their hours were not saved — while the
+     * queue holds them and the job screen says so — is the kind of
+     * contradiction that makes people stop believing either message. Each
+     * caller adds its own consequence; this layer reports the transport.
      */
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-    throw new ApiRequestError(
-      'network',
-      'No connection to the EJE server. Your change has not been saved.',
-    );
+    throw new ApiRequestError('network', 'No connection to the EJE server.');
   }
 
   let envelope: Envelope<T>;
@@ -189,6 +195,16 @@ export const apiUpload = async <T>(
    * validates each one; this only carries them.
    */
   fields: Readonly<Record<string, string>> = {},
+  /**
+   * The key that makes a RETRY of this upload safe.
+   *
+   * Minted once per capture by the caller and reused for every attempt at it,
+   * so a tablet that lost its connection after the bytes landed — but before
+   * the answer came back — can try again without attaching the same
+   * photograph twice. A deliberate second photograph is a new capture and
+   * mints its own key. Omitted, the upload behaves exactly as it always did.
+   */
+  idempotencyKey?: string,
 ): Promise<T> => {
   const form = new FormData();
   form.append('file', file);
@@ -197,7 +213,14 @@ export const apiUpload = async <T>(
 
   let response: Response;
   try {
-    response = await fetch(path, { method: 'POST', credentials: 'same-origin', body: form });
+    response = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: form,
+      ...(idempotencyKey === undefined
+        ? {}
+        : { headers: { 'idempotency-key': idempotencyKey } }),
+    });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
     throw new ApiRequestError(

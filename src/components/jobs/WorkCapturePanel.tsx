@@ -31,6 +31,7 @@ import {
 import { formatCurrency, formatDate } from '@/lib/format';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
+import { useOfflineCapture } from '@/hooks/useOfflineCapture';
 import { cn } from '@/lib/cn';
 import { businessToday } from '@/lib/business-time';
 
@@ -67,6 +68,17 @@ export const WorkCapturePanel = ({
     { kind: LineItemKind; id: string; label: string } | null
   >(null);
   const operation = useOperation();
+  /*
+   * ADDING A LINE GOES THROUGH HERE, not through `operation`. OFF-2.
+   *
+   * It tries the server first and holds the capture on the tablet only when
+   * there is no connection — and says which of the two happened. AMENDING and
+   * REMOVING a line still go through `operation` and still need a connection,
+   * because both replace or delete something on the server and a queue cannot
+   * decide what happens if it changed in the meantime (OFF-9).
+   */
+  const capture = useOfflineCapture(job);
+  const [held, setHeld] = useState<string | null>(null);
 
   const closeDialog = () => {
     setDialog(null);
@@ -92,6 +104,29 @@ export const WorkCapturePanel = ({
       {operation.error !== null && (
         <p role="alert" className="text-sm font-medium text-signal-600">
           {operation.error}
+        </p>
+      )}
+
+      {capture.outcome?.kind === 'refused' && (
+        <p role="alert" className="text-sm font-medium text-signal-600">
+          {capture.outcome.message}
+        </p>
+      )}
+
+      {/*
+        SAVED ON THIS TABLET IS NOT SAVED ON THE SERVER, and this line is the
+        difference. It names what was held and says plainly that it is not on
+        the job yet — the technician decides when to send it, and the queue
+        below the job sends it by itself when the signal returns.
+      */}
+      {held !== null && (
+        <p
+          role="status"
+          data-testid="capture-held"
+          className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3.5 py-2.5 text-sm font-medium text-amber-eje-800"
+        >
+          Held on this tablet: {held}. It is <strong>not on the server yet</strong> — see
+          &ldquo;Work waiting to be sent&rdquo; on this job.
         </p>
       )}
 
@@ -384,17 +419,29 @@ export const WorkCapturePanel = ({
         existing={job.labour.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
+          if (editingId === null) {
+            const result = await capture.capture(
+              'add_labour',
+              values,
+              `${values.hours} h ${labourRateLabel(values.rateType).toLowerCase()}${
+                values.description.length > 0 ? ` — ${values.description}` : ''
+              }`,
+            );
+            if (result.kind === 'refused') return;
+            setHeld(result.kind === 'queued' ? 'labour' : null);
+            closeDialog();
+            onChanged();
+            return;
+          }
           const ok = await operation.run(() =>
-            editingId === null
-              ? jobs.addLabour(job.id, values)
-              : jobs.updateLabour(job.id, { ...values, lineId: editingId }),
+            jobs.updateLabour(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();
             onChanged();
           }
         }}
-        busy={operation.running}
+        busy={operation.running || capture.running}
         pricing={totals.pricing}
       />
 
@@ -404,17 +451,29 @@ export const WorkCapturePanel = ({
         existing={job.travel.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
+          if (editingId === null) {
+            const result = await capture.capture(
+              'add_travel',
+              values,
+              `${values.kilometres} km${
+                values.description.length > 0 ? ` — ${values.description}` : ''
+              }`,
+            );
+            if (result.kind === 'refused') return;
+            setHeld(result.kind === 'queued' ? 'travel' : null);
+            closeDialog();
+            onChanged();
+            return;
+          }
           const ok = await operation.run(() =>
-            editingId === null
-              ? jobs.addTravel(job.id, values)
-              : jobs.updateTravel(job.id, { ...values, lineId: editingId }),
+            jobs.updateTravel(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();
             onChanged();
           }
         }}
-        busy={operation.running}
+        busy={operation.running || capture.running}
         pricing={totals.pricing}
       />
 
@@ -424,17 +483,29 @@ export const WorkCapturePanel = ({
         existing={job.parts.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
         onSubmit={async (values) => {
+          if (editingId === null) {
+            const result = await capture.capture(
+              'add_part',
+              values,
+              `${values.quantity} × ${values.partNumber}${
+                values.description.length > 0 ? ` — ${values.description}` : ''
+              }`,
+            );
+            if (result.kind === 'refused') return;
+            setHeld(result.kind === 'queued' ? 'the part' : null);
+            closeDialog();
+            onChanged();
+            return;
+          }
           const ok = await operation.run(() =>
-            editingId === null
-              ? jobs.addPart(job.id, values)
-              : jobs.updatePart(job.id, { ...values, lineId: editingId }),
+            jobs.updatePart(job.id, { ...values, lineId: editingId }),
           );
           if (ok) {
             closeDialog();
             onChanged();
           }
         }}
-        busy={operation.running}
+        busy={operation.running || capture.running}
       />
 
       <ConfirmDialog

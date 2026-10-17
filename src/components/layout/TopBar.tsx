@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Avatar, Icon, Menu } from '@/components/ui';
+import { Avatar, ConfirmDialog, Icon, Menu } from '@/components/ui';
 import { useApp } from '@/providers/AppProvider';
+import { usePendingWork } from '@/hooks/usePendingWork';
 import { DemoUserSwitcher } from './DemoUserSwitcher';
 import { ThemeToggleButton } from './ThemeToggle';
 import { roleLabel, userFullName } from '@/domain';
@@ -19,6 +20,17 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
   const router = useRouter();
   const { currentUser, signOut } = useApp();
   const [term, setTerm] = useState('');
+  /*
+   * SIGNING OUT WITH UNSENT WORK IS NOT SILENT. OFF-6, CR-02.
+   *
+   * The captures stay on the tablet — `clearCachedJobs` deliberately does not
+   * touch them — but a technician who signs out believing their hours went to
+   * the server has been misled by omission. So the menu asks, names the
+   * number, and says what happens to them.
+   */
+  const pending = usePendingWork();
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const unsent = pending.rows.length;
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
@@ -105,13 +117,43 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
                   label: 'Sign out',
                   icon: <Icon name="logout" className="size-4" />,
                   destructive: true,
-                  onSelect: signOut,
+                  onSelect: () => {
+                    if (unsent > 0) {
+                      setConfirmSignOut(true);
+                      return;
+                    }
+                    void signOut();
+                  },
                 },
               ]}
             />
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmSignOut}
+        title="Sign out with work still unsent?"
+        message={
+          <>
+            <p>
+              {unsent} {unsent === 1 ? 'capture has' : 'captures have'} not reached the EJE server.
+            </p>
+            <p className="mt-2 text-steel-500">
+              They stay on this tablet and are sent the next time you sign in here with a
+              connection. Nothing is lost by signing out — but nothing is on the job yet either,
+              so do not tell the office it is captured until it has gone.
+            </p>
+          </>
+        }
+        confirmLabel="Sign out"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setConfirmSignOut(false);
+          void signOut();
+        }}
+        onCancel={() => setConfirmSignOut(false)}
+      />
     </header>
   );
 };

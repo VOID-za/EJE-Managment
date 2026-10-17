@@ -295,20 +295,20 @@ export const runCreateCustomer = (
   });
 };
 
-export const createMachineSchema = machineFields.extend({
-  photos: z
-    .array(
-      z
-        .object({
-          fileName: text(260),
-          caption: text(500),
-          sizeBytes: z.number().int().nonnegative().max(2_000_000_000),
-        })
-        .strict(),
-    )
-    .max(20)
-    .optional(),
-});
+/**
+ * A new machine. NO PHOTOGRAPHS IN THE JSON BODY. *Amended by MACH-PHOTO-1.*
+ *
+ * It used to accept `photos: [{ fileName, caption, sizeBytes }]` — metadata
+ * the client made up, which `createMachine` turned into storage keys with
+ * nothing behind them. The register then displayed photographs that did not
+ * exist.
+ *
+ * A machine is now raised first and photographed afterwards, through
+ * `POST /api/machines/:machineId/photos`, which carries real bytes. Two
+ * requests, each doing one thing, rather than a multipart create carrying a
+ * record and several megabytes of images.
+ */
+export const createMachineSchema = machineFields;
 
 export const runCreateMachine = (
   context: CommandContext,
@@ -318,5 +318,5 @@ export const runCreateMachine = (
     ...input,
     customerId: asCustomerId(input.customerId),
     siteId: asSiteId(input.siteId),
-    photos: input.photos ?? [],
+    photos: [],
   });

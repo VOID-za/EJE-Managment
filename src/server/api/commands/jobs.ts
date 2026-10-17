@@ -404,11 +404,15 @@ export const JOB_COMMANDS: CommandRegistry = {
       jobs.answerChecklistItem(context.operation, job, itemId, answer),
   ),
 
-  add_checklist_photo: withInput(
-    z.object({ itemId: z.string().min(1).max(100), fileName: text(260) }).strict(),
-    (context, job, input) =>
-      jobs.addChecklistPhoto(context.operation, job, input.itemId, input.fileName),
-  ),
+  /*
+   * `add_checklist_photo` USED TO BE HERE, and it is gone for the same reason
+   * `add_media` is. CHK-EVIDENCE-1.
+   *
+   * It took an item id and a file NAME, stored nothing, and recorded evidence
+   * with a hard-coded size against a question that gates the checklist's
+   * completion. Evidence now arrives as multipart bytes at
+   * `POST /api/jobs/:jobId/checklist/:itemId/photo`.
+   */
 
   complete_checklist: simple(async (context, job) =>
     jobs.completeChecklist(context.operation, job, await checklistTemplate(context, job)),

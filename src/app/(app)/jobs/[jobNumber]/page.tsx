@@ -44,6 +44,8 @@ import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
 import { useQuery } from '@/hooks/useQuery';
 import { useRememberJob } from '@/hooks/useRememberJob';
+import { usePendingWork } from '@/hooks/usePendingWork';
+import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
 
@@ -88,6 +90,16 @@ const JobDetailPage = ({
   useRememberJob(jobNumber);
 
   /*
+   * WORK THIS TABLET IS STILL HOLDING FOR THIS JOB. OFF-8.
+   *
+   * Read here rather than inside the capture panels so it is on screen whichever
+   * tab is open — a technician who captured hours in a basement needs to see
+   * that they are unsent from anywhere on the job, not only from the tab they
+   * happened to use.
+   */
+  const pending = usePendingWork();
+
+  /*
    * The job, the people on it and its own history — one read, for THIS viewer.
    *
    * The trail used to be the whole company's, filtered by job id in the
@@ -106,7 +118,18 @@ const JobDetailPage = ({
   const viewQuery = { ...screenQuery, data: screenQuery.data?.view ?? null };
   const supportQuery = { ...screenQuery, data: screenQuery.data ?? null };
 
-  if (viewQuery.error !== null) {
+  /*
+   * THE JOB STAYS ON SCREEN WHEN THE CONNECTION GOES. OFF-8.
+   *
+   * Only shown as a failure when there is nothing to show: a refusal, or a
+   * first load that never arrived. A dropped connection with a job already in
+   * hand keeps the job — `useQuery` retains the last answer for a transport
+   * failure — because a technician half-way through capturing work on a tablet
+   * that lost signal must not have the screen replaced by an error panel. The
+   * connection banner says what happened, and the pending-work panel says what
+   * has and has not reached the server.
+   */
+  if (viewQuery.error !== null && viewQuery.data === null) {
     return <QueryFailure code={viewQuery.errorCode} message={viewQuery.error} onRetry={viewQuery.refetch} />;
   }
   if (viewQuery.loading) {
@@ -313,6 +336,11 @@ const JobDetailPage = ({
           to know that is what they are looking at, and a Master has to be able
           to deal with it without hunting for it. */}
       <SignatureRefusalPanel job={job} users={users} onChanged={refresh} />
+
+      {/* Before the record, like the refusal above and for the same reason:
+          whether the work on screen has reached the server is the first thing
+          a technician needs to know about this job. OFF-8. */}
+      <PendingWorkPanel pending={pending} jobId={job.id} className="mb-5" />
 
       <Card className="mb-5">
         <JobProgressRail

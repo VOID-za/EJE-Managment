@@ -262,6 +262,14 @@ export class ApiTestClient {
     if (options.withoutFetchMetadata !== true) {
       headers.set('sec-fetch-site', options.crossSite === true ? 'cross-site' : 'same-origin');
     }
+    /*
+     * An upload carries an idempotency key too, since TAB-UPLOAD-1: a retried
+     * capture reuses its key so the server replays the first answer instead of
+     * attaching the same photograph twice.
+     */
+    if (options.idempotencyKey !== undefined) {
+      headers.set('idempotency-key', options.idempotencyKey);
+    }
     const token = options.token === undefined ? this.cookie : options.token;
     if (token !== null) headers.set('cookie', `${SESSION_COOKIE}=${token}`);
 

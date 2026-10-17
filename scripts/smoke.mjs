@@ -3881,6 +3881,280 @@ await step('the technician’s assigned jobs are cached on the device', async ()
   }
 });
 
+/* ---- real evidence, and real offline capture ---------------------------- */
+
+await step('checklist evidence is a real file, stored and served back', async () => {
+  /*
+   * CHK-EVIDENCE-1. The runner used to post an item id and a file NAME and
+   * store nothing, against the very questions that gate the checklist's
+   * completion.
+   *
+   * AN INSTALLATION JOB, because the installation checklist is the one whose
+   * items are marked `photoRequired` — the service template has none, so it
+   * would prove nothing about evidence. EJE-1050 is the seeded installation
+   * job, open in the pool, and Thabo can take it.
+   */
+  await signInAs(page, 'Thabo Nkosi', { base: BASE });
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+
+  const accept = page.getByRole('button', { name: 'Accept job' });
+  if ((await accept.count()) > 0) {
+    await accept.click();
+    await page.getByRole('dialog').waitFor({ timeout: 8000 });
+    await page.getByRole('button', { name: 'Accept and start' }).click();
+    // Acceptance offers the site location; answering it finishes the flow.
+    const decline = page.getByRole('button', { name: 'No, Thanks' });
+    await decline.waitFor({ timeout: 15000 });
+    await decline.click();
+  }
+  await page.getByText('In Progress').first().waitFor({ timeout: 20000 });
+
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Checklist/ }).click();
+
+  const start = page.getByRole('button', { name: 'Start checklist' });
+  if ((await start.count()) > 0) {
+    await start.click();
+  }
+  // The photograph controls appear only on the items the template marks
+  // `photoRequired`, which is the only place evidence belongs.
+  const input = page
+    .locator('[data-testid^="checklist-photo-"][data-testid$="-gallery"]')
+    .first();
+  await input.waitFor({ state: 'attached', timeout: 15000 });
+
+  await input.setInputFiles({
+    name: 'bearing-condition.png',
+    mimeType: 'image/png',
+    buffer: pngBytes('bearing condition'),
+  });
+
+  // THE BROWSER DECODES WHAT IT FETCHED. A tile that renders proves the bytes
+  // went up, were stored, and came back through the authenticated route.
+  await page.locator('[data-testid="checklist-evidence-thumbnail"]').first().waitFor({
+    timeout: 20000,
+  });
+  await page.waitForFunction(
+    () => {
+      const image = document.querySelector('[data-testid="checklist-evidence-thumbnail"]');
+      return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+    },
+    undefined,
+    { timeout: 20000 },
+  );
+  await page.screenshot({ path: `${shots}/41-checklist-evidence.png`, fullPage: false });
+});
+
+await step('the office photographs a machine, and the register shows the photograph', async () => {
+  // MACH-PHOTO-1. The register used to draw grey camera icons over storage
+  // keys with nothing behind them.
+  await signInAs(page, 'Elmarie Coetzee', { base: BASE });
+  await page.goto(`${BASE}/machines`, { waitUntil: 'networkidle' });
+  // The register is a table of rows, and a row opens the machine.
+  await page.locator('main table tbody tr').first().click();
+  await page.locator('[data-testid="machine-detail-photo-gallery"]').waitFor({
+    state: 'attached',
+    timeout: 20000,
+  });
+
+  await page.locator('[data-testid="machine-detail-photo-gallery"]').setInputFiles({
+    name: 'rating-plate.png',
+    mimeType: 'image/png',
+    buffer: pngBytes('rating plate'),
+  });
+
+  await page.locator('[data-testid="machine-photo-thumbnail"]').first().waitFor({ timeout: 20000 });
+  await page.waitForFunction(
+    () => {
+      const image = document.querySelector('[data-testid="machine-photo-thumbnail"]');
+      return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+    },
+    undefined,
+    { timeout: 20000 },
+  );
+  await page.screenshot({ path: `${shots}/42-machine-photo.png`, fullPage: false });
+});
+
+await step('the machine register, and its camera, stay out of a technician’s reach', async () => {
+  /*
+   * THE PERMISSION THIS BATCH DID NOT WIDEN. MACH-PHOTO-1 gave machine
+   * photographs real bytes; it gave nobody new access. The register is the
+   * office's screen — `machines.manage` — and a technician is refused the page
+   * outright, which is pre-existing behaviour worth locking in beside the new
+   * upload route. The route itself refuses them too (403), proved in
+   * `machine-photo-api.test.ts`.
+   */
+  await signInAs(page, 'Riaan van Wyk', { base: BASE });
+  await page.goto(`${BASE}/machines`, { waitUntil: 'networkidle' });
+  await page.getByText('Your role does not include this screen', { exact: false }).first().waitFor({
+    timeout: 20000,
+  });
+  if ((await page.locator('[data-testid="machine-detail-photo-gallery"]').count()) > 0) {
+    throw new Error('a technician was offered the machine camera');
+  }
+});
+
+await step('with no connection, captured labour is HELD on the tablet and says so', async () => {
+  /*
+   * THE HEADLINE OF THIS BATCH. OFF-2, OFF-8.
+   *
+   * A technician in a plant basement captures 2.5 hours. The server cannot be
+   * reached, so the capture is held on the device — and the screen says that
+   * plainly rather than claiming it is saved.
+   */
+  /*
+   * The job list first, while there IS a connection: signing in as somebody
+   * else earlier in this file cleared the previous user's cached copy (the
+   * shared-tablet rule), so this step fills Riaan's own cache rather than
+   * depending on an earlier step's leftovers.
+   */
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('table').first().waitFor({ timeout: 20000 });
+
+  await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Labour & Parts' }).click();
+  await page.getByRole('button', { name: 'Add labour' }).first().waitFor({ timeout: 15000 });
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+
+  await page.getByRole('button', { name: 'Add labour' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  // A labour line is hours only — what was done belongs in the write-up — so
+  // the capture is driven through the hours field the dialog actually has.
+  await dialog.getByLabel('Or enter hours').fill('2.5');
+  await dialog.getByRole('button', { name: 'Add labour' }).last().click();
+
+  // Held, not saved. The wording is the requirement.
+  await page.getByTestId('capture-held').waitFor({ timeout: 15000 });
+  await page.getByTestId('pending-work-heading').waitFor({ timeout: 15000 });
+  const queued = await page.getByTestId('pending-work-list').innerText();
+  if (!/Not sent/.test(queued)) throw new Error(`the queue does not say "Not sent": ${queued}`);
+  if (!/2\.5/.test(queued)) throw new Error(`the queue does not name the capture: ${queued}`);
+
+  // The panel sits above the tabs, so the unsent capture is visible from
+  // anywhere on the job and not only from the tab it was captured on. OFF-8.
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  await page.getByTestId('pending-work-heading').waitFor({ timeout: 15000 });
+  const fromAnotherTab = await page.locator('main').innerText();
+  if (!/not on the server/i.test(fromAnotherTab)) {
+    throw new Error('the job screen does not say the work is not on the server');
+  }
+
+  const stored = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (stored.length !== 1) throw new Error(`${stored.length} rows held, expected 1`);
+  if (stored[0].action !== 'add_labour') throw new Error(`held ${stored[0].action}`);
+  if (stored[0].state !== 'pending') throw new Error(`held in state ${stored[0].state}`);
+  // The key that makes the send safe to repeat.
+  if (typeof stored[0].idempotencyKey !== 'string' || stored[0].idempotencyKey.length === 0) {
+    throw new Error('the held capture carries no idempotency key');
+  }
+  await page.screenshot({ path: `${shots}/43-offline-held.png`, fullPage: false });
+});
+
+await step('the held capture survives the application being closed, offline', async () => {
+  /*
+   * ACC-OFF-6, measured rather than asserted in prose. A reload is the closest
+   * a browser gets to a battery going flat — and offline it does NOT come back
+   * to the job, because no job page is ever cached (deliberately): the service
+   * worker answers the navigation with the offline page.
+   *
+   * So the test is the honest one: the tablet lands on the offline page, that
+   * page SAYS the captures are still waiting, and they are still in the store.
+   */
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByTestId('offline-unsent').waitFor({ timeout: 25000 });
+  const notice = await page.getByTestId('offline-unsent').innerText();
+  if (!/1 capture is waiting/.test(notice)) {
+    throw new Error(`the offline page does not name the waiting capture: ${notice}`);
+  }
+  if (!/not on the job/i.test(notice)) {
+    throw new Error('the offline page does not say the capture is not on the job');
+  }
+
+  const survived = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (survived.length !== 1) {
+    throw new Error(`${survived.length} captures survived the reload, expected 1`);
+  }
+  await page.screenshot({ path: `${shots}/45-offline-unsent.png`, fullPage: false });
+});
+
+await step('when the signal returns, the held capture is sent and lands on the job', async () => {
+  await page.context().setOffline(false);
+  offlineExpected = false;
+
+  /*
+   * The queue flushes by itself on reconnection — no tap required — and the
+   * row leaves the panel only when the SERVER has it. Then the labour is on
+   * the job, through the ordinary read.
+   */
+  await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
+  await page.getByTestId('pending-work-heading').waitFor({ state: 'detached', timeout: 30000 });
+
+  const emptied = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result);
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      }),
+  );
+  if (emptied !== 0) throw new Error(`${emptied} captures still held after the flush`);
+
+  await page.getByRole('tab', { name: 'Labour & Parts' }).click();
+  const labour = page.locator('main').getByText('2.5', { exact: false });
+  await labour.first().waitFor({ timeout: 20000 });
+
+  // ONE line of 2.5 hours, not two: the capture was sent once, under its own
+  // key, however many times the flush ran.
+  const rows = (await page.locator('main').innerText())
+    .split('\n')
+    .filter((line) => /\b2\.5\b/.test(line) && /h\b|hours/i.test(line));
+  if (rows.length > 1) {
+    throw new Error(`the capture landed ${rows.length} times: ${rows.join(' | ')}`);
+  }
+  await page.screenshot({ path: `${shots}/44-offline-sent.png`, fullPage: false });
+});
+
 await step('with the network off, the tablet still shows the cached jobs', async () => {
   const cachedNumbers = await page.evaluate(
     () =>

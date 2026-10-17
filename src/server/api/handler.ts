@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { z } from 'zod';
 import type { OperationContext } from '@/application/context';
@@ -199,9 +200,25 @@ export const writeRoute =
  * a large body limit, and the upload path cannot accidentally inherit a parser
  * that would have to buffer the file as text first.
  *
- * NO IDEMPOTENCY KEY. A retried upload is a second attachment, which is what
- * the person asked for both times; replaying the first would silently swallow
- * a deliberate second copy of a document.
+ * IDEMPOTENCY IS HONOURED WHEN A KEY IS SENT, AND NEVER REQUIRED. *Amended for
+ * the field-reliability batch; the original reasoning is kept because it was
+ * right about the case it considered.* It read:
+ *
+ *   > NO IDEMPOTENCY KEY. A retried upload is a second attachment, which is
+ *   > what the person asked for both times; replaying the first would silently
+ *   > swallow a deliberate second copy of a document.
+ *
+ * That is true of two SEPARATE captures, and it stays true: each one mints its
+ * own key, so both land. What it did not consider is one capture sent twice —
+ * a tablet whose connection dropped after the bytes had been written but
+ * before the answer came back, and a technician who then taps *Try again*. The
+ * retry carries the SAME key, which is what makes the second attempt a replay
+ * of the first rather than a duplicate photograph on a job card somebody is
+ * about to sign.
+ *
+ * The key is scoped to the actor, the operation and the request's content — the
+ * file's bytes included — so a key reused for a different photograph is
+ * refused rather than quietly answering about the wrong one.
  */
 export interface UploadContext extends ReadContext {
   readonly file: File;
@@ -271,24 +288,80 @@ export const uploadRoute =
       }
 
       const caption = form.get('caption');
+      const key = request.headers.get('idempotency-key');
 
-      const data = await getServerRuntime().write((unit) =>
-        handler({
-          ...unit,
-          actor,
-          request,
-          params,
-          file,
-          form,
-          caption: typeof caption === 'string' ? caption.slice(0, 500) : '',
-          operation: {
-            repos: unit.repos,
-            services: unit.services,
-            // THE ACTOR COMES FROM THE SESSION, here as everywhere else.
-            actor: actor.user,
-          },
-        }),
+      /*
+       * The bytes, read ONCE, here.
+       *
+       * The handler reads them again through `file.arrayBuffer()`, which is
+       * safe because a `File`'s contents can be read repeatedly — unlike the
+       * request stream, which cannot. Hashing them is what makes the
+       * idempotency key specific to this photograph: a key reused with a
+       * different file is a client bug, and it is refused rather than answered
+       * from the wrong record.
+       */
+      const fingerprint =
+        key === null || key.length === 0
+          ? null
+          : hashRequest({
+              fileName: file.name,
+              size: file.size,
+              caption: typeof caption === 'string' ? caption : '',
+              fields: [...form.entries()]
+                .filter(([, value]) => typeof value === 'string')
+                .map(([name, value]) => [name, value as string])
+                .sort(),
+              bytes: createHash('sha256')
+                .update(new Uint8Array(await file.arrayBuffer()))
+                .digest('hex'),
+            });
+
+      const result = await getServerRuntime().write(async (unit) => {
+        const scope: IdempotencyScope | null =
+          key === null || key.length === 0 || fingerprint === null
+            ? null
+            : { userId: actor.user.id, operation, key: key.slice(0, 200) };
+
+        if (scope !== null && fingerprint !== null) {
+          const replayed = await unit.idempotency.claim(scope, fingerprint);
+          // The first attempt already stored these bytes. Hand back what it
+          // answered rather than attaching the same photograph twice.
+          if (replayed !== null) return { data: replayed as TResult, replayed: true };
+        }
+
+        try {
+          const data = await handler({
+            ...unit,
+            actor,
+            request,
+            params,
+            file,
+            form,
+            caption: typeof caption === 'string' ? caption.slice(0, 500) : '',
+            operation: {
+              repos: unit.repos,
+              services: unit.services,
+              // THE ACTOR COMES FROM THE SESSION, here as everywhere else.
+              actor: actor.user,
+            },
+          });
+          if (scope !== null) await unit.idempotency.complete(scope, data ?? null);
+          return { data, replayed: false };
+        } catch (cause) {
+          /*
+           * In memory there is no transaction to roll the claim back, so a
+           * failed upload has to release its key — otherwise a storage failure
+           * would make that capture permanently unretryable, which is the
+           * opposite of what the key is for. On PostgreSQL the marker is
+           * written inside the request's transaction and rolls back with it.
+           */
+          if (scope !== null) unit.idempotency.release?.(scope);
+          throw cause;
+        }
+      });
+
+      return NextResponse.json(
+        { data: result.data },
+        { headers: result.replayed ? { 'Idempotent-Replay': 'true' } : undefined },
       );
-
-      return NextResponse.json({ data });
     });

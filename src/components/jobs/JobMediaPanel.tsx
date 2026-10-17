@@ -19,6 +19,7 @@ import {
 } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { jobs } from '@/api/endpoints';
+import { newIdempotencyKey } from '@/api/client';
 import { useOperation } from '@/hooks/useOperation';
 import { formatFileSize, formatRelative } from '@/lib/format';
 
@@ -63,6 +64,16 @@ export const JobMediaPanel = ({
   const [selection, setSelection] = useState<{
     readonly file: File;
     readonly preview: string;
+    /*
+     * MINTED WHEN THE PHOTOGRAPH IS CHOSEN, NOT WHEN IT IS SENT. TAB-UPLOAD-1.
+     *
+     * So *Try again* after a connection that dropped mid-upload re-sends the
+     * same capture under the same key, and the server answers from the first
+     * attempt if it had already stored the bytes — instead of putting the same
+     * photograph on the job card twice. A genuinely different photograph is a
+     * new selection and gets a new key.
+     */
+    readonly idempotencyKey: string;
   } | null>(null);
   const [caption, setCaption] = useState('');
   const [visibility, setVisibility] = useState<MediaVisibility>('customer_facing');
@@ -87,7 +98,7 @@ export const JobMediaPanel = ({
     setSelection(
       picked === null || previewUrl.current === null
         ? null
-        : { file: picked, preview: previewUrl.current },
+        : { file: picked, preview: previewUrl.current, idempotencyKey: newIdempotencyKey() },
     );
   };
   useEffect(
@@ -131,7 +142,11 @@ export const JobMediaPanel = ({
     if (selection === null) return;
     setAttempted(true);
     const result = await operation.runFor(() =>
-      jobs.uploadMedia(job.id, selection.file, { caption: caption.trim(), visibility }),
+      jobs.uploadMedia(job.id, selection.file, {
+        caption: caption.trim(),
+        visibility,
+        idempotencyKey: selection.idempotencyKey,
+      }),
     );
     /*
      * A RETRY IS THE SAME FILE, NOT A SECOND ONE. The selection is cleared only

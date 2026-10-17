@@ -276,6 +276,21 @@ export const jobs = {
   /** Where a job's attachment is downloaded from. Authorised on every request. */
   attachmentUrl: (jobId: string, attachmentId: string) =>
     `/api/jobs/${segment(jobId)}/attachments/${segment(attachmentId)}`,
+  /**
+   * SENDS A CAPTURE THIS DEVICE HAS BEEN HOLDING. OFF-6.
+   *
+   * The same route the online call uses — there is no special offline endpoint
+   * and no relaxed validation — with ONE difference that is the whole point:
+   * the idempotency key comes from the queued row rather than being minted
+   * here. So a flush interrupted after the server committed, but before the
+   * answer arrived, re-sends the same request and is answered from the first
+   * one instead of adding the hours twice.
+   *
+   * The action is restricted to the offline allowlist by the queue
+   * (`offline-rules.ts`), not by this function; this is the transport.
+   */
+  sendCaptured: (jobId: string, action: string, payload: unknown, idempotencyKey: string) =>
+    apiPost<Job>(`/api/jobs/${segment(jobId)}/${action}`, payload, idempotencyKey),
   accept: (jobId: string) => jobAction(jobId, 'accept'),
   sendSiteLocation: (jobId: string, recipientMobile?: string) =>
     command<{ sent: boolean; navigationUrl: string; failureReason: string | null }>(
@@ -311,7 +326,12 @@ export const jobs = {
   uploadMedia: (
     jobId: string,
     file: File,
-    options: { readonly caption?: string; readonly visibility?: MediaVisibility } = {},
+    options: {
+      readonly caption?: string;
+      readonly visibility?: MediaVisibility;
+      /** Minted once per capture, so a retry replays instead of duplicating. */
+      readonly idempotencyKey?: string;
+    } = {},
   ) =>
     apiUpload<{
       photos: readonly {
@@ -322,9 +342,13 @@ export const jobs = {
         sizeBytes: number;
         uploadedAt: string;
       }[];
-    }>(`/api/jobs/${segment(jobId)}/media`, file, options.caption ?? '', {
-      ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
-    }),
+    }>(
+      `/api/jobs/${segment(jobId)}/media`,
+      file,
+      options.caption ?? '',
+      { ...(options.visibility === undefined ? {} : { visibility: options.visibility }) },
+      options.idempotencyKey,
+    ),
   /** Where one photograph is read back from. Authorised on every request. */
   mediaUrl: (jobId: string, attachmentId: string) =>
     `/api/jobs/${segment(jobId)}/media/${segment(attachmentId)}`,
@@ -342,8 +366,34 @@ export const jobs = {
   saveReport: (jobId: string, report: unknown) => jobAction(jobId, 'save_report', report),
   startChecklist: (jobId: string) => jobAction(jobId, 'start_checklist'),
   answerChecklist: (jobId: string, input: unknown) => jobAction(jobId, 'answer_checklist', input),
-  addChecklistPhoto: (jobId: string, itemId: string, fileName: string) =>
-    jobAction(jobId, 'add_checklist_photo', { itemId, fileName }),
+  /**
+   * ATTACHES CHECKLIST EVIDENCE, BYTES AND ALL. CHK-EVIDENCE-1.
+   *
+   * It used to post an item id and a file name the client invented, and store
+   * nothing — against the very questions that gate a checklist's completion.
+   */
+  addChecklistPhoto: (
+    jobId: string,
+    itemId: string,
+    file: File,
+    options: { readonly caption?: string; readonly idempotencyKey?: string } = {},
+  ) =>
+    apiUpload<{
+      itemId: string;
+      photos: readonly {
+        id: string;
+        fileName: string;
+        caption: string;
+        sizeBytes: number;
+        uploadedAt: string;
+      }[];
+    }>(
+      `/api/jobs/${segment(jobId)}/checklist/${segment(itemId)}/photo`,
+      file,
+      options.caption ?? '',
+      {},
+      options.idempotencyKey,
+    ),
   completeChecklist: (jobId: string) => jobAction(jobId, 'complete_checklist'),
   setCollection: (jobId: string, courier: boolean, waybillNumber: string) =>
     jobAction(jobId, 'set_collection', { courier, waybillNumber }),
@@ -419,6 +469,37 @@ export const machines = {
   create: (input: unknown) => command<Machine>('/api/machines', input),
   update: (machineId: string, input: unknown) =>
     command<Machine>(`/api/machines/${segment(machineId)}/update`, input),
+  /**
+   * A PHOTOGRAPH OF THE MACHINE, BYTES AND ALL. MACH-PHOTO-1.
+   *
+   * The create call used to carry `photos: [{ fileName, caption, sizeBytes }]`
+   * — metadata with no file behind it. A machine is raised first and
+   * photographed afterwards, and the server's register rules decide who may.
+   */
+  addPhoto: (
+    machineId: string,
+    file: File,
+    options: { readonly caption?: string; readonly idempotencyKey?: string } = {},
+  ) =>
+    apiUpload<{
+      approval: Machine['approval'];
+      photos: readonly {
+        id: string;
+        fileName: string;
+        caption: string;
+        sizeBytes: number;
+        uploadedAt: string;
+      }[];
+    }>(
+      `/api/machines/${segment(machineId)}/photos`,
+      file,
+      options.caption ?? '',
+      {},
+      options.idempotencyKey,
+    ),
+  /** Where one machine photograph is read back from. Authorised per request. */
+  photoUrl: (machineId: string, attachmentId: string) =>
+    `/api/machines/${segment(machineId)}/photos/${segment(attachmentId)}`,
   approve: (machineId: string) => command<Machine>(`/api/machines/${segment(machineId)}/approve`),
   remove: (machineId: string) =>
     command<RemovalOutcome>(`/api/machines/${segment(machineId)}/remove`),
