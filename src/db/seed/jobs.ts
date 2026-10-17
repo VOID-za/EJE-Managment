@@ -67,7 +67,7 @@ const finalJobCard = (
   pageCount,
   generatedAt,
   generatedBy: MASTER,
-  simulated: true,
+  renderedLocally: true,
   issuedTo,
 });
 
@@ -81,7 +81,7 @@ const finalPartsNote = (
   pageCount: 1,
   generatedAt,
   generatedBy: MASTER,
-  simulated: true,
+  renderedLocally: true,
   issuedTo,
 });
 
@@ -1155,11 +1155,31 @@ export const seedJobs: readonly Job[] = [
   /* therefore final and untouchable; EJE-2026 does not, and is the    */
   /* office's to correct and resubmit. Without these two the seed      */
   /* could not demonstrate immutability, the refusal correction loop,  */
-  /* or the Master's final submission at all — the register held NO    */
-  /* job at Review.                                                    */
+  /* or the technician's own final submission at all — the register    */
+  /* held NO job at Review.                                            */
   /* ---------------------------------------------------------------- */
 
-  // SIGNED. Waiting on a Master's final submission, and immutable to everyone.
+  /*
+   * SIGNED, UNSUBMITTED, AND ITS TECHNICIAN IS AWAY ALL DAY. CR-07, CR-08,
+   * AUD-8.
+   *
+   * Two corrections live in this comment, and both were stale rather than
+   * wrong-headed. It said this job was *waiting on a Master's final
+   * submission*, which CR-07 removed: a signed job card is submitted by the
+   * TECHNICIAN who attended the machine, and there is no Master Review stage
+   * for it to wait in. What it actually waits for is its own technician.
+   *
+   * And it is now TECH3's rather than TECH1's, which is what makes the
+   * office's rescue rule demonstrable from the seed at all. TECH3 is on
+   * all-day sick leave spanning today (`availability tech3:sick`), so
+   * `submissionCover` finds nobody available and CR-08 unlocks the takeover —
+   * without a single part of that condition being relaxed. TECH1 keeps the
+   * part-day appointment and EJE-2018, which is the other half of the rule:
+   * a technician who is at work either side of an appointment submits their
+   * own job, and the office is offered nothing.
+   *
+   * It is immutable to everyone either way: the signature is what makes it so.
+   */
   job('EJE-2025', {
     jobType: 'breakdown',
     priority: 'high',
@@ -1172,7 +1192,7 @@ export const seedJobs: readonly Job[] = [
     orderNumber: 'PO-ACME-7781',
     referenceNumber: 'ACME-BRK-207',
     faultDescription: 'Spindle drive tripping under load on the STM-1.',
-    primaryTechnicianId: TECH1,
+    primaryTechnicianId: TECH3,
     acceptedAt: timeAgo(1, 7, 15),
     completedAt: timeAgo(1, 14, 40),
     createdAt: timeAgo(2, 8),
@@ -1180,24 +1200,24 @@ export const seedJobs: readonly Job[] = [
     labour: [
       {
         id: lineId('2025-lab-1'),
-        technicianId: TECH1,
+        technicianId: TECH3,
         date: dayOffset(-1),
         rateType: 'normal',
         hours: 4,
         description: 'Spindle drive fault finding and cooling fan replacement',
         capturedAt: timeAgo(1, 14),
-        capturedBy: TECH1,
+        capturedBy: TECH3,
       },
     ],
     travel: [
       {
         id: lineId('2025-trv-1'),
-        technicianId: TECH1,
+        technicianId: TECH3,
         date: dayOffset(-1),
         kilometres: 48,
         description: 'Workshop to site and back',
         capturedAt: timeAgo(1, 14),
-        capturedBy: TECH1,
+        capturedBy: TECH3,
       },
     ],
     parts: [
@@ -1208,7 +1228,7 @@ export const seedJobs: readonly Job[] = [
         quantity: 1,
         unitPrice: 48500,
         capturedAt: timeAgo(1, 14),
-        capturedBy: TECH1,
+        capturedBy: TECH3,
       },
     ],
     completionReport: {

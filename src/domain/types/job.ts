@@ -149,8 +149,26 @@ export interface FinalDocument {
   readonly pageCount: number;
   readonly generatedAt: IsoDateTime;
   readonly generatedBy: UserId;
-  /** True in the demo, where no file is rendered server-side. */
-  readonly simulated: boolean;
+  /**
+   * WHERE THESE BYTES WERE RENDERED — and nothing else. AUD-8.
+   *
+   * True when the PDF was produced by this application itself, which is the
+   * demonstration build; false when a server-side renderer produced it.
+   *
+   * IT WAS CALLED `simulated`, AND THAT NAME WAS A LIE BY IMPLICATION. The
+   * bytes are real whichever renderer made them: they are written once, when
+   * the job card is issued, and every later view or download returns that
+   * exact file. A field called `simulated` on a document whose bytes exist
+   * reads as "this document is fake", and — worse — it was read as evidence
+   * about DELIVERY, which it has never said anything about.
+   *
+   * DELIVERY IS A DIFFERENT FACT, kept somewhere else on purpose: `job.delivery`
+   * carries what the provider said, and only a confirmed delivery closes a job
+   * (MANDATE-3). A locally rendered document can be genuinely delivered, and a
+   * server-rendered one can fail to send. Neither field may ever be read as
+   * proof of the other.
+   */
+  readonly renderedLocally: boolean;
   /** Where the signed copy was emailed, recorded with the document. */
   readonly issuedTo: string;
 }

@@ -69,7 +69,7 @@ const finalJobCard = (
   pageCount,
   generatedAt,
   generatedBy: asUserId('user-master-elmarie'),
-  simulated: true,
+  renderedLocally: true,
   issuedTo,
 });
 
@@ -83,7 +83,7 @@ const finalPartsNote = (
   pageCount: 1,
   generatedAt,
   generatedBy: asUserId('user-master-elmarie'),
-  simulated: true,
+  renderedLocally: true,
   issuedTo,
 });
 
@@ -157,6 +157,104 @@ export const seedJobs: readonly Job[] = [
   // The flagship demonstration job: freshly dispatched and not yet accepted, so a
   // walkthrough can run the entire journey live — accept, capture, write up, sign,
   // submit — on one job without switching between records.
+  /**
+   * A SIGNED JOB CARD NOBODY IS THERE TO SUBMIT. AUD-8, CR-08.
+   *
+   * The takeover exception could not be demonstrated from the seed at all: the
+   * technician on every signed job at Review was either at work or away for
+   * PART of today, which correctly keeps the exception shut — so a
+   * demonstrator had to record an absence first, and the one rule the office
+   * most needs to see was invisible until they did.
+   *
+   * This is that case, seeded honestly rather than by weakening the rule.
+   * Thabo signed it yesterday and did not submit it; he is on all-day sick
+   * leave today (`avail-thabo-sick`, which already spanned today), so
+   * `submissionCover` finds nobody available and the office may take the
+   * submission over. Nothing about CR-08's condition is relaxed to achieve it:
+   * the job is signed, at Review, with no outstanding refusal, and its only
+   * technician is away for the whole day.
+   *
+   * Deliberately NOT Lerato's: she is the technician the end-to-end suite
+   * drives through the negative half of this rule — offered no takeover while
+   * she is at work — and a seed that put her away today would make that
+   * assertion untestable.
+   */
+  job('EJE-1046', {
+    jobType: 'breakdown',
+    priority: 'high',
+    status: 'review',
+    customerId: asCustomerId('cust-highveld'),
+    siteId: asSiteId('site-highveld-centurion'),
+    contactId: asContactId('contact-highveld-main'),
+    machineId: asMachineId('machine-highveld-grinder'),
+    scheduledDate: dateOffset(-1),
+    orderNumber: 'PO-HV-2208',
+    referenceNumber: 'HV-BRK-061',
+    faultDescription: 'Grinder stopping mid-cycle with a hydraulic pressure alarm.',
+    primaryTechnicianId: asUserId('user-tech-thabo'),
+    createdAt: timeOffset(-2, 14),
+    acceptedAt: timeOffset(-1, 7, 10),
+    completedAt: timeOffset(-1, 16, 20),
+    travel: [
+      {
+        id: asLineItemId('trv-1046-1'),
+        technicianId: asUserId('user-tech-thabo'),
+        date: dateOffset(-1),
+        kilometres: 96,
+        description: 'Isando to Centurion return',
+        capturedAt: timeOffset(-1, 7, 30),
+        capturedBy: asUserId('user-tech-thabo'),
+      },
+    ],
+    labour: [
+      {
+        id: asLineItemId('lab-1046-1'),
+        technicianId: asUserId('user-tech-thabo'),
+        date: dateOffset(-1),
+        rateType: 'normal',
+        hours: 4.5,
+        description: 'Fault finding and pressure-switch replacement',
+        capturedAt: timeOffset(-1, 16),
+        capturedBy: asUserId('user-tech-thabo'),
+      },
+    ],
+    parts: [
+      {
+        id: asLineItemId('prt-1046-1'),
+        partNumber: 'HYD-PS-250',
+        description: 'Hydraulic pressure switch, 250 bar',
+        quantity: 1,
+        unitPrice: 186000,
+        capturedAt: timeOffset(-1, 16, 5),
+        capturedBy: asUserId('user-tech-thabo'),
+      },
+    ],
+    completionReport: {
+      faultFindings:
+        'Hydraulic pressure switch drifting out of calibration, cutting the cycle at roughly 180 bar.',
+      diagnosis: 'Pressure switch failure. The hydraulic pump and relief valve both tested within specification.',
+      workPerformed:
+        'Replaced the hydraulic pressure switch, recalibrated the cut-out, and ran twenty full cycles under load with the pressure logged at each one.',
+      recommendations: 'Replace the second switch on the other machine at the next service — it is the same age.',
+      generalNotes: 'Machine returned to production at hand-over.',
+    },
+    pricingSnapshot: {
+      labourRates: { normal: 95000, overtime: 142500, double: 190000 },
+      calloutRate: 85000,
+      kilometreRate: 1850,
+      vatPercentage: 15,
+      capturedAt: timeOffset(-1, 16, 30),
+      reason: 'customer_signature',
+    },
+    signature: {
+      customerName: 'Pieter',
+      customerSurname: 'Nel',
+      strokeData: 'demo-signature-pieter-nel',
+      signedAt: timeOffset(-1, 16, 30),
+      declaration: SIGNATURE_DECLARATION,
+    },
+  }),
+
   job('EJE-1048', {
     jobType: 'breakdown',
     priority: 'urgent',

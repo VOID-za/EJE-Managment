@@ -102,7 +102,7 @@ const ReviewJobPage = ({
           fileName: storedFinal.fileName,
           pageCount: storedFinal.pageCount,
           generatedAt: storedFinal.generatedAt,
-          simulated: storedFinal.simulated,
+          renderedLocally: storedFinal.renderedLocally,
         }
       : generated;
 
@@ -242,7 +242,7 @@ const ReviewJobPage = ({
               <Badge tone="neutral" size="sm">
                 {document.pageCount} pages
               </Badge>
-              {document.simulated && (
+              {document.renderedLocally && (
                 <Badge tone="amber" size="sm">
                   Simulated document
                 </Badge>

@@ -437,7 +437,9 @@ describe('the final document on a closed job', () => {
     expect(document.generatedAt).not.toBe('');
     expect(document.issuedTo).toContain('@');
     // The demo renders no file server-side, and says so rather than pretending.
-    expect(document.simulated).toBe(true);
+    // Rendered by the application, which is what the demonstration build is.
+    // It says nothing about the bytes (real) or the delivery (recorded apart).
+    expect(document.renderedLocally).toBe(true);
     expect(document.pageCount).toBeGreaterThan(0);
   });
 

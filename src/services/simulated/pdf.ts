@@ -31,7 +31,9 @@ export class SimulatedPdfService implements PdfService {
       fileName: `${job.jobNumber}-${final ? 'Final-' : ''}Job-Card.pdf`,
       pageCount,
       generatedAt: this.clock.now(),
-      simulated: true,
+      // This application rendered it. The bytes are real; see
+      // `FinalDocument.renderedLocally`.
+      renderedLocally: true,
     };
   }
 
@@ -50,7 +52,7 @@ export class SimulatedPdfService implements PdfService {
       // checklist or a write-up.
       pageCount: 1,
       generatedAt: this.clock.now(),
-      simulated: true,
+      renderedLocally: true,
     };
   }
 

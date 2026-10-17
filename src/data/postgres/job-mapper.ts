@@ -172,7 +172,8 @@ export const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
   generatedBy: asUserId(row.generatedBy ?? ''),
   // Production bytes are real. The flag stays on the type so a demonstration
   // build can still mark its own documents honestly.
-  simulated: false,
+  // A server-side renderer produced these bytes.
+  renderedLocally: false,
   issuedTo: row.issuedTo,
 });
 

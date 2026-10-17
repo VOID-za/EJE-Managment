@@ -162,13 +162,23 @@ export const FinalDocumentCard = ({
         )}
       </div>
 
-      {document.simulated && (
+      {/*
+        WHERE IT WAS RENDERED, AND WHAT THAT DOES NOT MEAN. AUD-8.
+
+        This used to be gated on a field called `simulated`, which read as
+        "this document is fake" and was taken as a statement about delivery.
+        It is neither: the bytes are real and were written once, and what
+        happened to the customer's copy is the delivery record below — which
+        is why the two sentences are now separate and say which is which.
+      */}
+      {document.renderedLocally && (
         <p className="mt-3 text-xs text-amber-eje-700">
           Demonstration build: the PDF is rendered by this application rather than by a server, and
           was written to storage once, when the job card was issued. Download returns that stored
           file as <span className="font-mono">{document.fileName}</span> — it does not build a new
           one. In production the same document is rendered server-side and served from object
-          storage.
+          storage. <strong>This says nothing about delivery:</strong> whether the customer received
+          their copy is recorded separately, and only a confirmed delivery closes a job.
         </p>
       )}
     </Card>

@@ -112,6 +112,77 @@ const sendOnLeave = async (harness: Harness, userId: string): Promise<void> => {
 };
 
 /* ------------------------------------------------------------------ *
+ * The DEMONSTRATION DATA can show this rule. AUD-8.
+ * ------------------------------------------------------------------ */
+
+describe('the seeded register, as a demonstrator opens it', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  /**
+   * The finding this closes: every signed job at Review belonged to a
+   * technician who was at work, or away for PART of today — which correctly
+   * keeps the exception shut. So the office's one rescue rule could not be
+   * seen at all until a demonstrator first recorded an absence, and a rule
+   * nobody can see is a rule nobody can approve.
+   *
+   * Asserted from the SEED through the real read, not from a fixture built in
+   * this file: if the seed drifts back, this fails.
+   */
+  it('holds a signed job at Review that the office may genuinely take over', async () => {
+    const view = await loadJobView(harness.repos, 'EJE-1046');
+    expect(view, 'EJE-1046 is not seeded').not.toBeNull();
+    expect(view!.job.status).toBe('review');
+    expect(view!.job.signature).not.toBeNull();
+
+    const cover = await loadSubmissionCover(harness.as(master), view!.job);
+    expect(isSubmissionUncovered(cover)).toBe(true);
+    // Away for the WHOLE day, which is the only thing that unlocks it.
+    expect(cover.blocked.map((entry) => entry.kind)).toContain('away');
+    expect(cover.unassigned).toBe(false);
+
+    expect(canTakeOverSubmission(master.role, view!.job, cover)).toBe(true);
+    expect(canTakeOverSubmission(coordinator.role, view!.job, cover)).toBe(true);
+    // And it is still not a technician's to take.
+    expect(canTakeOverSubmission(technician.role, view!.job, cover)).toBe(false);
+  });
+
+  it('keeps the part-day case shut, so both halves of the rule are demonstrable', async () => {
+    /*
+     * EJE-1054's technician has an appointment this morning and is at work
+     * either side of it. The office must be offered NOTHING there — and that
+     * is the case the end-to-end suite drives, which is why the seeded
+     * takeover above is deliberately on a different technician.
+     */
+    const view = await loadJobView(harness.repos, 'EJE-1054');
+    expect(view!.job.status).toBe('review');
+    expect(view!.job.signature).not.toBeNull();
+
+    const cover = await loadSubmissionCover(harness.as(master), view!.job);
+    expect(isSubmissionUncovered(cover)).toBe(false);
+    expect(canTakeOverSubmission(master.role, view!.job, cover)).toBe(false);
+  });
+
+  it('lets the office actually submit it, which is the point of the fixture', async () => {
+    const view = await loadJobView(harness.repos, 'EJE-1046');
+    const taken = await takeOverSubmission(
+      harness.as(master),
+      view!.job,
+      'accounts@highveld-precision.example',
+      'Highveld Precision',
+    );
+
+    expect(taken.job.status).toBe('awaiting_delivery');
+    expect(taken.job.finalDocument).not.toBeNull();
+    // Rendered here, really written, and NOT a claim about delivery. AUD-8.
+    expect(taken.job.finalDocument?.renderedLocally).toBe(true);
+    expect(taken.job.delivery?.state).toBe('pending_delivery');
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * The normal rule is untouched.
  * ------------------------------------------------------------------ */
 
