@@ -2551,17 +2551,92 @@ await step('a Master can add a machine, which lands on the register confirmed', 
 });
 
 await step('a duplicate serial number is refused', async () => {
+  /*
+   * THIS STEP USED TO FAIL WITH NOTHING TO GO ON, and twice did: once locally
+   * and once on the CI runner, with
+   *
+   *   locator.waitFor: Timeout 8000ms exceeded.
+   *     - waiting for getByRole('dialog').getByText('is already on the register')
+   *
+   * which says only that the wording was not there. There are three different
+   * reasons it might not be — the refusal had not come back yet, the dialog
+   * said something ELSE (a missing site, a validation message), or the
+   * duplicate was ACCEPTED and the dialog closed on a success — and the one
+   * that matters most is the last, because it is the only one that is a defect
+   * in the application rather than in this step.
+   *
+   * So the step now waits for whichever of those three happened and SAYS WHICH.
+   * The assertion is unchanged: the refusal must appear.
+   */
   await page.getByRole('button', { name: 'Add machine' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
   await dialog.getByLabel('Manufacturer').fill('Mazak');
   await dialog.getByLabel('Model').fill('QT-250');
   // The serial already on the register, in a different case.
-  await dialog.getByLabel('Serial number').fill('mz-qt200-11902');
-  await dialog.getByRole('button', { name: 'Add machine' }).click();
+  const serial = dialog.getByLabel('Serial number');
+  await serial.fill('mz-qt200-11902');
 
-  await dialog.getByText('is already on the register', { exact: false })
-    .waitFor({ timeout: 8000 });
+  /*
+   * READ BACK WHAT THE FORM ACTUALLY HOLDS before submitting it.
+   *
+   * These are controlled inputs, and a `fill` that races a re-render can leave
+   * a field short — which is the one failure mode that would make this step
+   * fail for a reason that looks nothing like its name: a serial of
+   * "mz-qt200-1190" is not a duplicate, the server accepts it, the dialog
+   * closes, and the wait below times out on wording that was never coming.
+   * There is a whole smoke step about this class of bug ("every dialog field
+   * accepts typing, not one character per click"). One retry, then an
+   * assertion that says what the field holds.
+   */
+  if ((await serial.inputValue()) !== 'mz-qt200-11902') await serial.fill('mz-qt200-11902');
+  const typed = await serial.inputValue();
+  if (typed !== 'mz-qt200-11902') {
+    throw new Error(`the serial field holds "${typed}", so this is not the duplicate case`);
+  }
+
+  // Enabled, not merely present: the form disables its own submit until the
+  // customer's sites have loaded, and clicking a disabled button does nothing.
+  const submit = dialog.getByRole('button', { name: 'Add machine' });
+  await submit.waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForFunction(
+    () => {
+      const node = [...document.querySelectorAll('[role="dialog"] button')].find(
+        (button) => (button.textContent ?? '').trim() === 'Add machine',
+      );
+      return node !== undefined && !node.disabled;
+    },
+    undefined,
+    { timeout: 10000 },
+  );
+  await submit.click();
+
+  const refusal = dialog.getByText('is already on the register', { exact: false });
+  const gone = page.locator('body:not(:has([role="dialog"]))');
+  await refusal.or(gone).first().waitFor({ timeout: 20000 });
+
+  if (!(await refusal.isVisible().catch(() => false))) {
+    /*
+     * The dialog closed, which means the server took it. Ask what is on the
+     * register: two machines sharing one serial is a real defect — a serial
+     * number identifies one physical asset — and this is where it would be
+     * found.
+     */
+    const serials = await page.evaluate(async (base) => {
+      const response = await fetch(`${base}/api/machines`);
+      if (!response.ok) return null;
+      const body = await response.json();
+      return (body?.data ?? [])
+        .map((row) => row?.machine?.serialNumber ?? row?.serialNumber ?? '')
+        .filter((serial) => String(serial).toLowerCase() === 'mz-qt200-11902');
+    }, BASE);
+    throw new Error(
+      serials === null
+        ? 'the dialog closed without refusing the duplicate, and the register could not be read'
+        : `the duplicate was ACCEPTED (serial submitted: "${typed}"): ${serials.length} machine(s) now carry MZ-QT200-11902`,
+    );
+  }
+
   await dialog.getByRole('button', { name: 'Cancel' }).click();
 });
 

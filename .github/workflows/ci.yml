@@ -218,6 +218,12 @@ jobs:
 
       # The screenshots and the server log, for a failure somebody has to
       # diagnose from a transcript rather than a browser.
+      #
+      # `include-hidden-files` IS THE WHOLE STEP. The smoke suite writes its
+      # screenshots to `.smoke/`, which begins with a dot, and this action
+      # excludes hidden files by default — so the one run that failed and
+      # needed them uploaded the server log and nothing else, and said so in
+      # one line nobody reads: "there will be 1 file uploaded".
       - name: Keep the evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -227,6 +233,7 @@ jobs:
             .smoke/
             /tmp/eje-server.log
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 7
 
       - name: Stop the application
