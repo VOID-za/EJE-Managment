@@ -10,11 +10,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '@/db/client';
 import * as schema from '@/db/schema';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
 import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
+import { extractArchiveSafely } from './archive';
 import { decryptFile } from './crypto';
 import {
   claimScratchDatabase,
@@ -631,6 +633,108 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
     expect(record?.detail).toMatch(/1 UNRESOLVED/u);
   });
 
+  /**
+   * THE WHOLE ROUND TRIP, WITH THE BYTES CHECKED AT THE FAR END. BACKUP-2.
+   *
+   * Every other test here checks one link of the chain: the dump is readable,
+   * the checksums match, the tag verifies, `pg_restore` accepts the archive,
+   * the storage keys resolve. None of them has ever answered the question EJE
+   * would actually ask on the worst morning — *is my data still in there?*
+   *
+   * So this one goes the whole way with nothing mocked: a known row and a known
+   * file go in, the backup is taken and ENCRYPTED, the artefacts are verified,
+   * decrypted, restored into a scratch database and unpacked into a scratch
+   * directory, and then the row is read back and the file is compared BYTE FOR
+   * BYTE. Not a count, not a checksum of a checksum — the caption somebody
+   * typed and the bytes of the document.
+   *
+   * It does the restore itself rather than calling `backup:restore-test`,
+   * because that command drops its scratch database on the way out; the point
+   * of this test is to look inside it first.
+   */
+  it('round-trips a real record and a real document through encryption and restore', async () => {
+    const canary = `Round-trip canary ${new Date().toISOString()}`;
+    await db
+      .update(schema.machinePhotos)
+      .set({ caption: canary })
+      .where(eq(schema.machinePhotos.storageKey, SEEDED_KEYS[0]));
+
+    documentsTheDatabaseRefersTo(storage);
+    const documentBytes = readFileSync(join(storage, SEEDED_KEYS[0]));
+
+    const taken = runBackup({
+      DATABASE_URL: url ?? '',
+      EJE_STORAGE_DIR: storage,
+      EJE_BACKUP_DIR: into,
+    });
+    expect(taken.status, taken.stderr).toBe(0);
+    const directory = join(into, readdirSync(into)[0]!);
+
+    // The backup on the shelf is ciphertext, and the plaintext is not beside it.
+    expect(readdirSync(directory).sort()).toEqual([
+      'database.dump.enc',
+      'manifest.json',
+      'storage.tar.gz.enc',
+    ]);
+
+    const scratchDir = mkdtempSync(join(tmpdir(), 'eje-roundtrip-'));
+    roots.push(scratchDir);
+    const dump = join(scratchDir, 'database.dump');
+    const archive = join(scratchDir, 'storage.tar.gz');
+    const manifest = manifestOf(directory);
+
+    // Decrypted, and the plaintext checksums recorded in the manifest are what
+    // came out — the half a ciphertext checksum cannot answer.
+    expect(await decryptFile(join(directory, 'database.dump.enc'), dump, KEY)).toBe(
+      manifest.artefacts.find((a) => a.name === 'database.dump.enc')?.plainSha256,
+    );
+    expect(await decryptFile(join(directory, 'storage.tar.gz.enc'), archive, KEY)).toBe(
+      manifest.artefacts.find((a) => a.name === 'storage.tar.gz.enc')?.plainSha256,
+    );
+
+    const admin = withDatabase(url ?? '', 'postgres');
+    const server = postgresScratchServer(admin);
+    const source = new URL(url ?? '').pathname.slice(1);
+    const scratch = claimScratchDatabase(server, source, new Date());
+    try {
+      const target = withDatabase(url ?? '', scratch);
+      const restored = spawnSync(
+        'pg_restore',
+        ['--dbname', target, '--no-owner', '--no-privileges', '--exit-on-error', dump],
+        { encoding: 'utf8' },
+      );
+      expect(restored.status, restored.stderr ?? '').toBe(0);
+
+      // THE RECORD. Read out of the restored database, by the key it went in
+      // under, and compared with what a person typed.
+      const readBack = spawnSync(
+        'psql',
+        [
+          target,
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-At',
+          '-c',
+          `select caption from public.machine_photos where storage_key = '${SEEDED_KEYS[0]}'`,
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(readBack.status, readBack.stderr ?? '').toBe(0);
+      expect(readBack.stdout.trim()).toBe(canary);
+    } finally {
+      server.drop(scratch);
+    }
+
+    // THE DOCUMENT. Unpacked through the same guarded extraction a restore test
+    // uses, and compared byte for byte with the file that went in.
+    const unpacked = join(scratchDir, 'storage');
+    mkdirSync(unpacked, { recursive: true });
+    const { files } = await extractArchiveSafely(archive, unpacked);
+    expect(files).toContain(SEEDED_KEYS[0]);
+    expect(readFileSync(join(unpacked, SEEDED_KEYS[0])).equals(documentBytes)).toBe(true);
+    expect(files).toHaveLength(manifest.storedFiles);
+  });
+
   /* -- the scratch database, on the real server -------------------------- */
 
   /**
@@ -727,6 +831,100 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
         { encoding: 'utf8' },
       ).stdout.trim(),
     ).toBe('');
+  });
+
+  /**
+   * CTRL-C IS NOT A LEAK. BACKUP-2.
+   *
+   * The likely way a restore test ends is neither success nor an exception: an
+   * operator presses Ctrl-C because it is slower than they expected, or a
+   * deployment script's timeout sends SIGTERM. `finally` does not run for a
+   * signal, and what was being held at that moment is a scratch database
+   * containing a COPY OF THE WHOLE DATABASE and a workspace holding the
+   * decrypted dump and every signed job card in plaintext. Leaving either
+   * behind undoes the encryption.
+   *
+   * So the command is started, waited for until it has actually CLAIMED its
+   * database — polling the server, not sleeping a guessed interval — and then
+   * terminated. Nothing may be left on the server afterwards.
+   */
+  it('cleans up its scratch database when it is TERMINATED rather than finished', async () => {
+    const directory = freshBackup();
+
+    const scratchDatabases = (): readonly string[] =>
+      spawnSync(
+        'psql',
+        [
+          url ?? '',
+          '-At',
+          '-c',
+          "select datname from pg_database where datname like 'eje_restore_test_%'",
+        ],
+        { encoding: 'utf8' },
+      )
+        .stdout.split('\n')
+        .filter((line) => line.trim().length > 0);
+
+    expect(scratchDatabases(), 'a previous test left a scratch database').toEqual([]);
+
+    /*
+     * `node --import tsx` ON PURPOSE, where every other test here uses
+     * `npx tsx`. This one signals the process, and `npx tsx` is two processes
+     * above the one holding the scratch database: terminating the wrapper
+     * tears the tree down from outside, which proves nothing about the
+     * handler. One node process means SIGTERM is delivered where the handler
+     * is — the same place `systemd`, a CI runner or an operator's Ctrl-C would
+     * send it in production, since those signal the process group that the
+     * command itself leads.
+     */
+    const child = spawn('node', ['--import', 'tsx', 'src/db/backup/restore-test.ts', directory], {
+      env: { ...process.env, EJE_BACKUP_KEY: TEST_KEY, DATABASE_URL: url ?? '' },
+      cwd: process.cwd(),
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    const finished = new Promise<{ status: number | null; signal: string | null }>((resolve) => {
+      child.on('close', (status, signal) => resolve({ status, signal }));
+    });
+
+    // Wait for the window this test is about: a database has been claimed and
+    // the command is still working. Bounded, so a change that makes the claim
+    // unreachable fails here instead of hanging.
+    const deadline = Date.now() + 60_000;
+    let claimed: readonly string[] = [];
+    while (claimed.length === 0 && Date.now() < deadline) {
+      claimed = scratchDatabases();
+      if (claimed.length === 0) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(claimed, 'the restore test never claimed a scratch database').toHaveLength(1);
+
+    child.kill('SIGTERM');
+    const ended = await finished;
+
+    /*
+     * THE HANDLER RAN. The database disappearing is the outcome; this line is
+     * the evidence that it disappeared because the command cleaned up, rather
+     * than because something else happened to drop it.
+     */
+    expect(
+      stderr,
+      `exit ${String(ended.status)} / signal ${String(ended.signal)} / stderr ${JSON.stringify(stderr)} / stdout ${JSON.stringify(stdout)}`,
+    ).toMatch(/SIGTERM — cleaning up before exit/u);
+    // Terminated, not finished: 143 is what a shell reports for SIGTERM, and a
+    // process killed outright reports the signal instead of a code.
+    expect(
+      ended.status === 143 || ended.signal === 'SIGTERM',
+      `exit ${String(ended.status)} / signal ${String(ended.signal)}: ${stderr}`,
+    ).toBe(true);
+
+    // THE POINT OF THE TEST. No copy of the database is left on the server.
+    expect(scratchDatabases(), `left behind: ${scratchDatabases().join(', ')}`).toEqual([]);
   });
 
   it('REFUSES a directory with no manifest at all', () => {

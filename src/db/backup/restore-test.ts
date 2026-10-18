@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
+import { extractArchiveSafely } from './archive';
 import { recordVerification, verifyInto } from './integrity';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
 import {
@@ -70,14 +70,6 @@ const run = (
 const psql = (url: string, sql: string): { ok: boolean; stdout: string; stderr: string } =>
   run('psql', [url, '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
 
-/** Every file under a directory, as paths relative to it. */
-const filesUnder = async (root: string): Promise<string[]> => {
-  const entries = await readdir(root, { withFileTypes: true, recursive: true });
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1));
-};
-
 const main = async (): Promise<void> => {
   loadEnvFiles();
   const directory = process.argv[2];
@@ -105,6 +97,74 @@ const main = async (): Promise<void> => {
    * command believes it owns a database it has not created.
    */
   let scratch: string | null = null;
+
+  /*
+   * THE ONE PIECE OF CLEANING UP, REACHABLE FROM THREE DIRECTIONS. BACKUP-2.
+   *
+   * A restore test holds two things that must not outlive it: a scratch
+   * database containing a COPY OF THE WHOLE PRODUCTION DATABASE, and a
+   * workspace containing the decrypted dump and every customer's signed job
+   * card in plaintext. `finally` covers success and failure. It does not cover
+   * the third case, which is the likely one in practice — an operator pressing
+   * Ctrl-C because the restore is taking longer than they expected, or a
+   * deployment script timing out and sending SIGTERM. Before this, that left
+   * the plaintext and the copy on the disk, and the encryption with it.
+   *
+   * Idempotent, because `finally` and a signal can both reach it, and because
+   * dropping a database twice is not something to find out about at 2am.
+   */
+  /*
+   * WRITTEN SYNCHRONOUSLY, because the caller may be a signal handler that
+   * exits immediately afterwards. `process.stderr.write` to a PIPE is
+   * asynchronous in Node, so `process.exit` on the next line throws the
+   * message away — which is how the first version of this reported nothing at
+   * all about the cleanup it had just performed.
+   */
+  const warn = (text: string): void => {
+    writeSync(2, text);
+  };
+
+  let cleaned = false;
+  const cleanUp = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    if (scratch !== null) {
+      /*
+       * ONLY THE DATABASE THIS INVOCATION CLAIMED, and checked again right
+       * here: the first check was fifty lines ago and this is the line that
+       * destroys something. Dropped whatever happened above — a failed restore
+       * test that leaves a copy of the production database on the server has
+       * created the very exposure the encryption was for.
+       */
+      assertSafeToDrop(scratch, source);
+      try {
+        server.drop(scratch);
+      } catch (cause: unknown) {
+        warn(`restore  WARNING: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      }
+    }
+    rmSync(workspace, { recursive: true, force: true });
+    if (existsSync(workspace)) {
+      warn(`restore  WARNING: ${workspace} still exists and holds plaintext\n`);
+    }
+  };
+
+  /*
+   * `once`, and the exit code a shell expects for each signal, so a CI job or
+   * a wrapper script can still tell it was interrupted rather than failing a
+   * check. The handlers are removed in `finally`: this module is also imported
+   * by nothing else, but a process-wide listener that outlives the work it was
+   * protecting is a leak waiting to be inherited.
+   */
+  const onSignal = (signal: 'SIGINT' | 'SIGTERM') => () => {
+    warn(`restore  ${signal} — cleaning up before exit\n`);
+    cleanUp();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  const interrupted = onSignal('SIGINT');
+  const terminated = onSignal('SIGTERM');
+  process.once('SIGINT', interrupted);
+  process.once('SIGTERM', terminated);
 
   try {
     // ---- 1. integrity, and the decrypted artefacts ------------------------
@@ -162,12 +222,13 @@ const main = async (): Promise<void> => {
     // ---- 5. the documents, and the rows that point at them ---------------
     const unpacked = join(workspace, 'storage');
     mkdirSync(unpacked, { recursive: true, mode: 0o700 });
-    const untarred = run('tar', ['-xzf', archive, '-C', unpacked]);
-    if (!untarred.ok) {
-      throw new BackupRefused(`the document archive would not unpack: ${untarred.stderr}`);
-    }
-
-    const files = await filesUnder(unpacked);
+    /*
+     * JUDGED BEFORE IT IS UNPACKED. An archive that has been rsynced, carried
+     * on a disk and handed over by somebody else is not trusted to describe
+     * only ordinary files under its own root — see `archive.ts` for the four
+     * refusals and the two ceilings.
+     */
+    const { files } = await extractArchiveSafely(archive, unpacked);
     if (files.length !== manifest.storedFiles) {
       throw new BackupRefused(
         `the archive unpacked to ${files.length} files and the manifest records ` +
@@ -248,27 +309,9 @@ const main = async (): Promise<void> => {
         'restore  RESTORE-TESTED — recorded in manifest.json\n',
     );
   } finally {
-    if (scratch !== null) {
-      /*
-       * ONLY THE DATABASE THIS INVOCATION CLAIMED, and checked again right
-       * here: the first check was fifty lines ago and this is the line that
-       * destroys something. Dropped whatever happened above — a failed restore
-       * test that leaves a copy of the production database on the server has
-       * created the very exposure the encryption was for.
-       */
-      assertSafeToDrop(scratch, source);
-      try {
-        server.drop(scratch);
-      } catch (cause: unknown) {
-        process.stderr.write(
-          `restore  WARNING: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-        );
-      }
-    }
-    rmSync(workspace, { recursive: true, force: true });
-    if (existsSync(workspace)) {
-      process.stderr.write(`restore  WARNING: ${workspace} still exists and holds plaintext\n`);
-    }
+    process.removeListener('SIGINT', interrupted);
+    process.removeListener('SIGTERM', terminated);
+    cleanUp();
   }
 };
 

@@ -443,7 +443,7 @@ is a truncated SHA-256 and reveals nothing.
 | Command | What it proves |
 |---|---|
 | `npm run backup:verify <dir>` | The recorded SHA-256 of each artefact still matches **and** each one decrypts and authenticates. The checksum catches damage; the GCM tag catches ALTERATION, which a checksum cannot — whoever edited the file can recompute a checksum, and cannot forge a tag without the key. It decrypts into a temporary directory and removes it, so running the check never leaves a plaintext copy beside the ciphertext |
-| `npm run backup:restore-test <dir>` | The dump is actually restored, into a scratch database this command creates and then drops, and never into the one being backed up: the name is generated, checked against a pattern and against the source's name, and a name that already exists is refused rather than replaced. It then unpacks the archive and walks **every `storage_key` in the restored database**, demanding the file — because a restored row pointing at a signed job card that is not there is this system's worst failure, and the only way to find it is to look. Needs `DATABASE_URL` for the server, and writes nothing to the database named in it |
+| `npm run backup:restore-test <dir>` | The dump is actually restored, into a scratch database this command creates and then drops, and never into the one being backed up: the name is generated, checked against a pattern and against the source's name, and a name that already exists is refused rather than replaced. It then unpacks the archive and walks **every `storage_key` in the restored database**, demanding the file — because a restored row pointing at a signed job card that is not there is this system's worst failure, and the only way to find it is to look. Needs `DATABASE_URL` for the server, and writes nothing to the database named in it. The archive is **judged before it is unpacked**: an absolute path, a `..` component, a symlink or hardlink, a device or FIFO, the same document twice, or more members or bytes than the ceilings allow are each refused with nothing extracted — a backup is handled by people who are not EJE by the time anybody restore-tests one, and the GCM tag proves only that the bytes are unaltered, not that the archive was made honestly. Interrupting it (Ctrl-C, SIGTERM) drops the scratch database and removes the decrypted plaintext, which `finally` alone did not do |
 
 Both append a dated record to `manifest.json`, so a backup nobody has checked and
 a backup somebody checked last Tuesday can be told apart. Until the restore
@@ -456,6 +456,39 @@ before `pg_dump` ran. `EJE_RESTORE_ALLOW_ORPHANS=yes` accepts that, and the
 unresolved count still goes into the manifest — a restore record that cannot be
 told apart from a clean one is worth nothing. **Do not set it on production:**
 there, an unresolved key means a document is genuinely missing.
+
+#### The key: keeping it, rotating it, and what is NOT automated
+
+**The key is a prerequisite for restoring, not a precaution.** There is no
+recovery path that does not involve it: no escrow, no recovery code, no second
+key, and nothing in this repository can read an artefact without
+`EJE_BACKUP_KEY`. A lost key turns every backup encrypted with it into noise.
+
+Keep it in **two** places the server cannot reach — EJE's password manager and
+one offline copy — and record, beside each copy, the 16-character fingerprint the
+manifest shows, so a directory can be matched to a key without trying them.
+
+**Rotating it is an operator procedure, and old backups do not re-encrypt
+themselves:**
+
+1. Generate the new key on a machine that is not the server
+   (`openssl rand -hex 32`) and store it as above.
+2. Set `EJE_BACKUP_KEY` to the new value. Every backup taken from then on
+   records the new fingerprint.
+3. **Keep the old key** until every backup encrypted with it has been deleted.
+   Its fingerprint is in those manifests; a backup whose fingerprint matches no
+   key you hold is already unrecoverable, and `backup:verify` says so by name
+   rather than reporting damage.
+4. Only once no retained directory carries the old fingerprint may the old key
+   be destroyed.
+
+**This lifecycle is NOT complete in software, and should not be described as
+though it is.** There is no key store, no scheduled rotation, no
+re-encryption command and no enforcement that step 3 was honoured: what exists
+is encryption that cannot be bypassed, a fingerprint that identifies the key a
+directory needs, and refusals that name the wrong key rather than blaming the
+bytes. The rest is a procedure a person follows, and a decision about where EJE
+keep secrets that has not been made.
 
 **What BACKUP-2 still does not do:** it does not schedule anything and it does
 not copy a backup off this machine. Both are deployment, and both are still
