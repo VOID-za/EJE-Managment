@@ -13,6 +13,7 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  DocumentTextIndex,
   IsoDateTime,
   Job,
   JobId,
@@ -30,6 +31,7 @@ import type {
   UserId,
 } from '@/domain';
 import { isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
+import { matchesAllTerms, tokenize } from '@/lib/text-search';
 import type {
   ActivityRepository,
   ChecklistTemplateRepository,
@@ -451,6 +453,87 @@ class DemoDocumentRepository implements DocumentRepository {
       draft.recentDocuments = { ...draft.recentDocuments, [userId]: next };
     });
     return Promise.resolve();
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* The full-text index. MASTER SCOPE LIB-5.                               */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * Writes a revision's index, REPLACING whatever was there.
+   *
+   * Replacing rather than appending is the whole protection against stale
+   * searchable text: a document re-extracted after a better copy was uploaded
+   * must not still match on the words of the copy it replaced.
+   */
+  saveTextIndex(index: DocumentTextIndex, content: string): Promise<DocumentTextIndex> {
+    this.context.commit((draft) => {
+      const kept = draft.documentText.filter((entry) => entry.index.documentId !== index.documentId);
+      // The text is kept only where the state says there IS text.
+      draft.documentText = [
+        { index, content: index.state === 'indexed' ? content : '' },
+        ...kept,
+      ];
+    });
+    return Promise.resolve(index);
+  }
+
+  findTextIndex(documentId: DocumentId): Promise<DocumentTextIndex | null> {
+    const entry = this.context
+      .read()
+      .documentText.find((candidate) => candidate.index.documentId === documentId);
+    return Promise.resolve(entry?.index ?? null);
+  }
+
+  listTextIndexes(documentIds?: readonly DocumentId[]): Promise<readonly DocumentTextIndex[]> {
+    const wanted = documentIds === undefined ? null : new Set(documentIds);
+    return Promise.resolve(
+      this.context
+        .read()
+        .documentText.filter((entry) => wanted === null || wanted.has(entry.index.documentId))
+        .map((entry) => entry.index),
+    );
+  }
+
+  findTextContent(documentId: DocumentId): Promise<string | null> {
+    const entry = this.context
+      .read()
+      .documentText.find((candidate) => candidate.index.documentId === documentId);
+    return Promise.resolve(entry === undefined ? null : entry.content);
+  }
+
+  /**
+   * The matching revisions, by the rule in `text-search.ts`.
+   *
+   * The same rule the PostgreSQL adapter's `tsvector` applies — whole words,
+   * no stemming — so a search finds the same manuals on a sales laptop as it
+   * does in production. Ordered by how many times the terms occur, which is as
+   * much ranking as a demonstration store can honestly offer.
+   */
+  searchTextIds(
+    terms: readonly string[],
+    documentIds: readonly DocumentId[],
+    limit: number,
+  ): Promise<readonly DocumentId[]> {
+    if (terms.length === 0 || documentIds.length === 0) return Promise.resolve([]);
+    const allowed = new Set(documentIds);
+
+    const scored = this.context
+      .read()
+      .documentText.filter(
+        (entry) =>
+          allowed.has(entry.index.documentId) &&
+          entry.index.state === 'indexed' &&
+          matchesAllTerms(entry.content, terms),
+      )
+      .map((entry) => {
+        const words = tokenize(entry.content);
+        const hits = words.filter((word) => terms.includes(word)).length;
+        return { documentId: entry.index.documentId, hits };
+      })
+      .sort((a, b) => b.hits - a.hits);
+
+    return Promise.resolve(scored.slice(0, limit).map((entry) => entry.documentId));
   }
 }
 

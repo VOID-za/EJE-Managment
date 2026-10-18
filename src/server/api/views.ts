@@ -394,12 +394,20 @@ export const adminView = async ({ repos, actor }: ViewContext) => {
 };
 
 export const libraryView = async ({ repos, actor }: ViewContext) => {
-  const [documents, favourites, recent] = await Promise.all([
+  const [documents, favourites, recent, indexes] = await Promise.all([
     repos.documents.list(),
     repos.documents.listFavourites(actor.id),
     repos.documents.listRecentlyViewed(actor.id),
+    /*
+     * WHICH DOCUMENTS ARE ACTUALLY SEARCHABLE. MASTER SCOPE LIB-5.
+     *
+     * The state only, never the text: the screen shows a badge per row, and
+     * pulling every manual's extracted text to render a badge is the read that
+     * works in a demonstration and falls over on a real library.
+     */
+    repos.documents.listTextIndexes(),
   ]);
-  return { documents, favourites, recent };
+  return { documents, favourites, recent, indexes };
 };
 
 export const activityView = ({ repos, actor }: ViewContext) => loadActivityFeed(repos, actor);

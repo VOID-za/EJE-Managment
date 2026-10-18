@@ -12,6 +12,7 @@ import type {
   AvailabilityRecord,
   SystemSettings,
   TechnicalDocument,
+  DocumentTextIndex,
   ChatMessage,
   Conversation,
   User,
@@ -96,6 +97,21 @@ export interface DemoDatabase {
   files: Record<string, StoredFileRecord>;
   favouriteDocuments: Record<string, string[]>;
   recentDocuments: Record<string, string[]>;
+  /**
+   * The technical library's full-text index, one entry per REVISION. LIB-5.
+   *
+   * The state and the extracted text travel together, because a state that
+   * says `indexed` with no text behind it is the one thing the library must
+   * never show. Nothing is seeded: a seeded document has no uploaded file, so
+   * it has nothing to extract and is honestly "not indexed" until a file is
+   * uploaded for it.
+   */
+  documentText: DocumentTextEntry[];
+}
+
+export interface DocumentTextEntry {
+  readonly index: DocumentTextIndex;
+  readonly content: string;
 }
 
 export interface StoredFileRecord {
@@ -132,11 +148,13 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * the delivery record a job carries while its copy is in transit, and the
  * archive marker on sites, contacts and machines.
  *
+ * v15 added `documentText`: the technical library's full-text index (LIB-5).
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -181,6 +199,15 @@ export const createSeededDatabase = (): DemoDatabase => ({
     'user-tech-sipho': ['doc-lw-v40-electrical', 'doc-lw-v40-manual', 'doc-safety-general'],
     'user-master-elmarie': ['doc-proc-installation'],
   },
+  /*
+   * EMPTY, AND THAT IS THE HONEST STATE. LIB-5.
+   *
+   * A seeded document is metadata: there is no uploaded PDF behind it, so
+   * there is nothing to extract and nothing to search. Seeding an index for it
+   * would be inventing text the library does not hold — the library screen
+   * says "not indexed" against each one instead, and an upload indexes itself.
+   */
+  documentText: [],
 });
 
 const isBrowser = (): boolean => typeof window !== 'undefined';

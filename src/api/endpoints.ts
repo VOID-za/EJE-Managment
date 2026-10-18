@@ -14,6 +14,7 @@ import type {
   MediaVisibility,
   Site,
   SystemSettings,
+  DocumentTextIndex,
   TechnicalDocument,
   SubmissionCover,
   TemplateUsage,
@@ -26,8 +27,29 @@ import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs
 import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
+import type { LibrarySearchPage } from '@/application/library-search';
 import type { SearchResult } from '@/application/search';
 import type { GeneratedPdf, OutboxEntry } from '@/services/ports';
+
+/** What an upload answers with: the record, and the honest state of its text. */
+export interface LibraryUploadResult {
+  readonly document: {
+    readonly id: string;
+    readonly name: string;
+    readonly status: string;
+    readonly version: string;
+    readonly fileName: string;
+    readonly fileSizeBytes: number;
+    readonly pageCount: number;
+  };
+  readonly index: {
+    readonly state: 'indexed' | 'needs_ocr' | 'failed';
+    readonly characters: number;
+    readonly pages: number;
+    readonly truncated: boolean;
+    readonly failureReason: string;
+  };
+}
 import { apiGet, apiPatch, apiPost, apiUpload, newIdempotencyKey, segment } from './client';
 
 /**
@@ -239,7 +261,12 @@ export const reads = {
       documents: readonly TechnicalDocument[];
       favourites: readonly string[];
       recent: readonly string[];
+      /** Which documents hold searchable text, and which do not. LIB-5. */
+      indexes: readonly DocumentTextIndex[];
     }>('/api/library'),
+  /** The words INSIDE the documents, paged. LIB-5. */
+  librarySearch: (term: string, page = 1) =>
+    query<LibrarySearchPage>(`/api/library/search${search({ q: term, page: String(page) })}`),
   activity: () =>
     query<{
       events: ActivityFeed['events'];
@@ -610,6 +637,15 @@ export const conversations = {
 
 export const library = {
   create: (input: unknown) => command<TechnicalDocument>('/api/library', input),
+  /**
+   * Uploads a document WITH ITS FILE, and indexes the text in it. LIB-5.
+   *
+   * The fields travel with the bytes: a document's type and model are decided
+   * at the moment somebody chooses the file, and sending them separately would
+   * leave the library holding a file nothing describes.
+   */
+  upload: (file: File, fields: Readonly<Record<string, string>>) =>
+    apiUpload<LibraryUploadResult>('/api/library/upload', file, '', fields),
   update: (documentId: string, input: unknown) =>
     command<TechnicalDocument>(`/api/library/${segment(documentId)}/update`, input),
   approve: (documentId: string) =>

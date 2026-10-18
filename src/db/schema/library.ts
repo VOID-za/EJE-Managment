@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  check,
+  customType,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { archivedAt, cents, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import { libraryDocumentStatus, technicalDocumentType } from './enums';
 import { users } from './identity';
@@ -120,4 +130,75 @@ export const libraryViews = pgTable(
     viewedAt: instant('viewed_at').notNull(),
   },
   (table) => [index('library_views_user_idx').on(table.userId, table.viewedAt)],
+);
+
+/**
+ * PostgreSQL's own full-text type, declared so the index can be described here.
+ *
+ * Drizzle has no `tsvector`, and the column is GENERATED from `content` — so
+ * nothing ever writes to it and the application cannot put it out of step with
+ * the text it indexes.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => 'tsvector',
+});
+
+/**
+ * THE TECHNICAL LIBRARY'S FULL-TEXT INDEX. MASTER SCOPE LIB-5.
+ *
+ * ONE ROW PER REVISION, keyed by the revision's own id — which is what
+ * `library_documents` holds, because the domain's unit is a revision. A new
+ * revision therefore indexes itself and cannot inherit, or be shadowed by, the
+ * text of the revision it supersedes; and `on delete cascade` means a deleted
+ * document takes its searchable text with it rather than leaving words in the
+ * index pointing at nothing.
+ *
+ * WHY THE STATE IS A COLUMN AND NOT AN ABSENCE. A scanned manual has no text:
+ * it is `needs_ocr`, which is a fact worth storing — the library shows it, and
+ * it is what makes "this document is not searchable yet" sayable instead of
+ * leaving a technician to conclude the library has nothing on that machine.
+ * `failed` carries the reason an extraction could not be done at all, because
+ * an extraction failure that is dropped is a hole nobody knows about.
+ *
+ * `search` is GENERATED ALWAYS from `content` with the `simple` configuration —
+ * no stemming, which is the rule `src/lib/text-search.ts` states and which the
+ * demonstration store applies in JavaScript, so the two backends agree about
+ * what matches. A GIN index over it is what makes the search a search rather
+ * than a scan.
+ */
+export const libraryDocumentText = pgTable(
+  'library_document_text',
+  {
+    documentId: uuid('document_id')
+      .primaryKey()
+      .references(() => libraryDocuments.id, { onDelete: 'cascade' }),
+    state: text('state').notNull(),
+    extractedAt: instant('extracted_at').notNull(),
+    characters: integer('characters').notNull().default(0),
+    pages: integer('pages').notNull().default(1),
+    truncated: boolean('truncated').notNull().default(false),
+    unreadableStreams: integer('unreadable_streams').notNull().default(0),
+    failureReason: text('failure_reason').notNull().default(''),
+    /** The extracted text. Empty for every state but `indexed`. */
+    content: text('content').notNull().default(''),
+    search: tsvector('search').generatedAlwaysAs(
+      (): ReturnType<typeof sql> => sql`to_tsvector('simple', content)`,
+    ),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('library_document_text_search_idx').using('gin', table.search),
+    index('library_document_text_state_idx').on(table.state),
+    // `indexed` is the only state that may carry text, and it must carry some:
+    // the state and the index can never disagree about whether text exists.
+    check(
+      'library_document_text_state_matches_content',
+      sql`(${table.state} = 'indexed' and length(${table.content}) > 0)
+          or (${table.state} <> 'indexed' and ${table.content} = '')`,
+    ),
+    check(
+      'library_document_text_state_known',
+      sql`${table.state} in ('indexed', 'needs_ocr', 'failed')`,
+    ),
+  ],
 );

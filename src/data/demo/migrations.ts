@@ -249,6 +249,20 @@ const v13ToV14 = (data: Loose): Loose => {
   };
 };
 
+/**
+ * v14 -> v15.
+ *
+ * Adds the technical library's full-text index. Nothing is back-filled and
+ * nothing could be: the index is built from an uploaded PDF's bytes, and a
+ * snapshot written before this existed has no uploaded library files in it. So
+ * every existing document comes forward as "not indexed", which is what it is
+ * — the alternative would be an index entry claiming text nobody extracted.
+ */
+const v14ToV15 = (data: Loose): Loose => ({
+  ...data,
+  documentText: Array.isArray(data.documentText) ? data.documentText : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -256,6 +270,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   11: v11ToV12,
   12: v12ToV13,
   13: v13ToV14,
+  14: v14ToV15,
 };
 
 /**

@@ -37,6 +37,13 @@ import type { RepositoryBundle } from '@/data/repositories';
  *    `jobVisibilityFor` and is applied HERE, to the query's results, so the
  *    same answer comes back however the read is reached.
  *
+ *  - TECHNICAL LIBRARY (`library.view`, then STATUS). The library is reference
+ *    material and only a CURRENT revision is reference material: a pending
+ *    upload has not been approved and an archived one has been withdrawn, so
+ *    neither is an answer to a search however it is reached. The library's own
+ *    screen already applied that; this read did not, which made the search box
+ *    the way around it.
+ *
  * Refusal detail is private regardless — search never matched on it and still
  * does not.
  */
@@ -92,6 +99,7 @@ export const runSearch = async (
   // rather than a filter somebody forgot to apply further down.
   const mayReadEveryJob = can(actor.role, 'jobs.viewAll');
   const mayReadStaffRegister = can(actor.role, 'users.manageTechnicians');
+  const mayReadLibrary = can(actor.role, 'library.view');
 
   const [jobs, participated, customers, sites, contacts, machines, users, documents] =
     await Promise.all([
@@ -269,6 +277,19 @@ export const runSearch = async (
   }
 
   for (const document of documents) {
+    /*
+     * ONLY WHAT THIS PERSON MAY SEE, AND ONLY WHAT IS OFFICIAL. LIB-5.
+     *
+     * This loop used to run over EVERY document, whatever its status and
+     * whoever was asking: a `pending_approval` upload nobody had checked, and
+     * an `archived` revision that had been withdrawn, both came back to
+     * anybody with the search box — including through the one route where the
+     * library's own screen filters could not apply. Both are now excluded, and
+     * the capability that governs reading the library governs finding it.
+     */
+    if (!mayReadLibrary) break;
+    if (document.status !== 'current') continue;
+
     const matched = firstMatch(
       [
         { field: 'Document name', value: document.name },

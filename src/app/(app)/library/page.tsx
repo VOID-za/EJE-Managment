@@ -1,7 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { can, type TechnicalDocument, type TechnicalDocumentType } from '@/domain';
+import {
+  can,
+  type DocumentTextIndex,
+  type TechnicalDocument,
+  type TechnicalDocumentType,
+} from '@/domain';
 import {
   Badge,
   Button,
@@ -18,6 +23,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { UploadDocumentDialog } from '@/components/library/UploadDocumentDialog';
+import type { LibrarySearchPage } from '@/application/library-search';
 import { library, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -45,6 +51,8 @@ const LibraryPage = () => {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [preview, setPreview] = useState<TechnicalDocument | null>(null);
   const [uploading, setUploading] = useState(false);
+  /** Which page of the inside-the-documents results is showing. LIB-5. */
+  const [textPage, setTextPage] = useState(1);
   // A Master reviews pending uploads in Administration; a technician must not
   // see them here, or an unapproved document could be followed on site.
   const seesPending = can(user.role, 'library.manage');
@@ -52,6 +60,31 @@ const LibraryPage = () => {
   const query = useQuery(`library:${user.id}`, () => reads.library());
 
   const documents = useMemo(() => query.data?.documents ?? [], [query.data]);
+  /** Which documents hold searchable text, by document id. LIB-5. */
+  const indexes = useMemo(
+    () => new Map((query.data?.indexes ?? []).map((index) => [index.documentId, index])),
+    [query.data],
+  );
+
+  /*
+   * SEARCHING INSIDE THE DOCUMENTS. MASTER SCOPE LIB-5.
+   *
+   * A SECOND READ, not a filter over the first. The list above matches the
+   * fields somebody typed into the upload form — the name, the model, the tags
+   * — and that is a useful way to find a manual you already know about. This
+   * one asks the server for the documents whose TEXT contains the words, which
+   * is what a technician with an alarm code in front of them is actually
+   * asking. Both are shown, because they answer different questions.
+   *
+   * The server decides what may be searched and refuses a query that is too
+   * short; the screen does not pre-judge either, beyond not asking at all
+   * while the box is empty.
+   */
+  const insideTerm = term.trim();
+  const inside = useQuery(
+    `library:text:${user.id}:${insideTerm.toLowerCase()}:${textPage}`,
+    () => (insideTerm.length >= 2 ? reads.librarySearch(insideTerm, textPage) : Promise.resolve(null)),
+  );
   const favourites = useMemo(() => query.data?.favourites ?? [], [query.data]);
   const recent = useMemo(() => query.data?.recent ?? [], [query.data]);
 
@@ -121,10 +154,12 @@ const LibraryPage = () => {
       <UploadDocumentDialog
         open={uploading}
         onClose={() => setUploading(false)}
-        onUploaded={() => {
-          setUploading(false);
-          query.refetch();
-        }}
+        /*
+          REFRESH, DO NOT CLOSE. The dialog reports whether the document it just
+          uploaded can be searched, and closing it over that message would hide
+          the one fact the person who uploaded it needs.
+        */
+        onUploaded={() => query.refetch()}
       />
 
       <Card className="mb-5">
@@ -145,8 +180,13 @@ const LibraryPage = () => {
                 id="library-search"
                 type="search"
                 value={term}
-                onChange={(event) => setTerm(event.target.value)}
-                placeholder="Document name, machine model or tag"
+                onChange={(event) => {
+                  setTerm(event.target.value);
+                  // A new search starts at its first page, not wherever the
+                  // last one was left.
+                  setTextPage(1);
+                }}
+                placeholder="Document name, machine model, tag — or words inside the documents"
                 className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
               />
             </div>
@@ -187,6 +227,17 @@ const LibraryPage = () => {
         </div>
       </Card>
 
+      {insideTerm.length >= 2 && (
+        <InsideDocuments
+          term={insideTerm}
+          page={inside.data}
+          loading={inside.loading}
+          error={inside.error}
+          onPage={setTextPage}
+          onOpen={(hit: TechnicalDocument) => void openDocument(hit)}
+        />
+      )}
+
       <Tabs
         tabs={[
           { id: 'all', label: 'All documents' },
@@ -225,6 +276,7 @@ const LibraryPage = () => {
             <DocumentCard
               key={document.id}
               document={document}
+              index={indexes.get(document.id) ?? null}
               favourite={favourites.includes(document.id)}
               onOpen={() => openDocument(document)}
               onToggleFavourite={() => toggleFavourite(document)}
@@ -235,6 +287,131 @@ const LibraryPage = () => {
 
       <DocumentPreview document={preview} onClose={() => setPreview(null)} />
     </>
+  );
+};
+
+/**
+ * The documents whose TEXT contains the words. MASTER SCOPE LIB-5.
+ *
+ * Shown as its own section with the snippets in it, because a result that is
+ * only a file name is a result nobody can judge: the technician wants to see
+ * that the manual really does talk about the alarm before opening fourteen
+ * megabytes of it on a tablet at a customer's site.
+ *
+ * WHAT IS NOT SEARCHABLE IS SAID HERE TOO. "Nothing matched" and "nothing
+ * matched, and four manuals in this library are scans nobody can search" are
+ * different answers, and only the second one is true when it is true.
+ */
+const InsideDocuments = ({
+  term,
+  page,
+  loading,
+  error,
+  onPage,
+  onOpen,
+}: {
+  readonly term: string;
+  readonly page: LibrarySearchPage | null | undefined;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly onPage: (page: number) => void;
+  readonly onOpen: (document: TechnicalDocument) => void;
+}) => {
+  const pages = page === null || page === undefined ? 0 : Math.ceil(page.matched / page.pageSize);
+  const unsearchable =
+    page === null || page === undefined
+      ? 0
+      : page.notSearchable.needsOcr + page.notSearchable.failed + page.notSearchable.notIndexed;
+
+  return (
+    <Card className="mb-5">
+      {/* The id goes on a plain element: `Card` renders a `<section>` and
+          forwards only its own props, so a `data-` attribute put on it is
+          dropped silently. */}
+      <div data-testid="library-inside-results" />
+      <CardHeader
+        title="Found inside the documents"
+        description={`The words of the documents themselves, not their file names. Searching for "${term}".`}
+      />
+
+      {loading && page === undefined ? (
+        <LoadingPanel rows={2} label="Searching inside the documents" />
+      ) : error !== null ? (
+        /* The server's own refusal — a query too short, or a page that does
+           not exist — in its own words. */
+        <p className="px-4 pb-4 text-sm text-steel-600" data-testid="library-inside-refusal">
+          {error}
+        </p>
+      ) : page === null || page === undefined ? null : (
+        <div className="space-y-3 px-4 pb-4">
+          <p className="tabular text-sm text-steel-500">
+            {page.matched === 0
+              ? 'No document contains all of those words.'
+              : `${page.matched} document${page.matched === 1 ? '' : 's'} contain${page.matched === 1 ? 's' : ''} all of those words.`}
+            {unsearchable > 0 && (
+              <span>
+                {' '}
+                {unsearchable} document{unsearchable === 1 ? '' : 's'} in the library{' '}
+                {unsearchable === 1 ? 'holds' : 'hold'} no searchable text, so{' '}
+                {unsearchable === 1 ? 'it was' : 'they were'} not searched.
+              </span>
+            )}
+          </p>
+
+          {page.hits.map((hit) => (
+            <div
+              key={hit.document.id}
+              className="rounded-[var(--radius-control)] border border-steel-200 p-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-steel-900">{hit.document.name}</p>
+                  <p className="text-xs text-steel-500">
+                    {hit.document.manufacturer} · {hit.document.machineModel} ·{' '}
+                    {hit.document.version} · {hit.index.pages} pages
+                  </p>
+                </div>
+                <Button size="sm" variant="secondary" onClick={() => onOpen(hit.document)}>
+                  Open
+                </Button>
+              </div>
+              {hit.snippets.map((snippet) => (
+                <p
+                  key={snippet}
+                  className="mt-2 border-l-2 border-eje-200 pl-3 text-sm leading-relaxed text-steel-700"
+                >
+                  {snippet}
+                </p>
+              ))}
+            </div>
+          ))}
+
+          {pages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-steel-100 pt-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page.page <= 1}
+                onClick={() => onPage(page.page - 1)}
+              >
+                Previous
+              </Button>
+              <p className="tabular text-xs text-steel-500">
+                Page {page.page} of {pages}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page.page >= pages}
+                onClick={() => onPage(page.page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 };
 
@@ -250,13 +427,44 @@ const STATUS_LABEL = {
   pending_approval: 'Pending approval',
 } as const;
 
+/**
+ * WHETHER A DOCUMENT CAN BE SEARCHED, ON THE DOCUMENT. MASTER SCOPE LIB-5.
+ *
+ * Said on every row rather than inferred from an empty result: a scanned manual
+ * is a perfectly good document that no search will ever find, and a technician
+ * who does not know that concludes EJE has nothing on the machine.
+ */
+const IndexBadge = ({ index }: { readonly index: DocumentTextIndex | null }) => {
+  if (index === null) {
+    return (
+      <Badge tone="neutral" size="sm">
+        Not indexed
+      </Badge>
+    );
+  }
+  if (index.state === 'indexed') {
+    return (
+      <Badge tone="green" size="sm">
+        Searchable
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="amber" size="sm">
+      {index.state === 'needs_ocr' ? 'Not searchable — scanned' : 'Not searchable'}
+    </Badge>
+  );
+};
+
 const DocumentCard = ({
   document,
+  index,
   favourite,
   onOpen,
   onToggleFavourite,
 }: {
   readonly document: TechnicalDocument;
+  readonly index: DocumentTextIndex | null;
   readonly favourite: boolean;
   readonly onOpen: () => void;
   readonly onToggleFavourite: () => void;
@@ -302,6 +510,7 @@ const DocumentCard = ({
       <Badge tone="neutral" size="sm">
         {document.version}
       </Badge>
+      <IndexBadge index={index} />
     </div>
 
     <div className="mt-4 flex items-center justify-between gap-2 border-t border-steel-100 pt-3">

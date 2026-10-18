@@ -10,6 +10,7 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  DocumentTextIndex,
   OutboxMessage,
   IsoDateTime,
   Job,
@@ -216,6 +217,40 @@ export interface DocumentRepository {
   toggleFavourite(userId: UserId, documentId: string): Promise<readonly string[]>;
   listRecentlyViewed(userId: UserId): Promise<readonly string[]>;
   recordView(userId: UserId, documentId: string): Promise<void>;
+
+  /*
+   * THE FULL-TEXT INDEX. MASTER SCOPE LIB-5.
+   *
+   * Five methods rather than one, because the three things a caller wants are
+   * genuinely different reads: what state a revision's text is in (cheap, shown
+   * on every library row), which revisions match a query (the search itself,
+   * which an index serves), and the text of ONE revision (expensive, read only
+   * for the snippets of the rows actually being shown).
+   *
+   * The state and the text are written together — `saveTextIndex` takes both —
+   * because a state that says `indexed` with no text behind it, or text with no
+   * state in front of it, is exactly the inconsistency the library must never
+   * show. Writing a revision's index REPLACES whatever was there, so a
+   * re-extraction cannot leave the old text searchable.
+   */
+  saveTextIndex(index: DocumentTextIndex, content: string): Promise<DocumentTextIndex>;
+  findTextIndex(documentId: DocumentId): Promise<DocumentTextIndex | null>;
+  /** Every revision's index state, or just the ones asked for. */
+  listTextIndexes(documentIds?: readonly DocumentId[]): Promise<readonly DocumentTextIndex[]>;
+  /** The extracted text of one revision, for building snippets. */
+  findTextContent(documentId: DocumentId): Promise<string | null>;
+  /**
+   * The revisions whose text matches EVERY term, most relevant first.
+   *
+   * `documentIds` is the set the actor may search, decided by the application
+   * before this is called: the index is never consulted for a document the
+   * caller has not already established this person may see.
+   */
+  searchTextIds(
+    terms: readonly string[],
+    documentIds: readonly DocumentId[],
+    limit: number,
+  ): Promise<readonly DocumentId[]>;
 }
 
 export interface ChecklistTemplateRepository {

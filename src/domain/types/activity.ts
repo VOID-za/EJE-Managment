@@ -164,6 +164,15 @@ export type ActivityEventType =
   | 'document_versioned'
   | 'document_approved'
   | 'document_archived'
+  /**
+   * Whether an uploaded document's text could be read. LIB-5.
+   *
+   * On the trail because an index is a CLAIM about what the library can find.
+   * A scanned manual that arrived unsearchable with nothing said about it is
+   * how "we have no manual for that machine" gets said in good faith and is
+   * wrong; this event carries which of the three outcomes it was and why.
+   */
+  | 'document_indexed'
   | 'checklist_template_created'
   | 'checklist_template_updated'
   | 'checklist_template_versioned'
