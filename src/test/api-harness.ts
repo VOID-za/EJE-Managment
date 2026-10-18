@@ -168,11 +168,19 @@ export class ApiTestClient {
     this.cookie = value;
   }
 
-  async send<T = unknown>(
+  /**
+   * The request, through the real route, with the real response back.
+   *
+   * Everything that builds a request lives here and nowhere else, so a reader
+   * that wants the body as TEXT rather than as JSON — an export — goes through
+   * exactly the same cookie jar, the same fetch metadata and the same handler
+   * resolution as every other call.
+   */
+  private async dispatch(
     method: string,
     path: string,
-    options: SendOptions = {},
-  ): Promise<ApiResponse<T>> {
+    options: SendOptions,
+  ): Promise<NextResponse> {
     const url = new URL(path, ORIGIN);
     const { file, params } = matchRoute(url.pathname);
 
@@ -199,7 +207,15 @@ export class ApiTestClient {
     });
 
     this.absorbCookies(response.headers);
+    return response;
+  }
 
+  async send<T = unknown>(
+    method: string,
+    path: string,
+    options: SendOptions = {},
+  ): Promise<ApiResponse<T>> {
+    const response = await this.dispatch(method, path, options);
     const raw = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     return {
       status: response.status,
@@ -291,31 +307,44 @@ export class ApiTestClient {
   /**
    * A GET whose answer is NOT JSON.
    *
-   * The attachment download hands back the file itself, so a test has to be
-   * able to read the bytes and the headers rather than a parsed envelope.
+   * The attachment download hands back the file itself, and so does a
+   * spreadsheet export (SEARCH-4), so a test has to be able to read the bytes
+   * — or the text — and the headers rather than a parsed envelope.
+   *
+   * IT GOES THROUGH `dispatch` LIKE EVERYTHING ELSE. *Amended for SEARCH-4:*
+   * this built its own request, which meant it quietly did not absorb cookies
+   * and always claimed `same-origin` whatever the caller asked for. One
+   * request builder, used by every method.
+   *
+   * A REFUSAL IS STILL UNWRAPPED. A refused download answers with the same
+   * JSON envelope as every other refusal, and a test that could only see a
+   * status code would not be able to say WHY it was refused.
    */
   async download(
     path: string,
     options: SendOptions = {},
-  ): Promise<{ status: number; headers: Headers; bytes: Uint8Array }> {
-    const url = new URL(path, ORIGIN);
-    const { file, params } = matchRoute(url.pathname);
+  ): Promise<{
+    readonly status: number;
+    readonly headers: Headers;
+    readonly bytes: Uint8Array;
+    readonly text: string;
+    readonly error: ApiResponse['error'];
+  }> {
+    const response = await this.dispatch('GET', path, options);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
 
-    const headers = new Headers({ host: new URL(ORIGIN).host, ...options.headers });
-    headers.set('sec-fetch-site', 'same-origin');
-    const token = options.token === undefined ? this.cookie : options.token;
-    if (token !== null) headers.set('cookie', `${SESSION_COOKIE}=${token}`);
+    let error: ApiResponse['error'] = null;
+    if (response.status >= 400) {
+      try {
+        error = ((JSON.parse(text) as Record<string, unknown>).error ??
+          null) as ApiResponse['error'];
+      } catch {
+        error = null;
+      }
+    }
 
-    const handler = await loadHandler(file, 'GET');
-    const response = await handler(new NextRequest(url, { method: 'GET', headers }), {
-      params: Promise.resolve(params),
-    });
-
-    return {
-      status: response.status,
-      headers: response.headers,
-      bytes: new Uint8Array(await response.arrayBuffer()),
-    };
+    return { status: response.status, headers: response.headers, bytes, text, error };
   }
 
   signIn(email: string, password: string) {

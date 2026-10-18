@@ -96,6 +96,55 @@ export const readRoute =
       return NextResponse.json({ data });
     });
 
+/**
+ * A read whose answer is a FILE rather than JSON. MASTER SCOPE SEARCH-4.
+ *
+ * Everything `readRoute` does — authenticate, no transaction, no CSRF check on
+ * a GET — and then a body with a file name on it instead of a `data` envelope.
+ * It is a separate wrapper rather than a flag because the two answers are
+ * different kinds of thing: one is parsed by the client's API layer, the other
+ * is handed to the operating system by the browser.
+ *
+ * WHAT THE HEADERS ARE FOR, EACH OF THEM:
+ *
+ * - `Content-Disposition: attachment` with a file name, so the browser saves
+ *   it rather than rendering it. The name is sent twice — the plain form for
+ *   older clients and RFC 5987's `filename*` for anything non-ASCII — and
+ *   quotes and control characters are stripped out of it, because a file name
+ *   is the one part of this response a caller could have influenced.
+ * - `X-Content-Type-Options: nosniff`, so a browser cannot decide a CSV is
+ *   really HTML and run it.
+ * - `Cache-Control: no-store`. These files are built from one person's
+ *   authorised read; a shared cache must not hold one.
+ */
+export interface DownloadResponse {
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly body: string;
+}
+
+const safeFileName = (name: string): string =>
+  name.replace(/["\\\r\n\u0000-\u001f]/g, '').slice(0, 120) || 'export';
+
+export const downloadRoute =
+  (route: string, handler: (context: ReadContext) => Promise<DownloadResponse>) =>
+  async (request: NextRequest, routeContext?: RouteParams): Promise<NextResponse> =>
+    run(route, async () => {
+      const params = routeContext === undefined ? {} : await routeContext.params;
+      const actor = await requireAuthenticatedActor(request);
+      const runtime = getServerRuntime();
+      const file = await runtime.read((unit) => handler({ ...unit, actor, request, params }));
+      const name = safeFileName(file.fileName);
+      return new NextResponse(file.body, {
+        headers: {
+          'Content-Type': file.contentType,
+          'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+        },
+      });
+    });
+
 export interface WriteOptions<TInput, TResult> {
   /** Names the operation for idempotency and for the server log. */
   readonly operation: string;

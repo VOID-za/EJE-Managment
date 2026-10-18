@@ -5,22 +5,24 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
 import {
   can,
-  isJobOpenWork,
   JOB_STATUS_ORDER,
   jobStatusLabel,
-  statusMatches,
   JOB_TYPE_CODES,
   jobTypeLabel,
   PRIORITY_ORDER,
-  refusalAwaitingResolution,
   priorityLabel,
-  priorityRank,
+  refusalAwaitingResolution,
   type JobPriority,
-  type JobStatus,
   type JobTypeCode,
 } from '@/domain';
+import {
+  filterJobListRows,
+  matchesJobListStatus,
+  type JobListStatusFilter,
+} from '@/application/job-list-filters';
 import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportCsvButton } from '@/components/exports/ExportCsvButton';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { CachedJobList } from '@/components/pwa/CachedJobList';
@@ -36,9 +38,16 @@ import { reads } from '@/api/endpoints';
 import type { JobListRow } from '@/application/job-view';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
-import { isOverdue } from '@/lib/format';
 
-type StatusFilter = JobStatus | 'all' | 'open-work' | 'awaiting_completion' | 'overdue';
+/*
+ * THE FILTERS THEMSELVES LIVE IN THE APPLICATION LAYER. SEARCH-4.
+ *
+ * They used to be defined here, in the screen, which made the export of this
+ * list a second copy of them — and a copy is a thing that drifts. The screen
+ * now calls the same predicates the export route calls, over the same
+ * authorised rows, so "download what I am looking at" means it.
+ */
+type StatusFilter = JobListStatusFilter;
 
 const STATUS_OPTIONS: readonly { value: StatusFilter; label: string }[] = [
   { value: 'open-work', label: 'All open work' },
@@ -65,23 +74,6 @@ const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: st
   { value: 'awaiting_delivery', label: 'Awaiting delivery' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
-
-const matchesStatus = (status: JobStatus, filter: StatusFilter, scheduled: string | null) => {
-  switch (filter) {
-    case 'all':
-      return true;
-    case 'open-work':
-      return isJobOpenWork(status);
-    case 'overdue':
-      return isJobOpenWork(status) && isOverdue(scheduled);
-    case 'awaiting_completion':
-      return status === 'completion' || status === 'customer_signature' || status === 'review';
-    default:
-      // `statusMatches` rather than equality, so a historical Master Review
-      // job is listed under Review, which is what it is labelled.
-      return statusMatches(status, filter);
-  }
-};
 
 const JobsPageContent = () => {
   const user = useCurrentUser();
@@ -136,50 +128,40 @@ const JobsPageContent = () => {
     failed: query.error !== null,
   });
 
-  const rows = useMemo(() => {
-    const all = query.data?.rows ?? [];
-    const needle = term.trim().toLowerCase();
+  const rows = useMemo(
+    () =>
+      filterJobListRows(
+        query.data?.rows ?? [],
+        { status, jobType, priority, mineOnly, refusalsOnly, term },
+        user.id,
+      ),
+    [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id],
+  );
 
-    return all
-      // Closed and cancelled work is excluded by `loadActiveJobList`.
-      .filter((row) => (refusalsOnly ? refusalAwaitingResolution(row.job) : true))
-      .filter((row) =>
-        // The refusal queue is a queue, not a status: it ignores the status
-        // filter entirely rather than intersecting with whatever was selected.
-        refusalsOnly ? true : matchesStatus(row.job.status, status, row.job.scheduledDate),
-      )
-      .filter((row) => jobType === 'all' || row.job.jobType === jobType)
-      .filter((row) => priority === 'all' || row.job.priority === priority)
-      .filter(
-        (row) =>
-          !mineOnly ||
-          row.job.primaryTechnicianId === user.id ||
-          row.job.additionalTechnicianIds.includes(user.id),
-      )
-      .filter(
-        (row) =>
-          needle.length === 0 ||
-          row.job.jobNumber.toLowerCase().includes(needle) ||
-          row.customerName.toLowerCase().includes(needle) ||
-          row.siteName.toLowerCase().includes(needle) ||
-          row.machineLabel.toLowerCase().includes(needle) ||
-          row.machineSerial.toLowerCase().includes(needle) ||
-          row.job.orderNumber.toLowerCase().includes(needle) ||
-          row.job.referenceNumber.toLowerCase().includes(needle) ||
-          row.job.faultDescription.toLowerCase().includes(needle),
-      )
-      .sort((a, b) => {
-        const rank = priorityRank(a.job.priority) - priorityRank(b.job.priority);
-        if (rank !== 0) return rank;
-        return (a.job.scheduledDate ?? '9999').localeCompare(b.job.scheduledDate ?? '9999');
-      });
-  }, [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id]);
+  /*
+   * THE EXPORT IS THIS SCREEN'S OWN FILTERS, IN A URL. SEARCH-4.
+   *
+   * Built from the same state the table is built from, so there is no second
+   * idea anywhere of what "what I am looking at" means. The server applies
+   * them with `filterJobListRows` — the function this screen just used — over
+   * the rows its own read says this person may have.
+   */
+  const exportHref = useMemo(() => {
+    const search = new URLSearchParams({ status });
+    if (jobType !== 'all') search.set('jobType', jobType);
+    if (priority !== 'all') search.set('priority', priority);
+    if (mineOnly) search.set('mine', '1');
+    if (refusalsOnly) search.set('signatureRefusal', 'unresolved');
+    if (term.trim().length > 0) search.set('term', term.trim());
+    return `/api/jobs/export?${search.toString()}`;
+  }, [status, jobType, priority, mineOnly, refusalsOnly, term]);
 
   // Counted over everything this user may see — which is what the read
   // returned, so nothing has to be filtered out again here.
   const visible = query.data?.rows ?? [];
   const quickCount = (filter: StatusFilter): number =>
-    visible.filter((row) => matchesStatus(row.job.status, filter, row.job.scheduledDate)).length;
+    visible.filter((row) => matchesJobListStatus(row.job.status, filter, row.job.scheduledDate))
+      .length;
   // Counted by the server: the operational list no longer carries closed work.
   const closedCount = query.data?.closedCount ?? 0;
   const refusalCount = visible.filter((row) => refusalAwaitingResolution(row.job)).length;
@@ -223,9 +205,12 @@ const JobsPageContent = () => {
         description="Every job card in the system, filtered the way you need it."
         breadcrumbs={[{ label: 'Jobs' }]}
         actions={
-          <Link href="/jobs/new">
-            <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
-          </Link>
+          <>
+            <ExportCsvButton href={exportHref} fallbackName="eje-jobs.csv" />
+            <Link href="/jobs/new">
+              <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
+            </Link>
+          </>
         }
       />
 

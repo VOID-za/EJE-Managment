@@ -3138,6 +3138,95 @@ await step('the archive filters by the date the job was closed', async () => {
   await page.getByRole('button', { name: 'Clear filters' }).click();
 });
 
+/* -------------------------------------------------------------------------- */
+/* SEARCH-4 — the archive, downloaded as a spreadsheet                        */
+/* -------------------------------------------------------------------------- */
+
+await step('SEARCH-4: the archive downloads as a CSV, built by the server', async () => {
+  /*
+   * THE FILE, NOT A SCREENSHOT OF A BUTTON. The download is caught and read:
+   * the header row, a job the screen is showing, and the proof that the CSV is
+   * the server's own answer rather than something assembled in the browser —
+   * the request goes to `/api/jobs/closed/export`, where the authorisation is.
+   */
+  // Whatever the filter steps above left set: the file is "what is on screen",
+  // so the screen is put back to the whole archive first.
+  const clear = page.getByRole('button', { name: 'Clear filters' });
+  // Disabled when nothing is filtered, which is already the state this step
+  // wants — so it is clicked only when it would do something.
+  if (await clear.isEnabled().catch(() => false)) await clear.click();
+  await page.waitForFunction(
+    () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1044'),
+    { timeout: 10000 },
+  );
+
+  const started = page.waitForEvent('download', { timeout: 25000 });
+  await page.getByTestId('export-csv').click();
+  const file = await started;
+  if (!/^eje-closed-jobs-\d{4}-\d{2}-\d{2}\.csv$/.test(file.suggestedFilename())) {
+    throw new Error(`the archive export is named ${file.suggestedFilename()}`);
+  }
+
+  const stream = await file.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const csv = Buffer.concat(chunks).toString('utf8');
+
+  if (!csv.startsWith('\uFEFF')) throw new Error('the CSV has no BOM, so Excel will mis-read it');
+  const [header, ...rows] = csv.replace('\uFEFF', '').trimEnd().split('\r\n');
+  if (header !== 'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,Reference number,Final job card') {
+    throw new Error(`unexpected export columns: ${header}`);
+  }
+  if (!rows.some((row) => row.startsWith('EJE-1044,'))) {
+    throw new Error('EJE-1044 is in the archive on screen and missing from the file');
+  }
+  // What a closed job was charged at is NOT in this file — see `exports.ts`.
+  if (/total|price|rate|vat/i.test(header)) {
+    throw new Error('the archive export carries a commercial column');
+  }
+  console.log(`      ${rows.length} archive row(s) exported`);
+});
+
+await step('SEARCH-4: a technician is refused the archive file, and gets their own list', async () => {
+  /*
+   * THE SERVER REFUSES IT, NOT THE SCREEN. Asked as the technician's own
+   * browser asks — same cookie, same origin — so what is proved is the route's
+   * authorisation and not the absence of a button.
+   */
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await signInAs(page, 'Sipho Mahlangu');
+
+  const refused = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/closed/export`);
+    return { status: response.status, body: (await response.text()).slice(0, 400) };
+  }, BASE);
+  if (refused.status !== 403) {
+    throw new Error(`the technician got HTTP ${refused.status} for the archive export`);
+  }
+  if (refused.body.includes('Job number')) {
+    throw new Error('the refused archive export still handed over rows');
+  }
+
+  const own = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/export?status=all`);
+    return { status: response.status, body: await response.text() };
+  }, BASE);
+  if (own.status !== 200) throw new Error(`the technician got HTTP ${own.status} for their own list`);
+  if (!own.body.includes('Job number,Status,Priority')) {
+    throw new Error('the technician export is missing its header row');
+  }
+  if (/total|price|rate|vat/i.test(own.body.split('\r\n')[0] ?? '')) {
+    throw new Error('the technician export carries a commercial column');
+  }
+
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await signInAs(page, 'Elmarie Coetzee');
+  await page.goto(`${BASE}/jobs/closed`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
+});
+
 await step('opening a closed job shows the complete historical record', async () => {
   await page.getByRole('row').filter({ hasText: 'EJE-1044' }).first().click();
   await page.getByRole('heading', { name: 'EJE-1044' }).waitFor({ timeout: 10000 });

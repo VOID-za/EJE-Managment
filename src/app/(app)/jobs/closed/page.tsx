@@ -28,6 +28,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportCsvButton } from '@/components/exports/ExportCsvButton';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
@@ -66,6 +67,29 @@ const ClosedJobsPage = () => {
     setFilters((current) => ({ ...current, [key]: value }));
 
   const data = query.data;
+
+  /*
+   * THE ARCHIVE'S OWN FILTERS, IN A URL. SEARCH-4.
+   *
+   * The same names the archive's JSON route takes, so the file is the screen's
+   * query asked again with a different `Accept` — not a second query. The
+   * server refuses this route for anybody without `jobs.viewAll`, which is the
+   * same refusal that produces the notice below.
+   */
+  const exportHref = useMemo(() => {
+    const search = new URLSearchParams();
+    if (filters.term.trim().length > 0) search.set('term', filters.term.trim());
+    if (filters.customerId !== 'all') search.set('customerId', filters.customerId);
+    if (filters.siteId !== 'all') search.set('siteId', filters.siteId);
+    if (filters.jobType !== 'all') search.set('jobType', filters.jobType);
+    if (filters.technicianId !== 'all') search.set('technicianId', filters.technicianId);
+    if (filters.closedFrom.length > 0) search.set('closedFrom', filters.closedFrom);
+    if (filters.closedTo.length > 0) search.set('closedTo', filters.closedTo);
+    const queryString = search.toString();
+    return queryString.length === 0
+      ? '/api/jobs/closed/export'
+      : `/api/jobs/closed/export?${queryString}`;
+  }, [filters]);
 
   // Sites narrow to the chosen customer, so the filter is usable rather than a
   // list of every site EJE has.
@@ -186,6 +210,7 @@ const ClosedJobsPage = () => {
         title="Closed Jobs"
         breadcrumbs={[{ label: 'Jobs', href: '/jobs' }, { label: 'Closed Jobs' }]}
         description="Every issued and closed job card. Historical records — read-only, with the final signed document against each one."
+        actions={<ExportCsvButton href={exportHref} fallbackName="eje-closed-jobs.csv" />}
       />
 
       <Card className="mb-5">

@@ -156,6 +156,86 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
 export const apiGet = <T>(path: string, signal?: AbortSignal): Promise<T> =>
   request<T>(path, signal === undefined ? {} : { signal });
 
+/**
+ * A FILE, not JSON. MASTER SCOPE SEARCH-4.
+ *
+ * `request` above parses every response as JSON, which is right for every
+ * other call and wrong for an export: the body is a CSV. This keeps the same
+ * two behaviours that matter — a transport failure is reported as the network
+ * rather than as a server answer, and a refusal is unwrapped into the same
+ * `ApiRequestError` the screens already render — and returns the file instead.
+ *
+ * THE NAME COMES FROM THE SERVER. `Content-Disposition` is what names the file
+ * the office ends up with, so the client does not invent one: it reads the
+ * header the download route set, preferring the RFC 5987 form, and falls back
+ * only if the header is missing entirely.
+ */
+export interface DownloadedFile {
+  readonly fileName: string;
+  /**
+   * THE SERVER'S OWN BYTES, UNTOUCHED.
+   *
+   * Not `response.text()`. That decodes the body and STRIPS A LEADING BOM —
+   * which the smoke suite caught: the CSV left the server with its BOM and the
+   * file the office saved had none, so Excel on Windows read a UTF-8 file as
+   * the legacy code page and turned "Müller" into "MÃ¼ller". The bytes are
+   * carried through and handed to the browser exactly as they arrived.
+   */
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+}
+
+const fileNameFrom = (disposition: string | null, fallback: string): string => {
+  if (disposition === null) return fallback;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (encoded?.[1] !== undefined) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      // A header we cannot decode is not a reason to fail the download.
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(disposition);
+  return plain?.[1] ?? fallback;
+};
+
+export const apiDownload = async (path: string, fallbackName: string): Promise<DownloadedFile> => {
+  let response: Response;
+  try {
+    response = await fetch(path, { method: 'GET', credentials: 'same-origin' });
+  } catch {
+    throw new ApiRequestError('network', 'No connection to the EJE server.');
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+
+  if (!response.ok) {
+    // A refusal is JSON, like every other refusal in the system.
+    let envelope: Envelope<unknown> | null = null;
+    try {
+      envelope = JSON.parse(new TextDecoder().decode(bytes)) as Envelope<unknown>;
+    } catch {
+      envelope = null;
+    }
+    const error = envelope?.error;
+    const code: ApiErrorCode = error?.code ?? 'internal_error';
+    if (code === 'unauthenticated') {
+      for (const listener of sessionListeners) listener();
+    }
+    throw new ApiRequestError(
+      code,
+      error?.message ?? 'That export could not be produced.',
+      error?.violations ?? [],
+    );
+  }
+
+  return {
+    fileName: fileNameFrom(response.headers.get('content-disposition'), fallbackName),
+    bytes,
+    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+  };
+};
+
 export const apiPost = <T>(
   path: string,
   body: unknown = {},
