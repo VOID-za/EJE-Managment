@@ -22,7 +22,7 @@ import {
 } from '@/application/job-list-filters';
 import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { ExportCsvButton } from '@/components/exports/ExportCsvButton';
+import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { CachedJobList } from '@/components/pwa/CachedJobList';
@@ -206,7 +206,7 @@ const JobsPageContent = () => {
         breadcrumbs={[{ label: 'Jobs' }]}
         actions={
           <>
-            <ExportCsvButton href={exportHref} fallbackName="eje-jobs.csv" />
+            <DownloadFileButton href={exportHref} fallbackName="eje-jobs.csv" label="Download CSV" />
             <Link href="/jobs/new">
               <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
             </Link>

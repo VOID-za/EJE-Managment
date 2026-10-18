@@ -51,6 +51,21 @@ export interface ReportDraft {
   readonly jobNumber: string;
   readonly report: JobCompletionReport;
   readonly savedAt: string;
+  /**
+   * WHAT THE SERVER HELD WHEN THIS DRAFT WAS TAKEN. OFF-WRITEUP-1.
+   *
+   * Without it, a draft can only be compared with what the server holds NOW,
+   * and the two interesting cases are indistinguishable: a draft typed over an
+   * empty write-up (apply it — nothing is lost) and a draft typed over text the
+   * OFFICE has since corrected (applying it throws the office's correction
+   * away). Keeping the base makes that a question the technician is asked
+   * rather than one the Load button answers for them.
+   *
+   * OPTIONAL, because drafts written before this existed do not have it. A
+   * draft with no base reports no conflict — it cannot honestly report one —
+   * and is offered exactly as it was.
+   */
+  readonly basedOn?: JobCompletionReport;
 }
 
 export const isDraftSupported = (): boolean =>
@@ -106,6 +121,8 @@ export const saveReportDraft = async (input: {
   readonly jobId: string;
   readonly jobNumber: string;
   readonly report: JobCompletionReport;
+  /** What the server held when this text was typed. See `basedOn`. */
+  readonly basedOn?: JobCompletionReport;
 }): Promise<ReportDraft | null> => {
   if (!isDraftSupported() || input.userId.length === 0) return null;
   const draft: ReportDraft = {
@@ -115,6 +132,7 @@ export const saveReportDraft = async (input: {
     jobNumber: input.jobNumber,
     report: input.report,
     savedAt: new Date().toISOString(),
+    ...(input.basedOn === undefined ? {} : { basedOn: input.basedOn }),
   };
   await withStore('readwrite', (store) => {
     store.put(draft);
@@ -177,3 +195,47 @@ export const draftDiffersFrom = (
   (Object.keys(draft.report) as (keyof JobCompletionReport)[]).some(
     (field) => draft.report[field] !== report[field],
   );
+
+/**
+ * HAS THE SERVER'S WRITE-UP MOVED UNDER THIS DRAFT? OFF-WRITEUP-1, CR-02.
+ *
+ * The case: a technician types three paragraphs in a basement with no signal,
+ * the tablet holds them, and meanwhile the office corrects the same write-up
+ * from the other end — a customer rang, a part number was wrong. When the
+ * tablet comes back, "load the draft into the form and save" would replace the
+ * office's correction with text typed before it existed, and nothing would say
+ * so. That is precisely the silent overwrite CR-02 forbids.
+ *
+ * So a conflict is reported when ALL THREE hold:
+ *
+ *   1. the draft knows what it was typed over (`basedOn`);
+ *   2. the server's value is no longer that; and
+ *   3. the draft itself still says something different from the server — a
+ *      draft the server has caught up with is not a conflict, it is finished.
+ *
+ * It reports; it does not resolve. Which text wins is the technician's
+ * decision, taken in front of both of them.
+ */
+export const draftConflictsWith = (
+  draft: ReportDraft,
+  report: JobCompletionReport,
+): boolean => {
+  const base = draft.basedOn;
+  if (base === undefined) return false;
+  if (!draftDiffersFrom(draft, report)) return false;
+  return (Object.keys(report) as (keyof JobCompletionReport)[]).some(
+    (field) => base[field] !== report[field],
+  );
+};
+
+/** The fields the server has changed since the draft was taken, named. */
+export const conflictingFields = (
+  draft: ReportDraft,
+  report: JobCompletionReport,
+): readonly (keyof JobCompletionReport)[] => {
+  const base = draft.basedOn;
+  if (base === undefined) return [];
+  return (Object.keys(report) as (keyof JobCompletionReport)[]).filter(
+    (field) => base[field] !== report[field],
+  );
+};

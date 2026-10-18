@@ -6,7 +6,12 @@ import { apiDownload, ApiRequestError } from '@/api/client';
 import { downloadBytes } from '@/lib/download';
 
 /**
- * Download what is on this screen, as a spreadsheet. MASTER SCOPE SEARCH-4.
+ * Download a file the server builds or holds. MASTER SCOPE SEARCH-4, LIB-5.
+ *
+ * Two callers, one behaviour: the spreadsheet exports of the Jobs list and the
+ * closed-job archive, and the technical library's stored documents. Both are an
+ * authenticated GET that answers with a file or refuses in JSON, which is the
+ * whole reason this is not an `<a href>`.
  *
  * WHY IT IS A FETCH AND NOT A LINK. A plain `<a href>` to the export route
  * would work on the happy path and would be unreadable on every other one: a
@@ -21,10 +26,10 @@ import { downloadBytes } from '@/lib/download';
  * route's authorised read produced. There is no client-side assembly of a file
  * here, and no second copy of a filter — see `exports.ts`.
  */
-export const ExportCsvButton = ({
+export const DownloadFileButton = ({
   href,
   fallbackName,
-  label = 'Download CSV',
+  label = 'Download',
   disabled = false,
 }: {
   /** The export route, with this screen's current filters already on it. */

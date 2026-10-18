@@ -170,3 +170,92 @@ describe('searching inside the documents', () => {
     expect(answer.status).toBe(400);
   });
 });
+
+describe('opening a stored document', () => {
+  let master: Client;
+  let coordinator: Client;
+  let technician: Client;
+  let otherTechnician: Client;
+  let current: string;
+  let pending: string;
+
+  beforeEach(async () => {
+    startTestServer();
+    master = await signedInAs(DEMO_USERS.master);
+    coordinator = await signedInAs(DEMO_USERS.coordinator);
+    technician = await signedInAs(DEMO_USERS.technician);
+    otherTechnician = await signedInAs(DEMO_USERS.otherTechnician);
+
+    const published = await master.upload<UploadBody>('/api/library/upload', {
+      name: 'siemens-840d-alarms.pdf',
+      type: 'application/pdf',
+      bytes: pdf('Alarm 300500 is a drive enable fault. Check terminal 64 before the module.'),
+      fields: FIELDS,
+    });
+    current = published.data.document.id;
+
+    const submitted = await technician.upload<UploadBody>('/api/library/upload', {
+      name: 'hoist.pdf',
+      type: 'application/pdf',
+      bytes: pdf('The hoist brake is adjusted through the castellated nut behind the cover.'),
+      fields: { ...FIELDS, name: 'Hoist brake adjustment' },
+    });
+    pending = submitted.data.document.id;
+  });
+
+  it('hands the stored bytes to anybody who may read the library', async () => {
+    for (const client of [master, coordinator, technician]) {
+      const answer = await client.download(`/api/library/${current}/file`);
+      expect(answer.status).toBe(200);
+      expect(answer.headers.get('content-type')).toBe('application/pdf');
+      expect(answer.headers.get('content-disposition')).toMatch(/attachment; filename="/);
+      // The file itself, not a description of one.
+      expect(new TextDecoder().decode(answer.bytes.subarray(0, 5))).toBe('%PDF-');
+    }
+  });
+
+  /*
+   * AN UNAPPROVED DOCUMENT IS NOT REFERENCE MATERIAL, and the refusal is a 404
+   * rather than a 403 — the same answer a document that does not exist gets,
+   * so the response cannot be used to ask what is waiting for approval.
+   */
+  it('refuses a pending upload to a technician who is not its uploader', async () => {
+    const answer = await otherTechnician.download(`/api/library/${pending}/file`);
+    expect(answer.status).toBe(404);
+    expect(answer.bytes.byteLength === 0 || !answer.text.startsWith('%PDF-')).toBe(true);
+  });
+
+  it('serves a pending upload to the office that has to approve it, and to its uploader', async () => {
+    for (const client of [master, coordinator, technician]) {
+      expect((await client.download(`/api/library/${pending}/file`)).status).toBe(200);
+    }
+  });
+
+  it('answers 404 for a record that has no stored file, and says so', async () => {
+    // Every seeded document is metadata: there was no upload path when the
+    // demonstration data was written.
+    const library = await master.get<{ documents: readonly { id: string; name: string }[] }>(
+      '/api/library',
+    );
+    const seeded = library.data.documents.find(
+      (document) => document.id === 'doc-lw-v40-manual',
+    );
+    expect(seeded).toBeDefined();
+
+    const answer = await master.download(`/api/library/${seeded?.id ?? ''}/file`);
+    expect(answer.status).toBe(404);
+    expect(JSON.stringify(answer.error)).toMatch(/never uploaded|no file stored/i);
+  });
+
+  it('refuses a request with no session', async () => {
+    const stranger = new ApiTestClient();
+    const answer = await stranger.download(`/api/library/${current}/file`);
+    expect(answer.status).toBe(401);
+    expect(answer.text.startsWith('%PDF-')).toBe(false);
+  });
+
+  it('never hands a storage key to a client', async () => {
+    const library = await master.get('/api/library');
+    expect(JSON.stringify(library.raw)).not.toContain('library/');
+  });
+});

@@ -6,7 +6,9 @@ import type { Job, JobCompletionReport } from '@/domain';
 import { Badge, Button, Card, CardHeader, ConfirmDialog, TextAreaField } from '@/components/ui';
 import { createAutosaver, type AutosaveStatus } from '@/lib/autosave';
 import {
+  conflictingFields,
   discardReportDraft,
+  draftConflictsWith,
   draftDiffersFrom,
   readReportDraft,
   saveReportDraft,
@@ -163,6 +165,16 @@ export const CompletionReportPanel = ({
               jobId: job.id,
               jobNumber: job.jobNumber,
               report,
+              /*
+               * WHAT THE SERVER HELD WHEN THIS WAS TYPED, kept with the text.
+               *
+               * It is what lets the panel tell "typed over nothing" from
+               * "typed over text the office has since corrected" — see
+               * `draftConflictsWith`. Without it, loading a draft could
+               * replace a correction made at the other end while this tablet
+               * had no signal, and nothing would say so.
+               */
+              basedOn: job.completionReport,
             })
               .then((kept) => setLocalDraft(kept))
               .catch(() => undefined);
@@ -275,30 +287,95 @@ export const CompletionReportPanel = ({
           className="mt-4 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3.5 py-3"
           data-testid="writeup-local-draft"
         >
-          <p className="text-sm font-semibold text-amber-eje-800">
-            A write-up typed on this tablet is NOT on the server.
-          </p>
-          <p className="mt-1 text-xs text-amber-eje-800">
-            Kept here since {formatDateTime(localDraft.savedAt)}, under your name and visible to
-            nobody else. Nothing sends it by itself: load it into the form and it saves to the job
-            the ordinary way, with every rule that applies to a write-up typed at a desk.
-          </p>
-          {editable && (
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                data-testid="writeup-use-draft"
-                onClick={() => {
-                  setDraft(localDraft.report);
-                  saver.change(localDraft.report);
-                }}
-              >
-                Load the draft into the form
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setDiscarding(true)}>
-                Discard the draft
-              </Button>
-            </div>
+          {draftConflictsWith(localDraft, job.completionReport) ? (
+            /*
+              TWO WRITE-UPS, AND THE TECHNICIAN CHOOSES. CR-02.
+
+              The server's copy has CHANGED since this draft was typed — the
+              office corrected the same write-up while this tablet had no
+              signal. Loading the draft would replace a correction made by
+              somebody who knew something this text does not, and the old
+              notice would have called that "load the draft into the form".
+              So the conflict is named, both texts are on screen, and nothing
+              is applied until somebody decides.
+            */
+            <>
+              <p className="text-sm font-semibold text-amber-eje-800" data-testid="writeup-draft-conflict">
+                This write-up has been changed on the server since your draft was typed.
+              </p>
+              <p className="mt-1 text-xs text-amber-eje-800">
+                Your draft was kept on this tablet at {formatDateTime(localDraft.savedAt)}. Since
+                then {conflictingFields(localDraft, job.completionReport).length === 1
+                  ? 'one field was'
+                  : 'fields were'}{' '}
+                changed on the job by somebody else. Both are below: nothing has been overwritten,
+                and nothing will be until you choose.
+              </p>
+              <dl className="mt-2.5 space-y-2 text-xs">
+                {conflictingFields(localDraft, job.completionReport).map((field) => (
+                  <div key={String(field)} className="rounded border border-amber-eje-200 bg-surface p-2">
+                    <dt className="font-semibold text-steel-700">
+                      {FIELDS.find((entry) => entry.key === field)?.label ?? String(field)}
+                    </dt>
+                    <dd className="mt-1 text-steel-600">
+                      <span className="font-semibold">On the job now: </span>
+                      {job.completionReport[field].length === 0
+                        ? '— nothing —'
+                        : job.completionReport[field]}
+                    </dd>
+                    <dd className="mt-1 text-steel-600">
+                      <span className="font-semibold">Your draft: </span>
+                      {localDraft.report[field].length === 0 ? '— nothing —' : localDraft.report[field]}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {editable && (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    data-testid="writeup-use-draft"
+                    onClick={() => {
+                      setDraft(localDraft.report);
+                      saver.change(localDraft.report);
+                    }}
+                  >
+                    Use my draft instead
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setDiscarding(true)}>
+                    Keep what is on the job
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-amber-eje-800">
+                A write-up typed on this tablet is NOT on the server.
+              </p>
+              <p className="mt-1 text-xs text-amber-eje-800">
+                Kept here since {formatDateTime(localDraft.savedAt)}, under your name and visible to
+                nobody else. Nothing sends it by itself: load it into the form and it saves to the
+                job the ordinary way, with every rule that applies to a write-up typed at a desk.
+              </p>
+              {editable && (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    data-testid="writeup-use-draft"
+                    onClick={() => {
+                      setDraft(localDraft.report);
+                      saver.change(localDraft.report);
+                    }}
+                  >
+                    Load the draft into the form
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setDiscarding(true)}>
+                    Discard the draft
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

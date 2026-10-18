@@ -407,7 +407,18 @@ export const libraryView = async ({ repos, actor }: ViewContext) => {
      */
     repos.documents.listTextIndexes(),
   ]);
-  return { documents, favourites, recent, indexes };
+  /*
+   * THE STORAGE KEY DOES NOT LEAVE THE SERVER. LIB-5.
+   *
+   * It used to: the view returned the records as they are stored, key and all,
+   * and the screen has no use for one — the download goes through
+   * `/api/library/:id/file`, which resolves the key itself after checking who
+   * is asking. A key is not a credential and must not become one; the same
+   * rule the job-attachment routes already state, applied here, where a test
+   * found it was not.
+   */
+  const withoutStorageKeys = documents.map(({ storageKey: _storageKey, ...rest }) => rest);
+  return { documents: withoutStorageKeys, favourites, recent, indexes };
 };
 
 export const activityView = ({ repos, actor }: ViewContext) => loadActivityFeed(repos, actor);

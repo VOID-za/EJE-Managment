@@ -2,6 +2,7 @@ import {
   asDocumentId,
   can,
   userFullName,
+  type User,
   type DocumentTextIndex,
   type TechnicalDocument,
   type TechnicalDocumentType,
@@ -374,4 +375,33 @@ export const uploadDocument = async (
   });
 
   return { document: stored, index };
+};
+
+/**
+ * WHO MAY OPEN A DOCUMENT'S FILE. MASTER SCOPE LIB-5, MOD-3.
+ *
+ * The same three-way answer the library screen gives, stated once so the
+ * download, the search and the list cannot drift apart:
+ *
+ *  - `current`          — anybody who may read the library. It is official
+ *                         reference material; that is what the status means.
+ *  - `archived`         — anybody who may read the library. A revision is
+ *                         archived rather than deleted precisely so the job
+ *                         that referenced it still resolves, and a reference
+ *                         nobody can open is not a reference.
+ *  - `pending_approval` — the office (`library.manage`), because approving a
+ *                         document means READING it first and an approval
+ *                         queue nobody can open is a rubber stamp; and the
+ *                         person who uploaded it, because it is their own
+ *                         file and they are the one who can replace it.
+ *                         Nobody else: an unapproved manual followed on site
+ *                         is the risk the approval step exists for.
+ */
+export const canOpenDocumentFile = (
+  actor: Pick<User, 'id' | 'role'>,
+  document: Pick<TechnicalDocument, 'status' | 'uploadedBy'>,
+): boolean => {
+  if (!can(actor.role, 'library.view')) return false;
+  if (document.status !== 'pending_approval') return true;
+  return can(actor.role, 'library.manage') || document.uploadedBy === actor.id;
 };

@@ -4967,6 +4967,99 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
     throw new Error(`the loaded draft did not reach the job: ${saved}`);
   }
 });
+await step('a write-up the server changed under a held draft is a CONFLICT, not an overwrite', async () => {
+  /*
+   * THE CASE CR-02 IS ABOUT, end to end.
+   *
+   * A technician types a write-up in a basement; the tablet holds it. While
+   * there is no signal the same write-up is corrected at the other end — a
+   * customer rang, a part number was wrong. "Load the draft into the form and
+   * save" would then replace a correction made by somebody who knew something
+   * the draft does not, and until now nothing said so: the notice offered the
+   * draft exactly as it would over an empty field.
+   *
+   * The draft now carries what the server held when it was typed, so the two
+   * cases can be told apart, and this one is put in front of the technician
+   * with BOTH texts and no default.
+   */
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Completion' }).click();
+  const findings = page.getByLabel('Fault findings');
+  await findings.waitFor({ timeout: 20000 });
+  const serverHeldBefore = await findings.inputValue();
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  const mine = 'Basement draft: the slab needs grouting before the machine can be levelled.';
+  try {
+    await findings.fill(mine);
+    await findings.blur();
+    await page.getByRole('button', { name: 'Save now' }).click();
+    await page.getByText('kept on this tablet', { exact: false }).first().waitFor({ timeout: 25000 });
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  /*
+   * THE SERVER MOVES. Written through the API, which is the only way anything
+   * reaches the job — a correction typed at a desk arrives exactly like this.
+   */
+  const theirs = 'Office correction: the slab was repaired by the customer on Tuesday.';
+  const wrote = await page.evaluate(
+    async ([text, held]) => {
+      const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
+      const body = await response.json();
+      const job = body.data.view.job;
+      const save = await fetch(`/api/jobs/${job.id}/save_report`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // The route takes the report's own fields, which is what the panel
+        // sends: a correction typed at a desk arrives exactly like this.
+        body: JSON.stringify({ ...job.completionReport, faultFindings: text }),
+      });
+      return { status: save.status, held };
+    },
+    [theirs, serverHeldBefore],
+  );
+  if (wrote.status !== 200) throw new Error(`the office correction was refused: HTTP ${wrote.status}`);
+
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Completion' }).click();
+
+  const conflict = page.getByTestId('writeup-draft-conflict');
+  await conflict.waitFor({ timeout: 25000 });
+  const notice = await page.getByTestId('writeup-local-draft').innerText();
+  for (const fragment of ['changed on the server', 'On the job now', 'Your draft']) {
+    if (!notice.includes(fragment)) throw new Error(`the conflict notice is missing "${fragment}"`);
+  }
+  if (!notice.includes('Office correction')) {
+    throw new Error('the conflict does not show what is on the job now');
+  }
+  if (!notice.includes('Basement draft')) {
+    throw new Error('the conflict does not show the draft it is weighed against');
+  }
+  // NOTHING WAS APPLIED: the form still holds the server's text.
+  const inForm = await page.getByLabel('Fault findings').inputValue();
+  if (inForm !== theirs) {
+    throw new Error(`the draft was applied without being chosen: ${inForm}`);
+  }
+  await page.screenshot({ path: `${shots}/50-writeup-conflict.png`, fullPage: false });
+
+  // And the technician's decision is what applies it.
+  await page.getByTestId('writeup-use-draft').click();
+  await page.getByRole('button', { name: 'Save now' }).click();
+  await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
+  const after = await page.evaluate(async () => {
+    const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
+    const body = await response.json();
+    return body.data.view.job.completionReport.faultFindings;
+  });
+  if (!after.includes('Basement draft')) {
+    throw new Error(`the chosen draft did not reach the job: ${after}`);
+  }
+});
+
 /* ---- OFF-DETAIL-1: the job detail, from this device's own copy ----------- */
 
 await step('the job a technician had open is readable with the network off', async () => {
@@ -5243,6 +5336,25 @@ await step('unsent work survives a sign-out and stays with its owner', async () 
   await page.locator('table').first().waitFor({ timeout: 20000 });
   const { jobNumber } = await workableJob(page);
 
+  /*
+   * THE SESSION'S OWN VALUE, TAKEN WHILE THERE IS ONE.
+   *
+   * Read from the BROWSER CONTEXT, where Playwright can see an HttpOnly cookie
+   * the page cannot, and kept for the storage check further down — which runs
+   * after the sign-out, when there is deliberately no cookie left to read.
+   * Asserting on field NAMES catches a field somebody called `sessionToken`;
+   * it does not catch one called `d` holding the session, which is why the
+   * value itself is what the stores are checked against.
+   */
+  const sessionCookie = (await page.context().cookies(BASE)).find((cookie) =>
+    cookie.name.endsWith('eje_session'),
+  );
+  if (sessionCookie === undefined) throw new Error('there is no session cookie to check against');
+  if (!sessionCookie.httpOnly) throw new Error('the session cookie is not HttpOnly');
+  if (sessionCookie.value.length < 16) {
+    throw new Error('the session cookie is too short to be a real token');
+  }
+
   await page.goto(`${BASE}/jobs/${jobNumber}`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Labour & Parts' }).click();
   await page.getByRole('button', { name: 'Add labour' }).first().waitFor({ timeout: 15000 });
@@ -5351,6 +5463,13 @@ await step('unsent work survives a sign-out and stays with its owner', async () 
                   Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]),
                 ),
               ),
+              // Session storage as well: it is cleared when the tab closes,
+              // which makes it a tempting place to keep a token and no safer.
+              session: JSON.stringify(
+                Object.fromEntries(
+                  Object.keys(sessionStorage).map((key) => [key, sessionStorage.getItem(key)]),
+                ),
+              ),
             });
           };
           tx.onerror = () => reject(new Error('the read failed'));
@@ -5362,6 +5481,9 @@ await step('unsent work survives a sign-out and stays with its owner', async () 
       .filter((needle) => new RegExp(needle, 'i').test(blob));
     if (offending.length > 0) {
       throw new Error(`${where} holds ${offending.join(', ')}`);
+    }
+    if (blob.includes(sessionCookie.value)) {
+      throw new Error(`${where} holds the session cookie's own value`);
     }
   }
 

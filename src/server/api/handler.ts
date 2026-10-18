@@ -120,7 +120,14 @@ export const readRoute =
 export interface DownloadResponse {
   readonly fileName: string;
   readonly contentType: string;
-  readonly body: string;
+  /**
+   * Text for a spreadsheet, bytes for a stored document.
+   *
+   * Both, because the two real uses are a CSV this server composed and a PDF
+   * it is handing back exactly as it was stored — and converting the second
+   * one through a string would corrupt it.
+   */
+  readonly body: string | Uint8Array;
 }
 
 const safeFileName = (name: string): string =>
@@ -135,7 +142,7 @@ export const downloadRoute =
       const runtime = getServerRuntime();
       const file = await runtime.read((unit) => handler({ ...unit, actor, request, params }));
       const name = safeFileName(file.fileName);
-      return new NextResponse(file.body, {
+      return new NextResponse(file.body as BodyInit, {
         headers: {
           'Content-Type': file.contentType,
           'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,

@@ -28,7 +28,7 @@ import {
   type Column,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { ExportCsvButton } from '@/components/exports/ExportCsvButton';
+import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
@@ -210,7 +210,13 @@ const ClosedJobsPage = () => {
         title="Closed Jobs"
         breadcrumbs={[{ label: 'Jobs', href: '/jobs' }, { label: 'Closed Jobs' }]}
         description="Every issued and closed job card. Historical records — read-only, with the final signed document against each one."
-        actions={<ExportCsvButton href={exportHref} fallbackName="eje-closed-jobs.csv" />}
+        actions={
+          <DownloadFileButton
+            href={exportHref}
+            fallbackName="eje-closed-jobs.csv"
+            label="Download CSV"
+          />
+        }
       />
 
       <Card className="mb-5">

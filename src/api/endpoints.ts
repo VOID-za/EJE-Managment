@@ -646,6 +646,14 @@ export const library = {
    */
   upload: (file: File, fields: Readonly<Record<string, string>>) =>
     apiUpload<LibraryUploadResult>('/api/library/upload', file, '', fields),
+  /**
+   * Where a stored document is downloaded from. LIB-5.
+   *
+   * Authorised on every request by `canOpenDocumentFile`, and a refusal is the
+   * same 404 a missing document gets — so the response cannot be used to ask
+   * which documents are waiting for approval.
+   */
+  fileUrl: (documentId: string) => `/api/library/${segment(documentId)}/file`,
   update: (documentId: string, input: unknown) =>
     command<TechnicalDocument>(`/api/library/${segment(documentId)}/update`, input),
   approve: (documentId: string) =>

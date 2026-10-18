@@ -82,6 +82,31 @@ Check 10 is the one most likely to produce real work, and it is the one nobody
 can do from a desk. Write down what was awkward rather than whether it
 "passed".
 
+**WHAT IS NOW MEASURED FROM A DESK, AND WHY IT DOES NOT REPLACE CHECK 10.**
+*Added 18 October 2026.* `npm run responsive-check` measures every screen at
+1024×768, 820×1180 and 390×844 and fails on sideways scroll, on a control whose
+box ends past the right edge, on a tap target under 36px, on a control that
+cannot be focused, and on any of those appearing once a 200-character fault
+description and a long customer name are typed in. It runs in CI. It found five
+real defects — a closed navigation drawer that was still focusable, 16px
+breadcrumb links, a 58×16px job-number link on the activity trail and the
+dashboard, 24px chips on the search screen, and the calendar's "+N more" sitting
+below the bars beside it — and all five are fixed.
+
+None of that is check 10. A headless browser cannot tell you that the screen
+washes out in Highveld sun at two in the afternoon, that a gloved thumb covers
+three controls at once, or that the stylus skips on a cracked screen protector.
+What the audit buys is that the person doing check 10 is reporting on the things
+only a person can report on, instead of finding a button off the edge of the
+screen.
+
+**Check 8 is now stronger than it was.** The update bar does not merely refrain
+from reloading mid-capture — it does not APPEAR mid-capture. It is `sticky` at
+the top of the page, so appearing used to push the signature pad down under
+whatever was drawing on it. While a signature, a write-up with unsaved text or a
+photograph being sent is on screen, the bar renders nothing at all and appears
+once the capture is finished.
+
 ---
 
 ## What the technician should be told

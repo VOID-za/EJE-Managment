@@ -22,6 +22,7 @@ import {
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { UploadDocumentDialog } from '@/components/library/UploadDocumentDialog';
 import type { LibrarySearchPage } from '@/application/library-search';
 import { library, reads } from '@/api/endpoints';
@@ -547,9 +548,23 @@ const DocumentPreview = ({
         <Button variant="secondary" onClick={onClose}>
           Close
         </Button>
-        <Button leadingIcon={<Icon name="download" className="size-4" />} disabled>
-          Download (simulated)
-        </Button>
+        {/*
+          A REAL DOWNLOAD. LIB-5.
+
+          It read *Download (simulated)* and was disabled, because there was no
+          file behind the record. There is one now for anything uploaded
+          through the library, and this fetches it — so a refusal, or a record
+          that was never uploaded, is reported in the server's own words
+          instead of a dead button. A seeded document still has no bytes and
+          says so.
+        */}
+        {document !== null && (
+          <DownloadFileButton
+            href={library.fileUrl(document.id)}
+            fallbackName={document.fileName}
+            label="Download the document"
+          />
+        )}
       </>
     }
   >
