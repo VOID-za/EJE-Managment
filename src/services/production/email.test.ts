@@ -317,6 +317,17 @@ describe('a deployment with no configuration', () => {
     expect(failure?.message).toContain('never used in production');
   });
 
+  it('says WHICH KIND of failure it is, so the job can record it', async () => {
+    /*
+     * "Not configured" is not "the provider refused": nobody is at fault on
+     * the customer's side, nothing was sent, and what has to change is this
+     * deployment. The job's delivery record stores that distinction, so the
+     * office reads it off the job rather than out of a sentence.
+     */
+    const refusal = await new UnconfiguredEmailService().send().catch((error: unknown) => error);
+    expect((refusal as { kind?: string }).kind).toBe('not_configured');
+  });
+
   it('reports no delivery state, so nothing closes a job on its silence', async () => {
     expect(await new UnconfiguredEmailService().deliveryState()).toBeNull();
   });

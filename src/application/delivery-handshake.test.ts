@@ -12,6 +12,7 @@ import {
 } from './job-operations';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
+import type { AppServices } from './context';
 import { deliveryMessage, isDelivered, type Job } from '@/domain';
 
 /**
@@ -270,6 +271,153 @@ describe('a failed delivery', () => {
 
     const retried = await retryJobCardDelivery(harness.as(master), abandoned, 'Pieter Nel');
     expect(retried.delivery.attempts).toBe(2);
+  });
+
+  /**
+   * THE KIND OF FAILURE IS RECORDED, NOT JUST THE SENTENCE. MANDATE-3.
+   *
+   * The office reads the provider's own words AND acts on the classification:
+   * a refused credential and a throttled provider are the same red card
+   * otherwise, and only one of them is worth pressing *Send again* on.
+   *
+   * The failing transport here is a stand-in that carries a `kind` the way the
+   * Graph adapter does, because the point under test is what the APPLICATION
+   * does with it — the adapter's own classification is proved in
+   * `services/production/email.test.ts`.
+   */
+  const failingEmail = (kind: string | undefined, message: string): AppServices['email'] => ({
+    send: () =>
+      Promise.reject(
+        kind === undefined ? new Error(message) : Object.assign(new Error(message), { kind }),
+      ),
+    deliveryState: () => Promise.resolve(null),
+  });
+
+  it('stores the KIND the transport reported, and the advice that goes with it', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const base = harness.as(technician);
+    const context = {
+      ...base,
+      services: {
+        ...base.services,
+        email: failingEmail('credentials_rejected', 'Microsoft 365 refused the credentials.'),
+      },
+    };
+
+    const issued = await issueJobCard(context, signed, 'accounts@example-demo.co.za', 'Pieter Nel');
+
+    expect(issued.delivery.state).toBe('failed');
+    expect(issued.delivery.failureKind).toBe('credentials_rejected');
+    expect(issued.job.status).toBe('awaiting_delivery');
+
+    // And the trail says what has to change, rather than only what happened.
+    const events = await harness.repos.activity.list(issued.job.id);
+    const failure = events.find((event) => event.type === 'delivery_state_changed');
+    expect(failure?.detail).toMatch(/refused the credentials/u);
+    expect(failure?.detail).toMatch(/until it is corrected/u);
+  });
+
+  it('records a transport that says nothing as UNCLASSIFIED rather than guessing', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const base = harness.as(technician);
+    const context = {
+      ...base,
+      services: { ...base.services, email: failingEmail(undefined, 'Something went wrong.') },
+    };
+
+    const issued = await issueJobCard(context, signed, 'accounts@example-demo.co.za', 'Pieter Nel');
+    expect(issued.delivery.state).toBe('failed');
+    expect(issued.delivery.failureKind).toBeNull();
+    expect(issued.delivery.failureReason).toBe('Something went wrong.');
+  });
+
+  it('ignores a kind an adapter invents, because the domain owns the vocabulary', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const base = harness.as(technician);
+    const context = {
+      ...base,
+      services: {
+        ...base.services,
+        email: failingEmail('the_moon_was_wrong', 'A transport from the future.'),
+      },
+    };
+
+    const issued = await issueJobCard(context, signed, 'accounts@example-demo.co.za', 'Pieter Nel');
+    expect(issued.delivery.failureKind).toBeNull();
+  });
+
+  /*
+   * A SUCCESSFUL SEND CARRIES NO KIND. The database says the same thing with a
+   * CHECK; this is the application agreeing with it rather than relying on it.
+   */
+  it('leaves an accepted send unclassified', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(
+      harness.as(technician),
+      signed,
+      'customer@example-demo.co.za',
+      'Pieter Nel',
+    );
+    expect(issued.delivery.state).toBe('pending_delivery');
+    expect(issued.delivery.failureKind).toBeNull();
+  });
+
+  /**
+   * A SECOND REPORT THAT SAYS SOMETHING NEW IS HEARD. MANDATE-3.
+   *
+   * `confirmJobCardDelivery` compared the STATE alone, so a provider that first
+   * said "too many requests" and then "the credential was refused" was ignored
+   * the second time: the office kept reading the first message and being told
+   * to try again, on a job that could not be sent until somebody fixed the
+   * credential. Found by a browser test reporting two failures in a row.
+   */
+  it('applies a report that changes the REASON while keeping the state', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(
+      harness.as(technician),
+      signed,
+      'customer@example-demo.co.za',
+      'Pieter Nel',
+    );
+
+    harness.outbox.setDelivery(issued.delivery.messageId, 'failed', 'Too many requests.', 'throttled');
+    const throttled = await confirmJobCardDelivery(harness.as(master), issued.job);
+    expect(throttled.delivery?.state).toBe('failed');
+    expect(throttled.delivery?.failureKind).toBe('throttled');
+
+    harness.outbox.setDelivery(
+      issued.delivery.messageId,
+      'failed',
+      'Microsoft 365 refused the credentials (HTTP 401).',
+      'credentials_rejected',
+    );
+    const refused = await confirmJobCardDelivery(harness.as(master), throttled);
+    expect(refused.delivery?.failureKind, 'the second report was ignored').toBe(
+      'credentials_rejected',
+    );
+    expect(refused.delivery?.failureReason).toMatch(/refused the credentials/u);
+    expect(refused.status).toBe('awaiting_delivery');
+  });
+
+  /** And the same report twice still changes nothing, which is what makes a replayed callback safe. */
+  it('does nothing at all for an identical repeated report', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(
+      harness.as(technician),
+      signed,
+      'customer@example-demo.co.za',
+      'Pieter Nel',
+    );
+
+    harness.outbox.setDelivery(issued.delivery.messageId, 'failed', 'Mailbox full.', 'provider_refused');
+    const first = await confirmJobCardDelivery(harness.as(master), issued.job);
+    const before = await harness.repos.activity.list(issued.job.id);
+
+    const second = await confirmJobCardDelivery(harness.as(master), first);
+    const after = await harness.repos.activity.list(issued.job.id);
+
+    expect(second.delivery?.updatedAt).toBe(first.delivery?.updatedAt);
+    expect(after).toHaveLength(before.length);
   });
 
   it('records every attempt on the audit trail', async () => {

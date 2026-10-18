@@ -94,6 +94,8 @@ const delivered = (to: string, at: IsoDateTime) => ({
   updatedAt: at,
   attempts: 1,
   failureReason: '',
+  // Delivered, so there is no failure to classify.
+  failureKind: null,
 });
 
 /** Every item answered `pass`, with the measurements filled in sensibly. */

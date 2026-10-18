@@ -486,6 +486,7 @@ describeDb('the PostgreSQL job repository', () => {
       updatedAt: '2026-09-20T12:31:00.000Z',
       attempts: 1,
       failureReason: '',
+      failureKind: null,
     };
 
     it('keeps the provider message id and state across a reload', async () => {
@@ -505,6 +506,95 @@ describeDb('the PostgreSQL job repository', () => {
       expect(read?.delivery?.attempts).toBe(1);
     });
 
+    /**
+     * THE KIND OF FAILURE SURVIVES, AND ONLY ON A FAILURE. MANDATE-3.
+     *
+     * `failure_reason` is the provider's sentence; the KIND is what the office
+     * can act on — whether *Send again* can work at all. It is stored, read
+     * back, and the table refuses to carry one on an attempt that did not
+     * fail, because a kind that explains an accepted send explains nothing.
+     */
+    it('keeps the KIND of failure, and clears it when the attempt stops failing', async () => {
+      const stored = await signedJobWithEvidence();
+      const base = { ...stored, status: 'awaiting_delivery' as const };
+
+      await repository.save({
+        ...base,
+        delivery: {
+          ...sentDelivery,
+          messageId: '',
+          state: 'failed',
+          acceptedAt: null,
+          failureReason: 'The job card is 4 MB.',
+          failureKind: 'attachment_too_large',
+        },
+      });
+
+      const failed = await repository.findById(stored.id);
+      expect(failed?.delivery?.failureKind).toBe('attachment_too_large');
+
+      // The same attempt, now accepted. The kind goes with the failure.
+      await repository.save({ ...base, delivery: sentDelivery });
+      const accepted = await repository.findById(stored.id);
+      expect(accepted?.delivery?.state).toBe('pending_delivery');
+      expect(accepted?.delivery?.failureKind).toBeNull();
+
+      const rows = await db
+        .select()
+        .from(schema.deliveryAttempts)
+        .where(eq(schema.deliveryAttempts.jobId, stored.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.failureKind).toBeNull();
+    });
+
+    it('reads an unrecognised kind as unclassified rather than passing it up', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        delivery: {
+          ...sentDelivery,
+          messageId: '',
+          state: 'failed',
+          acceptedAt: null,
+          failureReason: 'Something a future provider invented.',
+          failureKind: 'provider_refused',
+        },
+      });
+
+      /*
+       * The column is `text` so a new transport's failure mode needs no
+       * migration. The price of that freedom is paid here: a string the domain
+       * does not know reads as NULL rather than arriving on a screen as a kind
+       * nothing can narrow.
+       */
+      await db
+        .update(schema.deliveryAttempts)
+        .set({ failureKind: 'invented_by_a_later_provider' })
+        .where(eq(schema.deliveryAttempts.jobId, stored.id));
+
+      const read = await repository.findById(stored.id);
+      expect(read?.delivery?.state).toBe('failed');
+      expect(read?.delivery?.failureKind).toBeNull();
+      expect(read?.delivery?.failureReason).toMatch(/future provider/u);
+    });
+
+    it('REFUSES at the database to explain a send that did not fail', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({ ...stored, status: 'awaiting_delivery', delivery: sentDelivery });
+
+      const refused = await db
+        .update(schema.deliveryAttempts)
+        .set({ failureKind: 'credentials_rejected' })
+        .where(eq(schema.deliveryAttempts.jobId, stored.id))
+        .then(() => null, (error: unknown) => error);
+
+      expect(refused, 'the CHECK did not fire').not.toBeNull();
+      expect(await postgresMessage(Promise.reject(refused))).toMatch(
+        /delivery_attempts_kind_only_on_failure/u,
+      );
+    });
+
     it('keeps a FAILURE and its reason, which is what the office acts on', async () => {
       const stored = await signedJobWithEvidence();
       await repository.save({
@@ -516,6 +606,7 @@ describeDb('the PostgreSQL job repository', () => {
           state: 'failed',
           acceptedAt: null,
           failureReason: 'Microsoft 365 refused the credentials (HTTP 401).',
+          failureKind: 'credentials_rejected',
         },
       });
 
@@ -534,7 +625,14 @@ describeDb('the PostgreSQL job repository', () => {
       await repository.save({
         ...stored,
         status: 'awaiting_delivery',
-        delivery: { ...sentDelivery, messageId: '', state: 'failed', acceptedAt: null, failureReason: 'Mailbox full.' },
+        delivery: {
+          ...sentDelivery,
+          messageId: '',
+          state: 'failed',
+          acceptedAt: null,
+          failureReason: 'Mailbox full.',
+          failureKind: 'invalid_recipient',
+        },
       });
       const second = await repository.save({
         ...stored,

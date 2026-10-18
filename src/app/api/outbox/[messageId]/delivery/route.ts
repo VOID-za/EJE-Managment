@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { can } from '@/domain';
+import { can, DELIVERY_FAILURE_KINDS, isDeliveryFailureKind } from '@/domain';
 import { confirmJobCardDelivery } from '@/application/job-operations';
 import { forbidden } from '@/server/api/errors';
 import { writeRoute } from '@/server/api/handler';
@@ -23,6 +23,15 @@ export const POST = writeRoute({
     .object({
       state: z.enum(['not_started', 'sending', 'pending_delivery', 'delivered', 'failed']),
       failureReason: z.string().max(500).optional(),
+      /*
+       * WHICH KIND of failure this stands in for. MANDATE-3.
+       *
+       * A real delivery report classifies, and the office acts on the
+       * classification rather than on the sentence. Validated against the
+       * domain's own vocabulary so the demonstration cannot report a kind the
+       * screens do not understand.
+       */
+      failureKind: z.enum(DELIVERY_FAILURE_KINDS as readonly [string, ...string[]]).optional(),
     })
     .strict(),
   handler: async (context) => {
@@ -49,6 +58,7 @@ export const POST = writeRoute({
       messageId,
       context.input.state,
       context.input.failureReason ?? '',
+      isDeliveryFailureKind(context.input.failureKind) ? context.input.failureKind : null,
     );
 
     /*

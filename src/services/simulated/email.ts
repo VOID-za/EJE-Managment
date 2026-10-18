@@ -79,6 +79,7 @@ export class SimulatedEmailService implements EmailService {
       messageId: entry.id,
       state: entry.delivery,
       failureReason: entry.failureReason,
+      failureKind: entry.failureKind ?? null,
       entry,
     };
   }

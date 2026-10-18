@@ -1,3 +1,4 @@
+import type { DeliveryFailureKind } from '@/domain';
 import type { DeliveryState, OutboxEntry, OutboxReader } from '../ports';
 
 /**
@@ -35,11 +36,22 @@ export class SimulatedOutbox implements OutboxReader {
    * that the demo cannot actually observe: nothing here invents a confirmation
    * on its own.
    */
-  setDelivery(id: string, delivery: DeliveryState, failureReason = ''): OutboxEntry | null {
+  setDelivery(
+    id: string,
+    delivery: DeliveryState,
+    failureReason = '',
+    failureKind: DeliveryFailureKind | null = null,
+  ): OutboxEntry | null {
     let updated: OutboxEntry | null = null;
     this.entries = this.read().map((entry) => {
       if (entry.id !== id) return entry;
-      updated = { ...entry, delivery, failureReason };
+      /*
+       * The KIND travels with the state, because that is what a real report
+       * does: "refused the credential" and "mailbox full" are different
+       * instructions to the office, and a demonstration that collapsed them
+       * would be showing a screen production does not have.
+       */
+      updated = { ...entry, delivery, failureReason, failureKind };
       return updated;
     });
     if (updated === null) return null;

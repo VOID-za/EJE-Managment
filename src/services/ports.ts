@@ -3,6 +3,7 @@ import type {
   Contact,
   DeliveryState,
   Customer,
+  DeliveryFailureKind,
   IsoDateTime,
   Job,
   Machine,
@@ -10,7 +11,8 @@ import type {
   SystemSettings,
   User,
 } from '@/domain';
-export type { DeliveryState } from '@/domain';
+export type { DeliveryFailureKind, DeliveryState } from '@/domain';
+import { isDeliveryFailureKind } from '@/domain';
 
 /**
  * Integration ports.
@@ -55,6 +57,15 @@ export interface OutboxEntry {
    */
   readonly delivery: DeliveryState;
   readonly failureReason: string;
+  /**
+   * WHICH KIND of failure, where whatever reported it could say.
+   *
+   * A real delivery report classifies — a refused credential is not a full
+   * mailbox. The demonstration outbox carries the field so the office screen
+   * can show the SAME distinction it will show in production, rather than the
+   * demo being the one place that cannot.
+   */
+  readonly failureKind?: DeliveryFailureKind | null;
 }
 
 export interface EmailMessage {
@@ -77,9 +88,36 @@ export interface DeliveryReceipt {
   readonly messageId: string;
   readonly state: DeliveryState;
   readonly failureReason: string;
+  /**
+   * WHICH KIND of failure, where the transport can say.
+   *
+   * Optional, because a transport need not classify and the demonstration
+   * adapters do not. The domain owns the vocabulary (`DeliveryFailureKind`):
+   * whether a retry can work is the office's question, not a provider's.
+   */
+  readonly failureKind?: DeliveryFailureKind | null;
   /** The outbox record, where the adapter keeps one. */
   readonly entry: OutboxEntry | null;
 }
+
+/**
+ * THE KIND OF FAILURE AN ADAPTER THREW, READ WITHOUT KNOWING THE ADAPTER.
+ *
+ * `services.email.send` rejects with whatever its transport raises — Graph's
+ * `EmailSendFailed`, an `EmailNotConfigured`, a `TypeError` from something
+ * nobody expected. The application has to record WHICH KIND of failure that
+ * was, and must not import a concrete adapter to find out: the port is the
+ * contract, so the contract is where this lives.
+ *
+ * Structural on purpose. An adapter that carries a `kind` from the domain's own
+ * vocabulary is understood; anything else is `null`, which the record stores as
+ * "unclassified" rather than guessing. That keeps a new transport free to say
+ * nothing at all without pretending.
+ */
+export const deliveryFailureKindOf = (error: unknown): DeliveryFailureKind | null => {
+  const kind = (error as { readonly kind?: unknown } | null | undefined)?.kind;
+  return isDeliveryFailureKind(kind) ? kind : null;
+};
 
 export interface EmailService {
   /**

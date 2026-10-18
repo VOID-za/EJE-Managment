@@ -67,9 +67,11 @@ import {
   type DeliveryRecord,
   type UserId,
   type MediaVisibility,
+  deliveryRetryAdvice,
 } from '@/domain';
 import { businessDateOf } from '@/lib/business-time';
 import { formatHours, formatKilometres } from '@/lib/format';
+import { deliveryFailureKindOf } from '@/services/ports';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment } from './assignment-notice';
@@ -3038,6 +3040,14 @@ const sendFinalDocument = async (
       messageId: '',
       state: 'failed' as const,
       failureReason: error instanceof Error ? error.message : 'The provider could not be reached.',
+      /*
+       * WHICH KIND, so the office is not left with one button and nine
+       * situations. Read off the thrown error through the PORT's own guard —
+       * the application does not know which transport this deployment has, and
+       * an adapter that says nothing is recorded as unclassified rather than
+       * guessed at.
+       */
+      failureKind: deliveryFailureKindOf(error),
       entry: null,
     };
   }
@@ -3051,6 +3061,8 @@ const sendFinalDocument = async (
     updatedAt: now,
     attempts,
     failureReason: receipt.failureReason,
+    // Only a failure carries a kind, which is also what the table's CHECK says.
+    failureKind: receipt.state === 'failed' ? (receipt.failureKind ?? null) : null,
   };
 
   await audit(context, {
@@ -3059,7 +3071,11 @@ const sendFinalDocument = async (
     summary: `Customer copy ${deliveryStateLabel(delivery.state).toLowerCase()}`,
     detail:
       delivery.state === 'failed'
-        ? `Attempt ${attempts} to ${document.issuedTo} failed: ${delivery.failureReason}`
+        ? `Attempt ${attempts} to ${document.issuedTo} failed: ${delivery.failureReason}${
+            deliveryRetryAdvice(delivery.failureKind).length === 0
+              ? ''
+              : ` ${deliveryRetryAdvice(delivery.failureKind)}`
+          }`
         : `Attempt ${attempts}: the provider accepted ${document.fileName} for ${document.issuedTo}. Delivery is ${deliveryStateLabel(delivery.state).toLowerCase()}.`,
   });
 
@@ -3118,13 +3134,39 @@ export const confirmJobCardDelivery = async (
   if (job.delivery.messageId.length === 0) return job;
 
   const receipt = await context.services.email.deliveryState(job.delivery.messageId);
-  if (receipt === null || receipt.state === job.delivery.state) return job;
+  if (receipt === null) return job;
+
+  /*
+   * IDEMPOTENT, BUT NOT DEAF. MANDATE-3.
+   *
+   * This compared the STATE alone, so a second report that kept the state and
+   * changed what it meant was dropped on the floor: a provider that first said
+   * "too many requests" and then "the credential was refused" left the office
+   * reading the first message and being advised to try again, on a job that
+   * could never be sent until somebody fixed the credential. Found by a
+   * browser test reporting two different failures in a row.
+   *
+   * So the comparison is of everything the record carries from a report. An
+   * identical report still changes nothing — which is what makes a repeated or
+   * replayed callback safe — and a report that says something NEW is applied.
+   */
+  const unchanged =
+    receipt.state === job.delivery.state &&
+    receipt.failureReason === job.delivery.failureReason &&
+    (receipt.failureKind ?? null) === job.delivery.failureKind;
+  if (unchanged) return job;
 
   const now = context.services.clock.now();
   const delivery: DeliveryRecord = {
     ...job.delivery,
     state: receipt.state,
     failureReason: receipt.failureReason,
+    /*
+     * A report that moves the attempt off `failed` clears the kind with it —
+     * the kind explains a failure, and keeping a stale one would have the
+     * screen advising the office about a problem that is over.
+     */
+    failureKind: receipt.state === 'failed' ? (receipt.failureKind ?? job.delivery.failureKind) : null,
     confirmedAt: receipt.state === 'delivered' ? now : null,
     updatedAt: now,
   };

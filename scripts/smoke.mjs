@@ -922,6 +922,111 @@ await step('the customer email is in the outbox, marked pending rather than deli
   await page.getByText('Delivery pending').first().waitFor({ timeout: 8000 });
 });
 
+/*
+ * WHAT THE OFFICE IS TOLD WHEN A CUSTOMER'S COPY DOES NOT GO. MANDATE-3.
+ *
+ * The office has one button — *Send to the customer again* — and a sentence
+ * written by a mail provider. For four kinds of failure that button works; for
+ * the rest it cannot, until a credential is corrected, a permission granted, an
+ * address fixed or the document made smaller. Pressing it again is then
+ * somebody losing an afternoon to a problem nobody told them about.
+ *
+ * The failure is reported through the SAME route the demonstration outbox uses
+ * to stand in for a provider's delivery report, with the kind that report would
+ * carry. Nothing here invents a send: the job really did go to the simulated
+ * transport, and this is the report coming back negative.
+ *
+ * The button must still be there. Once the credential IS corrected, this is
+ * exactly the failure the office should be able to retry — what the kind
+ * changes is what they are told before they press it.
+ */
+await step('a failed delivery tells the office whether trying again can work', async () => {
+  const messageId = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/EJE-1048`);
+    const payload = await response.json();
+    return payload?.data?.view?.job?.delivery?.messageId ?? '';
+  }, BASE);
+  if (messageId.length === 0) throw new Error('EJE-1048 has no provider message id to report on');
+
+  const report = async (state, failureReason, failureKind) =>
+    page.evaluate(
+      async ({ base, id, body }) => {
+        const response = await fetch(`${base}/api/outbox/${encodeURIComponent(id)}/delivery`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        return { status: response.status, body: (await response.text()).slice(0, 300) };
+      },
+      { base: BASE, id: messageId, body: { state, failureReason, failureKind } },
+    );
+
+  const refusedCredential = await report(
+    'failed',
+    'Microsoft 365 refused the credentials (HTTP 401).',
+    'credentials_rejected',
+  );
+  if (refusedCredential.status !== 200) {
+    throw new Error(`reporting the failure answered HTTP ${refusedCredential.status}: ${refusedCredential.body}`);
+  }
+
+  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
+  const reason = page.getByTestId('delivery-failure-reason');
+  await reason.waitFor({ timeout: 10000 });
+  const reasonText = (await reason.innerText()).trim();
+  if (!reasonText.includes('refused the credentials')) {
+    throw new Error(`the office is not shown the provider's own words: ${reasonText}`);
+  }
+
+  const advice = page.getByTestId('delivery-retry-advice');
+  await advice.waitFor({ timeout: 10000 });
+  const unretryable = await advice.evaluate((node) => ({
+    kind: node.getAttribute('data-delivery-kind'),
+    retryable: node.getAttribute('data-delivery-retryable'),
+    text: node.textContent ?? '',
+  }));
+  if (unretryable.kind !== 'credentials_rejected') {
+    throw new Error(`the screen read the kind as ${unretryable.kind}`);
+  }
+  if (unretryable.retryable !== 'false') {
+    throw new Error('a refused credential was presented as worth retrying');
+  }
+  if (!unretryable.text.includes('Something has to change first')) {
+    throw new Error(`the advice did not say what to do: ${unretryable.text}`);
+  }
+
+  // The button stays. Hiding it would strand the office once they fix the cause.
+  if ((await page.getByRole('button', { name: 'Send to the customer again' }).count()) === 0) {
+    throw new Error('the re-send was taken away on an unretryable failure');
+  }
+  await page.screenshot({ path: `${shots}/05a-delivery-failure-advice.png`, fullPage: false });
+
+  // And the other half of the distinction: a throttled provider IS worth retrying.
+  const throttled = await report('failed', 'Too many requests.', 'throttled');
+  if (throttled.status !== 200) throw new Error(`the second report answered HTTP ${throttled.status}`);
+
+  await page.goto(`${BASE}/jobs/EJE-1048/review`, { waitUntil: 'networkidle' });
+  const second = page.getByTestId('delivery-retry-advice');
+  await second.waitFor({ timeout: 10000 });
+  const worthTrying = await second.evaluate((node) => ({
+    kind: node.getAttribute('data-delivery-kind'),
+    retryable: node.getAttribute('data-delivery-retryable'),
+    text: node.textContent ?? '',
+  }));
+  if (worthTrying.kind !== 'throttled' || worthTrying.retryable !== 'true') {
+    throw new Error(`a throttled provider read as ${worthTrying.kind}/${worthTrying.retryable}`);
+  }
+  if (!worthTrying.text.includes('Worth trying again')) {
+    throw new Error(`the advice did not encourage a retry: ${worthTrying.text}`);
+  }
+
+  // Back to where the next step expects it: accepted, awaiting confirmation.
+  const restored = await report('pending_delivery', '', undefined);
+  if (restored.status !== 200) throw new Error(`restoring the report answered HTTP ${restored.status}`);
+  await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
+  await page.getByText('Delivery pending').first().waitFor({ timeout: 10000 });
+});
+
 await step('confirming the delivery is what closes the job', async () => {
   await page.getByRole('button', { name: 'Confirm delivered' }).first().click();
   await page.getByText('Delivered').first().waitFor({ timeout: 10000 });

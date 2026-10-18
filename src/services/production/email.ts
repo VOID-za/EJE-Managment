@@ -1,3 +1,7 @@
+import {
+  isRetryableDeliveryFailure,
+  type DeliveryFailureKind,
+} from '@/domain';
 import type {
   Clock,
   DeliveryReceipt,
@@ -272,37 +276,18 @@ export const chooseEmailTransport = (options: {
  * So the kind is part of the failure, and `retryable` is derived from it in one
  * place rather than guessed at each screen.
  */
-export type EmailFailureKind =
-  /** 401: the client credential was refused. Nothing a retry changes. */
-  | 'credentials_rejected'
-  /** 403: authenticated and not allowed — usually a missing `Mail.Send`. */
-  | 'permission_denied'
-  /** 429 or 503: Microsoft is asking for less. Retry, after the wait it names. */
-  | 'throttled'
-  /** 5xx: Exchange is having a bad time. Worth retrying. */
-  | 'provider_unavailable'
-  /** The address is not one Graph will accept. A person must fix the record. */
-  | 'invalid_recipient'
-  /** Over Graph's 3 MB message limit. A retry sends the same bytes. */
-  | 'attachment_too_large'
-  /** The stored document could not be read, so nothing was sent. */
-  | 'document_unavailable'
-  /** The provider accepted the connection and did not answer in time. */
-  | 'timed_out'
-  /** The provider could not be reached at all. */
-  | 'unreachable'
-  /** Anything else Graph refused, reported in its own words. */
-  | 'provider_refused';
+/**
+ * THE KIND OF FAILURE, NAMED BY THE DOMAIN RATHER THAN BY THIS ADAPTER.
+ *
+ * It was declared here first, which put a business question — can the office
+ * retry this, or must somebody change something? — inside the Microsoft
+ * adapter, where it could not be stored on a job or read on a screen. The
+ * vocabulary moved to `DeliveryFailureKind` and this is the alias, kept so the
+ * adapter's own tests and callers read naturally.
+ */
+export type EmailFailureKind = DeliveryFailureKind;
 
-/** The four that a second attempt can actually resolve. */
-const RETRYABLE: ReadonlySet<EmailFailureKind> = new Set<EmailFailureKind>([
-  'throttled',
-  'provider_unavailable',
-  'timed_out',
-  'unreachable',
-]);
-
-export const isRetryableFailure = (kind: EmailFailureKind): boolean => RETRYABLE.has(kind);
+export const isRetryableFailure = isRetryableDeliveryFailure;
 
 /** Raised when the provider did not accept the message. */
 export class EmailSendFailed extends Error {
@@ -369,6 +354,7 @@ export const classifyGraphFailure = (
  * administers the tenant.
  */
 const ADVICE: Readonly<Record<EmailFailureKind, string>> = {
+  not_configured: '',
   credentials_rejected:
     " This deployment's Microsoft 365 credential was refused, so sending again will fail the " +
     'same way. EMAIL_GRAPH_CLIENT_SECRET or the app registration needs attention.',
@@ -403,6 +389,16 @@ export const retryAfterSeconds = (header: string | null): number | null => {
 
 /** Raised when a deployment has no email configuration at all. */
 export class EmailNotConfigured extends Error {
+  /**
+   * The kind the job's delivery record stores. MANDATE-3.
+   *
+   * "Not configured" is a different thing from "the provider refused": nobody
+   * is at fault on the customer's side, nothing was sent, and what has to
+   * change is this deployment. The office reads that distinction off the job
+   * rather than off a sentence.
+   */
+  readonly kind: DeliveryFailureKind = 'not_configured';
+
   constructor(detail = '') {
     super(
       'Customer email is not configured on this deployment. Set EMAIL_GRAPH_TENANT_ID, ' +
@@ -671,7 +667,7 @@ export class GraphEmailService implements EmailService {
       failureReason: '',
     };
 
-    return { messageId, state: 'pending_delivery', failureReason: '', entry };
+    return { messageId, state: 'pending_delivery', failureReason: '', failureKind: null, entry };
   }
 
   /**
@@ -710,7 +706,7 @@ export class GraphEmailService implements EmailService {
      * yet receive — see `docs/integrations.md`. Until it does, this adapter
      * cannot close a job, and it says so rather than guessing.
      */
-    return { messageId, state: 'pending_delivery', failureReason: '', entry: null };
+    return { messageId, state: 'pending_delivery', failureReason: '', failureKind: null, entry: null };
   }
 }
 

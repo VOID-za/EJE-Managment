@@ -7,7 +7,9 @@ import {
   canSubmitJobCard,
   contactFullName,
   deliveryMessage,
+  deliveryRetryAdvice,
   deliveryStateLabel,
+  isRetryableDeliveryFailure,
   isDelivered,
   refusalAwaitingResolution,
   type DeliveryRecord,
@@ -172,6 +174,13 @@ const ReviewJobPage = ({
   const inMasterReview = job.status === 'submitted';
   const awaitingDelivery = job.status === 'awaiting_delivery';
   const closed = job.status === 'closed';
+
+  /*
+   * What a failed delivery MEANS for the office, decided in the domain so no
+   * screen invents its own version of "this will not work". MANDATE-3.
+   */
+  const advice = deliveryRetryAdvice(job.delivery?.failureKind ?? null);
+  const retryWorthTrying = isRetryableDeliveryFailure(job.delivery?.failureKind ?? null);
 
   /*
    * One submission, by whoever finished the job.
@@ -418,6 +427,42 @@ const ReviewJobPage = ({
               </Badge>
             }
           />
+          {/*
+            THE PROVIDER'S OWN WORDS, AND THEN WHAT THEY MEAN. MANDATE-3.
+
+            The office had one button and a sentence written by a mail
+            provider. For four kinds of failure that button works; for the rest
+            it cannot, until a credential is corrected, a permission granted,
+            an address fixed or a document made smaller — and pressing it again
+            is somebody losing an afternoon to a problem nobody told them
+            about. The reason stays, because it is the only account of what
+            happened; the advice says what to do with it.
+
+            The button is NOT hidden on an unretryable kind: once the thing is
+            fixed, this is exactly the failure the office should be able to
+            retry. What changes is what they are told before they press it.
+          */}
+          {job.delivery?.state === 'failed' && job.delivery.failureReason.length > 0 && (
+            <p
+              className="mt-3 rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-3 py-2 text-sm font-medium text-signal-800"
+              data-testid="delivery-failure-reason"
+            >
+              {job.delivery.failureReason}
+            </p>
+          )}
+          {job.delivery?.state === 'failed' && advice.length > 0 && (
+            <p
+              className="mt-2 text-sm text-steel-700"
+              data-testid="delivery-retry-advice"
+              data-delivery-kind={job.delivery.failureKind ?? 'unclassified'}
+              data-delivery-retryable={String(retryWorthTrying)}
+            >
+              <strong className="font-semibold">
+                {retryWorthTrying ? 'Worth trying again: ' : 'Something has to change first: '}
+              </strong>
+              {advice}
+            </p>
+          )}
           <p className="mt-3 text-xs text-steel-600">
             The signed job card is stored against the job. Re-sending uses that same document — the
             customer is never sent two different job cards, and nothing has to be signed again.

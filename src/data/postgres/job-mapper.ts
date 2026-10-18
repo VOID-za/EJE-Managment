@@ -21,6 +21,7 @@ import {
   type PricingSnapshot,
   type SignatureRefusal,
   type TravelEntry,
+  isDeliveryFailureKind,
 } from '@/domain';
 import type * as schema from '@/db/schema';
 
@@ -204,6 +205,12 @@ const deliveryFrom = (
     updatedAt: latest.failedAt ?? latest.confirmedAt ?? latest.acceptedAt ?? latest.attemptedAt,
     attempts: attempts.length,
     failureReason: latest.failureReason,
+    /*
+     * An unrecognised string reads as UNCLASSIFIED rather than being passed up
+     * as a kind nothing can narrow. The column is `text` so a new provider's
+     * failure mode needs no migration; this is where that freedom is paid for.
+     */
+    failureKind: isDeliveryFailureKind(latest.failureKind) ? latest.failureKind : null,
   };
 };
 

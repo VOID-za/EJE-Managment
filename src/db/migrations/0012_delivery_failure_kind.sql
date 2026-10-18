@@ -1,0 +1,22 @@
+-- WHICH KIND of delivery failure, so the office knows what to do about it.
+-- MASTER SCOPE MANDATE-3, DELIV-4.
+--
+-- `failure_reason` already held the provider's own sentence, which belongs on a
+-- screen and tells nobody whether pressing *Send again* can work. Four kinds of
+-- failure a retry resolves on its own (throttling, an unavailable provider, a
+-- timeout, an unreachable host); the rest need a credential corrected, a
+-- permission granted, an address fixed, a smaller document or the deployment
+-- configured — and until this column existed, the office had the same one
+-- button and no way to tell those apart.
+--
+-- NULLABLE, AND DELIBERATELY `text` RATHER THAN AN ENUM. Null means nobody
+-- classified it: every row written before this column, and any transport that
+-- does not say. Text because a new provider's new failure mode must not need a
+-- migration to be recorded; the domain's own union (`DeliveryFailureKind`) is
+-- what readers narrow against, and an unknown string reads as unclassified
+-- rather than breaking a screen.
+--
+-- The CHECK keeps the column honest: a kind explains a FAILURE, so an accepted
+-- or confirmed attempt cannot carry one.
+ALTER TABLE "delivery_attempts" ADD COLUMN "failure_kind" text;--> statement-breakpoint
+ALTER TABLE "delivery_attempts" ADD CONSTRAINT "delivery_attempts_kind_only_on_failure" CHECK ("delivery_attempts"."failure_kind" is null or "delivery_attempts"."state" = 'failed');

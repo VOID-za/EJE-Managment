@@ -899,6 +899,13 @@ export class PostgresJobRepository implements JobRepository {
         confirmedAt: delivery.confirmedAt,
         failedAt,
         failureReason: delivery.failureReason,
+        /*
+         * A kind explains a FAILURE — the table's own CHECK says so — and an
+         * attempt that was accepted carries none. Writing it on any other
+         * state would be refused by the database, which is the right place for
+         * that rule to live.
+         */
+        failureKind: delivery.state === 'failed' ? delivery.failureKind : null,
       })
       .onConflictDoUpdate({
         target: [
@@ -914,6 +921,7 @@ export class PostgresJobRepository implements JobRepository {
           confirmedAt: delivery.confirmedAt,
           failedAt,
           failureReason: delivery.failureReason,
+          failureKind: delivery.state === 'failed' ? delivery.failureKind : null,
         },
       });
   }

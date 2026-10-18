@@ -537,6 +537,13 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(attempts[0]?.state).toBe('failed');
     expect(attempts[0]?.failureReason).toMatch(/not configured/u);
     expect(attempts[0]?.finalDocumentId).not.toBeNull();
+    /*
+     * AND WHICH KIND it was. MANDATE-3. "Not configured" is a different
+     * instruction from "the provider refused": nothing was sent, nobody is at
+     * fault on the customer's side, and what has to change is this deployment.
+     * The office reads that off the job rather than out of a sentence.
+     */
+    expect(attempts[0]?.failureKind).toBe('not_configured');
 
     const reread = await master.get<{ view: { job: { delivery: Record<string, unknown> } } }>(
       `/api/jobs/${jobNumber}`,
@@ -546,6 +553,8 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(served.state).toBe('failed');
     expect(served.attempts).toBe(1);
     expect(String(served.failureReason)).toMatch(/not configured/u);
+    // The classification reaches the screen, which is where it is acted on.
+    expect(served.failureKind).toBe('not_configured');
   });
 
   it('keeps every attempt, so three tries can be told from one', async () => {

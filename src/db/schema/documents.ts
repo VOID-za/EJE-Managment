@@ -96,6 +96,19 @@ export const deliveryAttempts = pgTable(
     confirmedAt: instant('confirmed_at'),
     failedAt: instant('failed_at'),
     failureReason: text('failure_reason').notNull().default(''),
+    /*
+     * WHICH KIND of failure, so the office knows whether *Send again* can work.
+     *
+     * `failure_reason` is the provider's own sentence and belongs on a screen;
+     * this is the part somebody can act on — a credential to correct, an
+     * address to fix, a document too large, or simply "try again". Nullable
+     * because a transport need not classify, and because every row written
+     * before this column existed is legitimately unclassified. Deliberately
+     * `text` rather than an enum: a new provider's new failure mode must not
+     * need a migration to be recorded, and the domain's own union
+     * (`DeliveryFailureKind`) is what readers narrow against.
+     */
+    failureKind: text('failure_kind'),
     /** When the worker should try again. Null when it should not. */
     nextAttemptAt: instant('next_attempt_at'),
     createdAt: createdAt(),
@@ -115,6 +128,11 @@ export const deliveryAttempts = pgTable(
     check(
       'delivery_attempts_delivered_is_confirmed',
       sql`${table.state} <> 'delivered' or ${table.confirmedAt} is not null`,
+    ),
+    // A kind explains a FAILURE. An accepted or delivered attempt has none.
+    check(
+      'delivery_attempts_kind_only_on_failure',
+      sql`${table.failureKind} is null or ${table.state} = 'failed'`,
     ),
   ],
 );
