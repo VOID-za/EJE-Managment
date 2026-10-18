@@ -1,0 +1,73 @@
+# EJE Job Card Management — STAGING systemd unit
+#
+# Install to /etc/systemd/system/eje-staging.service on the VPS.
+#
+# A SECOND SERVICE BESIDE THE FIRST, SHARING NOTHING THAT MATTERS. Every path,
+# port, database and environment file below differs from `eje.service`, and the
+# differences are the whole point: a staging deployment that shares a database,
+# a storage directory or a port with the live service is not a staging
+# deployment, it is a second way to break production.
+#
+#   | | live | staging |
+#   |---|---|---|
+#   | unit | eje.service | eje-staging.service |
+#   | user | eje | eje-staging |
+#   | application | /srv/eje/app | /srv/eje-staging/app |
+#   | port (loopback) | 3000 | 3001 |
+#   | environment | /etc/eje/eje.env | /etc/eje-staging/eje.env |
+#   | database | eje_production | eje_staging |
+#   | documents | /var/lib/eje/storage | /var/lib/eje-staging/storage |
+#
+# Installing this unit does NOT touch eje.service, and `systemctl start
+# eje-staging` cannot stop it: they are separate units on separate ports. The
+# one thing they do share is the PostgreSQL server, which is why the database
+# name in the environment file is checked by `npm run preflight -- --expect-db
+# eje_staging` before this unit is ever started.
+#
+# See docs/vps-staging.md for the standing-up procedure and the rollback.
+[Unit]
+Description=EJE Job Card Management (staging)
+Documentation=https://github.com/VOID-za/EJE-Managment
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Wants, not Requires: the same reasoning as the live unit — restarting
+# PostgreSQL for a minor upgrade must not leave this stopped.
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=eje-staging
+Group=eje-staging
+WorkingDirectory=/srv/eje-staging/app
+
+EnvironmentFile=/etc/eje-staging/eje.env
+Environment=NODE_ENV=production
+Environment=PORT=3001
+
+# node, not npm, and the hostname as an argument — both for the reasons written
+# out in eje.service: npm does not forward SIGTERM, and `next start` does not
+# read HOSTNAME from the environment, so without the flag this would bind
+# 0.0.0.0 and publish port 3001 to the internet.
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3001
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=90
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eje-staging
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/eje-staging/app/.next /var/lib/eje-staging/storage
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

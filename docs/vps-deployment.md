@@ -383,6 +383,44 @@ sudo ss -lntp | grep 3000
 | PostgreSQL maintenance | EJE stays up. `Wants=` not `Requires=`, so restarting PostgreSQL does not stop the application; `/api/health` reports `"database":"unreachable"` while it is down |
 | Rollback | `git checkout <previous commit>` then rebuild and restart. **A migration is not rolled back by checking out old code** — the schema is additive, so old code runs against the newer schema; that is the safe direction and the reason there are no destructive migrations |
 
+### Before you start the service: `npm run preflight`
+
+```bash
+sudo -u eje env $(sudo cat /etc/eje/eje.env | xargs) \
+  NODE_ENV=production npm run preflight -- --expect-db eje_production
+```
+
+It reads this machine's own configuration, opens the database, writes and
+deletes one probe file in the storage directory, and prints a verdict per check.
+It exits non-zero if anything failed, so a deployment script stops instead of
+starting a server that looks healthy and is quietly wrong. It changes nothing —
+one `select 1`, one read of the migration ledger — and is deliberately safe to
+run against production, because the moment before a deployment is when somebody
+needs to know.
+
+**It prints no values.** Not a password, not a token, not a host, not the length
+of a secret: a verdict names the VARIABLE and says what is wrong with it,
+because this output ends up pasted into messages.
+
+The six silent failures it exists for, each of which otherwise shows up as
+something else entirely:
+
+| What it catches | What would happen without it |
+|---|---|
+| `DATABASE_URL` missing or misspelt | The in-memory DEMONSTRATION store serves fictional customers and discards every write on restart |
+| The wrong database named | A staging service writes to `eje_production`. `--expect-db` is the guard |
+| A migration not applied | The server starts and the first request touching the new schema fails |
+| `EJE_STORAGE_DIR` unwritable | Every issued job card fails at the moment a customer should have received one |
+| That directory INSIDE the application directory | The next deployment deletes every stored job card, and a database backup cannot rebuild one |
+| No email configuration | A real-database deployment refuses to send (MANDATE-3), so no customer gets a job card |
+
+It also refuses a deployment where `EJE_DEMO_SWITCHER` is armed for the
+configured database, and warns about a `EJE_BACKUP_KEY` that is absent or the
+wrong shape.
+
+For a SECOND service beside this one — its own user, port, database and storage
+— see `docs/vps-staging.md`.
+
 ### Backups
 
 ```bash
