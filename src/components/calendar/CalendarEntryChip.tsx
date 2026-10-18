@@ -117,6 +117,10 @@ export const CalendarEntryChip = ({
     return (
       <Link
         href={`/jobs/${entry.jobNumber}`}
+        // Marked so the responsive audit holds a month-grid bar to the floor
+        // the grid can actually give it, rather than to the 36px every other
+        // control is held to. See `scripts/responsive-check.mjs`.
+        data-calendar-bar=""
         className="flex h-full w-full items-center"
         aria-label={`${entry.jobNumber} — ${entry.subtitle}`}
       >
@@ -131,6 +135,7 @@ export const CalendarEntryChip = ({
     <button
       type="button"
       onClick={() => onSelect(entry)}
+      data-calendar-bar=""
       className="flex h-full w-full items-center"
       aria-label={`${entry.userName} — ${entry.subtitle}`}
     >

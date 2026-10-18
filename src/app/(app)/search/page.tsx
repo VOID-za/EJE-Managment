@@ -120,7 +120,14 @@ const SearchPageContent = () => {
                 setTerm(example);
                 router.push(`/search?q=${encodeURIComponent(example)}`);
               }}
-              className="rounded-full bg-steel-100 px-2.5 py-1 font-mono text-xs text-steel-600 transition-colors hover:bg-steel-200"
+              /*
+                A TAP TARGET, NOT A LABEL. These were 24px tall — the height of
+                their own text — and they are the first thing a technician
+                touches on the search screen. `npm run responsive-check` found
+                them; the type scale is unchanged and the pill simply holds its
+                text at a height a thumb can hit.
+              */
+              className="inline-flex min-h-9 items-center rounded-full bg-steel-100 px-3 font-mono text-xs text-steel-600 transition-colors hover:bg-steel-200"
             >
               {example}
             </button>

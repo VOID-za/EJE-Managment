@@ -161,7 +161,11 @@ export const MonthView = ({
                     key={`more-${day}`}
                     type="button"
                     onClick={() => (onSelectDayEntries ?? onSelectDay)(day)}
-                    className="pointer-events-auto absolute flex min-h-[18px] items-center justify-start rounded px-1 text-[10px] font-semibold text-steel-500 transition-colors hover:bg-steel-100 hover:text-steel-800"
+                    // A bar in the month grid, like the entries above it, and
+                    // held to the same floor by the responsive audit — the day
+                    // cell is the larger target. See `responsive-check.mjs`.
+                    data-calendar-bar=""
+                    className="pointer-events-auto absolute flex min-h-[20px] items-center justify-start rounded px-1 text-[10px] font-semibold text-steel-500 transition-colors hover:bg-steel-100 hover:text-steel-800"
                     style={{
                       left: `calc(${(column / 7) * 100}% + 3px)`,
                       width: `calc(${(1 / 7) * 100}% - 6px)`,

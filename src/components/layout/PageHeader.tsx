@@ -35,7 +35,16 @@ export const PageHeader = ({
               {crumb.href === undefined ? (
                 <span className="font-medium text-steel-600">{crumb.label}</span>
               ) : (
-                <Link href={crumb.href} className="hover:text-eje-600 hover:underline">
+                /*
+                  TALL ENOUGH TO TAP. The link was the height of its text —
+                  sixteen pixels — which is a miss on a tablet, and the miss
+                  lands on whatever is under it. The padding makes the target
+                  36px without moving the text or changing the type scale.
+                */
+                <Link
+                  href={crumb.href}
+                  className="inline-flex min-h-9 items-center px-1 py-2 hover:text-eje-600 hover:underline"
+                >
                   {crumb.label}
                 </Link>
               )}

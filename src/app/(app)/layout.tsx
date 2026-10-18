@@ -46,7 +46,25 @@ const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
         </div>
       </aside>
 
+      {/*
+        THE CLOSED DRAWER IS INERT, NOT MERELY INVISIBLE.
+        
+        It is always in the DOM and slid off-canvas, which is what makes the
+        animation possible — and it left twelve navigation links focusable and
+        announced while they were off the screen. A technician working the
+        tablet from a keyboard tabbed off the top bar into a menu they could not
+        see, and a screen reader read the whole navigation twice. Found by
+        `npm run responsive-check`.
+
+        `inert` is the one attribute that fixes both: the subtree stops being
+        focusable, stops taking pointer events and is removed from the
+        accessibility tree. `pointer-events-none` only ever fixed the third of
+        those, and `aria-hidden` on its own would hide links a keyboard could
+        still reach — which is worse than either.
+      */}
       <div
+        aria-hidden={!menuOpen}
+        inert={!menuOpen}
         className={cn(
           'fixed inset-0 z-50 lg:hidden',
           menuOpen ? 'pointer-events-auto' : 'pointer-events-none',

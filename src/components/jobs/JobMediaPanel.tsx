@@ -23,6 +23,7 @@ import { newIdempotencyKey } from '@/api/client';
 import { useOperation } from '@/hooks/useOperation';
 import { useOnline } from '@/hooks/useOnline';
 import { holdMedia } from '@/lib/pwa/pending-media';
+import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatFileSize, formatRelative } from '@/lib/format';
 
@@ -86,6 +87,16 @@ export const JobMediaPanel = ({
   const [caption, setCaption] = useState('');
   const [visibility, setVisibility] = useState<MediaVisibility>('customer_facing');
   const [attempted, setAttempted] = useState(false);
+
+  /*
+   * A PHOTOGRAPH BEING SENT IS A CAPTURE. PWA-7.
+   *
+   * From the moment a photograph is chosen until it is sent, held or
+   * discarded: the dialog is on screen with a caption being typed into it and
+   * a classification to choose, and a banner appearing behind it reflows the
+   * screen it will be dismissed onto.
+   */
+  useCaptureLock(selection !== null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
 

@@ -1,7 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui';
+import {
+  captureIdleOnServer,
+  captureInProgress,
+  subscribeToCapture,
+} from '@/lib/pwa/capture-lock';
 
 /**
  * REGISTERS THE WORKER, AND OFFERS THE UPDATE. PWA-5, PWA-7.
@@ -18,6 +23,16 @@ import { Button } from '@/components/ui';
  * keeps serving the build the page already has, and its cached chunks match
  * that build because Next content-hashes them. A technician can finish the job
  * card and update between jobs.
+ *
+ * AND THE OFFER ITSELF WAITS FOR A CAPTURE. *Amended for the tablet usability
+ * pass.* Not applying the update mid-capture was never enough: this bar is
+ * `sticky top-0` and APPEARING pushes everything below it down by its own
+ * height. On a tablet that is the signature pad sliding out from under a
+ * stylus mid-stroke, or *Confirm signature* moving under a thumb already on
+ * its way to it — a mis-tap on the one screen where a mis-tap is a customer
+ * signing the wrong thing. So while a capture holds the lock the bar renders
+ * NOTHING, and it appears the moment the capture is finished. The waiting
+ * worker is unaffected either way: it is already installed and still waiting.
  *
  * BROWSERS WITHOUT SERVICE WORKERS get nothing at all — no error, no bar, no
  * degraded screen. The application is online-first and works exactly as it did
@@ -73,7 +88,20 @@ export const ServiceWorkerManager = () => {
     });
   }, [waiting]);
 
-  if (waiting === null || dismissed) return null;
+  /*
+   * Is somebody in the middle of something? See `capture-lock.ts`.
+   *
+   * `useSyncExternalStore` rather than an effect and a state: the lock is read
+   * during render, so the bar cannot appear for one frame and then remove
+   * itself — one frame is enough to move the pad under a stylus.
+   */
+  const capturing = useSyncExternalStore(
+    subscribeToCapture,
+    captureInProgress,
+    captureIdleOnServer,
+  );
+
+  if (waiting === null || dismissed || capturing) return null;
 
   return (
     <div

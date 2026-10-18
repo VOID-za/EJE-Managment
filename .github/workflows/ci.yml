@@ -18,7 +18,8 @@
 #             against PostgreSQL is a path nobody has tested.
 #   browser   the gates that need a built, running application and a real
 #             Chromium: the route and permission check, the end-to-end workflow,
-#             the signed-document check on both PDF paths, and the smoke suite. QA-4 left this as a decision to record, and
+#             the signed-document check on both PDF paths, the tablet and phone
+#             layout audit, and the smoke suite. QA-4 left this as a decision to record, and
 #             the decision is IN CI: these are the only gates that exercise the
 #             worker, IndexedDB, the offline queue and the tablet flows, and a
 #             manual-only gate for the features most likely to break is not a
@@ -203,6 +204,14 @@ jobs:
       # needs a gate of its own.
       - name: Signed document on both PDF paths
         run: npm run tablet-pdf-check
+
+      # UX-1/CR-03: every screen measured at tablet and phone width — sideways
+      # scroll, controls off the screen, tap targets, keyboard reach and long
+      # content. It is in CI because these defects arrive by accident, in a
+      # layout change nobody thought touched a tablet. It is NOT acceptance of
+      # the tablet: that needs the real rugged device.
+      - name: Tablet and phone layout
+        run: npm run responsive-check
 
       - name: Smoke suite
         run: npm run smoke

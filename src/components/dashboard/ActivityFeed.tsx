@@ -77,9 +77,17 @@ export const ActivityFeed = ({
               <div className="flex flex-wrap items-baseline gap-x-2">
                 <p className="text-sm font-semibold text-steel-900">{event.summary}</p>
                 {jobNumber !== null && (
+                  /*
+                    THE WAY INTO THE JOB, SO IT HAS TO BE TAPPABLE. The link was
+                    the height of its own text — sixteen pixels — on the trail
+                    the office reads all day and the dashboard a technician
+                    opens on a tablet. The padding gives it a 36px target
+                    without moving the text off the baseline it shares with the
+                    summary beside it. Found by `npm run responsive-check`.
+                  */
                   <Link
                     href={`/jobs/${jobNumber}`}
-                    className="font-mono text-xs font-semibold text-eje-600 hover:underline"
+                    className="-my-2 inline-flex min-h-9 items-center px-1 py-2 font-mono text-xs font-semibold text-eje-600 hover:underline"
                   >
                     {jobNumber}
                   </Link>

@@ -12,6 +12,7 @@ import {
   saveReportDraft,
   type ReportDraft,
 } from '@/lib/pwa/report-draft';
+import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatTime } from '@/lib/format';
 
@@ -109,6 +110,20 @@ export const CompletionReportPanel = ({
    * effect does the telling.
    */
   const [saves, setSaves] = useState(0);
+
+  /*
+   * TYPING IS A CAPTURE. PWA-7.
+   *
+   * Held while there is an edit the server has not taken — `pending` is the
+   * window between a keystroke and the autosave, `saving` is the write itself,
+   * `failed` is text that exists only on this tablet. The update bar appearing
+   * above the panel in any of those three moves the textarea under the hands
+   * typing into it. `clean` and `saved` are not captures: there is nothing
+   * outstanding, which is exactly when a technician may update between jobs.
+   */
+  useCaptureLock(
+    status.kind === 'pending' || status.kind === 'saving' || status.kind === 'failed',
+  );
 
   /*
    * THE TEXT THAT COULD NOT BE SAVED, KEPT ON THE DEVICE. OFF-WRITEUP-1.

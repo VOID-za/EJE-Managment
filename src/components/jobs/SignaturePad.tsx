@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { Button, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import {
@@ -33,6 +34,16 @@ export interface SignaturePadProps {
 }
 
 export const SignaturePad = ({ disabled = false, onChange }: SignaturePadProps) => {
+  /*
+   * NOTHING MAY REFLOW THE PAGE WHILE THIS IS ON SCREEN. PWA-7.
+   *
+   * The pad being drawn on is the one capture that cannot survive the layout
+   * moving: the update bar appearing above it slides the pad out from under a
+   * stylus mid-stroke, and the customer signs a line that is not theirs. Held
+   * for the pad's whole life rather than only while the pen is down, because
+   * the *Confirm signature* button moving under a thumb is the same defect.
+   */
+  useCaptureLock(true);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const strokesRef = useRef<SignatureStroke[]>([]);
   const [strokes, setStrokes] = useState<readonly SignatureStroke[]>([]);
