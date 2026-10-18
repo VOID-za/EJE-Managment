@@ -94,9 +94,36 @@ export const isOfflineAction = (action: string): action is OfflineAction =>
  * held by the media queue (OFF-MEDIA-1), which is a different mechanism with
  * its own store, its own ceiling and its own flush — not a member of this
  * queue's allowlist. Their reasons say so.
+ *
+ * *Amended 18 October 2026.* THIS MAP HAD DRIFTED FROM THE SERVER. It explained
+ * three commands that no longer exist under those names (`add_media` and
+ * `add_checklist_photo` became multipart routes, `record_signature_refusal`
+ * became `record_refusal`, the three `remove_*` line commands became
+ * `remove_line`) and said nothing at all about twenty-one that do — every
+ * transfer, the cancellation, the deletion, the delivery calls, the refusal
+ * resolution, the technician assignments. Each of those fell through to "This
+ * needs a connection to the EJE server", the one sentence that is true of
+ * everything and useful for nothing. `offline-inventory.test.ts` now compares
+ * this map with the real command registry, so a command added to the server
+ * without an offline answer fails a test by name.
  */
+/**
+ * ACTIONS A TABLET CAN ATTEMPT THAT ARE NOT JSON JOB COMMANDS.
+ *
+ * Both are photographs, and both arrive as multipart bytes at their own route
+ * rather than through the command registry — so the registry cannot be the only
+ * thing this map is checked against. Declared here, by name, so the comparison
+ * in `offline-inventory.test.ts` can tell a legitimate non-command from an
+ * entry that has gone stale because somebody renamed a command.
+ */
+export const NON_COMMAND_FIELD_ACTIONS: readonly string[] = [
+  'add_media',
+  'add_checklist_photo',
+];
+
 export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   complete_checklist: 'Completing the checklist is checked against the template on the server.',
+  start_checklist: 'Starting the checklist takes the current wording from the server.',
   /*
    * BYTES ARE NOT A QUEUED REQUEST, and that is still true — but they are no
    * longer lost. OFF-MEDIA-1: a photograph taken with no signal is kept in its
@@ -116,17 +143,38 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
     'A photograph is not sent with the other captures. It is kept on this tablet and uploaded on its own when there is a signal.',
   remove_media: 'Removing a photograph changes the record on the server.',
   capture_signature: 'A customer signature is only ever taken with a connection.',
-  record_signature_refusal: 'A signature refusal is only ever recorded with a connection.',
+  start_signature: 'Taking a customer signature needs a connection from the first step.',
+  record_refusal: 'A signature refusal is only ever recorded with a connection.',
+  resolve_refusal:
+    'What happens after a customer refuses to sign is the office’s decision, recorded on the server.',
   accept: 'Accepting a job moves it through the workflow, which the server decides.',
+  decline_site_location: 'Telling the office you do not need the site location needs a connection.',
+  send_site_location: 'The site location goes out through WhatsApp, which needs a connection.',
   start_completion: 'Moving the job on is a workflow step the server decides.',
+  return_to_progress: 'Reopening the job is a workflow step the server decides.',
+  return_for_signature: 'Sending the job back for a signature is a workflow step the server decides.',
   issue: 'Submitting the job card is a workflow step the server decides.',
+  take_over_submission:
+    'Submitting a job card on somebody else’s behalf is an office step the server decides.',
+  generate_document: 'The job card is rendered on the server, from what the server holds.',
+  confirm_delivery:
+    'Whether the customer received their copy is something only the mail provider can answer.',
+  retry_delivery: 'Sending the customer their copy again needs a connection to the mail provider.',
   awaiting_spares: 'Putting a job on hold is a workflow step the server decides.',
+  reschedule:
+    'Changing the date moves the job in the calendar everybody shares, so it needs a connection.',
+  cancel: 'Cancelling a job is an office decision recorded on the server.',
+  delete: 'Deleting a job is an office action, and never one taken from a tablet.',
+  assign_primary: 'Who owns a job is decided by the office on the server.',
+  add_technician: 'Adding somebody to a job changes who may work on it, which the office decides.',
+  remove_technician:
+    'Taking somebody off a job changes who may work on it, which the office decides.',
+  transfer_to_technician: 'Reassigning a job is an office decision recorded on the server.',
+  transfer_to_open: 'Putting a job back on the open list is an office decision.',
   update_labour: 'Changing a captured line replaces it, so it needs a connection.',
-  remove_labour: 'Removing a captured line changes the record on the server.',
   update_travel: 'Changing a captured line replaces it, so it needs a connection.',
-  remove_travel: 'Removing a captured line changes the record on the server.',
   update_part: 'Changing a captured line replaces it, so it needs a connection.',
-  remove_part: 'Removing a captured line changes the record on the server.',
+  remove_line: 'Removing a captured line changes the record on the server.',
 };
 
 /**

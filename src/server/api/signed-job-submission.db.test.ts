@@ -538,11 +538,14 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(attempts[0]?.failureReason).toMatch(/not configured/u);
     expect(attempts[0]?.finalDocumentId).not.toBeNull();
 
-    const reread = await master.get(`/api/jobs/${jobNumber}`);
+    const reread = await master.get<{ view: { job: { delivery: Record<string, unknown> } } }>(
+      `/api/jobs/${jobNumber}`,
+    );
     expect(reread.status).toBe(200);
-    expect(reread.data.view.job.delivery.state).toBe('failed');
-    expect(reread.data.view.job.delivery.attempts).toBe(1);
-    expect(reread.data.view.job.delivery.failureReason).toMatch(/not configured/u);
+    const served = reread.data.view.job.delivery;
+    expect(served.state).toBe('failed');
+    expect(served.attempts).toBe(1);
+    expect(String(served.failureReason)).toMatch(/not configured/u);
   });
 
   it('keeps every attempt, so three tries can be told from one', async () => {
@@ -556,7 +559,9 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
       .where(eq(schema.deliveryAttempts.jobId, id));
     expect(attempts.map((row) => row.attemptNumber).sort()).toEqual([1, 2]);
 
-    const reread = await master.get(`/api/jobs/${jobNumber}`);
+    const reread = await master.get<{ view: { job: { delivery: { attempts: number } } } }>(
+      `/api/jobs/${jobNumber}`,
+    );
     expect(reread.data.view.job.delivery.attempts).toBe(2);
   });
 
