@@ -473,6 +473,85 @@ await step('a technician cannot read the outbox at all', async () => {
   }
 });
 
+/*
+ * THE TECHNICIAN REPORTS THAT THE REGISTER IS WRONG, AND THE OFFICE DECIDES.
+ * CUST-CR.
+ *
+ * The application has told technicians for months that they may do this —
+ * "Technicians can view customers and raise change requests, but not edit
+ * them" — and there was nowhere to do it. Both halves are checked in a real
+ * browser because the whole feature is about who may do what: a technician can
+ * raise one and cannot read anybody else's, and the office sees it, decides,
+ * and has to say what they did.
+ */
+const REPORTED = 'The serial plate on this machine reads MZ-QT200-11903, not what the register has.';
+
+await step('a technician reports a problem with a record they cannot edit', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByTestId('report-register-problem').waitFor({ timeout: 10000 });
+
+  // The panel the office acts on must NOT be here: that somebody complained
+  // about a record is not a technician's to read.
+  if ((await page.getByTestId('change-requests-panel').count()) !== 0) {
+    throw new Error('a technician was shown the office’s reported-problems panel');
+  }
+
+  await page.getByTestId('report-register-problem').click();
+  await page.getByTestId('change-request-details').fill(REPORTED);
+  await page.getByTestId('change-request-submit').click();
+  await page.getByTestId('change-request-details').waitFor({ state: 'hidden', timeout: 10000 });
+});
+
+await step('the office sees the report, and the technician’s own copy says it is waiting', async () => {
+  const mine = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/change-requests?mine=1`);
+    const payload = await response.json();
+    return { status: response.status, rows: payload?.data?.rows ?? [] };
+  }, BASE);
+  if (mine.status !== 200) throw new Error(`a technician could not read their own reports: ${mine.status}`);
+  if (mine.rows.length !== 1) throw new Error(`the technician has ${mine.rows.length} reports, expected 1`);
+  if (mine.rows[0].state !== 'open') throw new Error('the report did not arrive as open');
+
+  // And the office's list is refused to them outright, rather than answered
+  // empty — an empty list reads as "there are no problems with the register".
+  const refused = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/change-requests`);
+    return response.status;
+  }, BASE);
+  if (refused !== 403) throw new Error(`the office list answered a technician HTTP ${refused}`);
+});
+
+await step('the office records what it did about the report', async () => {
+  await signOut();
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+
+  const panel = page.getByTestId('change-requests-panel');
+  await panel.waitFor({ timeout: 10000 });
+  const text = await panel.innerText();
+  if (!text.includes('MZ-QT200-11903')) {
+    throw new Error(`the office cannot see what was reported: ${text.slice(0, 200)}`);
+  }
+
+  await page.getByTestId('change-request-apply').first().click();
+  await page.getByTestId('change-request-note').fill('Serial corrected on the machine record.');
+  await page.getByTestId('change-request-decision-confirm').click();
+
+  await page.getByTestId('change-request-resolution').first().waitFor({ timeout: 10000 });
+  const resolved = await page.getByTestId('change-requests-panel').innerText();
+  if (!resolved.includes('Applied by the office')) {
+    throw new Error('the decision was not shown against the report');
+  }
+  if (!resolved.includes('Serial corrected on the machine record.')) {
+    throw new Error('the office’s own words are not kept with the decision');
+  }
+  // Nothing is offered twice: the decision stands.
+  if ((await page.getByTestId('change-request-apply').count()) !== 0) {
+    throw new Error('a report that was dealt with is still offering a decision');
+  }
+  await page.screenshot({ path: `${shots}/14a-change-request.png`, fullPage: false });
+});
+
 await step('the queued WhatsApp message appears in the office Simulated Outbox', async () => {
   await signOut();
   await signInAsMasterIfNeeded();
