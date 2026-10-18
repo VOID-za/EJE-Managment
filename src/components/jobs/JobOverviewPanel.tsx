@@ -44,6 +44,14 @@ export const JobOverviewPanel = ({
   readonly onChanged: () => void;
 }) => {
   const { job, customer, site, contact, machine } = view;
+
+  /*
+   * A job whose document has gone out. From here on the register is the
+   * PRESENT DAY and the customer's copy is the history, so the two are
+   * labelled apart — see the note in the Machine card. MACH-HIST (#28).
+   */
+  const historicalJob =
+    job.status === 'closed' || job.status === 'awaiting_delivery' || job.submittedAt !== null;
   const currentUser = useCurrentUser();
   const operation = useOperation();
   const [assignOpen, setAssignOpen] = useState(false);
@@ -171,6 +179,15 @@ export const JobOverviewPanel = ({
                   <br />
                   {site.city}, {site.province} {site.postalCode}
                 </p>
+                {historicalJob && (
+                  <p
+                    className="mt-3 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2 text-xs text-steel-600"
+                    data-testid="register-is-present-day-site"
+                  >
+                    Shown as the register has it today. The issued job card
+                    holds what was recorded when the work was done.
+                  </p>
+                )}
                 {site.accessNotes.length > 0 && (
                   <p className="mt-2 rounded-[var(--radius-control)] bg-eje-50 px-3 py-2 text-xs text-eje-800">
                     <span className="font-semibold">Site access: </span>
@@ -280,6 +297,37 @@ export const JobOverviewPanel = ({
               {machine.notes.length > 0 && (
                 <p className="mt-3 rounded-[var(--radius-control)] bg-steel-50 px-3 py-2 text-xs text-steel-600">
                   {machine.notes}
+                </p>
+              )}
+              {/*
+                WHAT THIS PANEL IS, ON A JOB THAT IS FINISHED. MACH-HIST (#28).
+
+                The machine and the site are resolved from the register as it
+                stands TODAY, not as it stood when the work was done — the job
+                carries identifiers, and the register is a living record. On an
+                open job that is exactly right: a technician needs today's
+                control system and today's access notes.
+
+                On a job that has been issued or closed it can mislead, because
+                the panel reads like a record of where the work happened. The
+                document the customer holds is the historical record and cannot
+                change (its bytes are frozen); this says so rather than letting
+                a present-day address be mistaken for a past one.
+
+                It is a LABEL, not a movement history. Whether EJE record a
+                machine's moves, and what a job screen should then show, is
+                MACH-HIST and is open — so nothing here invents an effective
+                date or a previous location.
+              */}
+              {historicalJob && (
+                <p
+                  className="mt-3 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2 text-xs text-steel-600"
+                  data-testid="register-is-present-day"
+                >
+                  This is the register as it stands today. If the machine has
+                  been moved or amended since {formatDate(job.submittedAt ?? job.closedAt ?? '')},
+                  the job card issued to the customer still shows what was
+                  recorded then — that document cannot change.
                 </p>
               )}
               {/* BD-14: the technician at the machine photographs it from the

@@ -53,6 +53,11 @@ export const actionRoute =
             services: write.services,
             actor: write.actor.user,
             operation: write.operation,
+            // `X-EJE-Capture` is sent by `sendCaptured` and by nothing else,
+            // so it is what distinguishes a capture from a tap. The
+            // idempotency key cannot: every command in this application mints
+            // one.
+            capturedWrite: write.request.headers.get('x-eje-capture') === 'held',
           },
           parseWith(command.schema, write.input),
           target,

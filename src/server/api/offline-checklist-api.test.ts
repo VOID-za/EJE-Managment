@@ -109,6 +109,24 @@ describe('a checklist answer a tablet held offline', () => {
       key === undefined ? undefined : { idempotencyKey: key },
     );
 
+  /**
+   * A write through the CAPTURE transport, as the queue sends it.
+   *
+   * `X-EJE-Capture` is what `sendCaptured` adds and nothing else does. It is
+   * what tells the server this answer may have been written hours ago — the
+   * idempotency key cannot, because every command in this application mints
+   * one of those.
+   */
+  const captured = (
+    client: ApiTestClient,
+    body: Readonly<Record<string, unknown>>,
+    key: string,
+  ) =>
+    client.post<JobBody>(`/api/jobs/${job.id}/answer_checklist`, body, {
+      idempotencyKey: key,
+      headers: { 'x-eje-capture': 'held' },
+    });
+
   const responseFor = async (itemId: string): Promise<Response | undefined> =>
     (
       await master.get<{ view: { job: JobBody } }>(`/api/jobs/${job.jobNumber}`)
@@ -256,6 +274,116 @@ describe('a checklist answer a tablet held offline', () => {
   });
 
   /* -- what the office can do about one that was refused ------------------- */
+
+  /* -- the ways the conflict rule could be got round ---------------------- */
+
+  /**
+   * THE BYPASS BY OMISSION. OFF-CHK-1, CR-02.
+   *
+   * The expectation is optional because an online screen has nothing to
+   * expect — and optional meant a replay could simply leave it out and be
+   * applied as though it were a tap made this second, silently replacing
+   * whatever the office answered while the tablet was away. Nobody has to
+   * tamper with anything: an older build, a hand-made request or a queue row
+   * written before the fields existed does it by accident.
+   *
+   * An `Idempotency-Key` is minted once per CAPTURE and sent only by the
+   * queue, so a request carrying one is work that was HELD. Such a request now
+   * has to say what it was answering.
+   */
+  it('REFUSES a capture that does not say what it was answering', async () => {
+    expect((await answer(master, { itemId: ITEM, choice: 'pass' })).status).toBe(200);
+    const theirs = await responseFor(ITEM);
+
+    const bare = await captured(
+      sipho,
+      { itemId: ITEM, choice: 'fail', notes: 'Captured out of signal.' },
+      'capture-with-no-expectation',
+    );
+
+    expect(bare.status).toBe(422);
+    expect(bare.error?.violations?.[0]?.code).toBe('checklist_expectation_required');
+    // And the office's answer stands, untouched.
+    const after = await responseFor(ITEM);
+    expect(after?.choice).toBe('pass');
+    expect(after?.answeredAt).toBe(theirs?.answeredAt);
+  });
+
+  it('REFUSES half an expectation when it arrived as a capture', async () => {
+    expect((await answer(master, { itemId: ITEM, choice: 'pass' })).status).toBe(200);
+
+    const half = await captured(
+      sipho,
+      { itemId: ITEM, choice: 'fail', notes: 'x', ...instance() },
+      'capture-missing-the-stamp',
+    );
+    expect(half.status).toBe(422);
+    expect(half.error?.violations?.[0]?.code).toBe('checklist_expectation_required');
+    expect((await responseFor(ITEM))?.choice).toBe('pass');
+  });
+
+  /**
+   * AND A NEW KEY IS NOT A NEW CHANCE.
+   *
+   * A tablet (or anybody) re-sending the same stale capture under a freshly
+   * minted key gets the same refusal — the conflict is decided by what the JOB
+   * says, not by whether this particular request has been seen before.
+   */
+  it('REFUSES the same stale capture again under a different key', async () => {
+    const held = { itemId: ITEM, choice: 'fail' as const, notes: 'Bolts loose.', ...instance(), expectedAnsweredAt: null };
+    expect((await answer(master, { itemId: ITEM, choice: 'pass' })).status).toBe(200);
+    const theirs = await responseFor(ITEM);
+
+    const first = await answer(sipho, held, 'capture-key-one');
+    const second = await answer(sipho, held, 'capture-key-two');
+    const third = await answer(sipho, held, 'capture-key-three');
+
+    for (const [label, response] of [
+      ['first', first],
+      ['under a new key', second],
+      ['under another new key', third],
+    ] as const) {
+      expect(response.status, label).toBe(422);
+      expect(response.error?.violations?.[0]?.code, label).toBe('checklist_answer_changed');
+    }
+
+    const after = await responseFor(ITEM);
+    expect(after?.choice).toBe('pass');
+    expect(after?.answeredAt).toBe(theirs?.answeredAt);
+  });
+
+  /**
+   * An online tap is UNCHANGED, which is the other half of the rule: the
+   * runner writes one field at a time as the technician taps, and there is no
+   * interval in which anybody could be overwritten.
+   */
+  it('still lets a SCREEN answer field by field, which is how the runner writes', async () => {
+    /*
+     * The established rule for an online answer, and the reason the capture
+     * marker exists rather than the idempotency key: every command in this
+     * application mints a key, so keying the rule on one refused every
+     * ordinary tap — which a browser test caught.
+     */
+    expect((await answer(sipho, { itemId: ITEM, choice: 'fail' })).status).toBe(200);
+    expect((await answer(sipho, { itemId: ITEM, notes: 'Bearing noisy.' })).status).toBe(200);
+    const stored = await responseFor(ITEM);
+    expect(stored?.choice).toBe('fail');
+    expect(stored?.notes).toBe('Bearing noisy.');
+  });
+
+  /*
+   * AND HALF AN EXPECTATION FROM A SCREEN IS DELIBERATELY ALLOWED. The office's
+   * resolution of a referred capture is exactly that shape: it keeps the
+   * version check and replaces the answer on purpose (BD-15). Dropping the
+   * stamp gains nobody anything, because a screen may answer with no
+   * expectation at all — which is weaker still.
+   */
+  it('allows the version check WITHOUT the stamp from a screen, which is the office path', async () => {
+    expect((await answer(master, { itemId: ITEM, choice: 'pass' })).status).toBe(200);
+    const replaced = await answer(master, { itemId: ITEM, choice: 'fail', notes: 'x', ...instance() });
+    expect(replaced.status).toBe(200);
+    expect((await responseFor(ITEM))?.choice).toBe('fail');
+  });
 
   it('lets the office apply a refused answer, replacing the one on the job', async () => {
     /*

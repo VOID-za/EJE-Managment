@@ -319,7 +319,12 @@ export const jobs = {
    * (`offline-rules.ts`), not by this function; this is the transport.
    */
   sendCaptured: (jobId: string, action: string, payload: unknown, idempotencyKey: string) =>
-    apiPost<Job>(`/api/jobs/${segment(jobId)}/${action}`, payload, idempotencyKey),
+    apiPost<Job>(`/api/jobs/${segment(jobId)}/${action}`, payload, idempotencyKey, {
+      // This is the CAPTURE transport, and it says so. The server holds a
+      // checklist answer that arrived this way to a stricter rule — see
+      // `answer_checklist` — because it may have been written hours ago.
+      captureTransport: true,
+    }),
   accept: (jobId: string) => jobAction(jobId, 'accept'),
   /**
    * Asks for the site location. NO DESTINATION — see the command.

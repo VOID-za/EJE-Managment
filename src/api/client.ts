@@ -85,6 +85,20 @@ export interface RequestOptions {
    * server does the work once and hands the same answer back to the retry.
    */
   readonly idempotencyKey?: string;
+  /**
+   * WHETHER THIS WRITE IS A CAPTURE, rather than a screen writing one field.
+   *
+   * Set only by `sendCaptured`, the transport the offline queue flushes
+   * through. The server needs the distinction for one rule: a checklist answer
+   * that travelled as a CAPTURE has to say which answer it believed it was
+   * replacing, because it may have been written minutes or hours ago. A tap on
+   * a screen writes one field at a time with nothing to expect.
+   *
+   * It is not the idempotency key: EVERY command mints one of those, so a key
+   * says nothing about where the write came from. That mistake was made, and a
+   * browser test caught it by refusing every ordinary tap.
+   */
+  readonly captureTransport?: boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -101,6 +115,7 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
         ...(options.idempotencyKey === undefined
           ? {}
           : { 'idempotency-key': options.idempotencyKey }),
+        ...(options.captureTransport === true ? { 'x-eje-capture': 'held' } : {}),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -247,11 +262,13 @@ export const apiPost = <T>(
   path: string,
   body: unknown = {},
   idempotencyKey?: string,
+  options: { readonly captureTransport?: boolean } = {},
 ): Promise<T> =>
   request<T>(path, {
     method: 'POST',
     body,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(options.captureTransport === true ? { captureTransport: true } : {}),
   });
 
 export const apiPatch = <T>(path: string, body: unknown = {}): Promise<T> =>

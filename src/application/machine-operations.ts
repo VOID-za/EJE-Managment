@@ -94,6 +94,90 @@ const assertSerialFree = async (
   ]);
 };
 
+/**
+ * A MACHINE STANDS AT ONE OF ITS OWN CUSTOMER'S SITES, AND IT IS CHECKED HERE.
+ * MACH-1, and a defect fix.
+ *
+ * `createMachine` and `updateMachine` both took `customerId` and `siteId`
+ * straight from the request. The database's foreign keys refuse ids that do not
+ * exist and have nothing to say about the pair being WRONG — so a machine could
+ * be recorded against ABC Engineering standing at a site belonging to Jia
+ * Industrial, or at a site that was withdrawn from the register last year, and
+ * every job raised on it afterwards would inherit that. Job creation has
+ * refused exactly this since it was written (`resolveRegister`); the register
+ * that feeds it did not.
+ *
+ * WHAT IT REFUSES, AND WHAT IT DELIBERATELY DOES NOT.
+ *
+ *   - A customer that is not on the register: refused, both on create and on
+ *     amend.
+ *   - A WITHDRAWN customer: refused on CREATE only, the same rule job creation
+ *     applies — no new machine for an account EJE no longer trades with — while
+ *     an existing machine's record stays correctable, because tidying history
+ *     is not trading.
+ *   - A site that is not on the register, or belongs to somebody else: refused
+ *     always. This is the pair that cannot be true.
+ *   - An ARCHIVED site: refused when the machine is being MOVED onto it, and
+ *     allowed when the machine is already there — otherwise archiving a site
+ *     would make every machine on it uneditable, which is the opposite of what
+ *     withdrawing a site is for.
+ *
+ * IT DECIDES NOTHING ABOUT RELOCATION. Whether a machine may move between
+ * customers at all, and what that means for the jobs already done on it, is
+ * MACH-HIST and is open (#28). This only insists that whatever the register
+ * says is internally consistent: a site that belongs to the customer the
+ * machine is recorded against.
+ */
+const assertSiteBelongsToCustomer = async (
+  context: OperationContext,
+  customerId: CustomerId,
+  siteId: SiteId,
+  options: { readonly isNew: boolean; readonly unchangedSite: boolean },
+): Promise<void> => {
+  const customer = await context.repos.customers.findById(customerId);
+  if (customer === null) {
+    throw new WorkflowError('That customer is not on the register.', [
+      {
+        code: 'unknown_customer',
+        message: 'A machine is recorded against a customer EJE actually has.',
+      },
+    ]);
+  }
+  if (options.isNew && !customer.active) {
+    throw new WorkflowError(`${customer.name} is not an active account.`, [
+      {
+        code: 'customer_inactive',
+        message: 'A machine cannot be added to a withdrawn customer account.',
+      },
+    ]);
+  }
+
+  const sites = await context.repos.customers.listSites(customerId, { includeArchived: true });
+  const site = sites.find((candidate) => candidate.id === siteId);
+  if (site === undefined) {
+    /*
+     * Deliberately one refusal for "no such site" and "somebody else's site".
+     * Telling them apart would answer, for any id, whether it exists — and the
+     * office screen offers only this customer's sites, so the distinction is
+     * of no use to anybody legitimate.
+     */
+    throw new WorkflowError(`That site is not one of ${customer.name}’s.`, [
+      {
+        code: 'site_not_of_customer',
+        message: 'A machine stands at a site belonging to the customer it is recorded against.',
+      },
+    ]);
+  }
+  if (site.archivedAt !== null && !options.unchangedSite) {
+    throw new WorkflowError(`${site.name} has been withdrawn from the register.`, [
+      {
+        code: 'site_archived',
+        message: 'Choose a site that is still on the register, or put the site back first.',
+      },
+    ]);
+  }
+};
+
 export const createMachine = async (
   context: OperationContext,
   input: NewMachineInput,
@@ -104,6 +188,10 @@ export const createMachine = async (
     'A serial number is required: it is how a machine is identified across jobs.',
   );
   await assertSerialFree(context, serialNumber);
+  await assertSiteBelongsToCustomer(context, input.customerId, input.siteId, {
+    isNew: true,
+    unchangedSite: false,
+  });
 
   const approval = approvalForNewMachine(context.actor.role);
   const now = context.services.clock.now();
@@ -372,6 +460,12 @@ export const updateMachine = async (
   // Read before the write, so the trail can name what actually changed rather
   // than just saying the record was touched.
   const previous = await context.repos.machines.findById(machine.id);
+  await assertSiteBelongsToCustomer(context, machine.customerId, machine.siteId, {
+    isNew: false,
+    // Already standing there: an archived site must not make its machines
+    // uneditable, which is the opposite of what withdrawing a site is for.
+    unchangedSite: previous !== null && previous.siteId === machine.siteId,
+  });
   const saved = await context.repos.machines.save(machine);
 
   const changes: string[] = [];

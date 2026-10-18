@@ -1683,6 +1683,42 @@ await step('closed job is read-only', async () => {
   await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 8000 });
 });
 
+/*
+ * THE REGISTER IS TODAY'S, AND THE JOB SCREEN SAYS SO. MACH-HIST (#28).
+ *
+ * A job carries its machine and site by identifier, so a finished job's screen
+ * shows the register as it stands NOW — which reads like a record of where the
+ * work happened and is not one. The customer's copy is the history, and its
+ * bytes cannot change. Saying that is a label, not a movement ledger: whether
+ * EJE record a machine's moves is still their decision.
+ *
+ * Both halves are asserted, because a label that appears everywhere says
+ * nothing: it is on the closed job and absent from one still in progress.
+ */
+await step('a finished job says the machine and site are the register of TODAY', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  const note = page.getByTestId('register-is-present-day');
+  await note.waitFor({ timeout: 10000 });
+  const text = (await note.innerText()).trim();
+  if (!text.includes('register as it stands today')) {
+    throw new Error(`the note does not say what it is: ${text}`);
+  }
+  if (!text.includes('cannot change')) {
+    throw new Error('the note does not say the issued document is the historical record');
+  }
+  if ((await page.getByTestId('register-is-present-day-site').count()) === 0) {
+    throw new Error('the site card does not carry the same warning');
+  }
+
+  // An open job must NOT carry it: there the register is simply the record a
+  // technician needs, and a warning on every screen is a warning on none.
+  await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1049' }).waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('register-is-present-day').count()) !== 0) {
+    throw new Error('an unfinished job was told its register data is historical');
+  }
+});
+
 await step('checklist blocks signature until complete (EJE-1053 service job)', async () => {
   await page.goto(`${BASE}/jobs/EJE-1053`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1053' }).waitFor({ timeout: 8000 });

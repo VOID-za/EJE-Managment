@@ -281,6 +281,34 @@ describeDb('the PostgreSQL registers', () => {
       expect(machine.serialNumber).toBe('DUP-0001');
     });
 
+    /**
+     * TWO AMENDMENTS AT ONCE, AND NEITHER IS LOST SILENTLY. MACH-1.
+     *
+     * Two people editing one machine in the register is ordinary — and before
+     * the version guard the second write simply replaced the first, so a
+     * corrected serial number could be quietly undone by somebody who had the
+     * record open. The second writer is refused and has to re-read, which is
+     * the only safe answer: the change they wanted may not even be legal
+     * against the newer record.
+     */
+    it('refuses the second of two concurrent amendments, and keeps the first', async () => {
+      const machine = await machines.save(newMachine({ controlSystem: 'Haas NGC' }));
+
+      // Two units of work, which is what two requests are.
+      const first = new PostgresMachineRepository(db);
+      const second = new PostgresMachineRepository(db);
+      const readByFirst = await first.findById(machine.id);
+      const readBySecond = await second.findById(machine.id);
+
+      await first.save({ ...readByFirst!, controlSystem: 'Haas NGC with probing' });
+      await expect(
+        second.save({ ...readBySecond!, controlSystem: 'Fanuc 0i' }),
+      ).rejects.toBeInstanceOf(ConcurrencyError);
+
+      const read = await machines.findById(machine.id);
+      expect(read?.controlSystem).toBe('Haas NGC with probing');
+    });
+
     it('archives out of the register and still resolves for a historical job', async () => {
       const machine = await machines.save(newMachine());
       await machines.save({ ...machine, archivedAt: '2026-04-01T08:00:00.000Z' });

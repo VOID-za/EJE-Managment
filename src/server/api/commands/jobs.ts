@@ -18,6 +18,7 @@ import {
   type User,
 } from '@/domain';
 import * as jobs from '@/application/job-operations';
+import { WorkflowError } from '@/application/errors';
 import { createJob } from '@/application/job-creation';
 import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
@@ -456,12 +457,67 @@ export const JOB_COMMANDS: CommandRegistry = {
       context,
       job,
       { itemId, templateId, templateVersion, expectedAnsweredAt, ...answer },
-    ) =>
-      jobs.answerChecklistItem(context.operation, job, itemId, answer, {
+    ) => {
+      /*
+       * AN ANSWER THAT TRAVELLED AS A CAPTURE MUST SAY WHAT IT WAS ANSWERING.
+       * OFF-CHK-1, CR-02.
+       *
+       * The expectation is optional because a SCREEN has nothing to expect: the
+       * runner writes one field at a time as the technician taps, and there is
+       * no interval in which anybody could be overwritten. A CAPTURE is the
+       * opposite — it may have been written minutes or hours before it reaches
+       * the server — and optional meant the conflict rule could be got round by
+       * omission: a capture that simply left the three fields out was applied
+       * as though it were a tap made this second, silently replacing whatever
+       * the office had answered while the tablet was away. An older build or a
+       * queue row written before the fields existed does that by accident.
+       *
+       * THE RULE IS NARROW ON PURPOSE: it applies to the CAPTURE transport
+       * (`X-EJE-Capture`, which only `sendCaptured` sends) and to nothing else.
+       *
+       * WHY HALF AN EXPECTATION IS NOT REFUSED ELSEWHERE. Dropping the stamp
+       * while keeping the version looks like tampering and gains nothing: a
+       * screen may answer with NO expectation at all, which is weaker still, so
+       * the version check that remains is stricter than the baseline rather
+       * than a way round it. The office's own resolution of a referred capture
+       * does exactly this on purpose — it keeps the version check and replaces
+       * the answer deliberately (BD-15) — and refusing that shape broke it,
+       * which its own test caught.
+       *
+       * WHAT THIS DOES NOT CLAIM. A request with no expectation and no capture
+       * header is treated as a tap, which is the established last-write-wins
+       * rule for online answers. The server cannot tell a hand-made request
+       * from a screen, and inventing a refusal there would break the runner
+       * rather than protect anybody.
+       *
+       * Refused rather than defaulted: guessing `expectedAnsweredAt: null`
+       * would turn every incomplete capture into "I believed nobody had
+       * answered this", which is the overwrite this exists to prevent.
+       */
+      const held = context.capturedWrite === true;
+      const partial =
+        templateId === undefined || templateVersion === undefined || expectedAnsweredAt === undefined;
+      if (held && partial) {
+        throw new WorkflowError(
+          `A held checklist answer for ${job.jobNumber} did not say what it was answering.`,
+          [
+            {
+              code: 'checklist_expectation_required',
+              message:
+                'A capture must carry the checklist version it was answered against and the ' +
+                'answer it is replacing, so it cannot overwrite one given since. Capture it ' +
+                'again on this screen.',
+            },
+          ],
+        );
+      }
+
+      return jobs.answerChecklistItem(context.operation, job, itemId, answer, {
         ...(templateId === undefined ? {} : { templateId }),
         ...(templateVersion === undefined ? {} : { templateVersion }),
         ...(expectedAnsweredAt === undefined ? {} : { expectedAnsweredAt }),
-      }),
+      });
+    },
   ),
 
   /*

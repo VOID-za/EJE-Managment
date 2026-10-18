@@ -162,3 +162,136 @@ describe('removing a machine', () => {
     );
   });
 });
+
+/**
+ * A MACHINE STANDS AT ONE OF ITS OWN CUSTOMER'S SITES. MACH-1, and a defect fix.
+ *
+ * `createMachine` and `updateMachine` took the customer and the site straight
+ * from the request. The database's foreign keys refuse ids that do not exist and
+ * have nothing to say about the PAIR being wrong, so a machine could be recorded
+ * against ABC Engineering standing at a site belonging to Kruger Mining — and
+ * every job raised on it afterwards would inherit that. Job creation has refused
+ * exactly this since it was written; the register that feeds it did not.
+ *
+ * None of this decides whether a machine may MOVE between customers or what
+ * that means for jobs already done on it — MACH-HIST (#28) is open. It insists
+ * only that the register is internally consistent.
+ */
+describe('a machine’s customer, site and the pair of them', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  const refusal = async (work: Promise<unknown>): Promise<WorkflowError> => {
+    try {
+      await work;
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowError);
+      return error as WorkflowError;
+    }
+    throw new Error('the register accepted it');
+  };
+
+  it('REFUSES a machine at another customer’s site', async () => {
+    const wrong = await refusal(
+      createMachine(harness.as(master), {
+        ...NEW_MACHINE,
+        // Both ids are real. They are not related, which is the whole point.
+        siteId: asSiteId('site-kruger-main'),
+      }),
+    );
+    expect(wrong.violations[0]?.code).toBe('site_not_of_customer');
+    expect(await harness.repos.machines.list({ includeArchived: true })).not.toContainEqual(
+      expect.objectContaining({ serialNumber: NEW_MACHINE.serialNumber }),
+    );
+  });
+
+  it('REFUSES a machine against a customer nobody has', async () => {
+    const unknown = await refusal(
+      createMachine(harness.as(master), {
+        ...NEW_MACHINE,
+        customerId: asCustomerId('cust-does-not-exist'),
+      }),
+    );
+    expect(unknown.violations[0]?.code).toBe('unknown_customer');
+  });
+
+  it('REFUSES a machine at a site nobody has, without saying whether it exists', async () => {
+    const unknown = await refusal(
+      createMachine(harness.as(master), { ...NEW_MACHINE, siteId: asSiteId('site-invented') }),
+    );
+    /*
+     * The SAME refusal as another customer's site. Telling them apart would
+     * answer, for any id, whether it exists — and the office screen offers
+     * only this customer's sites, so the distinction helps nobody legitimate.
+     */
+    expect(unknown.violations[0]?.code).toBe('site_not_of_customer');
+  });
+
+  it('REFUSES moving a machine onto another customer’s site', async () => {
+    const machine = await createMachine(harness.as(master), NEW_MACHINE);
+
+    const moved = await refusal(
+      updateMachine(harness.as(master), { ...machine, siteId: asSiteId('site-kruger-main') }),
+    );
+    expect(moved.violations[0]?.code).toBe('site_not_of_customer');
+
+    // Nothing moved.
+    expect((await stored(harness, machine.id))?.siteId).toBe(NEW_MACHINE.siteId);
+  });
+
+  it('REFUSES moving a machine onto a WITHDRAWN site', async () => {
+    const machine = await createMachine(harness.as(master), NEW_MACHINE);
+    const sites = await harness.repos.customers.listSites(NEW_MACHINE.customerId);
+    const elsewhere = sites.find((site) => site.id !== NEW_MACHINE.siteId);
+    expect(elsewhere).toBeDefined();
+    await harness.repos.customers.saveSite({
+      ...elsewhere!,
+      archivedAt: '2026-10-01T08:00:00.000Z',
+    });
+
+    const moved = await refusal(
+      updateMachine(harness.as(master), { ...machine, siteId: elsewhere!.id }),
+    );
+    expect(moved.violations[0]?.code).toBe('site_archived');
+  });
+
+  /*
+   * AND THE CASE THE RULE MUST NOT BREAK. Withdrawing a site cannot make the
+   * machines standing on it uneditable — that is the opposite of what
+   * archiving a site is for, and it would strand the register.
+   */
+  it('still amends a machine that is already standing on a withdrawn site', async () => {
+    const machine = await createMachine(harness.as(master), NEW_MACHINE);
+    const site = (await harness.repos.customers.listSites(NEW_MACHINE.customerId)).find(
+      (candidate) => candidate.id === NEW_MACHINE.siteId,
+    );
+    await harness.repos.customers.saveSite({
+      ...site!,
+      archivedAt: '2026-10-01T08:00:00.000Z',
+    });
+
+    const amended = await updateMachine(harness.as(master), {
+      ...machine,
+      controlSystem: 'Mazatrol SmoothG2',
+    });
+    expect(amended.controlSystem).toBe('Mazatrol SmoothG2');
+  });
+
+  it('REFUSES a new machine for a withdrawn customer, and still amends an existing one', async () => {
+    const customer = await harness.repos.customers.findById(NEW_MACHINE.customerId);
+    const machine = await createMachine(harness.as(master), NEW_MACHINE);
+    await harness.repos.customers.save({ ...customer!, active: false });
+
+    const added = await refusal(
+      createMachine(harness.as(master), { ...NEW_MACHINE, serialNumber: 'MZ-QT200-11903' }),
+    );
+    expect(added.violations[0]?.code).toBe('customer_inactive');
+
+    // Tidying the history of an account EJE no longer trades with is not
+    // trading with them, so this is deliberately still allowed.
+    const amended = await updateMachine(harness.as(master), { ...machine, notes: 'Mothballed.' });
+    expect(amended.notes).toBe('Mothballed.');
+  });
+});
