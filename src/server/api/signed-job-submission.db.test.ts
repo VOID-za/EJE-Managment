@@ -512,6 +512,84 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(jobNumber).toMatch(/^EJE-/u);
   });
 
+  /**
+   * THE DELIVERY RECORD SURVIVES THE REQUEST THAT MADE IT. MANDATE-3.
+   *
+   * `delivery_attempts` was read by the mapper and written by nothing, so on
+   * PostgreSQL what the provider said lived only in the object one request was
+   * holding — and the office's next look at the job said it had not been sent.
+   * This asserts the row, through the real route, and then asserts the job the
+   * API serves afterwards agrees with it.
+   */
+  it('writes what the provider said, and still says it on the next request', async () => {
+    const { tech, master, id, jobNumber } = await signedJob({ labour: true });
+    expect((await issue(tech, id)).status).toBe(200);
+
+    const attempts = await db
+      .select()
+      .from(schema.deliveryAttempts)
+      .where(eq(schema.deliveryAttempts.jobId, id));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.attemptNumber).toBe(1);
+    expect(attempts[0]?.channel).toBe('email');
+    // Email is deliberately unconfigured in this deployment, so the attempt
+    // failed — and the REASON is what the office acts on, so it is kept.
+    expect(attempts[0]?.state).toBe('failed');
+    expect(attempts[0]?.failureReason).toMatch(/not configured/u);
+    expect(attempts[0]?.finalDocumentId).not.toBeNull();
+
+    const reread = await master.get(`/api/jobs/${jobNumber}`);
+    expect(reread.status).toBe(200);
+    expect(reread.data.view.job.delivery.state).toBe('failed');
+    expect(reread.data.view.job.delivery.attempts).toBe(1);
+    expect(reread.data.view.job.delivery.failureReason).toMatch(/not configured/u);
+  });
+
+  it('keeps every attempt, so three tries can be told from one', async () => {
+    const { tech, master, id, jobNumber } = await signedJob({ labour: true });
+    expect((await issue(tech, id)).status).toBe(200);
+    expect((await master.post(`/api/jobs/${id}/retry_delivery`, {})).status).toBe(200);
+
+    const attempts = await db
+      .select()
+      .from(schema.deliveryAttempts)
+      .where(eq(schema.deliveryAttempts.jobId, id));
+    expect(attempts.map((row) => row.attemptNumber).sort()).toEqual([1, 2]);
+
+    const reread = await master.get(`/api/jobs/${jobNumber}`);
+    expect(reread.data.view.job.delivery.attempts).toBe(2);
+  });
+
+  /**
+   * TWO RE-SENDS AT ONCE DO NOT SEND TWO COPIES. MANDATE-3.
+   *
+   * The customer must never receive two copies of one signed job card — neither
+   * they nor EJE could then say which is the record. Two requests arriving
+   * together are refused one layer down, where the repository holds each writer
+   * to the version it read; the second loses and never reaches the provider.
+   * This asserts the OUTCOME rather than the mechanism: one success, one
+   * refusal, and exactly two attempts on the job (the issue and one re-send).
+   */
+  it('does not send two copies when two re-sends arrive together', async () => {
+    const { tech, master, id } = await signedJob({ labour: true });
+    expect((await issue(tech, id)).status).toBe(200);
+
+    const retry = () => master.post(`/api/jobs/${id}/retry_delivery`, {});
+    const [a, b] = await Promise.all([retry(), retry()]);
+
+    expect([a, b].filter((response) => response.status === 200)).toHaveLength(1);
+    const attempts = await db
+      .select()
+      .from(schema.deliveryAttempts)
+      .where(eq(schema.deliveryAttempts.jobId, id));
+    expect(attempts.map((row) => row.attemptNumber).sort()).toEqual([1, 2]);
+
+    // And the job is still awaiting delivery: nothing closed it on a send that
+    // nothing confirmed.
+    const rows = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
+    expect(rows[0]?.status).toBe('awaiting_delivery');
+  });
+
   it('re-sends the STORED document rather than rendering a new one', async () => {
     const { tech, master, id } = await signedJob({ labour: true, parts: true });
     expect((await issue(tech, id)).status).toBe(200);

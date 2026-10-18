@@ -48,10 +48,35 @@ export interface GraphEmailConfiguration {
   readonly replyTo: string;
   readonly baseUrl: string;
   readonly loginUrl: string;
+  /**
+   * How long one Graph request may take before it is abandoned.
+   *
+   * THERE WAS NO TIMEOUT AT ALL. `fetch` with no signal waits as long as the
+   * socket stays open, and the call sits inside the request that submits a
+   * signed job card — so a Microsoft 365 endpoint that accepted the connection
+   * and then went quiet held a technician's submission open until something
+   * else gave up first. A timeout is not a tuning parameter here; it is the
+   * difference between "the provider did not answer" and a screen that never
+   * comes back.
+   */
+  readonly timeoutMs: number;
 }
 
 const DEFAULT_BASE_URL = 'https://graph.microsoft.com/v1.0';
 const DEFAULT_LOGIN_URL = 'https://login.microsoftonline.com';
+const DEFAULT_TIMEOUT_MS = 20_000;
+
+/**
+ * The largest attachment Graph will take on the message resource.
+ *
+ * Microsoft's limit for `attachments` on a created message is 3 MB; past that
+ * an upload session is required, which is a different protocol. A job card with
+ * a dozen photographs reaches this, and before this check the first anybody
+ * heard of it was a Graph error nobody could act on. Checked against the RAW
+ * bytes, because the base64 Graph wants is a third larger again and the limit
+ * is on what is sent.
+ */
+export const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
 /**
  * The configuration, or null when this deployment has none.
@@ -78,6 +103,8 @@ export const readGraphEmailConfiguration = (
     return null;
   }
 
+  const configuredTimeout = Number((env.EMAIL_GRAPH_TIMEOUT_MS ?? '').trim());
+
   return {
     tenantId,
     clientId,
@@ -86,7 +113,108 @@ export const readGraphEmailConfiguration = (
     replyTo: (env.EMAIL_REPLY_TO ?? '').trim(),
     baseUrl: ((env.EMAIL_GRAPH_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/u, ''),
     loginUrl: ((env.EMAIL_GRAPH_LOGIN_URL ?? '').trim() || DEFAULT_LOGIN_URL).replace(/\/+$/u, ''),
+    // A nonsense value is the default rather than NaN, which would abort every
+    // request immediately and look exactly like an unreachable provider.
+    timeoutMs:
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : DEFAULT_TIMEOUT_MS,
   };
+};
+
+/**
+ * WHAT IS WRONG WITH THIS DEPLOYMENT'S EMAIL, BY NAME. MANDATE-3.
+ *
+ * `readGraphEmailConfiguration` answers null for any incomplete configuration,
+ * which is the right answer for CHOOSING a transport and a useless one for the
+ * person who has to fix it: "customer email is not configured" does not say
+ * that three variables are set and the fourth is empty.
+ *
+ * So this says which ones are missing, by variable name, and what is suspect
+ * about the ones that are present. It NEVER reports a value — not the secret,
+ * not a prefix of it, not its length — because this is read by diagnostics that
+ * end up in logs and on screens. A name is enough to act on; a value is a leak.
+ */
+export interface EmailConfigurationReport {
+  readonly configured: boolean;
+  /** Variables that must be set and are not. */
+  readonly missing: readonly string[];
+  /** Things that are set and look wrong. Never includes a value. */
+  readonly problems: readonly string[];
+  /** The sending mailbox, which is not a secret and is the usual mistake. */
+  readonly sender: string;
+  /** Endpoints in use, so a staging override is visible. */
+  readonly baseUrl: string;
+  readonly loginUrl: string;
+  readonly timeoutMs: number;
+}
+
+export const describeEmailConfiguration = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): EmailConfigurationReport => {
+  const value = (name: string): string => (env[name] ?? '').trim();
+  const required = [
+    'EMAIL_GRAPH_TENANT_ID',
+    'EMAIL_GRAPH_CLIENT_ID',
+    'EMAIL_GRAPH_CLIENT_SECRET',
+    'EMAIL_SENDER',
+  ] as const;
+
+  const missing = required.filter((name) => value(name).length === 0);
+  const problems: string[] = [];
+
+  const sender = value('EMAIL_SENDER');
+  if (sender.length > 0 && !sender.includes('@')) {
+    problems.push(
+      'EMAIL_SENDER is not an address. Graph needs the sending MAILBOX, for example ' +
+        'jobcards@eje.example — a display name will not resolve.',
+    );
+  }
+  const replyTo = value('EMAIL_REPLY_TO');
+  if (replyTo.length > 0 && !replyTo.includes('@')) {
+    problems.push('EMAIL_REPLY_TO is set and is not an address, so replies would go nowhere.');
+  }
+  const tenant = value('EMAIL_GRAPH_TENANT_ID');
+  if (tenant.length > 0 && tenant.includes('@')) {
+    problems.push(
+      'EMAIL_GRAPH_TENANT_ID looks like an address. It is the Entra ID tenant id or domain, ' +
+        'not a mailbox.',
+    );
+  }
+  const timeout = value('EMAIL_GRAPH_TIMEOUT_MS');
+  if (timeout.length > 0 && !(Number(timeout) > 0)) {
+    problems.push(
+      `EMAIL_GRAPH_TIMEOUT_MS is not a positive number of milliseconds, so the default of ` +
+        `${DEFAULT_TIMEOUT_MS} is in use.`,
+    );
+  }
+
+  const configuration = readGraphEmailConfiguration(env);
+  return {
+    configured: configuration !== null,
+    missing,
+    problems,
+    sender,
+    baseUrl: configuration?.baseUrl ?? DEFAULT_BASE_URL,
+    loginUrl: configuration?.loginUrl ?? DEFAULT_LOGIN_URL,
+    timeoutMs: configuration?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  };
+};
+
+/**
+ * One sentence an operator can act on, or the empty string when all is well.
+ *
+ * Built from the report rather than from the environment, so there is one
+ * place that decides how this is worded and one place that decides what counts
+ * as a problem.
+ */
+export const emailConfigurationSummary = (report: EmailConfigurationReport): string => {
+  const parts: string[] = [];
+  if (report.missing.length > 0) {
+    parts.push(`Not configured: ${report.missing.join(', ')} ${report.missing.length === 1 ? 'is' : 'are'} not set.`);
+  }
+  parts.push(...report.problems);
+  return parts.join(' ');
 };
 
 /**
@@ -129,17 +257,149 @@ export const chooseEmailTransport = (options: {
   return 'refuse';
 };
 
+/**
+ * WHY A SEND FAILED, IN THE ONLY TERMS THAT CHANGE WHAT ANYBODY DOES NEXT.
+ *
+ * Every failure used to arrive as one `EmailSendFailed` carrying whatever
+ * sentence the provider offered, which left the office with one action for
+ * nine situations: press *Send again*. For four of them that is right and the
+ * message will go. For the other five it cannot possibly work — the credential
+ * is wrong, the app registration lacks `Mail.Send`, the address is not an
+ * address, the attachment is over Graph's limit — and pressing it again is a
+ * person wasting their afternoon on a configuration problem nobody has told
+ * them about.
+ *
+ * So the kind is part of the failure, and `retryable` is derived from it in one
+ * place rather than guessed at each screen.
+ */
+export type EmailFailureKind =
+  /** 401: the client credential was refused. Nothing a retry changes. */
+  | 'credentials_rejected'
+  /** 403: authenticated and not allowed — usually a missing `Mail.Send`. */
+  | 'permission_denied'
+  /** 429 or 503: Microsoft is asking for less. Retry, after the wait it names. */
+  | 'throttled'
+  /** 5xx: Exchange is having a bad time. Worth retrying. */
+  | 'provider_unavailable'
+  /** The address is not one Graph will accept. A person must fix the record. */
+  | 'invalid_recipient'
+  /** Over Graph's 3 MB message limit. A retry sends the same bytes. */
+  | 'attachment_too_large'
+  /** The stored document could not be read, so nothing was sent. */
+  | 'document_unavailable'
+  /** The provider accepted the connection and did not answer in time. */
+  | 'timed_out'
+  /** The provider could not be reached at all. */
+  | 'unreachable'
+  /** Anything else Graph refused, reported in its own words. */
+  | 'provider_refused';
+
+/** The four that a second attempt can actually resolve. */
+const RETRYABLE: ReadonlySet<EmailFailureKind> = new Set<EmailFailureKind>([
+  'throttled',
+  'provider_unavailable',
+  'timed_out',
+  'unreachable',
+]);
+
+export const isRetryableFailure = (kind: EmailFailureKind): boolean => RETRYABLE.has(kind);
+
 /** Raised when the provider did not accept the message. */
 export class EmailSendFailed extends Error {
   constructor(
     message: string,
     /** The provider's own code, where it gave one. For the audit trail. */
     readonly providerCode: string = '',
+    readonly kind: EmailFailureKind = 'provider_refused',
+    /** From `Retry-After`, when the provider said how long to wait. */
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = 'EmailSendFailed';
   }
+
+  /** Whether trying the same send again could succeed. */
+  get retryable(): boolean {
+    return isRetryableFailure(this.kind);
+  }
 }
+
+/**
+ * Turns an HTTP answer into one of the kinds above. Pure, and exported, so
+ * every status this system claims to distinguish is proved by a test rather
+ * than by reading the adapter.
+ *
+ * Graph's own error codes are preferred over the status where they are more
+ * specific: a 400 is only an invalid recipient if Graph says the recipient is
+ * the problem, and treating every 400 as a bad address would send the office
+ * editing a customer record over a malformed request.
+ */
+export const classifyGraphFailure = (
+  status: number,
+  providerCode: string,
+  providerMessage: string,
+): EmailFailureKind => {
+  if (status === 401) return 'credentials_rejected';
+  if (status === 403) return 'permission_denied';
+  if (status === 429 || status === 503) return 'throttled';
+  if (status === 413) return 'attachment_too_large';
+  if (status >= 500) return 'provider_unavailable';
+
+  const code = providerCode.toLowerCase();
+  const text = providerMessage.toLowerCase();
+  if (code.includes('invalidrecipients') || code === 'errorinvalidrecipients') {
+    return 'invalid_recipient';
+  }
+  if (status === 400 && (text.includes('recipient') || text.includes('smtp address'))) {
+    return 'invalid_recipient';
+  }
+  if (code.includes('messagesizeexceeded') || text.includes('maximum message size')) {
+    return 'attachment_too_large';
+  }
+  return 'provider_refused';
+};
+
+/**
+ * WHAT TO DO ABOUT IT, APPENDED TO THE PROVIDER'S OWN WORDS.
+ *
+ * The provider's sentence is kept — it is the only account of what actually
+ * happened — and this says what it means for EJE. The text reaches the job's
+ * delivery record and, through it, the office's screen, which is the one place
+ * somebody decides between pressing *Send again* and telephoning whoever
+ * administers the tenant.
+ */
+const ADVICE: Readonly<Record<EmailFailureKind, string>> = {
+  credentials_rejected:
+    " This deployment's Microsoft 365 credential was refused, so sending again will fail the " +
+    'same way. EMAIL_GRAPH_CLIENT_SECRET or the app registration needs attention.',
+  permission_denied:
+    ' Microsoft 365 authenticated this deployment and would not let it send. The app ' +
+    'registration needs Mail.Send for the sending mailbox; a retry cannot grant it.',
+  throttled: ' Microsoft 365 is asking for fewer requests.',
+  provider_unavailable: ' Microsoft 365 is unavailable rather than refusing. Worth trying again.',
+  invalid_recipient:
+    " The customer's email address needs correcting on their record before this can be sent.",
+  attachment_too_large:
+    ' A retry sends the same bytes, so it will fail the same way — the document itself has to ' +
+    'be smaller, or sent another way.',
+  document_unavailable:
+    ' The job card is in the database and its bytes are not in storage, which is a storage ' +
+    'problem rather than a mail one.',
+  timed_out: ' Worth trying again; nothing was sent.',
+  unreachable: ' Worth trying again once the connection is back; nothing was sent.',
+  provider_refused: '',
+};
+
+/** `Retry-After` in seconds, where the provider gave a usable one. */
+export const retryAfterSeconds = (header: string | null): number | null => {
+  if (header === null) return null;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds);
+  // The HTTP-date form. Anything unparseable is simply no advice.
+  const when = Date.parse(header);
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, Math.round((when - Date.now()) / 1000));
+};
 
 /** Raised when a deployment has no email configuration at all. */
 export class EmailNotConfigured extends Error {
@@ -216,23 +476,32 @@ export class GraphEmailService implements EmailService {
           scope: 'https://graph.microsoft.com/.default',
           grant_type: 'client_credentials',
         }).toString(),
+        signal: this.deadline(),
       });
     } catch (cause) {
-      throw new EmailSendFailed(
-        `Microsoft 365 could not be reached for a token: ${this.redact(
-          cause instanceof Error ? cause.message : 'network error',
-        )}.`,
-      );
+      throw this.unreachable('a token', cause);
     }
 
     const payload = (await response.json().catch(() => ({}))) as GraphTokenResponse;
     if (!response.ok || (payload.access_token ?? '').length === 0) {
+      const kind =
+        response.ok || response.status === 400 || response.status === 401
+          ? 'credentials_rejected'
+          : classifyGraphFailure(response.status, payload.error ?? '', payload.error_description ?? '');
       throw new EmailSendFailed(
         this.redact(
           payload.error_description ??
             `Microsoft 365 refused the credentials (HTTP ${response.status}).`,
         ),
         payload.error ?? '',
+        /*
+         * A TOKEN ENDPOINT THAT SAYS NO IS A CONFIGURATION PROBLEM, not
+         * something to retry. The exceptions are the ones that are about the
+         * service rather than the credential — throttling and a 5xx — and
+         * `classifyGraphFailure` is what tells them apart.
+         */
+        kind,
+        kind === 'throttled' ? retryAfterSeconds(response.headers.get('retry-after')) : null,
       );
     }
 
@@ -240,6 +509,36 @@ export class GraphEmailService implements EmailService {
     const lifetime = (payload.expires_in ?? 3600) * 1000;
     this.token = { value: payload.access_token as string, expiresAt: now + lifetime - 60_000 };
     return this.token.value;
+  }
+
+  /** A deadline for one request. See `timeoutMs`. */
+  private deadline(): AbortSignal {
+    return AbortSignal.timeout(this.config.timeoutMs);
+  }
+
+  /**
+   * A thrown `fetch`, told apart: a deadline that expired is not the same event
+   * as a host that refused the connection, and the office can act on one of
+   * them (wait) differently from the other (check the network).
+   */
+  private unreachable(what: string, cause: unknown): EmailSendFailed {
+    const aborted =
+      cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
+    if (aborted) {
+      return new EmailSendFailed(
+        `Microsoft 365 did not answer within ${Math.round(this.config.timeoutMs / 1000)}s when ` +
+          `asked for ${what}. Nothing was sent, and the job stays open.`,
+        '',
+        'timed_out',
+      );
+    }
+    return new EmailSendFailed(
+      `Microsoft 365 could not be reached for ${what}: ${this.redact(
+        cause instanceof Error ? cause.message : 'network error',
+      )}.`,
+      '',
+      'unreachable',
+    );
   }
 
   private async call(path: string, body: unknown): Promise<GraphMessageResponse> {
@@ -250,24 +549,26 @@ export class GraphEmailService implements EmailService {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal: this.deadline(),
       });
     } catch (cause) {
-      throw new EmailSendFailed(
-        `Microsoft 365 could not be reached: ${this.redact(
-          cause instanceof Error ? cause.message : 'network error',
-        )}.`,
-      );
+      throw this.unreachable('the message', cause);
     }
 
     if (response.status === 202 || response.status === 204) return {};
 
     const payload = (await response.json().catch(() => ({}))) as GraphMessageResponse;
     if (!response.ok) {
+      const code = payload.error?.code ?? '';
+      const detail =
+        payload.error?.message ?? `Microsoft 365 refused the message (HTTP ${response.status}).`;
+      const kind = classifyGraphFailure(response.status, code, detail);
+      const wait = kind === 'throttled' ? retryAfterSeconds(response.headers.get('retry-after')) : null;
       throw new EmailSendFailed(
-        this.redact(
-          payload.error?.message ?? `Microsoft 365 refused the message (HTTP ${response.status}).`,
-        ),
-        payload.error?.code ?? '',
+        this.redact(`${detail}${ADVICE[kind]}${wait === null ? '' : ` Try again in ${wait}s.`}`),
+        code,
+        kind,
+        wait,
       );
     }
     return payload;
@@ -277,6 +578,7 @@ export class GraphEmailService implements EmailService {
   private async attachmentsFor(message: EmailMessage): Promise<readonly unknown[]> {
     const wanted = message.attachments ?? [];
     const prepared: unknown[] = [];
+    let total = 0;
     for (const attachment of wanted) {
       const stored = await this.storage.getDocument(attachment.storageKey);
       if (stored === null) {
@@ -285,6 +587,25 @@ export class GraphEmailService implements EmailService {
         // success.
         throw new EmailSendFailed(
           `The stored document ${attachment.fileName} could not be read, so nothing was sent.`,
+          '',
+          'document_unavailable',
+        );
+      }
+      /*
+       * CHECKED HERE, BEFORE A SINGLE CALL IS MADE. Graph would refuse this
+       * eventually, in its own words, after a token request and a draft — and
+       * the office would be told something about a message size by a system
+       * that already knew. A retry cannot help: the same bytes are sent again.
+       */
+      total += stored.bytes.byteLength;
+      if (total > MAX_ATTACHMENT_BYTES) {
+        throw new EmailSendFailed(
+          `${attachment.fileName} brings this message to ${Math.round(total / 1024)} KB, over ` +
+            `the ${Math.round(MAX_ATTACHMENT_BYTES / 1024)} KB Microsoft 365 accepts on one ` +
+            'message. Nothing was sent.' +
+            ADVICE.attachment_too_large,
+          '',
+          'attachment_too_large',
         );
       }
       prepared.push({
@@ -300,7 +621,12 @@ export class GraphEmailService implements EmailService {
   async send(message: EmailMessage): Promise<DeliveryReceipt> {
     const recipients = message.to.filter((address) => address.includes('@'));
     if (recipients.length === 0) {
-      throw new EmailSendFailed('The provider rejected the recipient address.');
+      throw new EmailSendFailed(
+        `There is no address to send to${message.to.length === 0 ? '' : ` — "${message.to.join(', ')}" is not one`}.` +
+          ADVICE.invalid_recipient,
+        '',
+        'invalid_recipient',
+      );
     }
 
     const draft = {
@@ -364,7 +690,7 @@ export class GraphEmailService implements EmailService {
     try {
       response = await this.fetchImpl(
         `${this.config.baseUrl}/users/${sender}/messages/${encodeURIComponent(messageId)}`,
-        { headers: { authorization: `Bearer ${token}` } },
+        { headers: { authorization: `Bearer ${token}` }, signal: this.deadline() },
       );
     } catch {
       // A reporting call that cannot be made says nothing. It must not be read

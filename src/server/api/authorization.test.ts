@@ -68,21 +68,32 @@ describe('authentication is required', () => {
     // wrapped in the `{ data }` envelope the rest of the API uses.
     const payload = response.raw as Record<string, unknown>;
     /*
-     * FIVE KEYS, AND THE LIST IS THE POINT. Pinned exactly so that adding a
-     * sixth is a decision somebody makes here, in front of this comment, rather
-     * than a field that arrives with a feature. `demoSwitcher` was added that
-     * way: it is a boolean about this deployment's own configuration, it names
-     * no database and carries no credential, and it says strictly less than
-     * `GET /api/dev/demo-users` — which answers 200 with the five addresses
-     * whenever it is true.
+     * SIX KEYS, AND THE LIST IS THE POINT. Pinned exactly so that adding a
+     * seventh is a decision somebody makes here, in front of this comment,
+     * rather than a field that arrives with a feature. `demoSwitcher` was added
+     * that way: it is a boolean about this deployment's own configuration, it
+     * names no database and carries no credential, and it says strictly less
+     * than `GET /api/dev/demo-users` — which answers 200 with the five
+     * addresses whenever it is true.
+     *
+     * `email` was added the same way, on 18 October 2026, and the decision is
+     * this. A deployment that cannot send a customer their job card is broken
+     * in the way EJE would notice LAST: the application works, technicians
+     * submit, and nothing arrives (MANDATE-3). One word from outside is what
+     * makes that noticeable. It is the TRANSPORT NAME and nothing else — no
+     * variable names, no addresses, no endpoints, no reasons, which stay in the
+     * startup log next to the operator. The assertion below pins it to those
+     * four words so a reason can never arrive in this field.
      */
     expect(Object.keys(payload).sort()).toEqual([
       'backend',
       'build',
       'database',
       'demoSwitcher',
+      'email',
       'status',
     ]);
+    expect(['graph', 'smtp', 'simulated', 'refuse']).toContain(payload.email);
 
     const body = JSON.stringify(payload).toLowerCase();
     for (const secret of ['postgres://', 'postgresql://', 'password', 'localhost', '5432', 'error']) {

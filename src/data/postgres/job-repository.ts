@@ -834,6 +834,88 @@ export class PostgresJobRepository implements JobRepository {
         })
         .onConflictDoNothing({ target: schema.finalDocuments.jobId });
     }
+
+    await this.writeDeliveryAttempt(job);
+  }
+
+  /**
+   * WHAT THE PROVIDER SAID, WRITTEN DOWN. MANDATE-3.
+   *
+   * `delivery_attempts` was read by the mapper and written by NOTHING. The
+   * delivery record therefore lived only in the object a single request
+   * happened to be holding: the next read of the job derived `not_started`
+   * from an empty table, however recently Microsoft 365 had accepted the
+   * message. Three consequences, every one of them visible to EJE:
+   *
+   *   - the office was told a customer's copy had not been sent when it had;
+   *   - `confirmJobCardDelivery` returns early with no message id, so a job
+   *     could never close on a confirmed delivery — the one transition the
+   *     whole handshake exists to make;
+   *   - after a restart nobody could tell whether a copy had gone out, so a
+   *     re-send risked sending the customer a second one.
+   *
+   * ONE ROW PER ATTEMPT, UPDATED IN PLACE AS THAT ATTEMPT MOVES. An attempt
+   * goes `sending` → accepted → confirmed, and each step is another save of the
+   * same job; a row per save would make `attempts` count saves rather than
+   * attempts, and the unique index on (job, channel, attempt) would refuse the
+   * second one outright. So the conflict target is that index and the set is
+   * the attempt's own progress.
+   *
+   * AND IT WRITES NOTHING FOR A JOB NOBODY HAS TRIED TO SEND. `not_started` is
+   * the absence of an attempt, which is exactly what an empty table says — a
+   * row claiming it would be an attempt that never happened.
+   */
+  private async writeDeliveryAttempt(job: Job): Promise<void> {
+    const delivery = job.delivery;
+    if (delivery === null || delivery.state === 'not_started' || delivery.attempts < 1) return;
+
+    const document = await this.db
+      .select({ id: schema.finalDocuments.id })
+      .from(schema.finalDocuments)
+      .where(eq(schema.finalDocuments.jobId, job.id))
+      .limit(1);
+
+    const failedAt = delivery.state === 'failed' ? delivery.updatedAt : null;
+
+    await this.db
+      .insert(schema.deliveryAttempts)
+      .values({
+        id: crypto.randomUUID(),
+        jobId: job.id as string,
+        finalDocumentId: document[0]?.id ?? null,
+        channel: 'email',
+        recipient: delivery.to,
+        attemptNumber: delivery.attempts,
+        state: delivery.state,
+        /*
+         * Empty is NOT a message id. The column is nullable so that the index
+         * on it can skip the rows that have none, and so that "the provider
+         * never gave us one" is distinguishable from "it gave us an empty
+         * string", which it never does.
+         */
+        providerMessageId: delivery.messageId.length === 0 ? null : delivery.messageId,
+        attemptedAt: delivery.acceptedAt ?? delivery.updatedAt,
+        acceptedAt: delivery.acceptedAt,
+        confirmedAt: delivery.confirmedAt,
+        failedAt,
+        failureReason: delivery.failureReason,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.deliveryAttempts.jobId,
+          schema.deliveryAttempts.channel,
+          schema.deliveryAttempts.attemptNumber,
+        ],
+        set: {
+          state: delivery.state,
+          recipient: delivery.to,
+          providerMessageId: delivery.messageId.length === 0 ? null : delivery.messageId,
+          acceptedAt: delivery.acceptedAt,
+          confirmedAt: delivery.confirmedAt,
+          failedAt,
+          failureReason: delivery.failureReason,
+        },
+      });
   }
 
   /**

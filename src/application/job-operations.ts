@@ -3145,6 +3145,15 @@ export const confirmJobCardDelivery = async (
 };
 
 /**
+ * How long an attempt may sit in `sending` before the office may try again.
+ *
+ * Long enough that no real Graph call is still outstanding — the adapter's own
+ * deadline is twenty seconds — and short enough that a crash does not strand a
+ * customer's copy for the rest of the day.
+ */
+const SENDING_STALE_AFTER_MS = 10 * 60 * 1000;
+
+/**
  * Sends the customer's copy again after a failure, using the stored document.
  *
  * The signature and the job card are not re-captured or re-rendered: a retry is
@@ -3176,6 +3185,46 @@ export const retryJobCardDelivery = async (
   if (job.status !== 'awaiting_delivery') {
     throw new WorkflowError(`${job.jobNumber} is not awaiting delivery.`, []);
   }
+
+  /*
+   * NOT WHILE ONE IS ALREADY IN FLIGHT. MANDATE-3.
+   *
+   * `sendFinalDocument` records `sending` BEFORE it hands the message to the
+   * provider, so a second *Send again* pressed while the first request is
+   * still waiting on Microsoft 365 would read a job that says `sending` and
+   * send the customer a SECOND copy of the same job card. Two copies of a
+   * signed document is not a cosmetic problem: the customer cannot tell which
+   * one is the record, and EJE cannot either.
+   *
+   * Simultaneous arrivals are already refused one layer down — the repository
+   * holds each writer to the version it read, so the second save loses with a
+   * ConcurrencyError and never reaches the provider. This is the case that
+   * guard cannot see: a request that arrives AFTER the first has committed its
+   * `sending` and before the provider has answered.
+   *
+   * IT EXPIRES, because a crash between the save and the answer would
+   * otherwise leave a job nobody can ever re-send. After the window the office
+   * may try again: at worst the earlier attempt also arrived, which is the
+   * situation the provider's own message id exists to reconcile — and far
+   * better than a job card that can never be sent.
+   */
+  if (job.delivery !== null && job.delivery.state === 'sending') {
+    const startedAt = Date.parse(job.delivery.updatedAt);
+    const now = Date.parse(context.services.clock.now());
+    const waited = now - startedAt;
+    if (Number.isFinite(startedAt) && Number.isFinite(now) && waited < SENDING_STALE_AFTER_MS) {
+      throw new WorkflowError(`${job.jobNumber} is being sent right now.`, [
+        {
+          code: 'delivery_in_flight',
+          message:
+            `An attempt to send ${job.jobNumber} to ${job.delivery.to} is still with the mail ` +
+            'provider. Wait for it to finish rather than sending the customer a second copy — ' +
+            'the screen will say what happened to it.',
+        },
+      ]);
+    }
+  }
+
   return sendFinalDocument(context, job, customerDisplayName);
 };
 

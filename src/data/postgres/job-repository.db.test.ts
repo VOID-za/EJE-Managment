@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import { PostgresJobRepository } from './job-repository';
 import { ConcurrencyError, SignedJobCardAltered, withTransaction } from './transaction';
@@ -452,6 +452,165 @@ describeDb('the PostgreSQL job repository', () => {
       // Nothing was written: the stored line is still the signed one.
       const read = await repository.findById(stored.id);
       expect(read?.labour[0]?.hours).toBe(3);
+    });
+
+    /* -- the delivery record, which was never written at all -------------- */
+
+    /**
+     * WHAT THE PROVIDER SAID, KEPT. MANDATE-3, AUD-10's neighbour.
+     *
+     * `delivery_attempts` was READ by the mapper and written by nothing. So on
+     * PostgreSQL the whole delivery record — the provider's message id, the
+     * state, the failure reason, how many attempts there had been — lived only
+     * in the object the request happened to be holding, and the next read
+     * derived `not_started` from an empty table. Three consequences, all of
+     * them visible to EJE:
+     *
+     *   - the office's screen said a customer's copy had not been sent when
+     *     Microsoft 365 had accepted it;
+     *   - `confirm_delivery` returns early when there is no message id, so a
+     *     job could NEVER close on a confirmed delivery — the one transition
+     *     the delivery handshake exists to make;
+     *   - after a restart nobody could tell whether a copy had gone out, so a
+     *     re-send risked a second copy of the same job card.
+     *
+     * These tests write the record and read it back. With the repository as it
+     * was, every one of them fails on the first assertion.
+     */
+    const sentDelivery = {
+      messageId: 'AAMkAGI2THVSAAA=',
+      state: 'pending_delivery' as const,
+      to: 'accounts@abc-engineering.example',
+      acceptedAt: '2026-09-20T12:31:00.000Z',
+      confirmedAt: null,
+      updatedAt: '2026-09-20T12:31:00.000Z',
+      attempts: 1,
+      failureReason: '',
+    };
+
+    it('keeps the provider message id and state across a reload', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        submittedAt: '2026-09-20T12:30:00.000Z',
+        delivery: sentDelivery,
+      });
+
+      const read = await repository.findById(stored.id);
+      expect(read?.delivery?.messageId).toBe(sentDelivery.messageId);
+      expect(read?.delivery?.state).toBe('pending_delivery');
+      expect(read?.delivery?.to).toBe(sentDelivery.to);
+      expect(read?.delivery?.acceptedAt).toBe(sentDelivery.acceptedAt);
+      expect(read?.delivery?.attempts).toBe(1);
+    });
+
+    it('keeps a FAILURE and its reason, which is what the office acts on', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        delivery: {
+          ...sentDelivery,
+          messageId: '',
+          state: 'failed',
+          acceptedAt: null,
+          failureReason: 'Microsoft 365 refused the credentials (HTTP 401).',
+        },
+      });
+
+      const read = await repository.findById(stored.id);
+      expect(read?.delivery?.state).toBe('failed');
+      expect(read?.delivery?.failureReason).toMatch(/HTTP 401/u);
+    });
+
+    /**
+     * EVERY ATTEMPT, NOT A COUNTER. The office's question is "we tried three
+     * times — what did it say each time?", and the table was built to answer
+     * it. One row per attempt, the latest being the current state.
+     */
+    it('records each attempt as its own row, keeping what the earlier ones said', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        delivery: { ...sentDelivery, messageId: '', state: 'failed', acceptedAt: null, failureReason: 'Mailbox full.' },
+      });
+      const second = await repository.save({
+        ...stored,
+        status: 'awaiting_delivery',
+        delivery: { ...sentDelivery, attempts: 2, updatedAt: '2026-09-20T13:00:00.000Z', acceptedAt: '2026-09-20T13:00:00.000Z' },
+      });
+
+      expect(second.delivery?.attempts).toBe(2);
+      const rows = await db
+        .select()
+        .from(schema.deliveryAttempts)
+        .where(eq(schema.deliveryAttempts.jobId, stored.id));
+      expect(rows).toHaveLength(2);
+      const first = rows.find((row) => row.attemptNumber === 1);
+      expect(first?.state).toBe('failed');
+      expect(first?.failureReason).toBe('Mailbox full.');
+      expect(rows.find((row) => row.attemptNumber === 2)?.state).toBe('pending_delivery');
+
+      const read = await repository.findById(stored.id);
+      expect(read?.delivery?.state).toBe('pending_delivery');
+      expect(read?.delivery?.attempts).toBe(2);
+    });
+
+    /**
+     * SAVING THE SAME ATTEMPT AGAIN IS AN UPDATE, NOT A SECOND ROW. The state
+     * of one attempt moves — sending, then accepted, then confirmed — and each
+     * step is another save of the same job. A row per save would make
+     * `attempts` count saves instead of attempts, and the unique index on
+     * (job, channel, attempt) would refuse the second one outright.
+     */
+    it('moves one attempt through its states without inventing new ones', async () => {
+      const stored = await signedJobWithEvidence();
+      const base = { ...stored, status: 'awaiting_delivery' as const };
+
+      await repository.save({
+        ...base,
+        delivery: { ...sentDelivery, state: 'sending', acceptedAt: null, messageId: '' },
+      });
+      await repository.save({ ...base, delivery: sentDelivery });
+      const closed = await repository.save({
+        ...base,
+        status: 'closed',
+        closedAt: '2026-09-20T14:00:00.000Z',
+        delivery: {
+          ...sentDelivery,
+          state: 'delivered',
+          confirmedAt: '2026-09-20T14:00:00.000Z',
+          updatedAt: '2026-09-20T14:00:00.000Z',
+        },
+      });
+
+      expect(closed.delivery?.state).toBe('delivered');
+      const rows = await db
+        .select()
+        .from(schema.deliveryAttempts)
+        .where(eq(schema.deliveryAttempts.jobId, stored.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.state).toBe('delivered');
+      // The table's own CHECK: only a confirmation may claim delivery.
+      expect(rows[0]?.confirmedAt).toBe('2026-09-20T14:00:00.000Z');
+
+      const read = await repository.findById(stored.id);
+      expect(read?.delivery?.state).toBe('delivered');
+      expect(read?.delivery?.attempts).toBe(1);
+    });
+
+    it('writes nothing for a job nobody has tried to send', async () => {
+      const stored = await signedJobWithEvidence();
+      await repository.save({ ...stored, status: 'awaiting_delivery' });
+
+      expect(
+        await db
+          .select()
+          .from(schema.deliveryAttempts)
+          .where(eq(schema.deliveryAttempts.jobId, stored.id)),
+      ).toEqual([]);
     });
 
     it('refuses to save a signed job that has GAINED a line', async () => {

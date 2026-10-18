@@ -206,6 +206,72 @@ describe('a failed delivery', () => {
     expect(retried.job.status).toBe('awaiting_delivery');
   });
 
+  /**
+   * NOT A SECOND COPY WHILE THE FIRST IS STILL IN FLIGHT. MANDATE-3.
+   *
+   * `sendFinalDocument` records `sending` before it hands the message over, so
+   * before this guard a second *Send again* — pressed while the first request
+   * was still waiting on Microsoft 365 — read a job that said `sending` and
+   * sent the customer ANOTHER copy of the signed job card. Two copies of a
+   * signed document is not cosmetic: neither the customer nor EJE can then say
+   * which one is the record.
+   *
+   * The job is put into `sending` directly here, which is exactly the state a
+   * request in flight leaves behind.
+   */
+  it('REFUSES a re-send while an attempt is still with the provider', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+
+    const inFlight = await harness.repos.jobs.save({
+      ...issued.job,
+      delivery: {
+        ...(issued.delivery),
+        state: 'sending',
+        updatedAt: harness.services.clock.now(),
+      },
+    });
+
+    await expect(retryJobCardDelivery(harness.as(master), inFlight, 'Pieter Nel')).rejects.toThrow(
+      WorkflowError,
+    );
+    try {
+      await retryJobCardDelivery(harness.as(master), inFlight, 'Pieter Nel');
+    } catch (error) {
+      expect((error as WorkflowError).violations[0]?.code).toBe('delivery_in_flight');
+      expect((error as WorkflowError).violations[0]?.message).toMatch(/second copy/u);
+    }
+
+    // And the attempt count did not move, because nothing was sent.
+    const read = await harness.repos.jobs.findById(issued.job.id);
+    expect(read?.delivery?.attempts).toBe(1);
+  });
+
+  /**
+   * AND IT EXPIRES. A crash between recording `sending` and the provider's
+   * answer would otherwise leave a customer's copy that can never be re-sent,
+   * which is worse than the risk of a duplicate — and the provider's own
+   * message id is what reconciles that.
+   */
+  it('lets the office re-send once a stuck attempt is plainly stale', async () => {
+    const signed = await workAndSign(harness, 'EJE-1048');
+    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+
+    const abandoned = await harness.repos.jobs.save({
+      ...issued.job,
+      delivery: {
+        ...(issued.delivery),
+        state: 'sending',
+        // Half an hour ago: no Graph call is still outstanding after twenty
+        // seconds, so this is a process that died mid-send.
+        updatedAt: new Date(Date.parse(harness.services.clock.now()) - 30 * 60 * 1000).toISOString(),
+      },
+    });
+
+    const retried = await retryJobCardDelivery(harness.as(master), abandoned, 'Pieter Nel');
+    expect(retried.delivery.attempts).toBe(2);
+  });
+
   it('records every attempt on the audit trail', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
     const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');

@@ -9,6 +9,8 @@ import { getDatabase } from '@/db/client';
 import type { AppServices } from '@/application/context';
 import {
   chooseEmailTransport,
+  describeEmailConfiguration,
+  emailConfigurationSummary,
   GraphEmailService,
   readGraphEmailConfiguration,
   UnconfiguredEmailService,
@@ -163,6 +165,28 @@ const buildEmail = (
     isDemoBackend: backend === 'demo',
   });
 
+  /*
+   * SAID OUT LOUD, ONCE, AT STARTUP. MANDATE-3.
+   *
+   * "Customer email is not configured" is useless to whoever is configuring it:
+   * a deployment with three of the four variables set is indistinguishable from
+   * one with none. The report names the variables that are missing and the
+   * values that look wrong — never a value itself — and it is logged here, at
+   * the moment the decision is made, because the alternative is finding out
+   * from a technician whose customer never got their job card.
+   *
+   * A deployment that IS configured still gets a line when something about it
+   * is suspect: EMAIL_SENDER that is not an address, a tenant id that is one, a
+   * nonsense timeout. Those produce a working transport that cannot send.
+   */
+  const report = describeEmailConfiguration();
+  const summary = emailConfigurationSummary(report);
+  if (transport === 'refuse') {
+    console.error(`[email] no customer email on this deployment. ${summary}`.trim());
+  } else if (summary.length > 0) {
+    console.warn(`[email] ${transport} transport selected, with problems. ${summary}`);
+  }
+
   switch (transport) {
     case 'graph':
       return new GraphEmailService(graph as GraphEmailConfiguration, storage, clock);
@@ -172,9 +196,14 @@ const buildEmail = (
       return new SimulatedEmailService(outbox, clock, ids);
     default:
       return new UnconfiguredEmailService(
-        smtp === null
-          ? ''
-          : 'SMTP is configured, but SMTP is a development transport and is never used in production.',
+        [
+          summary,
+          smtp === null
+            ? ''
+            : 'SMTP is configured, but SMTP is a development transport and is never used in production.',
+        ]
+          .filter((part) => part.length > 0)
+          .join(' '),
       );
   }
 };

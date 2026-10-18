@@ -39,6 +39,7 @@ message arrive instead of trusting a simulation.
 | `EMAIL_REPLY_TO` | no | none — replies go to `EMAIL_SENDER` |
 | `EMAIL_GRAPH_BASE_URL` | no | `https://graph.microsoft.com/v1.0` |
 | `EMAIL_GRAPH_LOGIN_URL` | no | `https://login.microsoftonline.com` |
+| `EMAIL_GRAPH_TIMEOUT_MS` | no | `20000` — how long one Graph request may take |
 
 **What each absence does.** Any one of the four required variables missing means
 *no Graph configuration*, and a real-database deployment then **refuses to send
@@ -58,6 +59,58 @@ message id. This adapter instead creates a draft (`POST
 /users/{sender}/messages`), which returns Graph's own id, then sends it. That id
 becomes the outbox entry's id, and it is the only thing that makes the entry
 reconcilable against a delivery report later.
+
+**Every request carries a deadline.** There was none: `fetch` with no signal
+waits as long as the socket stays open, and these calls sit inside the request
+that submits a signed job card — so an endpoint that accepted the connection and
+then went quiet held a technician's submission open indefinitely. Twenty seconds
+by default, `EMAIL_GRAPH_TIMEOUT_MS` to change it, and a deadline that expires is
+reported as a TIMEOUT rather than as a refusal, because the two mean different
+things to whoever is deciding what to do next.
+
+**Attachments are checked before anything is sent.** Graph takes at most 3 MB of
+attachments on the message resource; beyond that it needs an upload session,
+which this adapter does not implement. A job card whose attachments exceed the
+limit is refused here, by size, before a token is even requested — a retry would
+send the same bytes.
+
+#### Checking the configuration
+
+A deployment with three of the four required variables set is indistinguishable
+from one with none, as far as *"customer email is not configured"* goes. So:
+
+- **At startup**, the chosen transport is logged, and a missing or suspect
+  configuration is logged with the VARIABLE NAMES — never a value, not even a
+  length. `[email] no customer email on this deployment. Not configured:
+  EMAIL_GRAPH_CLIENT_SECRET is not set.`
+- **`GET /api/health`** reports `"email"` as the transport in use (`graph`,
+  `smtp`, `simulated` or `refuse`) and nothing more. That is the one bit an
+  outside check needs in order to notice that a deployment cannot send; the
+  reasons stay in the log, next to the operator.
+- A deployment that is complete but wrong is caught too: `EMAIL_SENDER` that is
+  not an address, a tenant id that looks like a mailbox, a nonsense timeout.
+  Each of those selects a working transport that cannot send.
+
+#### What a failure means, and whether to press *Send again*
+
+The adapter classifies what the provider said, and the delivery record carries
+that wording, because the office has one button and nine situations:
+
+| What happened | Retry? |
+|---|---|
+| 401 — the credential was refused | **No.** `EMAIL_GRAPH_CLIENT_SECRET` or the registration |
+| 403 — authenticated, not allowed | **No.** The registration needs `Mail.Send` |
+| 429 / 503 — throttled | **Yes**, after the wait Microsoft names in `Retry-After` |
+| 5xx — Exchange is unavailable | **Yes** |
+| An address Graph will not accept | **No.** Correct the customer's record first |
+| Over the attachment limit | **No.** The same bytes fail the same way |
+| The stored document could not be read | **No.** That is a storage problem |
+| Timed out, or unreachable | **Yes.** Nothing was sent |
+
+A re-send is refused outright while an attempt is still with the provider, so a
+second press cannot put a second copy of one signed job card in a customer's
+inbox. The refusal expires after ten minutes, because a process that died
+mid-send would otherwise strand that customer's copy for good.
 
 ### Development configuration — SMTP
 
@@ -130,7 +183,18 @@ Never use a real customer's job card as a test. Instead:
 
 To prove the refusal path, unset one Graph variable in a production-mode
 deployment and submit: the job must show a failed delivery naming the missing
-configuration, and remain re-sendable.
+configuration, and remain re-sendable. `GET /api/health` must then report
+`"email":"refuse"`, and the startup log must name the variable that is missing.
+
+**What has NOT been done, and must not be claimed.** No live Microsoft 365
+tenant has been configured and no message has been sent to a real mailbox from
+this codebase. Everything above is proved against the real adapter driven by
+injected HTTP responses — the requests it builds, the answers it believes, the
+failures it tells apart and the deadlines it carries — which is the whole of what
+can honestly be tested without EJE's tenant. **MANDATE-3 stays PARTIAL until a
+configured deployment sends a real job card and the provider's behaviour is
+observed.** The six steps above are that verification, and they need a tenant,
+an app registration and a mailbox that nobody in this repository can create.
 
 ---
 

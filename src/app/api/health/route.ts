@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 import { getDatabase } from '@/db/client';
 import { selectPersistenceBackend } from '@/data/backend';
 import { isDemoSwitcherEnabled } from '@/server/dev/demo-switcher';
+import { readSmtpEmailConfiguration } from '@/services/development/email';
+import { chooseEmailTransport, readGraphEmailConfiguration } from '@/services/production/email';
 
 /**
  * Is this deployment actually working?
@@ -32,11 +34,25 @@ import { isDemoSwitcherEnabled } from '@/server/dev/demo-switcher';
  * It discloses nothing new: `GET /api/dev/demo-users` already answers 200 with
  * the five addresses when the switcher is on and 404 when it is not, so this
  * field says strictly less than the feature it describes.
+ *
+ * AND IT SAYS WHICH MAIL TRANSPORT IS IN USE. MANDATE-3. A deployment that
+ * cannot send a customer their job card is broken in the way EJE would notice
+ * last — the application works, technicians submit, and nothing arrives. The
+ * transport NAME is reported (`graph`, `smtp`, `simulated`, `refuse`) and
+ * nothing else: no variable names, no addresses, no endpoints, no reasons.
+ * Those are in the startup log, next to the operator; this is the one bit an
+ * outside check needs in order to notice.
  */
 export const dynamic = 'force-dynamic';
 
 export const GET = async (): Promise<NextResponse> => {
   const backend = selectPersistenceBackend();
+  const email = chooseEmailTransport({
+    graphConfigured: readGraphEmailConfiguration() !== null,
+    smtpConfigured: readSmtpEmailConfiguration() !== null,
+    isProduction: process.env.NODE_ENV === 'production',
+    isDemoBackend: backend === 'demo',
+  });
   const build = {
     commit: process.env.EJE_BUILD_COMMIT ?? 'unknown',
     builtAt: process.env.EJE_BUILD_TIME ?? 'unknown',
@@ -49,6 +65,7 @@ export const GET = async (): Promise<NextResponse> => {
       status: 'ok',
       backend,
       database: 'not-configured',
+      email,
       demoSwitcher,
       build,
     });
@@ -60,6 +77,7 @@ export const GET = async (): Promise<NextResponse> => {
       status: 'ok',
       backend,
       database: 'reachable',
+      email,
       demoSwitcher,
       build,
     });
@@ -68,7 +86,7 @@ export const GET = async (): Promise<NextResponse> => {
     // to an unauthenticated caller.
     console.error('[health] database unreachable', cause);
     return NextResponse.json(
-      { status: 'degraded', backend, database: 'unreachable', demoSwitcher, build },
+      { status: 'degraded', backend, database: 'unreachable', email, demoSwitcher, build },
       { status: 503 },
     );
   }
