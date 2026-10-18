@@ -19,6 +19,7 @@ import type {
   SubmissionCover,
   TemplateUsage,
   User,
+  ChangeRequest,
 } from '@/domain';
 import type { ActivityFeed } from '@/application/activity-read';
 import type { CaptureReferralRow } from '@/application/capture-referral-view';
@@ -101,6 +102,33 @@ const search = (params: Record<string, string | undefined>): string => {
   return usable.length === 0 ? '' : `?${new URLSearchParams(usable).toString()}`;
 };
 
+/* ---- register change requests ------------------------------------------ */
+
+/**
+ * A report that the register is wrong, raised by somebody who may not edit it.
+ * CUST-CR.
+ *
+ * `mine()` is how a technician sees what became of their own report; `list()`
+ * is the office's screen and needs `customers.manage`. The server decides
+ * which, from the session — see `/api/change-requests`.
+ */
+export const changeRequests = {
+  list: (state?: 'open' | 'applied' | 'declined') =>
+    apiGet<{ rows: readonly ChangeRequest[] }>(
+      `/api/change-requests${search({ state })}`,
+    ),
+  mine: () => apiGet<{ rows: readonly ChangeRequest[] }>('/api/change-requests?mine=1'),
+  raise: (input: {
+    readonly subject: 'customer' | 'site' | 'machine';
+    readonly customerId: string;
+    readonly siteId?: string | null;
+    readonly machineId?: string | null;
+    readonly details: string;
+  }) => command<ChangeRequest>('/api/change-requests', input),
+  resolve: (requestId: string, input: { readonly outcome: 'applied' | 'declined'; readonly note: string }) =>
+    command<ChangeRequest>(`/api/change-requests/${segment(requestId)}/resolve`, input),
+};
+
 /* ---- identity ---------------------------------------------------------- */
 
 export interface SafeUser {
@@ -180,6 +208,14 @@ export interface CustomerScreen {
   readonly machines: readonly Machine[];
   readonly jobRows: readonly JobListRow[];
   readonly users: readonly User[];
+  /**
+   * Reports that this record is wrong. CUST-CR.
+   *
+   * Empty for anybody but the office, and empty on the SERVER rather than
+   * hidden here: the fact that somebody complained about a record is not a
+   * technician's to read. Their own reports come from `changeRequests.mine()`.
+   */
+  readonly changeRequests: readonly ChangeRequest[];
 }
 
 export interface MachineScreen {

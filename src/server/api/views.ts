@@ -264,6 +264,19 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     repos.users.list(),
   ]);
 
+  /*
+   * REPORTS THAT THIS RECORD IS WRONG. CUST-CR.
+   *
+   * Office-only, and composed here rather than fetched by the browser so the
+   * scoping is a server fact: the office sees every report about this customer
+   * (that is the screen they act on), and a technician sees only their OWN
+   * reports, on their own screen — the fact that somebody else complained about
+   * a record is not theirs to read.
+   */
+  const changeRequests = can(actor.role, 'customers.manage')
+    ? await repos.changeRequests.listForCustomer(id)
+    : [];
+
   return {
     customer,
     sites,
@@ -271,6 +284,7 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     machines: machines.filter((machine: Machine) => machine.customerId === id),
     jobRows: await loadVisibleJobRows(repos, jobs, actor),
     users,
+    changeRequests,
   };
 };
 
