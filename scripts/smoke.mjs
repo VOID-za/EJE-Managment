@@ -5346,7 +5346,16 @@ await step('unsent work survives a sign-out and stays with its owner', async () 
    * it does not catch one called `d` holding the session, which is why the
    * value itself is what the stores are checked against.
    */
-  const sessionCookie = (await page.context().cookies(BASE)).find((cookie) =>
+  /*
+   * EVERY cookie, not `cookies(BASE)`.
+   *
+   * The session cookie is `Secure` — and `__Host-` prefixed, which requires it
+   * — so Playwright does not return it for an `http://` URL even though the
+   * browser is holding it for 127.0.0.1, which Chromium treats as a
+   * trustworthy origin. Filtering by URL therefore found nothing and the check
+   * reported "no session cookie" on a session that plainly existed.
+   */
+  const sessionCookie = (await page.context().cookies()).find((cookie) =>
     cookie.name.endsWith('eje_session'),
   );
   if (sessionCookie === undefined) throw new Error('there is no session cookie to check against');
