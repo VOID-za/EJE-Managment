@@ -405,3 +405,48 @@ export const canOpenDocumentFile = (
   if (document.status !== 'pending_approval') return true;
   return can(actor.role, 'library.manage') || document.uploadedBy === actor.id;
 };
+
+/**
+ * INDEX THIS REVISION'S TEXT AGAIN. MASTER SCOPE LIB-5.
+ *
+ * WHY A RETRY HAS TO EXIST. An index can fail for reasons that are fixed
+ * later and have nothing to do with the document: a stream this extractor
+ * could not decompress, a file that arrived while a limit was lower, a parser
+ * improvement shipped after the upload. Without a retry the only way to
+ * re-index a manual is to upload it again, which creates a NEW revision — so
+ * the library would gain a duplicate document to fix a missing index.
+ *
+ * WHAT IT CANNOT DO, and the test that holds each one:
+ *
+ *  - It cannot touch another revision. The index is keyed by the revision's
+ *    own id, and this writes that key only: a failed re-index of version 2.0
+ *    leaves version 1.0's index exactly as it was.
+ *  - It cannot invent an index. It re-reads the STORED BYTES; a record with no
+ *    file behind it is refused with that as the reason, rather than quietly
+ *    recorded as `needs_ocr`.
+ *  - It cannot be done by a technician. Re-indexing decides what the library
+ *    can find, which is the office's business — the same capability that
+ *    approves and archives.
+ *
+ * It is idempotent per revision: running it twice replaces one row twice and
+ * leaves one row.
+ */
+export const reindexDocument = async (
+  context: OperationContext,
+  document: TechnicalDocument,
+): Promise<DocumentTextIndex> => {
+  assertManages(context);
+
+  const stored = await context.services.storage.getDocument(document.storageKey);
+  if (stored === null) {
+    throw new WorkflowError('There is no stored file to index.', [
+      {
+        code: 'no_file_stored',
+        message:
+          'This record describes a document that was never uploaded, so there are no bytes to read. Upload the PDF as a new revision.',
+      },
+    ]);
+  }
+
+  return indexDocumentText(context, document, stored.bytes);
+};

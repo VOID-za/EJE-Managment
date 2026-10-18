@@ -173,6 +173,12 @@ export const apiGet = <T>(path: string, signal?: AbortSignal): Promise<T> =>
 export interface DownloadedFile {
   readonly fileName: string;
   /**
+   * The response's own headers, for a caller that has to check WHAT it was
+   * given — the library preview reads the revision the server says it served
+   * and compares it with the revision it asked for.
+   */
+  readonly headers: Headers;
+  /**
    * THE SERVER'S OWN BYTES, UNTOUCHED.
    *
    * Not `response.text()`. That decodes the body and STRIPS A LEADING BOM —
@@ -231,6 +237,7 @@ export const apiDownload = async (path: string, fallbackName: string): Promise<D
 
   return {
     fileName: fileNameFrom(response.headers.get('content-disposition'), fallbackName),
+    headers: response.headers,
     bytes,
     contentType: response.headers.get('content-type') ?? 'application/octet-stream',
   };

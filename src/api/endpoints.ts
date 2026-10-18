@@ -654,6 +654,9 @@ export const library = {
    * which documents are waiting for approval.
    */
   fileUrl: (documentId: string) => `/api/library/${segment(documentId)}/file`,
+  /** Index this revision's text again, from the bytes already stored. LIB-5. */
+  reindex: (documentId: string) =>
+    command<DocumentTextIndex>(`/api/library/${segment(documentId)}/reindex`),
   update: (documentId: string, input: unknown) =>
     command<TechnicalDocument>(`/api/library/${segment(documentId)}/update`, input),
   approve: (documentId: string) =>

@@ -22,9 +22,11 @@ import {
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { DocumentPdfPreview } from '@/components/library/DocumentPdfPreview';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { UploadDocumentDialog } from '@/components/library/UploadDocumentDialog';
 import type { LibrarySearchPage } from '@/application/library-search';
+import { ApiRequestError } from '@/api/client';
 import { library, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -54,6 +56,9 @@ const LibraryPage = () => {
   const [uploading, setUploading] = useState(false);
   /** Which page of the inside-the-documents results is showing. LIB-5. */
   const [textPage, setTextPage] = useState(1);
+  /** The revision currently being re-indexed, and the last refusal. LIB-5. */
+  const [reindexing, setReindexing] = useState<string | null>(null);
+  const [reindexFailure, setReindexFailure] = useState<string | null>(null);
   // A Master reviews pending uploads in Administration; a technician must not
   // see them here, or an unapproved document could be followed on site.
   const seesPending = can(user.role, 'library.manage');
@@ -129,6 +134,32 @@ const LibraryPage = () => {
   const toggleFavourite = async (document: TechnicalDocument) => {
     await library.toggleFavourite(document.id);
     query.refetch();
+  };
+
+  /*
+   * INDEX IT AGAIN. MASTER SCOPE LIB-5.
+   *
+   * A failed or unsearchable index is a state somebody can act on, and until
+   * now the only way to act was to upload the document a second time — which
+   * creates a new revision, so the library gained a duplicate to fix a missing
+   * index. The server re-reads the bytes it already holds; the office decides
+   * when to ask.
+   */
+  const reindex = async (document: TechnicalDocument): Promise<void> => {
+    setReindexing(document.id);
+    setReindexFailure(null);
+    try {
+      await library.reindex(document.id);
+      query.refetch();
+    } catch (cause) {
+      setReindexFailure(
+        cause instanceof ApiRequestError
+          ? [cause.message, ...cause.violations.map((violation) => violation.message)].join(' ')
+          : 'The document could not be indexed again.',
+      );
+    } finally {
+      setReindexing(null);
+    }
   };
 
   if (query.error !== null) {
@@ -228,6 +259,16 @@ const LibraryPage = () => {
         </div>
       </Card>
 
+      {reindexFailure !== null && (
+        <p
+          className="mb-4 rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-3.5 py-2.5 text-sm text-signal-700"
+          role="status"
+          data-testid="library-reindex-failure"
+        >
+          {reindexFailure}
+        </p>
+      )}
+
       {insideTerm.length >= 2 && (
         <InsideDocuments
           term={insideTerm}
@@ -278,6 +319,9 @@ const LibraryPage = () => {
               key={document.id}
               document={document}
               index={indexes.get(document.id) ?? null}
+              manages={seesPending}
+              reindexing={reindexing === document.id}
+              onReindex={() => void reindex(document)}
               favourite={favourites.includes(document.id)}
               onOpen={() => openDocument(document)}
               onToggleFavourite={() => toggleFavourite(document)}
@@ -460,12 +504,19 @@ const IndexBadge = ({ index }: { readonly index: DocumentTextIndex | null }) => 
 const DocumentCard = ({
   document,
   index,
+  manages,
+  reindexing,
+  onReindex,
   favourite,
   onOpen,
   onToggleFavourite,
 }: {
   readonly document: TechnicalDocument;
   readonly index: DocumentTextIndex | null;
+  /** The office may ask for a re-index; a technician may not. */
+  readonly manages: boolean;
+  readonly reindexing: boolean;
+  readonly onReindex: () => void;
   readonly favourite: boolean;
   readonly onOpen: () => void;
   readonly onToggleFavourite: () => void;
@@ -513,6 +564,35 @@ const DocumentCard = ({
       </Badge>
       <IndexBadge index={index} />
     </div>
+
+    {/*
+      WHY IT IS NOT SEARCHABLE, AND WHAT TO DO ABOUT IT. MASTER SCOPE LIB-5.
+
+      The badge says a document holds no searchable text; the reason is what
+      tells the office whether that is a scan (OCR, which EJE have not bought),
+      a file that is not a PDF (upload it again) or a stream this extractor
+      could not read (try again, perhaps after a parser improvement). Shown to
+      the office, which is who can act on it, and the retry is the same
+      capability that approves and archives.
+    */}
+    {manages && index !== null && index.state !== 'indexed' && (
+      <div
+        className="mt-3 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3 py-2.5"
+        data-testid="library-index-problem"
+      >
+        <p className="text-xs leading-relaxed text-amber-eje-800">{index.failureReason}</p>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-2"
+          loading={reindexing}
+          onClick={onReindex}
+          data-testid="library-reindex"
+        >
+          Index this document again
+        </Button>
+      </div>
+    )}
 
     <div className="mt-4 flex items-center justify-between gap-2 border-t border-steel-100 pt-3">
       <p className="text-xs text-steel-400">
@@ -587,37 +667,19 @@ const DocumentPreview = ({
         <p className="text-sm leading-relaxed text-steel-700">{document.description}</p>
 
         <SectionHeading title="Preview" className="!mb-0" />
-        <div className="rounded-[var(--radius-card)] bg-steel-200/60 p-6">
-          <div
-            // A document preview represents paper, so it stays light in both themes.
-            data-theme="light"
-            className="mx-auto max-w-lg space-y-3 bg-white p-8 shadow-[var(--shadow-card)]"
-          >
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-steel-400 uppercase">
-              {document.manufacturer}
-            </p>
-            <p className="text-xl font-bold text-steel-900">{document.name}</p>
-            <p className="text-xs text-steel-500">
-              {document.machineModel} · {document.version}
-            </p>
-            <div className="space-y-2 pt-4">
-              {Array.from({ length: 9 }, (_, index) => (
-                <div
-                  key={index}
-                  className="h-2 rounded-full bg-steel-100"
-                  style={{ width: `${95 - ((index * 13) % 45)}%` }}
-                />
-              ))}
-            </div>
-            <p className="pt-6 text-center text-[11px] text-steel-400">
-              Page 1 of {document.pageCount}
-            </p>
-          </div>
-          <p className="mt-4 text-center text-xs text-steel-500">
-            Document preview is simulated in this demonstration. The production system streams the
-            stored file through the storage service.
-          </p>
-        </div>
+        {/*
+          THE REAL DOCUMENT, NOT A DRAWING OF ONE. MASTER SCOPE LIB-5.
+
+          What was here was a facsimile — the manufacturer's name, the title and
+          nine grey bars, captioned "Document preview is simulated in this
+          demonstration". It was honest about being fake and useless for the one
+          thing a preview is for: a technician cannot read a wiring diagram out
+          of grey bars, and a Master cannot approve a document they have not
+          seen. `DocumentPdfPreview` fetches this revision's own bytes through
+          the authorised route and gives them to the browser's viewer, or says
+          exactly why it cannot.
+        */}
+        <DocumentPdfPreview document={document} />
 
         <Card padded={false} className="shadow-none">
           <CardHeader title="Document details" className="px-4 pt-4" />

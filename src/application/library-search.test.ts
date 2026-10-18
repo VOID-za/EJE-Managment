@@ -4,7 +4,9 @@ import {
   approveDocument,
   addDocumentVersion,
   archiveDocument,
+  canOpenDocumentFile,
   indexDocumentText,
+  reindexDocument,
   uploadDocument,
 } from './library-operations';
 import { searchLibraryText } from './library-search';
@@ -37,6 +39,7 @@ import type { TechnicalDocument } from '@/domain';
 const master = seedUser('user-master-elmarie');
 const technician = seedUser('user-tech-sipho');
 const coordinator = seedUser('user-coord-christene');
+const otherTechnician = seedUser('user-tech-riaan');
 
 /** A PDF with one page of real, extractable text, compressed as usual. */
 const pdfWith = (text: string): Uint8Array => {
@@ -354,5 +357,126 @@ describe('the query itself', () => {
         searchLibraryText(harness.repos, master, { term: 'lubrication', page }),
       ).rejects.toThrowError(/page of results does not exist/i);
     }
+  });
+});
+
+describe('indexing a revision again', () => {
+  let harness: Harness;
+
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  /*
+   * THE RETRY EXISTS SO A MISSING INDEX DOES NOT NEED A SECOND UPLOAD, which
+   * would create a duplicate revision to fix a missing index.
+   */
+  it('re-reads the stored bytes and makes a previously unsearchable document searchable', async () => {
+    const document = await upload(harness, master, scannedPdf(), { name: 'Scanned manual' });
+    expect((await harness.repos.documents.findTextIndex(document.id))?.state).toBe('needs_ocr');
+
+    /*
+     * The same revision, with a readable copy put into storage behind it — the
+     * case a parser improvement or a re-uploaded file produces. Nothing about
+     * the RECORD changes; only what is stored under its key.
+     */
+    await harness.services.storage.putDocument({
+      storageKey: document.storageKey,
+      fileName: document.fileName,
+      contentType: 'application/pdf',
+      bytes: pdfWith('The scanned pages were replaced with a text-based copy of the manual.'),
+    });
+
+    const index = await reindexDocument(harness.as(master), document);
+    expect(index.state).toBe('indexed');
+    expect(index.characters).toBeGreaterThan(20);
+
+    const page = await searchLibraryText(harness.repos, technician, {
+      term: 'text-based copy',
+      page: 1,
+    });
+    expect(page.matched).toBe(1);
+  });
+
+  it('is idempotent: twice leaves one index, not two', async () => {
+    const document = await upload(harness, master, pdfWith(DRIVE_MANUAL));
+    await reindexDocument(harness.as(master), document);
+    await reindexDocument(harness.as(master), document);
+
+    const indexes = await harness.repos.documents.listTextIndexes([document.id]);
+    expect(indexes).toHaveLength(1);
+    expect(indexes[0]?.state).toBe('indexed');
+  });
+
+  /*
+   * THE DISCRIMINATING TEST FOR "VERSION-SPECIFIC". A failed re-index of one
+   * revision must leave another revision's index exactly as it was — the whole
+   * point of keying the index by the revision rather than by the document.
+   */
+  it('cannot disturb another revision’s index, even when it fails', async () => {
+    const first = await upload(harness, master, pdfWith(DRIVE_MANUAL));
+    const second = await addDocumentVersion(harness.as(master), first, {
+      version: '2.0',
+      fileName: 'alarms-rev2.pdf',
+      pageCount: 1,
+      description: 'Revision 2.',
+    });
+
+    const before = await harness.repos.documents.findTextIndex(first.id);
+    expect(before?.state).toBe('indexed');
+
+    // The new revision has no stored bytes, so its re-index is refused.
+    await expect(reindexDocument(harness.as(master), second)).rejects.toThrowError(
+      /no stored file/i,
+    );
+
+    const after = await harness.repos.documents.findTextIndex(first.id);
+    expect(after).toEqual(before);
+    expect(await harness.repos.documents.findTextContent(first.id)).toContain('servo amplifier');
+    expect(await harness.repos.documents.findTextIndex(second.id)).toBeNull();
+  });
+
+  it('refuses a technician, because it decides what the library can find', async () => {
+    const document = await upload(harness, master, pdfWith(DRIVE_MANUAL));
+    await expect(reindexDocument(harness.as(technician), document)).rejects.toThrowError(
+      /Only a Master can manage the technical library/i,
+    );
+  });
+});
+
+describe('who may open a revision’s file', () => {
+  /*
+   * The rule the PREVIEW and the DOWNLOAD both answer to — asserted on the
+   * function rather than only through a route, so a second caller cannot get a
+   * different answer.
+   */
+  const file = (over: Partial<Pick<TechnicalDocument, 'status' | 'uploadedBy'>> = {}) => ({
+    status: 'current' as TechnicalDocument['status'],
+    uploadedBy: technician.id,
+    ...over,
+  });
+
+  it('serves a current revision to anybody who may read the library', () => {
+    for (const actor of [master, coordinator, technician]) {
+      expect(canOpenDocumentFile(actor, file())).toBe(true);
+    }
+  });
+
+  it('serves an archived revision too, because the job that referenced it still resolves', () => {
+    expect(canOpenDocumentFile(technician, file({ status: 'archived' }))).toBe(true);
+  });
+
+  it('keeps a pending upload to the office and to its own uploader', () => {
+    const pending = file({ status: 'pending_approval', uploadedBy: technician.id });
+    expect(canOpenDocumentFile(master, pending)).toBe(true);
+    expect(canOpenDocumentFile(coordinator, pending)).toBe(true);
+    expect(canOpenDocumentFile(technician, pending)).toBe(true);
+    // Another technician: an unapproved manual followed on site is the risk
+    // the approval step exists for.
+    expect(canOpenDocumentFile(otherTechnician, pending)).toBe(false);
+  });
+
+  it('refuses an account that may not read the library at all', () => {
+    expect(canOpenDocumentFile({ id: master.id, role: 'nobody' as never }, file())).toBe(false);
   });
 });

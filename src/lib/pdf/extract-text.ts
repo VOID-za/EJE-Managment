@@ -50,6 +50,38 @@ const MIN_READABLE_RATIO = 0.6;
 /** The most text one document contributes to the index. */
 export const MAX_INDEXED_CHARACTERS = 400_000;
 
+/*
+ * BOUNDED PROCESSING, AND WHY EACH BOUND IS HERE.
+ *
+ * This runs on the server, inside the request that uploads the document, on
+ * bytes a person chose. Every one of these limits is a thing a hostile or
+ * merely broken file does:
+ *
+ *  - A DECOMPRESSION BOMB: a few kilobytes of zlib that inflate to gigabytes.
+ *    `maxOutputLength` makes `inflateSync` throw instead, and a stream that
+ *    throws is counted as unreadable like any other — the document is still
+ *    indexed from whatever else it holds, and says part of it could not be
+ *    read.
+ *  - A FILE TOO LARGE TO READ AS ONE STRING. The upload route already bounds
+ *    the body; this bounds what the EXTRACTOR will take on, so raising that
+ *    limit cannot quietly turn into a server holding a 200 MB latin-1 string.
+ *  - TENS OF THOUSANDS OF STREAMS, or a page count claiming six figures:
+ *    both are cheap to write and expensive to walk.
+ *
+ * Exceeding a bound is never silent: it is reported as its own reason, with
+ * the number that was exceeded, so an operator can tell a refusal from a scan.
+ */
+/** The largest file this will attempt to read. */
+export const MAX_PDF_BYTES = 40 * 1024 * 1024;
+/** The most any single compressed stream may inflate to. */
+export const MAX_STREAM_BYTES = 16 * 1024 * 1024;
+/** The most bytes of inflated content this will walk, across all streams. */
+const MAX_TOTAL_STREAM_BYTES = 64 * 1024 * 1024;
+/** The most streams it will look at. */
+const MAX_STREAMS = 5_000;
+/** Beyond this, a page count is a claim rather than a document. */
+const MAX_PAGES = 20_000;
+
 export type PdfTextOutcome =
   | {
       readonly kind: 'text';
@@ -126,13 +158,20 @@ const streamsOf = (text: string, bytes: Uint8Array): readonly RawStream[] => {
 };
 
 const inflated = (stream: RawStream): Buffer | null => {
-  if (!/\/FlateDecode/.test(stream.dictionary)) return stream.body;
+  if (!/\/FlateDecode/.test(stream.dictionary)) {
+    // An uncompressed stream is already as big as it is; the file-size bound
+    // above is what keeps that finite.
+    return stream.body.length > MAX_STREAM_BYTES ? null : stream.body;
+  }
+  // `maxOutputLength` is the bomb protection: zlib stops and throws rather
+  // than inflating a few kilobytes into gigabytes of server memory.
+  const options = { maxOutputLength: MAX_STREAM_BYTES } as const;
   try {
-    return inflateSync(stream.body);
+    return inflateSync(stream.body, options);
   } catch {
     try {
       // Some writers omit the zlib header; raw deflate is still readable.
-      return inflateRawSync(stream.body);
+      return inflateRawSync(stream.body, options);
     } catch {
       return null;
     }
@@ -274,6 +313,12 @@ const collapse = (value: string): string =>
 
 export const extractPdfText = (bytes: Uint8Array): PdfTextOutcome => {
   if (bytes.length === 0) return { kind: 'failed', reason: 'The file is empty.' };
+  if (bytes.length > MAX_PDF_BYTES) {
+    return {
+      kind: 'failed',
+      reason: `The file is ${Math.round(bytes.length / (1024 * 1024))} MB, and this extractor reads at most ${MAX_PDF_BYTES / (1024 * 1024)} MB. It is stored and downloadable; its text is not indexed.`,
+    };
+  }
 
   const text = latin1(bytes);
   if (!text.startsWith('%PDF-')) {
@@ -287,19 +332,54 @@ export const extractPdfText = (bytes: Uint8Array): PdfTextOutcome => {
   }
 
   // One per page object; `/Type /Pages` is the tree node and is excluded.
-  const pages = Math.max(1, [...text.matchAll(/\/Type\s*\/Page[^s]/g)].length);
+  const pageObjects = [...text.matchAll(/\/Type\s*\/Page[^s]/g)].length;
+  if (pageObjects > MAX_PAGES) {
+    return {
+      kind: 'failed',
+      reason: `The file claims ${pageObjects} pages, which is beyond what this extractor will walk (${MAX_PAGES}).`,
+    };
+  }
+  const pages = Math.max(1, pageObjects);
 
-  const streams = streamsOf(text, bytes);
+  const allStreams = streamsOf(text, bytes);
+
+  /*
+   * A FILE WITH NEITHER OBJECTS NOR PAGES IS CORRUPT, NOT SCANNED.
+   *
+   * The distinction matters to whoever has to act on it: `needs_ocr` means
+   * "this is a document and nobody can search it yet", while a truncated or
+   * mangled file means "the thing in storage is not usable and should be
+   * uploaded again". Reporting the second as the first sends somebody looking
+   * for an OCR service they do not need.
+   */
+  if (allStreams.length === 0 && pageObjects === 0) {
+    return {
+      kind: 'failed',
+      reason:
+        'No PDF objects, streams or page objects could be read from the file. It is truncated or corrupt rather than scanned — upload the document again.',
+    };
+  }
+
+  const streams = allStreams.slice(0, MAX_STREAMS);
   let unreadable = 0;
   let collected = '';
   let contentStreams = 0;
+  let inflatedBytes = 0;
+  let overBudget = false;
 
   for (const stream of streams) {
+    if (inflatedBytes > MAX_TOTAL_STREAM_BYTES) {
+      overBudget = true;
+      break;
+    }
     const body = inflated(stream);
     if (body === null) {
+      // Could not be decompressed, was over the per-stream ceiling, or was a
+      // bomb that `maxOutputLength` stopped. Counted, never swallowed.
       unreadable += 1;
       continue;
     }
+    inflatedBytes += body.length;
     const content = body.toString('latin1');
     // A content stream is one that draws text. An image or a font file is not.
     if (!/\bBT\b|\bTj\b|\bTJ\b/.test(content)) continue;
@@ -308,27 +388,30 @@ export const extractPdfText = (bytes: Uint8Array): PdfTextOutcome => {
     if (collected.length > MAX_INDEXED_CHARACTERS * 2) break;
   }
 
-  if (/\/ObjStm\b/.test(text) && contentStreams === 0) {
-    return {
-      kind: 'needs_ocr',
-      reason:
-        'This PDF packs its objects into object streams, which this extractor does not unpack, so no text could be read.',
-      pages,
-      unreadableStreams: unreadable,
-    };
-  }
-
   const body = collapse(collected);
+
   if (body.length < MIN_CHARACTERS_PER_PAGE * pages) {
-    return {
-      kind: 'needs_ocr',
-      reason:
-        body.length === 0
-          ? 'No text could be extracted: the pages are images, so the document needs OCR before it can be searched.'
-          : `Only ${body.length} characters could be extracted across ${pages} page(s), which is too little to be the document's text.`,
-      pages,
-      unreadableStreams: unreadable,
-    };
+    /*
+     * NOTHING READABLE CAME OUT, AND THE REASON SAYS WHICH KIND OF NOTHING.
+     *
+     * The three cases a person can act on differently: the pages are images
+     * (OCR would fix it), the extractor stopped on its own resource budget
+     * (a bigger budget or a different tool would fix it), or the file is
+     * structured in a way this parser does not follow.
+     *
+     * OBJECT STREAMS ARE NO LONGER BLAMED FOR THIS, and the old message that
+     * blamed them was wrong: `/ObjStm` holds non-stream objects only — the
+     * specification forbids putting a stream inside one — so a file that packs
+     * its catalogue and page objects away still has its CONTENT streams at the
+     * top level, where this reads them. `extract-text.test.ts` proves it on a
+     * fixture with an object stream and a cross-reference stream.
+     */
+    const reason = overBudget
+      ? `The document's streams exceeded this extractor's ${MAX_TOTAL_STREAM_BYTES / (1024 * 1024)} MB processing budget before any text was found, so it is not indexed. It is stored and downloadable.`
+      : body.length === 0
+        ? `No text could be extracted from ${pages} page(s): ${contentStreams === 0 ? 'the pages carry no text operators at all, so they are images' : 'the text operators carry no characters'}. The document needs OCR before it can be searched.${unreadable > 0 ? ` ${unreadable} stream(s) could also not be decompressed.` : ''}`
+        : `Only ${body.length} characters could be extracted across ${pages} page(s), which is too little to be the document's text.`;
+    return { kind: 'needs_ocr', reason, pages, unreadableStreams: unreadable };
   }
 
   const ratio = readableRatio(body);

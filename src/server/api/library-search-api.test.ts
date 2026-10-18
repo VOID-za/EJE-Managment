@@ -259,3 +259,61 @@ describe('opening a stored document', () => {
     expect(JSON.stringify(library.raw)).not.toContain('library/');
   });
 });
+
+describe('the revision named in the answer, and indexing again', () => {
+  let master: Client;
+  let technician: Client;
+  let current: string;
+
+  beforeEach(async () => {
+    startTestServer();
+    master = await signedInAs(DEMO_USERS.master);
+    technician = await signedInAs(DEMO_USERS.technician);
+    const published = await master.upload<UploadBody>('/api/library/upload', {
+      name: 'siemens-840d-alarms.pdf',
+      type: 'application/pdf',
+      bytes: pdf('Alarm 300500 is a drive enable fault. Check terminal 64 before the module.'),
+      fields: FIELDS,
+    });
+    current = published.data.document.id;
+  });
+
+  /*
+   * THE PREVIEW CHECKS THIS HEADER against the revision it asked for, so that
+   * a screen can never silently show a technician a different version of the
+   * document they are working from.
+   */
+  it('names the revision and the version it served', async () => {
+    const answer = await master.download(`/api/library/${current}/file`);
+    expect(answer.status).toBe(200);
+    expect(answer.headers.get('x-eje-document-revision')).toBe(current);
+    expect(answer.headers.get('x-eje-document-version')).toBe(FIELDS.version);
+    // And the bytes are a PDF, which is what the preview refuses to fake.
+    expect(new TextDecoder().decode(answer.bytes.subarray(0, 5))).toBe('%PDF-');
+  });
+
+  it('re-indexes a revision for the office, and refuses a technician', async () => {
+    const refused = await technician.post(`/api/library/${current}/reindex`);
+    expect(refused.status).toBe(403);
+
+    const again = await master.post<{ state: string; characters: number }>(
+      `/api/library/${current}/reindex`,
+    );
+    expect(again.status).toBe(200);
+    expect(again.data.state).toBe('indexed');
+    expect(again.data.characters).toBeGreaterThan(20);
+
+    // Idempotent: the library still reports one index for this revision.
+    const library = await master.get<{ indexes: readonly { documentId: string }[] }>(
+      '/api/library',
+    );
+    const rows = library.data.indexes.filter((index) => index.documentId === current);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('refuses a re-index of a record that has no stored file, with the reason', async () => {
+    const answer = await master.post('/api/library/doc-lw-v40-manual/reindex');
+    expect(answer.status).toBe(422);
+    expect(JSON.stringify(answer.error)).toMatch(/never uploaded|no stored file/i);
+  });
+});

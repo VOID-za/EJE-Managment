@@ -307,6 +307,21 @@ export const LIBRARY_COMMANDS: CommandRegistry = {
     },
   }),
 
+  /*
+   * INDEX THIS REVISION AGAIN. LIB-5.
+   *
+   * The office's, like approve and archive: re-indexing decides what the
+   * library can find. `reindexDocument` re-reads the stored bytes — it cannot
+   * invent an index for a record with no file, and it cannot write another
+   * revision's row.
+   */
+  reindex: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      return library.reindexDocument(context.operation, await loadDocument(context, target));
+    },
+  }),
+
   toggle_favourite: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {

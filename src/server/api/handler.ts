@@ -121,6 +121,16 @@ export interface DownloadResponse {
   readonly fileName: string;
   readonly contentType: string;
   /**
+   * Extra response headers, for a caller that has to say WHICH thing this is.
+   *
+   * The library's preview needs it: a technician looking at revision 1.0 must
+   * not be shown revision 2.0's bytes because a request raced a republish, so
+   * the route names the revision it actually served and the screen checks the
+   * answer against the revision it asked for. Reserved names — the ones this
+   * wrapper sets itself — are ignored rather than overridden.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
+  /**
    * Text for a spreadsheet, bytes for a stored document.
    *
    * Both, because the two real uses are a CSV this server composed and a PDF
@@ -142,8 +152,18 @@ export const downloadRoute =
       const runtime = getServerRuntime();
       const file = await runtime.read((unit) => handler({ ...unit, actor, request, params }));
       const name = safeFileName(file.fileName);
+      const reserved = new Set([
+        'content-type',
+        'content-disposition',
+        'x-content-type-options',
+        'cache-control',
+      ]);
+      const extra = Object.entries(file.headers ?? {}).filter(
+        ([header]) => !reserved.has(header.toLowerCase()),
+      );
       return new NextResponse(file.body as BodyInit, {
         headers: {
+          ...Object.fromEntries(extra),
           'Content-Type': file.contentType,
           'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
           'X-Content-Type-Options': 'nosniff',

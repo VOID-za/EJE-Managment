@@ -32,7 +32,7 @@
  *   npm run tablet-pdf-check
  */
 import { chromium } from 'playwright';
-import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { resetDemonstration, signInAs, signOut } from './sign-in.mjs';
 
 const BASE = process.env.EJE_TABLET_URL ?? process.env.EJE_E2E_URL ?? 'http://localhost:3000';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
@@ -239,12 +239,228 @@ await step('DESKTOP: the signed PDF is still shown in the frame, at A4', async (
   console.log(`      frame ${box.width.toFixed(2)} × ${box.height.toFixed(2)} px, ratio ${ratio.toFixed(4)}`);
 });
 
+/* -------------------------------------------------------------------------- */
+/* THE TECHNICAL LIBRARY'S PREVIEW — the REAL stored PDF. MASTER SCOPE LIB-5. */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * WHAT THIS PROVES, AND WHY IT IS HERE RATHER THAN IN THE SMOKE SUITE.
+ *
+ * The library's preview used to be a facsimile: a white box with the title and
+ * nine grey bars. It now fetches the revision's own bytes through the
+ * authorised route and hands them to the browser's viewer — so the claim to
+ * test is "the bytes on screen are the bytes the server stored", and that can
+ * only be shown on BOTH capabilities, which is what this script already has
+ * contexts for.
+ *
+ *   DESKTOP — the frame is a real `blob:` of the stored file. The test reads it
+ *             back from inside the page and compares the PDF header and the
+ *             exact byte length with what it uploaded.
+ *   TABLET  — no viewer, so NO FRAME and NO FACSIMILE: the panel says the
+ *             browser cannot display a PDF and offers the download. The byte
+ *             length is still asserted, because the bytes were fetched and
+ *             checked before the panel was drawn.
+ */
+
+/** A small, real, text-based PDF, built here so the bytes are known exactly. */
+const libraryPdf = (text) => {
+  const content = `BT /F1 11 Tf 40 800 Td (${text}) Tj ET\n`;
+  const body =
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R /MediaBox [0 0 595 842] >>\nendobj\n' +
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`;
+  return `%PDF-1.4\n${body}trailer\n<< /Root 1 0 R >>\n%%EOF\n`;
+};
+
+/** Uploads a document through the real route, from inside the page. */
+const uploadDocument = async (page, { name, text }) =>
+  page.evaluate(
+    async ([base, documentName, source]) => {
+      const file = new File([source], 'library-preview.pdf', { type: 'application/pdf' });
+      const form = new FormData();
+      form.append('file', file);
+      form.append('name', documentName);
+      form.append('description', 'Uploaded by the PDF path check.');
+      form.append('documentType', 'service_manual');
+      form.append('manufacturer', 'Siemens');
+      form.append('machineModel', '840D');
+      form.append('version', '1.0');
+      form.append('tags', 'alarms');
+      const response = await fetch(`${base}/api/library/upload`, { method: 'POST', body: form });
+      const payload = await response.json();
+      return {
+        status: response.status,
+        id: payload?.data?.document?.id ?? null,
+        indexState: payload?.data?.index?.state ?? null,
+        bytes: source.length,
+      };
+    },
+    [BASE, name, libraryPdf(text)],
+  );
+
+const openLibraryDocument = async (page, name) => {
+  await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' });
+  const card = page.locator('section', { hasText: name }).first();
+  await card.waitFor({ timeout: 20000 });
+  await card.getByRole('button', { name: 'Open' }).click();
+  const preview = page.getByTestId('library-pdf-preview');
+  await preview.waitFor({ timeout: 25000 });
+  return preview;
+};
+
+let uploaded = null;
+
+await step('DESKTOP: the library preview shows the stored PDF, byte for byte', async () => {
+  await signOut(desktopPage);
+  await signInAs(desktopPage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+
+  uploaded = await uploadDocument(desktopPage, {
+    name: 'Preview proof manual',
+    text: 'Alarm 300500 is a drive enable fault. Check terminal 64 before the module.',
+  });
+  if (uploaded.status !== 200) throw new Error(`the upload answered HTTP ${uploaded.status}`);
+  if (uploaded.indexState !== 'indexed') {
+    throw new Error(`the uploaded PDF indexed as "${uploaded.indexState}"`);
+  }
+
+  const preview = await openLibraryDocument(desktopPage, 'Preview proof manual');
+  if ((await preview.getAttribute('data-preview-revision')) !== uploaded.id) {
+    throw new Error('the preview is not showing the revision that was opened');
+  }
+  if ((await preview.getAttribute('data-preview-kind')) !== 'pdf-viewer') {
+    throw new Error('a browser with a PDF viewer was not given the frame');
+  }
+
+  const frame = desktopPage.getByTestId('library-pdf-frame');
+  await frame.waitFor({ timeout: 20000 });
+  const src = await frame.getAttribute('src');
+  if (src === null || !src.startsWith('blob:')) {
+    throw new Error(`the frame's source is "${src}", not a blob of the stored file`);
+  }
+
+  /*
+   * THE BYTES, READ BACK FROM THE BLOB THE FRAME IS RENDERING.
+   *
+   * This is the assertion a facsimile could never pass: the header and the
+   * exact length of the file that was uploaded a moment ago.
+   */
+  const actual = await desktopPage.evaluate(async (url) => {
+    const response = await fetch(url);
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    return {
+      head: new TextDecoder().decode(buffer.subarray(0, 5)),
+      length: buffer.byteLength,
+      type: response.headers.get('content-type'),
+    };
+  }, src);
+
+  if (actual.head !== '%PDF-') throw new Error(`the frame is rendering "${actual.head}", not a PDF`);
+  if (actual.length !== uploaded.bytes) {
+    throw new Error(`the frame holds ${actual.length} bytes; ${uploaded.bytes} were uploaded`);
+  }
+  if (actual.type !== 'application/pdf') {
+    throw new Error(`the blob's type is ${actual.type}`);
+  }
+  console.log(`      ${actual.length} bytes of real PDF in the frame`);
+
+  // And no facsimile anywhere: the old preview's caption is gone for good.
+  const body = await desktopPage.locator('[role="dialog"]').innerText();
+  if (/preview is simulated/i.test(body)) {
+    throw new Error('the simulated-preview caption is still on screen');
+  }
+});
+
+await step('DESKTOP: a technician cannot fetch a pending revision through the browser', async () => {
+  // A technician's own upload lands pending; another technician must not get
+  // the bytes, and the refusal is a 404 rather than a 403.
+  //
+  // Off the library screen first: the preview is a MODAL, and its overlay
+  // covers the profile menu the sign-out goes through — which is what made
+  // this step time out on a click rather than on anything it was testing.
+  await desktopPage.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut(desktopPage);
+  await signInAs(desktopPage, 'Sipho Mahlangu', { base: BASE, greeting: /Sipho/ });
+  const pending = await uploadDocument(desktopPage, {
+    name: 'Pending preview manual',
+    text: 'The hoist brake is adjusted through the castellated nut behind the cover.',
+  });
+  if (pending.status !== 200) throw new Error(`the upload answered HTTP ${pending.status}`);
+
+  await signOut(desktopPage);
+  await signInAs(desktopPage, 'Riaan van Wyk', { base: BASE, greeting: /Riaan/ });
+  const refused = await desktopPage.evaluate(
+    async ([base, id]) => {
+      const response = await fetch(`${base}/api/library/${id}/file`);
+      const text = await response.text();
+      return { status: response.status, isPdf: text.startsWith('%PDF-') };
+    },
+    [BASE, pending.id],
+  );
+  if (refused.status !== 404) {
+    throw new Error(`another technician got HTTP ${refused.status} for a pending revision`);
+  }
+  if (refused.isPdf) throw new Error('the refusal handed over the document anyway');
+});
+
 await desktop.close();
+
+/* The same preview on a browser with no viewer: no frame, and no facsimile. */
+const tabletLibrary = await browser.newContext({
+  viewport: { width: 820, height: 1180 },
+  hasTouch: true,
+});
+await tabletLibrary.addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', {
+    get: () => false,
+    configurable: true,
+  });
+});
+const tabletLibraryPage = await tabletLibrary.newPage();
+await signInAs(tabletLibraryPage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+
+await step('TABLET: the library preview offers the file instead of faking the page', async () => {
+  const preview = await openLibraryDocument(tabletLibraryPage, 'Preview proof manual');
+
+  if ((await preview.getAttribute('data-preview-kind')) !== 'download-only') {
+    throw new Error('a browser with no PDF viewer was handed a frame');
+  }
+  if ((await tabletLibraryPage.getByTestId('library-pdf-frame').count()) !== 0) {
+    throw new Error('a PDF frame was drawn for a browser that cannot render one');
+  }
+  await tabletLibraryPage.getByTestId('library-pdf-no-viewer').waitFor({ timeout: 10000 });
+
+  // The bytes were still fetched and checked — the panel is drawn after that.
+  const held = Number(await preview.getAttribute('data-preview-bytes'));
+  if (held !== uploaded.bytes) {
+    throw new Error(`the preview holds ${held} bytes; ${uploaded.bytes} were uploaded`);
+  }
+
+  // No embedded viewer of any kind, and no facsimile.
+  for (const tag of ['iframe', 'embed', 'object']) {
+    const count = await tabletLibraryPage.locator(`[role="dialog"] ${tag}`).count();
+    if (count !== 0) throw new Error(`${count} <${tag}> in the preview on a browser with no viewer`);
+  }
+  const body = await tabletLibraryPage.locator('[role="dialog"]').innerText();
+  if (/preview is simulated/i.test(body)) {
+    throw new Error('the simulated-preview caption is still on screen');
+  }
+  if (!/cannot display a PDF inside the page/i.test(body)) {
+    throw new Error('the panel does not say why the document is not shown');
+  }
+
+  // And the real file is still offered.
+  await tabletLibraryPage.getByRole('button', { name: 'Download the document' }).waitFor({
+    timeout: 10000,
+  });
+});
+
+await tabletLibrary.close();
 await browser.close();
 
 console.log('\n=== SUMMARY ===');
 if (failures.length === 0) {
-  console.log('THE SIGNED DOCUMENT RENDERS ON BOTH, with no dead action');
+  console.log('THE SIGNED DOCUMENT AND THE LIBRARY PREVIEW RENDER ON BOTH, with no dead action');
   process.exit(0);
 }
 for (const failure of failures) console.log(` - ${failure}`);

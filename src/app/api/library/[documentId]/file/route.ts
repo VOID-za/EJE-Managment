@@ -45,9 +45,27 @@ export const GET = downloadRoute('library.file', async (context) => {
     ]);
   }
 
+  /*
+   * THE REVISION IS NAMED IN THE ANSWER. MASTER SCOPE LIB-5, IMMUT-*.
+   *
+   * The domain's unit is a revision, and this route is keyed by the revision's
+   * own id, so it CANNOT serve a newer one — but the screen cannot see that,
+   * and a preview that silently showed revision 2.0 while the technician
+   * believed they were reading 1.0 would be the worst kind of wrong on a
+   * document somebody works from. So the answer says which revision and which
+   * version it is, and the preview refuses to render bytes whose revision is
+   * not the one it asked for.
+   *
+   * Neither header is a secret or a key: the revision id is already in the URL
+   * the client used, and the version is on the screen beside it.
+   */
   return {
     fileName: document.fileName,
     contentType: stored.contentType.length > 0 ? stored.contentType : 'application/pdf',
     body: stored.bytes,
+    headers: {
+      'X-EJE-Document-Revision': document.id,
+      'X-EJE-Document-Version': document.version,
+    },
   };
 });

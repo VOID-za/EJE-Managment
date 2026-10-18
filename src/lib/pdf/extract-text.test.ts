@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { MAX_INDEXED_CHARACTERS, extractPdfText } from './extract-text';
+import { MAX_INDEXED_CHARACTERS, MAX_PDF_BYTES, MAX_STREAM_BYTES, extractPdfText } from './extract-text';
 import { loadJobView } from '@/application/job-view';
 import { buildHarness, seedUser } from '@/application/test-harness';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
@@ -187,5 +187,128 @@ describe('a very large document', () => {
     if (outcome.kind !== 'text') return;
     expect(outcome.truncated).toBe(true);
     expect(outcome.text).toHaveLength(MAX_INDEXED_CHARACTERS);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Structures and limits — the ingestion-robustness pass                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A PDF 1.5 file with a CROSS-REFERENCE STREAM and an OBJECT STREAM.
+ *
+ * This is what "compressed PDF structure" actually means, and it is the shape
+ * the extractor used to blame for finding no text. The catalogue, the page tree
+ * and the page object are packed into an `/ObjStm`; the page's CONTENT stream
+ * is a top-level Flate stream, because the specification forbids putting a
+ * stream object inside an object stream. So the text IS reachable, and this
+ * fixture is what proves the old message wrong.
+ */
+const objectStreamPdf = (text: string): Uint8Array => {
+  const packed = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /Contents 4 0 R /MediaBox [0 0 595 842] >>',
+  ];
+  // The object stream's own header: pairs of object number and offset.
+  let offsets = '';
+  let payload = '';
+  for (const [index, object] of packed.entries()) {
+    offsets += `${index + 1} ${payload.length} `;
+    payload += `${object} `;
+  }
+  const inner = Buffer.from(`${offsets}${payload}`, 'latin1');
+  const objStm = deflateSync(inner);
+  const content = deflateSync(Buffer.from(`BT /F1 11 Tf 40 800 Td (${text}) Tj ET\n`, 'latin1'));
+  const xref = deflateSync(Buffer.from('', 'latin1'));
+
+  const body =
+    `5 0 obj\n<< /Type /ObjStm /N ${packed.length} /First ${offsets.length} /Length ${objStm.length} /Filter /FlateDecode >>\nstream\n${objStm.toString('latin1')}\nendstream\nendobj\n` +
+    `4 0 obj\n<< /Length ${content.length} /Filter /FlateDecode >>\nstream\n${content.toString('latin1')}\nendstream\nendobj\n` +
+    `6 0 obj\n<< /Type /XRef /Size 7 /W [1 2 1] /Root 1 0 R /Length ${xref.length} /Filter /FlateDecode >>\nstream\n${xref.toString('latin1')}\nendstream\nendobj\n`;
+  return bytes(`%PDF-1.5\n${body}startxref\n9\n%%EOF\n`);
+};
+
+describe('a PDF that packs its objects into an object stream', () => {
+  it('is read, because a CONTENT stream is never inside one', () => {
+    const outcome = extractPdfText(
+      objectStreamPdf('Hydraulic schematic: the pilot valve is fed from port P2 at 40 bar.'),
+    );
+    expect(outcome.kind).toBe('text');
+    if (outcome.kind !== 'text') return;
+    expect(outcome.text).toContain('pilot valve');
+    expect(outcome.pages).toBe(1);
+  });
+
+  it('is not blamed for a scan: the reason names the pages, not the structure', () => {
+    // A real page with no text operators anywhere — a scan.
+    const image = Buffer.from(`BI /W 1200 /H 1600 ID ${'\u00fe'.repeat(500)} EI\n`, 'latin1');
+    const outcome = extractPdfText(onePage(image));
+    expect(outcome.kind).toBe('needs_ocr');
+    if (outcome.kind !== 'needs_ocr') return;
+    expect(outcome.reason).toMatch(/images/);
+    expect(outcome.reason).not.toMatch(/object stream/i);
+  });
+});
+
+describe('a file that is hostile rather than merely awkward', () => {
+  /*
+   * A DECOMPRESSION BOMB: 32 MB of zeroes compress to a few kilobytes, and an
+   * unbounded `inflateSync` would hand all 32 MB back — repeat it a hundred
+   * times in one file and the server is the target. `maxOutputLength` makes
+   * zlib throw instead, and the stream is COUNTED as unreadable like any
+   * other, so the document still reports what it is.
+   */
+  it('refuses to inflate a bomb, counts it, and keeps reading the rest', () => {
+    const bomb = deflateSync(Buffer.alloc(MAX_STREAM_BYTES * 2, 0));
+    expect(bomb.length).toBeLessThan(100_000);
+    const good = deflateSync(page('The readable half of this document, with plenty of words in it'));
+
+    const file = bytes(
+      '%PDF-1.4\n' +
+        '1 0 obj\n<< /Type /Page >>\nendobj\n' +
+        `2 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n${bomb.toString('latin1')}\nendstream\nendobj\n` +
+        `3 0 obj\n<< /Length ${good.length} /Filter /FlateDecode >>\nstream\n${good.toString('latin1')}\nendstream\nendobj\n` +
+        'trailer\n<< /Root 1 0 R >>\n%%EOF\n',
+    );
+
+    const outcome = extractPdfText(file);
+    expect(outcome.kind).toBe('text');
+    if (outcome.kind !== 'text') return;
+    expect(outcome.text).toContain('readable half');
+    expect(outcome.unreadableStreams).toBe(1);
+  });
+
+  it('refuses a file larger than it will read, and says the size', () => {
+    const huge = new Uint8Array(MAX_PDF_BYTES + 1024);
+    huge.set(new TextEncoder().encode('%PDF-1.4\n'));
+    const outcome = extractPdfText(huge);
+    expect(outcome.kind).toBe('failed');
+    if (outcome.kind !== 'failed') return;
+    expect(outcome.reason).toMatch(/MB/);
+    expect(outcome.reason).toMatch(/stored and downloadable/);
+  });
+
+  it('refuses a page count that is a claim rather than a document', () => {
+    const outcome = extractPdfText(bytes(`%PDF-1.4\n${'/Type /Page \n'.repeat(20_001)}%%EOF\n`));
+    expect(outcome.kind).toBe('failed');
+    if (outcome.kind !== 'failed') return;
+    expect(outcome.reason).toMatch(/pages/);
+  });
+});
+
+describe('a corrupt file is told apart from a scanned one', () => {
+  it('reports a header with nothing behind it as truncated, not as needing OCR', () => {
+    const outcome = extractPdfText(bytes('%PDF-1.7\n%%EOF\n'));
+    expect(outcome.kind).toBe('failed');
+    if (outcome.kind !== 'failed') return;
+    expect(outcome.reason).toMatch(/truncated or corrupt/);
+    expect(outcome.reason).toMatch(/upload the document again/i);
+  });
+
+  it('still reports a real page with no text as needing OCR', () => {
+    const image = Buffer.from(`BI /W 900 /H 1200 ID ${'\u00fd'.repeat(400)} EI\n`, 'latin1');
+    const outcome = extractPdfText(onePage(image));
+    expect(outcome.kind).toBe('needs_ocr');
   });
 });
