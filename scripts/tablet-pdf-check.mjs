@@ -15,9 +15,15 @@
  *             which is what Chrome on Android reports. The document must be
  *             drawn in the page, at A4 proportions, with no iframe and no dead
  *             Open button.
- *   DESKTOP — untouched, so the browser keeps its viewer. The iframe must still
- *             be there, still at A4 proportions. PDF-4: no regression.
+ *   DESKTOP — the same signal forced true, which is what a desktop browser
+ *             with its viewer available reports. The iframe must still be
+ *             there, still at A4 proportions. PDF-4: no regression.
  *
+ * BOTH SIDES SET THE SIGNAL, and neither is left to the binary. Playwright
+ * launches `chrome-headless-shell` by default, and that build reports
+ * `pdfViewerEnabled === false` — the same answer an Android tablet gives — so
+ * a DESKTOP case that merely left the browser alone was testing whichever
+ * Chromium the runner happened to install rather than the capability it names.
  * The override is the browser's own capability signal, set the only way a real
  * device sets it — before the page loads. Nothing in the application is stubbed.
  *
@@ -140,14 +146,14 @@ await step('TABLET: the Signed step shows the document, not a PDF error block', 
 });
 
 await step('TABLET: no PDF iframe is handed to a browser that cannot render one', async () => {
-  const frames = await tabletPage.locator('iframe[title*="job card preview"]').count();
+  const frames = await tabletPage.locator('[data-preview-kind="pdf-viewer"]').count();
   if (frames !== 0) throw new Error(`${frames} PDF iframe(s) on a browser with no viewer`);
+  const drawn = await tabletPage.getByTestId('job-card-preview').getAttribute('data-preview-kind');
+  if (drawn !== 'document') throw new Error(`the preview drew "${drawn}", not the document`);
 });
 
 await step('TABLET: the frame keeps A4 proportions', async () => {
-  const { ratio, box } = await frameRatio(
-    tabletPage.locator('div.aspect-\\[595\\.28\\/841\\.89\\]').first(),
-  );
+  const { ratio, box } = await frameRatio(tabletPage.getByTestId('job-card-preview'));
   if (Math.abs(ratio - A4_RATIO) > 0.02) {
     throw new Error(`frame is ${box.width}×${box.height} (ratio ${ratio.toFixed(4)}), not A4`);
   }
@@ -178,9 +184,7 @@ await step('TABLET: there is no dead "Open" action, because there is nothing to 
   }
 
   // And the frame itself holds a document, not controls that might not work.
-  const controls = await tabletPage
-    .locator('div.aspect-\\[595\\.28\\/841\\.89\\] button')
-    .count();
+  const controls = await tabletPage.getByTestId('job-card-preview').locator('button').count();
   if (controls !== 0) throw new Error(`${controls} button(s) inside the document frame`);
 });
 
@@ -202,6 +206,20 @@ await tablet.close();
 /* -------------------------------------------------------------------------- */
 
 const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+/*
+ * What a desktop browser with its viewer available reports — stated, not
+ * inherited. `chrome-headless-shell`, which Playwright launches by default and
+ * which CI installs, has no PDF viewer and answers false; leaving this context
+ * untouched therefore tested the runner's choice of binary instead of the
+ * desktop case, and failed on a build where the application was behaving
+ * correctly. Set the same way the tablet case sets its own answer.
+ */
+await desktop.addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', {
+    get: () => true,
+    configurable: true,
+  });
+});
 const desktopPage = await reachSignedStep(desktop);
 
 await step('DESKTOP: the browser has its own PDF viewer', async () => {
@@ -212,6 +230,8 @@ await step('DESKTOP: the browser has its own PDF viewer', async () => {
 await step('DESKTOP: the signed PDF is still shown in the frame, at A4', async () => {
   const frame = desktopPage.locator('iframe[title*="job card preview"]').first();
   await frame.waitFor({ timeout: 25000 });
+  const drawn = await desktopPage.getByTestId('job-card-preview').getAttribute('data-preview-kind');
+  if (drawn !== 'pdf-viewer') throw new Error(`the preview drew "${drawn}", not the PDF frame`);
   const { ratio, box } = await frameRatio(frame);
   if (Math.abs(ratio - A4_RATIO) > 0.02) {
     throw new Error(`frame is ${box.width}×${box.height} (ratio ${ratio.toFixed(4)}), not A4`);

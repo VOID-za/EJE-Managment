@@ -18,7 +18,7 @@
 #             against PostgreSQL is a path nobody has tested.
 #   browser   the gates that need a built, running application and a real
 #             Chromium: the route and permission check, the end-to-end workflow,
-#             and the smoke suite. QA-4 left this as a decision to record, and
+#             the signed-document check on both PDF paths, and the smoke suite. QA-4 left this as a decision to record, and
 #             the decision is IN CI: these are the only gates that exercise the
 #             worker, IndexedDB, the offline queue and the tablet flows, and a
 #             manual-only gate for the features most likely to break is not a
@@ -157,6 +157,15 @@ jobs:
       # Playwright's own Chromium, with the system libraries a headless browser
       # needs on a bare runner. Chromium only: nothing here tests Firefox or
       # WebKit, and installing them would cost minutes for no coverage.
+      #
+      # WHICH BINARY THIS LAUNCHES, AND WHY IT IS LEFT ALONE. This installs both
+      # Chromium and `chrome-headless-shell`, and Playwright launches the shell.
+      # The shell reports `navigator.pdfViewerEnabled === false` — the same
+      # answer Chrome on Android gives, which is what the EJE tablets run — so
+      # the signed job card is drawn as HTML here rather than handed to a
+      # viewer. That is the more faithful of the two environments and it stays:
+      # the suites assert whichever frame the browser is given, and
+      # `tablet-pdf-check` below pins both capabilities explicitly.
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
@@ -186,6 +195,14 @@ jobs:
 
       - name: End-to-end workflow
         run: npm run e2e
+
+      # PDF-3 and PDF-4: the signed document on a browser with a PDF viewer and
+      # on one without. It is in CI because the runner's own browser is the one
+      # without — see the note on `chrome-headless-shell` above — so the tablet
+      # path is the path CI exercises everywhere else, and the desktop path
+      # needs a gate of its own.
+      - name: Signed document on both PDF paths
+        run: npm run tablet-pdf-check
 
       - name: Smoke suite
         run: npm run smoke

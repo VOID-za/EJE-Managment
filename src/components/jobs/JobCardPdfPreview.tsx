@@ -234,10 +234,21 @@ export const JobCardPdfPreview = ({
         zooming, with the viewer's own scrolling for further pages.
 
         Nothing about the DOCUMENT changed. This is the viewer, not the file.
+
+        BOTH BRANCHES CARRY THE SAME `data-testid`, and each says which one it
+        is in `data-preview-kind`. Which one is drawn is the browser's decision,
+        not this screen's: a headless Chromium shell — what the CI runner
+        launches — answers `pdfViewerEnabled` exactly as an Android tablet does,
+        so a browser suite that waited for the iframe alone was asserting which
+        binary it happened to be started with rather than anything about this
+        screen. The frame is found either way now, and the same A4 geometry is
+        measured on whichever one the browser drew.
       */}
       <div className="mx-auto w-full max-w-[calc(80vh*595.28/841.89)]">
         {useNativeViewer ? (
           <iframe
+            data-testid="job-card-preview"
+            data-preview-kind="pdf-viewer"
             title={`${view.job.jobNumber} job card preview`}
             src={state.url}
             className="aspect-[595.28/841.89] w-full rounded-[var(--radius-control)] border border-steel-200 bg-white"
@@ -264,7 +275,11 @@ export const JobCardPdfPreview = ({
            * is the viewer, not the file. The PDF itself is untouched: it is the
            * same bytes, and Download hands them over unchanged.
            */
-          <div className="eje-scrollbar aspect-[595.28/841.89] w-full overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2">
+          <div
+            data-testid="job-card-preview"
+            data-preview-kind="document"
+            className="eje-scrollbar aspect-[595.28/841.89] w-full overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2"
+          >
             {view.job.jobType === 'parts' ? (
               <PartsCollectionNote view={view} />
             ) : (

@@ -679,7 +679,16 @@ await step('Back keeps everything that was entered', async () => {
  * real PDF, which is asserted a few steps below.
  */
 await step('the review step is a summary, with no embedded document', async () => {
-  const previews = await page.locator('iframe').count();
+  /*
+   * COUNTED BY TEST ID, NOT BY IFRAME.
+   *
+   * It counted `iframe`s, which only ever existed on a browser that has a PDF
+   * viewer of its own: on a headless shell, and on the Android tablets this
+   * system runs on, the preview is drawn as HTML and an iframe count of zero
+   * said nothing at all. Both branches of the preview carry the same test id,
+   * so this now holds on either browser.
+   */
+  const previews = await page.getByTestId('job-card-preview').count();
   if (previews !== 0) {
     throw new Error(`the Review step still embeds ${previews} document preview(s)`);
   }
@@ -721,7 +730,15 @@ await step('capture signature', async () => {
 
 await step('the signed document is shown before anything is submitted', async () => {
   await page.getByRole('heading', { name: 'Signed', exact: true }).waitFor({ timeout: 10000 });
-  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+  /*
+   * WHICHEVER FRAME THIS BROWSER GETS. MASTER SCOPE PDF-1 AND PDF-3.
+   *
+   * The iframe is drawn only for a browser that reports a PDF viewer of its
+   * own; a headless shell reports none, exactly as Chrome on Android does, and
+   * is handed the same document as HTML instead. Both carry this test id, and
+   * `tablet-pdf-check` is what pins each branch to its own capability.
+   */
+  await page.getByTestId('job-card-preview').waitFor({ timeout: 20000 });
   // There is no way back past a signature.
   if ((await page.getByRole('button', { name: 'Back' }).count()) !== 0) {
     throw new Error('the wizard offered to go back behind a captured signature');
@@ -1369,7 +1386,7 @@ await step('the corrected job card is reviewed, then returned for signature', as
    * summary, and the corrected write-up in it.
    */
   await page.getByText('Ready for the customer').waitFor({ timeout: 15000 });
-  if ((await page.locator('iframe').count()) !== 0) {
+  if ((await page.getByTestId('job-card-preview').count()) !== 0) {
     throw new Error('the correction Review step still embeds a document preview');
   }
   const summary = await page.locator('main').innerText();
@@ -1742,7 +1759,7 @@ await step('capturing the collector signature produces a collection note', async
 
   await page.getByRole('button', { name: 'Confirm collection' }).click();
   await page.getByText('Step 5 of 5', { exact: false }).waitFor({ timeout: 20000 });
-  await page.locator('iframe[title$="job card preview"]').waitFor({ timeout: 20000 });
+  await page.getByTestId('job-card-preview').waitFor({ timeout: 20000 });
 
   /*
    * THE COUNTER ISSUES ITS OWN COLLECTION NOTE. MASTER SCOPE SUBMIT-10.
@@ -2073,8 +2090,25 @@ await step('the Master records the availability from the message', async () => {
   await dialog.getByLabel('To').fill('16:00');
   await dialog.getByRole('button', { name: 'Record availability' }).click();
 
-  await page.getByText('Availability recorded', { exact: false }).first()
-    .waitFor({ timeout: 10000 });
+  /*
+   * THE RECORD IS WHAT IS ASSERTED, NOT A MESSAGE THAT MAY NOT APPEAR.
+   *
+   * This waited for "Availability recorded", which is the title of the CLASH
+   * dialog — raised only when the period overlaps work already booked for that
+   * technician, because nothing is ever reassigned on the office's behalf.
+   * Whether it appears therefore depends on what the seed has scheduled for
+   * the business date this runs on, so the step was quietly asserting the
+   * seed's calendar. Both outcomes are waited for; the absence itself is then
+   * asserted on the technician's record.
+   */
+  const clash = page.getByRole('button', { name: 'I’ll deal with these' });
+  const noDialog = page.locator('body:not(:has([role="dialog"]))');
+  await clash.or(noDialog).first().waitFor({ timeout: 15000 });
+  if (await clash.isVisible().catch(() => false)) await clash.click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 10000 });
+
+  const record = page.locator('main');
+  await record.getByText('14:00–16:00', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
 await step('a full-day and a multi-day period can both be recorded', async () => {

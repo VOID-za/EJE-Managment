@@ -267,10 +267,11 @@ await step('the wizard reaches its review and then the signature step', async ()
    * NO DOCUMENT PREVIEW HERE. MASTER SCOPE REV-1.
    *
    * The Review step is a verification summary; the PDF belongs on the Signed
-   * step, which is asserted a few steps below. Counting iframes is the whole
-   * check, because the preview is the only one on the screen.
+   * step, which is asserted a few steps below. The preview is found by the
+   * test id both of its branches carry, so this holds whether or not the
+   * browser has a PDF viewer of its own.
    */
-  const previews = await page.locator('iframe').count();
+  const previews = await page.getByTestId('job-card-preview').count();
   if (previews !== 0) {
     throw new Error(`the Review step still embeds ${previews} document preview(s)`);
   }
@@ -301,8 +302,33 @@ await step('the customer signs, and the signature is captured', async () => {
   await page.getByRole('button', { name: 'Confirm signature' }).click();
   // The signed document is shown before anything is submitted.
   await page.getByText('Step 4 of 4', { exact: false }).waitFor({ timeout: 25000 });
-  const preview = page.locator('iframe[title$="job card preview"]');
+
+  /*
+   * WHICHEVER FRAME THIS BROWSER GETS. MASTER SCOPE PDF-1 AND PDF-3.
+   *
+   * This waited for `iframe[title$="job card preview"]`, which is only ever
+   * drawn for a browser that answers `navigator.pdfViewerEnabled === true`. A
+   * headless Chromium shell answers false — exactly as Chrome on Android does,
+   * which is what the EJE tablets run — so on the CI runner the screen
+   * correctly drew the HTML document instead and this step waited 25s for a
+   * frame that was never coming, failing the whole journey after it. The
+   * application was right and the assertion was wrong.
+   *
+   * So the frame is found by the test id both branches carry, and which one was
+   * drawn is read back from `data-preview-kind` and printed rather than
+   * assumed. `tablet-pdf-check` is what pins each branch to its own capability;
+   * this step's business is that the signed document is on screen, at A4.
+   */
+  const preview = page.getByTestId('job-card-preview');
   await preview.waitFor({ timeout: 25000 });
+  const previewKind = await preview.getAttribute('data-preview-kind');
+  const viewerEnabled = await page.evaluate(() => navigator.pdfViewerEnabled === true);
+  if (previewKind !== (viewerEnabled ? 'pdf-viewer' : 'document')) {
+    throw new Error(
+      `the preview drew "${previewKind}" on a browser whose pdfViewerEnabled is ${String(viewerEnabled)}`,
+    );
+  }
+  console.log(`      signed preview drawn as "${previewKind}"`);
 
   /*
    * THE PREVIEW IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1.
@@ -977,6 +1003,18 @@ await step('the office records that the technician is away all day', async () =>
    * the absence is ON the technician's record, all day, for that date.
    */
   const clash = page.getByRole('button', { name: 'I’ll deal with these' });
+  /*
+   * WAITED FOR, NOT SAMPLED.
+   *
+   * Asking `isVisible()` the instant after the click asked the question before
+   * the save had come back: on a slower browser the clash notice had not been
+   * drawn yet, the answer was "no", and the step then waited fifteen seconds
+   * for a dialog that was never going to close by itself. So the step waits
+   * for whichever of the two outcomes the save actually produced — the clash
+   * notice, or no dialog at all — and only then decides which one it got.
+   */
+  const noDialog = page.locator('body:not(:has([role="dialog"]))');
+  await clash.or(noDialog).first().waitFor({ timeout: 15000 });
   if (await clash.isVisible().catch(() => false)) await clash.click();
   await dialog.waitFor({ state: 'hidden', timeout: 15000 });
 
