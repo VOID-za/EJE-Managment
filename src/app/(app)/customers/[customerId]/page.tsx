@@ -4,6 +4,7 @@ import { use, useState } from 'react';
 import { userFullName } from '@/domain';
 import {
   Badge,
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -17,8 +18,12 @@ import { JobListTable } from '@/components/jobs/JobListTable';
 import { CustomerMachinesTab } from '@/components/customers/CustomerMachinesTab';
 import { CustomerOverviewTab } from '@/components/customers/CustomerOverviewTab';
 import { CustomerSitesTab } from '@/components/customers/CustomerSitesTab';
+import { ChangeRequestDialog } from '@/components/customers/ChangeRequestDialog';
+import { ChangeRequestsPanel } from '@/components/customers/ChangeRequestsPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
+import { useCurrentUser } from '@/providers/AppProvider';
+import { can } from '@/domain';
 import { formatRelative } from '@/lib/format';
 
 type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes';
@@ -39,6 +44,8 @@ const CustomerDetailPage = ({
 }) => {
   const { customerId } = use(params);
   const [tab, setTab] = useState<TabId>('overview');
+  const [reporting, setReporting] = useState(false);
+  const currentUser = useCurrentUser();
 
   const query = useQuery(`customer:${customerId}`, () => reads.customer(customerId));
 
@@ -65,7 +72,14 @@ const CustomerDetailPage = ({
     );
   }
 
-  const { customer, sites, contacts, machines, jobRows, users } = data;
+  const { customer, sites, contacts, machines, jobRows, users, changeRequests } = data;
+  /*
+   * WHO SEES WHICH HALF OF CUST-CR. The office acts on reports, so they see the
+   * panel; everybody who can read the register may RAISE one, which is the
+   * whole point — the person who cannot edit a record is the one standing in
+   * front of it. The server decides both again.
+   */
+  const manages = currentUser !== null && can(currentUser.role, 'customers.manage');
   const openJobs = jobRows.filter(
     (row) => row.job.status !== 'closed' && row.job.status !== 'submitted',
   );
@@ -84,8 +98,30 @@ const CustomerDetailPage = ({
             <Badge tone="outline">{sites.length} sites</Badge>
             <Badge tone="outline">{machines.length} machines</Badge>
             {openJobs.length > 0 && <Badge tone="blue">{openJobs.length} open jobs</Badge>}
+            {/*
+              CUST-CR. Offered to everybody who can read this screen, including
+              a technician who cannot change a word of it — which is exactly who
+              notices that a serial number is wrong.
+            */}
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setReporting(true)}
+              data-testid="report-register-problem"
+            >
+              Report a problem
+            </Button>
           </div>
         }
+      />
+
+      <ChangeRequestDialog
+        customer={customer}
+        sites={sites}
+        machines={machines}
+        open={reporting}
+        onClose={() => setReporting(false)}
+        onRaised={query.refetch}
       />
 
       <Tabs
@@ -102,11 +138,21 @@ const CustomerDetailPage = ({
       />
 
       {tab === 'overview' && (
-        <CustomerOverviewTab
-          customer={customer}
-          openJobs={openJobs}
-          onChanged={query.refetch}
-        />
+        <div className="space-y-5">
+          <CustomerOverviewTab
+            customer={customer}
+            openJobs={openJobs}
+            onChanged={query.refetch}
+          />
+
+          {manages && (
+            <ChangeRequestsPanel
+              requests={changeRequests}
+              users={users}
+              onChanged={query.refetch}
+            />
+          )}
+        </div>
       )}
 
       {tab === 'sites' && (
