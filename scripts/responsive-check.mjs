@@ -361,6 +361,156 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Keyboard use: a visible focus ring, on screen, nowhere hidden               */
+/* -------------------------------------------------------------------------- */
+
+console.log('\n=== KEYBOARD ===');
+
+/*
+ * WHY THIS IS MEASURED AND NOT EYEBALLED. The office works from a keyboard all
+ * day, and two defects make that impossible without ever showing up on a
+ * screenshot: focus that lands on something off the screen (or inside a closed
+ * drawer), and focus that lands somewhere with no visible ring at all, so
+ * nobody can tell where they are. Both are computable.
+ *
+ * Tab is pressed twenty times from the top of each screen — far enough to
+ * leave the header and reach the page's own controls — and after each press the
+ * focused element is measured.
+ */
+const focusWalk = async (path, presses = 20) => {
+  await visit(path);
+  await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+  const problems = [];
+
+  for (let press = 0; press < presses; press += 1) {
+    await page.keyboard.press('Tab');
+    const finding = await page.evaluate(() => {
+      const node = document.activeElement;
+      if (node === null || node === document.body) return null;
+
+      const describe = () => {
+        const label =
+          node.getAttribute?.('aria-label') ||
+          (node.textContent || '').trim().slice(0, 32) ||
+          node.getAttribute?.('placeholder') ||
+          node.id ||
+          '';
+        return `${node.tagName.toLowerCase()}${label === '' ? '' : ` "${label}"`}`;
+      };
+
+      // 1. Inside something that is not meant to be reachable.
+      if (node.closest('[inert], [aria-hidden="true"]') !== null) {
+        return `focus reached ${describe()} inside an inert or hidden region`;
+      }
+
+      // 2. Off the screen: focused and unreachable at the same time.
+      const box = node.getBoundingClientRect();
+      if (box.width > 0 && (box.right < 0 || box.left > window.innerWidth + 1)) {
+        return `focus reached ${describe()}, which is off the screen`;
+      }
+
+      // 3. No visible ring. The design system uses a ring or an outline; a
+      //    focused control with neither leaves a keyboard user lost.
+      const style = getComputedStyle(node);
+      const ring =
+        (style.outlineStyle !== 'none' && Number.parseFloat(style.outlineWidth) > 0) ||
+        (style.boxShadow !== 'none' && style.boxShadow !== '') ||
+        style.borderColor !== getComputedStyle(document.body).borderColor;
+      if (!ring) return `focus reached ${describe()} with no visible focus ring`;
+      return null;
+    });
+    if (finding !== null) problems.push(finding);
+  }
+  return problems;
+};
+
+for (const path of ['/jobs', '/jobs/EJE-1049', '/library', '/calendar', '/admin']) {
+  await step(`keyboard focus stays visible and on screen: ${path}`, () => focusWalk(path));
+}
+
+/* -------------------------------------------------------------------------- */
+/* LIB-5: an unsearchable document says why, and offers the retry             */
+/* -------------------------------------------------------------------------- */
+
+console.log('\n=== LIBRARY INDEXING STATES ===');
+
+/** A scanned page: a real PDF with an image and no text operators at all. */
+const scannedPdf = () => {
+  const image = `BI /W 1700 /H 2200 /CS /G ID ${'\u00fe'.repeat(600)} EI\n`;
+  const body =
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n' +
+    `4 0 obj\n<< /Length ${image.length} >>\nstream\n${image}\nendstream\nendobj\n`;
+  return `%PDF-1.4\n${body}trailer\n<< /Root 1 0 R >>\n%%EOF\n`;
+};
+
+await step('a scanned document says it is not searchable, and why, with a retry', async () => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  /*
+   * AS THE OFFICE, deliberately. The indexing reason and the retry are shown
+   * to whoever can act on them — and a technician's own upload lands
+   * `pending_approval`, which their library does not list at all.
+   */
+  await visit('/dashboard');
+  await signOut(page);
+  await signInAs(page, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+  const upload = await page.evaluate(
+    async ([base, source]) => {
+      const form = new FormData();
+      form.append('file', new File([source], 'scanned.pdf', { type: 'application/pdf' }));
+      form.append('name', 'Scanned press brake manual');
+      form.append('description', 'A scan, with no text layer.');
+      form.append('documentType', 'machine_manual');
+      form.append('manufacturer', 'Amada');
+      form.append('machineModel', 'HFE-1303');
+      form.append('version', '1.0');
+      form.append('tags', 'scan');
+      const response = await fetch(`${base}/api/library/upload`, { method: 'POST', body: form });
+      const payload = await response.json();
+      return { status: response.status, state: payload?.data?.index?.state ?? null };
+    },
+    [BASE, scannedPdf()],
+  );
+  if (upload.status !== 200) return [`the scan uploaded as HTTP ${upload.status}`];
+  if (upload.state !== 'needs_ocr') return [`the scan indexed as "${upload.state}"`];
+
+  await visit('/library');
+  const card = page.locator('section', { hasText: 'Scanned press brake manual' }).first();
+  await card.waitFor({ timeout: 20000 });
+
+  const problems = [];
+  const badge = await card.innerText();
+  if (!/Not searchable/i.test(badge)) problems.push('the card does not say it is not searchable');
+
+  const problem = card.getByTestId('library-index-problem');
+  if ((await problem.count()) === 0) {
+    problems.push('the office is not told WHY the document cannot be searched');
+  } else {
+    const reason = await problem.innerText();
+    if (!/OCR/i.test(reason)) problems.push(`the reason does not mention OCR: ${reason}`);
+    const retry = card.getByTestId('library-reindex');
+    if ((await retry.count()) === 0) problems.push('there is no route to try the index again');
+    else {
+      // The retry really runs, and a scan honestly stays a scan — what must
+      // NOT happen is the badge flipping to "Searchable".
+      await retry.click();
+      await page.waitForTimeout(1500);
+      const after = await page
+        .locator('section', { hasText: 'Scanned press brake manual' })
+        .first()
+        .innerText();
+      if (/\bSearchable\b/.test(after.replace(/Not searchable/gi, ''))) {
+        problems.push('re-indexing a scan claimed it is now searchable');
+      }
+    }
+  }
+
+  // And the same measurements as every other screen, with the panel on it.
+  return [...problems, ...(await measure({ name: 'tablet landscape' }))];
+});
+
 await context.close();
 await browser.close();
 

@@ -203,6 +203,47 @@ export const queueWork = async (input: QueueInput): Promise<PendingWork> => {
   return row;
 };
 
+/* -------------------------------------------------------------------------- */
+/* WHICH CAPTURE IS BEING SENT RIGHT NOW. OFF-QUEUE-4, OFF-8.                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The captures currently in flight, and why this is NOT a stored state.
+ *
+ * A technician with twelve captures queued used to see one spinner on a *Send*
+ * button and no idea which of the twelve was moving — on a bad link that reads
+ * as nothing happening. So each row says "sending" while its own request is
+ * open.
+ *
+ * IT IS DELIBERATELY IN MEMORY. A `sending` written into IndexedDB would
+ * survive the tablet being killed mid-request, and on the next launch the
+ * queue would show a row as sending with nothing sending it — a lie that only
+ * a person could clear. Held like this, the truth after a crash is the honest
+ * one: the row is `pending` again, and the next flush re-sends it under the
+ * same idempotency key.
+ */
+const sending = new Set<string>();
+
+export const markSending = (id: string): void => {
+  sending.add(id);
+  announce();
+};
+
+export const clearSending = (id: string): void => {
+  if (!sending.delete(id)) return;
+  announce();
+};
+
+/** The ids of the captures whose request is open right now. */
+export const sendingIds = (): readonly string[] => [...sending];
+
+/** For tests, and for a sign-out: nothing is in flight any more. */
+export const resetSending = (): void => {
+  if (sending.size === 0) return;
+  sending.clear();
+  announce();
+};
+
 /** Everything this user is still holding, oldest capture first. */
 export const readPendingWork = async (userId: string): Promise<readonly PendingWork[]> => {
   if (!isPendingSupported() || userId.length === 0) return [];

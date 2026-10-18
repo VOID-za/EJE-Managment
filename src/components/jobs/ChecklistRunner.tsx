@@ -364,6 +364,10 @@ export const ChecklistRunner = ({
                 onAnswer={(value) => answer(item.id, value)}
                 offline={!online}
                 held={held.get(item.id)}
+                sendingAnswer={(() => {
+                  const row = held.get(item.id);
+                  return row !== undefined && pending.sending.includes(row.id);
+                })()}
                 onHold={(draft) => hold(item, draft)}
                 jobId={job.id}
                 onCapture={(file) => void captureEvidence(item.id, file)}
@@ -493,6 +497,7 @@ const ChecklistItemRow = ({
   onAnswer,
   offline,
   held,
+  sendingAnswer,
   onHold,
   onCapture,
   uploading,
@@ -509,6 +514,8 @@ const ChecklistItemRow = ({
   readonly offline: boolean;
   /** An answer this tablet is holding for this item, if there is one. */
   readonly held: PendingWork | undefined;
+  /** True while this item's held answer is being sent. OFF-8. */
+  readonly sendingAnswer: boolean;
   readonly onHold: (draft: ChecklistAnswer) => Promise<string | null>;
   readonly onCapture: (file: File) => void;
   readonly uploading: boolean;
@@ -578,7 +585,16 @@ const ChecklistItemRow = ({
   };
 
   return (
-    <li className={cn('px-5 py-4', failed && 'bg-signal-50/40')}>
+    /*
+      The item's own id on its row, so a browser test can answer and hold ONE
+      named question rather than whichever happens to be first — which is what
+      a conflict test needs: the office has to change the same item the tablet
+      is holding.
+    */
+    <li
+      data-testid={`checklist-item-${item.id}`}
+      className={cn('px-5 py-4', failed && 'bg-signal-50/40')}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-steel-900">
@@ -597,8 +613,20 @@ const ChecklistItemRow = ({
           */}
           {held !== undefined && (
             <span data-testid={`checklist-held-${item.id}`}>
-              <Badge tone="amber" size="sm">
-                {held.state === 'referred' ? 'With the office' : 'Held on this tablet'}
+              {/*
+                SENDING IS ITS OWN STATE. OFF-CHK-1, OFF-8.
+
+                Held, being sent, and with the office are three different
+                things to a technician standing at the machine: the first is
+                theirs to finish, the second needs nothing from them, and the
+                third is somebody else's to answer. One word each.
+              */}
+              <Badge tone={sendingAnswer ? 'blue' : 'amber'} size="sm">
+                {held.state === 'referred'
+                  ? 'With the office'
+                  : sendingAnswer
+                    ? 'Sending…'
+                    : 'Held on this tablet'}
               </Badge>
             </span>
           )}

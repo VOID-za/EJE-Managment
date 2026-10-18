@@ -107,9 +107,24 @@ export const PendingWorkPanel = ({
           <li key={row.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
+                {/*
+                  WHICH OF THE FIVE THINGS THIS ROW IS. OFF-8.
+
+                  "Not sent" covered two situations that need different things
+                  of the technician: work waiting for a signal, and work whose
+                  request is open right now. On a bad link with a dozen
+                  captures, one spinner on the Send button read as nothing
+                  happening at all — so the row that is moving says so.
+                */}
                 <Badge
                   tone={
-                    row.state === 'conflict' ? 'red' : row.state === 'referred' ? 'blue' : 'amber'
+                    row.state === 'conflict'
+                      ? 'red'
+                      : row.state === 'referred'
+                        ? 'blue'
+                        : pending.sending.includes(row.id)
+                          ? 'blue'
+                          : 'amber'
                   }
                   size="sm"
                 >
@@ -117,7 +132,9 @@ export const PendingWorkPanel = ({
                     ? 'Refused'
                     : row.state === 'referred'
                       ? 'With the office'
-                      : 'Not sent'}
+                      : pending.sending.includes(row.id)
+                        ? 'Sending…'
+                        : 'Not sent'}
                 </Badge>
                 <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
                   {ACTION_LABEL[row.action] ?? row.action}

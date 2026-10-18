@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { emptyClosedJobFilters, type ClosedJobFilters } from '@/application/closed-jobs';
-import { exportClosedJobs } from '@/application/exports';
+import { closedJobsExportColumns, exportClosedJobs } from '@/application/exports';
+import { describeExport, recordExport } from '@/application/export-audit';
 import { downloadRoute, parseWith } from '@/server/api/handler';
 
 /**
@@ -34,5 +35,20 @@ export const GET = downloadRoute('jobs.closed.export', async (context) => {
   const query = parseWith(filters, Object.fromEntries(context.request.nextUrl.searchParams));
   const merged: ClosedJobFilters = { ...emptyClosedJobFilters, ...query };
   const file = await exportClosedJobs(context.repos, context.actor.user, merged);
+
+  // The export-audit boundary. BD-18 — writes nothing today. See the Jobs
+  // export route and `export-audit.ts`.
+  await recordExport(
+    { repos: context.repos, services: context.services, actor: context.actor.user },
+    describeExport({
+      kind: 'closed-jobs',
+      actor: context.actor.user,
+      filters: Object.fromEntries(context.request.nextUrl.searchParams),
+      rowCount: file.rowCount,
+      columns: closedJobsExportColumns,
+      takenAt: context.services.clock.now(),
+    }),
+  );
+
   return { fileName: file.fileName, contentType: 'text/csv; charset=utf-8', body: file.csv };
 });

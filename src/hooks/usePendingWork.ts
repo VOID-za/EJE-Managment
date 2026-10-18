@@ -6,6 +6,7 @@ import { captures as capturesApi, jobs as jobsApi } from '@/api/endpoints';
 import { classifyRefusal } from '@/lib/pwa/offline-rules';
 import {
   PENDING_SCHEMA_VERSION,
+  clearSending,
   completeWork,
   discardWork,
   isPendingSupported,
@@ -14,8 +15,10 @@ import {
   markReferred,
   markUnsent,
   onPendingWorkChanged,
+  markSending,
   readPendingWork,
   requeueWork,
+  sendingIds,
   type PendingWork,
 } from '@/lib/pwa/pending-work';
 import { useApp, useCurrentUser } from '@/providers/AppProvider';
@@ -55,6 +58,13 @@ export interface PendingWorkResult {
   /** Captures the office now has, and is deciding about. BD-15. */
   readonly referred: readonly PendingWork[];
   readonly flushing: boolean;
+  /**
+   * The captures whose request is open right now. OFF-8.
+   *
+   * So a row can say "Sending…" for itself, rather than one spinner standing
+   * for twelve captures on a bad link.
+   */
+  readonly sending: readonly string[];
   readonly supported: boolean;
   /**
    * True where the server would not even consider the work, because there is
@@ -82,6 +92,7 @@ export const usePendingWork = (): PendingWorkResult => {
 
   const [rows, setRows] = useState<readonly PendingWork[]>([]);
   const [flushing, setFlushing] = useState(false);
+  const [sending, setSending] = useState<readonly string[]>([]);
   const [blockedBySession, setBlockedBySession] = useState(false);
   const [resolvedCount, setResolvedCount] = useState(0);
 
@@ -96,6 +107,7 @@ export const usePendingWork = (): PendingWorkResult => {
   useEffect(() => {
     let cancelled = false;
     const reread = () => {
+      if (!cancelled) setSending(sendingIds());
       void readPendingWork(userId).then((found) => {
         if (!cancelled) setRows(found);
       });
@@ -198,6 +210,9 @@ export const usePendingWork = (): PendingWorkResult => {
         if (row.schemaVersion > PENDING_SCHEMA_VERSION) continue;
 
         await markAttempt(userId, row.id);
+        // This row, now: the panel and the checklist both show it on the row
+        // rather than as one spinner for the whole queue.
+        markSending(row.id);
         try {
           await jobsApi.sendCaptured(row.jobId, row.action, row.payload, row.idempotencyKey);
           await completeWork(userId, row.id);
@@ -235,6 +250,10 @@ export const usePendingWork = (): PendingWorkResult => {
             // this flush either.
             break;
           }
+        } finally {
+          // Whatever happened — sent, refused, referred or a dead link — this
+          // row's request is closed, so it must stop saying it is sending.
+          clearSending(row.id);
         }
       }
 
@@ -306,6 +325,7 @@ export const usePendingWork = (): PendingWorkResult => {
     conflicts: rows.filter((row) => row.state === 'conflict'),
     referred: rows.filter((row) => row.state === 'referred'),
     flushing,
+    sending,
     supported: isPendingSupported(),
     blockedBySession,
     resolvedCount,

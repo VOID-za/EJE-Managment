@@ -4916,6 +4916,246 @@ await step('a checklist answer is held on the tablet, with what it was answering
   if (landed.answeredAt === null) throw new Error('the applied answer carries no stamp');
 });
 
+await step('a held checklist answer the OFFICE has since changed is refused, not applied', async () => {
+  /*
+   * THE CONFLICT OFF-CHK-1 EXISTS FOR, end to end and through two browsers.
+   *
+   * A technician answers a checklist item in a basement; the tablet holds it.
+   * While they are down there the OFFICE answers the same item — a Master may,
+   * administratively — and the question becomes what happens when the signal
+   * comes back. A queue that simply replays would overwrite an answer given by
+   * somebody who knew something the held one does not, and nothing would say
+   * so: CR-02 forbids exactly that.
+   *
+   * What must happen instead: the server refuses the stale capture, the capture
+   * is RETAINED and referred to the office (BD-15), the job keeps the office's
+   * answer, and the tablet says where the work went.
+   *
+   * The office is a SECOND browser context, online while the technician's is
+   * not — which is the real shape of the situation and the only way to move the
+   * server under a tablet that cannot reach it.
+   */
+  await signInAs(page, 'Thabo Nkosi', { base: BASE });
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Checklist/ }).click();
+  await page.getByRole('button', { name: 'Pass', exact: true }).first().waitFor({ timeout: 20000 });
+
+  /*
+   * WHICH ITEM, AND THE ANSWER IT ALREADY HAS.
+   *
+   * An item that is ALREADY answered is the stronger case: the held capture
+   * then carries `expectedAnsweredAt`, and the office changing the answer is
+   * exactly what makes that expectation stale. An unanswered item would do, but
+   * by this point in the suite EJE-1050's pass/fail items have all been
+   * answered — and the replacement path is the one a technician actually takes
+   * when they correct an answer in a basement.
+   */
+  const target = await page.evaluate(async () => {
+    const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
+    const body = await response.json();
+    const job = body?.data?.view?.job ?? null;
+    const template = body?.data?.view?.checklistTemplate ?? null;
+    const responses = job?.checklist?.responses ?? [];
+    const answered = new Map(
+      responses
+        .filter((entry) => entry?.answeredAt !== null)
+        .map((entry) => [entry.itemId, entry.answeredAt]),
+    );
+    // The template's items live inside its SECTIONS, which is the shape the
+    // view returns — flattened here rather than assumed away.
+    const items = (template?.sections ?? []).flatMap((section) => section?.items ?? []);
+    const item = items.find(
+      (candidate) => candidate?.responseType === 'pass_fail_na' && answered.has(candidate.id),
+    );
+    return {
+      jobId: job?.id ?? null,
+      itemId: item?.id ?? null,
+      answeredAt: item === undefined ? null : (answered.get(item.id) ?? null),
+    };
+  });
+  if (target.itemId === null) throw new Error('EJE-1050 has no answered pass/fail item to contest');
+
+  offlineExpected = true;
+  await page.context().setOffline(true);
+  let held = null;
+  try {
+    await page.getByTestId('checklist-offline-notice').waitFor({ timeout: 20000 });
+    const scope = page.locator(`[data-testid="checklist-item-${target.itemId}"]`);
+    await scope.waitFor({ timeout: 20000 });
+    // N/A rather than Pass: a different answer from the one on the job, and one
+    // the template does not require a note for.
+    await scope.getByRole('button', { name: 'N/A', exact: true }).first().click();
+    const hold = scope.locator('[data-testid^="checklist-hold-"]').first();
+    await hold.waitFor({ timeout: 10000 });
+    await hold.click();
+    await page.locator(`[data-testid="checklist-held-${target.itemId}"]`).waitFor({ timeout: 20000 });
+
+    /*
+     * IT SURVIVES THE APPLICATION BEING CLOSED, STILL OFFLINE, AND KEEPS ITS
+     * KEY. The key is what makes the later send a replay rather than a second
+     * answer, so a restart that minted a new one would be a duplicate waiting
+     * to happen.
+     */
+    const before = await page.evaluate(() => {
+      return new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result.filter((entry) => entry.action === 'answer_checklist'));
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      });
+    });
+    if (before.length !== 1) throw new Error(`${before.length} held answers, expected 1`);
+    held = before[0];
+
+    await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
+    const after = await page.evaluate(() => {
+      return new Promise((resolve, reject) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => reject(new Error('IndexedDB could not be opened'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result.filter((entry) => entry.action === 'answer_checklist'));
+          };
+          request.onerror = () => reject(new Error('the read failed'));
+        };
+      });
+    });
+    if (after.length !== 1) throw new Error('the held answer did not survive the restart');
+    if (after[0].idempotencyKey !== held.idempotencyKey) {
+      throw new Error('the restart minted a new idempotency key for the same capture');
+    }
+    if (after[0].payload.templateVersion !== held.payload.templateVersion) {
+      throw new Error('the held answer lost the template version it was answered against');
+    }
+
+    /* ---- the office answers the same item, from its own browser ---------- */
+    const office = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const officePage = await office.newPage();
+    await signInAs(officePage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+    const officeAnswer = await officePage.evaluate(
+      async ([jobId, itemId]) => {
+        const response = await fetch(`/api/jobs/${jobId}/answer_checklist`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            itemId,
+            choice: 'fail',
+            notes: 'Office: the customer reported this clamp as damaged before we arrived.',
+          }),
+        });
+        return { status: response.status };
+      },
+      [target.jobId, target.itemId],
+    );
+    await office.close();
+    if (officeAnswer.status !== 200) {
+      throw new Error(`the office could not answer the item: HTTP ${officeAnswer.status}`);
+    }
+  } finally {
+    await page.context().setOffline(false);
+    offlineExpected = false;
+  }
+
+  /* ---- the signal returns, and the stale answer is NOT applied ---------- */
+  await page.goto(`${BASE}/jobs/EJE-1050`, { waitUntil: 'networkidle' });
+
+  // The flush runs on reconnect; the capture ends with the office rather than
+  // on the job. Either state proves it was refused — `referred` is the settled
+  // outcome, `conflict` the moment before the referral is accepted.
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').getAll();
+          request.onsuccess = () => {
+            db.close();
+            const answers = request.result.filter((row) => row.action === 'answer_checklist');
+            resolve(
+              answers.length === 1 &&
+                (answers[0].state === 'referred' || answers[0].state === 'conflict'),
+            );
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 40000 },
+  );
+
+  // THE JOB KEEPS THE OFFICE'S ANSWER. This is the assertion CR-02 is about.
+  const onTheJob = await page.evaluate(
+    async (itemId) => {
+      const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
+      const body = await response.json();
+      const responses = body?.data?.view?.job?.checklist?.responses ?? [];
+      const found = responses.find((entry) => entry.itemId === itemId);
+      return { choice: found?.choice ?? null, notes: found?.notes ?? '' };
+    },
+    target.itemId,
+  );
+  if (onTheJob.choice !== 'fail' || !onTheJob.notes.startsWith('Office:')) {
+    throw new Error(
+      `the held answer overwrote the office's: the job now says ${JSON.stringify(onTheJob)}`,
+    );
+  }
+
+  // And the tablet says where the work went, rather than losing it.
+  await page.getByTestId('pending-work-heading').waitFor({ timeout: 20000 });
+  const panel = await page.getByTestId('pending-work-list').innerText();
+  if (!/With the office|Refused/.test(panel)) {
+    throw new Error(`the queue does not say what became of the capture: ${panel}`);
+  }
+  await page.screenshot({ path: `${shots}/51-checklist-conflict.png`, fullPage: false });
+
+  /*
+   * AND THE TECHNICIAN CLEARS IT, which is the end of this workflow: the office
+   * has the capture, so the row's only remaining job is to tell them that, and
+   * *Remove from tablet* is how they acknowledge it. Exercised here rather
+   * than left behind — a referral nobody can clear would pile up on a shared
+   * tablet, and the next step's count of what survives a sign-out would be
+   * measuring this instead of its own work.
+   */
+  const remove = page
+    .getByTestId('pending-work-list')
+    .getByRole('button', { name: /Remove from tablet|Discard/ })
+    .first();
+  await remove.click();
+  const confirm = page.getByRole('dialog');
+  await confirm.waitFor({ timeout: 10000 });
+  await confirm.getByRole('button', { name: /Remove it|Discard the capture/ }).click();
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('eje-job-cache');
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db.transaction('pending', 'readonly').objectStore('pending').count();
+          request.onsuccess = () => {
+            db.close();
+            resolve(request.result === 0);
+          };
+          request.onerror = () => resolve(false);
+        };
+      }),
+    undefined,
+    { timeout: 20000 },
+  );
+});
+
 /* ---- OFF-WRITEUP-1: the write-up typed with no signal -------------------- */
 
 await step('a write-up typed with no signal is kept on the tablet, as a draft', async () => {

@@ -115,3 +115,45 @@ describe('exporting the closed-job archive', () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe('an export and the audit trail', () => {
+  let master: ApiTestClient;
+
+  beforeEach(async () => {
+    startTestServer();
+    master = await signedInAs(DEMO_USERS.master);
+  });
+
+  /*
+   * BD-18 IS OPEN, so an export must change nothing about the trail. The
+   * mechanism is called by both export routes and writes nothing; if it is
+   * ever switched on without the decision, this is what fails.
+   */
+  it('records no activity event, because whether it should is undecided', async () => {
+    const before = await master.get<{ events: readonly { id: string; type: string }[] }>(
+      '/api/activity',
+    );
+
+    expect((await master.download('/api/jobs/export?status=all')).status).toBe(200);
+    expect((await master.download('/api/jobs/closed/export')).status).toBe(200);
+
+    const after = await master.get<{ events: readonly { id: string; type: string }[] }>(
+      '/api/activity',
+    );
+    expect(after.data.events).toHaveLength(before.data.events.length);
+    expect(after.data.events.some((event) => /export/i.test(event.type))).toBe(false);
+  });
+
+  it('produces byte-identical output across repeated requests', async () => {
+    // The security properties of the file — quoting, the BOM, the columns —
+    // are asserted elsewhere; this holds that the boundary call changed none
+    // of them, and that an export is a pure read.
+    const first = await master.download('/api/jobs/closed/export?customerId=cust-abc');
+    const second = await master.download('/api/jobs/closed/export?customerId=cust-abc');
+
+    expect(first.status).toBe(200);
+    expect(second.text).toBe(first.text);
+    expect(first.bytes[0]).toBe(0xef);
+    expect(first.headers.get('cache-control')).toBe('no-store');
+  });
+});
