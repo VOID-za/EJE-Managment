@@ -16,6 +16,7 @@ import type {
   ChatMessage,
   Conversation,
   User,
+  ChangeRequest,
 } from '@/domain';
 import {
   seedActivity,
@@ -67,6 +68,11 @@ export interface DemoDatabase {
    * BD-15. See `types/capture.ts`.
    */
   captureReferrals: CaptureReferral[];
+  /**
+   * Reports that the register is wrong, raised by people who may not edit it.
+   * CUST-CR. See `types/change-request.ts`.
+   */
+  changeRequests: ChangeRequest[];
   /**
    * WHO HAS EVER BEEN ON A JOB, which is not the same question as who is on it
    * now.
@@ -154,7 +160,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -176,6 +182,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   // describe messages that already happened, not ones still to be sent.
   outbox: [],
   captureReferrals: [],
+  changeRequests: [],
   // Derived from the seed's own crews: a seeded job's technicians have been on
   // it since it was created, which is the only true statement a fixture can
   // make about work that was never reassigned.

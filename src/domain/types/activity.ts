@@ -112,6 +112,23 @@ export type ActivityEventType =
   // customer, machine, user, library and checklist registers.
   | 'customer_created'
   | 'customer_updated'
+  /*
+   * SOMEBODY WHO MAY NOT EDIT THE REGISTER SAYS IT IS WRONG, and what the
+   * office did about it. CUST-CR.
+   *
+   * Two types rather than one, because they are two different facts and the
+   * second does not always follow the first: a report can sit open for a week,
+   * and the trail has to show that as plainly as it shows the decision.
+   *
+   * NEITHER OF THEM IS A CHANGE TO THE REGISTER. `customer_change_resolved`
+   * records that the office DECIDED; the edit itself, if they made one, arrives
+   * as an ordinary `customer_updated` or `machine_updated` with its own
+   * before-and-after values. Collapsing the two would make the trail claim a
+   * change that the system never performed — see
+   * `src/application/change-request-operations.ts` for why it performs none.
+   */
+  | 'customer_change_requested'
+  | 'customer_change_resolved'
   | 'site_created'
   | 'site_updated'
   // Removal is recorded either way it goes: a record nothing refers to is

@@ -12,4 +12,5 @@ export * from './activity';
 export * from './notification';
 export * from './outbox';
 export * from './capture';
+export * from './change-request';
 export * from './settings';

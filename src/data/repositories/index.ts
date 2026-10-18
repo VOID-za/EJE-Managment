@@ -3,6 +3,8 @@ import type {
   AppNotification,
   CaptureReferral,
   CaptureReferralState,
+  ChangeRequest,
+  ChangeRequestState,
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
@@ -397,6 +399,34 @@ export interface CaptureReferralRepository {
 }
 
 /** The full set of repositories the application is wired against. */
+/**
+ * A technician's report that the register is wrong. CUST-CR.
+ *
+ * Shaped like `CaptureReferralRepository` on purpose: the two are the same
+ * workflow — somebody who may not change a thing says it is wrong, and the
+ * office decides — so they read the same way, and `resolve` carries the same
+ * guarantee.
+ */
+export interface ChangeRequestRepository {
+  /** For the office: open first, oldest first within a state. */
+  list(filter?: { readonly state?: ChangeRequestState }): Promise<readonly ChangeRequest[]>;
+  /** Everything raised about one customer, including its sites and machines. */
+  listForCustomer(customerId: CustomerId): Promise<readonly ChangeRequest[]>;
+  /** One person's own reports, newest first. */
+  listForRaiser(raisedBy: UserId): Promise<readonly ChangeRequest[]>;
+  findById(id: string): Promise<ChangeRequest | null>;
+  save(request: ChangeRequest): Promise<ChangeRequest>;
+  /**
+   * Records the office's decision, and only on a request still OPEN.
+   *
+   * Returns null when it had already been resolved, which is how two office
+   * users resolving the same report at once is settled: the second is told it
+   * has been dealt with rather than overwriting the first decision. The
+   * condition is in the WRITE, because a read-then-write check is a race.
+   */
+  resolve(request: ChangeRequest): Promise<ChangeRequest | null>;
+}
+
 export interface RepositoryBundle {
   readonly jobs: JobRepository;
   readonly customers: CustomerRepository;
@@ -412,4 +442,6 @@ export interface RepositoryBundle {
   readonly outbox: OutboxRepository;
   /** Work a tablet held that the server refused. BD-15. */
   readonly captureReferrals: CaptureReferralRepository;
+  /** Reports that the register is wrong, raised by people who cannot edit it. */
+  readonly changeRequests: ChangeRequestRepository;
 }

@@ -263,6 +263,18 @@ const v14ToV15 = (data: Loose): Loose => ({
   documentText: Array.isArray(data.documentText) ? data.documentText : [],
 });
 
+/**
+ * v15 -> v16. CUST-CR.
+ *
+ * Adds the register change requests, empty. A snapshot written before the
+ * office could be sent one has none, by definition — there was nowhere to put
+ * one, which is the gap this feature closes.
+ */
+const v15ToV16 = (data: Loose): Loose => ({
+  ...data,
+  changeRequests: Array.isArray(data.changeRequests) ? data.changeRequests : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -271,6 +283,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   12: v12ToV13,
   13: v13ToV14,
   14: v14ToV15,
+  15: v15ToV16,
 };
 
 /**

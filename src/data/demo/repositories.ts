@@ -29,6 +29,8 @@ import type {
   TechnicalDocument,
   User,
   UserId,
+  ChangeRequest,
+  ChangeRequestState,
 } from '@/domain';
 import { isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
 import { matchesAllTerms, tokenize } from '@/lib/text-search';
@@ -49,6 +51,7 @@ import type {
   SettingsRepository,
   UserRepository,
   CaptureReferralRepository,
+  ChangeRequestRepository,
 } from '../repositories';
 import type { DemoDatabase } from './store';
 
@@ -978,6 +981,87 @@ class DemoCaptureReferralRepository implements CaptureReferralRepository {
   }
 }
 
+/**
+ * Reports that the register is wrong. CUST-CR.
+ *
+ * The same shape as the referral repository above, because it is the same
+ * workflow: somebody who may not change a record says it is wrong, and the
+ * office decides. `resolve` carries the same guarantee — only an OPEN request
+ * can be resolved, so two office users deciding at once cannot overwrite each
+ * other's note.
+ */
+class DemoChangeRequestRepository implements ChangeRequestRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  private all(): readonly ChangeRequest[] {
+    return this.context.read().changeRequests;
+  }
+
+  list(filter: { readonly state?: ChangeRequestState } = {}): Promise<readonly ChangeRequest[]> {
+    const matching =
+      filter.state === undefined
+        ? this.all()
+        : this.all().filter((entry) => entry.state === filter.state);
+    // Open first — that is what the office acts on — then oldest first, because
+    // the longest-waiting report is the one somebody should look at next.
+    return Promise.resolve(
+      [...matching].sort((left, right) =>
+        left.state === right.state
+          ? left.raisedAt.localeCompare(right.raisedAt)
+          : left.state === 'open'
+            ? -1
+            : 1,
+      ),
+    );
+  }
+
+  listForCustomer(customerId: CustomerId): Promise<readonly ChangeRequest[]> {
+    return Promise.resolve(
+      this.all()
+        .filter((entry) => entry.customerId === customerId)
+        .sort((left, right) => right.raisedAt.localeCompare(left.raisedAt)),
+    );
+  }
+
+  listForRaiser(raisedBy: UserId): Promise<readonly ChangeRequest[]> {
+    return Promise.resolve(
+      this.all()
+        .filter((entry) => entry.raisedBy === raisedBy)
+        .sort((left, right) => right.raisedAt.localeCompare(left.raisedAt)),
+    );
+  }
+
+  findById(id: string): Promise<ChangeRequest | null> {
+    return Promise.resolve(this.all().find((entry) => entry.id === id) ?? null);
+  }
+
+  save(request: ChangeRequest): Promise<ChangeRequest> {
+    this.context.commit((draft) => {
+      draft.changeRequests = [...draft.changeRequests, request];
+    });
+    return Promise.resolve(request);
+  }
+
+  resolve(request: ChangeRequest): Promise<ChangeRequest | null> {
+    const stored = this.all().find((entry) => entry.id === request.id);
+    if (stored === undefined || stored.state !== 'open') return Promise.resolve(null);
+
+    const resolved: ChangeRequest = {
+      ...stored,
+      state: request.state,
+      resolvedBy: request.resolvedBy,
+      resolvedAt: request.resolvedAt,
+      resolutionNote: request.resolutionNote,
+    };
+    this.context.commit((draft) => {
+      draft.changeRequests = draft.changeRequests.map((entry) =>
+        entry.id === resolved.id ? resolved : entry,
+      );
+    });
+    return Promise.resolve(resolved);
+  }
+}
+
 export const createDemoRepositories = (context: DemoContext): RepositoryBundle => ({
   jobs: new DemoJobRepository(context),
   customers: new DemoCustomerRepository(context),
@@ -988,6 +1072,7 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   activity: new DemoActivityRepository(context),
   outbox: new DemoOutboxRepository(context),
   captureReferrals: new DemoCaptureReferralRepository(context),
+  changeRequests: new DemoChangeRequestRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),
