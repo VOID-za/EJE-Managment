@@ -21,6 +21,7 @@
     "db:reset": "tsx src/db/seed/reset.ts",
     "preflight": "tsx src/ops/preflight.ts",
     "documents:reconcile": "tsx src/ops/documents.ts",
+    "integrations:check": "tsx src/ops/integrations.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "smoke": "node scripts/smoke.mjs",
     "workflow-check": "node scripts/job-workflow-check.mjs",

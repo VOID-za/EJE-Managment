@@ -91,6 +91,46 @@ from one with none, as far as *"customer email is not configured"* goes. So:
   not an address, a tenant id that looks like a mailbox, a nonsense timeout.
   Each of those selects a working transport that cannot send.
 
+#### `npm run integrations:check` — is this deployment ready, without messaging anybody
+
+```bash
+npm run integrations:check              # configuration only, no network
+npm run integrations:check -- --probe   # ask the providers. SENDS NOTHING
+```
+
+`/api/health` says which transport was SELECTED. This says whether that
+transport works, which is a different question and the one that decides whether
+a customer receives their job card.
+
+`--probe` acquires a client-credentials token from Microsoft and reads **the
+sender's own mailbox** (`GET /users/<EMAIL_SENDER>`); for Meta it reads the
+configured phone number's own metadata, and — when
+`WHATSAPP_BUSINESS_ACCOUNT_ID` is set — whether the templates this build sends
+are approved. No message is sent, and no customer record is read: the only
+address involved is EJE's own.
+
+The four verdicts are kept apart on purpose:
+
+| Verdict | Meaning |
+|---|---|
+| `ABSENT` | Not configured. The missing variable NAMES are printed; no values, ever. |
+| `PENDING` | Configured, and either nothing was asked of the provider or the provider could not be reached. **Not readiness.** |
+| `READY` | The provider accepted the credential, and for WhatsApp the templates are known to be approved. |
+| `REFUSED` | The provider rejected the credential, or Meta has no approved template under the name this build sends. Exits non-zero. |
+
+An unreachable provider is reported as `PENDING`, never as `REFUSED`: that is
+this moment's network, and reporting it as a refusal sends somebody to rotate a
+secret that works.
+
+A WhatsApp token that Meta accepts is still only `PENDING` until template
+approval is confirmed. That is the most expensive false green available here —
+the office would press send, Meta would drop the message, and the customer
+would get nothing.
+
+**The template names come from the application, not from configuration.** This
+build sends `eje_job_assigned` and `eje_site_location`, and EJE must have
+templates approved in Meta Business Manager under exactly those names.
+
 #### What a failure means, and whether to press *Send again*
 
 The adapter classifies what the provider said, and the delivery record carries
