@@ -277,6 +277,23 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     ? await repos.changeRequests.listForCustomer(id)
     : [];
 
+  /*
+   * THE CUSTOMER'S OWN FILED PAPERWORK. October mandate §4.
+   *
+   * Office-only for the same reason as the reports above, and composed here
+   * rather than fetched by the browser so the scoping is a server fact rather
+   * than a screen's choice: a technician's response does not carry the
+   * customer's credit application at all.
+   *
+   * The storage keys are stripped — the download route resolves one after
+   * deciding who is asking, and a key is not a way in.
+   */
+  const documents = can(actor.role, 'customers.manage')
+    ? (await repos.customers.listDocuments(id)).map(
+        ({ storageKey: _storageKey, ...rest }) => rest,
+      )
+    : [];
+
   return {
     customer,
     sites,
@@ -285,6 +302,7 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     jobRows: await loadVisibleJobRows(repos, jobs, actor),
     users,
     changeRequests,
+    documents,
   };
 };
 

@@ -1,4 +1,5 @@
 import type {
+  CustomerDocument,
   CaptureReferral,
   CaptureReferralState,
   ActivityEvent,
@@ -292,6 +293,37 @@ class DemoCustomerRepository implements CustomerRepository {
 
   findSiteById(id: SiteId): Promise<Site | null> {
     return Promise.resolve(this.context.read().sites.find((site) => site.id === id) ?? null);
+  }
+
+  /* -- the customer's own files. October mandate §4 ----------------------- */
+
+  listDocuments(
+    customerId: CustomerId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly CustomerDocument[]> {
+    const documents = this.context
+      .read()
+      .customerDocuments.filter((document) => document.customerId === customerId)
+      .filter((document) => filter?.includeArchived === true || document.archivedAt === null);
+    // Newest first: the office is looking for what was added recently.
+    return Promise.resolve(
+      [...documents].sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt)),
+    );
+  }
+
+  findDocumentById(id: string): Promise<CustomerDocument | null> {
+    return Promise.resolve(
+      this.context.read().customerDocuments.find((document) => document.id === id) ?? null,
+    );
+  }
+
+  saveDocument(document: CustomerDocument): Promise<CustomerDocument> {
+    this.context.commit((draft) => {
+      const index = draft.customerDocuments.findIndex((entry) => entry.id === document.id);
+      if (index === -1) draft.customerDocuments.push(document);
+      else draft.customerDocuments[index] = document;
+    });
+    return Promise.resolve(document);
   }
 
   findContactById(id: ContactId): Promise<Contact | null> {

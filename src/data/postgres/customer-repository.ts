@@ -1,11 +1,13 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   asContactId,
   asCustomerId,
   asSiteId,
+  asUserId,
   type Contact,
   type ContactId,
   type Customer,
+  type CustomerDocument,
   type CustomerId,
   type Site,
   type SiteId,
@@ -20,6 +22,29 @@ type CustomerRow = typeof schema.customers.$inferSelect;
 type NoteRow = typeof schema.customerNotes.$inferSelect;
 type SiteRow = typeof schema.sites.$inferSelect;
 type ContactRow = typeof schema.contacts.$inferSelect;
+type CustomerDocumentRow = typeof schema.customerDocuments.$inferSelect;
+
+/**
+ * A customer's own file, as the register holds it. October mandate §4.
+ *
+ * `sizeBytes` and the checksum are what the server measured when the bytes
+ * landed; an unrecognised provenance reads as `simulated`, which is the safe
+ * direction — a fixture must not pass as a customer's genuine document.
+ */
+const toDomainCustomerDocument = (row: CustomerDocumentRow): CustomerDocument => ({
+  id: row.id,
+  customerId: asCustomerId(row.customerId),
+  fileName: row.fileName,
+  caption: row.caption,
+  contentType: row.contentType,
+  storageKey: row.storageKey,
+  sizeBytes: row.sizeBytes,
+  checksumSha256: row.checksumSha256,
+  uploadedAt: row.uploadedAt,
+  uploadedBy: asUserId(row.uploadedBy ?? ''),
+  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
+  archivedAt: row.archivedAt,
+});
 
 /** `numeric` arrives as text so no precision is lost on the way; coordinates are numbers. */
 const coordinate = (value: string | null): number | null =>
@@ -245,6 +270,76 @@ export class PostgresCustomerRepository implements CustomerRepository {
     const written = requireWritten(updated, 'Site', site.name, expected);
     this.siteVersions.remember(written.id, written.version);
     return toDomainSite(written);
+  }
+
+  /* -- the customer's own files. October mandate §4 ----------------------- */
+
+  async listDocuments(
+    customerId: CustomerId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly CustomerDocument[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.customerDocuments)
+      .where(
+        filter?.includeArchived === true
+          ? eq(schema.customerDocuments.customerId, customerId)
+          : and(
+              eq(schema.customerDocuments.customerId, customerId),
+              isNull(schema.customerDocuments.archivedAt),
+            ),
+      )
+      // Newest first: the office is looking for what was added recently.
+      .orderBy(desc(schema.customerDocuments.uploadedAt));
+    return rows.map(toDomainCustomerDocument);
+  }
+
+  async findDocumentById(id: string): Promise<CustomerDocument | null> {
+    // A caller-supplied id reaches this; anything that is not a uuid would
+    // make PostgreSQL raise rather than answer "no such document".
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.customerDocuments)
+      .where(eq(schema.customerDocuments.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row === undefined ? null : toDomainCustomerDocument(row);
+  }
+
+  async saveDocument(document: CustomerDocument): Promise<CustomerDocument> {
+    /*
+     * INSERT OR UPDATE THE WITHDRAWAL, and nothing else.
+     *
+     * The file name, the bytes, the size and the checksum describe a file that
+     * was stored once; the only thing that changes afterwards is whether the
+     * office has withdrawn it. A wholesale update would let a later save
+     * silently redescribe somebody else's document.
+     */
+    const inserted = await this.db
+      .insert(schema.customerDocuments)
+      .values({
+        id: document.id,
+        customerId: document.customerId as string,
+        fileName: document.fileName,
+        caption: document.caption,
+        contentType: document.contentType,
+        storageKey: document.storageKey,
+        sizeBytes: document.sizeBytes,
+        checksumSha256: document.checksumSha256,
+        uploadedAt: document.uploadedAt,
+        uploadedBy: document.uploadedBy.length === 0 ? null : (document.uploadedBy as string),
+        provenance: document.provenance,
+        archivedAt: document.archivedAt,
+      })
+      .onConflictDoUpdate({
+        target: schema.customerDocuments.id,
+        set: { caption: document.caption, archivedAt: document.archivedAt },
+      })
+      .returning();
+    const row = inserted[0];
+    if (row === undefined) throw new Error('the customer document vanished during save');
+    return toDomainCustomerDocument(row);
   }
 
   async saveContact(contact: Contact): Promise<Contact> {

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   customType,
   index,
   numeric,
@@ -9,7 +10,16 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { archivedAt, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
+import {
+  archivedAt,
+  bigintNumber,
+  createdAt,
+  instant,
+  primaryId,
+  provenance,
+  rowVersion,
+  updatedAt,
+} from './columns';
 import { users } from './identity';
 
 const citext = customType<{ data: string }>({ dataType: () => 'citext' });
@@ -82,6 +92,62 @@ export const customerNotes = pgTable(
     createdAt: createdAt(),
   },
   (table) => [index('customer_notes_customer_idx').on(table.customerId, table.createdAt)],
+);
+
+/**
+ * A FILE ATTACHED TO A CUSTOMER. October mandate §4.
+ *
+ * WHAT WAS MISSING. Jobs, machines, checklists and the library all carry
+ * files; a customer carried none, so the credit application, the signed
+ * service agreement, the site induction certificate and the purchase-order
+ * authority had nowhere to live and were kept in somebody's mailbox.
+ *
+ * ITS OWN TABLE RATHER THAN `job_media` WITH A NULLABLE JOB, for the reason
+ * `machine_photos` is its own table: a customer's document does not belong to
+ * a job, is not printed on a job card, and has a different audience. A
+ * nullable foreign key would make every query about job media have to remember
+ * to exclude these.
+ *
+ * ARCHIVED, NEVER DELETED, once the office withdraws one: the same rule the
+ * customer register itself follows. The bytes stay in storage, so an audit can
+ * still resolve what was attached when a decision was made.
+ */
+export const customerDocuments = pgTable(
+  'customer_documents',
+  {
+    id: primaryId(),
+    customerId: uuid('customer_id')
+      .notNull()
+      /*
+       * RESTRICT, not cascade. A customer with documents is a customer with
+       * history; `src/application/removal.ts` archives rather than deletes
+       * anything a record refers to, and these are exactly such records.
+       */
+      .references(() => customers.id, { onDelete: 'restrict' }),
+    fileName: text('file_name').notNull(),
+    caption: text('caption').notNull().default(''),
+    /** The server's SNIFFED type, never the browser's claim. */
+    contentType: text('content_type').notNull(),
+    storageKey: text('storage_key').notNull(),
+    /** Measured off the bytes that were stored. Never supplied by a client. */
+    sizeBytes: bigintNumber('size_bytes').notNull(),
+    /** SHA-256 of those bytes, so a damaged file can be told from a lost one. */
+    checksumSha256: text('checksum_sha256'),
+    uploadedAt: instant('uploaded_at').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    provenance: provenance(),
+    archivedAt: archivedAt(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('customer_documents_customer_idx').on(table.customerId, table.uploadedAt),
+    uniqueIndex('customer_documents_storage_key_key').on(table.storageKey),
+    check('customer_documents_size_positive', sql`${table.sizeBytes} > 0`),
+    check(
+      'customer_documents_provenance_known',
+      sql`${table.provenance} in ('genuine', 'simulated')`,
+    ),
+  ],
 );
 
 /**

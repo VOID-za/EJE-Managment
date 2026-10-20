@@ -5,6 +5,7 @@ import type {
   CaptureReferralState,
   ChangeRequest,
   ChangeRequestState,
+  CustomerDocument,
   ChecklistTemplate,
   ChecklistTemplateId,
   Contact,
@@ -180,6 +181,24 @@ export interface CustomerRepository {
   save(customer: Customer): Promise<Customer>;
   saveSite(site: Site): Promise<Site>;
   saveContact(contact: Contact): Promise<Contact>;
+  /**
+   * The customer's own files. October mandate §4.
+   *
+   * On the CUSTOMER repository rather than a repository of its own, because a
+   * customer's documents have no life apart from the customer: every read is
+   * "this customer's files", every write names the customer, and there is no
+   * screen that lists documents across customers. A separate repository would
+   * be an interface whose every method takes a `CustomerId`.
+   *
+   * `listDocuments` includes withdrawn ones when asked, because an audit of
+   * what was attached at the time has to be able to see them.
+   */
+  listDocuments(
+    customerId: CustomerId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly CustomerDocument[]>;
+  findDocumentById(id: string): Promise<CustomerDocument | null>;
+  saveDocument(document: CustomerDocument): Promise<CustomerDocument>;
   /**
    * Removes the record outright.
    *

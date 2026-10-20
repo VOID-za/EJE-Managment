@@ -1,4 +1,5 @@
 import type {
+  CustomerDocument,
   ActivityEvent,
   CaptureReferral,
   OutboxMessage,
@@ -50,6 +51,8 @@ import { migrateDatabase, OLDEST_MIGRATABLE_VERSION } from './migrations';
 export interface DemoDatabase {
   jobs: Job[];
   customers: Customer[];
+  /** The customer register's own files. October mandate §4. */
+  customerDocuments: CustomerDocument[];
   sites: Site[];
   contacts: Contact[];
   machines: Machine[];
@@ -170,6 +173,13 @@ interface PersistedEnvelope {
 export const createSeededDatabase = (): DemoDatabase => ({
   jobs: seedJobs.map((job) => ({ ...job })),
   customers: seedCustomers.map((customer) => ({ ...customer })),
+  /*
+   * EMPTY, AND DELIBERATELY SO. A seeded customer document would be a fourth
+   * kind of fixture with no bytes behind it, and §1 of the mandate is about
+   * having fewer of those rather than more. The demonstration proves the
+   * feature by uploading a real file during a session.
+   */
+  customerDocuments: [],
   sites: seedSites.map((site) => ({ ...site })),
   contacts: seedContacts.map((contact) => ({ ...contact })),
   machines: seedMachines.map((machine) => ({ ...machine })),

@@ -70,3 +70,12 @@ export const archivedAt = () => instant('archived_at');
  */
 export const provenance = () =>
   text('provenance').notNull().default('genuine');
+
+/**
+ * A byte count. `bigint` read as a JavaScript number.
+ *
+ * The same shape `cents()` uses, named for what it is so a size column does
+ * not read as money. Node's `Number` is exact to 2^53, which is nine petabytes
+ * — past anything this application will store in one file.
+ */
+export const bigintNumber = (name: string) => bigint(name, { mode: 'number' });

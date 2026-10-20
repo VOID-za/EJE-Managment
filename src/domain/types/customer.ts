@@ -1,9 +1,11 @@
+import type { Provenance } from './provenance';
 import type {
   Attachment,
   ContactId,
   CustomerId,
   IsoDateTime,
   SiteId,
+  UserId,
 } from './common';
 
 /**
@@ -88,6 +90,35 @@ export interface CustomerNote {
   readonly body: string;
   readonly authorId: string;
   readonly createdAt: IsoDateTime;
+}
+
+/**
+ * A FILE ATTACHED TO A CUSTOMER. October mandate §4.
+ *
+ * Shaped like `Attachment` and deliberately NOT the same type: an attachment
+ * belongs to a job and carries `visibility`, which decides whether it is
+ * printed on the customer's job card. A customer's own document is never
+ * printed on a job card, so a visibility field here would be a field with no
+ * meaning that somebody would eventually read as one.
+ *
+ * `sizeBytes` and `checksumSha256` are MEASURED by the server off the bytes it
+ * stored — never supplied by a client, and never invented when no file exists.
+ */
+export interface CustomerDocument {
+  readonly id: string;
+  readonly customerId: CustomerId;
+  readonly fileName: string;
+  readonly caption: string;
+  /** The server's sniffed type, not the browser's claim. */
+  readonly contentType: string;
+  readonly storageKey: string;
+  readonly sizeBytes: number;
+  readonly checksumSha256: string | null;
+  readonly uploadedAt: IsoDateTime;
+  readonly uploadedBy: UserId;
+  readonly provenance: Provenance;
+  /** Withdrawn by the office, and kept: the register's own rule. */
+  readonly archivedAt: IsoDateTime | null;
 }
 
 export interface Customer {

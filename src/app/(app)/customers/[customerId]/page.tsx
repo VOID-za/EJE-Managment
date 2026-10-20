@@ -20,6 +20,7 @@ import { CustomerOverviewTab } from '@/components/customers/CustomerOverviewTab'
 import { CustomerSitesTab } from '@/components/customers/CustomerSitesTab';
 import { ChangeRequestDialog } from '@/components/customers/ChangeRequestDialog';
 import { ChangeRequestsPanel } from '@/components/customers/ChangeRequestsPanel';
+import { CustomerDocumentsPanel } from '@/components/customers/CustomerDocumentsPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -72,7 +73,8 @@ const CustomerDetailPage = ({
     );
   }
 
-  const { customer, sites, contacts, machines, jobRows, users, changeRequests } = data;
+  const { customer, sites, contacts, machines, jobRows, users, changeRequests, documents } =
+    data;
   /*
    * WHO SEES WHICH HALF OF CUST-CR. The office acts on reports, so they see the
    * panel; everybody who can read the register may RAISE one, which is the
@@ -148,6 +150,20 @@ const CustomerDetailPage = ({
           {manages && (
             <ChangeRequestsPanel
               requests={changeRequests}
+              users={users}
+              onChanged={query.refetch}
+            />
+          )}
+
+          {/*
+            THE CUSTOMER'S FILED PAPERWORK. October mandate §4.
+            Office-only on screen, and office-only on the server too: the view
+            sends a technician no documents at all, and the routes refuse them.
+          */}
+          {manages && (
+            <CustomerDocumentsPanel
+              customerId={customer.id}
+              documents={documents}
               users={users}
               onChanged={query.refetch}
             />

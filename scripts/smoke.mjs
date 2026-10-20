@@ -552,6 +552,84 @@ await step('the office records what it did about the report', async () => {
   await page.screenshot({ path: `${shots}/14a-change-request.png`, fullPage: false });
 });
 
+/**
+ * A FILE FILED AGAINST A CUSTOMER. October mandate §4.
+ *
+ * The customer register carried no files at all: the signed service agreement
+ * and the credit application lived in somebody's mailbox. This is the whole
+ * path in a browser — choose a real file, upload it, see it on the customer's
+ * own screen, and fetch the exact bytes back through the authorised route.
+ */
+await step('the office files a document against a customer, and gets those bytes back', async () => {
+  await signOut();
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+
+  const panel = page.getByTestId('customer-documents-empty');
+  await panel.waitFor({ timeout: 10000 });
+
+  const body = '%PDF-1.4\nABC Engineering service agreement 2026\n%%EOF';
+  await page.getByTestId('customer-document-caption').fill('Signed service agreement, 2026');
+  await page.getByTestId('customer-document-file').setInputFiles({
+    name: 'abc-service-agreement.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(body, 'utf8'),
+  });
+
+  // The row appears because the list was re-read from the server, not because
+  // this component hoped the upload worked.
+  await page.getByTestId('customer-document-row').first().waitFor({ timeout: 15000 });
+  const row = await page.getByTestId('customer-documents').innerText();
+  if (!row.includes('abc-service-agreement.pdf')) {
+    throw new Error(`the document is not on the customer's screen: ${row.slice(0, 200)}`);
+  }
+  if (!row.includes('Signed service agreement, 2026')) {
+    throw new Error('the description was not kept with the document');
+  }
+  // A genuine upload carries no SIMULATED badge — §1's label means something
+  // only because real records do not get it.
+  if ((await page.getByTestId('customer-documents').getByTestId('simulated-badge').count()) !== 0) {
+    throw new Error('a document somebody really uploaded is labelled as demonstration data');
+  }
+
+  // THE BYTES, through the authorised route, read inside the page.
+  const href = await page.getByTestId('customer-document-download').first().getAttribute('href');
+  const fetched = await page.evaluate(async (url) => {
+    const response = await fetch(url, { credentials: 'include' });
+    return { status: response.status, text: await response.text() };
+  }, href);
+  if (fetched.status !== 200) {
+    throw new Error(`the download answered HTTP ${fetched.status}`);
+  }
+  if (fetched.text !== body) {
+    throw new Error('the bytes that came back are not the bytes that went in');
+  }
+  await page.screenshot({ path: `${shots}/14b-customer-document.png`, fullPage: false });
+});
+
+await step('a technician cannot read the customer register’s files', async () => {
+  await signOut();
+  await signInAs(page, 'Sipho Mahlangu');
+
+  // The office's own route, asked for by a technician's browser with their own
+  // session: refused by the server, not merely hidden by a screen.
+  const refused = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/customers/cust-abc/documents`, {
+      credentials: 'include',
+    });
+    return response.status;
+  }, BASE);
+  if (refused !== 403) {
+    throw new Error(`the customer document list answered a technician HTTP ${refused}`);
+  }
+
+  // And their own customer screen carries none of them.
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  if ((await page.getByTestId('customer-documents').count()) !== 0) {
+    throw new Error('a technician’s customer screen is showing the register’s files');
+  }
+});
+
 await step('the queued WhatsApp message appears in the office Simulated Outbox', async () => {
   await signOut();
   await signInAsMasterIfNeeded();

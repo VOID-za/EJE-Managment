@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  CustomerDocument,
   ActivityEvent,
   AppNotification,
   AvailabilityRecord,
@@ -216,6 +217,15 @@ export interface CustomerScreen {
    * technician's to read. Their own reports come from `changeRequests.mine()`.
    */
   readonly changeRequests: readonly ChangeRequest[];
+  /**
+   * The customer's filed paperwork. October mandate §4.
+   *
+   * Empty for anybody but the office, and empty on the SERVER: a technician's
+   * response does not carry the customer's credit application at all. The
+   * storage keys are stripped by the view — the download route resolves one
+   * after deciding who is asking.
+   */
+  readonly documents: readonly Omit<CustomerDocument, 'storageKey'>[];
 }
 
 export interface MachineScreen {
@@ -542,6 +552,30 @@ export const customers = {
     command<Contact>(`/api/contacts/${segment(contactId)}/update`, input),
   removeContact: (contactId: string) =>
     command<RemovalOutcome>(`/api/contacts/${segment(contactId)}/remove`),
+
+  /**
+   * THE CUSTOMER'S OWN FILED PAPERWORK. October mandate §4.
+   *
+   * A service agreement, a credit application, a site induction certificate —
+   * documents that belong to the customer rather than to any one job. The
+   * server decides who may read or attach one (the office); these only ask.
+   *
+   * `documentUrl` is a URL rather than a fetch on purpose, for the same reason
+   * `library.fileUrl` is: the browser's own download handles a file better
+   * than JSON can, and the route authorises the request before it reads a byte.
+   */
+  documents: (customerId: string) =>
+    apiGet<{ readonly documents: readonly CustomerDocument[] }>(
+      `/api/customers/${segment(customerId)}/documents`,
+    ),
+  documentUrl: (customerId: string, documentId: string) =>
+    `/api/customers/${segment(customerId)}/documents/${segment(documentId)}`,
+  attachDocument: (customerId: string, file: File, caption = '') =>
+    apiUpload<{ readonly document: CustomerDocument }>(
+      `/api/customers/${segment(customerId)}/documents`,
+      file,
+      caption,
+    ),
 };
 
 /**
