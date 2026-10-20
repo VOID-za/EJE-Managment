@@ -4,8 +4,10 @@
 > items moved off this list — demonstration labelling (§1) and customer
 > attachments (§4) — and the library gained the five categories EJE asked for.
 > See `docs/demonstration-data.md` for the classification record and the batch
-> section in `docs/SCOPE.md` for the evidence. Everything still listed below
-> stands.
+> section in `docs/SCOPE.md` for the evidence. The two are tracked as
+> [#58](https://github.com/VOID-za/EJE-Managment/issues/58) (DEMO-1) and
+> [#59](https://github.com/VOID-za/EJE-Managment/issues/59) (CUST-DOC-1).
+> Everything still listed below stands.
 
 A classification of the outstanding scope, made by reading the implementation
 against `docs/SCOPE.md` and the 57 open issues, and by running every gate the
@@ -52,6 +54,8 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | **Invented file facts removed** — four places asserted sizes and page counts for files that do not exist; a size is now measured or zero, and a record with nothing stored offers no download | same | TESTED — awaiting approval |
 | **Customer documents** — the register carried no files at all; `customer_documents`, the office-only routes, the panel, and real bytes proved in a browser | `27a1b53`, `30c4f03` | TESTED — awaiting approval |
 | **The library's missing categories** — checklist, training document, internal company procedure, form and certificate | `f38d46b` | TESTED — awaiting approval |
+| **A customer document is withdrawn, never deleted** — the row and the bytes stay; nothing in this application removes a document's bytes | `0140034` | TESTED — awaiting approval |
+| **The OCR investigation** — the local option costed against the hosted one, with a recommendation to count before choosing | `0140034`, `docs/library-ocr.md` | INVESTIGATED, not implemented (#26) |
 
 ## Not built
 
@@ -60,7 +64,7 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | **DRAFT-1** (#21) | Draft jobs, Master-only. Creation always produces `open`. | Needs two rules from EJE before it can be built honestly: what a draft may leave blank (today every required field is required at creation), and whether releasing one re-validates against the rates of the release day or the drafting day. |
 | **COST-5** (#24) | Additional charges and discounts. | Needs the rules: who may discount, against what authority, and whether a discount is a line or a total adjustment — each prints differently on the customer's document. |
 | **MEDIA-5** (#18) | Video capture. Type only; no capture path. | The simulated *Add video* button was removed rather than left pretending. Storage, size limits and what a video does to a job card's attachment limit are unanswered. |
-| **LIB-5** (#26) | Full-text PDF search / OCR in the library. | Partial: a scanned document says it is not searchable, and why, with a retry. OCR needs a decision about where it runs — in process, or a service with its own cost. |
+| **LIB-5** (#26) | Full-text PDF search / OCR in the library. | Partial: a scanned document says it is not searchable, and why, with a retry. OCR is now **costed** — `docs/library-ocr.md` — and the decision is EJE's: Tesseract on the VPS at 5–15 seconds per page behind a background job, or a hosted service at about US$1–1.50 per 1 000 pages that takes EJE's own documents off the premises. The recommendation is to count the unsearchable documents first, because on a real library the number may be nil. |
 | **MACH-HIST** (#28) | Machine location history. | Deliberately not invented. See DECISION below. |
 | **IMMUT-9** (#20) | Addendum mechanism for post-signature corrections. | Blocked on BD-02. |
 

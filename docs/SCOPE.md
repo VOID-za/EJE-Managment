@@ -1216,13 +1216,23 @@ is deployed:** the live service still serves `4dede18`.*
 | **The library's five missing categories** — checklist, training document, internal company procedure, form and certificate, all previously filed as `work_procedure` | **TESTED — awaiting approval** `f38d46b`. The label map moved into the domain so a category is named on every screen |
 | **CUSTOMER DOCUMENTS (§4)** — the register carried no files at all, so the signed service agreement and the credit application lived in a mailbox | **TESTED — awaiting approval** `27a1b53`. `customer_documents` with a RESTRICT key and a size CHECK, bytes stored and read back before the row is written, office-only at both ends with a technician's response carrying none at all, every indistinguishable refusal a 404, and the download an attachment with `nosniff` and `no-store` |
 | **A 20px touch target, caught by CI** — the panel's bare `<input type="file">` failed the responsive gate at all three widths | **TESTED — awaiting approval** `30c4f03`. A real button over a hidden input, the pattern the photo-capture surfaces already use |
+| **A customer document is WITHDRAWN, never deleted** — the row stays, the bytes stay, and the office only takes it off the screen | **TESTED — awaiting approval** `0140034`. The register's own rule: a site or a contact a job has named is archived because the record has to stay resolvable, and a document that was on file when a decision was taken is exactly such a record. Nothing in this application removes a document's bytes |
+| **The OCR investigation §3 asks for** — the local option costed against the hosted one, with the recommendation to count the unsearchable documents before choosing | **INVESTIGATED, NOT IMPLEMENTED** `0140034`, `docs/library-ocr.md`. Tesseract on the VPS costs no licence and 5–15 seconds per page, so the real work is a durable background job rather than the recognition; a hosted service costs about US$1–1.50 per 1 000 pages and takes EJE's own documents off the premises. No dependency was added and no service was signed up for (#26) |
 | Whether a technician may read a specific customer document (a site induction certificate is the obvious candidate) | **OPEN.** Office-only is the conservative answer; widening it is one line, and a technician who has read a credit application cannot be un-shown it |
 
-**Evidence:** 2342 unit and route tests, 276 on real PostgreSQL and real file
+**Evidence:** 2345 unit and route tests, 275 on real PostgreSQL and real file
 storage, every browser suite (smoke, e2e, tablet-pdf-check, responsive-check,
 check-routes, workflow-check), and all 17 migrations applied from zero on a
 fresh database. `docs/demonstration-data.md` is the classification record §1.3
 asks for, including what remains uncertain.
+
+**Work items:** demonstration labelling is
+[#58](https://github.com/VOID-za/EJE-Managment/issues/58) (DEMO-1) and customer
+documents are [#59](https://github.com/VOID-za/EJE-Managment/issues/59)
+(CUST-DOC-1), both `status:TESTING`; the OCR investigation is recorded against
+[#26](https://github.com/VOID-za/EJE-Managment/issues/26) (LIB-5), which stays
+`scope:PARTIAL` because the choice between running it on the VPS and paying for
+a service is EJE's.
 
 ### Document durability and backup validation (20 October 2026, sixth batch)
 
