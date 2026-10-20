@@ -162,3 +162,65 @@ export const machinePhotos = pgTable(
     check('machine_photos_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
   ],
 );
+
+/**
+ * DOCUMENTS ABOUT ONE MACHINE. October mandate §4.
+ *
+ * Its own table rather than a row on `machine_photos` with a PDF in it: a
+ * photograph renders inline as a thumbnail and is readable by anybody who may
+ * read the machine, and a document is neither of those things. And not the
+ * technical library, which files by manufacturer and MODEL — a commissioning
+ * report for one serial number filed against the model would be wrong for
+ * every other machine of that model.
+ *
+ * CASCADE, unlike `customer_documents`. A machine with job history is archived
+ * rather than deleted (`src/application/removal.ts`), so the delete that this
+ * key governs only ever happens to a machine nothing refers to at all — an
+ * entry somebody created by mistake — and its paperwork should go with it.
+ * `machine_photos` and `machine_approvals` are cascade for the same reason.
+ */
+export const machineDocuments = pgTable(
+  'machine_documents',
+  {
+    id: primaryId(),
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    caption: text('caption').notNull().default(''),
+    /** The server's SNIFFED type, never the browser's claim. */
+    contentType: text('content_type').notNull(),
+    storageKey: text('storage_key').notNull(),
+    /** Measured off the bytes that were stored. Never supplied by a client. */
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    /** SHA-256 of those bytes, so a damaged file can be told from a lost one. */
+    checksumSha256: text('checksum_sha256'),
+    /**
+     * Who may read it: `field` or `office_only`. MEDIA-1's answer, applied to
+     * machine paperwork.
+     *
+     * DEFAULTS TO `office_only`, which is the safe direction: a document
+     * nobody classified is not shown to the field, and a manual somebody
+     * forgot to mark is an inconvenience rather than a disclosure.
+     */
+    audience: text('audience').notNull().default('office_only'),
+    uploadedAt: instant('uploaded_at').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    provenance: provenance(),
+    archivedAt: archivedAt(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('machine_documents_machine_idx').on(table.machineId, table.uploadedAt),
+    uniqueIndex('machine_documents_storage_key_key').on(table.storageKey),
+    check('machine_documents_size_positive', sql`${table.sizeBytes} > 0`),
+    check(
+      'machine_documents_audience_known',
+      sql`${table.audience} in ('field', 'office_only')`,
+    ),
+    check(
+      'machine_documents_provenance_known',
+      sql`${table.provenance} in ('genuine', 'simulated')`,
+    ),
+  ],
+);

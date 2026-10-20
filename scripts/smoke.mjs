@@ -633,6 +633,107 @@ await step('a technician cannot read the customer register’s files', async () 
   }
 });
 
+/**
+ * PAPER ABOUT ONE MACHINE, AND THE AUDIENCE THAT DECIDES WHO READS IT.
+ * October mandate §4.
+ *
+ * Two documents on the same machine: one marked for the FIELD and one kept to
+ * the OFFICE. The next step signs in as the technician and proves that the
+ * first is readable and the second is not even in the response — which is the
+ * only assertion that matters, because a screen that hides a row still
+ * received it.
+ */
+await step('the office files two documents against a machine, one for the field', async () => {
+  await signOut();
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/machines/machine-abc-lv40`, { waitUntil: 'networkidle' });
+
+  await page.getByTestId('machine-documents-empty').waitFor({ timeout: 10000 });
+
+  const manual = '%PDF-1.4\nLeadwell V-40 commissioning report\n%%EOF';
+  await page.getByTestId('machine-document-caption').fill('Commissioning report, 2019');
+  await page.getByTestId('machine-document-audience-field').click();
+  await page.getByTestId('machine-document-file').setInputFiles({
+    name: 'lv40-commissioning.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(manual, 'utf8'),
+  });
+  await page.getByTestId('machine-document-row').first().waitFor({ timeout: 15000 });
+
+  const invoice = '%PDF-1.4\nSupplier invoice for the machine\n%%EOF';
+  await page.getByTestId('machine-document-caption').fill('Supplier invoice');
+  await page.getByTestId('machine-document-audience-office_only').click();
+  await page.getByTestId('machine-document-file').setInputFiles({
+    name: 'lv40-supplier-invoice.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(invoice, 'utf8'),
+  });
+  await page
+    .getByTestId('machine-document-row')
+    .nth(1)
+    .waitFor({ timeout: 15000 });
+
+  const listed = await page.getByTestId('machine-documents').innerText();
+  if (!listed.includes('lv40-commissioning.pdf') || !listed.includes('lv40-supplier-invoice.pdf')) {
+    throw new Error(`both documents are not on the machine's screen: ${listed.slice(0, 200)}`);
+  }
+  // The office is told which is which, because the office is the one who can
+  // get it wrong: a manual left office-only is a technician telephoning in.
+  if (!listed.includes('Readable in the field') || !listed.includes('Office only')) {
+    throw new Error('the office cannot see which documents the field may read');
+  }
+  // A genuine upload carries no SIMULATED badge.
+  if ((await page.getByTestId('machine-documents').getByTestId('simulated-badge').count()) !== 0) {
+    throw new Error('a document somebody really uploaded is labelled as demonstration data');
+  }
+
+  await page.screenshot({ path: `${shots}/14c-machine-documents.png`, fullPage: false });
+});
+
+await step('a technician reads the FIELD document and never sees the office-only one', async () => {
+  await signOut();
+  await signInAs(page, 'Sipho Mahlangu');
+
+  // THE SERVER'S ANSWER, asked for by a technician's own browser.
+  const listed = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/machines/machine-abc-lv40/documents`, {
+      credentials: 'include',
+    });
+    return { status: response.status, body: await response.json() };
+  }, BASE);
+  if (listed.status !== 200) {
+    throw new Error(`the machine document list answered a technician HTTP ${listed.status}`);
+  }
+  const names = (listed.body?.data?.documents ?? []).map((row) => row.fileName);
+  if (names.length !== 1 || names[0] !== 'lv40-commissioning.pdf') {
+    throw new Error(`a technician's own list is wrong: ${JSON.stringify(names)}`);
+  }
+
+  // The field document's BYTES, through the authorised route.
+  await page.goto(`${BASE}/machines/machine-abc-lv40`, { waitUntil: 'networkidle' });
+  await page.getByTestId('machine-document-row').first().waitFor({ timeout: 15000 });
+  const href = await page.getByTestId('machine-document-download').first().getAttribute('href');
+  const fetched = await page.evaluate(async (url) => {
+    const response = await fetch(url, { credentials: 'include' });
+    return { status: response.status, text: await response.text() };
+  }, href);
+  if (fetched.status !== 200) {
+    throw new Error(`the field document answered a technician HTTP ${fetched.status}`);
+  }
+  if (!fetched.text.includes('commissioning report')) {
+    throw new Error('the bytes that came back are not the bytes that went in');
+  }
+
+  // And the technician is offered no upload and no withdrawal: the register is
+  // the office's, and the screen says the same thing the server does.
+  if ((await page.getByTestId('machine-document-choose').count()) !== 0) {
+    throw new Error('a technician is being offered the machine-document upload');
+  }
+  if ((await page.getByTestId('machine-document-withdraw').count()) !== 0) {
+    throw new Error('a technician is being offered to withdraw a machine document');
+  }
+});
+
 await step('the queued WhatsApp message appears in the office Simulated Outbox', async () => {
   await signOut();
   await signInAsMasterIfNeeded();

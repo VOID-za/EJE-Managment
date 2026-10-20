@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   asAttachmentId,
   asCustomerId,
@@ -6,6 +6,8 @@ import {
   asSiteId,
   asUserId,
   type Machine,
+  type MachineDocument,
+  type MachineDocumentAudience,
   type MachineId,
 } from '@/domain';
 import type { MachineRepository, RegisterFilter } from '@/data/repositories';
@@ -17,6 +19,32 @@ import { isUuid } from './identifiers';
 
 type MachineRow = typeof schema.machines.$inferSelect;
 type PhotoRow = typeof schema.machinePhotos.$inferSelect;
+type MachineDocumentRow = typeof schema.machineDocuments.$inferSelect;
+
+/**
+ * An unrecognised audience reads as `office_only`, which is the safe
+ * direction: a value this code does not understand must not widen who sees a
+ * document. The CHECK constraint makes it unreachable through the application
+ * anyway; this is what happens if somebody writes the row by hand.
+ */
+const toDomainAudience = (value: string): MachineDocumentAudience =>
+  value === 'field' ? 'field' : 'office_only';
+
+const toDomainMachineDocument = (row: MachineDocumentRow): MachineDocument => ({
+  id: row.id,
+  machineId: asMachineId(row.machineId),
+  fileName: row.fileName,
+  caption: row.caption,
+  contentType: row.contentType,
+  storageKey: row.storageKey,
+  sizeBytes: row.sizeBytes,
+  checksumSha256: row.checksumSha256,
+  audience: toDomainAudience(row.audience),
+  uploadedAt: row.uploadedAt,
+  uploadedBy: asUserId(row.uploadedBy ?? ''),
+  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
+  archivedAt: row.archivedAt,
+});
 
 /**
  * The machine register, in PostgreSQL.
@@ -129,6 +157,84 @@ export class PostgresMachineRepository implements MachineRepository {
   async delete(id: MachineId): Promise<void> {
     await this.db.delete(schema.machines).where(eq(schema.machines.id, id));
     this.versions.forget(id);
+  }
+
+  /* -- paper about one machine. October mandate §4. ----------------------- */
+
+  async listDocuments(
+    machineId: MachineId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly MachineDocument[]> {
+    if (!isUuid(machineId)) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.machineDocuments)
+      .where(
+        filter?.includeArchived === true
+          ? eq(schema.machineDocuments.machineId, machineId)
+          : and(
+              eq(schema.machineDocuments.machineId, machineId),
+              isNull(schema.machineDocuments.archivedAt),
+            ),
+      )
+      // Newest first: the office is looking for what was added recently.
+      .orderBy(desc(schema.machineDocuments.uploadedAt));
+    return rows.map(toDomainMachineDocument);
+  }
+
+  async findDocumentById(id: string): Promise<MachineDocument | null> {
+    // A caller-supplied id reaches this; anything that is not a uuid would
+    // make PostgreSQL raise rather than answer "no such document".
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.machineDocuments)
+      .where(eq(schema.machineDocuments.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row === undefined ? null : toDomainMachineDocument(row);
+  }
+
+  async saveDocument(document: MachineDocument): Promise<MachineDocument> {
+    /*
+     * INSERT, OR UPDATE THE THREE THINGS THAT MAY CHANGE.
+     *
+     * The file name, the bytes, the size and the checksum describe a file that
+     * was stored once. What the office may revise afterwards is the caption,
+     * the audience — a manual wrongly marked office-only is exactly the
+     * mistake the safe default invites — and whether it is withdrawn. A
+     * wholesale update would let a later save silently redescribe somebody
+     * else's document.
+     */
+    const inserted = await this.db
+      .insert(schema.machineDocuments)
+      .values({
+        id: document.id,
+        machineId: document.machineId as string,
+        fileName: document.fileName,
+        caption: document.caption,
+        contentType: document.contentType,
+        storageKey: document.storageKey,
+        sizeBytes: document.sizeBytes,
+        checksumSha256: document.checksumSha256,
+        audience: document.audience,
+        uploadedAt: document.uploadedAt,
+        uploadedBy: document.uploadedBy.length === 0 ? null : (document.uploadedBy as string),
+        provenance: document.provenance,
+        archivedAt: document.archivedAt,
+      })
+      .onConflictDoUpdate({
+        target: schema.machineDocuments.id,
+        set: {
+          caption: document.caption,
+          audience: document.audience,
+          archivedAt: document.archivedAt,
+        },
+      })
+      .returning();
+    const row = inserted[0];
+    if (row === undefined) throw new Error(`${document.fileName} vanished during save.`);
+    return toDomainMachineDocument(row);
   }
 
   /* ---------------------------------------------------------------------- */

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
+import { MachineDocumentsPanel } from '@/components/machines/MachineDocumentsPanel';
 import { MachinePhotoPanel } from '@/components/machines/MachinePhotoPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
@@ -53,7 +54,7 @@ const MachineDetailPage = ({
     );
   }
 
-  const { machine, customer, site, jobRows } = data;
+  const { machine, customer, site, jobRows, documents, users } = data;
   const history = [...jobRows].sort((a, b) =>
     (b.job.scheduledDate ?? b.job.createdAt).localeCompare(a.job.scheduledDate ?? a.job.createdAt),
   );
@@ -173,6 +174,20 @@ const MachineDetailPage = ({
           {/* Real photographs, and the camera for whoever the register's own
               rules allow to add one. MACH-PHOTO-1. */}
           <MachinePhotoPanel machine={machine} onChanged={query.refetch} />
+
+          {/*
+            THE MACHINE'S OWN PAPER. October mandate §4.
+            Rendered for everybody, because a technician's list is the one the
+            SERVER sent them — the office-only documents are not in it. The
+            upload belongs to the office, and the panel decides that the same
+            way the server does.
+          */}
+          <MachineDocumentsPanel
+            machineId={machine.id}
+            documents={documents}
+            users={users}
+            onChanged={query.refetch}
+          />
         </div>
       </div>
 

@@ -313,6 +313,37 @@ describe('migrating a persisted snapshot', () => {
     expect(never?.awaitingSparesReason).toBeUndefined();
   });
 
+  /**
+   * THE COLLECTIONS A LATER VERSION ADDED MUST EXIST, not merely be documented.
+   *
+   * A REAL DEFECT, and the shape of it is worth keeping: `customerDocuments`
+   * was introduced BY the v17 → v18 step and that step did not create the
+   * array, so a snapshot brought forward from v8 arrived at v18 with the key
+   * absent. The repository reads `customerDocuments.filter(...)` directly, so
+   * the first customer screen opened after the upgrade threw a TypeError
+   * rather than showing an empty list — and the demonstration store is
+   * exactly where an old snapshot is normal.
+   */
+  it('creates the collections that later versions introduced', () => {
+    const migrated = migrateDatabase(8, v8Snapshot(), SCHEMA_VERSION)!;
+    expect(Array.isArray(migrated.customerDocuments)).toBe(true);
+    expect(migrated.customerDocuments).toEqual([]);
+    expect(Array.isArray(migrated.machineDocuments)).toBe(true);
+    expect(migrated.machineDocuments).toEqual([]);
+  });
+
+  it('keeps documents a snapshot already carried rather than emptying them', () => {
+    // The step must not reset a collection a newer snapshot already holds: the
+    // files somebody attached during a demonstration ARE the demonstration.
+    const existing = [{ id: 'doc-1', machineId: 'machine-abc-lv40', fileName: 'manual.pdf' }];
+    const migrated = migrateDatabase(
+      18,
+      { ...v8Snapshot(), machineDocuments: existing },
+      SCHEMA_VERSION,
+    )!;
+    expect(migrated.machineDocuments).toHaveLength(1);
+  });
+
   it('upgrades a v8 snapshot all the way to a spares request', () => {
     // The whole chain still runs, which is what keeps a demonstration that has
     // been going since v8 from being thrown away.

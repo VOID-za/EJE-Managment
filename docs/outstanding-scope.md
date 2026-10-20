@@ -55,6 +55,8 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | **Customer documents** — the register carried no files at all; `customer_documents`, the office-only routes, the panel, and real bytes proved in a browser | `27a1b53`, `30c4f03` | TESTED — awaiting approval |
 | **The library's missing categories** — checklist, training document, internal company procedure, form and certificate | `f38d46b` | TESTED — awaiting approval |
 | **A customer document is withdrawn, never deleted** — the row and the bytes stay; nothing in this application removes a document's bytes | `0140034` | TESTED — awaiting approval |
+| **Machine documents** — a machine carried photographs and nothing else; its commissioning report, compliance certificate and calibration results now have a home, with the office classifying each one `field` or `office_only` | MACH-DOC-1 (#60) | TESTED — awaiting approval |
+| **Two counting defects found on the way** — the reconcile's table list was two tables stale, and a demonstration snapshot upgraded to v18 had no `customerDocuments` array to read | same | FIXED |
 | **The OCR investigation** — the local option costed against the hosted one, with a recommendation to count before choosing | `0140034`, `docs/library-ocr.md` | INVESTIGATED, not implemented (#26) |
 
 ## Not built
@@ -91,7 +93,10 @@ implementation.
 **Customer and machine administration** — built and tested. The register is
 internally consistent (a machine cannot stand at another customer's site),
 concurrent amendments cannot overwrite each other on PostgreSQL, and archiving
-is a withdrawal rather than a delete. Outstanding: MACH-HIST (decision).
+is a withdrawal rather than a delete. Both now carry **files**: a customer's
+paperwork is office-only, and a machine's is classified per document so a
+technician reads the manual and not the invoice. Outstanding: MACH-HIST
+(decision), and whether `field` should be the default audience (decision).
 
 **User administration** — built and tested, including who may create whom (a
 Coordinator may add a Technician and nothing else; only a Master may add a

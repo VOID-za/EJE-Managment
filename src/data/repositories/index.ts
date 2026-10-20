@@ -20,6 +20,7 @@ import type {
   JobId,
   AvailabilityRecord,
   Machine,
+  MachineDocument,
   MachineId,
   NotificationId,
   Site,
@@ -217,6 +218,23 @@ export interface MachineRepository {
   save(machine: Machine): Promise<Machine>;
   /** See `CustomerRepository.deleteSite`. */
   delete(id: MachineId): Promise<void>;
+
+  /*
+   * PAPER ABOUT ONE MACHINE. October mandate §4.
+   *
+   * Not on `Machine` the way photographs are: a photograph is shown with the
+   * machine on every screen that names it, while a document is a list the
+   * office opens, and loading every machine's paperwork to draw a register
+   * would be a read nobody asked for. Unfiltered here — `listMachineDocuments`
+   * applies the audience, because who may read which document is a rule and
+   * not a query.
+   */
+  listDocuments(
+    machineId: MachineId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly MachineDocument[]>;
+  findDocumentById(id: string): Promise<MachineDocument | null>;
+  saveDocument(document: MachineDocument): Promise<MachineDocument>;
 }
 
 export interface UserRepository {

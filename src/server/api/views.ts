@@ -15,6 +15,7 @@ import type { RepositoryBundle } from '@/data/repositories';
 import { businessToday } from '@/lib/business-time';
 import { loadActivityFeed, loadJobActivity } from '@/application/activity-read';
 import { loadCalendar } from '@/application/calendar';
+import { listMachineDocuments } from '@/application/machine-documents';
 import { loadClosedJobs, type ClosedJobFilters } from '@/application/closed-jobs';
 import { loadConversations } from '@/application/chat-operations';
 import {
@@ -346,17 +347,29 @@ export const machinesView = async ({ repos, actor }: ViewContext) => {
  * machine, with the commercial figures on them. The rule was documented here
  * and not applied.
  */
-export const machineView = async ({ repos, actor }: ViewContext, machineId: string) => {
+export const machineView = async ({ repos, services, actor }: ViewContext, machineId: string) => {
   const id = asMachineId(machineId);
   const machine = await repos.machines.findById(id);
   if (machine === null) return null;
 
-  const [customer, sites, jobs] = await Promise.all([
+  const [customer, sites, jobs, documents, users] = await Promise.all([
     repos.customers.findById(machine.customerId),
     // Includes a withdrawn site: this machine may be archived itself, and it
     // still has to say where it stood.
     repos.customers.listSites(machine.customerId, { includeArchived: true }),
     repos.jobs.list({ machineId: id }),
+    /*
+     * THE MACHINE'S OWN PAPER. October mandate §4.
+     *
+     * Composed here rather than fetched by the browser, so the audience filter
+     * is a server fact: `listMachineDocuments` gives the office everything and
+     * a technician only what the office marked `field`. The storage keys are
+     * stripped — the download route resolves one after deciding who is asking.
+     */
+    listMachineDocuments({ repos, services, actor }, id),
+    // So the screen can name whoever filed a document. The same list the
+    // customer screen carries, for the same reason.
+    repos.users.list(),
   ]);
 
   return {
@@ -364,6 +377,8 @@ export const machineView = async ({ repos, actor }: ViewContext, machineId: stri
     customer,
     site: sites.find((candidate) => candidate.id === machine.siteId) ?? null,
     jobRows: await loadVisibleJobRows(repos, jobs, actor),
+    documents: documents.map(({ storageKey: _storageKey, ...rest }) => rest),
+    users,
   };
 };
 

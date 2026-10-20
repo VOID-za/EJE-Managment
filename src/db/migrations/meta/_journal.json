@@ -120,6 +120,13 @@
       "when": 1792532069204,
       "tag": "0016_customer_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792536114971,
+      "tag": "0017_machine_documents",
+      "breakpoints": true
     }
   ]
 }

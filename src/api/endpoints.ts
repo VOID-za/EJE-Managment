@@ -12,6 +12,7 @@ import type {
   Job,
   CaptureReferral,
   Machine,
+  MachineDocument,
   MediaVisibility,
   Site,
   SystemSettings,
@@ -228,11 +229,29 @@ export interface CustomerScreen {
   readonly documents: readonly Omit<CustomerDocument, 'storageKey'>[];
 }
 
+/**
+ * A machine document as it leaves the server: never its storage key.
+ *
+ * The download route resolves the key after deciding who is asking, and a key
+ * is not a way in.
+ */
+export type MachineDocumentRow = Omit<MachineDocument, 'storageKey'>;
+
 export interface MachineScreen {
   readonly machine: Machine;
   readonly customer: Customer | null;
   readonly site: Site | null;
   readonly jobRows: readonly JobListRow[];
+  /**
+   * The paper filed against this machine, as THIS actor may see it. Mandate §4.
+   *
+   * Filtered on the SERVER by each document's audience, so a technician's
+   * response does not carry an office-only document at all — a screen that
+   * hides a row still received it.
+   */
+  readonly documents: readonly MachineDocumentRow[];
+  /** So the screen can name whoever filed a document. */
+  readonly users: readonly User[];
 }
 
 export interface TechnicianScreen {
@@ -659,6 +678,43 @@ export const machines = {
   approve: (machineId: string) => command<Machine>(`/api/machines/${segment(machineId)}/approve`),
   remove: (machineId: string) =>
     command<RemovalOutcome>(`/api/machines/${segment(machineId)}/remove`),
+
+  /**
+   * PAPER ABOUT ONE MACHINE. October mandate §4.
+   *
+   * A commissioning report, a compliance certificate, the calibration results
+   * for that serial number — not a photograph, which renders inline, and not a
+   * library document, which is filed by MODEL and answers for every machine of
+   * it.
+   *
+   * `audience` is who may read it afterwards: `field` or `office_only`. The
+   * server decides who may attach one (the office) and who may read which;
+   * these only ask.
+   */
+  documents: (machineId: string) =>
+    apiGet<{ readonly documents: readonly MachineDocumentRow[] }>(
+      `/api/machines/${segment(machineId)}/documents`,
+    ),
+  documentUrl: (machineId: string, documentId: string) =>
+    `/api/machines/${segment(machineId)}/documents/${segment(documentId)}`,
+  attachDocument: (
+    machineId: string,
+    file: File,
+    options: {
+      readonly caption?: string;
+      readonly audience?: MachineDocument['audience'];
+    } = {},
+  ) =>
+    apiUpload<{ readonly document: MachineDocumentRow }>(
+      `/api/machines/${segment(machineId)}/documents`,
+      file,
+      options.caption ?? '',
+      { audience: options.audience ?? 'office_only' },
+    ),
+  withdrawDocument: (machineId: string, documentId: string) =>
+    command<{ readonly document: MachineDocumentRow }>(
+      `/api/machines/${segment(machineId)}/documents/${segment(documentId)}/withdraw`,
+    ),
 };
 
 export const users = {

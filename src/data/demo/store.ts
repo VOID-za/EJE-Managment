@@ -9,6 +9,7 @@ import type {
   Contact,
   Job,
   Machine,
+  MachineDocument,
   Site,
   AvailabilityRecord,
   SystemSettings,
@@ -53,6 +54,8 @@ export interface DemoDatabase {
   customers: Customer[];
   /** The customer register's own files. October mandate §4. */
   customerDocuments: CustomerDocument[];
+  /** Paper about ONE machine, as opposed to its photographs. Mandate §4. */
+  machineDocuments: MachineDocument[];
   sites: Site[];
   contacts: Contact[];
   machines: Machine[];
@@ -163,7 +166,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -180,6 +183,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
    * feature by uploading a real file during a session.
    */
   customerDocuments: [],
+  /** Empty for the same reason, and proved the same way: by a real upload. */
+  machineDocuments: [],
   sites: seedSites.map((site) => ({ ...site })),
   contacts: seedContacts.map((contact) => ({ ...contact })),
   machines: seedMachines.map((machine) => ({ ...machine })),

@@ -337,6 +337,13 @@ const v17ToV18 = (data: Loose): Loose => {
 
   return {
     ...data,
+    /*
+     * AND THE NEW COLLECTION, which v18 also introduced (CUST-DOC-1). A
+     * snapshot written before it has no such key, and a repository that reads
+     * `customerDocuments.filter` on `undefined` does not fail politely — it
+     * throws on the first customer screen somebody opens after upgrading.
+     */
+    customerDocuments: Array.isArray(data.customerDocuments) ? data.customerDocuments : [],
     documents: rows(data, 'documents').map(withProvenance),
     machines: rows(data, 'machines').map((machine) => ({
       ...machine,
@@ -355,6 +362,19 @@ const v17ToV18 = (data: Loose): Loose => {
   };
 };
 
+/**
+ * v18 -> v19. October mandate §4.
+ *
+ * A machine gained its own documents (`MACH-DOC-1`). Nothing derives them and
+ * nothing is seeded, so the step only has to make the collection EXIST: the
+ * repository reads it directly, and an absent key is a thrown TypeError on the
+ * first machine screen rather than an empty list.
+ */
+const v18ToV19 = (data: Loose): Loose => ({
+  ...data,
+  machineDocuments: Array.isArray(data.machineDocuments) ? data.machineDocuments : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -366,6 +386,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   15: v15ToV16,
   16: v16ToV17,
   17: v17ToV18,
+  18: v18ToV19,
 };
 
 /**

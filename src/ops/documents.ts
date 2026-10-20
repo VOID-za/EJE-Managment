@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import postgres from 'postgres';
 import { loadEnvFiles } from '@/db/seed/env';
+import { scansForReferences } from '@/db/backup/references';
 import {
   FilesystemStorageService,
   readStorageConfiguration,
@@ -64,14 +65,30 @@ const argument = (name: string): string | null => {
   return process.argv[index + 1] ?? null;
 };
 
-/** Tables that hold a storage key, for the reference count the restore test reports. */
-const KEY_TABLES = [
-  'final_documents',
-  'job_media',
-  'machine_photos',
-  'checklist_answer_photos',
-  'library_document_versions',
-] as const;
+/**
+ * Tables that hold a storage key, for the reference count the restore test
+ * reports — READ FROM THE DATABASE, never listed here.
+ *
+ * It was a literal list of five tables, and by the time two more arrived
+ * (`customer_documents`, `machine_documents`) it was quietly reporting a
+ * smaller system than the one it was looking at. `backup/run.ts` and
+ * `backup/restore-test.ts` both read `information_schema` for exactly that
+ * reason; this now does the same, so a table that gains a `storage_key`
+ * column is counted without anybody remembering to come back here.
+ *
+ * `REFERENCE_EXEMPT_TABLES` is applied, because `final_document_verifications`
+ * records every LOOK at a document, including the looks that found nothing —
+ * counting those would make the number grow each time this tool ran.
+ */
+const keyTables = async (sql: postgres.Sql): Promise<readonly string[]> => {
+  const rows = await sql<{ table_name: string }[]>`
+    select table_name from information_schema.columns
+     where column_name = 'storage_key' and table_schema = 'public'
+     order by 1
+  `.catch(() => null);
+  if (rows === null) return [];
+  return rows.map((row) => row.table_name).filter(scansForReferences);
+};
 
 const main = async (): Promise<void> => {
   loadEnvFiles();
@@ -173,7 +190,7 @@ const main = async (): Promise<void> => {
 
     /* -- the wider reference count, which is what a restore test reports --- */
     const references: { table: string; total: number }[] = [];
-    for (const table of KEY_TABLES) {
+    for (const table of await keyTables(sql)) {
       const counted = await sql<{ count: string }[]>`
         select count(*)::text as count from ${sql(table)}
       `.catch(() => null);

@@ -21,6 +21,7 @@ import type {
   JobSummary,
   PricingSnapshot,
   Machine,
+  MachineDocument,
   MachineId,
   NotificationId,
   OutboxMessage,
@@ -402,8 +403,43 @@ class DemoMachineRepository implements MachineRepository {
   delete(id: MachineId): Promise<void> {
     this.context.commit((draft) => {
       draft.machines = draft.machines.filter((machine) => machine.id !== id);
+      // Its paperwork goes with it, which is what the PostgreSQL cascade does.
+      draft.machineDocuments = draft.machineDocuments.filter(
+        (document) => document.machineId !== id,
+      );
     });
     return Promise.resolve();
+  }
+
+  /* -- paper about one machine. October mandate §4. ----------------------- */
+
+  listDocuments(
+    machineId: MachineId,
+    filter?: { readonly includeArchived?: boolean },
+  ): Promise<readonly MachineDocument[]> {
+    const documents = this.context
+      .read()
+      .machineDocuments.filter((document) => document.machineId === machineId)
+      .filter((document) => filter?.includeArchived === true || document.archivedAt === null);
+    // Newest first: the office is looking for what was added recently.
+    return Promise.resolve(
+      [...documents].sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt)),
+    );
+  }
+
+  findDocumentById(id: string): Promise<MachineDocument | null> {
+    return Promise.resolve(
+      this.context.read().machineDocuments.find((document) => document.id === id) ?? null,
+    );
+  }
+
+  saveDocument(document: MachineDocument): Promise<MachineDocument> {
+    this.context.commit((draft) => {
+      const index = draft.machineDocuments.findIndex((entry) => entry.id === document.id);
+      if (index === -1) draft.machineDocuments.push(document);
+      else draft.machineDocuments[index] = document;
+    });
+    return Promise.resolve(document);
   }
 }
 
