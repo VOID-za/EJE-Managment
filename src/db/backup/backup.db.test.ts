@@ -113,8 +113,19 @@ describeDb('npm run backup', () => {
     for (const root of roots) spawnSync('rm', ['-rf', root]);
   });
 
+  /**
+   * The one backup directory in `parent`, ignoring `last-run.json`.
+   *
+   * Every run writes that status file beside the backups — successful or not —
+   * because a scheduled backup fails silently by nature and somebody has to be
+   * able to see what happened without reading the journal. It is not a backup,
+   * so nothing that looks for backups counts it.
+   */
+  const backupDirectories = (parent: string): readonly string[] =>
+    readdirSync(parent).filter((entry) => entry !== 'last-run.json');
+
   const onlyDirectory = (parent: string): string => {
-    const entries = readdirSync(parent);
+    const entries = backupDirectories(parent);
     expect(entries).toHaveLength(1);
     return join(parent, entries[0]!);
   };
@@ -273,7 +284,7 @@ describeDb('npm run backup', () => {
      * NOTHING LEFT BEHIND. A directory holding only `database.dump` is the trap
      * this requirement exists to prevent — somebody in a hurry would trust it.
      */
-    expect(readdirSync(into)).toHaveLength(0);
+    expect(backupDirectories(into)).toHaveLength(0);
   });
 
   it('REFUSES when the documents are all gone, rather than recording a success', () => {
@@ -288,7 +299,7 @@ describeDb('npm run backup', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/no files at all/u);
-    expect(readdirSync(into)).toHaveLength(0);
+    expect(backupDirectories(into)).toHaveLength(0);
   });
 
   it('allows an empty directory only when told the deployment is new', () => {
@@ -331,7 +342,7 @@ describeDb('npm run backup', () => {
     if (again.status !== 0) {
       expect(again.stderr).toMatch(/already exists/u);
     } else {
-      expect(readdirSync(into).length).toBe(2);
+      expect(backupDirectories(into).length).toBe(2);
     }
     expect(readdirSync(directory)).toContain('manifest.json');
   });
@@ -346,7 +357,7 @@ describeDb('npm run backup', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/pg_dump failed/u);
     // Nothing half-written: the dump failed, so the directory goes with it.
-    expect(readdirSync(into)).toHaveLength(0);
+    expect(backupDirectories(into)).toHaveLength(0);
   });
 });
 
@@ -404,9 +415,22 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       { encoding: 'utf8' },
     ).stdout.split('\n').filter((line) => line.length > 0);
 
+    /*
+     * `<key>.bin` AND `<key>.json`, BECAUSE THAT IS WHAT THE STORE WRITES.
+     *
+     * This fixture used to write one file AT the key itself, which is not a
+     * shape `FilesystemStorageService` ever produces — and it matched the
+     * restore test's broken comparison exactly, so these tests passed while
+     * the real check could never resolve a single document. The fixture was
+     * calibrated to the defect. See `references.ts`.
+     */
     for (const key of keys) {
       mkdirSync(join(root, key.split('/').slice(0, -1).join('/')), { recursive: true });
-      writeFileSync(join(root, key), `%PDF-1.4 ${key}`);
+      writeFileSync(join(root, `${key}.bin`), `%PDF-1.4 ${key}`);
+      writeFileSync(
+        join(root, `${key}.json`),
+        JSON.stringify({ fileName: key.split('/').pop(), contentType: 'application/pdf' }),
+      );
     }
 
     /*
@@ -464,10 +488,14 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       EJE_BACKUP_DIR: into,
     });
     expect(result.status, result.stderr).toBe(0);
-    const entries = readdirSync(into);
+    const entries = backupDirectories(into);
     expect(entries).toHaveLength(1);
     return join(into, entries[0]!);
   };
+
+  /** As in the block above: the status file beside the backups is not one. */
+  const backupDirectories = (parent: string): readonly string[] =>
+    readdirSync(parent).filter((entry) => entry !== 'last-run.json');
 
   const manifestOf = (directory: string) =>
     JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as {
@@ -475,6 +503,8 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       storedFiles: number;
       encryption: { keyFingerprint: string };
       verifications?: { kind: string; at: string; detail: string }[];
+      /** Recorded by the backup run; absent on a manifest from before it. */
+      danglingReferences?: { table: string; storageKey: string; verdict: string }[];
     };
 
   it('verifies a fresh backup and records that it did', () => {
@@ -570,7 +600,9 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
 
     expect(restored.status, restored.stderr).toBe(0);
     expect(restored.stdout).toMatch(/jobs=\d+/u);
-    expect(restored.stdout).toMatch(/0 missing/u);
+    // Every key resolved, said as a ratio rather than as "0 missing": the
+    // number that matters is how many of them were found.
+    expect(restored.stdout).toMatch(/(\d+) of \1 storage key\(s\) resolved/u);
     expect(restored.stdout).toMatch(/RESTORE-TESTED/u);
 
     // The scratch database is gone. A copy of the production database left on
@@ -587,16 +619,23 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
     expect(record?.detail).toMatch(/all resolved/u);
   });
 
-  it('REFUSES when a restored row points at a document the backup does not hold', () => {
-    /*
-     * THE FAILURE BACKUP-1 EXISTS TO PREVENT, checked rather than argued. One
-     * signed job card is removed from the storage directory before the backup
-     * is taken; the database row that names it is still in the dump.
-     */
+  /**
+   * A DOCUMENT THAT WAS ALREADY MISSING IS REPORTED, NOT FATAL. BACKUP-1.
+   *
+   * This is the case that used to make the restore test unusable. A reference
+   * with no file is NORMAL here — a photo capture path allocates a key without
+   * sending bytes, a seeded demonstration job card is rendered on first
+   * download — and a check that fails on those gets switched off with
+   * EJE_RESTORE_ALLOW_ORPHANS, which then hides the real failure too.
+   *
+   * So the backup records what was dangling when it ran, and the restore test
+   * says which it was and passes.
+   */
+  it('reports a document that was ALREADY missing when the backup was taken, and passes', () => {
     documentsTheDatabaseRefersTo(storage);
-    // One of the rows this block seeded, taken away before the backup is made.
+    // One of the rows this block seeded, taken away BEFORE the backup is made.
     const missing = SEEDED_KEYS[0];
-    rmSync(join(storage, missing));
+    rmSync(join(storage, `${missing}.bin`));
 
     const taken = runBackup({
       DATABASE_URL: url ?? '',
@@ -604,33 +643,81 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       EJE_BACKUP_DIR: into,
     });
     expect(taken.status, taken.stderr).toBe(0);
-    const directory = join(into, readdirSync(into)[0]!);
+    const directory = join(into, backupDirectories(into)[0]!);
+
+    // The backup wrote down that this one had no file, in full rather than as
+    // a count — a count cannot tell a different missing document from the same
+    // one.
+    const dangling = manifestOf(directory).danglingReferences ?? [];
+    expect(dangling.map((entry) => entry.storageKey)).toContain(missing);
 
     const restored = runRestoreTest(directory);
-    expect(restored.status).toBe(1);
-    expect(restored.stderr).toMatch(/point at documents that are not in the backup/u);
-    expect(restored.stderr).toContain(missing);
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout).toMatch(/1 were ALREADY missing when this backup was taken/u);
+    const record = manifestOf(directory).verifications?.find((entry) => entry.kind === 'restore');
+    expect(record?.detail).toMatch(/1 already missing when taken/u);
   });
 
-  it('records the unresolved count rather than hiding it when orphans are accepted', () => {
+  /**
+   * AND A DOCUMENT THE BACKUP LOST IS FATAL, WHATEVER THE FLAGS SAY. BACKUP-1.
+   *
+   * The state such a backup presents afterwards is exactly this: references
+   * with no file, and a manifest that did not record them as dangling. It is
+   * produced here by emptying that list, because there is no honest way to
+   * make a correct backup lose a file on purpose — and the test would be worth
+   * nothing if it tested anything other than what the restore test actually
+   * reads.
+   */
+  it('REFUSES a backup that LOST a document, and EJE_RESTORE_ALLOW_ORPHANS does not excuse it', () => {
     documentsTheDatabaseRefersTo(storage);
-    // One of the rows this block seeded, taken away before the backup is made.
     const missing = SEEDED_KEYS[0];
-    rmSync(join(storage, missing));
+    rmSync(join(storage, `${missing}.bin`));
 
     expect(
       runBackup({ DATABASE_URL: url ?? '', EJE_STORAGE_DIR: storage, EJE_BACKUP_DIR: into }).status,
     ).toBe(0);
-    const directory = join(into, readdirSync(into)[0]!);
+    const directory = join(into, backupDirectories(into)[0]!);
+    const manifest = manifestOf(directory);
+    writeFileSync(
+      join(directory, 'manifest.json'),
+      JSON.stringify({ ...manifest, danglingReferences: [] }, null, 2),
+    );
 
     const restored = runRestoreTest(directory, { EJE_RESTORE_ALLOW_ORPHANS: 'yes' });
-    expect(restored.status, restored.stderr).toBe(0);
-    // Permitted, and NOT quiet: a restore record that cannot be told apart from
-    // a clean one is worth nothing.
-    expect(restored.stdout).toMatch(/1 missing/u);
-    expect(restored.stdout).toMatch(/WARNING/u);
+    expect(restored.status).toBe(1);
+    expect(restored.stderr).toMatch(/were not recorded as missing when it was taken/u);
+    expect(restored.stderr).toContain(missing);
+    // And the full list is written where somebody deciding can read it.
+    expect(readdirSync(directory)).toContain('unresolved-references.json');
+  });
+
+  /**
+   * A BACKUP FROM BEFORE THE DANGLING LIST KNOWS NOTHING, and must not be
+   * allowed to imply that nothing was dangling. That is the one job the old
+   * flag still has.
+   */
+  it('treats a manifest with no dangling list as knowing nothing, and takes the operator’s word', () => {
+    documentsTheDatabaseRefersTo(storage);
+    const missing = SEEDED_KEYS[0];
+    rmSync(join(storage, `${missing}.bin`));
+
+    expect(
+      runBackup({ DATABASE_URL: url ?? '', EJE_STORAGE_DIR: storage, EJE_BACKUP_DIR: into }).status,
+    ).toBe(0);
+    const directory = join(into, backupDirectories(into)[0]!);
+    const { danglingReferences: _dropped, ...older } = manifestOf(directory);
+    writeFileSync(join(directory, 'manifest.json'), JSON.stringify(older, null, 2));
+
+    // Without the flag it is a failure, because nothing is known.
+    expect(runRestoreTest(directory).status).toBe(1);
+
+    // With it, the operator is saying "that deployment was seeded rather than
+    // worked in" — and the count still goes into the manifest.
+    const accepted = runRestoreTest(directory, { EJE_RESTORE_ALLOW_ORPHANS: 'yes' });
+    expect(accepted.status, accepted.stderr).toBe(0);
+    expect(accepted.stdout).toMatch(/WARNING/u);
     const record = manifestOf(directory).verifications?.find((entry) => entry.kind === 'restore');
-    expect(record?.detail).toMatch(/1 UNRESOLVED/u);
+    expect(record?.detail).toMatch(/ACCEPTED UNDER EJE_RESTORE_ALLOW_ORPHANS/u);
   });
 
   /**
@@ -660,7 +747,7 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       .where(eq(schema.machinePhotos.storageKey, SEEDED_KEYS[0]));
 
     documentsTheDatabaseRefersTo(storage);
-    const documentBytes = readFileSync(join(storage, SEEDED_KEYS[0]));
+    const documentBytes = readFileSync(join(storage, `${SEEDED_KEYS[0]}.bin`));
 
     const taken = runBackup({
       DATABASE_URL: url ?? '',
@@ -668,7 +755,7 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
       EJE_BACKUP_DIR: into,
     });
     expect(taken.status, taken.stderr).toBe(0);
-    const directory = join(into, readdirSync(into)[0]!);
+    const directory = join(into, backupDirectories(into)[0]!);
 
     // The backup on the shelf is ciphertext, and the plaintext is not beside it.
     expect(readdirSync(directory).sort()).toEqual([
@@ -730,8 +817,8 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
     const unpacked = join(scratchDir, 'storage');
     mkdirSync(unpacked, { recursive: true });
     const { files } = await extractArchiveSafely(archive, unpacked);
-    expect(files).toContain(SEEDED_KEYS[0]);
-    expect(readFileSync(join(unpacked, SEEDED_KEYS[0])).equals(documentBytes)).toBe(true);
+    expect(files).toContain(`${SEEDED_KEYS[0]}.bin`);
+    expect(readFileSync(join(unpacked, `${SEEDED_KEYS[0]}.bin`)).equals(documentBytes)).toBe(true);
     expect(files).toHaveLength(manifest.storedFiles);
   });
 
