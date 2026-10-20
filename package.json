@@ -36,7 +36,8 @@
     "responsive-check": "node scripts/responsive-check.mjs",
     "backup": "tsx src/db/backup/run.ts",
     "backup:verify": "tsx src/db/backup/verify.ts",
-    "backup:restore-test": "tsx src/db/backup/restore-test.ts"
+    "backup:restore-test": "tsx src/db/backup/restore-test.ts",
+    "dump:inspect": "tsx src/db/backup/inspect-dump.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",

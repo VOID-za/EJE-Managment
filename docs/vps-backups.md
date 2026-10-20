@@ -288,6 +288,32 @@ is a new document carrying an old date, and the customer holds the real one.
 that refusal is one of the protections CR-01 rests on, and the first version of
 this tool was correctly stopped by it.
 
+## 8. Looking inside an old dump, safely
+
+```bash
+npm run dump:inspect -- /opt/eje/eje-backup-20260925-092747.dump
+```
+
+It restores the dump into a scratch database of its own — a generated name,
+checked against a pattern *and* against the name in `DATABASE_URL` — reports
+what the register said, and drops that database on success, on failure and on
+Ctrl-C. It never writes to the database in `DATABASE_URL`; that URL is used
+only to reach the server.
+
+Use it when a document is missing and you want to know what an older copy of
+the register said about it: the storage key, the date it was issued, whether
+the row recorded a size at all.
+
+**A dump contains no documents.** `final_documents` holds a key; the bytes live
+under `EJE_STORAGE_DIR`, and only a storage archive — `storage.tar.gz.enc`
+inside a backup taken by `npm run backup` — can give them back. The two
+hand-made dumps in `/opt/eje` are registers, not documents, and no amount of
+reading them will recover a PDF.
+
+`pg_restore --list` is not a substitute: a table of contents says which tables
+exist and nothing about the rows, which is why the first attempt at this on the
+server came back empty.
+
 ---
 
 ## What was actually wrong, 20 October 2026
