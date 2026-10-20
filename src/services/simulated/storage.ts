@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { StorageService, StoredDocument, StoredFile, UploadedFile } from '../ports';
 
 /**
@@ -38,6 +39,15 @@ export interface StoredFileRecord {
   readonly renderer?: number;
   readonly backfilled?: boolean;
 }
+
+/**
+ * The same hash the production store speaks, computed the same way.
+ *
+ * `node:crypto` rather than the production adapter's export, so the
+ * demonstration store does not import a filesystem module into a path that
+ * also runs in a browser build.
+ */
+const sha256Of = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 /** Base64 without depending on Node's Buffer or the DOM's atob/btoa. */
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -132,13 +142,23 @@ export class DemoStorageService implements StorageService {
   getDocument(storageKey: string): Promise<StoredDocument | null> {
     const record = this.files.get(storageKey);
     if (record === undefined) return Promise.resolve(null);
+    const bytes = base64ToBytes(record.base64);
     return Promise.resolve({
       storageKey,
       fileName: record.fileName,
       contentType: record.contentType,
-      bytes: base64ToBytes(record.base64),
+      bytes,
       renderer: record.renderer,
       backfilled: record.backfilled,
+      /*
+       * MEASURED HERE TOO, so the demonstration backend records the same
+       * metadata on `final_documents` as production does. Nothing is verified:
+       * this store cannot be damaged independently of the process holding it,
+       * and a hash of bytes that came from the same object in memory would
+       * check nothing. The production adapter is where the check belongs.
+       */
+      sizeBytes: bytes.byteLength,
+      sha256: sha256Of(bytes),
     });
   }
 }

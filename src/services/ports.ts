@@ -266,6 +266,17 @@ export interface StoredDocument {
   readonly renderer?: number;
   /** True when these bytes are a cache for history, not an issued document. */
   readonly backfilled?: boolean;
+  /**
+   * What the store MEASURED, set only on the way out.
+   *
+   * A caller writing a document does not supply these — the bytes are right
+   * there and a supplied length could disagree with them. `getDocument` fills
+   * them in from the bytes it actually read, which is what makes them worth
+   * recording on `final_documents`: the row then says what is on the disk
+   * rather than what somebody believed was going to be.
+   */
+  readonly sizeBytes?: number;
+  readonly sha256?: string;
 }
 
 /** A file the office or a technician actually uploaded, bytes and all. */

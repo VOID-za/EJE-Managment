@@ -1,10 +1,12 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   FilesystemStorageService,
   readStorageConfiguration,
+  StorageIntegrityFailed,
   StorageWriteFailed,
 } from './file-storage';
 
@@ -152,6 +154,105 @@ describe('where the bytes go', () => {
     const url = storage.resolveUrl(stored.storageKey);
     expect(url.startsWith('http')).toBe(false);
     expect(url.startsWith('/')).toBe(false);
+  });
+
+  /* -- what a truncated or swapped file does, and what it must never do ---- */
+
+  /**
+   * THE DEFECT THESE FOUR TESTS WERE WRITTEN FOR.
+   *
+   * `final_documents` carried `size_bytes` and `checksum_sha256` columns that
+   * NOTHING WROTE and nothing checked — every row in production read
+   * `size_bytes = 0` — while the schema's own comment said the checksum was
+   * "verified on every read". So a signed job card that had been truncated by
+   * a full disk or a half-completed write was indistinguishable from an intact
+   * one, and would have been handed to a customer as the legal record.
+   */
+  it('records what it stored, so a row can say what is on the disk', async () => {
+    const content = bytes('%PDF-1.4 the issued job card');
+    const stored = await storage.storeUpload({
+      fileName: 'EJE-3001.pdf',
+      contentType: 'application/pdf',
+      bytes: content,
+    });
+
+    const read = await afterRestart().getDocument(stored.storageKey);
+    expect(read?.sizeBytes).toBe(content.byteLength);
+    expect(read?.sha256).toBe(createHash('sha256').update(content).digest('hex'));
+  });
+
+  it('REFUSES a document that has been truncated under it', async () => {
+    await storage.putDocument({
+      storageKey: 'jobcards/final/EJE-3002.pdf',
+      fileName: 'EJE-3002.pdf',
+      contentType: 'application/pdf',
+      bytes: bytes('%PDF-1.4 a complete job card, signed by the customer'),
+    });
+
+    // A full disk, a crash mid-write, a bad block: the file is shorter than it
+    // was and nothing else about the system has changed.
+    await truncate(join(root, 'jobcards/final/EJE-3002.pdf.bin'), 10);
+
+    await expect(afterRestart().getDocument('jobcards/final/EJE-3002.pdf')).rejects.toBeInstanceOf(
+      StorageIntegrityFailed,
+    );
+  });
+
+  it('REFUSES a document whose bytes were swapped for different ones', async () => {
+    await storage.putDocument({
+      storageKey: 'jobcards/final/EJE-3003.pdf',
+      fileName: 'EJE-3003.pdf',
+      contentType: 'application/pdf',
+      bytes: bytes('%PDF-1.4 what the customer signed'),
+    });
+
+    // Same length, different content — which is exactly what a length check
+    // alone cannot see, and why the hash is recorded as well.
+    await writeFile(
+      join(root, 'jobcards/final/EJE-3003.pdf.bin'),
+      '%PDF-1.4 NOT what they signed',
+    );
+
+    await expect(afterRestart().getDocument('jobcards/final/EJE-3003.pdf')).rejects.toBeInstanceOf(
+      StorageIntegrityFailed,
+    );
+  });
+
+  it('still serves a file written before any of this was recorded', async () => {
+    // A sidecar from the old adapter: no length, no hash. Refusing these would
+    // make the application unable to serve documents that are perfectly
+    // intact, which is a worse failure than the one being prevented.
+    await writeFile(join(root, 'legacy.bin'), 'older bytes');
+    await writeFile(
+      join(root, 'legacy.json'),
+      JSON.stringify({ fileName: 'legacy.pdf', contentType: 'application/pdf' }),
+    );
+
+    const read = await storage.getDocument('legacy');
+    expect(new TextDecoder().decode(read?.bytes)).toBe('older bytes');
+    // And it still MEASURES what it read, so a reconcile can fill the gap in.
+    expect(read?.sizeBytes).toBe('older bytes'.length);
+  });
+
+  it('leaves no half-written file behind, and no temporary one either', async () => {
+    await storage.putDocument({
+      storageKey: 'jobcards/final/EJE-3004.pdf',
+      fileName: 'EJE-3004.pdf',
+      contentType: 'application/pdf',
+      bytes: bytes('%PDF-1.4 complete'),
+    });
+
+    /*
+     * A rename is the only way a reader sees the file, so there is no window in
+     * which the `.bin` exists and is short. The temporaries are what prove the
+     * write went through one: none may survive it.
+     */
+    const written = await readdir(join(root, 'jobcards/final'));
+    expect(written.some((name) => name.startsWith('.tmp-'))).toBe(false);
+    expect(written.sort()).toEqual(['EJE-3004.pdf.bin', 'EJE-3004.pdf.json']);
+    expect((await readFile(join(root, 'jobcards/final/EJE-3004.pdf.bin'))).byteLength).toBe(
+      bytes('%PDF-1.4 complete').byteLength,
+    );
   });
 
   it('raises rather than swallowing a write it could not make', async () => {
