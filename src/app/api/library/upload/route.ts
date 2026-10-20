@@ -113,6 +113,14 @@ export const POST = uploadRoute({
         fileName: document.fileName,
         fileSizeBytes: document.fileSizeBytes,
         pageCount: document.pageCount,
+        /*
+         * WHOSE DOCUMENT THIS IS, in the answer to the upload itself.
+         * October mandate §1: an upload produces a GENUINE record, and the
+         * screen that just made one should not have to re-fetch the list to
+         * find out that it is not demonstration data.
+         */
+        provenance: document.provenance,
+        storedFile: document.fileSizeBytes > 0,
       },
       index: {
         state: index.state,

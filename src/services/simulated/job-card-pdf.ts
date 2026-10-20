@@ -1,6 +1,7 @@
 import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
 import { buildJobCardModel, type ChargeRow, type JobCardModel, type LabelValue } from '@/lib/job-card/model';
 import { A4_HEIGHT, A4_WIDTH, PdfBuilder, textWidth, type PdfFont } from '@/lib/pdf/writer';
+import { SIMULATED_NOTICE_PRINT } from '@/domain';
 import type { FinalDocumentSource, RenderedPdf } from '../ports';
 
 /**
@@ -742,10 +743,40 @@ const acceptance = (sheet: Sheet, model: JobCardModel): void => {
   sheet.move(GAP.section);
 };
 
-const footers = (sheet: Sheet, model: JobCardModel, fileName: string): void => {
+/**
+ * THE STAMP ON A DEMONSTRATION DOCUMENT. October mandate §1.1.
+ *
+ * On EVERY PAGE, and in the file itself rather than only on the screen that
+ * produced it: a PDF is downloaded, emailed, printed and filed, and by then
+ * the screen's badge is long gone. A demonstration job card that reaches
+ * somebody's desk looking exactly like an issued one is the single most
+ * expensive confusion this system could create — it is the document a customer
+ * signs and a dispute is settled by.
+ *
+ * Drawn in the footer band, where there is always room on every page, and in
+ * the strongest ink the document uses rather than the faint grey the rest of
+ * the band is in. Nothing is drawn for a genuine document: the absence of this
+ * line is what makes its presence mean something.
+ */
+const simulatedStamp = (sheet: Sheet): void => {
+  const width = textWidth(SIMULATED_NOTICE_PRINT, SIZE.small);
+  sheet.pdf.rect(MARGIN, MARGIN + 29, CONTENT_WIDTH, 14, BAND);
+  sheet.pdf.text(MARGIN + (CONTENT_WIDTH - width) / 2, MARGIN + 33, SIMULATED_NOTICE_PRINT, {
+    size: SIZE.small,
+    colour: INK,
+  });
+};
+
+const footers = (
+  sheet: Sheet,
+  model: JobCardModel,
+  fileName: string,
+  simulated: boolean,
+): void => {
   const total = sheet.pdf.pageCount;
   for (let index = 0; index < total; index += 1) {
     sheet.pdf.selectPage(index);
+    if (simulated) simulatedStamp(sheet);
     sheet.pdf.line(MARGIN, MARGIN + 26, RIGHT, MARGIN + 26, 0.5, RULE);
 
     model.footerLines.forEach((line, lineIndex) => {
@@ -788,7 +819,15 @@ export const renderJobCardPdf = (
   checklist(sheet, model);
   photographs(sheet, model);
   acceptance(sheet, model);
-  footers(sheet, model, fileName);
+  /*
+   * WHETHER THIS IS A DEMONSTRATION DOCUMENT, taken from the JOB'S OWN RECORD.
+   *
+   * `finalDocument.provenance` is what the seed wrote for the six demonstration
+   * job cards; a document being issued for the first time has no record yet and
+   * is therefore genuine, which is the right default — a preview of a real job
+   * must not be stamped.
+   */
+  footers(sheet, model, fileName, source.job.finalDocument?.provenance === 'simulated');
 
   return { bytes: sheet.pdf.toBytes(), pageCount: sheet.pdf.pageCount };
 };

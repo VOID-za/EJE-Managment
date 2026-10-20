@@ -11,6 +11,16 @@ import { timeOffset } from './reference';
 
 /** Fictional serial numbers. No real customer asset data is used. */
 
+/**
+ * A DEMONSTRATION MACHINE PHOTOGRAPH, which is metadata and no photograph.
+ * October mandate §1.
+ *
+ * `sizeBytes` was `1_842_000` here — a number this file invented for an image
+ * that does not exist, which the register then displayed as though a
+ * photograph of a customer's machine were on file. It is zero now, and the
+ * record says `simulated`, so the panel can say what it is instead of drawing
+ * a frame around nothing.
+ */
 const photo = (id: string, fileName: string, caption: string, days: number): Attachment => ({
   id: asAttachmentId(id),
   kind: 'photo',
@@ -21,7 +31,8 @@ const photo = (id: string, fileName: string, caption: string, days: number): Att
   storageKey: `machines/${fileName}`,
   uploadedAt: timeOffset(days, 10),
   uploadedBy: asUserId('user-tech-sipho'),
-  sizeBytes: 1_842_000,
+  sizeBytes: 0,
+  provenance: 'simulated',
 });
 
 /**

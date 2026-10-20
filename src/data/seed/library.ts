@@ -1,6 +1,25 @@
 import { asDocumentId, asUserId, type TechnicalDocument } from '@/domain';
 import { timeOffset } from './reference';
 
+/**
+ * THE DEMONSTRATION LIBRARY. EVERY RECORD HERE IS METADATA ALONE.
+ * October mandate §1.
+ *
+ * None of these documents exists as a file and none ever did: a seed cannot
+ * ship a 200-page machine manual, and manufacturers' manuals are not EJE's to
+ * redistribute. So each one is `provenance: 'simulated'` and carries NO SIZE
+ * AND NO PAGE COUNT.
+ *
+ * WHAT THOSE TWO ZEROES REPLACE. This file used to assert `fileSizeBytes:
+ * 18_442_000` and `pageCount: 214` — numbers somebody made up — and the library
+ * screen printed them beside a download button for bytes that were not there.
+ * A size is now measured off a real file or it is zero, and zero is what makes
+ * the screen say there is nothing to open.
+ *
+ * A REAL revision uploaded against one of these records is genuine and says so
+ * on its own row; see `library_document_versions.provenance`.
+ */
+
 export const seedDocuments: readonly TechnicalDocument[] = [
   {
     id: asDocumentId('doc-lw-v40-manual'),
@@ -13,8 +32,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'Rev 4',
     status: 'current',
     fileName: 'leadwell-v40-machine-manual-rev4.pdf',
-    fileSizeBytes: 18_442_000,
-    pageCount: 214,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/leadwell-v40-machine-manual-rev4.pdf',
     uploadedAt: timeOffset(-410, 9, 20),
     uploadedBy: asUserId('user-master-johan'),
@@ -31,8 +51,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'Rev 2',
     status: 'current',
     fileName: 'leadwell-v40-electrical-rev2.pdf',
-    fileSizeBytes: 7_120_000,
-    pageCount: 46,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/leadwell-v40-electrical-rev2.pdf',
     uploadedAt: timeOffset(-395, 14, 5),
     uploadedBy: asUserId('user-master-johan'),
@@ -49,8 +70,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'Rev 7',
     status: 'current',
     fileName: 'haas-st20-service-manual-rev7.pdf',
-    fileSizeBytes: 12_880_000,
-    pageCount: 168,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/haas-st20-service-manual-rev7.pdf',
     uploadedAt: timeOffset(-260, 11),
     uploadedBy: asUserId('user-master-denise'),
@@ -67,8 +89,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'v3.1',
     status: 'current',
     fileName: 'eje-general-safety-procedure-v3-1.pdf',
-    fileSizeBytes: 1_420_000,
-    pageCount: 18,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/eje-general-safety-procedure-v3-1.pdf',
     uploadedAt: timeOffset(-120, 8, 30),
     uploadedBy: asUserId('user-master-johan'),
@@ -85,8 +108,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'v2.4',
     status: 'current',
     fileName: 'eje-installation-procedure-v2-4.pdf',
-    fileSizeBytes: 2_310_000,
-    pageCount: 26,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/eje-installation-procedure-v2-4.pdf',
     uploadedAt: timeOffset(-98, 15, 45),
     uploadedBy: asUserId('user-master-denise'),
@@ -103,8 +127,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'v2.0',
     status: 'current',
     fileName: 'eje-service-procedure-v2-0.pdf',
-    fileSizeBytes: 1_980_000,
-    pageCount: 22,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/eje-service-procedure-v2-0.pdf',
     uploadedAt: timeOffset(-75, 10, 10),
     uploadedBy: asUserId('user-master-denise'),
@@ -120,8 +145,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'v1.6',
     status: 'archived',
     fileName: 'eje-service-procedure-v1-6.pdf',
-    fileSizeBytes: 1_760_000,
-    pageCount: 20,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/eje-service-procedure-v1-6.pdf',
     uploadedAt: timeOffset(-520, 9),
     uploadedBy: asUserId('user-master-johan'),
@@ -137,8 +163,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'Rev 1',
     status: 'current',
     fileName: 'fanuc-0i-mf-alarm-reference.pdf',
-    fileSizeBytes: 3_410_000,
-    pageCount: 58,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/fanuc-0i-mf-alarm-reference.pdf',
     uploadedAt: timeOffset(-180, 13),
     uploadedBy: asUserId('user-tech-sipho'),
@@ -154,8 +181,9 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     version: 'Rev 3',
     status: 'pending_approval',
     fileName: 'amada-hfe1303-light-curtain.pdf',
-    fileSizeBytes: 980_000,
-    pageCount: 12,
+    fileSizeBytes: 0,
+    pageCount: 0,
+    provenance: 'simulated',
     storageKey: 'library/amada-hfe1303-light-curtain.pdf',
     uploadedAt: timeOffset(-4, 16, 20),
     uploadedBy: asUserId('user-tech-lerato'),

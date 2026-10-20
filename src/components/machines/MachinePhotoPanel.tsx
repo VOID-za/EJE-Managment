@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { can, type Machine } from '@/domain';
-import { Card, CardHeader, Icon } from '@/components/ui';
+import { can, type Machine, type Provenance } from '@/domain';
+import { Card, CardHeader, Icon, SimulatedBadge } from '@/components/ui';
 import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
 import { UploadFailureNotice } from '@/components/media/UploadFailureNotice';
 import { machines } from '@/api/endpoints';
@@ -68,11 +68,20 @@ export const MachinePhotoPanel = ({
           {machine.photos.map((photo) => (
             <li key={photo.id}>
               <MachineThumbnail machineId={machine.id} photo={photo} />
-              <p className="mt-1.5 truncate text-xs font-medium text-steel-800">
-                {photo.caption.length > 0 ? photo.caption : photo.fileName}
+              <p className="mt-1.5 flex items-center gap-1.5 truncate text-xs font-medium text-steel-800">
+                <span className="truncate">
+                  {photo.caption.length > 0 ? photo.caption : photo.fileName}
+                </span>
+                {/*
+                  A DEMONSTRATION PHOTOGRAPH SAYS SO. October mandate §1.
+                  The three seeded ones are metadata with no image behind them,
+                  and the register showed them exactly as it shows a photograph
+                  a technician took of a customer's machine.
+                */}
+                <SimulatedBadge provenance={photo.provenance} testId="machine-photo-simulated" />
               </p>
               <p className="truncate text-[11px] text-steel-400">
-                {formatFileSize(photo.sizeBytes)}
+                {photo.sizeBytes > 0 ? formatFileSize(photo.sizeBytes) : 'No stored image'}
               </p>
             </li>
           ))}
@@ -148,17 +157,38 @@ const MachineThumbnail = ({
   photo,
 }: {
   readonly machineId: string;
-  readonly photo: { readonly id: string; readonly caption: string; readonly fileName: string };
+  readonly photo: {
+    readonly id: string;
+    readonly caption: string;
+    readonly fileName: string;
+    readonly sizeBytes: number;
+    readonly provenance: Provenance;
+  };
 }) => {
   const [failed, setFailed] = useState(false);
 
-  if (failed) {
+  /*
+   * NOTHING STORED, SO NOTHING IS REQUESTED. October mandate §1.2.
+   *
+   * A record with no bytes used to be discovered by asking for the image and
+   * getting a 404 — one failed request per seeded photograph on every render
+   * of the register. The size already says there is nothing there.
+   */
+  if (failed || photo.sizeBytes <= 0) {
     return (
       <div
-        className="flex aspect-4/3 items-center justify-center rounded-[var(--radius-control)] border border-steel-200 bg-steel-100 text-steel-400"
-        title="This record has no stored file."
+        className="flex aspect-4/3 flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] border border-dashed border-steel-300 bg-steel-100 text-steel-400"
+        title={
+          photo.provenance === 'simulated'
+            ? 'Demonstration metadata. No photograph was ever stored for it.'
+            : 'This record has no stored file.'
+        }
+        data-testid="machine-photo-placeholder"
       >
         <Icon name="camera" className="size-6" />
+        <span className="text-[10px] font-semibold tracking-wide uppercase">
+          {photo.provenance === 'simulated' ? 'Simulated' : 'No image'}
+        </span>
       </div>
     );
   }

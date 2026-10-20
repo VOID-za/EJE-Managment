@@ -48,6 +48,9 @@ const toDomainResponse = (
     // Evidence against a checklist question the customer's document reports.
     visibility: 'customer_facing' as const,
     fileName: photo.fileName,
+    // Evidence is stored bytes-first (CHK-EVIDENCE-1) and the seed creates
+    // none, so there is no column and nothing to be uncertain about.
+    provenance: 'genuine' as const,
     caption: photo.caption,
     storageKey: photo.storageKey,
     uploadedAt: photo.uploadedAt,

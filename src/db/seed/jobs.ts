@@ -78,6 +78,15 @@ const finalJobCard = (
   sizeBytes: null,
   checksumSha256: null,
   renderer: null,
+  /*
+   * A DEMONSTRATION JOB CARD. October mandate §1.
+   *
+   * These six are the only `simulated` final documents there are. The PDF is
+   * rendered on first download — a seed cannot ship one — and when it is
+   * rendered it is stamped on every page, so the file says what it is even
+   * once it has left the application.
+   */
+  provenance: 'simulated',
 });
 
 const finalPartsNote = (
@@ -101,6 +110,15 @@ const finalPartsNote = (
   sizeBytes: null,
   checksumSha256: null,
   renderer: null,
+  /*
+   * A DEMONSTRATION JOB CARD. October mandate §1.
+   *
+   * These six are the only `simulated` final documents there are. The PDF is
+   * rendered on first download — a seed cannot ship one — and when it is
+   * rendered it is stamped on every page, so the file says what it is even
+   * once it has left the application.
+   */
+  provenance: 'simulated',
 });
 
 const delivered = (to: string, at: IsoDateTime) => ({

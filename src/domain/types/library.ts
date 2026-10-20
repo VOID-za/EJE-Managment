@@ -1,12 +1,27 @@
 import type { DocumentId, IsoDateTime, UserId } from './common';
+import type { Provenance } from './provenance';
 
+/**
+ * The library's categories. October mandate §3.
+ *
+ * The last five were asked for by name and had nowhere to go: a checklist, a
+ * training document, an internal company procedure, a form and a certificate
+ * were all being filed as `work_procedure`, which made them unfindable as what
+ * they are. Added, never renamed, so every existing document keeps its
+ * category.
+ */
 export type TechnicalDocumentType =
   | 'machine_manual'
   | 'electrical_diagram'
   | 'service_manual'
   | 'safety_procedure'
   | 'work_procedure'
-  | 'datasheet';
+  | 'datasheet'
+  | 'checklist'
+  | 'training'
+  | 'internal_procedure'
+  | 'form'
+  | 'certificate';
 
 export interface TechnicalDocument {
   readonly id: DocumentId;
@@ -18,9 +33,26 @@ export interface TechnicalDocument {
   readonly version: string;
   readonly status: 'current' | 'archived' | 'pending_approval';
   readonly fileName: string;
+  /**
+   * The length of the stored file, as the store MEASURED it. Zero means there
+   * is no file — see `provenance` for whether that is expected.
+   *
+   * It used to be whatever the seed said: nine documents claimed sizes from
+   * 980 kB to 18.4 MB and not one of them had a byte behind it, so the library
+   * displayed "18.4 MB, 214 pages" for a manual nobody could open. A size is
+   * now measured or absent.
+   */
   readonly fileSizeBytes: number;
+  /** Pages in the stored file. Zero when there is no file to count. */
   readonly pageCount: number;
   readonly storageKey: string;
+  /**
+   * Whether this is an EJE document or demonstration data. Section 1 of the
+   * October mandate: a demonstration document must never be mistakable for a
+   * real one, and the answer is recorded on the row rather than guessed from
+   * its name.
+   */
+  readonly provenance: Provenance;
   readonly uploadedAt: IsoDateTime;
   readonly uploadedBy: UserId;
   readonly tags: readonly string[];
@@ -68,3 +100,24 @@ export interface DocumentTextIndex {
   readonly unreadableStreams: number;
   readonly failureReason: string;
 }
+
+/**
+ * What each category is called on screen. One map, in the domain.
+ *
+ * It lived in `library/page.tsx`, so the five categories added for the October
+ * mandate would have been unlabelled anywhere else that lists a type — and the
+ * upload dialog, the search results and the job screens all do.
+ */
+export const TECHNICAL_DOCUMENT_TYPE_LABEL: Record<TechnicalDocumentType, string> = {
+  machine_manual: 'Machine Manual',
+  electrical_diagram: 'Electrical Diagram',
+  service_manual: 'Service Manual',
+  safety_procedure: 'Safety Procedure',
+  work_procedure: 'Service Procedure',
+  datasheet: 'Datasheet',
+  checklist: 'Checklist',
+  training: 'Training Document',
+  internal_procedure: 'Internal Company Procedure',
+  form: 'Form',
+  certificate: 'Certificate',
+};

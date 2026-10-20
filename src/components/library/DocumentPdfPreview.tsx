@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { TechnicalDocument } from '@/domain';
-import { Icon, LoadingPanel } from '@/components/ui';
+import { Icon, LoadingPanel, ProvenanceNotice } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { ApiRequestError, apiDownload } from '@/api/client';
 import { library } from '@/api/endpoints';
@@ -89,7 +89,23 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
    */
   const inlinePdf = useSyncExternalStore(subscribeToNothing, canDisplayPdfInline, unknownOnServer);
 
+  /**
+   * WHETHER THERE IS A FILE TO FETCH AT ALL. October mandate §1.2.
+   *
+   * A record with no stored bytes — every seeded demonstration document, and
+   * any metadata somebody adds without a file — must not produce a request, a
+   * spinner, or a download button. It used to: the panel fetched, the server
+   * answered 404, and the technician read "the document could not be fetched",
+   * which describes a fault and this is not one. The size is the server's own
+   * answer to the question (see `libraryView`), so there is nothing to probe.
+   */
+  const nothingStored = document.fileSizeBytes <= 0;
+
   useEffect(() => {
+    // Nothing to fetch, and nothing to set: the render path below answers
+    // this case directly, which keeps the effect free of a synchronous state
+    // change that would cascade a render for a panel that needs no data.
+    if (nothingStored) return;
     let cancelled = false;
     let objectUrl: string | null = null;
 
@@ -140,7 +156,32 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
       cancelled = true;
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
-  }, [document.id, document.fileName, document.version]);
+  }, [document.id, document.fileName, document.version, nothingStored]);
+
+  /*
+   * NOTHING IS STORED, AND NOTHING IS OFFERED. October mandate §1.2.
+   *
+   * No frame, no download, and no generated stand-in: a simulated preview of a
+   * manual EJE do not hold would be the fabrication the mandate forbids. The
+   * sentence says which situation it is — demonstration metadata, or a genuine
+   * record whose file is missing — because the remedies are opposite.
+   */
+  if (nothingStored) {
+    return (
+      <div
+        className="rounded-[var(--radius-control)] border border-dashed border-steel-300 bg-steel-50 p-4"
+        data-testid="document-metadata-only"
+        data-preview-kind="metadata-only"
+      >
+        <ProvenanceNotice provenance={document.provenance} storedFile={false} />
+        <p className="mt-3 text-xs leading-relaxed text-steel-500">
+          {document.fileName} is the name this record carries. No bytes were ever stored under it,
+          so there is nothing to preview or download — and nothing has been generated to stand in
+          for one.
+        </p>
+      </div>
+    );
+  }
 
   if (state.kind === 'loading') {
     return <LoadingPanel rows={4} label={`Fetching ${document.fileName}`} />;

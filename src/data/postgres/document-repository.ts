@@ -78,6 +78,7 @@ export class PostgresDocumentRepository implements DocumentRepository {
       machineModel: document.machineModel,
       tags: [...document.tags] as string[],
       status: document.status,
+      provenance: document.provenance,
       archivedAt: document.status === 'archived' ? document.uploadedAt : null,
     } as const;
 
@@ -114,6 +115,9 @@ export class PostgresDocumentRepository implements DocumentRepository {
       storageKey: document.storageKey,
       sizeBytes: document.fileSizeBytes,
       pageCount: document.pageCount,
+      // Written on the revision AND on the document below: they are allowed to
+      // differ, and this is the one somebody downloads.
+      provenance: document.provenance,
       uploadedAt: document.uploadedAt,
       uploadedBy: document.uploadedBy.length === 0 ? null : document.uploadedBy,
       approvedAt,
@@ -405,9 +409,23 @@ const toDomainDocument = ({
   status: document.status,
   fileName: version.fileName,
   fileSizeBytes: version.sizeBytes,
-  pageCount: version.pageCount ?? 1,
+  /*
+   * ZERO MEANS UNKNOWN, and that is why the `?? 1` went. A metadata-only
+   * record has no pages to count, and reporting one page for a manual nobody
+   * uploaded is the same fabrication as reporting 2.4 MB for it.
+   */
+  pageCount: version.pageCount ?? 0,
   storageKey: version.storageKey,
   uploadedAt: version.uploadedAt,
   uploadedBy: asUserId(version.uploadedBy ?? ''),
   tags: document.tags,
+  /*
+   * THE REVISION'S OWN PROVENANCE, not the document's.
+   *
+   * They can differ, and the one somebody is looking at is the revision: a
+   * genuine manual uploaded as revision 2 of a seeded demonstration record is
+   * a real file. An unrecognised value reads as `simulated`, which is the safe
+   * direction — a fixture must not pass as EJE's document.
+   */
+  provenance: version.provenance === 'genuine' ? 'genuine' : 'simulated',
 });

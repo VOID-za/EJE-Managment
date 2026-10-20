@@ -1228,6 +1228,8 @@ export const addMedia = async (
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     sizeBytes: input.bytes.length,
+    // A photograph somebody really took, on a real job.
+    provenance: 'genuine',
   };
 
   const next: Job =
@@ -1296,6 +1298,7 @@ export const attachDocument = async (
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     sizeBytes: file.bytes.length,
+    provenance: 'genuine',
   };
 
   const saved = await context.repos.jobs.save({
@@ -1849,6 +1852,7 @@ export const addChecklistPhoto = async (
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     sizeBytes: file.bytes.length,
+    provenance: 'genuine',
   };
 
   const existing = job.checklist.responses.find((response) => response.itemId === itemId);
@@ -2734,6 +2738,8 @@ const renderAndStoreFinalDocument = async (
       sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
       checksumSha256: stored.sha256 ?? null,
       renderer: stored.renderer ?? null,
+      // EJE issued this one. Only the seed writes `simulated`.
+      provenance: 'genuine',
     },
   };
 };
@@ -2962,6 +2968,7 @@ const performIssue = async (
       sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
       checksumSha256: stored.sha256 ?? null,
       renderer: stored.renderer ?? null,
+      provenance: 'genuine',
     },
     delivery: emptyDelivery(customerEmail, now),
   });

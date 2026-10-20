@@ -139,6 +139,15 @@ export const notificationType = pgEnum('notification_type', [
 
 export const notificationChannel = pgEnum('notification_channel', ['in_app', 'whatsapp', 'email']);
 
+/**
+ * The library's categories. MASTER SCOPE LIB-1, October mandate §3.
+ *
+ * The last four were asked for by name and had nowhere to go: a training
+ * document, a form, a certificate and an internal company procedure were all
+ * being filed as `work_procedure`, which made them unfindable as what they are.
+ * Added rather than renamed — every existing value keeps its meaning and every
+ * existing row keeps its category.
+ */
 export const technicalDocumentType = pgEnum('technical_document_type', [
   'machine_manual',
   'electrical_diagram',
@@ -146,6 +155,11 @@ export const technicalDocumentType = pgEnum('technical_document_type', [
   'safety_procedure',
   'work_procedure',
   'datasheet',
+  'checklist',
+  'training',
+  'internal_procedure',
+  'form',
+  'certificate',
 ]);
 
 export const libraryDocumentStatus = pgEnum('library_document_status', [

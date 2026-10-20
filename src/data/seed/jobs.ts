@@ -47,6 +47,12 @@ const jobPhoto = (
   uploadedAt: timeOffset(days, hours),
   uploadedBy: asUserId(uploadedBy),
   sizeBytes: 2_140_000,
+  /*
+   * A DEMONSTRATION PHOTOGRAPH, which is metadata and no photograph.
+   * October mandate §1: the row exists so the panels have something to draw,
+   * and it says what it is rather than pretending bytes are behind it.
+   */
+  provenance: 'simulated',
 });
 
 /**
@@ -80,6 +86,15 @@ const finalJobCard = (
   sizeBytes: null,
   checksumSha256: null,
   renderer: null,
+  /*
+   * A DEMONSTRATION JOB CARD. October mandate §1.
+   *
+   * These six are the only `simulated` final documents there are. The PDF is
+   * rendered on first download — a seed cannot ship one — and when it is
+   * rendered it is stamped on every page, so the file says what it is even
+   * once it has left the application.
+   */
+  provenance: 'simulated',
 });
 
 const finalPartsNote = (
@@ -103,6 +118,15 @@ const finalPartsNote = (
   sizeBytes: null,
   checksumSha256: null,
   renderer: null,
+  /*
+   * A DEMONSTRATION JOB CARD. October mandate §1.
+   *
+   * These six are the only `simulated` final documents there are. The PDF is
+   * rendered on first download — a seed cannot ship one — and when it is
+   * rendered it is stamped on every page, so the file says what it is even
+   * once it has left the application.
+   */
+  provenance: 'simulated',
 });
 
 /**

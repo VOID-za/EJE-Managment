@@ -229,6 +229,7 @@ describeDb('the PostgreSQL job repository', () => {
       uploadedAt: '2026-09-20T09:00:00.000Z',
       uploadedBy: asUserId(TECHNICIAN),
       sizeBytes: 2_140_000,
+      provenance: 'genuine' as const,
     });
 
     it('round trips both classifications', async () => {

@@ -431,7 +431,24 @@ export const libraryView = async ({ repos, actor }: ViewContext) => {
    * rule the job-attachment routes already state, applied here, where a test
    * found it was not.
    */
-  const withoutStorageKeys = documents.map(({ storageKey: _storageKey, ...rest }) => rest);
+  /*
+   * AND WHETHER THERE IS A FILE AT ALL, SAID EXPLICITLY. October mandate §1.2.
+   *
+   * Derived here rather than left to each screen to infer from a size: a
+   * record with no stored bytes must not offer a download, and three
+   * components deciding that separately is three chances to offer one. Zero
+   * bytes is the only honest meaning of "nothing stored" — see
+   * `library-operations.ts`, where a metadata-only record stopped claiming
+   * 2.4 MB.
+   *
+   * It is NOT the same question as provenance, which rides along on the record
+   * itself: a genuine document whose file is missing is an incident, and a
+   * demonstration record with no file is expected.
+   */
+  const withoutStorageKeys = documents.map(({ storageKey: _storageKey, ...rest }) => ({
+    ...rest,
+    storedFile: rest.fileSizeBytes > 0,
+  }));
   return { documents: withoutStorageKeys, favourites, recent, indexes };
 };
 

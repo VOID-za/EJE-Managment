@@ -5,6 +5,7 @@ import {
   can,
   type DocumentTextIndex,
   type TechnicalDocument,
+  TECHNICAL_DOCUMENT_TYPE_LABEL,
   type TechnicalDocumentType,
 } from '@/domain';
 import {
@@ -16,9 +17,11 @@ import {
   Icon,
   LoadingPanel,
   Modal,
+  ProvenanceNotice,
   QueryFailure,
   SectionHeading,
   SelectField,
+  SimulatedBadge,
   Tabs,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -33,14 +36,18 @@ import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatFileSize } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
-const TYPE_LABELS: Record<TechnicalDocumentType, string> = {
-  machine_manual: 'Machine Manual',
-  electrical_diagram: 'Electrical Diagram',
-  service_manual: 'Service Manual',
-  safety_procedure: 'Safety Procedure',
-  work_procedure: 'Work Procedure',
-  datasheet: 'Datasheet',
-};
+/** The domain's own map, so a category added there is labelled everywhere. */
+const TYPE_LABELS = TECHNICAL_DOCUMENT_TYPE_LABEL;
+
+/**
+ * Whether a document has bytes behind it.
+ *
+ * The server says so explicitly (`storedFile` on the library view); this falls
+ * back to the size for the places that hold a plain `TechnicalDocument`, which
+ * is the same rule the server applies rather than a second opinion.
+ */
+const storedFile = (document: TechnicalDocument & { readonly storedFile?: boolean }): boolean =>
+  document.storedFile ?? document.fileSizeBytes > 0;
 
 type TabId = 'all' | 'favourites' | 'recent';
 
@@ -563,6 +570,13 @@ const DocumentCard = ({
         {document.version}
       </Badge>
       <IndexBadge index={index} />
+      {/*
+        DEMONSTRATION DATA SAYS SO IN THE LIST, not only on the detail view.
+        October mandate §1.1: the label has to be wherever somebody might
+        mistake the record for a real document, and a list row is the first
+        place they see it.
+      */}
+      <SimulatedBadge provenance={document.provenance} testId="library-simulated-badge" />
     </div>
 
     {/*
@@ -595,9 +609,16 @@ const DocumentCard = ({
     )}
 
     <div className="mt-4 flex items-center justify-between gap-2 border-t border-steel-100 pt-3">
-      <p className="text-xs text-steel-400">
-        {document.pageCount} pages · {formatFileSize(document.fileSizeBytes)} ·{' '}
-        {formatDate(document.uploadedAt)}
+      {/*
+        WHAT IS ACTUALLY KNOWN ABOUT THE FILE. October mandate §1.2.
+        This row used to read "214 pages · 18.4 MB" for documents that have
+        never existed, because the seed asserted both. A record with nothing
+        stored now says so instead of describing a file nobody can open.
+      */}
+      <p className="text-xs text-steel-400" data-testid="library-file-facts">
+        {storedFile(document)
+          ? `${document.pageCount} pages · ${formatFileSize(document.fileSizeBytes)} · ${formatDate(document.uploadedAt)}`
+          : `No stored file · added ${formatDate(document.uploadedAt)}`}
       </p>
       <Button size="sm" variant="secondary" onClick={onOpen}>
         Open
@@ -679,6 +700,18 @@ const DocumentPreview = ({
           the authorised route and gives them to the browser's viewer, or says
           exactly why it cannot.
         */}
+        {/*
+          THE STATUS OF THE RECORD, ABOVE THE PREVIEW. October mandate §1.
+          A demonstration record says what it is and that there is nothing to
+          open; a GENUINE record with no file says the opposite — that the file
+          should be restored — because those are different situations with the
+          same symptom.
+        */}
+        <ProvenanceNotice
+          provenance={document.provenance}
+          storedFile={storedFile(document)}
+        />
+
         <DocumentPdfPreview document={document} />
 
         <Card padded={false} className="shadow-none">
@@ -688,9 +721,18 @@ const DocumentPreview = ({
               ['File name', document.fileName],
               ['Version', document.version],
               ['Status', STATUS_LABEL[document.status]],
-              ['Pages', String(document.pageCount)],
-              ['File size', formatFileSize(document.fileSizeBytes)],
+              ['Pages', storedFile(document) ? String(document.pageCount) : 'No stored file'],
+              [
+                'File size',
+                storedFile(document) ? formatFileSize(document.fileSizeBytes) : 'No stored file',
+              ],
               ['Uploaded', formatDate(document.uploadedAt)],
+              [
+                'Record',
+                document.provenance === 'simulated'
+                  ? 'SIMULATED — demonstration data'
+                  : 'EJE document',
+              ],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between gap-3 border-b border-steel-100 pb-2">
                 <dt className="text-steel-500">{label}</dt>

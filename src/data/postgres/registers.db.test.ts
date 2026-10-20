@@ -247,6 +247,7 @@ describeDb('the PostgreSQL registers', () => {
             uploadedAt: '2026-03-01T07:35:00.000Z',
             uploadedBy: asUserId(IDS.technician),
             sizeBytes: 1_840_000,
+            provenance: 'genuine' as const,
           },
         ],
       });

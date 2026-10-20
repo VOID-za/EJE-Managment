@@ -1,3 +1,4 @@
+import type { Provenance } from './provenance';
 import type { DeliveryRecord } from './delivery';
 import type {
   Attachment,
@@ -192,6 +193,16 @@ export interface FinalDocument {
   readonly checksumSha256: string | null;
   /** Which renderer produced them, as the store recorded it. Null when unknown. */
   readonly renderer: number | null;
+  /**
+   * A job card EJE issued, or a demonstration one. October mandate §1.
+   *
+   * The six seeded job cards are `simulated`: their PDF is rendered on first
+   * download rather than at issue, and when it is rendered it is stamped on
+   * every page — so the file itself says what it is, not only the screen it
+   * came from. Nothing downgrades a genuine document: every issue path records
+   * `genuine`.
+   */
+  readonly provenance: Provenance;
 }
 
 export interface JobCancellation {

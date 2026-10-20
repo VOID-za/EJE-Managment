@@ -75,6 +75,7 @@ describeDb('an issued document on PostgreSQL', () => {
         sizeBytes: BYTES,
         checksumSha256: HASH,
         renderer: 3,
+        provenance: 'genuine',
         ...over,
       },
     });

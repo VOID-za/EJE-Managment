@@ -206,6 +206,9 @@ export class PostgresMachineRepository implements MachineRepository {
         fileName: photo.fileName,
         caption: photo.caption,
         storageKey: photo.storageKey,
+        // Unrecognised reads as simulated: a value nothing understands must
+        // not let demonstration data pass as a photograph of a real machine.
+        provenance: photo.provenance === 'genuine' ? ('genuine' as const) : ('simulated' as const),
         uploadedAt: photo.uploadedAt,
         uploadedBy: asUserId(photo.uploadedBy ?? ''),
         sizeBytes: photo.sizeBytes,

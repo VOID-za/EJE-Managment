@@ -46,7 +46,17 @@ export interface NewDocumentInput {
   readonly tags: readonly string[];
 }
 
-const DEMO_FILE_SIZE_BYTES = 2_400_000;
+/**
+ * A RECORD WITH NO FILE HAS NO SIZE AND NO PAGE COUNT. October mandate §1.2.
+ *
+ * `addDocument` records metadata and allocates a storage key; it does not
+ * receive bytes. It used to assert `fileSizeBytes: 2_400_000` and whatever
+ * page count the dialog had typed, so the library displayed "2.4 MB, 12 pages"
+ * and a download button for a file that did not exist. Zero is what the screen
+ * reads to say there is nothing stored — see `uploadDocument`, which replaces
+ * both with what the file actually measures.
+ */
+const NO_STORED_FILE = { fileSizeBytes: 0, pageCount: 0 } as const;
 
 /**
  * Where this revision's file lives.
@@ -100,9 +110,15 @@ export const addDocument = async (
     version: input.version.trim().length > 0 ? input.version.trim() : '1.0',
     status: isMaster ? 'current' : 'pending_approval',
     fileName,
-    fileSizeBytes: DEMO_FILE_SIZE_BYTES,
-    pageCount: Math.max(1, Math.round(input.pageCount)),
+    ...NO_STORED_FILE,
     storageKey: storageKeyFor(documentId, fileName),
+    /*
+     * A DOCUMENT SOMEBODY IN THE OFFICE ADDED IS GENUINE, whether or not a
+     * file came with it. Provenance is about whose record it is; whether bytes
+     * exist is a separate question the screen answers from the size. Only the
+     * seed writes `simulated`.
+     */
+    provenance: 'genuine',
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     tags: input.tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0),

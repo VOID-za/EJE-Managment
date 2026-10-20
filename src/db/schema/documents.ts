@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { cents, createdAt, instant, primaryId } from './columns';
+import { cents, createdAt, instant, primaryId, provenance } from './columns';
 import { deliveryState, outboxChannel } from './enums';
 import { jobs } from './jobs';
 import { users } from './identity';
@@ -57,12 +57,21 @@ export const finalDocuments = pgTable(
     generatedBy: uuid('generated_by').references(() => users.id),
     /** The address the document was issued to, recorded as it was at the time. */
     issuedTo: text('issued_to').notNull().default(''),
+    /**
+     * A job card EJE issued, or a demonstration one. October mandate §1.
+     *
+     * The six seeded job cards are demonstration data whose PDF is rendered on
+     * first download; a simulated document is stamped on every page, so the
+     * file itself says what it is and not only the screen it came from.
+     */
+    provenance: provenance(),
     createdAt: createdAt(),
   },
   (table) => [
     uniqueIndex('final_documents_job_key').on(table.jobId),
     uniqueIndex('final_documents_storage_key_key').on(table.storageKey),
     check('final_documents_page_count_positive', sql`${table.pageCount} >= 1`),
+    check('final_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
   ],
 );
 

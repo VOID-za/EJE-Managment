@@ -216,6 +216,8 @@ export const createMachine = async (
       uploadedAt: context.services.clock.now(),
       uploadedBy: context.actor.id,
       sizeBytes: photo.bytes.length,
+      // A photograph somebody really took of a real machine.
+      provenance: 'genuine',
     });
   }
 
@@ -364,6 +366,7 @@ export const addMachinePhoto = async (
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     sizeBytes: photo.bytes.length,
+    provenance: 'genuine',
   };
 
   const saved = await context.repos.machines.save({

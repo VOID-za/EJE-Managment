@@ -1,3 +1,4 @@
+import type { Provenance } from './provenance';
 /**
  * Shared primitive types for the EJE domain model.
  *
@@ -83,5 +84,14 @@ export interface Attachment {
   readonly storageKey: string;
   readonly uploadedAt: IsoDateTime;
   readonly uploadedBy: UserId;
+  /** Measured off the stored bytes. Zero means nothing is stored. */
   readonly sizeBytes: number;
+  /**
+   * A real attachment, or demonstration data. October mandate §1.
+   *
+   * Defaulted nowhere: every path that records an attachment says which it is,
+   * so a screen never has to guess from a file name. The seeded machine
+   * photographs are the only `simulated` ones, and they carry no bytes.
+   */
+  readonly provenance: Provenance;
 }

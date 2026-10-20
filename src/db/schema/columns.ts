@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, integer, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, integer, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * Column helpers, so a convention is written once instead of copied.
@@ -53,3 +53,20 @@ export const rowVersion = () => integer('version').notNull().default(1);
  * a job refers to is ever deleted."
  */
 export const archivedAt = () => instant('archived_at');
+
+/**
+ * WHETHER THE ROW IS AN EJE RECORD OR DEMONSTRATION DATA. October mandate §1.
+ *
+ * `text` with a CHECK rather than an enum, for the reason `delivery_attempts
+ * .failure_kind` is text: the vocabulary belongs to the domain
+ * (`Provenance`), and a value this application does not know must read as
+ * unrecognised rather than need a migration.
+ *
+ * DEFAULT `genuine`, and that direction is deliberate. Every row that exists
+ * now was written by the application or by the seed; the seed is being changed
+ * to say `simulated` for its own rows, and nothing else may. A default of
+ * `simulated` would silently label real customer documents as fixtures, which
+ * is the one mistake here that could lose a real record.
+ */
+export const provenance = () =>
+  text('provenance').notNull().default('genuine');

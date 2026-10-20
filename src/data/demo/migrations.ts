@@ -304,6 +304,57 @@ const v16ToV17 = (data: Loose): Loose => ({
   }),
 });
 
+/**
+ * v17 -> v18. October mandate §1.
+ *
+ * Every document-bearing record gained `provenance`, and a snapshot written
+ * before that has none. The honest answer for a snapshot of the DEMONSTRATION
+ * store is `simulated` for the records the seed created and `genuine` for
+ * anything a person captured during the session — and the snapshot cannot tell
+ * them apart, because nothing recorded it at the time.
+ *
+ * SO IT GOES BY WHETHER THERE ARE BYTES, and only here. A seeded record has a
+ * storage key and no file behind it; anything captured in the session went
+ * through an upload path that stores bytes first. That is a sound reading of a
+ * snapshot's own contents rather than a guess from a name — and it is confined
+ * to this one-time upgrade, which is why `provenance` is recorded explicitly
+ * everywhere else rather than derived from a size.
+ */
+const v17ToV18 = (data: Loose): Loose => {
+  const files = (data.files ?? {}) as Record<string, unknown>;
+  const stored = (storageKey: unknown): boolean =>
+    typeof storageKey === 'string' && Object.prototype.hasOwnProperty.call(files, storageKey);
+  const classify = (storageKey: unknown): 'genuine' | 'simulated' =>
+    stored(storageKey) ? 'genuine' : 'simulated';
+
+  const withProvenance = (row: Record<string, unknown>): Record<string, unknown> =>
+    row.provenance === 'genuine' || row.provenance === 'simulated'
+      ? row
+      : { ...row, provenance: classify(row.storageKey) };
+
+  const attachments = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map((entry) => withProvenance(entry as Record<string, unknown>)) : value;
+
+  return {
+    ...data,
+    documents: rows(data, 'documents').map(withProvenance),
+    machines: rows(data, 'machines').map((machine) => ({
+      ...machine,
+      photos: attachments(machine.photos),
+    })),
+    jobs: rows(data, 'jobs').map((job) => ({
+      ...job,
+      photos: attachments(job.photos),
+      videos: attachments(job.videos),
+      attachments: attachments(job.attachments),
+      finalDocument:
+        job.finalDocument === null || typeof job.finalDocument !== 'object'
+          ? job.finalDocument
+          : withProvenance(job.finalDocument as Record<string, unknown>),
+    })),
+  };
+};
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -314,6 +365,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   14: v14ToV15,
   15: v15ToV16,
   16: v16ToV17,
+  17: v17ToV18,
 };
 
 /**

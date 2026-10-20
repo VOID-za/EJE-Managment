@@ -61,6 +61,7 @@ describeDb('the library, the settings and the reference data', () => {
       uploadedAt: '2026-02-01T09:00:00.000Z',
       uploadedBy: asUserId(IDS.master),
       tags: ['leadwell', 'v40'],
+      provenance: 'genuine' as const,
       ...over,
     };
   };

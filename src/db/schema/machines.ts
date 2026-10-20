@@ -11,7 +11,15 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { archivedAt, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
+import {
+  archivedAt,
+  createdAt,
+  instant,
+  primaryId,
+  provenance,
+  rowVersion,
+  updatedAt,
+} from './columns';
 import { machineApproval } from './enums';
 import { customers, sites } from './customers';
 import { users } from './identity';
@@ -144,10 +152,13 @@ export const machinePhotos = pgTable(
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull().default(0),
     uploadedAt: instant('uploaded_at').notNull(),
     uploadedBy: uuid('uploaded_by').references(() => users.id),
+    /** A photograph of a real machine, or a demonstration one. Mandate §1. */
+    provenance: provenance(),
     createdAt: createdAt(),
   },
   (table) => [
     index('machine_photos_machine_idx').on(table.machineId, table.uploadedAt),
     uniqueIndex('machine_photos_storage_key_key').on(table.storageKey),
+    check('machine_photos_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
   ],
 );

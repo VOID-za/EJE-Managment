@@ -82,6 +82,12 @@ const attachmentFrom = (row: MediaRow): Attachment => ({
   fileName: row.fileName,
   caption: row.caption,
   storageKey: row.storageKey,
+  /*
+   * JOB MEDIA IS ALWAYS GENUINE, and that is a fact about this system rather
+   * than a default: every path that records one stores bytes first and the
+   * row second (MEDIA-6), and the seed creates none. There is no column.
+   */
+  provenance: 'genuine' as const,
   uploadedAt: row.uploadedAt,
   uploadedBy: asUserId(row.uploadedBy ?? ''),
   sizeBytes: row.sizeBytes,
@@ -184,6 +190,9 @@ export const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
   sizeBytes: row.sizeBytes === 0 ? null : row.sizeBytes,
   checksumSha256: row.checksumSha256,
   renderer: row.rendererVersion === 0 ? null : row.rendererVersion,
+  // Unrecognised reads as `simulated`, which is the SAFE direction here: a
+  // value nothing understands must not let a fixture pass as EJE's document.
+  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
 });
 
 /**

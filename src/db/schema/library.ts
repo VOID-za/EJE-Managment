@@ -10,7 +10,16 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { archivedAt, cents, createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
+import {
+  archivedAt,
+  cents,
+  createdAt,
+  instant,
+  primaryId,
+  provenance,
+  rowVersion,
+  updatedAt,
+} from './columns';
 import { libraryDocumentStatus, technicalDocumentType } from './enums';
 import { users } from './identity';
 
@@ -32,6 +41,8 @@ export const libraryDocuments = pgTable(
     machineModel: text('machine_model').notNull().default(''),
     tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
     status: libraryDocumentStatus('status').notNull().default('pending_approval'),
+    /** EJE's document, or demonstration data. October mandate §1. */
+    provenance: provenance(),
 
     createdAt: createdAt(),
     createdBy: uuid('created_by').references(() => users.id),
@@ -43,6 +54,7 @@ export const libraryDocuments = pgTable(
     index('library_documents_name_idx').on(sql`lower(${table.name})`),
     index('library_documents_model_idx').on(sql`lower(${table.machineModel})`),
     index('library_documents_status_idx').on(table.status),
+    check('library_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
   ],
 );
 
@@ -73,6 +85,13 @@ export const libraryDocumentVersions = pgTable(
 
     uploadedAt: instant('uploaded_at').notNull(),
     uploadedBy: uuid('uploaded_by').references(() => users.id),
+    /**
+     * On the REVISION as well as the document, because they can differ: a
+     * genuine manual uploaded as revision 2 of a seeded demonstration record
+     * is a real file, and the screen has to say so for the revision somebody
+     * is actually looking at.
+     */
+    provenance: provenance(),
     approvedBy: uuid('approved_by').references(() => users.id),
     approvedAt: instant('approved_at'),
     rejectedBy: uuid('rejected_by').references(() => users.id),
@@ -93,6 +112,10 @@ export const libraryDocumentVersions = pgTable(
     check(
       'library_document_versions_one_outcome',
       sql`${table.approvedAt} is null or ${table.rejectedAt} is null`,
+    ),
+    check(
+      'library_document_versions_provenance_known',
+      sql`${table.provenance} in ('genuine', 'simulated')`,
     ),
     check(
       'library_document_versions_rejection_has_reason',

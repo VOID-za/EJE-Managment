@@ -82,12 +82,22 @@ const document = (input: DocumentInput): TechnicalDocument => ({
   version: input.version,
   status: input.status,
   fileName: fileNameFor(input.name, input.version),
-  fileSizeBytes: 4_180_000 + input.pages * 12_000,
-  pageCount: input.pages,
+  /*
+   * NO SIZE AND NO PAGE COUNT, because there is no file. October mandate §1.2.
+   *
+   * This used to compute one — `4_180_000 + pages * 12_000` — which produced a
+   * plausible number of megabytes for a document that has never existed, and
+   * the library printed it beside a download button. A size is measured off a
+   * real file or it is zero.
+   */
+  fileSizeBytes: 0,
+  pageCount: 0,
   storageKey: `library/${fileNameFor(input.name, input.version)}`,
   uploadedAt: timeAgo(input.daysAgo ?? 300, 9),
   uploadedBy: input.uploadedBy ?? MASTER,
   tags: input.tags,
+  /** Demonstration reference material: metadata, and no document. */
+  provenance: 'simulated',
 });
 
 export const seedDocuments: readonly TechnicalDocument[] = [

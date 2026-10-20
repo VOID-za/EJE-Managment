@@ -67,6 +67,7 @@ describeDb('the technical library full-text index', () => {
       uploadedAt: '2026-10-01T08:00:00.000Z',
       uploadedBy: asUserId(IDS.master),
       tags: ['alarms'],
+      provenance: 'genuine' as const,
       ...over,
     };
   };

@@ -423,7 +423,9 @@ const machinePhoto = (key: string, fileName: string, caption: string): Attachmen
   storageKey: `machines/${fileName}`,
   uploadedAt: timeAgo(200, 10),
   uploadedBy: TECH1,
-  sizeBytes: 1_842_000,
+  /* Metadata and no photograph; `1_842_000` was invented here. Mandate §1. */
+  sizeBytes: 0,
+  provenance: 'simulated',
 });
 
 interface MachineInput {

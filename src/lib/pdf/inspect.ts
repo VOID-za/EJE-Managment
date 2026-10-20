@@ -68,6 +68,24 @@ export const pdfPlainText = (bytes: Uint8Array): string =>
     .runs.map((run) => run.value)
     .join('\n');
 
+/**
+ * The text of each page, in page order.
+ *
+ * For the assertions that are about WHERE something appears rather than
+ * whether it appears at all — a stamp that has to be on every page, a footer
+ * that has to be on each one. `pdfPlainText` flattens the document and cannot
+ * tell "on page 1 only" from "on all four".
+ */
+export const pdfPageTexts = (bytes: Uint8Array): readonly string[] => {
+  const inspection = inspectPdf(bytes);
+  const pages: string[][] = Array.from({ length: inspection.pageCount }, () => []);
+  for (const run of inspection.runs) {
+    // `page` is 1-based in a run, as a reader counts them.
+    (pages[run.page - 1] ?? []).push(run.value);
+  }
+  return pages.map((lines) => lines.join('\n'));
+};
+
 /** The page content streams, in page order. */
 const pageStreams = (text: string): readonly string[] => {
   const objects = new Map<number, string>();
