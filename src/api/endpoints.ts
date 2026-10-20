@@ -570,6 +570,10 @@ export const customers = {
     ),
   documentUrl: (customerId: string, documentId: string) =>
     `/api/customers/${segment(customerId)}/documents/${segment(documentId)}`,
+  withdrawDocument: (customerId: string, documentId: string) =>
+    command<{ readonly document: Omit<CustomerDocument, 'storageKey'> }>(
+      `/api/customers/${segment(customerId)}/documents/${segment(documentId)}/withdraw`,
+    ),
   attachDocument: (customerId: string, file: File, caption = '') =>
     apiUpload<{ readonly document: CustomerDocument }>(
       `/api/customers/${segment(customerId)}/documents`,

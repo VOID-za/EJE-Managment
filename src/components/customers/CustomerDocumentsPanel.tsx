@@ -62,6 +62,12 @@ export const CustomerDocumentsPanel = ({
     return person === undefined ? 'Somebody no longer on the system' : userFullName(person);
   };
 
+  const withdraw = async (documentId: string): Promise<void> => {
+    await api.withdrawDocument(customerId, documentId);
+    // Re-read rather than splice: what is on screen is what the server has.
+    onChanged();
+  };
+
   const send = async (file: File): Promise<void> => {
     setUploading(true);
     try {
@@ -130,14 +136,30 @@ export const CustomerDocumentsPanel = ({
                 A real download, through the authorised route. The link is not
                 a storage key and cannot be turned into one.
               */}
-              <a
-                className="shrink-0 text-xs font-semibold text-eje-600 underline-offset-2 hover:underline"
-                href={api.documentUrl(customerId, document.id)}
-                download={document.fileName}
-                data-testid="customer-document-download"
-              >
-                Download
-              </a>
+              <div className="flex shrink-0 items-center gap-3">
+                <a
+                  className="text-xs font-semibold text-eje-600 underline-offset-2 hover:underline"
+                  href={api.documentUrl(customerId, document.id)}
+                  download={document.fileName}
+                  data-testid="customer-document-download"
+                >
+                  Download
+                </a>
+                {/*
+                  WITHDRAWN, NOT DELETED — the register's own rule. The row and
+                  the bytes stay, so an audit can still resolve what was on
+                  file when a decision was taken; this only takes it off the
+                  screen. There is no delete, deliberately.
+                */}
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-steel-500 underline-offset-2 hover:underline"
+                  onClick={() => void withdraw(document.id)}
+                  data-testid="customer-document-withdraw"
+                >
+                  Withdraw
+                </button>
+              </div>
             </li>
           ))}
         </ul>

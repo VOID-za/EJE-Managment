@@ -161,6 +161,55 @@ describe('customer documents', () => {
     expect(refused.status).toBe(400);
   });
 
+  /* -- withdrawn, never deleted -------------------------------------------- */
+
+  it('withdraws a document from the screen and KEEPS the file', async () => {
+    const attached = await attach(master);
+    const id = attached.data.document.id;
+
+    const withdrawn = await master.post(
+      `/api/customers/${CUSTOMER}/documents/${id}/withdraw`,
+    );
+    expect(withdrawn.status, JSON.stringify(withdrawn.error)).toBe(200);
+
+    // Off the list the office reads…
+    const listed = await master.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents`,
+    );
+    expect(listed.data.documents).toEqual([]);
+
+    // …and the FILE is still there, because an audit of what was on file when
+    // a decision was taken has to resolve afterwards.
+    const file = await master.download(`/api/customers/${CUSTOMER}/documents/${id}`);
+    expect(file.status).toBe(200);
+    expect(new TextDecoder().decode(file.bytes)).toBe(PDF);
+  });
+
+  it('REFUSES a technician withdrawing one', async () => {
+    const attached = await attach(master);
+    const refused = await technician.post(
+      `/api/customers/${CUSTOMER}/documents/${attached.data.document.id}/withdraw`,
+    );
+    expect([403, 404, 422]).toContain(refused.status);
+
+    // Still on file.
+    const listed = await master.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents`,
+    );
+    expect(listed.data.documents).toHaveLength(1);
+  });
+
+  it('REFUSES withdrawing a document that belongs to another customer', async () => {
+    const attached = await attach(master);
+    const others = await master.get<readonly { id: string }[]>('/api/customers');
+    const other = others.data.find((row) => row.id !== CUSTOMER);
+
+    const refused = await master.post(
+      `/api/customers/${other?.id ?? ''}/documents/${attached.data.document.id}/withdraw`,
+    );
+    expect([404, 422]).toContain(refused.status);
+  });
+
   it('REFUSES a document for a customer that does not exist', async () => {
     const refused = await attach(master, '00000000-0000-4000-8000-0000000000ff');
     expect([403, 404, 422]).toContain(refused.status);
