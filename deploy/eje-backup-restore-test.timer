@@ -1,0 +1,17 @@
+# EJE — when the restore test runs. BACKUP-2.
+#
+# Weekly, and deliberately not nightly: see the service unit for what a restore
+# test costs and why it is the only proof that matters.
+[Unit]
+Description=Weekly EJE restore test
+Documentation=https://github.com/VOID-za/EJE-Managment/blob/main/docs/vps-backups.md
+
+[Timer]
+# Sunday 03:40, well clear of the nightly backup and of month-end evenings.
+OnCalendar=Sun *-*-* 03:40:00
+Persistent=true
+RandomizedDelaySec=600
+Unit=eje-backup-restore-test.service
+
+[Install]
+WantedBy=timers.target

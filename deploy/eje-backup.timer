@@ -1,0 +1,31 @@
+# EJE — when the backup runs. BACKUP-2.
+#
+# Install to /etc/systemd/system/eje-backup.timer, then:
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now eje-backup.timer
+#   systemctl list-timers eje-backup.timer
+#
+# The live server had NO scheduled backup at all when this was written: every
+# backup on it was taken by hand, which means the gap between them is however
+# long it is since somebody remembered.
+[Unit]
+Description=Nightly EJE backup
+Documentation=https://github.com/VOID-za/EJE-Managment/blob/main/docs/vps-backups.md
+
+[Timer]
+# 02:12 rather than 02:00. Every scheduled job on every machine runs on the
+# hour, and the one thing a backup needs is a quiet disk.
+OnCalendar=*-*-* 02:12:00
+# EJE is a South African workshop; the schedule should mean what the office
+# thinks it means when somebody asks "was last night backed up".
+Persistent=true
+# A missed run — the machine was off, or rebooting — runs on the next boot
+# rather than being skipped until tomorrow, which is what Persistent= above
+# does. Randomised by a few minutes so a backup and a certificate renewal do
+# not start in the same second.
+RandomizedDelaySec=300
+Unit=eje-backup.service
+
+[Install]
+WantedBy=timers.target

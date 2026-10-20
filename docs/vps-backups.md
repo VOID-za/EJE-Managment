@@ -1,0 +1,304 @@
+# Backups: taking them, proving them, scheduling them, getting them off the box
+
+**Status on 20 October 2026, before any of this is installed:** the live server
+at `eje.syncza.co.za` had **no scheduled backup of any kind**. Every backup on
+it was taken by hand, so the gap between them was however long it had been
+since somebody remembered. There were two older PostgreSQL dumps in `/opt/eje`
+and one encrypted backup in `/var/backups/eje`, whose restore test failed — for
+a reason that turned out to be a defect in the restore test rather than a
+missing document. See *What was actually wrong* at the end.
+
+Everything below runs as the `eje` service user on the VPS. Nothing in it
+touches the live database except to read it.
+
+---
+
+## 0. Run it detached. Always.
+
+A backup of a loaded database, a restore test and a `pg_restore` all outlive an
+SSH session that drops — and Termius drops. Nothing here should ever be typed
+into an interactive shell and waited on:
+
+```bash
+# a one-off, now, that survives the laptop closing
+sudo systemd-run --unit=eje-backup-manual --uid=eje --gid=eje \
+  --working-directory=/opt/eje/app \
+  --property=EnvironmentFile=/etc/eje/eje.env \
+  /usr/bin/npm run backup
+
+journalctl -fu eje-backup-manual        # watch it, or do not; it keeps running
+systemctl status eje-backup-manual      # what it finished as
+```
+
+The same applies to the restore test, to `db:migrate`, and to a production
+build. If you only have `nohup`, that is fine too:
+
+```bash
+cd /opt/eje/app && nohup npm run backup > /tmp/eje-backup.log 2>&1 &
+```
+
+---
+
+## 1. What a backup contains, and why both halves
+
+```
+/var/backups/eje/eje-<database>-<stamp>/
+  database.dump.enc        pg_dump -Fc, AES-256-GCM
+  storage.tar.gz.enc       every file under EJE_STORAGE_DIR, AES-256-GCM
+  manifest.json            what this is, what it hashes to, what was dangling
+  unresolved-references.json   written by a restore test that found any
+```
+
+The documents are the half that cannot be rebuilt. The database can be
+recreated from migrations and re-seeded; a customer-signed job card exists in
+exactly one place, which is a file under `/var/lib/eje/storage`, and
+`final_documents` holds only a key pointing at it. A database-only backup is a
+backup of the index.
+
+If either half cannot be produced, the run removes the whole directory and
+fails. A directory holding only `database.dump` would be found by somebody in a
+hurry and trusted.
+
+## 2. Configure it
+
+In `/etc/eje/eje.env` (root-owned, readable by `eje`) — the template is
+`deploy/eje.env.example`:
+
+| Variable | What it is |
+|---|---|
+| `EJE_BACKUP_DIR` | Where backups are written. `/var/backups/eje`. Not inside `EJE_STORAGE_DIR`. |
+| `EJE_BACKUP_KEY` | 64 hex characters: `openssl rand -hex 32`. **Keep a copy that is not on this server.** |
+| `EJE_BACKUP_KEEP` | How many to keep. Unset keeps everything. |
+| `EJE_BACKUP_OFFSITE_DIR` | A mounted volume to copy each backup to. |
+| `EJE_BACKUP_OFFSITE_RCLONE` | An rclone remote, `remote:path`. |
+
+**The key is the one thing that cannot be recovered.** A backup whose key is
+lost is a directory of noise, and a key kept beside the backups protects
+nobody. Store it in EJE's password manager, and write down which key
+fingerprint goes with which period — every manifest records the fingerprint
+(not the key) so three years from now somebody can tell which one a directory
+needs.
+
+## 3. Take one, and prove it
+
+```bash
+npm run backup                              # dump + documents + encrypt + record
+npm run backup:verify  <directory>          # recompute the checksums, decrypt, authenticate
+npm run backup:restore-test <directory>     # the only honest proof: restore it
+```
+
+`backup:verify` catches damage — bit rot, a truncated copy, an interrupted
+transfer — and alteration, because decrypting authenticates the GCM tag and a
+tag cannot be forged without the key. It does **not** prove the backup
+restores.
+
+`backup:restore-test` does. It creates its own scratch database (a name it
+generates, checked against a pattern *and* against the source's name), restores
+into it, checks that the tables a business cannot lose are present and
+populated, unpacks the documents, and then resolves **every storage key in the
+restored database against the files it unpacked**. It drops the scratch
+database and deletes the plaintext afterwards, including on Ctrl-C and SIGTERM.
+A restore test that passes writes a dated record into the manifest; until it
+says so, nobody has read those bytes back.
+
+### Reading what a restore test says about missing documents
+
+```
+restore  23 of 25 storage key(s) resolved to a stored file
+restore  2 were ALREADY missing when this backup was taken (recorded in its manifest), so the backup did not lose them
+```
+
+That is fine, and it is not hidden: both numbers go into the manifest. Keys
+with no file behind them are normal here — a photo capture path allocates a key
+without sending bytes, and a seeded demonstration job card's PDF is rendered on
+first download.
+
+```
+restore  12 HAD a file when the backup was taken and do not now — this backup is missing documents
+restore  FAILED: ...
+```
+
+That is an incident, it exits non-zero, and no environment variable makes it
+pass. Every unresolved key is listed in `unresolved-references.json` beside the
+backup — in full, because deciding whether a document is genuinely gone needs
+the names, and three examples cannot tell you.
+
+`EJE_RESTORE_ALLOW_ORPHANS=yes` now does one narrow thing: a backup taken
+*before* the manifest recorded dangling references knows nothing about what was
+already missing, so everything reads as lost. If you know that database was
+seeded rather than worked in, that flag says so and the count goes into the
+manifest rather than being hidden. It cannot excuse a document the backup's own
+manifest says was there.
+
+## 4. Schedule it
+
+```bash
+sudo cp deploy/eje-backup.service deploy/eje-backup.timer \
+        deploy/eje-backup-alert.service \
+        deploy/eje-backup-restore-test.service deploy/eje-backup-restore-test.timer \
+        /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now eje-backup.timer eje-backup-restore-test.timer
+systemctl list-timers 'eje-backup*'
+```
+
+| Unit | When | What |
+|---|---|---|
+| `eje-backup.timer` | 02:12 nightly, catches up a missed run | the backup |
+| `eje-backup-restore-test.timer` | Sunday 03:40 | restores the newest backup into a scratch database |
+| `eje-backup-alert.service` | on failure of either | writes the failure to the journal, loudly |
+
+**How a failure reaches a person.** Every run writes
+`$EJE_BACKUP_DIR/last-run.json` — outcome, start, finish, and the reason if it
+failed — on both outcomes. A failed timer additionally starts the alert unit,
+which logs at `daemon.err` with the tag `eje-backup`, which is what a log
+search or a monitoring agent matches on.
+
+It does **not** email or WhatsApp anybody, and that is deliberate rather than
+unfinished: this deployment has no verified mail transport (`/api/health`
+reports `"email":"refuse"` because no Microsoft 365 tenant is configured). An
+alert that silently fails to send is worse than none, because somebody stops
+checking. When the tenant is configured, add one `ExecStart=` line to
+`eje-backup-alert.service` and nothing else changes.
+
+The daily check an operator can do in five seconds:
+
+```bash
+systemctl list-timers 'eje-backup*'          # did it run, when is the next
+cat /var/backups/eje/last-run.json           # what happened
+ls -1 /var/backups/eje | tail -3             # is the shelf growing
+```
+
+## 5. Get it off the machine
+
+A backup in `/var/backups/eje` is on the same disk as
+`/var/lib/eje/storage`. It survives a mistaken `DELETE` and nothing else — not
+the disk, not the provider, not ransomware, not an unpaid invoice. Every run
+with no off-site destination says so in its own output.
+
+Two shapes are implemented, both configured outside this repository:
+
+```bash
+# a mounted volume — NFS, an object-store mount, a disk somebody takes away
+EJE_BACKUP_OFFSITE_DIR=/mnt/offsite/eje
+```
+
+The run warns if that path turns out to be on the same filesystem as the
+backups: then it is a second copy on one disk and must not be counted as
+off-site in any statement to EJE.
+
+```bash
+# an rclone remote: S3, Backblaze B2, Google Drive, anything rclone speaks
+sudo -u eje rclone config          # the operator does this, once
+EJE_BACKUP_OFFSITE_RCLONE=eje-offsite:eje-backups
+```
+
+The run does `rclone copy` and then **`rclone check`**, which compares
+checksums at both ends — a copy nobody compared is a hope. rclone keeps its own
+credentials in its own config file; they never go in `/etc/eje/eje.env`, where
+a cloud key would be one `cat` away from every backup EJE has.
+
+If the off-site copy fails, the local backup is **kept** and the command still
+fails: a backup on one machine is worth more than no backup, and the timer must
+not record success for a copy that never left.
+
+### What is still needed from EJE for a real off-site destination
+
+Nothing in this repository can create one. One of these has to be supplied:
+
+1. **An object-store bucket and credentials** (S3, Backblaze B2, Wasabi,
+   Cloudflare R2). Give them to the operator, who runs `rclone config` on the
+   VPS as the `eje` user; then set `EJE_BACKUP_OFFSITE_RCLONE`. Nothing is
+   stored in the repository and the credential can be revoked at the provider.
+2. **A second machine or NAS** reachable from the VPS, mounted at a path, and
+   `EJE_BACKUP_OFFSITE_DIR` pointed at it.
+3. **A removable disk** that somebody physically takes off site on a stated
+   rotation, mounted at that same path.
+
+Also decide: **how long backups are kept** (`EJE_BACKUP_KEEP`), and **who holds
+the encryption key** and where. Until one of the three exists, EJE has no
+off-site backup, and no part of this repository should be read as saying
+otherwise.
+
+## 6. Restoring, for real
+
+This is the procedure nobody should be reading for the first time during an
+incident.
+
+```bash
+# 1. Stop the application. A restore under a running server is a corruption.
+sudo systemctl stop eje
+
+# 2. Verify the backup you are about to trust, and restore-test it FIRST if
+#    there is any doubt. It does not touch the live database.
+npm run backup:verify /var/backups/eje/eje-eje_production-<stamp>
+
+# 3. Decrypt into a working directory (0700, and delete it afterwards).
+#    `backup:verify` leaves nothing behind, so this is an explicit step:
+sudo -u eje mkdir -p /var/tmp/eje-restore && sudo chmod 700 /var/tmp/eje-restore
+# ... decrypt with the same key the manifest's fingerprint names ...
+
+# 4. The database, into a NEW database, never over the live one in one step.
+createdb eje_production_restored
+pg_restore --dbname "postgres://…/eje_production_restored" --no-owner --no-privileges \
+           --exit-on-error database.dump
+
+# 5. The documents, beside the live ones, never over them.
+tar -xzf storage.tar.gz -C /var/lib/eje/storage-restored
+
+# 6. Look at it before you swap anything: counts, the newest job, the newest
+#    final document, and `npm run documents:reconcile` against the restored
+#    pair, which says whether every document record has its file.
+
+# 7. Only then swap, and keep what you replaced:
+#    rename the databases, move the storage directory aside rather than deleting
+#    it, start the application, check /api/health and open a signed job card.
+```
+
+**Never** restore over `eje_production` or over `/var/lib/eje/storage` in a
+single irreversible step. The restored copy is the thing being proved; the
+existing one is the only fallback if the backup turns out to be worse.
+
+## 7. The document register, beside the backups
+
+```bash
+npm run documents:reconcile                      # report only
+npm run documents:reconcile -- --record          # keep the findings as rows
+npm run documents:reconcile -- --report /tmp/documents.json
+```
+
+It reads every `final_documents` row, looks for the file behind it, and
+classifies it:
+
+| Verdict | Meaning |
+|---|---|
+| `intact` | The file is there and the row describes it correctly. |
+| `unrecorded` | The file is there and the row records no length or checksum. Expected on every row written before 20 October 2026. |
+| `contradicted` | The row and the file disagree. Compare against a backup; the tool will not choose. |
+| `damaged` | The bytes are there and are not the bytes that were written. Restore them. |
+| `absent_demonstration` | No file, and the job is part of the shipped demonstration dataset. Housekeeping. |
+| `absent_genuine` | No file, and the job is not. **A lost customer record.** |
+
+It exits non-zero on the last three. It never writes document bytes, never
+removes a row, and never offers to re-render a missing document: a fresh render
+is a new document carrying an old date, and the customer holds the real one.
+
+`--record` appends to `final_document_verifications`. It does **not** update
+`final_documents`, which is write-once and whose UPDATE the database refuses —
+that refusal is one of the protections CR-01 rests on, and the first version of
+this tool was correctly stopped by it.
+
+---
+
+## What was actually wrong, 20 October 2026
+
+Recorded here because the numbers an operator saw on the live server were all
+real and all explainable, and three of the four causes were defects in this
+repository rather than lost data.
+
+| What was seen | What it was |
+|---|---|
+| 14 `final_documents` rows, every one with `size_bytes = 0` and no checksum | The repository's insert never wrote either column, and hard-coded `renderer_version` to 0 — while the schema's comment said the checksum was verified on every read. Fixed; new rows record what the store measured, and old rows get an observation in `final_document_verifications` because the row itself may not be changed. |
+| The restore test reporting 25 references with no stored file | The test compared a storage key (`jobcards/final/X.pdf`) against unpacked file names (`jobcards/final/X.pdf.bin`). It matched nothing, so **every** reference read as a missing document — and the only way to make it pass was a flag that accepted every missing document silently. Fixed. |
+| Six job cards absent from storage — EJE-2015, 2016, 2017, 2019, 2020, 2021 | All six are jobs in the shipped **demonstration** dataset, whose PDFs are rendered on first download rather than at issue. `npm run documents:reconcile` names them as demonstration data, read from the seed itself. Nothing was lost. |
+| No scheduled backup | True, and the units in `deploy/` are the fix. They are **not installed** by anything in this repository; somebody with root on the VPS has to copy and enable them. |

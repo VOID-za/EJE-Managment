@@ -1,0 +1,44 @@
+# EJE — proving the newest backup can actually be restored. BACKUP-2.
+#
+# Install to /etc/systemd/system/eje-backup-restore-test.service with
+# eje-backup-restore-test.timer. See docs/vps-backups.md.
+#
+# WHY THIS IS A SEPARATE, LESS FREQUENT UNIT. A restore test builds a scratch
+# database containing a complete copy of production and unpacks every signed
+# job card in plaintext, then removes both. That is the only honest proof a
+# backup works — and it is also the most expensive and the most sensitive thing
+# in this directory, so it runs weekly rather than nightly and never at the
+# same time as the backup itself.
+#
+# It never writes to the database named in DATABASE_URL. It creates its own
+# database, checks the name against a pattern AND against the source's name,
+# and drops only that.
+[Unit]
+Description=EJE restore test of the newest backup
+Documentation=https://github.com/VOID-za/EJE-Managment/blob/main/docs/vps-backups.md
+After=network-online.target postgresql.service
+Wants=postgresql.service
+OnFailure=eje-backup-alert.service
+
+[Service]
+Type=oneshot
+User=eje
+Group=eje
+WorkingDirectory=/opt/eje/app
+EnvironmentFile=/etc/eje/eje.env
+Environment=NODE_ENV=production
+
+# THE NEWEST BACKUP, chosen by the name's own timestamp rather than by mtime: a
+# manifest gains a verification record when it is checked, which changes the
+# mtime of the directory and would make the shelf sort differently every week.
+ExecStart=/bin/sh -c 'set -e; newest=$(ls -1d "$EJE_BACKUP_DIR"/eje-*-*Z 2>/dev/null | sort | tail -1); test -n "$newest" || { echo "no backup to restore-test in $EJE_BACKUP_DIR"; exit 1; }; exec /usr/bin/npm run backup:restore-test -- "$newest"'
+
+TimeoutStartSec=7200
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/eje
+
+[Install]
+WantedBy=multi-user.target

@@ -1,13 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { encryptFile, keyFingerprint } from './crypto';
 import { filesUnder } from './archive';
@@ -17,6 +20,8 @@ import {
   unresolved,
   type StorageReference,
 } from './references';
+import { planOffsite, rcloneCommands, sameMediaWarning } from './offsite';
+import { chooseBackupsToPrune, readRetention } from './retention';
 import {
   BackupRefused,
   buildManifest,
@@ -287,6 +292,72 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     mode: 0o600,
   });
 
+  /*
+   * ---- off this machine ---------------------------------------------------
+   *
+   * After the manifest, so what is copied is the complete artefact including
+   * its own description. A failure here does NOT remove the local backup: a
+   * backup that exists on one machine is worth more than no backup, and an
+   * unreachable off-site destination is an operational problem rather than a
+   * reason to destroy the copy that worked. It is reported loudly and the
+   * command still fails, so a timer does not record success.
+   */
+  const offsite = planOffsite(process.env, dirname(plan.destination));
+  const offsiteLines: string[] = [...offsite.notes];
+  let offsiteFailed = offsite.refusal;
+
+  for (const destination of offsite.destinations) {
+    if (destination.kind === 'directory') {
+      try {
+        mkdirSync(destination.target, { recursive: true, mode: 0o700 });
+        const warning = sameMediaWarning(
+          destination.target,
+          statSync(dirname(plan.destination)).dev,
+          statSync(destination.target).dev,
+        );
+        if (warning !== null) offsiteLines.push(warning);
+        const target = join(destination.target, basename(plan.destination));
+        cpSync(plan.destination, target, { recursive: true, errorOnExist: true, force: false });
+        offsiteLines.push(`copied to ${target}`);
+      } catch (cause) {
+        offsiteFailed = `the copy to ${destination.target} failed: ${
+          cause instanceof Error ? cause.message : 'unknown error'
+        }`;
+      }
+      continue;
+    }
+
+    for (const step of rcloneCommands(
+      plan.destination,
+      destination.target,
+      basename(plan.destination),
+    )) {
+      const result = run(step.command, step.args);
+      if (!result.ok) {
+        offsiteFailed = `\`${step.command} ${step.args[0]}\` to ${destination.target} failed: ${result.stderr}`;
+        break;
+      }
+      offsiteLines.push(`${step.args[0]} to ${destination.target} ok`);
+    }
+  }
+
+  /*
+   * ---- retention ----------------------------------------------------------
+   *
+   * Last, and only on a backup that got this far: pruning before a new backup
+   * is proven would be trading a good copy for an unproven one. Off by
+   * default — see `retention.ts` for why every rule there is a refusal.
+   */
+  const pruning = chooseBackupsToPrune({
+    entries: readdirSync(dirname(plan.destination)),
+    databaseName: plan.databaseName,
+    justWritten: basename(plan.destination),
+    keep: readRetention(process.env),
+  });
+  for (const name of pruning.remove) {
+    rmSync(join(dirname(plan.destination), name), { recursive: true, force: true });
+  }
+
   process.stdout.write(
     `backup   ${plan.destination}\n` +
       `backup   database ${plan.databaseName}, ${manifest.artefacts[0]?.bytes ?? 0} bytes\n` +
@@ -298,9 +369,22 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
         : 'backup   WARNING: the storage keys could not be read, so the manifest records none. ' +
           'A restore test will have to be told which missing documents were already missing.\n') +
       `backup   encrypted aes-256-gcm, key ${manifest.encryption.keyFingerprint}\n` +
+      offsiteLines.map((line) => `backup   ${line}\n`).join('') +
+      (pruning.remove.length === 0
+        ? `backup   ${pruning.note}\n`
+        : `backup   ${pruning.note} Removed ${pruning.remove.length}: ` +
+          `${pruning.remove.join(', ')}\n`) +
       'backup   NOT restore-tested yet — run: npm run backup:restore-test ' +
       `${plan.destination}\n`,
   );
+
+  if (offsiteFailed !== null) {
+    throw new BackupRefused(
+      `the backup was written to ${plan.destination} and IS intact, but it did not get off this ` +
+        `machine: ${offsiteFailed}. Deal with the destination and copy it by hand; the local ` +
+        'copy has deliberately been left in place.',
+    );
+  }
 };
 
 /*
@@ -312,14 +396,59 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
  * also what makes the command usable from cron, which reads the status and
  * nothing else.
  */
+/**
+ * WHAT HAPPENED LAST TIME, where somebody can see it. BACKUP-2.
+ *
+ * A scheduled backup fails silently by nature: nobody is watching at 02:00,
+ * and `journalctl` is only read by somebody who already suspects something.
+ * So every run — successful or not — writes `last-run.json` beside the
+ * backups, which is the first thing `docs/vps-backups.md` tells an operator to
+ * look at and the thing a monitoring check can read without credentials.
+ *
+ * Best-effort: a status file that cannot be written must not turn a successful
+ * backup into a failed one, and a failed backup's real message has already
+ * been printed.
+ */
+const recordRunStatus = (
+  outcome: 'ok' | 'failed',
+  detail: string,
+  startedAt: Date,
+): void => {
+  const into = (process.env.EJE_BACKUP_DIR ?? '').trim();
+  if (into.length === 0) return;
+  try {
+    mkdirSync(into, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(into, 'last-run.json'),
+      `${JSON.stringify(
+        {
+          outcome,
+          startedAt: startedAt.toISOString(),
+          finishedAt: new Date().toISOString(),
+          detail,
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+  } catch {
+    // Nothing useful to do, and nothing worth hiding the real outcome behind.
+  }
+};
+
 const main = async (): Promise<void> => {
   loadEnvFiles();
   const now = new Date();
   await backup(planBackup(process.env, now, process.cwd()), now);
+  recordRunStatus('ok', 'database and documents backed up, encrypted and recorded', now);
 };
+
+const startedAt = new Date();
 
 void main().catch((cause: unknown) => {
   const message = cause instanceof Error ? cause.message : String(cause);
   process.stderr.write(`backup   REFUSED: ${message}\n`);
+  recordRunStatus('failed', message, startedAt);
   process.exitCode = 1;
 });

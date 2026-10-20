@@ -1,0 +1,27 @@
+# EJE — a failed backup, said out loud. BACKUP-2.
+#
+# Install to /etc/systemd/system/eje-backup-alert.service. Started only by
+# `OnFailure=` in eje-backup.service and eje-backup-restore-test.service.
+#
+# WHAT IT DOES AND DOES NOT DO. It writes the failure to the journal with a
+# prefix that a log search or a monitoring agent can match, and prints the
+# status file the backup command writes on every run. It does NOT email or
+# WhatsApp anybody, because this deployment has no verified mail transport yet
+# (EMAIL-2 is implemented and the tenant is not configured — `/api/health`
+# reports `"email":"refuse"`). Pretending to send an alert would be worse than
+# not sending one: somebody would stop checking.
+#
+# WHEN THE TENANT IS CONFIGURED, add one line to this unit — an ExecStart that
+# posts the status file wherever EJE want it — and nothing else here changes.
+[Unit]
+Description=EJE backup FAILED — report it
+
+[Service]
+Type=oneshot
+User=eje
+Group=eje
+EnvironmentFile=/etc/eje/eje.env
+# `-` so a missing status file does not make the alert itself fail, which would
+# hide the failure it exists to report.
+ExecStart=/usr/bin/logger -t eje-backup -p daemon.err "EJE BACKUP FAILED — see journalctl -u eje-backup.service and $EJE_BACKUP_DIR/last-run.json"
+ExecStart=-/bin/sh -c 'cat "$EJE_BACKUP_DIR/last-run.json" | /usr/bin/logger -t eje-backup -p daemon.err'

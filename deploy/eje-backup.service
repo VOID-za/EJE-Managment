@@ -1,0 +1,64 @@
+# EJE — the nightly backup. BACKUP-1, BACKUP-2.
+#
+# Install to /etc/systemd/system/eje-backup.service, together with
+# eje-backup.timer and eje-backup-alert.service. See docs/vps-backups.md.
+#
+# WHY A UNIT AND NOT A CRON LINE. Three things cron cannot do that matter here:
+# a failed run can start another unit (OnFailure), the output goes to the
+# journal with the run's own identity rather than to root's mail, and
+# `systemctl list-timers` answers "when did this last run and when does it run
+# next" — which is the question nobody could answer on the live server, where
+# there was no scheduled backup at all.
+[Unit]
+Description=EJE encrypted backup of the database and the documents
+Documentation=https://github.com/VOID-za/EJE-Managment/blob/main/docs/vps-backups.md
+After=network-online.target postgresql.service
+Wants=postgresql.service
+
+# A FAILED BACKUP SAYS SO SOMEWHERE A PERSON LOOKS.
+#
+# Nobody is watching at 02:00 and `journalctl` is read by somebody who already
+# suspects something. This starts the alert unit, which writes the failure to
+# the journal with a prefix a log search will find and leaves the detail in
+# $EJE_BACKUP_DIR/last-run.json, which the backup command writes on both
+# outcomes.
+OnFailure=eje-backup-alert.service
+
+[Service]
+Type=oneshot
+User=eje
+Group=eje
+WorkingDirectory=/opt/eje/app
+
+# The same environment file the application uses, because the backup needs the
+# same DATABASE_URL and EJE_STORAGE_DIR — plus EJE_BACKUP_DIR, EJE_BACKUP_KEY,
+# and whichever off-site destination is configured. Secrets are in that file,
+# root-owned and readable by `eje`; never in this unit and never on a command
+# line where `ps` would show them.
+EnvironmentFile=/etc/eje/eje.env
+Environment=NODE_ENV=production
+
+# npm, not node, because this is a short-lived oneshot: there is no SIGTERM
+# forwarding problem to avoid (the reason eje.service execs node directly), and
+# the npm script is the command an operator runs by hand, so the scheduled run
+# and the manual one are the same thing.
+ExecStart=/usr/bin/npm run backup
+
+# A backup of a database under load can be slow; it must not be killed halfway.
+# It cleans up after itself on SIGTERM, but a half-written backup directory
+# removed by its own abort path is still a night without a backup.
+TimeoutStartSec=3600
+
+# The private temporary directory is where pg_dump and tar write; nothing else
+# on the machine needs to see it.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+# Everything it must be able to write. /var/backups/eje is the shelf;
+# /mnt/offsite is where an off-site volume is mounted, and is harmless when
+# nothing is mounted there.
+ReadWritePaths=/var/backups/eje /mnt/offsite
+
+[Install]
+WantedBy=multi-user.target
