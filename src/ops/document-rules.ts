@@ -32,6 +32,20 @@ import { seedJobs } from '@/db/seed/jobs';
 /** What the database row says about a document. */
 export interface DocumentRow {
   readonly jobNumber: string;
+  /**
+   * What the row itself says it is. October mandate §1.3.
+   *
+   * ASKED FIRST, and the reason matters: this tool used to classify a missing
+   * document by looking the job number up in the shipped demonstration
+   * dataset, which is sound as a fallback and wrong as a primary test —
+   * "infer authenticity from a name" is exactly what §1.3 forbids. The column
+   * is written by whoever wrote the row, so it is evidence rather than
+   * inference.
+   *
+   * `null` for a row written before the column existed, and those still fall
+   * back to the dataset.
+   */
+  readonly provenance?: 'genuine' | 'simulated' | null;
   readonly storageKey: string;
   readonly fileName: string;
   /** As stored; 0 is the column default and means "nobody measured it". */
@@ -129,23 +143,37 @@ export const classifyDocument = (
      * anything else about the row is considered: a demonstration job card that
      * was never rendered is housekeeping, and a missing signed job card is an
      * incident.
+     *
+     * THE ROW'S OWN WORD COMES FIRST. The dataset lookup below is the fallback
+     * for rows written before `provenance` existed — classifying by job number
+     * alone is inference from a name, which §1.3 forbids as a primary test.
      */
-    return demonstration.has(row.jobNumber)
+    const simulated =
+      row.provenance === 'simulated' ||
+      (row.provenance !== 'genuine' && demonstration.has(row.jobNumber));
+    return simulated
       ? {
           ...base,
           verdict: 'absent_demonstration',
           detail:
-            `${row.jobNumber} is part of the shipped demonstration dataset, whose job cards are ` +
-            'rendered on first download rather than at issue. Nothing is lost, and opening the ' +
-            'job card will write the file.',
+            `${row.jobNumber} is demonstration data — ` +
+            (row.provenance === 'simulated'
+              ? 'the row says so'
+              : 'the job is in the shipped demonstration dataset') +
+            '. Its job card is rendered on first download rather than at issue, so nothing is ' +
+            'lost and opening it will write the file.',
         }
       : {
           ...base,
           verdict: 'absent_genuine',
           detail:
-            `${row.jobNumber} is NOT in the demonstration dataset, so this is a real issued ` +
-            'document and its bytes are gone. Recover it from a backup. It must not be ' +
-            're-rendered: the customer holds a signed copy and a fresh render would not be it.',
+            `${row.jobNumber} is a GENUINE issued document — ` +
+            (row.provenance === 'genuine'
+              ? 'the row says so'
+              : 'nothing marks it as demonstration data and the job is not in the shipped ' +
+                'dataset') +
+            ' — and its bytes are gone. Recover it from a backup. It must not be re-rendered: ' +
+            'the customer holds a signed copy and a fresh render would not be it.',
         };
   }
 

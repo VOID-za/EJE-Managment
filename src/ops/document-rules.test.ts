@@ -132,6 +132,54 @@ describe('classifying a document the register points at', () => {
   });
 });
 
+describe('classifying by what the ROW says, not by its name', () => {
+  /**
+   * October mandate §1.3: provenance is recorded, and inferring it from a job
+   * number is the fallback for rows written before the column existed — not
+   * the primary test.
+   */
+  it('believes a row that says it is demonstration data, whatever its number', () => {
+    // EJE-4100 is not in the dataset; the row says what it is.
+    const finding = classifyDocument(
+      row({ jobNumber: 'EJE-4100', provenance: 'simulated' }),
+      { present: false },
+      DEMO,
+    );
+    expect(finding.verdict).toBe('absent_demonstration');
+    expect(finding.detail).toMatch(/the row says so/u);
+    expect(reconcileFailed([finding])).toBe(false);
+  });
+
+  it('believes a row that says it is GENUINE, even one in the dataset', () => {
+    // A real job card issued for a job number the demonstration also uses —
+    // which is exactly the situation a name-based test gets wrong, and gets
+    // wrong in the dangerous direction.
+    const finding = classifyDocument(
+      row({ jobNumber: 'EJE-2015', provenance: 'genuine' }),
+      { present: false },
+      DEMO,
+    );
+    expect(finding.verdict).toBe('absent_genuine');
+    expect(reconcileFailed([finding])).toBe(true);
+  });
+
+  it('falls back to the dataset for a row written before the column existed', () => {
+    const seeded = classifyDocument(
+      row({ jobNumber: 'EJE-2015', provenance: null }),
+      { present: false },
+      DEMO,
+    );
+    expect(seeded.verdict).toBe('absent_demonstration');
+
+    const unknown = classifyDocument(
+      row({ jobNumber: 'EJE-4100', provenance: null }),
+      { present: false },
+      DEMO,
+    );
+    expect(unknown.verdict).toBe('absent_genuine');
+  });
+});
+
 describe('the demonstration dataset this tool measures against', () => {
   it('is read from the shipped seed rather than written out by hand', () => {
     const numbers = demonstrationJobNumbers();

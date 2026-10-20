@@ -160,16 +160,36 @@ export const CustomerDocumentsPanel = ({
           data-testid="customer-document-caption"
         />
 
+        {/*
+          A HIDDEN INPUT BEHIND A REAL BUTTON, and not for looks.
+          A bare `<input type="file">` renders about 20px tall, which the
+          responsive gate refuses as a touch target — correctly: the office
+          uses this on a tablet. The pattern is `PhotoCaptureButtons`'s, so the
+          three upload surfaces behave the same way on the device that matters.
+        */}
         <input
           ref={input}
           type="file"
-          className="mt-3 block w-full text-sm text-steel-600"
+          className="hidden"
           data-testid="customer-document-file"
           onChange={(event) => {
             const file = event.target.files?.[0];
+            // Cleared so choosing the SAME file again still fires.
+            event.target.value = '';
             if (file !== undefined) void send(file);
           }}
         />
+        <Button
+          type="button"
+          variant="secondary"
+          className="mt-3"
+          loading={uploading}
+          onClick={() => input.current?.click()}
+          data-testid="customer-document-choose"
+        >
+          <Icon name="document" className="size-4" />
+          Choose a document
+        </Button>
 
         <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
           The server checks the file itself rather than its name, and records the size and checksum

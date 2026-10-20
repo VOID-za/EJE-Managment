@@ -847,6 +847,17 @@ export class PostgresJobRepository implements JobRepository {
           sizeBytes: job.finalDocument.sizeBytes ?? 0,
           checksumSha256: job.finalDocument.checksumSha256,
           rendererVersion: job.finalDocument.renderer ?? 0,
+          /*
+           * WHOSE JOB CARD THIS IS. October mandate §1.
+           *
+           * Caught by running `documents:reconcile` against a freshly seeded
+           * PostgreSQL database: the seed marked its six job cards
+           * `simulated`, this insert did not carry the field, the column took
+           * its `genuine` default, and the tool reported six demonstration
+           * fixtures as LOST CUSTOMER DOCUMENTS. A label that does not reach
+           * the database is not a label.
+           */
+          provenance: job.finalDocument.provenance,
           generatedAt: job.finalDocument.generatedAt,
           generatedBy: job.finalDocument.generatedBy,
           issuedTo: job.finalDocument.issuedTo,

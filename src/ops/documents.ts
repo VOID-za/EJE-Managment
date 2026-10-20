@@ -102,6 +102,7 @@ const main = async (): Promise<void> => {
         sizeBytes: string;
         checksum: string | null;
         renderer: number;
+        provenance: string | null;
       }[]
     >`
       select d.id            as "id",
@@ -110,7 +111,8 @@ const main = async (): Promise<void> => {
              d.file_name     as "fileName",
              d.size_bytes    as "sizeBytes",
              d.checksum_sha256 as "checksum",
-             d.renderer_version as "renderer"
+             d.renderer_version as "renderer",
+             d.provenance    as "provenance"
         from final_documents d
         join jobs j on j.id = d.job_id
        order by j.job_number
@@ -129,6 +131,13 @@ const main = async (): Promise<void> => {
         sizeBytes: Number(raw.sizeBytes),
         checksumSha256: raw.checksum,
         rendererVersion: Number(raw.renderer),
+        /*
+         * WHAT THE ROW SAYS IT IS. October mandate §1.3: read from the column
+         * rather than inferred from the job number, which is the fallback for
+         * rows written before the column existed.
+         */
+        provenance:
+          raw.provenance === 'genuine' || raw.provenance === 'simulated' ? raw.provenance : null,
       };
 
       let fact: StorageFact;

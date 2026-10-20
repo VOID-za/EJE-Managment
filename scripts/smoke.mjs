@@ -570,6 +570,9 @@ await step('the office files a document against a customer, and gets those bytes
 
   const body = '%PDF-1.4\nABC Engineering service agreement 2026\n%%EOF';
   await page.getByTestId('customer-document-caption').fill('Signed service agreement, 2026');
+  // The hidden input behind the button, which a headless browser can set
+  // directly — the button is what a person taps and what the responsive gate
+  // measures.
   await page.getByTestId('customer-document-file').setInputFiles({
     name: 'abc-service-agreement.pdf',
     mimeType: 'application/pdf',

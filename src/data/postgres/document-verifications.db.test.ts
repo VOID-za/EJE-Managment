@@ -61,12 +61,16 @@ describeDb('an issued document on PostgreSQL', () => {
   const BYTES = 10_422;
   const HASH = '7556fb0c8323d39f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071';
 
+  let sequence = 9000;
   const withDocument = async (over: Record<string, unknown> = {}) => {
-    const job = jobFixture('EJE-9001', {
+    sequence += 1;
+    const job = jobFixture(`EJE-${sequence}`, {
       status: 'awaiting_delivery',
       finalDocument: {
-        fileName: 'EJE-9001-Final-Job-Card.pdf',
-        storageKey: 'jobcards/final/EJE-9001.pdf',
+        fileName: `EJE-${sequence}-Final-Job-Card.pdf`,
+        // Keyed by the job number, so two documents in one test cannot collide
+        // on the unique storage key.
+        storageKey: `jobcards/final/EJE-${sequence}.pdf`,
         pageCount: 2,
         generatedAt: '2026-10-20T09:00:00.000Z',
         generatedBy: asUserId(IDS.master),
@@ -86,6 +90,23 @@ describeDb('an issued document on PostgreSQL', () => {
       .where(eq(schema.finalDocuments.jobId, job.id));
     return { job, row: rows[0] };
   };
+
+  /**
+   * A LABEL THAT DOES NOT REACH THE DATABASE IS NOT A LABEL. Mandate §1.
+   *
+   * Caught by running `documents:reconcile` against a freshly seeded
+   * PostgreSQL database: the seed marked its six demonstration job cards
+   * `simulated`, the repository's insert did not carry the field, the column
+   * took its `genuine` default, and the tool reported six fixtures as LOST
+   * CUSTOMER DOCUMENTS — the worst possible direction for that mistake.
+   */
+  it('writes the PROVENANCE the job carries, so a fixture is not read as a lost record', async () => {
+    const { row } = await withDocument({ provenance: 'simulated' });
+    expect(row?.provenance).toBe('simulated');
+
+    const genuine = await withDocument();
+    expect(genuine.row?.provenance).toBe('genuine');
+  });
 
   it('records the LENGTH and CHECKSUM the store measured', async () => {
     const { row } = await withDocument();
