@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import type {
-  StorageService,
-  StoredDocument,
-  StoredFile,
-  UploadedFile,
+import {
+  StorageIntegrityFailed,
+  type StorageService,
+  type StoredDocument,
+  type StoredFile,
+  type UploadedFile,
 } from '../ports';
 import { generatedStorageKey } from '../simulated/storage';
 
@@ -91,25 +92,13 @@ export class StorageWriteFailed extends Error {
   }
 }
 
-/**
- * THE FILE IS THERE AND IT IS NOT THE FILE THAT WAS WRITTEN.
- *
- * Separate from `StorageWriteFailed` and from the null that means "nothing is
- * stored under this key", because it is a different fact with a different
- * remedy: nothing is wrong with the request, the stored bytes are damaged, and
- * the answer is a restore rather than a retry. It is raised rather than
- * swallowed — handing out a document that fails its own checksum is the one
- * outcome a checksum exists to prevent.
+/*
+ * `StorageIntegrityFailed` lives in `../ports`, because it is part of the
+ * contract and not of this adapter: the application has to be able to catch it
+ * without importing a filesystem module. Re-exported here so a caller holding
+ * this adapter still finds it where it expects to.
  */
-export class StorageIntegrityFailed extends Error {
-  constructor(
-    readonly storageKey: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'StorageIntegrityFailed';
-  }
-}
+export { StorageIntegrityFailed } from '../ports';
 
 /** The SHA-256 of some bytes, lower-case hex. The one hash this store speaks. */
 export const sha256Of = (bytes: Uint8Array): string =>

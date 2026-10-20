@@ -279,6 +279,32 @@ export interface StoredDocument {
   readonly sha256?: string;
 }
 
+/**
+ * THE FILE IS THERE AND IT IS NOT THE FILE THAT WAS WRITTEN. BACKUP-1.
+ *
+ * Part of the PORT rather than of the filesystem adapter, because it is part of
+ * the contract: a store that can tell damaged bytes from missing ones must say
+ * so in a way the application can act on, and the application must not have to
+ * import an adapter to catch it.
+ *
+ * Distinct from a null (nothing is stored here) and from a write failure
+ * (nothing could be stored): nothing is wrong with the request, the stored
+ * bytes are damaged, and the remedy is a restore rather than a retry. It is
+ * raised rather than swallowed — handing out a document that fails its own
+ * checksum is the one outcome a checksum exists to prevent — and it must never
+ * be turned into a re-render, which would replace a customer's signed document
+ * with a new one carrying its date.
+ */
+export class StorageIntegrityFailed extends Error {
+  constructor(
+    readonly storageKey: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'StorageIntegrityFailed';
+  }
+}
+
 /** A file the office or a technician actually uploaded, bytes and all. */
 export interface UploadedFile {
   readonly fileName: string;

@@ -2,7 +2,7 @@ import { can, type IsoDateTime, type Job } from '@/domain';
 import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
-import type { FinalDocumentSource, StoredDocument } from '@/services/ports';
+import { StorageIntegrityFailed, type FinalDocumentSource, type StoredDocument } from '@/services/ports';
 
 /**
  * The final document on a closed job: retrieval, not generation.
@@ -142,7 +142,33 @@ export const loadFinalDocumentFile = async (
     ]);
   }
 
-  const stored = await context.services.storage.getDocument(descriptor.storageKey);
+  /*
+   * DAMAGED BYTES ARE NOT "NO BYTES", AND MUST NOT FALL THROUGH TO THE
+   * BACKFILL BELOW. BACKUP-1.
+   *
+   * The store raises when what is on the disk is not what was written with it.
+   * If that were caught and treated as absence, the next few lines would
+   * RE-RENDER the document and write it over the damaged file — replacing a
+   * customer's signed job card with a new document carrying its date, and
+   * destroying the evidence that anything had gone wrong. So it is turned into
+   * a refusal the office can read, and nothing is written.
+   */
+  let stored: StoredDocument | null;
+  try {
+    stored = await context.services.storage.getDocument(descriptor.storageKey);
+  } catch (cause) {
+    if (!(cause instanceof StorageIntegrityFailed)) throw cause;
+    throw new WorkflowError(`${job.jobNumber}'s job card on file is damaged.`, [
+      {
+        code: 'document_damaged',
+        message:
+          'The stored file is not the file that was issued, so it has not been opened. It must ' +
+          'be restored from a backup — re-issuing would produce a different document carrying ' +
+          'the original date.',
+      },
+    ]);
+  }
+
   if (stored !== null) {
     const staleBackfill =
       stored.backfilled === true && stored.renderer !== RENDERER_VERSION;
