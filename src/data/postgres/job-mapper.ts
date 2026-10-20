@@ -176,6 +176,14 @@ export const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
   // A server-side renderer produced these bytes.
   renderedLocally: false,
   issuedTo: row.issuedTo,
+  /*
+   * ZERO IS READ AS "UNKNOWN", because that is what it means in this column.
+   * It defaults to 0 and was never written, so every row that predates
+   * BACKUP-1's fix carries one — and a job card is never genuinely 0 bytes.
+   */
+  sizeBytes: row.sizeBytes === 0 ? null : row.sizeBytes,
+  checksumSha256: row.checksumSha256,
+  renderer: row.rendererVersion === 0 ? null : row.rendererVersion,
 });
 
 /**

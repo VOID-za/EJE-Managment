@@ -71,6 +71,15 @@ const finalJobCard = (
   generatedBy: asUserId('user-master-elmarie'),
   renderedLocally: true,
   issuedTo,
+  /*
+   * NOTHING HAS MEASURED THESE BYTES, because they do not exist yet: a seed
+   * cannot ship binary content, so a seeded job card is rendered on first
+   * download (see `loadFinalDocumentFile`). Recording a length here would be
+   * describing a file nobody has written.
+   */
+  sizeBytes: null,
+  checksumSha256: null,
+  renderer: null,
 });
 
 const finalPartsNote = (
@@ -85,6 +94,15 @@ const finalPartsNote = (
   generatedBy: asUserId('user-master-elmarie'),
   renderedLocally: true,
   issuedTo,
+  /*
+   * NOTHING HAS MEASURED THESE BYTES, because they do not exist yet: a seed
+   * cannot ship binary content, so a seeded job card is rendered on first
+   * download (see `loadFinalDocumentFile`). Recording a length here would be
+   * describing a file nobody has written.
+   */
+  sizeBytes: null,
+  checksumSha256: null,
+  renderer: null,
 });
 
 /**

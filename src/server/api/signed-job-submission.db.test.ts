@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -287,6 +288,36 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(['failed', 'pending_delivery']).toContain(issued.data.delivery.state);
     expect(issued.data.delivery.state).not.toBe('delivered');
     expect(await db.select().from(schema.jobLabour).where(eq(schema.jobLabour.jobId, id))).toHaveLength(1);
+  });
+
+  /**
+   * THE ROW DESCRIBES THE FILE. BACKUP-1.
+   *
+   * The defect: this insert wrote neither `size_bytes` nor `checksum_sha256`
+   * and hard-coded `renderer_version` to 0, so every `final_documents` row in
+   * production read `size_bytes = 0` with no checksum — while the schema's own
+   * comment claimed the checksum was verified on every read. Nothing could
+   * tell a stored job card from a missing one, or an intact one from a
+   * truncated one, and the backup's restore test had nothing to check against.
+   */
+  it('records the SIZE and CHECKSUM of the document it issued, matching the file on disk', async () => {
+    const { tech, id } = await signedJob({ labour: true });
+    expect((await issue(tech, id)).status).toBe(200);
+
+    const rows = await db
+      .select()
+      .from(schema.finalDocuments)
+      .where(eq(schema.finalDocuments.jobId, id));
+    const row = rows[0];
+    expect(row, 'the issue wrote no final_documents row at all').toBeDefined();
+
+    // Not merely non-zero: the same length and hash as the bytes on the disk.
+    const onDisk = await readFile(join(storageRoot, `${row?.storageKey ?? ''}.bin`));
+    expect(row?.sizeBytes).toBe(onDisk.byteLength);
+    expect(row?.sizeBytes ?? 0).toBeGreaterThan(0);
+    expect(row?.checksumSha256).toBe(createHash('sha256').update(onDisk).digest('hex'));
+    // And the renderer that really produced them, not a hard-coded zero.
+    expect(row?.rendererVersion ?? 0).toBeGreaterThan(0);
   });
 
   it('issues a signed job carrying TRAVEL', async () => {

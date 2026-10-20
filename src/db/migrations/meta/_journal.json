@@ -99,6 +99,13 @@
       "when": 1792347845343,
       "tag": "0013_customer_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792521928953,
+      "tag": "0014_document_verifications",
+      "breakpoints": true
     }
   ]
 }

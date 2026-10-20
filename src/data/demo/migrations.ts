@@ -275,6 +275,35 @@ const v15ToV16 = (data: Loose): Loose => ({
   changeRequests: Array.isArray(data.changeRequests) ? data.changeRequests : [],
 });
 
+/**
+ * v16 -> v17. BACKUP-1.
+ *
+ * `FinalDocument` gained the length, checksum and renderer the store measured
+ * when the bytes landed. A snapshot written before that has job cards whose
+ * descriptor has none of the three, and the honest value for every one of them
+ * is NULL: nobody measured those bytes, and a 0 would say the document is
+ * empty, which is a different and false statement. A persisted demonstration
+ * job card is rendered on first download anyway, at which point the issue path
+ * records the real values.
+ */
+const v16ToV17 = (data: Loose): Loose => ({
+  ...data,
+  jobs: rows(data, 'jobs').map((job) => {
+    const document = job.finalDocument;
+    if (document === null || typeof document !== 'object') return job;
+    const descriptor = document as Record<string, unknown>;
+    return {
+      ...job,
+      finalDocument: {
+        ...descriptor,
+        sizeBytes: descriptor.sizeBytes ?? null,
+        checksumSha256: descriptor.checksumSha256 ?? null,
+        renderer: descriptor.renderer ?? null,
+      },
+    };
+  }),
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -284,6 +313,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   13: v13ToV14,
   14: v14ToV15,
   15: v15ToV16,
+  16: v16ToV17,
 };
 
 /**

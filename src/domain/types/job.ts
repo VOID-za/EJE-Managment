@@ -171,6 +171,27 @@ export interface FinalDocument {
   readonly renderedLocally: boolean;
   /** Where the signed copy was emailed, recorded with the document. */
   readonly issuedTo: string;
+  /**
+   * WHAT THE STORE MEASURED WHEN THE BYTES LANDED, and nothing else. BACKUP-1.
+   *
+   * Not supplied by a caller and not a promise about what should be there: the
+   * issue path writes the document, reads it back, and records the length and
+   * hash of the bytes it actually got. That is what makes the record able to
+   * say whether the file on the disk is still the file that was issued.
+   *
+   * NULL MEANS NOBODY MEASURED IT, which is the truth for two kinds of row:
+   * the seeded demonstration history, whose bytes are rendered on first
+   * download rather than at issue; and every row written before this existed —
+   * all of production's, whose `size_bytes` column therefore read 0 while the
+   * schema claimed a checksum was verified on every read. Null says "unknown";
+   * a zero would say "an empty document", which is a different and false
+   * statement. `npm run documents:reconcile` fills them in from the files.
+   */
+  readonly sizeBytes: number | null;
+  /** SHA-256 of those bytes, lower-case hex. Null when nothing has measured them. */
+  readonly checksumSha256: string | null;
+  /** Which renderer produced them, as the store recorded it. Null when unknown. */
+  readonly renderer: number | null;
 }
 
 export interface JobCancellation {

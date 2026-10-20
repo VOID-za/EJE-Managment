@@ -2725,6 +2725,15 @@ const renderAndStoreFinalDocument = async (
       generatedBy: context.actor.id,
       renderedLocally: document.renderedLocally,
       issuedTo: '',
+      /*
+       * THE READBACK IS THE MEASUREMENT. These come from the bytes that were
+       * read off the store a few lines up, not from the bytes that were handed
+       * to it — so the record describes the file that exists, and a later read
+       * that disagrees with it is a damaged document rather than a mystery.
+       */
+      sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
+      checksumSha256: stored.sha256 ?? null,
+      renderer: stored.renderer ?? null,
     },
   };
 };
@@ -2948,6 +2957,11 @@ const performIssue = async (
       generatedBy: context.actor.id,
       renderedLocally: document.renderedLocally,
       issuedTo: customerEmail,
+      // Measured off the readback above, for the reason given in
+      // `renderAndStoreFinalDocument`.
+      sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
+      checksumSha256: stored.sha256 ?? null,
+      renderer: stored.renderer ?? null,
     },
     delivery: emptyDelivery(customerEmail, now),
   });

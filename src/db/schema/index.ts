@@ -16,6 +16,7 @@ export * from './columns';
 export * from './identity';
 export * from './settings';
 export * from './customers';
+export * from './document-verifications';
 export * from './change-requests';
 export * from './machines';
 export * from './jobs';

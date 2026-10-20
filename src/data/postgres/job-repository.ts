@@ -819,6 +819,23 @@ export class PostgresJobRepository implements JobRepository {
     }
 
     if (job.finalDocument !== null) {
+      /*
+       * WHAT THIS USED TO DROP ON THE FLOOR. BACKUP-1.
+       *
+       * `size_bytes` and `checksum_sha256` have been columns on this table
+       * since it was created and this insert set NEITHER — so every row in
+       * production read `size_bytes = 0` and `checksum_sha256= NULL`, while
+       * the schema's own comment said the checksum was "verified on every
+       * read". `renderer_version` was a hard-coded 0, which is not a version
+       * this application has ever had. An operator looking at the table could
+       * not tell a stored job card from a missing one, and nothing could tell
+       * an intact one from a truncated one.
+       *
+       * The values come from the job's own record, which took them from the
+       * bytes the store handed back at issue — see `FinalDocument`. Null means
+       * nobody has measured the file, and the columns keep their defaults
+       * rather than being filled with a number that would be a guess.
+       */
       await this.db
         .insert(schema.finalDocuments)
         .values({
@@ -827,7 +844,9 @@ export class PostgresJobRepository implements JobRepository {
           fileName: job.finalDocument.fileName,
           storageKey: job.finalDocument.storageKey,
           pageCount: job.finalDocument.pageCount,
-          rendererVersion: 0,
+          sizeBytes: job.finalDocument.sizeBytes ?? 0,
+          checksumSha256: job.finalDocument.checksumSha256,
+          rendererVersion: job.finalDocument.renderer ?? 0,
           generatedAt: job.finalDocument.generatedAt,
           generatedBy: job.finalDocument.generatedBy,
           issuedTo: job.finalDocument.issuedTo,
