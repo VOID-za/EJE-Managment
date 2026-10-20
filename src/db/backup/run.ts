@@ -21,6 +21,13 @@ import {
   type StorageReference,
 } from './references';
 import { planOffsite, rcloneCommands, sameMediaWarning } from './offsite';
+import {
+  compareMajors,
+  majorFromServerVersion,
+  majorFromToolVersion,
+  skewNote,
+  skewRefusal,
+} from './versions';
 import { chooseBackupsToPrune, readRetention } from './retention';
 import {
   BackupRefused,
@@ -180,6 +187,36 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
         'stored yet, run it again with EJE_BACKUP_ALLOW_EMPTY=yes.',
     );
   }
+
+  /*
+   * ---- THE CLIENT TOOLS, BEFORE A SINGLE BYTE IS WRITTEN -----------------
+   *
+   * A pg_dump newer than its server writes a dump that cannot be restored onto
+   * that server, and says nothing about it: the backup succeeds, is encrypted,
+   * is copied off-site, and is useless. Checked here, where it costs one
+   * subprocess, rather than discovered at restore time. See `versions.ts`.
+   */
+  const clientMajor = majorFromToolVersion(
+    spawnSync('pg_dump', ['--version'], { encoding: 'utf8' }).stdout ?? '',
+  );
+  const serverMajor = majorFromServerVersion(
+    spawnSync('psql', [plan.databaseUrl, '-At', '-c', 'show server_version_num'], {
+      encoding: 'utf8',
+    }).stdout ?? '',
+  );
+  const skew = compareMajors(clientMajor, serverMajor);
+  const skewAllowed = (process.env.EJE_BACKUP_ALLOW_VERSION_SKEW ?? '').trim() === 'yes';
+  const refusal = skewRefusal(skew, clientMajor, serverMajor);
+  if (refusal !== null && !skewAllowed) {
+    // Before `mkdirSync`, so there is nothing to clean up.
+    throw new BackupRefused(refusal);
+  }
+  const versionLines = [
+    ...(refusal === null ? [] : [`WARNING, accepted under EJE_BACKUP_ALLOW_VERSION_SKEW: ${refusal}`]),
+    ...(skewNote(skew, clientMajor, serverMajor) === null
+      ? []
+      : [skewNote(skew, clientMajor, serverMajor) as string]),
+  ];
 
   /*
    * 0700, BEFORE ANYTHING IS WRITTEN INTO IT.
@@ -369,6 +406,8 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
         : 'backup   WARNING: the storage keys could not be read, so the manifest records none. ' +
           'A restore test will have to be told which missing documents were already missing.\n') +
       `backup   encrypted aes-256-gcm, key ${manifest.encryption.keyFingerprint}\n` +
+      `backup   pg_dump ${clientMajor ?? '?'} against PostgreSQL ${serverMajor ?? '?'}\n` +
+      versionLines.map((line) => `backup   ${line}\n`).join('') +
       offsiteLines.map((line) => `backup   ${line}\n`).join('') +
       (pruning.remove.length === 0
         ? `backup   ${pruning.note}\n`

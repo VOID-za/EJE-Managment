@@ -6,6 +6,7 @@ import { loadEnvFiles } from '../seed/env';
 import { extractArchiveSafely } from './archive';
 import { recordVerification, verifyInto } from './integrity';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
+import { skewDiagnosis } from './versions';
 import {
   describeReferences,
   partitionOrphans,
@@ -201,9 +202,13 @@ const main = async (): Promise<void> => {
       dump,
     ]);
     if (!restored.ok) {
-      throw new BackupRefused(
-        `pg_restore refused this dump: ${redactSecrets(restored.stderr, databaseUrl)}`,
-      );
+      const stderr = redactSecrets(restored.stderr, databaseUrl);
+      /*
+       * The version mismatch names a "configuration parameter", which reads
+       * like a server misconfiguration and sends an operator to
+       * postgresql.conf. It is not that — see `versions.ts`.
+       */
+      throw new BackupRefused(`pg_restore refused this dump: ${stderr}${skewDiagnosis(stderr)}`);
     }
 
     // ---- 4. the records that matter are there ----------------------------

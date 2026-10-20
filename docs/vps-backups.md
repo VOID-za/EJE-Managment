@@ -169,6 +169,43 @@ cat /var/backups/eje/last-run.json           # what happened
 ls -1 /var/backups/eje | tail -3             # is the shelf growing
 ```
 
+## 4a. The client tools must match the server
+
+```bash
+pg_dump --version                  # must be the same MAJOR as:
+psql "$DATABASE_URL" -At -c 'show server_version'
+```
+
+A `pg_dump` **newer** than its server writes a dump that cannot be restored
+onto that server. PostgreSQL 17's `pg_dump` emits `SET transaction_timeout`,
+which PostgreSQL 16 does not recognise, and the restore dies partway through
+with a message that reads like a server misconfiguration:
+
+```
+pg_restore: error: could not execute query: ERROR:
+  unrecognized configuration parameter "transaction_timeout"
+```
+
+Until this was checked, that failure appeared only at **restore** time. The
+backup kept reporting success, kept being encrypted and checksummed and copied
+off-site, and none of it could be restored — the exact shape of failure this
+requirement exists to prevent. `npm run backup` now refuses before it writes
+anything, naming the package to install:
+
+```
+backup   REFUSED: pg_dump is version 18 and the server is 16. The dump it would
+         write CANNOT BE RESTORED onto this server … Install the client tools
+         that match the server (`postgresql-client-16`) …
+```
+
+`EJE_BACKUP_ALLOW_VERSION_SKEW=yes` overrides it, for the one legitimate case:
+the restore target is deliberately a newer server. **Write down which server
+that is**, because such a dump will not go back where it came from.
+
+This is why the VPS should pin its client tools rather than take whatever
+`apt upgrade` offers, and why CI installs `postgresql-client-16` explicitly
+beside its PostgreSQL 16 service container.
+
 ## 5. Get it off the machine
 
 A backup in `/var/backups/eje` is on the same disk as

@@ -126,6 +126,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # CLIENT TOOLS THAT MATCH THE SERVER, and this is not housekeeping.
+      #
+      # The runner image ships whatever `postgresql-client` Ubuntu currently
+      # has — 17 as of 20 October 2026 — while the service container above is
+      # the 16 that production runs. `pg_dump 17` writes `SET
+      # transaction_timeout` into its output and PostgreSQL 16 has no such
+      # parameter, so every restore of every dump died with "unrecognized
+      # configuration parameter". The backup suite restores what it dumps, so
+      # it is the suite that noticed; the same upgrade on the VPS would have
+      # produced backups nobody could restore, which is why `versions.ts` now
+      # refuses the mismatch rather than only CI pinning around it.
+      - name: PostgreSQL 16 client tools, to match the service container
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --allow-downgrades postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+
+      - name: The client and the server agree
+        run: |
+          pg_dump --version
+          psql "$TEST_DATABASE_URL" -At -c 'show server_version'
+
       # The suite builds its own schema from the migrations on every run
       # (`openTestDatabase` drops and recreates `public`), so the migrations
       # themselves are exercised here rather than assumed to have worked once.
