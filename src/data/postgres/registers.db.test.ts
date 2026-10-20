@@ -234,6 +234,59 @@ describeDb('the PostgreSQL registers', () => {
       ...over,
     });
 
+    /**
+     * A LABEL THAT DOES NOT REACH THE DATABASE IS NOT A LABEL. Mandate §1.
+     *
+     * Found by counting rows in a freshly seeded database: the seed marked its
+     * demonstration photographs `simulated`, this insert did not carry the
+     * field, and the column took its `genuine` default — so the register would
+     * have presented three fixtures as photographs of a customer's machines.
+     * The same omission was found in `final_documents` the same way.
+     */
+    it('writes a photograph’s PROVENANCE, both ways', async () => {
+      const demonstration = await machines.save(
+        newMachine({
+          serialNumber: `DEMO-${crypto.randomUUID().slice(0, 8)}`,
+          photos: [
+            {
+              id: asAttachmentId(crypto.randomUUID()),
+              kind: 'photo',
+              visibility: 'customer_facing',
+              fileName: 'seeded-plate.jpg',
+              caption: 'Demonstration metadata',
+              storageKey: `machines/${crypto.randomUUID()}.jpg`,
+              uploadedAt: '2026-03-01T07:35:00.000Z',
+              uploadedBy: asUserId(IDS.technician),
+              sizeBytes: 0,
+              provenance: 'simulated' as const,
+            },
+          ],
+        }),
+      );
+      expect(demonstration.photos[0]?.provenance).toBe('simulated');
+
+      const real = await machines.save(
+        newMachine({
+          serialNumber: `REAL-${crypto.randomUUID().slice(0, 8)}`,
+          photos: [
+            {
+              id: asAttachmentId(crypto.randomUUID()),
+              kind: 'photo',
+              visibility: 'customer_facing',
+              fileName: 'rating-plate.jpg',
+              caption: 'Rating plate',
+              storageKey: `machines/${crypto.randomUUID()}.jpg`,
+              uploadedAt: '2026-03-01T07:35:00.000Z',
+              uploadedBy: asUserId(IDS.technician),
+              sizeBytes: 1_840_000,
+              provenance: 'genuine' as const,
+            },
+          ],
+        }),
+      );
+      expect(real.photos[0]?.provenance).toBe('genuine');
+    });
+
     it('round trips a machine, its type and its photographs', async () => {
       const machine = newMachine({
         photos: [

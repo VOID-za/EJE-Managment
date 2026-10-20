@@ -1,5 +1,12 @@
 # What is actually left, 20 October 2026
 
+> **Updated later the same day** by the October implementation mandate. Two
+> items moved off this list — demonstration labelling (§1) and customer
+> attachments (§4) — and the library gained the five categories EJE asked for.
+> See `docs/demonstration-data.md` for the classification record and the batch
+> section in `docs/SCOPE.md` for the evidence. Everything still listed below
+> stands.
+
 A classification of the outstanding scope, made by reading the implementation
 against `docs/SCOPE.md` and the 57 open issues, and by running every gate the
 repository has against this tree. It exists because "what is left" had become
@@ -36,6 +43,15 @@ No further implementation defect was confirmed in this pass. That is a
 statement about what was examined — the document, storage and backup paths were
 read line by line; the rest rests on 2 309 unit and route tests, 267
 PostgreSQL-backed tests, and the browser suites, all green on this tree.
+
+## Built since this document was written
+
+| What | Where | Status |
+|---|---|---|
+| **Demonstration records say so** — recorded provenance on library documents, revisions, machine photographs and issued job cards; the badge in lists, the notice on detail views, and a stamp on every page of a demonstration PDF | `f38d46b`, `6d8d33b`, `30c4f03` | TESTED — awaiting approval |
+| **Invented file facts removed** — four places asserted sizes and page counts for files that do not exist; a size is now measured or zero, and a record with nothing stored offers no download | same | TESTED — awaiting approval |
+| **Customer documents** — the register carried no files at all; `customer_documents`, the office-only routes, the panel, and real bytes proved in a browser | `27a1b53`, `30c4f03` | TESTED — awaiting approval |
+| **The library's missing categories** — checklist, training document, internal company procedure, form and certificate | `f38d46b` | TESTED — awaiting approval |
 
 ## Not built
 

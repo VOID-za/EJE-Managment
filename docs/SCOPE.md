@@ -1199,6 +1199,31 @@ customer change requests (CUST-CR); machine location history (MACH-HIST); video
 limits (MEDIA-5); and **who may export the prices a job was issued at
 (BD-17, raised by this batch)**.
 
+### Demonstration labelling and customer documents (20 October 2026, seventh batch)
+
+*The October implementation mandate, sections 1, 3 and 4. **Nothing here is
+approved:** every row is TESTED and awaits the owner (PROC-4). **Nothing here
+is deployed:** the live service still serves `4dede18`.*
+
+| What | Result |
+|---|---|
+| **A demonstration document says so, and the label is RECORDED rather than inferred** — `provenance` on library documents, their revisions, machine photographs and issued job cards; `genuine` is the default, in that direction deliberately | **TESTED — awaiting approval** `f38d46b`. Not derived from a missing file, because a genuine record whose file is gone is an incident and a fixture with no file is housekeeping: same symptom, opposite remedy |
+| **Four places invented facts about files that do not exist** — `18_442_000` bytes and `214` pages for a Leadwell manual nobody uploaded, `1_842_000` for machine photographs, `4_180_000 + pages × 12_000` in the PostgreSQL seed, and a flat `2_400_000` for every metadata-only document added through the office screen | **TESTED — awaiting approval** `f38d46b`. A size is measured off a real file or it is zero, and zero is what makes the screen say *No stored file* |
+| **A record with no bytes offers nothing** — no fetch, no spinner, no download button, no generated stand-in | **TESTED — awaiting approval** `f38d46b`, `6d8d33b`. The browser step found the modal's download button still being offered, which is how that was caught |
+| **A demonstration job card is stamped on EVERY PAGE of its PDF** | **TESTED — awaiting approval** `f38d46b`. The screen's badge is gone the moment a PDF is downloaded, emailed or printed. A genuine job card is stamped nowhere, and both directions are asserted page by page |
+| **The label did not reach PostgreSQL** — the seed marked six job cards and three machine photographs `simulated`; two repository inserts did not carry the field and the column took its `genuine` default | **TESTED — awaiting approval** `30c4f03`, and found by RUNNING `documents:reconcile` against a freshly seeded database, which reported six fixtures as LOST CUSTOMER DOCUMENTS |
+| **The reconcile asks the row first** — it classified a missing document by looking its job number up in the shipped dataset, which §1.3 forbids as a primary test | **TESTED — awaiting approval** `30c4f03`. The column decides; the dataset is the fallback for rows written before it existed |
+| **The library's five missing categories** — checklist, training document, internal company procedure, form and certificate, all previously filed as `work_procedure` | **TESTED — awaiting approval** `f38d46b`. The label map moved into the domain so a category is named on every screen |
+| **CUSTOMER DOCUMENTS (§4)** — the register carried no files at all, so the signed service agreement and the credit application lived in a mailbox | **TESTED — awaiting approval** `27a1b53`. `customer_documents` with a RESTRICT key and a size CHECK, bytes stored and read back before the row is written, office-only at both ends with a technician's response carrying none at all, every indistinguishable refusal a 404, and the download an attachment with `nosniff` and `no-store` |
+| **A 20px touch target, caught by CI** — the panel's bare `<input type="file">` failed the responsive gate at all three widths | **TESTED — awaiting approval** `30c4f03`. A real button over a hidden input, the pattern the photo-capture surfaces already use |
+| Whether a technician may read a specific customer document (a site induction certificate is the obvious candidate) | **OPEN.** Office-only is the conservative answer; widening it is one line, and a technician who has read a credit application cannot be un-shown it |
+
+**Evidence:** 2342 unit and route tests, 276 on real PostgreSQL and real file
+storage, every browser suite (smoke, e2e, tablet-pdf-check, responsive-check,
+check-routes, workflow-check), and all 17 migrations applied from zero on a
+fresh database. `docs/demonstration-data.md` is the classification record §1.3
+asks for, including what remains uncertain.
+
 ### Document durability and backup validation (20 October 2026, sixth batch)
 
 *Delivered after the batch below, against the live release `4dede18`. **Nothing

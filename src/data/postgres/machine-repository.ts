@@ -152,6 +152,15 @@ export class PostgresMachineRepository implements MachineRepository {
           sizeBytes: photo.sizeBytes,
           uploadedAt: photo.uploadedAt,
           uploadedBy: photo.uploadedBy.length === 0 ? null : photo.uploadedBy,
+          /*
+           * WHOSE PHOTOGRAPH THIS IS. October mandate §1, and the second place
+           * the same omission was found: the seed marked its demonstration
+           * photographs `simulated`, this insert did not carry the field, and
+           * the column took its `genuine` default — so the register would have
+           * shown three fixtures as photographs of a customer's machines. A
+           * label that does not reach the database is not a label.
+           */
+          provenance: photo.provenance,
         })
         .onConflictDoUpdate({
           target: schema.machinePhotos.id,
