@@ -3659,6 +3659,70 @@ await step('technical library preview', async () => {
   await page.screenshot({ path: `${shots}/08-library.png`, fullPage: false });
 });
 
+/**
+ * DEMONSTRATION DATA SAYS SO, IN A REAL BROWSER. October mandate §1.
+ *
+ * The seeded library is metadata and nothing else — nine documents with no
+ * bytes behind them — and until this it was drawn exactly like EJE's own
+ * records, down to "214 pages · 18.4 MB" for a manual nobody has uploaded.
+ * These two steps are the screen, not the API: the label a person actually
+ * sees, and the download that is NOT offered.
+ */
+await step('the library marks demonstration records SIMULATED, in the list', async () => {
+  await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' });
+  await page.getByText('Leadwell V-40 Machine Manual').waitFor({ timeout: 8000 });
+
+  const badges = page.locator('[data-testid="library-simulated-badge"]');
+  const count = await badges.count();
+  if (count === 0) throw new Error('no document in the seeded library is marked SIMULATED');
+  const badgeText = (await badges.first().innerText()).trim();
+  if (badgeText !== 'SIMULATED') {
+    throw new Error(`the badge reads "${badgeText}" rather than SIMULATED`);
+  }
+
+  // And the invented file facts are gone from the row.
+  const facts = await page.locator('[data-testid="library-file-facts"]').first().innerText();
+  if (!facts.includes('No stored file')) {
+    throw new Error(`a metadata-only row still describes a file: ${facts}`);
+  }
+  if (/\d+ pages/u.test(facts)) {
+    throw new Error(`a metadata-only row still claims a page count: ${facts}`);
+  }
+});
+
+await step('a record with no file offers no download, and says why', async () => {
+  await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' });
+  await page.getByText('Leadwell V-40 Machine Manual').waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Open' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+
+  // The panel that replaces the preview, and the full sentence inside it.
+  await page.locator('[data-testid="document-metadata-only"]').waitFor({ timeout: 8000 });
+  const notice = await page.locator('[data-testid="simulated-notice"]').first().innerText();
+  if (!notice.includes('NOT A GENUINE EJE DOCUMENT')) {
+    throw new Error(`the notice does not say what the record is: ${notice}`);
+  }
+  if (!notice.toLowerCase().includes('nothing')) {
+    throw new Error(`the notice does not say there is nothing to open: ${notice}`);
+  }
+
+  // NOTHING to download: no frame, no embed, no download action.
+  const offers = await page
+    .getByRole('dialog')
+    .locator('iframe, embed, object, a[download], button:has-text("Download")')
+    .count();
+  if (offers !== 0) {
+    throw new Error(`${offers} download or preview affordance(s) on a record with no file`);
+  }
+
+  // And the detail metadata says which kind of record it is.
+  const detail = await page.getByRole('dialog').innerText();
+  if (!detail.includes('SIMULATED — demonstration data')) {
+    throw new Error('the document details do not state the record is demonstration data');
+  }
+  await page.keyboard.press('Escape');
+});
+
 await step('calendar shows jobs, multi-day service and leave', async () => {
   await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });

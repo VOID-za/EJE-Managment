@@ -659,7 +659,16 @@ const DocumentPreview = ({
           instead of a dead button. A seeded document still has no bytes and
           says so.
         */}
-        {document !== null && (
+        {/*
+          AND NOT OFFERED AT ALL WHERE THERE IS NOTHING TO DOWNLOAD.
+          October mandate §1.2: a button that fetches a 404 and reports the
+          server's refusal is better than a dead one, and NO BUTTON is better
+          than both — the record is demonstration metadata, nothing is
+          missing, and offering a download invites somebody to go looking for
+          a file that was never meant to exist. The panel above says so in
+          words instead.
+        */}
+        {document !== null && storedFile(document) && (
           <DownloadFileButton
             href={library.fileUrl(document.id)}
             fallbackName={document.fileName}
