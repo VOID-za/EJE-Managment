@@ -10,6 +10,13 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { encryptFile, keyFingerprint } from './crypto';
+import { filesUnder } from './archive';
+import {
+  resolveReferences,
+  scansForReferences,
+  unresolved,
+  type StorageReference,
+} from './references';
 import {
   BackupRefused,
   buildManifest,
@@ -17,6 +24,7 @@ import {
   redactSecrets,
   type ArtefactRecord,
   type BackupPlan,
+  type DanglingReference,
 } from './plan';
 
 /**
@@ -77,6 +85,55 @@ const seal = async (
     sha256: encrypted.sha256,
     plainSha256: encrypted.plainSha256,
   };
+};
+
+/**
+ * Every storage key the database refers to, and which table refers to it.
+ *
+ * READ FROM `information_schema` RATHER THAN A LIST IN THIS FILE, for the same
+ * reason the restore test does it: a table that gains a `storage_key` column
+ * later is covered without anybody remembering to come back here. Five tables
+ * carry one today.
+ *
+ * A failure to read them is NOT fatal to the backup. The dump and the archive
+ * are what a restore needs; this list only tells a later restore test which
+ * references were already dangling, and a backup that refused itself over a
+ * missing nicety would be a worse outcome than one whose manifest says less.
+ */
+const referencedStorageKeys = (
+  databaseUrl: string,
+): { readonly keys: readonly StorageReference[]; readonly read: boolean } => {
+  const tables = spawnSync(
+    'psql',
+    [
+      databaseUrl,
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-At',
+      '-c',
+      "SELECT table_name FROM information_schema.columns WHERE column_name = 'storage_key' " +
+        "AND table_schema = 'public' ORDER BY 1",
+    ],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  );
+  if (tables.status !== 0) return { keys: [], read: false };
+
+  const keys: StorageReference[] = [];
+  for (const table of (tables.stdout ?? '')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .filter(scansForReferences)) {
+    const rows = spawnSync(
+      'psql',
+      [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-At', '-c', `SELECT storage_key FROM public.${table}`],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (rows.status !== 0) return { keys: [], read: false };
+    for (const storageKey of (rows.stdout ?? '').split('\n').filter((line) => line.length > 0)) {
+      keys.push({ table, storageKey });
+    }
+  }
+  return { keys, read: true };
 };
 
 /** Every file under a directory, recursively. The count the archive must match. */
@@ -186,6 +243,22 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
   }
 
   /*
+   * ---- which references the store cannot produce, RIGHT NOW ---------------
+   *
+   * Taken before the plaintext is sealed, against the live storage directory
+   * the archive was just made from — so what is recorded is the state of the
+   * deployment at the moment of the backup rather than a guess made later.
+   */
+  const referenced = referencedStorageKeys(plan.databaseUrl);
+  const onDisk = storageMissing ? new Set<string>() : new Set(await filesUnder(plan.storageRoot));
+  const resolved = resolveReferences(referenced.keys, onDisk);
+  const dangling: readonly DanglingReference[] = unresolved(resolved).map((entry) => ({
+    table: entry.table,
+    storageKey: entry.storageKey,
+    verdict: entry.verdict,
+  }));
+
+  /*
    * ---- encryption ---------------------------------------------------------
    *
    * BACKUP-2. Last, so that everything above it — the readable dump, the
@@ -206,6 +279,9 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     artefacts,
     appCommit: appCommit(),
     keyFingerprint: keyFingerprint(plan.key),
+    ...(referenced.read
+      ? { referencedKeys: referenced.keys.length, danglingReferences: dangling }
+      : {}),
   });
   writeFileSync(join(plan.destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, {
     mode: 0o600,
@@ -215,6 +291,12 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     `backup   ${plan.destination}\n` +
       `backup   database ${plan.databaseName}, ${manifest.artefacts[0]?.bytes ?? 0} bytes\n` +
       `backup   documents ${storedFiles} files, ${manifest.artefacts[1]?.bytes ?? 0} bytes\n` +
+      (referenced.read
+        ? `backup   ${referenced.keys.length} storage key(s) referenced, ${dangling.length} ` +
+          'with no file — recorded in the manifest so a restore test can tell them from ' +
+          'documents this backup loses\n'
+        : 'backup   WARNING: the storage keys could not be read, so the manifest records none. ' +
+          'A restore test will have to be told which missing documents were already missing.\n') +
       `backup   encrypted aes-256-gcm, key ${manifest.encryption.keyFingerprint}\n` +
       'backup   NOT restore-tested yet — run: npm run backup:restore-test ' +
       `${plan.destination}\n`,

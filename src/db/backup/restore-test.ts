@@ -1,11 +1,20 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { extractArchiveSafely } from './archive';
 import { recordVerification, verifyInto } from './integrity';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
+import {
+  describeReferences,
+  partitionOrphans,
+  referenceId,
+  resolveReferences,
+  scansForReferences,
+  unresolved,
+  type StorageReference,
+} from './references';
 import {
   assertSafeToDrop,
   claimScratchDatabase,
@@ -249,15 +258,69 @@ const main = async (): Promise<void> => {
     if (!keyTables.ok) throw new BackupRefused(`could not read the restored schema: ${keyTables.stderr}`);
 
     const present = new Set(files);
-    const orphans: string[] = [];
-    let referenced = 0;
-    for (const table of keyTables.stdout.split('\n').filter((line) => line.length > 0)) {
+    const references: StorageReference[] = [];
+    for (const table of keyTables.stdout
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .filter(scansForReferences)) {
       const keys = psql(target, `SELECT storage_key FROM public.${table}`);
       if (!keys.ok) throw new BackupRefused(`could not read ${table}: ${keys.stderr}`);
-      for (const key of keys.stdout.split('\n').filter((line) => line.length > 0)) {
-        referenced += 1;
-        if (!present.has(key)) orphans.push(`${table}:${key}`);
+      for (const storageKey of keys.stdout.split('\n').filter((line) => line.length > 0)) {
+        references.push({ table, storageKey });
       }
+    }
+
+    /*
+     * RESOLUTION IS THE ADAPTER'S OWN, AND THAT IS THE FIX. BACKUP-1.
+     *
+     * This used to be `present.has(key)` — a storage key against a file name.
+     * The store writes `<key>.bin` and `<key>.json`, so it matched NOTHING and
+     * every reference in the database was reported as a missing document: the
+     * "25 document references without corresponding stored files" an operator
+     * saw on a deployment whose documents were mostly there. A check that
+     * fails on a healthy backup gets switched off with
+     * EJE_RESTORE_ALLOW_ORPHANS, and then it is not a check.
+     */
+    const resolvedReferences = resolveReferences(references, present);
+    const orphanRefs = unresolved(resolvedReferences);
+    const referenced = references.length;
+
+    /*
+     * AND WHAT IS LEFT IS DIVIDED BY WHOSE FAULT IT IS. The backup recorded
+     * the references that had no file at the moment it ran; anything missing
+     * now that is NOT on that list was lost between then and here, which is
+     * fatal however the flags are set.
+     */
+    const recordedDangling = new Set(
+      (manifest.danglingReferences ?? []).map((entry) => referenceId(entry)),
+    );
+    const knowsWhatWasDangling = manifest.danglingReferences !== undefined;
+    const partition = partitionOrphans(orphanRefs, recordedDangling);
+    const orphans = orphanRefs.map((entry) => referenceId(entry));
+
+    /*
+     * THE WHOLE LIST, IN A FILE, rather than three examples in a sentence. An
+     * operator deciding whether a document is genuinely gone needs to see
+     * which ones, and a message truncated to three cannot tell them.
+     */
+    if (orphanRefs.length > 0) {
+      const reportPath = join(directory, 'unresolved-references.json');
+      writeFileSync(
+        reportPath,
+        `${JSON.stringify(
+          {
+            checkedAt: now.toISOString(),
+            referenced,
+            resolved: referenced - orphanRefs.length,
+            alreadyMissingWhenTaken: partition.preExisting,
+            lostByThisBackup: partition.lost,
+          },
+          null,
+          2,
+        )}\n`,
+        { mode: 0o600 },
+      );
+      process.stdout.write(`restore  every unresolved reference is listed in ${reportPath}\n`);
     }
     /*
      * ORPHANS ARE A FAILURE, AND THE FLAG DOES NOT MAKE THEM PASS QUIETLY.
@@ -271,16 +334,42 @@ const main = async (): Promise<void> => {
      * manifest, because a restore test whose record cannot be told apart from a
      * clean one is worth nothing.
      */
+    process.stdout.write(
+      `${describeReferences({
+        total: referenced,
+        resolvedCount: referenced - orphanRefs.length,
+        partition,
+      })
+        .split('\n')
+        .map((line) => `restore  ${line}`)
+        .join('\n')}\n`,
+    );
+
+    /*
+     * A DOCUMENT THIS BACKUP LOST IS ALWAYS FATAL, and no flag changes that.
+     *
+     * `EJE_RESTORE_ALLOW_ORPHANS` survives for one narrower job: a manifest
+     * written before the dangling list existed knows nothing, so everything
+     * missing reads as lost, and an operator who KNOWS the deployment was
+     * seeded rather than worked in can say so. It cannot excuse a document
+     * that the backup's own manifest says was there.
+     */
     const allowOrphans = (process.env.EJE_RESTORE_ALLOW_ORPHANS ?? '').trim() === 'yes';
-    if (orphans.length > 0 && !allowOrphans) {
+    if (partition.lost.length > 0 && !(allowOrphans && !knowsWhatWasDangling)) {
       throw new BackupRefused(
-        `${orphans.length} of ${referenced} restored row(s) point at documents that are not in ` +
-          `the backup — for example ${orphans.slice(0, 3).join(', ')}. THIS IS THE FAILURE ` +
+        `${partition.lost.length} of ${referenced} restored row(s) point at documents that are ` +
+          'not in this backup and were not recorded as missing when it was taken — for example ' +
+          `${partition.lost.slice(0, 3).map(referenceId).join(', ')}. THIS IS THE FAILURE ` +
           'BACKUP-1 EXISTS TO PREVENT: the database came back and a signed job card did not. ' +
-          'If these rows were ALREADY dangling before the backup was taken — which is true of ' +
-          'a development database that was seeded rather than worked in — re-run with ' +
-          'EJE_RESTORE_ALLOW_ORPHANS=yes, and the count will be recorded in the manifest ' +
-          'rather than hidden.',
+          `The full list is in ${join(directory, 'unresolved-references.json')}. ` +
+          (knowsWhatWasDangling
+            ? 'This backup DID record which references were already dangling, and these are not ' +
+              'among them, so they were lost between the backup and now. Do not accept this ' +
+              'backup as a restore point for those documents.'
+            : 'This backup predates that record, so nothing can be called pre-existing on its ' +
+              'evidence. If the deployment was seeded rather than worked in, re-run with ' +
+              'EJE_RESTORE_ALLOW_ORPHANS=yes and the count goes into the manifest rather than ' +
+              'being hidden.'),
       );
     }
 
@@ -293,19 +382,20 @@ const main = async (): Promise<void> => {
         `${files.length} document(s) unpacked; ${referenced} storage key(s) referenced, ` +
         (orphans.length === 0
           ? 'all resolved.'
-          : `${orphans.length} UNRESOLVED and accepted under EJE_RESTORE_ALLOW_ORPHANS.`),
+          : `${partition.preExisting.length} already missing when taken, ` +
+            `${partition.lost.length} unaccounted for` +
+            (partition.lost.length > 0 ? ' and ACCEPTED UNDER EJE_RESTORE_ALLOW_ORPHANS.' : '.')),
     });
 
     process.stdout.write(
       `restore  ${directory}\n` +
         `restore  dump restored into ${scratch} on the same server, then dropped\n` +
         `restore  ${counts.join('  ')}\n` +
-        `restore  ${files.length} document(s), ${referenced} storage key(s), ` +
-        `${orphans.length} missing\n` +
-        (orphans.length === 0
+        `restore  ${files.length} document(s) unpacked\n` +
+        (partition.lost.length === 0
           ? ''
-          : `restore  WARNING: ${orphans.length} storage key(s) did not resolve, accepted ` +
-            'under EJE_RESTORE_ALLOW_ORPHANS and recorded in the manifest\n') +
+          : `restore  WARNING: ${partition.lost.length} storage key(s) were lost and accepted ` +
+            'under EJE_RESTORE_ALLOW_ORPHANS; the manifest records that\n') +
         'restore  RESTORE-TESTED — recorded in manifest.json\n',
     );
   } finally {

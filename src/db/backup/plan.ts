@@ -207,6 +207,25 @@ export interface VerificationRecord {
   readonly detail: string;
 }
 
+/**
+ * A storage key the DATABASE referred to and the STORE could not produce, at
+ * the moment the backup ran. BACKUP-1.
+ *
+ * Recorded so a later restore test can tell two things apart that look
+ * identical afterwards: a document this backup LOST, and a document that was
+ * already missing before it ran. Both are real situations here — a key
+ * allocated with no bytes behind it (the photo capture paths do that), and a
+ * seeded demonstration job card whose PDF is rendered on first download — and
+ * without this list the only way to get a restore test to pass was a flag that
+ * accepted every missing document silently.
+ */
+export interface DanglingReference {
+  readonly table: string;
+  readonly storageKey: string;
+  /** `bytes_missing` or `sidecar_missing`; see `references.ts`. */
+  readonly verdict: string;
+}
+
 export interface BackupManifest {
   readonly takenAt: string;
   readonly databaseName: string;
@@ -218,6 +237,18 @@ export interface BackupManifest {
   readonly appCommit: string;
   /** BACKUP-2. Present on every backup this command writes; there is no plaintext path. */
   readonly encryption: EncryptionRecord;
+  /** How many storage keys the database held when this ran. */
+  readonly referencedKeys?: number;
+  /**
+   * The ones that did not resolve, in full rather than as a count.
+   *
+   * In full on purpose: a count tells a restore test how many to expect and
+   * nothing about WHICH, so it could not tell a different missing document
+   * from the same one. Absent on a manifest written before this existed, and
+   * the restore test treats that absence as "nothing is known" rather than as
+   * "nothing was dangling".
+   */
+  readonly danglingReferences?: readonly DanglingReference[];
   /**
    * Said out loud in the manifest itself, not only in the documentation.
    *
@@ -244,6 +275,8 @@ export const buildManifest = (input: {
   readonly artefacts: readonly ArtefactRecord[];
   readonly appCommit: string;
   readonly keyFingerprint: string;
+  readonly referencedKeys?: number;
+  readonly danglingReferences?: readonly DanglingReference[];
 }): BackupManifest => ({
   takenAt: input.now.toISOString(),
   databaseName: input.plan.databaseName,
@@ -252,6 +285,10 @@ export const buildManifest = (input: {
   artefacts: input.artefacts,
   appCommit: input.appCommit,
   encryption: { algorithm: 'aes-256-gcm', keyFingerprint: input.keyFingerprint },
+  ...(input.referencedKeys === undefined ? {} : { referencedKeys: input.referencedKeys }),
+  ...(input.danglingReferences === undefined
+    ? {}
+    : { danglingReferences: input.danglingReferences }),
   notVerifiedBy:
     'This backup is encrypted and its checksums are recorded, but NO RESTORE has been ' +
     'performed against it. Run `npm run backup:restore-test <directory>` to prove it can be ' +
