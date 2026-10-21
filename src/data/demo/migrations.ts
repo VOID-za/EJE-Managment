@@ -375,6 +375,30 @@ const v18ToV19 = (data: Loose): Loose => ({
   machineDocuments: Array.isArray(data.machineDocuments) ? data.machineDocuments : [],
 });
 
+/**
+ * v19 -> v20. BD-02.
+ *
+ * Corrections to issued job cards. Nothing derives them and nothing is
+ * seeded, so the step only has to make the collection EXIST — the same lesson
+ * `customerDocuments` taught at v18, where the key was introduced by a step
+ * that did not create it and the first customer screen after an upgrade threw
+ * on `undefined.filter`.
+ */
+const v19ToV20 = (data: Loose): Loose => ({
+  ...data,
+  jobCorrections: Array.isArray(data.jobCorrections) ? data.jobCorrections : [],
+});
+
+/**
+ * v20 -> v21. BD-06. The collection has to exist; nothing derives it.
+ */
+const v20ToV21 = (data: Loose): Loose => ({
+  ...data,
+  unsignedDeliveryAuthorisations: Array.isArray(data.unsignedDeliveryAuthorisations)
+    ? data.unsignedDeliveryAuthorisations
+    : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -387,6 +411,8 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   16: v16ToV17,
   17: v17ToV18,
   18: v18ToV19,
+  19: v19ToV20,
+  20: v20ToV21,
 };
 
 /**

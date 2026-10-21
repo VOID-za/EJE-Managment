@@ -78,9 +78,32 @@ easiest to run them. Record the result against the criterion in
 | 9 | Sign out, then reopen the application and check with DevTools → Application → IndexedDB | `eje-job-cache` is empty: no jobs, no meta, no device pointer, no last place | PWA-6 |
 | 10 | Use it one-handed, with work gloves, outside in daylight | Every control is reachable and hittable; nothing is a 20px target; the screen is legible | ACC-PWA-6 |
 
-Check 10 is the one most likely to produce real work, and it is the one nobody
-can do from a desk. Write down what was awkward rather than whether it
-"passed".
+### The rest of the checklist — October mandate, Workstream D
+
+*Added 21 October 2026.* Checks 1–10 covered installation, the camera, offline
+capture and reconnect. The mandate asks for the rest of what only a device can
+answer, so these are checks 11–18. **Each one has a failure mode that a
+headless browser cannot see**, which is the test for whether it belongs here.
+
+| # | Do this | Pass looks like | Why a desk cannot answer it |
+|---|---|---|---|
+| 11 | **Refuse the camera.** First photograph on a fresh install: tap *Take photo* and press **Block** on Chrome's prompt | The application says the camera was not allowed and how to allow it. It does not sit on a spinner, and *Choose photo* still works | The prompt is Chrome's and appears once per origin per device |
+| 12 | **Allow it afterwards.** Chrome → site settings → Camera → Allow, return to the job | *Take photo* works without reinstalling or signing in again | Permission state lives in Chrome, not the app |
+| 13 | **Upload on a bad connection.** Take a photograph with one bar of signal | Progress is visible while it sends. If it fails, it says so and offers to retry THAT photograph — it does not silently drop it or appear to succeed | A throttled desk connection is not a bad mobile one |
+| 14 | **Sign with a finger, then a stylus, in both orientations.** Rotate the tablet mid-signature | The stroke follows the finger with no visible lag; the pad does not clear on rotation; the captured signature looks like the one that was drawn | Touch latency, palm rejection and the rotation event are device behaviour |
+| 15 | **The on-screen keyboard.** Open the completion write-up, tap into *Work performed*, type a long paragraph, scroll, then dismiss the keyboard | Nothing typed is lost. The field stays visible above the keyboard rather than behind it, and the page does not scroll away from the caret | The keyboard's height and the viewport resize differ by device and by keyboard app |
+| 16 | **A long form in portrait.** Complete a checklist of 20+ items, plus labour, travel and three parts, in portrait | Every control stays reachable, the save buttons do not end up under the keyboard, and nothing already entered scrolls out of reach | Portrait on a 10" rugged tablet is not 390×844 |
+| 17 | **Session expiry.** Leave the application open and untouched overnight, then tap something that writes | It says the session ended and asks for a sign-in; **anything unsent is still there afterwards**. It does not fail silently or discard the capture | Only real elapsed time expires a real session |
+| 18 | **Unsent work and a sign-out.** With captures held offline, sign out deliberately | It says what is unsent and whose it is, and does not discard it. After signing back in as the SAME technician it is still there; as a different one it is not offered | The warning and the per-owner store are only interesting on a shared device |
+
+**Record a result against every one.** A row with no result is not a pass, and
+checks 11, 13, 15 and 17 are the four most likely to find something: each
+depends on behaviour that belongs to Chrome, to the radio, to the keyboard app
+or to the clock rather than to this application.
+
+Checks 10 and 14 are the ones most likely to produce real work, and they are
+the ones nobody can do from a desk. Write down what was awkward rather than
+whether it "passed".
 
 **WHAT IS NOW MEASURED FROM A DESK, AND WHY IT DOES NOT REPLACE CHECK 10.**
 *Added 18 October 2026.* `npm run responsive-check` measures every screen at

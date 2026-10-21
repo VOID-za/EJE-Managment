@@ -1,8 +1,10 @@
 import type { Job } from '@/domain';
 import { renderJobCardPdf } from './job-card-pdf';
+import { renderCorrectionPdf } from './correction-pdf';
 import type { IsoDateTime } from '@/domain';
 import type {
   Clock,
+  CorrectionDocumentSource,
   FinalDocumentSource,
   GeneratedPdf,
   PdfService,
@@ -82,5 +84,16 @@ export class SimulatedPdfService implements PdfService {
 
   generatePartsNote(job: Job, variant: PdfVariant = 'preview'): Promise<GeneratedPdf> {
     return Promise.resolve(this.partsDescriptor(job, variant));
+  }
+
+  /**
+   * The correction addendum. BD-02.
+   *
+   * Drawn by `renderCorrectionPdf`, which shares `pdf-sheet.ts` with the job
+   * card so the two are visibly the same company's paper and nothing else. It
+   * is given no job, so it cannot re-draw one.
+   */
+  renderCorrection(source: CorrectionDocumentSource, fileName: string): Promise<RenderedPdf> {
+    return Promise.resolve(renderCorrectionPdf(source, fileName));
   }
 }

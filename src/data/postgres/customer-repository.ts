@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
+  asProvenance,
   asContactId,
   asCustomerId,
   asSiteId,
@@ -42,7 +43,7 @@ const toDomainCustomerDocument = (row: CustomerDocumentRow): CustomerDocument =>
   checksumSha256: row.checksumSha256,
   uploadedAt: row.uploadedAt,
   uploadedBy: asUserId(row.uploadedBy ?? ''),
-  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
+  provenance: asProvenance(row.provenance),
   archivedAt: row.archivedAt,
 });
 

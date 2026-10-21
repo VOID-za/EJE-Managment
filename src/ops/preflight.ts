@@ -7,6 +7,7 @@ import {
   checkBackupKey,
   checkDatabaseTarget,
   checkDemoSwitcher,
+  checkDeployment,
   checkEmail,
   checkMigrations,
   checkRuntime,
@@ -202,6 +203,8 @@ const main = async (): Promise<void> => {
     ...checkStorage(storageFacts((env.EJE_STORAGE_DIR ?? '').trim())),
     ...checkBackupKey(env),
     ...checkEmail(env, (env.EJE_PERSISTENCE ?? '').trim().toLowerCase() === 'demo'),
+    // Which deployment this is, before the feature that depends on it.
+    ...checkDeployment(env),
     ...checkDemoSwitcher(env),
   );
 

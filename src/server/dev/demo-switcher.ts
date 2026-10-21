@@ -2,6 +2,7 @@ import 'server-only';
 import type { PersistenceBackend } from '@/data/backend';
 import type { RepositoryBundle } from '@/data/repositories';
 import { classifyDatabaseUrl } from '@/db/connection-guard';
+import { isDeclaredProduction } from '@/ops/deployment-mode';
 import { DEMO_PASSWORD, seedPeople } from '@/db/seed/people';
 import { DEMO_PASSWORD as IN_MEMORY_DEMO_PASSWORD } from '@/server/auth/demo-store';
 
@@ -21,8 +22,12 @@ import { DEMO_PASSWORD as IN_MEMORY_DEMO_PASSWORD } from '@/server/auth/demo-sto
  * authorization rule then applies exactly as it always does, because there is
  * only one kind of session.
  *
- * THREE THINGS KEEP IT OUT OF A LIVE DEPLOYMENT, and all three must hold:
+ * FOUR THINGS KEEP IT OUT OF A LIVE DEPLOYMENT, and all of them must hold:
  *
+ *  0. The deployment must not have DECLARED ITSELF production.
+ *     `EJE_DEPLOYMENT=production` turns this off outright and nothing below
+ *     can turn it back on — see `isDemoSwitcherEnabled` and
+ *     `src/ops/deployment-mode.ts`.
  *  1. The deployment must not be running as production — OR must have named
  *     its own database in `EJE_DEMO_SWITCHER`. See below; that second door
  *     exists for the staging site and nothing else.
@@ -71,10 +76,26 @@ export const DEMO_SWITCHER = 'EJE_DEMO_SWITCHER';
 export interface SwitcherEnvironment {
   readonly NODE_ENV?: string | undefined;
   readonly EJE_DEMO_SWITCHER?: string | undefined;
+  readonly EJE_DEPLOYMENT?: string | undefined;
   readonly DATABASE_URL?: string | undefined;
+  /** As `PreflightEnvironment` and `DeploymentEnvironment`: `process.env` fits. */
+  readonly [key: string]: string | undefined;
 }
 
 export const isDemoSwitcherEnabled = (env: SwitcherEnvironment = process.env): boolean => {
+  /*
+   * A DEPLOYMENT THAT CALLS ITSELF PRODUCTION NEVER GETS THIS, and the refusal
+   * is FIRST so that nothing below can argue with it. October mandate,
+   * Workstream A: "The production application must validate the configured
+   * database and environment before enabling demonstration features."
+   *
+   * It is checked before the `NODE_ENV` escape hatch on purpose. A production
+   * deployment running a development build — somebody debugging on the live
+   * machine — is exactly when the old condition would have handed out
+   * one-click sign-in to five accounts whose password is in this repository.
+   */
+  if (isDeclaredProduction(env)) return false;
+
   // Not a production build: a developer's own machine, and `npm test`.
   if ((env.NODE_ENV ?? '').toLowerCase() !== 'production') return true;
 

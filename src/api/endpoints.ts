@@ -11,6 +11,9 @@ import type {
   Customer,
   Job,
   CaptureReferral,
+  CorrectedArea,
+  DeliveryRecord,
+  JobCorrection,
   Machine,
   MachineDocument,
   MediaVisibility,
@@ -355,8 +358,15 @@ export const reads = {
 
 /* ---- commands ---------------------------------------------------------- */
 
-const jobAction = (jobId: string, action: string, body: unknown = {}) =>
-  command<Job>(`/api/jobs/${segment(jobId)}/${action}`, body);
+/**
+ * A job action, which answers with the job itself unless it says otherwise.
+ *
+ * Generic over the answer because not every action returns a `Job`: a
+ * correction returns the correction, and an authorised delivery returns what
+ * the provider said. The default keeps every existing call site unchanged.
+ */
+const jobAction = <T = Job>(jobId: string, action: string, body: unknown = {}) =>
+  command<T>(`/api/jobs/${segment(jobId)}/${action}`, body);
 
 export const jobs = {
   create: (input: unknown) => command<Job>('/api/jobs', input),
@@ -548,7 +558,68 @@ export const jobs = {
     }
     return { fileName: file.fileName, contentType: file.contentType, bytes };
   },
+
+  /* -- correcting a job card EJE have already issued. BD-02, IMMUT-9. ----- */
+
+  /**
+   * A Master raises a correction. The original is untouched; the server
+   * refuses anybody else and refuses a job that has issued nothing.
+   */
+  raiseCorrection: (
+    jobId: string,
+    input: {
+      readonly reason: string;
+      readonly narrative: string;
+      readonly areas: readonly CorrectedArea[];
+      readonly acknowledgementRequired: boolean;
+    },
+  ) => jobAction<JobCorrectionRow>(jobId, 'raise_correction', input),
+
+  /** The office records that the customer acknowledged one. Write-once. */
+  acknowledgeCorrection: (
+    jobId: string,
+    input: {
+      readonly correctionId: string;
+      readonly acknowledgedBy: string;
+      readonly method: string;
+      readonly note: string;
+    },
+  ) => jobAction<JobCorrectionRow>(jobId, 'acknowledge_correction', input),
+
+  /**
+   * The addendum's bytes. A POST although it reads, for the reason
+   * `finalDocument` is: opening a document is audited.
+   */
+  correctionDocument: async (jobNumber: string, correctionId: string) => {
+    const file = await apiPost<{
+      fileName: string;
+      contentType: string;
+      base64: string;
+      sequence: number;
+    }>(`/api/documents/${segment(jobNumber)}/corrections/${segment(correctionId)}`);
+    const binary = atob(file.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return { fileName: file.fileName, contentType: file.contentType, bytes };
+  },
+
+  /* -- sending a job card the customer did not sign. BD-06, DELIV-7. ------ */
+
+  /** A Master authorises it, with a reason, and it is sent. */
+  authoriseUnsignedDelivery: (jobId: string, reason: string) =>
+    jobAction<{ readonly delivery: DeliveryRecord }>(jobId, 'authorise_unsigned_delivery', {
+      reason,
+    }),
+
+  /** A retry of a failed send. No second authorisation; the decision stands. */
+  retryUnsignedDelivery: (jobId: string) =>
+    jobAction<{ readonly delivery: DeliveryRecord }>(jobId, 'retry_unsigned_delivery', {}),
 };
+
+/** A correction as it leaves the server: never a storage key. */
+export type JobCorrectionRow = Omit<JobCorrection, 'documentStorageKey'>;
 
 export interface RemovalOutcome {
   readonly removed: 'deleted' | 'archived';

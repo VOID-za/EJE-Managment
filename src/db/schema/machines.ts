@@ -159,7 +159,7 @@ export const machinePhotos = pgTable(
   (table) => [
     index('machine_photos_machine_idx').on(table.machineId, table.uploadedAt),
     uniqueIndex('machine_photos_storage_key_key').on(table.storageKey),
-    check('machine_photos_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
+    check('machine_photos_provenance_known', sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`),
   ],
 );
 
@@ -220,7 +220,7 @@ export const machineDocuments = pgTable(
     ),
     check(
       'machine_documents_provenance_known',
-      sql`${table.provenance} in ('genuine', 'simulated')`,
+      sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`,
     ),
   ],
 );

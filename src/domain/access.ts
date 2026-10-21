@@ -203,7 +203,43 @@ export type Capability =
    * it? The office — Master and Coordinator — may. A technician may see their
    * OWN referrals, which needs no capability because it is their own work.
    */
-  | 'captures.resolveReferral';
+  | 'captures.resolveReferral'
+
+  /**
+   * RAISE A CORRECTION TO AN ISSUED JOB CARD. BD-02, IMMUT-9, AUD-3.
+   *
+   * MASTER ONLY, and that is the owner's rule rather than a choice made here:
+   * "A Master can initiate a correction/addendum linked to the original job
+   * card." It is the narrowest permission that does the job — not
+   * `jobs.editSubmittedJob`, which is about a job card that has not been
+   * issued, and emphatically not a way to edit an issued one, which nothing
+   * has.
+   *
+   * A Coordinator may READ a correction and may RECORD the customer's
+   * acknowledgement of one (see below). What she may not do is decide that a
+   * document EJE have issued says the wrong thing.
+   */
+  | 'jobs.raiseCorrection'
+
+  /**
+   * Record that the customer has acknowledged a correction.
+   *
+   * THE OFFICE, both of them, because this is clerical: somebody telephoned
+   * the customer, the customer said they had seen it, and that fact is written
+   * down. Deciding a correction is needed is a Master's; writing down what the
+   * customer said is the office's.
+   */
+  | 'jobs.recordCorrectionAcknowledgement'
+
+  /**
+   * AUTHORISE SENDING A JOB CARD THE CUSTOMER DID NOT SIGN. BD-06.
+   *
+   * MASTER ONLY, and the owner's rule again: "A Master must explicitly
+   * authorise any exceptional delivery." Closing a job without a signature is
+   * the Coordinator's (`jobs.resolveSignatureRefusal`); deciding that the
+   * customer should nevertheless be sent the unsigned document is not.
+   */
+  | 'jobs.authoriseUnsignedDelivery';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -236,6 +272,11 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'settings.manage',
   'activity.viewAll',
   'captures.resolveReferral',
+  // A document EJE have issued says the wrong thing: BD-02. Master's alone.
+  'jobs.raiseCorrection',
+  'jobs.recordCorrectionAcknowledgement',
+  // Sending a job card the customer did not sign: BD-06. Master's alone.
+  'jobs.authoriseUnsignedDelivery',
 ];
 
 /**
@@ -282,6 +323,14 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'activity.viewAll',
   // The office deals with work a tablet could not get onto a job. BD-15.
   'captures.resolveReferral',
+  /*
+   * SHE RECORDS THE CUSTOMER'S ACKNOWLEDGEMENT, AND DOES NOT RAISE THE
+   * CORRECTION. BD-02. Deciding that an issued document is wrong is a
+   * Master's; writing down that the customer has seen the correction is
+   * clerical work the office does, and making her fetch a Master for it would
+   * mean the acknowledgement simply does not get recorded.
+   */
+  'jobs.recordCorrectionAcknowledgement',
 ];
 
 /**

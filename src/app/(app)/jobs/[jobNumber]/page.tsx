@@ -34,6 +34,8 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { ChecklistRunner } from '@/components/jobs/ChecklistRunner';
 import { CompletionReportPanel } from '@/components/jobs/CompletionReportPanel';
 import { FinalDocumentCard } from '@/components/jobs/FinalDocumentCard';
+import { JobCorrectionsPanel } from '@/components/jobs/JobCorrectionsPanel';
+import { UnsignedDeliveryPanel } from '@/components/jobs/UnsignedDeliveryPanel';
 import { CompleteJobWizard } from '@/components/jobs/CompleteJobWizard';
 import { JobActionBar } from '@/components/jobs/JobActionBar';
 import { JobMediaPanel } from '@/components/jobs/JobMediaPanel';
@@ -301,6 +303,29 @@ const JobDetailPage = ({
       {/* A closed job's first business is its official job card, so the
           document and its actions come before the record itself. */}
       {job.status === 'closed' && <FinalDocumentCard job={job} users={users} />}
+
+      {/*
+        AND THEN WHAT EJE HAVE SAID ABOUT IT SINCE. BD-06 before BD-02,
+        deliberately: "nothing has been sent to the customer" is the more
+        urgent fact, and a correction is read against a document somebody has.
+      */}
+      {job.status === 'closed' && job.signature === null && job.finalDocument !== null && (
+        <UnsignedDeliveryPanel
+          job={job}
+          authorisation={view.unsignedDeliveryAuthorisation}
+          users={users}
+          onChanged={refresh}
+        />
+      )}
+
+      {job.finalDocument !== null && (
+        <JobCorrectionsPanel
+          job={job}
+          corrections={view.corrections}
+          users={users}
+          onChanged={refresh}
+        />
+      )}
 
       {job.status === 'cancelled' && job.cancellation !== null && (
         <Card className="mb-5 border-signal-300 bg-signal-50">

@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { cents, createdAt, instant, primaryId, provenance } from './columns';
+import { bigintNumber, cents, createdAt, instant, primaryId, provenance } from './columns';
 import { deliveryState, outboxChannel } from './enums';
 import { jobs } from './jobs';
 import { users } from './identity';
@@ -71,7 +71,7 @@ export const finalDocuments = pgTable(
     uniqueIndex('final_documents_job_key').on(table.jobId),
     uniqueIndex('final_documents_storage_key_key').on(table.storageKey),
     check('final_documents_page_count_positive', sql`${table.pageCount} >= 1`),
-    check('final_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
+    check('final_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`),
   ],
 );
 
@@ -197,5 +197,157 @@ export const messageOutbox = pgTable(
     index('message_outbox_job_idx')
       .on(table.jobId)
       .where(sql`${table.jobId} is not null`),
+  ],
+);
+
+/**
+ * WHEN THIS DATABASE BEGAN RECORDING PROVENANCE. October mandate §1.3.
+ *
+ * One row, written by migration 0018. Everything created before
+ * `recorded_from` took the provenance column's original `genuine` default and
+ * was therefore never recorded as anything; everything after it was written by
+ * code that states the value.
+ *
+ * IT EXISTS BECAUSE `final_documents` IS WRITE-ONCE. The other five tables
+ * carrying provenance had their pre-0015 rows relabelled `unknown` in place.
+ * A job card cannot be — `refuse_mutation()` refuses UPDATE on it, and that
+ * refusal is one of the protections CR-01 rests on — and the trigger's own
+ * message says what to do instead: "correct it by adding a new record". This
+ * is that record, and `documents:reconcile` reads it rather than trusting a
+ * backfilled label.
+ */
+export const provenanceRecording = pgTable('provenance_recording', {
+  /** Always `cutoff`. One row; the key exists so it stays one row. */
+  id: text('id').primaryKey(),
+  recordedFrom: instant('recorded_from').notNull(),
+  note: text('note').notNull().default(''),
+});
+
+/**
+ * A CORRECTION TO AN ISSUED JOB CARD. BD-02, IMMUT-9, AUD-3.
+ *
+ * APPEND-ONLY, with exactly one thing that may be filled in later: the
+ * customer's acknowledgement. The shape `signature_refusals` already uses, and
+ * for the same reason — what was raised is a historical fact, and what the
+ * customer then said is a later one.
+ *
+ * `corrects_document_id` points at a `final_documents` row, which is
+ * write-once. That is deliberate: a correction names an exact set of bytes the
+ * customer holds, not "whatever this job card says now". RESTRICT, so the
+ * document it corrects cannot be removed from under it.
+ *
+ * THE ADDENDUM HAS ITS OWN FILE. It is not a re-render of the job card: a
+ * re-render would be a different document wearing the original's date, which
+ * is the one thing a frozen job card exists to prevent.
+ */
+export const jobCorrections = pgTable(
+  'job_corrections',
+  {
+    id: primaryId(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'restrict' }),
+    /** 1 for the first correction to this job. Printed on the addendum. */
+    sequence: integer('sequence').notNull(),
+    correctsDocumentKey: text('corrects_document_key')
+      .notNull()
+      .references(() => finalDocuments.storageKey, { onDelete: 'restrict' }),
+    reason: text('reason').notNull(),
+    narrative: text('narrative').notNull(),
+    /** Which parts of the job card are affected. At least one; see the CHECK. */
+    areas: text('areas').array().notNull(),
+    raisedBy: uuid('raised_by').references(() => users.id),
+    raisedAt: instant('raised_at').notNull(),
+    /** `not_required`, `required` or `recorded`. See `AcknowledgementState`. */
+    acknowledgement: text('acknowledgement').notNull().default('not_required'),
+    acknowledgedBy: text('acknowledged_by'),
+    acknowledgementMethod: text('acknowledgement_method'),
+    acknowledgementRecordedBy: uuid('acknowledgement_recorded_by').references(() => users.id),
+    acknowledgementRecordedAt: instant('acknowledgement_recorded_at'),
+    acknowledgementNote: text('acknowledgement_note').notNull().default(''),
+
+    documentFileName: text('document_file_name').notNull(),
+    documentStorageKey: text('document_storage_key').notNull(),
+    documentSizeBytes: bigintNumber('document_size_bytes').notNull(),
+    documentChecksumSha256: text('document_checksum_sha256'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('job_corrections_job_sequence_key').on(table.jobId, table.sequence),
+    uniqueIndex('job_corrections_storage_key_key').on(table.documentStorageKey),
+    index('job_corrections_job_idx').on(table.jobId, table.raisedAt),
+    check('job_corrections_sequence_positive', sql`${table.sequence} >= 1`),
+    check('job_corrections_reason_present', sql`length(btrim(${table.reason})) > 0`),
+    check('job_corrections_narrative_present', sql`length(btrim(${table.narrative})) > 0`),
+    /*
+     * A correction that names no part of the job card is not a correction.
+     *
+     * `cardinality`, NOT `array_length(areas, 1)`: on an empty array the
+     * latter returns NULL, `NULL >= 1` is NULL, and a CHECK treats NULL as
+     * satisfied — so the first version of this accepted exactly the row it was
+     * written to refuse. Found by the db test, which is why it is there.
+     */
+    check('job_corrections_areas_present', sql`cardinality(${table.areas}) >= 1`),
+    check('job_corrections_size_positive', sql`${table.documentSizeBytes} > 0`),
+    check(
+      'job_corrections_acknowledgement_known',
+      sql`${table.acknowledgement} in ('not_required', 'required', 'recorded')`,
+    ),
+    /*
+     * RECORDED MEANS RECORDED. The state and the detail cannot disagree: a row
+     * saying the customer acknowledged it must say who and how, and a row that
+     * does not say `recorded` must carry neither.
+     */
+    check(
+      'job_corrections_acknowledgement_consistent',
+      sql`(${table.acknowledgement} = 'recorded') =
+          (${table.acknowledgedBy} is not null and ${table.acknowledgementRecordedAt} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * A MASTER AUTHORISING THE SENDING OF A JOB CARD THE CUSTOMER DID NOT SIGN.
+ * BD-06, DELIV-7, AUD-4.
+ *
+ * APPEND-ONLY. One row per job — the authorisation is a decision about this
+ * job's unsigned document, and a retry of a failed send does not need a second
+ * one. What happened to each attempt lives on `job.delivery` and in the audit
+ * trail, which is where every other delivery attempt is recorded.
+ *
+ * WHY A TABLE RATHER THAN A FLAG ON THE JOB. Because the question somebody
+ * will ask in a year is "who decided to send this, and why" — and a boolean
+ * answers neither. `document_key` pins the exact bytes that were authorised,
+ * so an authorisation cannot be read as covering some later document.
+ */
+export const unsignedDeliveryAuthorisations = pgTable(
+  'unsigned_delivery_authorisations',
+  {
+    id: primaryId(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'restrict' }),
+    /** The bytes this authorises. A foreign key to the issued document. */
+    documentKey: text('document_key')
+      .notNull()
+      .references(() => finalDocuments.storageKey, { onDelete: 'restrict' }),
+    /** Where it may be sent. Taken from the document, never from a browser. */
+    recipient: text('recipient').notNull(),
+    /** Why the office is sending a document the customer declined to sign. */
+    reason: text('reason').notNull(),
+    authorisedBy: uuid('authorised_by').references(() => users.id),
+    authorisedAt: instant('authorised_at').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('unsigned_delivery_authorisations_job_key').on(table.jobId),
+    check(
+      'unsigned_delivery_authorisations_reason_present',
+      sql`length(btrim(${table.reason})) > 0`,
+    ),
+    check(
+      'unsigned_delivery_authorisations_recipient_present',
+      sql`length(btrim(${table.recipient})) > 0`,
+    ),
   ],
 );

@@ -1,4 +1,6 @@
 import type {
+  JobCorrection,
+  UnsignedDeliveryAuthorisation,
   ChecklistTemplate,
   Contact,
   Customer,
@@ -52,6 +54,25 @@ export interface JobView {
    * no checklist yet it is the current template for the job type.
    */
   readonly checklistTemplate: ChecklistTemplate | null;
+  /**
+   * CORRECTIONS TO THIS JOB CARD, oldest first. BD-02, IMMUT-9.
+   *
+   * Composed here rather than fetched by the browser, for the reason the
+   * customer's documents are: whether this viewer may see them is a server
+   * fact. Empty for a job that has issued nothing, which is almost every job,
+   * so the extra read costs nothing on the screens that do not show them.
+   *
+   * WITHOUT THE STORAGE KEY. The download route resolves it after deciding who
+   * is asking, and a key is not a way in.
+   */
+  readonly corrections: readonly Omit<JobCorrection, 'documentStorageKey'>[];
+  /**
+   * The Master's authorisation to send an UNSIGNED job card. BD-06, AUD-4.
+   *
+   * Null on every job that was signed, and on an unsigned one nobody has
+   * authorised — which is the state the panel exists to state plainly.
+   */
+  readonly unsignedDeliveryAuthorisation: UnsignedDeliveryAuthorisation | null;
   /**
    * Set when the job records a checklist version that is no longer held. The UI
    * must say so rather than quietly rendering today's wording.
@@ -153,6 +174,28 @@ export const loadJobView = async (
 
   const checklistVersionMissing = job.checklist !== null && historical === null;
 
+  /*
+   * WHAT EJE HAVE SAID ABOUT THIS JOB CARD SINCE ISSUING IT. BD-02, BD-06.
+   *
+   * Only for a job that HAS issued one. A job still in the workflow cannot
+   * have a correction and cannot have an unsigned-delivery authorisation, so
+   * asking would be two reads per job screen for an answer that is always
+   * empty.
+   *
+   * The corrections are visible to whoever may see the job at all, which is
+   * already decided above: the technician who did the work is the person who
+   * most needs to know it has been corrected.
+   */
+  const [corrections, unsignedDeliveryAuthorisation] =
+    job.finalDocument === null
+      ? ([[], null] as const)
+      : await Promise.all([
+          repos.jobs.listCorrections(job.id),
+          job.signature === null
+            ? repos.jobs.findUnsignedDeliveryAuthorisation(job.id)
+            : Promise.resolve(null),
+        ]);
+
   return {
     job,
     customer,
@@ -168,6 +211,8 @@ export const loadJobView = async (
     users,
     checklistTemplate,
     checklistVersionMissing,
+    corrections: corrections.map(({ documentStorageKey: _key, ...rest }) => rest),
+    unsignedDeliveryAuthorisation,
   };
 };
 

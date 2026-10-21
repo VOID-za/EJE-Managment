@@ -1,4 +1,5 @@
 import { classifyDatabaseUrl } from '@/db/connection-guard';
+import { DEPLOYMENT, deploymentMismatch, deploymentModeOf } from './deployment-mode';
 import { chooseEmailTransport, describeEmailConfiguration } from '@/services/production/email';
 import { readSmtpEmailConfiguration } from '@/services/development/email';
 
@@ -67,6 +68,7 @@ export interface PreflightEnvironment {
   readonly EJE_BACKUP_KEY?: string | undefined;
   readonly EJE_BACKUP_DIR?: string | undefined;
   readonly EJE_DEMO_SWITCHER?: string | undefined;
+  readonly EJE_DEPLOYMENT?: string | undefined;
   readonly EJE_BUILD_COMMIT?: string | undefined;
   readonly WHATSAPP_PHONE_NUMBER_ID?: string | undefined;
   readonly WHATSAPP_ACCESS_TOKEN?: string | undefined;
@@ -402,35 +404,133 @@ export const checkWhatsApp = (env: PreflightEnvironment): readonly Check[] => {
 };
 
 /**
+ * WHICH DEPLOYMENT THIS IS, AND WHETHER ITS DATABASE AGREES.
+ * October mandate, Workstream A.
+ *
+ * THE CHECK THIS REPLACED COULD NOT PASS. An armed demonstration switcher was
+ * an unconditional FAIL — correct for production, and wrong for
+ * `eje.syncza.co.za`, whose whole purpose is people signing in as the seeded
+ * accounts. A preflight that has to be overridden to deploy the deployment it
+ * was written for is a preflight nobody reads.
+ *
+ * So the deployment says which it is (`EJE_DEPLOYMENT`), and this reports the
+ * three things that can then be wrong: an undeclared deployment, a declared
+ * one whose database contradicts it, and a demonstration feature armed on
+ * production. See `src/ops/deployment-mode.ts` for why a declaration is the
+ * third line of defence rather than the first.
+ */
+export const checkDeployment = (env: PreflightEnvironment): readonly Check[] => {
+  const mode = deploymentModeOf(env);
+  const declared = value(env, DEPLOYMENT);
+  const checks: Check[] = [];
+
+  if (mode === 'undeclared') {
+    checks.push(
+      declared.length === 0
+        ? warn(
+            DEPLOYMENT,
+            'Not set, so this deployment has not said whether it is production or a ' +
+              'demonstration. Every guard behaves as it did before the line existed, which is ' +
+              'safe and leaves the demonstration switcher judged by its own configuration ' +
+              'alone. Set it to production or demonstration.',
+          )
+        : fail(
+            DEPLOYMENT,
+            'Set to something this application does not recognise, so it has been IGNORED ' +
+              'rather than guessed at. The two values are production and demonstration.',
+          ),
+    );
+  } else {
+    checks.push(
+      ok(DEPLOYMENT, `${mode} — declared rather than inferred from the build or the database name.`),
+    );
+  }
+
+  const mismatch = deploymentMismatch(env);
+  if (mismatch !== null) {
+    checks.push(fail('Deployment target', mismatch.reason));
+  }
+
+  return checks;
+};
+
+/**
  * THE DEMONSTRATION SIGN-IN SWITCH, which is the one setting that can turn a
  * real deployment into a public one.
  *
  * It is armed only when its value NAMES the configured database, which is the
  * mechanism rather than a word meaning yes — so this compares the two and says
  * so plainly when they match.
+ *
+ * WHAT THE DECLARED MODE CHANGES HERE. On a `production` deployment the
+ * switcher is refused by the RUNTIME whatever this file says
+ * (`isDemoSwitcherEnabled`), so an armed line there is reported as the
+ * configuration error it is rather than as a live exposure. On a
+ * `demonstration` deployment an armed switcher is the intended state and
+ * passes. Undeclared keeps the original, stricter reading: a deployment that
+ * has not said what it is gets the benefit of no doubt.
  */
 export const checkDemoSwitcher = (env: PreflightEnvironment): readonly Check[] => {
+  const mode = deploymentModeOf(env);
   const switcher = value(env, 'EJE_DEMO_SWITCHER');
-  if (switcher.length === 0) return [ok('EJE_DEMO_SWITCHER', 'Not set.')];
+
+  if (switcher.length === 0) {
+    if (mode === 'demonstration') {
+      return [
+        warn(
+          'EJE_DEMO_SWITCHER',
+          'Not set on a deployment that declares itself a demonstration, so nobody can sign in ' +
+            'as the seeded accounts. Set it to the name of this database if that is the point ' +
+            'of this deployment.',
+        ),
+      ];
+    }
+    return [ok('EJE_DEMO_SWITCHER', 'Not set.')];
+  }
 
   const url = value(env, 'DATABASE_URL');
   const databaseName = url.length === 0 ? '' : classifyDatabaseUrl(url).databaseName;
+  const armed = switcher === databaseName;
 
-  if (switcher === databaseName) {
+  if (mode === 'production') {
     return [
       fail(
         'EJE_DEMO_SWITCHER',
-        `ARMED for "${databaseName}": anybody reaching this deployment can sign in as the ` +
-          'seeded accounts whose password is published in the documentation. Remove the line ' +
-          'unless this is a demonstration deployment.',
+        'Set on a deployment that declares itself PRODUCTION. The runtime refuses to arm it ' +
+          `there — nobody can use it — but the line should not be in a production environment ` +
+          'file at all, because the next deployment to inherit this file may not declare itself.',
       ),
     ];
   }
+
+  if (!armed) {
+    return [
+      warn(
+        'EJE_DEMO_SWITCHER',
+        'Set, and it does not name the configured database, so it is inert. Remove it to avoid ' +
+          'arming it by accident the next time the database changes.',
+      ),
+    ];
+  }
+
+  if (mode === 'demonstration') {
+    return [
+      ok(
+        'EJE_DEMO_SWITCHER',
+        `Armed for "${databaseName}" on a deployment that declares itself a demonstration. ` +
+          'That is the intended configuration: one-click sign-in as the seeded accounts, whose ' +
+          'password is published. It must not be carried to a deployment holding real ' +
+          'customers — see docs/demonstration-data.md.',
+      ),
+    ];
+  }
+
   return [
-    warn(
+    fail(
       'EJE_DEMO_SWITCHER',
-      'Set, and it does not name the configured database, so it is inert. Remove it to avoid ' +
-        'arming it by accident the next time the database changes.',
+      `ARMED for "${databaseName}": anybody reaching this deployment can sign in as the ` +
+        'seeded accounts whose password is published in the documentation. Remove the line, or ' +
+        `declare this deployment with ${DEPLOYMENT}=demonstration if that is what it is.`,
     ),
   ];
 };

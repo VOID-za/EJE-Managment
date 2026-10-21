@@ -1,4 +1,6 @@
 import {
+  asCorrectedArea,
+  asProvenance,
   asAttachmentId,
   asContactId,
   asCustomerId,
@@ -10,11 +12,13 @@ import {
   emptyDelivery,
   type Attachment,
   type ChecklistInstance,
+  type CorrectedArea,
   type CustomerSignature,
   type DeliveryRecord,
   type FinalDocument,
   type Job,
   type JobCancellation,
+  type JobCorrection,
   type JobNote,
   type LabourEntry,
   type PartEntry,
@@ -48,6 +52,7 @@ type SignatureRow = typeof schema.jobSignatures.$inferSelect;
 type RefusalRow = typeof schema.signatureRefusals.$inferSelect;
 type SnapshotRow = typeof schema.pricingSnapshots.$inferSelect;
 type FinalDocumentRow = typeof schema.finalDocuments.$inferSelect;
+type CorrectionRow = typeof schema.jobCorrections.$inferSelect;
 type DeliveryAttemptRow = typeof schema.deliveryAttempts.$inferSelect;
 type TechnicianRow = typeof schema.jobTechnicians.$inferSelect;
 
@@ -158,6 +163,51 @@ export const refusalFrom = (row: RefusalRow): SignatureRefusal => ({
   resolutionNote: row.resolutionNote,
 });
 
+/**
+ * A CORRECTION TO AN ISSUED JOB CARD. BD-02.
+ *
+ * `areas` is read through the domain's own parser and anything unrecognised is
+ * DROPPED rather than carried: a correction printed with an area this build
+ * cannot label would say "undefined" on a customer's addendum. The CHECK
+ * constraint makes an empty result unreachable through the application, and if
+ * a hand-written row managed it the correction would read as affecting nothing
+ * — which is visible, unlike a silent mislabel.
+ */
+export const correctionFrom = (row: CorrectionRow): JobCorrection => ({
+  id: row.id,
+  jobId: asJobId(row.jobId),
+  sequence: row.sequence,
+  correctsDocumentKey: row.correctsDocumentKey,
+  reason: row.reason,
+  narrative: row.narrative,
+  areas: row.areas
+    .map((area) => asCorrectedArea(area))
+    .filter((area): area is CorrectedArea => area !== null),
+  raisedBy: asUserId(row.raisedBy ?? ''),
+  raisedAt: row.raisedAt,
+  acknowledgement:
+    row.acknowledgement === 'required'
+      ? 'required'
+      : row.acknowledgement === 'recorded'
+        ? 'recorded'
+        : 'not_required',
+  acknowledged:
+    row.acknowledgement === 'recorded' && row.acknowledgedBy !== null
+      ? {
+          acknowledgedBy: row.acknowledgedBy,
+          method: row.acknowledgementMethod ?? '',
+          recordedBy: asUserId(row.acknowledgementRecordedBy ?? ''),
+          recordedAt: row.acknowledgementRecordedAt ?? row.raisedAt,
+          note: row.acknowledgementNote,
+        }
+      : null,
+  documentFileName: row.documentFileName,
+  documentStorageKey: row.documentStorageKey,
+  documentSizeBytes: row.documentSizeBytes,
+  documentChecksumSha256: row.documentChecksumSha256,
+  createdAt: row.createdAt,
+});
+
 export const snapshotFrom = (row: SnapshotRow): PricingSnapshot => ({
   labourRates: {
     normal: row.labourNormalCents,
@@ -192,7 +242,7 @@ export const finalDocumentFrom = (row: FinalDocumentRow): FinalDocument => ({
   renderer: row.rendererVersion === 0 ? null : row.rendererVersion,
   // Unrecognised reads as `simulated`, which is the SAFE direction here: a
   // value nothing understands must not let a fixture pass as EJE's document.
-  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
+  provenance: asProvenance(row.provenance),
 });
 
 /**

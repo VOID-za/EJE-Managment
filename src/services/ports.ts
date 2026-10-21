@@ -1,4 +1,5 @@
 import type {
+  CorrectedArea,
   ChecklistTemplate,
   Contact,
   DeliveryState,
@@ -249,6 +250,56 @@ export interface PdfService {
     /** Stamped on the document, so a stored file renders identically every time. */
     generatedAt: IsoDateTime,
   ): Promise<RenderedPdf>;
+
+  /**
+   * THE CORRECTION ADDENDUM. BD-02, IMMUT-9, AUD-3.
+   *
+   * A SEPARATE METHOD RATHER THAN A VARIANT OF `render`, because it is a
+   * different document made of different facts: `render` takes a job and draws
+   * the job card, and a correction is a statement ABOUT a job card that must
+   * not re-draw it. Passing a job here would make it possible, one day, for a
+   * correction to be rendered from the job as it stands — which is the single
+   * thing a frozen job card exists to prevent.
+   */
+  renderCorrection(source: CorrectionDocumentSource, fileName: string): Promise<RenderedPdf>;
+}
+
+/**
+ * What an addendum is drawn from: the original by reference, and what the
+ * correction says. Never the job.
+ */
+export interface CorrectionDocumentSource {
+  readonly company: {
+    readonly name: string;
+    readonly address: string;
+    readonly contactLine: string;
+    readonly registrationLine: string;
+  };
+  readonly jobNumber: string;
+  readonly customerName: string;
+  readonly machineDescription: string;
+  readonly original: {
+    readonly fileName: string;
+    readonly issuedAt: string;
+    readonly signed: boolean;
+  };
+  readonly correction: {
+    readonly sequence: number;
+    readonly reason: string;
+    readonly narrative: string;
+    readonly areas: readonly CorrectedArea[];
+    readonly raisedBy: string;
+    readonly raisedAt: string;
+    readonly acknowledgementRequired: boolean;
+    readonly acknowledged: {
+      readonly by: string;
+      readonly method: string;
+      readonly at: string;
+      readonly note: string;
+    } | null;
+  };
+  /** True only for a demonstration job. Stamped on every page when it is. */
+  readonly simulated: boolean;
 }
 
 export interface StoredFile {

@@ -62,14 +62,20 @@ export const archivedAt = () => instant('archived_at');
  * (`Provenance`), and a value this application does not know must read as
  * unrecognised rather than need a migration.
  *
- * DEFAULT `genuine`, and that direction is deliberate. Every row that exists
- * now was written by the application or by the seed; the seed is being changed
- * to say `simulated` for its own rows, and nothing else may. A default of
- * `simulated` would silently label real customer documents as fixtures, which
- * is the one mistake here that could lose a real record.
+ * DEFAULT `unknown`, AND IT USED TO BE `genuine`. That change is the lesson of
+ * the two defects this column has already had: `JobRepository.save` and the
+ * machine-photograph insert each omitted the field, the `genuine` default
+ * filled it in, and the reconcile duly reported six demonstration job cards as
+ * LOST CUSTOMER DOCUMENTS. A default that makes a CLAIM turns a forgotten
+ * field into a false statement; a default that says "nobody recorded this"
+ * turns the same omission into a visible gap.
+ *
+ * `simulated` would be no better as a default, and worse in one direction: it
+ * would print SIMULATED across a real customer's paperwork. Every application
+ * path states the value, and `provenance-writes.db.test.ts` asserts that each
+ * one reaches the column.
  */
-export const provenance = () =>
-  text('provenance').notNull().default('genuine');
+export const provenance = () => text('provenance').notNull().default('unknown');
 
 /**
  * A byte count. `bigint` read as a JavaScript number.

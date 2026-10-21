@@ -740,7 +740,9 @@ const DocumentPreview = ({
                 'Record',
                 document.provenance === 'simulated'
                   ? 'SIMULATED — demonstration data'
-                  : 'EJE document',
+                  : document.provenance === 'unknown'
+                    ? 'Origin not recorded'
+                    : 'EJE document',
               ],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between gap-3 border-b border-steel-100 pb-2">

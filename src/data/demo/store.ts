@@ -8,12 +8,14 @@ import type {
   Customer,
   Contact,
   Job,
+  JobCorrection,
   Machine,
   MachineDocument,
   Site,
   AvailabilityRecord,
   SystemSettings,
   TechnicalDocument,
+  UnsignedDeliveryAuthorisation,
   DocumentTextIndex,
   ChatMessage,
   Conversation,
@@ -56,6 +58,10 @@ export interface DemoDatabase {
   customerDocuments: CustomerDocument[];
   /** Paper about ONE machine, as opposed to its photographs. Mandate §4. */
   machineDocuments: MachineDocument[];
+  /** Corrections to issued job cards. BD-02. Append-only in spirit here. */
+  jobCorrections: JobCorrection[];
+  /** A Master's authorisation to send an unsigned job card. BD-06. */
+  unsignedDeliveryAuthorisations: UnsignedDeliveryAuthorisation[];
   sites: Site[];
   contacts: Contact[];
   machines: Machine[];
@@ -166,7 +172,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 21;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -185,6 +191,10 @@ export const createSeededDatabase = (): DemoDatabase => ({
   customerDocuments: [],
   /** Empty for the same reason, and proved the same way: by a real upload. */
   machineDocuments: [],
+  /** Nothing is seeded: a correction is raised during a demonstration. */
+  jobCorrections: [],
+  /** Nothing is seeded: a Master authorises one during a demonstration. */
+  unsignedDeliveryAuthorisations: [],
   sites: seedSites.map((site) => ({ ...site })),
   contacts: seedContacts.map((contact) => ({ ...contact })),
   machines: seedMachines.map((machine) => ({ ...machine })),

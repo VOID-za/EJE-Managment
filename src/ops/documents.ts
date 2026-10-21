@@ -80,6 +80,22 @@ const argument = (name: string): string | null => {
  * records every LOOK at a document, including the looks that found nothing —
  * counting those would make the number grow each time this tool ran.
  */
+/**
+ * Every table carrying `provenance`, for the uncertainty count.
+ *
+ * Listed rather than discovered, unlike `keyTables`: `information_schema` would
+ * also find a future column called `provenance` that means something else, and
+ * this count is reported to an operator as a statement about documents.
+ */
+const PROVENANCE_TABLES = [
+  'final_documents',
+  'library_documents',
+  'library_document_versions',
+  'machine_photos',
+  'customer_documents',
+  'machine_documents',
+] as const;
+
 const keyTables = async (sql: postgres.Sql): Promise<readonly string[]> => {
   const rows = await sql<{ table_name: string }[]>`
     select table_name from information_schema.columns
@@ -109,6 +125,20 @@ const main = async (): Promise<void> => {
      * The job NUMBER comes from the join, because it is what an operator reads
      * and what tells a demonstration job from a real one. The row's own
      * columns are read exactly as stored — a 0 is reported as a 0.
+     *
+     * `recorded` IS THE §1.3 QUESTION: was this row's provenance recorded, or
+     * backfilled by 0015's default? `final_documents` is write-once, so
+     * migration 0018 could not relabel its pre-provenance rows the way it did
+     * for the other five tables — it wrote down WHEN recording began instead,
+     * and this is where that row is spent. A job card older than the cutoff
+     * carries a label nobody chose, whatever the column says, and is read as
+     * "the row did not say".
+     *
+     * A database with no cutoff row — one restored from a dump predating 0018
+     * — reports true, which is the previous behaviour and no worse than it.
+     *
+     * (No backticks below: the query is a template literal, and one would end
+     * the string. That mistake cost a compile.)
      */
     const rows = await sql<
       {
@@ -120,6 +150,7 @@ const main = async (): Promise<void> => {
         checksum: string | null;
         renderer: number;
         provenance: string | null;
+        recorded: boolean;
       }[]
     >`
       select d.id            as "id",
@@ -129,9 +160,12 @@ const main = async (): Promise<void> => {
              d.size_bytes    as "sizeBytes",
              d.checksum_sha256 as "checksum",
              d.renderer_version as "renderer",
-             d.provenance    as "provenance"
+             d.provenance    as "provenance",
+             -- Was this row's provenance recorded, or backfilled? See above.
+             coalesce(d.created_at >= r.recorded_from, true) as "recorded"
         from final_documents d
         join jobs j on j.id = d.job_id
+        left join provenance_recording r on r.id = 'cutoff'
        order by j.job_number
     `;
 
@@ -153,8 +187,17 @@ const main = async (): Promise<void> => {
          * rather than inferred from the job number, which is the fallback for
          * rows written before the column existed.
          */
-        provenance:
-          raw.provenance === 'genuine' || raw.provenance === 'simulated' ? raw.provenance : null,
+        /*
+         * `unknown`, an unrecognised value, and a row that PREDATES recording
+         * all arrive as null — which is what `classifyDocument` reads as "the
+         * row did not say" and answers with the dataset fallback. One meaning,
+         * one representation.
+         */
+        provenance: !raw.recorded
+          ? null
+          : raw.provenance === 'genuine' || raw.provenance === 'simulated'
+            ? raw.provenance
+            : null,
       };
 
       let fact: StorageFact;
@@ -199,6 +242,37 @@ const main = async (): Promise<void> => {
       }
     }
 
+    /*
+     * -- WHOSE RECORDS NOBODY CLASSIFIED. October mandate §1.3. -------------
+     *
+     * Counted per table and reported even when it is zero, because "no rows of
+     * uncertain origin" is the answer an operator wants and silence is not it.
+     * Read off the column rather than computed: migration 0018 relabelled the
+     * rows written before provenance existed, and anything still reading
+     * `unknown` afterwards is a row some later insert left unsaid.
+     */
+    const unrecorded: { table: string; total: number }[] = [];
+    for (const table of PROVENANCE_TABLES) {
+      /*
+       * THE SAME RULE THE CLASSIFIER USES, or the two would disagree and the
+       * summary would under-report exactly the rows the classifier distrusts:
+       * a `genuine` label on a row written before recording began is a
+       * default somebody never chose. A `simulated` label was positively
+       * written and is believed whatever its date.
+       */
+      const counted = await sql<{ count: string }[]>`
+        select count(*)::text as count
+          from ${sql(table)} t
+          left join provenance_recording r on r.id = 'cutoff'
+         where t.provenance = 'unknown'
+            or (t.provenance = 'genuine' and r.recorded_from is not null
+                and t.created_at < r.recorded_from)
+      `.catch(() => null);
+      if (counted !== null) {
+        unrecorded.push({ table, total: Number(counted[0]?.count ?? '0') });
+      }
+    }
+
     /* -- record what was found, beside the document and never in it -------- */
     let recorded = 0;
     if (record) {
@@ -230,8 +304,22 @@ const main = async (): Promise<void> => {
       `storage keys recorded elsewhere: ${references
         .filter((entry) => entry.table !== 'final_documents')
         .map((entry) => `${entry.table}=${entry.total}`)
-        .join('  ')}\n\n`,
+        .join('  ')}\n`,
     );
+
+    const uncertain = unrecorded.filter((entry) => entry.total > 0);
+    if (uncertain.length === 0) {
+      process.stdout.write('provenance: every record says where it came from.\n\n');
+    } else {
+      process.stdout.write(
+        `provenance NOT RECORDED on: ${uncertain
+          .map((entry) => `${entry.table}=${entry.total}`)
+          .join('  ')}\n` +
+          '  These rows predate the provenance column, or an insert left it unsaid. They are ' +
+          'NOT claimed to be genuine and NOT claimed to be demonstration data — somebody has ' +
+          'to look at them. This is a finding, not a failure.\n\n',
+      );
+    }
 
     for (const finding of findings) {
       if (finding.verdict === 'intact') continue;

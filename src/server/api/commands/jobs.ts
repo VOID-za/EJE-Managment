@@ -18,6 +18,8 @@ import {
   type User,
 } from '@/domain';
 import * as jobs from '@/application/job-operations';
+import * as corrections from '@/application/job-corrections';
+import * as unsigned from '@/application/unsigned-delivery';
 import { WorkflowError } from '@/application/errors';
 import { createJob } from '@/application/job-creation';
 import { forbidden, notFound } from '../errors';
@@ -634,6 +636,80 @@ export const JOB_COMMANDS: CommandRegistry = {
       return jobs.retryJobCardDelivery(context.operation, job, recipient.displayName);
     },
   }),
+
+  /* -- correcting a job card EJE have already issued. BD-02, IMMUT-9. ----- */
+
+  /**
+   * A Master raises a correction. Nothing about the original changes.
+   *
+   * `areas` is validated as a non-empty set of strings here and parsed into
+   * the domain's closed vocabulary by the operation — the schema's job is to
+   * refuse a body that is the wrong SHAPE, and the operation's is to decide
+   * what the values mean.
+   */
+  raise_correction: withInput(
+    z
+      .object({
+        reason: text(2000),
+        narrative: text(8000),
+        areas: z.array(z.string().min(1).max(60)).min(1).max(12),
+        acknowledgementRequired: z.boolean(),
+      })
+      .strict(),
+    (context, job, input) =>
+      corrections.raiseJobCorrection(context.operation, job, {
+        reason: input.reason,
+        narrative: input.narrative,
+        areas: input.areas,
+        acknowledgementRequired: input.acknowledgementRequired,
+      }),
+  ),
+
+  /**
+   * The office records that the customer acknowledged a correction.
+   *
+   * The correction id comes in the BODY rather than the path because this is a
+   * job action, and the operation checks that the correction belongs to a job
+   * this actor may see — a `loadVisibleJob` on the path has already decided
+   * that much.
+   */
+  acknowledge_correction: withInput(
+    z
+      .object({
+        correctionId: z.string().min(1).max(100),
+        acknowledgedBy: text(200),
+        method: text(200),
+        note: z.string().max(2000).default(''),
+      })
+      .strict(),
+    async (context, job, input) => {
+      const correction = await context.repos.jobs.findCorrectionById(input.correctionId);
+      // A correction on another job is NOT FOUND, never refused: refusing
+      // would confirm that it exists somewhere else.
+      if (correction === null || correction.jobId !== job.id) {
+        throw notFound('That correction does not exist.');
+      }
+      return corrections.recordCorrectionAcknowledgement(context.operation, input.correctionId, {
+        acknowledgedBy: input.acknowledgedBy,
+        method: input.method,
+        note: input.note,
+      });
+    },
+  ),
+
+  /* -- sending a job card the customer did not sign. BD-06, DELIV-7. ------ */
+
+  /** A Master authorises it, with a reason, and it is sent. */
+  authorise_unsigned_delivery: withInput(
+    z.object({ reason: text(2000) }).strict(),
+    (context, job, input) =>
+      unsigned.authoriseUnsignedDelivery(context.operation, job, { reason: input.reason }),
+  ),
+
+  /** A retry of a failed send. No second authorisation; see the operation. */
+  retry_unsigned_delivery: withInput(z.object({}).strict(), (context, job) =>
+    unsigned.retryUnsignedDelivery(context.operation, job),
+  ),
 
   transfer_to_open: withInput(
     z

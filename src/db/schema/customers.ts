@@ -145,7 +145,7 @@ export const customerDocuments = pgTable(
     check('customer_documents_size_positive', sql`${table.sizeBytes} > 0`),
     check(
       'customer_documents_provenance_known',
-      sql`${table.provenance} in ('genuine', 'simulated')`,
+      sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`,
     ),
   ],
 );

@@ -74,16 +74,52 @@ In `/etc/eje/eje.env` (root-owned, readable by `eje`) — the template is
 
 **The key is the one thing that cannot be recovered.** A backup whose key is
 lost is a directory of noise, and a key kept beside the backups protects
-nobody. Store it in EJE's password manager, and write down which key
-fingerprint goes with which period — every manifest records the fingerprint
-(not the key) so three years from now somebody can tell which one a directory
-needs.
+nobody.
+
+### 2.1 Key escrow, and the drill that proves it — BACKUP-2
+
+"The key is in the password manager" is a **belief** until somebody has tried
+that copy against a real backup. The morning it matters is the worst possible
+time to discover it was last year's key, or the right key with a space on the
+end.
+
+**Escrow it in two places that are not this server:**
+
+1. **EJE's password manager**, as a secret named for the period it covers —
+   `EJE backup key (from 2026-10)` — with the **fingerprint** in the note
+   field. The fingerprint is not secret; it is in every manifest.
+2. **A sealed printed copy** in whatever EJE use for a safe. A password manager
+   is an account, and an account can be lost with the person who held it.
+
+**Then run the drill, now and after every key change:**
+
+```bash
+# Put the escrowed copy in a file, read it back, and delete the file.
+#   (Never paste a key on a command line: it lands in shell history.)
+umask 077 && cat > /tmp/eje-key-test     # paste, then Ctrl-D
+npm run backup:key-check /var/backups/eje/eje-eje_production-<stamp>         --key-file /tmp/eje-key-test
+shred -u /tmp/eje-key-test
+```
+
+It prints two fingerprints and `MATCH` or `NO MATCH`, exits non-zero on a
+mismatch, and **decrypts nothing, restores nothing and writes nothing**. It
+never prints the key, any part of it, or its length — the output of this
+command ends up in a terminal somebody is sharing.
+
+A `NO MATCH` means the key is wrong, **not** that the backup is damaged, and
+the message says so along with the fingerprint to go looking for.
+
+**Verified in this repository** on a real encrypted backup of a real
+PostgreSQL 16 database with real stored files: the environment's key matched,
+the same key read from a file matched, and a freshly generated key reported
+`NO MATCH` and exit code 1.
 
 ## 3. Take one, and prove it
 
 ```bash
 npm run backup                              # dump + documents + encrypt + record
 npm run backup:verify  <directory>          # recompute the checksums, decrypt, authenticate
+npm run backup:key-check <directory>        # is the key you hold the key this needs? (§2.1)
 npm run backup:restore-test <directory>     # the only honest proof: restore it
 ```
 
@@ -253,9 +289,58 @@ Nothing in this repository can create one. One of these has to be supplied:
    rotation, mounted at that same path.
 
 Also decide: **how long backups are kept** (`EJE_BACKUP_KEEP`), and **who holds
-the encryption key** and where. Until one of the three exists, EJE has no
+the encryption key** and where (§2.1). Until one of the three exists, EJE has no
 off-site backup, and no part of this repository should be read as saying
 otherwise.
+
+### 5.1 The recommendation, and what it costs — October mandate, Workstream B
+
+**Option 1, an S3-compatible bucket reached by rclone, is the secure default**,
+and these are the trade-offs rather than a sales pitch:
+
+| | rclone to object storage | A second machine or NAS | A removable disk |
+|---|---|---|---|
+| Survives the VPS being lost | **yes** | yes, if it is elsewhere | yes, once it is off site |
+| Survives ransomware on the VPS | **yes, with versioning or object-lock on the bucket** | only if the VPS cannot delete on it | yes, once unplugged |
+| Credential on the VPS | an rclone remote, **revocable at the provider**, never in `/etc/eje/eje.env` | an SSH key or NFS mount | none |
+| Needs somebody to do something weekly | no | no | **yes, and that is the risk** |
+| Verified copy | `rclone check` compares checksums at both ends, and `npm run backup` runs it | `cmp`, by hand | by hand |
+| Ongoing cost | a few rand a month at this volume | hardware EJE may already own | a disk and a rotation |
+| Fails quietly if nobody looks | no — a failed copy fails the run | no | **yes: a disk nobody rotated** |
+
+**Why not a credential in `/etc/eje/eje.env`.** rclone keeps its own config
+with its own credentials, which this repository never reads. A cloud key in the
+environment file would be one `cat` away from every backup EJE has — by exactly
+the process whose compromise the off-site copy exists to survive.
+
+**Write-once, if the provider offers it.** Backblaze B2 and S3 both support
+object lock. Turn it on. A backup an attacker on the VPS can delete is a
+backup that will be deleted.
+
+**What the repository already does, and needs no further work:**
+
+- plans the destination from the environment and **refuses** a path inside
+  `EJE_BACKUP_DIR` (that is not a second copy, and retention would delete both);
+- refuses an `EJE_BACKUP_OFFSITE_RCLONE` that is not `remote:path`;
+- warns, on every run, when a directory destination turns out to be **on the
+  same filesystem** as the backups — it still writes the copy, and says it must
+  not be counted as off-site. *Verified locally: the copy is written and the
+  warning is printed.*
+- runs `rclone copy` **and then `rclone check`**, because copy means "it
+  transferred what it decided to" and check is what catches a truncated upload
+  or a quota that ran out mid-way;
+- says **"NO OFF-SERVER DESTINATION IS CONFIGURED"** on every run until one is.
+
+**What EJE must supply, and it is the whole of what is outstanding:**
+
+1. a bucket at a provider (or a second machine, or a disk and a rotation);
+2. `rclone config` run **on the VPS as the `eje` user**, creating the remote;
+3. `EJE_BACKUP_OFFSITE_RCLONE=<remote>:<path>` in `/etc/eje/eje.env`;
+4. object lock or versioning on the bucket, if the provider has it;
+5. the key escrowed per §2.1, and the drill run once against a real backup.
+
+Nothing in this repository can do any of those, and none of it is claimed as
+done.
 
 ## 6. Restoring, for real
 

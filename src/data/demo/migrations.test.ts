@@ -330,6 +330,8 @@ describe('migrating a persisted snapshot', () => {
     expect(migrated.customerDocuments).toEqual([]);
     expect(Array.isArray(migrated.machineDocuments)).toBe(true);
     expect(migrated.machineDocuments).toEqual([]);
+    expect(Array.isArray(migrated.jobCorrections)).toBe(true);
+    expect(migrated.jobCorrections).toEqual([]);
   });
 
   it('keeps documents a snapshot already carried rather than emptying them', () => {

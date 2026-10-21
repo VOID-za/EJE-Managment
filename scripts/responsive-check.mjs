@@ -267,6 +267,14 @@ const OFFICE_SCREENS = [
   '/jobs/EJE-1049',
   '/jobs/EJE-1048',
   '/jobs/EJE-1044/review',
+  /*
+   * A CLOSED JOB'S OWN SCREEN, which is where the correction and
+   * unsigned-delivery panels live (BD-02, BD-06). The review page above is a
+   * different screen and does not carry them — and the gate that caught a
+   * 20px file input on the customer-documents panel only caught it because
+   * that screen was on this list.
+   */
+  '/jobs/EJE-1044',
   '/customers',
   '/customers/cust-abc',
   '/machines',

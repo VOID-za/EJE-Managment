@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   asCustomerId,
   asJobId,
@@ -10,9 +10,11 @@ import {
 } from '@/domain';
 import type {
   Job,
+  JobCorrection,
   JobId,
   PricingSnapshot,
   PricingSnapshotTotals,
+  UnsignedDeliveryAuthorisation,
   UserId,
 } from '@/domain';
 import type { JobFilter, JobRepository, JobTransferRecord } from '@/data/repositories';
@@ -20,6 +22,7 @@ import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { loadChecklists, writeChecklist } from './job-checklist';
 import {
+  correctionFrom as toDomainCorrection,
   finalDocumentFrom,
   refusalFrom,
   snapshotFrom,
@@ -502,6 +505,138 @@ export class PostgresJobRepository implements JobRepository {
   async delete(id: JobId): Promise<void> {
     await this.db.delete(schema.jobs).where(eq(schema.jobs.id, id));
     this.versions.forget(id);
+  }
+
+  /* -- corrections to an issued job card. BD-02, IMMUT-9, AUD-3. ---------- */
+
+  async listCorrections(jobId: JobId): Promise<readonly JobCorrection[]> {
+    if (!isUuid(jobId)) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.jobCorrections)
+      .where(eq(schema.jobCorrections.jobId, jobId))
+      // Oldest first: correction 1, then 2. The customer holds them in order.
+      .orderBy(asc(schema.jobCorrections.sequence));
+    return rows.map(toDomainCorrection);
+  }
+
+  async findCorrectionById(id: string): Promise<JobCorrection | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.jobCorrections)
+      .where(eq(schema.jobCorrections.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row === undefined ? null : toDomainCorrection(row);
+  }
+
+  /**
+   * INSERTS, or fills in the acknowledgement. Nothing else.
+   *
+   * `job_corrections_guard` refuses every other change at the database, so the
+   * `set` below is not a convention this method observes — it is the only
+   * update the row will accept. Writing the whole record on conflict would
+   * raise, which is the correct outcome and a confusing way to discover it.
+   */
+  async saveCorrection(correction: JobCorrection): Promise<JobCorrection> {
+    const acknowledged = correction.acknowledged;
+    const inserted = await this.db
+      .insert(schema.jobCorrections)
+      .values({
+        id: correction.id,
+        jobId: correction.jobId as string,
+        sequence: correction.sequence,
+        correctsDocumentKey: correction.correctsDocumentKey,
+        reason: correction.reason,
+        narrative: correction.narrative,
+        areas: [...correction.areas],
+        raisedBy: correction.raisedBy.length === 0 ? null : (correction.raisedBy as string),
+        raisedAt: correction.raisedAt,
+        acknowledgement: correction.acknowledgement,
+        acknowledgedBy: acknowledged?.acknowledgedBy ?? null,
+        acknowledgementMethod: acknowledged?.method ?? null,
+        acknowledgementRecordedBy: acknowledged?.recordedBy ?? null,
+        acknowledgementRecordedAt: acknowledged?.recordedAt ?? null,
+        acknowledgementNote: acknowledged?.note ?? '',
+        documentFileName: correction.documentFileName,
+        documentStorageKey: correction.documentStorageKey,
+        documentSizeBytes: correction.documentSizeBytes,
+        documentChecksumSha256: correction.documentChecksumSha256,
+      })
+      .onConflictDoUpdate({
+        target: schema.jobCorrections.id,
+        set: {
+          acknowledgement: correction.acknowledgement,
+          acknowledgedBy: acknowledged?.acknowledgedBy ?? null,
+          acknowledgementMethod: acknowledged?.method ?? null,
+          acknowledgementRecordedBy: acknowledged?.recordedBy ?? null,
+          acknowledgementRecordedAt: acknowledged?.recordedAt ?? null,
+          acknowledgementNote: acknowledged?.note ?? '',
+        },
+      })
+      .returning();
+    const row = inserted[0];
+    if (row === undefined) throw new Error(`Correction ${correction.id} vanished during save.`);
+    return toDomainCorrection(row);
+  }
+
+  /* -- the Master's authorisation to send an unsigned job card. BD-06. ---- */
+
+  async findUnsignedDeliveryAuthorisation(
+    jobId: JobId,
+  ): Promise<UnsignedDeliveryAuthorisation | null> {
+    if (!isUuid(jobId)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.unsignedDeliveryAuthorisations)
+      .where(eq(schema.unsignedDeliveryAuthorisations.jobId, jobId))
+      .limit(1);
+    const row = rows[0];
+    return row === undefined
+      ? null
+      : {
+          id: row.id,
+          jobId: asJobId(row.jobId),
+          documentKey: row.documentKey,
+          recipient: row.recipient,
+          reason: row.reason,
+          authorisedBy: asUserId(row.authorisedBy ?? ''),
+          authorisedAt: row.authorisedAt,
+          createdAt: row.createdAt,
+        };
+  }
+
+  /**
+   * INSERTS, and does nothing at all on a second call.
+   *
+   * The table is append-only and unique per job, so `onConflictDoNothing` is
+   * the honest shape: a second authorisation is a second decision, and the
+   * operation refuses it before reaching here with a sentence an office can
+   * act on. This exists so a retry of the same request is harmless.
+   */
+  async saveUnsignedDeliveryAuthorisation(
+    authorisation: UnsignedDeliveryAuthorisation,
+  ): Promise<UnsignedDeliveryAuthorisation> {
+    await this.db
+      .insert(schema.unsignedDeliveryAuthorisations)
+      .values({
+        id: authorisation.id,
+        jobId: authorisation.jobId as string,
+        documentKey: authorisation.documentKey,
+        recipient: authorisation.recipient,
+        reason: authorisation.reason,
+        authorisedBy:
+          authorisation.authorisedBy.length === 0 ? null : (authorisation.authorisedBy as string),
+        authorisedAt: authorisation.authorisedAt,
+      })
+      .onConflictDoNothing();
+
+    const saved = await this.findUnsignedDeliveryAuthorisation(authorisation.jobId);
+    if (saved === null) {
+      throw new Error(`The authorisation for ${authorisation.jobId} vanished during save.`);
+    }
+    return saved;
   }
 
   /* ---------------------------------------------------------------------- */

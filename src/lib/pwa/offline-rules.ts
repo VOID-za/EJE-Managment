@@ -160,6 +160,24 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   confirm_delivery:
     'Whether the customer received their copy is something only the mail provider can answer.',
   retry_delivery: 'Sending the customer their copy again needs a connection to the mail provider.',
+  /*
+   * CORRECTING AN ISSUED JOB CARD, AND SENDING AN UNSIGNED ONE. BD-02, BD-06.
+   *
+   * All four are office decisions taken on an issued document, and none of
+   * them is a capture a technician makes at a machine — so the honest reason
+   * is not "no connection" but "this is not yours and not here". A technician
+   * who somehow reached one of these would be shown the sentence below, and
+   * the server would refuse them anyway (`jobs.raiseCorrection` and
+   * `jobs.authoriseUnsignedDelivery` are a Master's).
+   */
+  raise_correction:
+    'Correcting a job card EJE have already issued is a Master’s decision, taken in the office with the original document to hand.',
+  acknowledge_correction:
+    'Recording that the customer acknowledged a correction is office work on the server’s record.',
+  authorise_unsigned_delivery:
+    'Sending a customer a job card they declined to sign is a Master’s decision and goes out through the mail provider.',
+  retry_unsigned_delivery:
+    'Re-sending an unsigned job card needs a connection to the mail provider.',
   awaiting_spares: 'Putting a job on hold is a workflow step the server decides.',
   reschedule:
     'Changing the date moves the job in the calendar everybody shares, so it needs a connection.',

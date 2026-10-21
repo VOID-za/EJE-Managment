@@ -67,6 +67,12 @@ export const applyMigrations = async (db: Database): Promise<void> => {
  * `TRUNCATE ... CASCADE` rather than deleting rows, because the immutability
  * triggers deliberately refuse a DELETE on the historical tables — which is the
  * behaviour being tested, so the tests cannot rely on being able to delete.
+ *
+ * TWO TABLES ARE NOT TEST DATA and are left alone. `__drizzle_migrations` is
+ * the ledger. `provenance_recording` is written by migration 0018 and says
+ * when this database began recording provenance (§1.3) — truncating it would
+ * leave every test running against a database that cannot answer the question,
+ * and the reconcile would silently fall back to trusting a backfilled label.
  */
 export const truncateAll = async (db: Database): Promise<void> => {
   await db.execute(sql`
@@ -78,7 +84,7 @@ export const truncateAll = async (db: Database): Promise<void> => {
         into statement
         from pg_tables
        where schemaname = 'public'
-         and tablename <> '__drizzle_migrations';
+         and tablename not in ('__drizzle_migrations', 'provenance_recording');
 
       if statement is not null then
         execute statement;

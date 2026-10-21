@@ -20,6 +20,7 @@ import type {
   JobId,
   JobSummary,
   PricingSnapshot,
+  JobCorrection,
   Machine,
   MachineDocument,
   MachineId,
@@ -29,6 +30,7 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
+  UnsignedDeliveryAuthorisation,
   User,
   UserId,
   ChangeRequest,
@@ -240,6 +242,66 @@ class DemoJobRepository implements JobRepository {
           job.additionalTechnicianIds.includes(userId),
       ),
     );
+  }
+
+  /* -- corrections to an issued job card. BD-02, IMMUT-9, AUD-3. ---------- */
+
+  listCorrections(jobId: JobId): Promise<readonly JobCorrection[]> {
+    const corrections = this.context
+      .read()
+      .jobCorrections.filter((correction) => correction.jobId === jobId);
+    // Oldest first: correction 1, then 2, as the customer holds them.
+    return Promise.resolve([...corrections].sort((left, right) => left.sequence - right.sequence));
+  }
+
+  findCorrectionById(id: string): Promise<JobCorrection | null> {
+    return Promise.resolve(
+      this.context.read().jobCorrections.find((correction) => correction.id === id) ?? null,
+    );
+  }
+
+  /**
+   * Inserts, or replaces in place.
+   *
+   * The demonstration store has no triggers, so the append-only rule lives
+   * here only as a convention — the rule itself is `job_corrections_guard` on
+   * PostgreSQL, which is why `job-corrections.db.test.ts` exists. The
+   * operation never asks for anything else.
+   */
+  saveCorrection(correction: JobCorrection): Promise<JobCorrection> {
+    this.context.commit((draft) => {
+      const index = draft.jobCorrections.findIndex((entry) => entry.id === correction.id);
+      if (index === -1) draft.jobCorrections.push(correction);
+      else draft.jobCorrections[index] = correction;
+    });
+    return Promise.resolve(correction);
+  }
+
+  /* -- the Master's authorisation to send an unsigned job card. BD-06. ---- */
+
+  findUnsignedDeliveryAuthorisation(
+    jobId: JobId,
+  ): Promise<UnsignedDeliveryAuthorisation | null> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .unsignedDeliveryAuthorisations.find((entry) => entry.jobId === jobId) ?? null,
+    );
+  }
+
+  /** Inserts, and keeps the FIRST one: the table is append-only on PostgreSQL. */
+  saveUnsignedDeliveryAuthorisation(
+    authorisation: UnsignedDeliveryAuthorisation,
+  ): Promise<UnsignedDeliveryAuthorisation> {
+    let kept = authorisation;
+    this.context.commit((draft) => {
+      const existing = draft.unsignedDeliveryAuthorisations.find(
+        (entry) => entry.jobId === authorisation.jobId,
+      );
+      if (existing === undefined) draft.unsignedDeliveryAuthorisations.push(authorisation);
+      else kept = existing;
+    });
+    return Promise.resolve(kept);
   }
 }
 

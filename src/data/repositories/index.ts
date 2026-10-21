@@ -17,6 +17,7 @@ import type {
   OutboxMessage,
   IsoDateTime,
   Job,
+  JobCorrection,
   JobId,
   AvailabilityRecord,
   Machine,
@@ -27,6 +28,7 @@ import type {
   SiteId,
   SystemSettings,
   TechnicalDocument,
+  UnsignedDeliveryAuthorisation,
   TransferReason,
   ChatMessage,
   Conversation,
@@ -157,6 +159,37 @@ export interface JobRepository {
    * operations call this in addition to — never instead of — auditing it.
    */
   recordTransfer?(entry: JobTransferRecord): Promise<void>;
+
+  /*
+   * CORRECTIONS TO AN ISSUED JOB CARD. BD-02, IMMUT-9, AUD-3.
+   *
+   * NOT on `Job`, unlike `signatureRefusals`. A refusal is part of how the job
+   * reached its current state and every screen that draws the job needs it; a
+   * correction happens AFTER the job is closed and is read by the one screen
+   * that shows an issued document. Loading every correction to draw a job list
+   * would be a read nobody asked for, and putting it on the aggregate would
+   * mean `save` had to decide what to do with an append-only child.
+   *
+   * `saveCorrection` INSERTS, or fills in the acknowledgement. The database
+   * refuses anything else (`job_corrections_guard`), so this is not a
+   * convention — it is the only thing that works.
+   */
+  listCorrections(jobId: JobId): Promise<readonly JobCorrection[]>;
+  findCorrectionById(id: string): Promise<JobCorrection | null>;
+  saveCorrection(correction: JobCorrection): Promise<JobCorrection>;
+
+  /*
+   * THE MASTER'S AUTHORISATION TO SEND AN UNSIGNED JOB CARD. BD-06.
+   *
+   * One per job, and append-only: `saveUnsignedDeliveryAuthorisation` inserts
+   * or does nothing. A second call with different words is a second decision
+   * and the database refuses it, which is the behaviour — the operation
+   * refuses it first, with a sentence somebody can act on.
+   */
+  findUnsignedDeliveryAuthorisation(jobId: JobId): Promise<UnsignedDeliveryAuthorisation | null>;
+  saveUnsignedDeliveryAuthorisation(
+    authorisation: UnsignedDeliveryAuthorisation,
+  ): Promise<UnsignedDeliveryAuthorisation>;
 }
 
 /**

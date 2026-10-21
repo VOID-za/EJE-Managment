@@ -54,7 +54,7 @@ export const libraryDocuments = pgTable(
     index('library_documents_name_idx').on(sql`lower(${table.name})`),
     index('library_documents_model_idx').on(sql`lower(${table.machineModel})`),
     index('library_documents_status_idx').on(table.status),
-    check('library_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated')`),
+    check('library_documents_provenance_known', sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`),
   ],
 );
 
@@ -115,7 +115,7 @@ export const libraryDocumentVersions = pgTable(
     ),
     check(
       'library_document_versions_provenance_known',
-      sql`${table.provenance} in ('genuine', 'simulated')`,
+      sql`${table.provenance} in ('genuine', 'simulated', 'unknown')`,
     ),
     check(
       'library_document_versions_rejection_has_reason',

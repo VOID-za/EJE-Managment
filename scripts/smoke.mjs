@@ -1939,6 +1939,141 @@ await step('no Master Review appeared anywhere along the refusal route', async (
   }
 });
 
+/*
+ * CORRECTING A JOB CARD EJE HAVE ALREADY ISSUED. BD-02, IMMUT-9, AUD-3.
+ *
+ * The acceptance blocker these two steps close: a signed job card with a
+ * genuine error had no remedy at any layer. In a browser, as the office: raise
+ * a correction on a job the customer SIGNED, see it listed, download the
+ * addendum and read its text — then confirm that the original job card is
+ * byte-for-byte what it was before.
+ */
+await step('a Master corrects an issued job card, and the original does not move', async () => {
+  await signOut();
+  await signInAsMasterIfNeeded();
+
+  // The original's bytes, BEFORE the correction. EJE-1048 is closed and signed.
+  const before = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/documents/EJE-1048`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const body = await response.json();
+    return { status: response.status, base64: body?.data?.base64 ?? '', name: body?.data?.fileName ?? '' };
+  }, BASE);
+  if (before.status !== 200 || before.base64.length === 0) {
+    throw new Error(`the original job card could not be read: HTTP ${before.status}`);
+  }
+
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByTestId('correction-open').waitFor({ timeout: 10000 });
+  await page.getByTestId('correction-open').click();
+
+  await page
+    .getByTestId('correction-reason')
+    .fill('The labour hours were captured against the wrong rate.');
+  await page
+    .getByTestId('correction-narrative')
+    .fill('Three hours were charged at the after-hours rate and should have been normal time.');
+  await page.getByTestId('correction-area-labour').click();
+  await page.getByTestId('correction-area-charges').click();
+  await page.getByTestId('correction-acknowledgement-required').click();
+  await page.getByTestId('correction-save').click();
+
+  await page.getByTestId('job-correction-row').first().waitFor({ timeout: 15000 });
+  const listed = await page.getByTestId('job-corrections').innerText();
+  if (!listed.includes('Correction 1')) {
+    throw new Error(`the correction is not on the job screen: ${listed.slice(0, 200)}`);
+  }
+  if (!listed.includes('Awaiting the customer')) {
+    throw new Error('a correction that requires acknowledgement does not say so');
+  }
+
+  // THE ORIGINAL IS UNCHANGED. The whole feature rests on this.
+  const after = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/documents/EJE-1048`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const body = await response.json();
+    return { base64: body?.data?.base64 ?? '', name: body?.data?.fileName ?? '' };
+  }, BASE);
+  if (after.base64 !== before.base64 || after.name !== before.name) {
+    throw new Error('the original job card changed when a correction was raised');
+  }
+
+  // And the ADDENDUM is its own PDF, which says what it is.
+  const addendum = await page.evaluate(async (base) => {
+    const view = await (await fetch(`${base}/api/jobs/EJE-1048`, { credentials: 'include' })).json();
+    const correction = view?.data?.view?.corrections?.[0];
+    if (correction === undefined) return { status: 0, text: '' };
+    const response = await fetch(
+      `${base}/api/documents/EJE-1048/corrections/${correction.id}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      },
+    );
+    const body = await response.json();
+    return { status: response.status, text: atob(body?.data?.base64 ?? '') };
+  }, BASE);
+  if (addendum.status !== 200) {
+    throw new Error(`the addendum answered HTTP ${addendum.status}`);
+  }
+  if (!addendum.text.startsWith('%PDF-')) {
+    throw new Error('the addendum is not a PDF');
+  }
+  await page.screenshot({ path: `${shots}/14d-correction.png`, fullPage: false });
+});
+
+await step('a technician sees the correction and cannot raise one', async () => {
+  await signOut();
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+
+  // They SEE it: the person who did the work is the one who most needs to know.
+  await page.getByTestId('job-correction-row').first().waitFor({ timeout: 15000 });
+
+  // And they are not offered the form.
+  if ((await page.getByTestId('correction-open').count()) !== 0) {
+    throw new Error('a technician is being offered to correct an issued job card');
+  }
+
+  // Refused by the SERVER, not merely absent from the screen.
+  const refused = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/EJE-1048/raise_correction`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        reason: 'Trying it on.',
+        narrative: 'Trying it on.',
+        areas: ['labour'],
+        acknowledgementRequired: false,
+      }),
+    });
+    return response.status;
+  }, BASE);
+  if (refused === 200) {
+    throw new Error('the server let a technician correct an issued job card');
+  }
+
+  /*
+   * AND BACK TO THE OFFICE, because the steps after this one read screens a
+   * technician cannot see. An inserted step that changes who is signed in has
+   * to put it back — the first version of this did not, and the next step
+   * waited thirty seconds for a job EJE-1049 that a technician is not on.
+   */
+  await signOut();
+  await signInAsMasterIfNeeded();
+});
+
 await step('closed job is read-only', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 8000 });

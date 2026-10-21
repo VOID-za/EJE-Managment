@@ -55,6 +55,11 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | **Customer documents** — the register carried no files at all; `customer_documents`, the office-only routes, the panel, and real bytes proved in a browser | `27a1b53`, `30c4f03` | TESTED — awaiting approval |
 | **The library's missing categories** — checklist, training document, internal company procedure, form and certificate | `f38d46b` | TESTED — awaiting approval |
 | **A customer document is withdrawn, never deleted** — the row and the bytes stay; nothing in this application removes a document's bytes | `0140034` | TESTED — awaiting approval |
+| **BD-02 implemented** — a Master corrects an issued job card by adding a correction with its own addendum; the original, its signature and its date are untouched; the customer's acknowledgement is recorded once | IMMUT-9 (#20), AUD-3 (#29) | TESTED — awaiting approval |
+| **BD-06 implemented** — closing unsigned still sends nothing; a Master authorises an exceptional send with a reason, to the job's own contact, recorded against the exact document and retryable without re-authorising | DELIV-7 (#19), AUD-4 (#30) | TESTED — awaiting approval |
+| **Provenance has a third value, `unknown`** — rows written before the column existed are no longer presented as proven genuine; the default changed from `genuine` to `unknown` so a forgotten field is a visible gap rather than a false claim | DEMO-1 (#58) | TESTED — awaiting approval |
+| **A deployment declares itself** — `EJE_DEPLOYMENT=production` makes the demonstration switcher unreachable at runtime and the demo seed refuse outright, and a deployment pointed at a database that contradicts its declaration fails preflight | `docs/demonstration-isolation.md` | TESTED — awaiting approval |
+| **`npm run backup:key-check`** — is the key you hold the key this backup needs? The escrow drill, provable without decrypting anything | BACKUP-2 (#23) | TESTED — awaiting approval |
 | **Machine documents** — a machine carried photographs and nothing else; its commissioning report, compliance certificate and calibration results now have a home, with the office classifying each one `field` or `office_only` | MACH-DOC-1 (#60) | TESTED — awaiting approval |
 | **Two counting defects found on the way** — the reconcile's table list was two tables stale, and a demonstration snapshot upgraded to v18 had no `customerDocuments` array to read | same | FIXED |
 | **The OCR investigation** — the local option costed against the hosted one, with a recommendation to count before choosing | `0140034`, `docs/library-ocr.md` | INVESTIGATED, not implemented (#26) |
@@ -68,17 +73,24 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | **MEDIA-5** (#18) | Video capture. Type only; no capture path. | The simulated *Add video* button was removed rather than left pretending. Storage, size limits and what a video does to a job card's attachment limit are unanswered. |
 | **LIB-5** (#26) | Full-text PDF search / OCR in the library. | Partial: a scanned document says it is not searchable, and why, with a retry. OCR is now **costed** — `docs/library-ocr.md` — and the decision is EJE's: Tesseract on the VPS at 5–15 seconds per page behind a background job, or a hosted service at about US$1–1.50 per 1 000 pages that takes EJE's own documents off the premises. The recommendation is to count the unsearchable documents first, because on a real library the number may be nil. |
 | **MACH-HIST** (#28) | Machine location history. | Deliberately not invented. See DECISION below. |
-| **IMMUT-9** (#20) | Addendum mechanism for post-signature corrections. | Blocked on BD-02. |
+| ~~**IMMUT-9** (#20)~~ | ~~Addendum mechanism for post-signature corrections.~~ | **BUILT** on 21 October, now that BD-02 is answered. `job_corrections`, append-only with a write-once acknowledgement, its own addendum PDF, and the original untouched — proved by reading the original's bytes before and after in a browser. |
 
 ## Decisions only EJE can make
 
 These block real work. Each one has an issue; none may be answered by
 implementation.
 
+**Two fewer than yesterday.** The owner answered BD-02 and BD-06 on 21 October
+and both are now implemented, which also closes the two acceptance blockers
+that hung off them — AUD-3 (a signed job card with a genuine error had no
+remedy at any layer) and AUD-4 (closing without a signature sent the customer
+nothing). They are struck through below rather than deleted, because the
+reasoning that made them decisions is what the implementation had to respect.
+
 | ID | Question | What it blocks |
 |---|---|---|
-| **BD-02** (#34) | What is the post-signature correction/addendum mechanism? | IMMUT-9, and **AUD-3** (#29): a signed job card with a genuine error has no remedy at any layer. Marked an acceptance blocker. |
-| **BD-06** (#33) | Does closing *Without Customer Signature* email the customer their copy, and under whose authority? | DELIV-7 (#19), and **AUD-4** (#30): closing without a signature sends the customer nothing. Acceptance blocker. |
+| ~~**BD-02** (#34)~~ | ~~What is the post-signature correction/addendum mechanism?~~ | **ANSWERED by the owner on 21 October and IMPLEMENTED.** A signed job card stays immutable; a Master raises a correction with its own addendum, linked to the exact bytes of the original. IMMUT-9 and AUD-3 are closed by it. **One sub-question remains open:** *when* is the customer's acknowledgement required? The Master states it per correction; nothing in the application decides it. |
+| ~~**BD-06** (#33)~~ | ~~Does closing *Without Customer Signature* email the customer their copy, and under whose authority?~~ | **ANSWERED by the owner on 21 October and IMPLEMENTED.** No automatic delivery; a Master authorises an exceptional send with a reason, to the job's own contact, recorded against the exact document. DELIV-7 and AUD-4 are closed by it. |
 | **BD-17** (#56) | May the issued prices be exported, and by whom? | The closed-job CSV carries no money columns — current behaviour, not an answer. |
 | **BD-18** (#57) | Is a spreadsheet export recorded on the audit trail? | The mechanism exists and writes nothing (`EXPORT_AUDIT.recording = false`). |
 | **MACH-HIST** (#28) | Do EJE record a machine's moves, and what should a job screen then show? | Machine history, and whether a change request may apply itself. |

@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import {
+  asProvenance,
   asDocumentId,
   asUserId,
   type DocumentId,
@@ -427,5 +428,5 @@ const toDomainDocument = ({
    * a real file. An unrecognised value reads as `simulated`, which is the safe
    * direction — a fixture must not pass as EJE's document.
    */
-  provenance: version.provenance === 'genuine' ? 'genuine' : 'simulated',
+  provenance: asProvenance(version.provenance),
 });

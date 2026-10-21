@@ -84,6 +84,30 @@ export type ActivityEventType =
   | 'returned_for_customer_signature'
   /** The office corrected a job card the technician had already submitted. */
   | 'job_card_corrected'
+  /**
+   * A correction was raised against a job card EJE HAVE ALREADY ISSUED. BD-02.
+   *
+   * Its own type, and not `job_card_corrected`, because the two are opposite
+   * acts: that one is the office editing a draft before it goes out, and this
+   * one is EJE saying that a document the customer already holds is wrong.
+   * Nothing is edited here — a new record and a new addendum are added — and
+   * an audit trail that called both "corrected" would make the distinction
+   * unrecoverable.
+   */
+  | 'job_correction_raised'
+  /** The customer confirmed they had seen a correction. BD-02. */
+  | 'job_correction_acknowledged'
+  /**
+   * A Master authorised sending a job card the customer DECLINED to sign.
+   * BD-06, AUD-4.
+   *
+   * Its own type and not `delivery_state_changed`, because it is a DECISION
+   * rather than an event: somebody will be asked who authorised sending a
+   * document to a customer who refused to put their name to it, and the answer
+   * must not be buried among the provider's attempts. The attempts themselves
+   * are still `delivery_state_changed`, as every other send is.
+   */
+  | 'unsigned_delivery_authorised'
   /** Who is collecting, which decides whether the document carries prices. */
   | 'collection_method_set'
   | 'pdf_generated'

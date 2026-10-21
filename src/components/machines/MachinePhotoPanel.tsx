@@ -178,16 +178,27 @@ const MachineThumbnail = ({
     return (
       <div
         className="flex aspect-4/3 flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] border border-dashed border-steel-300 bg-steel-100 text-steel-400"
+        /*
+         * THREE ANSWERS, because "no image" means three different things: a
+         * fixture that never had one, a record whose origin nobody wrote down,
+         * and a genuine photograph that is missing. Only the last is a fault.
+         */
         title={
           photo.provenance === 'simulated'
             ? 'Demonstration metadata. No photograph was ever stored for it.'
-            : 'This record has no stored file.'
+            : photo.provenance === 'unknown'
+              ? 'This record has no stored file, and its origin was never recorded.'
+              : 'This record has no stored file.'
         }
         data-testid="machine-photo-placeholder"
       >
         <Icon name="camera" className="size-6" />
         <span className="text-[10px] font-semibold tracking-wide uppercase">
-          {photo.provenance === 'simulated' ? 'Simulated' : 'No image'}
+          {photo.provenance === 'simulated'
+            ? 'Simulated'
+            : photo.provenance === 'unknown'
+              ? 'Origin not recorded'
+              : 'No image'}
         </span>
       </div>
     );

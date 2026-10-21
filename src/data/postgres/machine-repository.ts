@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
+  asProvenance,
   asAttachmentId,
   asCustomerId,
   asMachineId,
@@ -42,7 +43,7 @@ const toDomainMachineDocument = (row: MachineDocumentRow): MachineDocument => ({
   audience: toDomainAudience(row.audience),
   uploadedAt: row.uploadedAt,
   uploadedBy: asUserId(row.uploadedBy ?? ''),
-  provenance: row.provenance === 'genuine' ? 'genuine' : 'simulated',
+  provenance: asProvenance(row.provenance),
   archivedAt: row.archivedAt,
 });
 
@@ -321,9 +322,9 @@ export class PostgresMachineRepository implements MachineRepository {
         fileName: photo.fileName,
         caption: photo.caption,
         storageKey: photo.storageKey,
-        // Unrecognised reads as simulated: a value nothing understands must
-        // not let demonstration data pass as a photograph of a real machine.
-        provenance: photo.provenance === 'genuine' ? ('genuine' as const) : ('simulated' as const),
+        // An unrecognised value reads as `unknown` rather than as an
+        // accusation either way: see `asProvenance`.
+        provenance: asProvenance(photo.provenance),
         uploadedAt: photo.uploadedAt,
         uploadedBy: asUserId(photo.uploadedBy ?? ''),
         sizeBytes: photo.sizeBytes,

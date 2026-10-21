@@ -1,3 +1,4 @@
+import { DEPLOYMENT, isDeclaredProduction } from '@/ops/deployment-mode';
 import {
   classifyDatabaseUrl,
   DEVELOPMENT_NAMES,
@@ -199,6 +200,9 @@ const PRODUCTION_DEMO_SEED = 'EJE_PRODUCTION_DEMO_SEED';
 
 export interface DemoSeedEnvironment extends SeedEnvironment {
   readonly EJE_PRODUCTION_DEMO_SEED?: string | undefined;
+  readonly EJE_DEPLOYMENT?: string | undefined;
+  /** So `process.env` satisfies it; see `DeploymentEnvironment`. */
+  readonly [key: string]: string | undefined;
 }
 
 /**
@@ -229,6 +233,27 @@ export interface DemoSeedEnvironment extends SeedEnvironment {
  * exactly when it needs to be.
  */
 export const resolveDemoSeedTarget = (env: DemoSeedEnvironment): SeedTarget => {
+  /*
+   * A DEPLOYMENT THAT CALLS ITSELF PRODUCTION CANNOT BE DEMO-SEEDED, AND
+   * THERE IS NO OVERRIDE. October mandate, Workstream A: "Confirm the
+   * production instance cannot accidentally load demo fixtures."
+   *
+   * This is checked FIRST and before the URL, because the whole point of the
+   * named-database door below is that a TEST deployment may have a database
+   * called `eje_production` — and that door must not also open for a
+   * deployment that has said, in its own environment file, that it holds real
+   * customers. `EJE_PRODUCTION_DEMO_SEED` names a database; this names the
+   * deployment, and the two are different questions.
+   */
+  if (isDeclaredProduction(env)) {
+    throw new SeedRefused(
+      `${DEPLOYMENT}=production. This deployment has declared that it holds real customers, ` +
+        'and the demonstration seed writes fictional ones along with accounts whose password is ' +
+        `published in this repository. There is no override: change ${DEPLOYMENT} only if the ` +
+        'declaration itself is wrong.',
+    );
+  }
+
   const url = (env.DATABASE_URL ?? '').trim();
   if (url.length === 0) {
     throw new SeedRefused(

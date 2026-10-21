@@ -1199,6 +1199,38 @@ customer change requests (CUST-CR); machine location history (MACH-HIST); video
 limits (MEDIA-5); and **who may export the prices a job was issued at
 (BD-17, raised by this batch)**.
 
+### The two job-workflow decisions, and demo/production separation (21 October 2026, eighth batch)
+
+*The October release mandate, Workstreams A, B, C and D. **Nothing here is
+approved:** every row is TESTED and awaits the owner (PROC-4). **Nothing here
+is deployed:** the live service still serves `4dede18`.*
+
+**Two acceptance blockers are closed by the owner answering their decisions.**
+
+| What | Result |
+|---|---|
+| **BD-02 — a signed job card with a genuine error had NO REMEDY AT ANY LAYER (AUD-3, IMMUT-9)** | **TESTED — awaiting approval.** The owner's rule, implemented: the original is immutable and untouched — contents, signature, issue date, prices and bytes — and a MASTER raises a correction that carries its own addendum, linked to the exact storage key of the document the customer holds. `job_corrections` is append-only with one thing that may be filled in later: the customer's acknowledgement, write-once |
+| **The addendum is not a re-rendered job card** | **TESTED — awaiting approval.** A re-render would be a different document wearing the original's date, which is what a frozen job card exists to prevent. `renderCorrection` is given no job at all, so it cannot do otherwise, and it shares `pdf-sheet.ts` with the job card so the two are visibly the same company's paper |
+| **Proved by reading the original's bytes before and after, in a browser** | **TESTED — awaiting approval.** A smoke step fetches the issued job card, raises a correction through the screen, fetches it again and compares base64. The technician who did the work SEES the correction and is refused raising one, by the server and not by a hidden button |
+| **When the customer's acknowledgement is REQUIRED** | **OPEN, and deliberately not answered.** A legally significant rule EJE have not stated. The Master says whether it is required when raising the correction, the addendum prints which of the two it is, and the system records what then happened. Nothing infers it |
+| **BD-06 — closing *Without Customer Signature* sent the customer NOTHING (AUD-4, DELIV-7)** | **TESTED — awaiting approval.** No automatic delivery, still — now on purpose rather than by omission. A MASTER authorises an exceptional send with a reason; the recipient is the job's own contact resolved by the same rule the ordinary path uses, never a caller's choice; the authorisation names the exact document and is append-only, one per job |
+| **The message does not tell a customer who refused to sign that they signed** | **TESTED — awaiting approval.** The ordinary path's mail says "signed job card" because every document it sends is one. Reusing it here would have been a false statement to a customer, so the unsigned path has its own wording and a test asserts the absence |
+| **A failed send is retryable without a second authorisation, and cannot double-send** | **TESTED — awaiting approval.** The decision stands; a provider failure does not undo it. The same in-flight guard the signed path uses, with the same expiry so a crash cannot leave a job nobody can ever send |
+| **Provenance gained a third value, `unknown`** | **TESTED — awaiting approval.** §1.3's "uncertainty must not be treated as proven". Migration 0018 relabels pre-provenance rows in the five tables that permit an UPDATE; the column's default changed from `genuine` to `unknown`, so a forgotten field is a visible gap rather than a false claim; `final_documents` is write-once and is NOT rewritten — 0018 records when recording began instead, and the reconcile spends that row |
+| **A would-be production incident, found and prevented** | **FIXED.** Without that record, applying 0015 to the live database would have backfilled `genuine` onto the six demonstration job cards and the first `documents:reconcile` after deployment would have reported all six as LOST CUSTOMER DOCUMENTS. Proved by building a database shaped like the live one and migrating it |
+| **An empty-array CHECK that accepted the row it was written to refuse** | **FIXED.** `array_length(areas, 1) >= 1` is NULL on an empty array and a CHECK treats NULL as satisfied. `cardinality` returns 0. Found by the db test, which is why it exists |
+| **A deployment declares itself** | **TESTED — awaiting approval.** `EJE_DEPLOYMENT=production` makes the demonstration switcher unreachable in the RUNTIME whatever else is set, makes `db:seed:demo` refuse outright with no override, and makes a deployment pointed at a database that contradicts its declaration fail preflight. The preflight now PASSES the demonstration deployment instead of blocking it — a check that must be overridden to deploy is not a check |
+| **`npm run backup:key-check`** | **TESTED — awaiting approval.** The escrow drill: is the key you hold the key this backup needs? Compares fingerprints, decrypts nothing, writes nothing, prints no part of the key, exits non-zero on a mismatch. Proved against a real encrypted backup with the right key, an escrowed copy from a file, and a wrong key |
+| **The off-site recommendation, costed** | **IMPLEMENTED, EXTERNAL CONFIGURATION REQUIRED.** `docs/vps-backups.md` §5.1 recommends rclone to object storage with object lock, with the trade-offs against a NAS and a removable disk, and names the five things EJE must supply. The repository refuses a destination inside the backup directory, refuses a malformed rclone target, and warns when a directory destination is on the same filesystem — all verified locally |
+| **Eight more tablet acceptance checks** | **AWAITING PHYSICAL ACCEPTANCE.** Camera permission refused and then allowed, upload progress and retry on a bad connection, signing with finger and stylus across a rotation, the on-screen keyboard over a long write-up, a long form in portrait, session expiry with unsent work, and a deliberate sign-out with captures held. Each has a failure mode a headless browser cannot see, which is the test for belonging there |
+
+**Evidence:** lint, typecheck, build, **2 430** unit and route tests, **305** on
+real PostgreSQL and real file storage, all 21 migrations applied from zero on a
+fresh database and again onto a database shaped like the live one, every
+browser suite, and a full backup → verify → key-check → restore-test cycle
+against a real PostgreSQL 16 with real stored files that left the source
+database and its files untouched and dropped its scratch database.
+
 ### Demonstration labelling and customer documents (20 October 2026, seventh batch)
 
 *The October implementation mandate, sections 1, 3 and 4. **Nothing here is

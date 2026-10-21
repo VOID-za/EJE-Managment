@@ -166,12 +166,19 @@ export const classifyDocument = (
       : {
           ...base,
           verdict: 'absent_genuine',
+          /*
+           * AN UNRECORDED ROW IS TREATED AS GENUINE HERE, and only here, and
+           * the wording says which it is. Dismissing a possibly-real missing
+           * job card because nobody wrote its origin down is the one error
+           * with no remedy; being asked to check a fixture is an afternoon.
+           */
           detail:
-            `${row.jobNumber} is a GENUINE issued document — ` +
+            `${row.jobNumber} is ` +
             (row.provenance === 'genuine'
-              ? 'the row says so'
-              : 'nothing marks it as demonstration data and the job is not in the shipped ' +
-                'dataset') +
+              ? 'a GENUINE issued document — the row says so'
+              : 'treated as a GENUINE issued document — its provenance was never recorded, and ' +
+                'the job is not in the shipped demonstration dataset, so this will not assume ' +
+                'it is a fixture') +
             ' — and its bytes are gone. Recover it from a backup. It must not be re-rendered: ' +
             'the customer holds a signed copy and a fresh render would not be it.',
         };
