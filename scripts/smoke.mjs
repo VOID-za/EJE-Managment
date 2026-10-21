@@ -3108,6 +3108,44 @@ await step('a duplicate serial number is refused', async () => {
   await page.getByRole('button', { name: 'Add machine' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
+
+  /*
+   * LET THE DIALOG SETTLE BEFORE TYPING INTO IT. This is the fix for the
+   * failure this step produced on two CI runs and never locally:
+   *
+   *   locator.waitFor: Timeout 20000ms exceeded.
+   *     - waiting for ...('is already on the register').or(body:not(:has(dialog)))
+   *
+   * — neither the refusal nor a closed dialog, for twenty seconds, which only
+   * happens when the form came back with a DIFFERENT message.
+   *
+   * WHY IT CAME BACK WITH A DIFFERENT ONE. `MachineDialog` resets its draft in
+   * an effect when `open` turns true. The element is visible before that effect
+   * has run, so a `fill` that lands in the gap is wiped by the reset — and the
+   * read-back below can happen in the same gap and see the value that is about
+   * to be discarded. The dialog then submits an EMPTY serial, the server
+   * refuses it for being empty rather than for being a duplicate, and the step
+   * waits out its timeout on wording that was never coming. On this machine the
+   * effect flushes before Playwright gets there; on a loaded runner it does not.
+   *
+   * The submit button is disabled until the customer's sites have loaded, so
+   * waiting for it to be ENABLED waits for a render that is strictly after the
+   * reset. Nothing is retried and nothing is relaxed: the fields are filled
+   * once the form is ready to hold them.
+   */
+  const submit = dialog.getByRole('button', { name: 'Add machine' });
+  await submit.waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForFunction(
+    () => {
+      const node = [...document.querySelectorAll('[role="dialog"] button')].find(
+        (button) => (button.textContent ?? '').trim() === 'Add machine',
+      );
+      return node !== undefined && !node.disabled;
+    },
+    undefined,
+    { timeout: 10000 },
+  );
+
   await dialog.getByLabel('Manufacturer').fill('Mazak');
   await dialog.getByLabel('Model').fill('QT-250');
   // The serial already on the register, in a different case.
@@ -3132,25 +3170,26 @@ await step('a duplicate serial number is refused', async () => {
     throw new Error(`the serial field holds "${typed}", so this is not the duplicate case`);
   }
 
-  // Enabled, not merely present: the form disables its own submit until the
-  // customer's sites have loaded, and clicking a disabled button does nothing.
-  const submit = dialog.getByRole('button', { name: 'Add machine' });
-  await submit.waitFor({ state: 'visible', timeout: 10000 });
-  await page.waitForFunction(
-    () => {
-      const node = [...document.querySelectorAll('[role="dialog"] button')].find(
-        (button) => (button.textContent ?? '').trim() === 'Add machine',
-      );
-      return node !== undefined && !node.disabled;
-    },
-    undefined,
-    { timeout: 10000 },
-  );
   await submit.click();
 
   const refusal = dialog.getByText('is already on the register', { exact: false });
   const gone = page.locator('body:not(:has([role="dialog"]))');
-  await refusal.or(gone).first().waitFor({ timeout: 20000 });
+  /*
+   * A THIRD OUTCOME, WAITED FOR BY NAME. The form's own refusal notice is
+   * `RuleViolationNotice`, which carries a heading whatever the reason is — so
+   * "the dialog answered with something else" is now something this step
+   * OBSERVES rather than something it times out on. The assertion below is
+   * unchanged; what changes is that a failure says what the dialog said.
+   */
+  const answered = dialog.getByText('The machine could not be added', { exact: false });
+  await refusal.or(gone).or(answered).first().waitFor({ timeout: 20000 });
+
+  if (!(await refusal.isVisible().catch(() => false)) && !(await gone.count())) {
+    const said = (await dialog.innerText().catch(() => '')).replace(/\s+/gu, ' ').trim();
+    throw new Error(
+      `the dialog refused the machine for a different reason (serial submitted: "${typed}"): ${said.slice(0, 400)}`,
+    );
+  }
 
   if (!(await refusal.isVisible().catch(() => false))) {
     /*
