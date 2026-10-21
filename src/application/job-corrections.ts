@@ -15,6 +15,7 @@ import { audit } from './audit';
 import { formatDateTime } from '@/lib/format';
 import { canReadFinalDocument, FINAL_DOCUMENT_CONTENT_TYPE } from './final-document';
 import { StorageIntegrityFailed, type StoredDocument } from '@/services/ports';
+import { measureStored } from './stored-file';
 
 /**
  * CORRECTING AN ISSUED JOB CARD. BD-02, IMMUT-9, AUD-3.
@@ -229,21 +230,13 @@ export const raiseJobCorrection = async (
     backfilled: false,
   });
 
-  let readBack: StoredDocument | null;
-  try {
-    readBack = await context.services.storage.getDocument(storageKey);
-  } catch (cause) {
-    if (!(cause instanceof StorageIntegrityFailed)) throw cause;
-    readBack = null;
-  }
-  if (readBack === null || readBack.bytes.byteLength === 0) {
-    throw new WorkflowError('The correction could not be stored.', [
-      {
-        code: 'document_not_stored',
-        message: 'The addendum did not land in storage, so nothing was recorded. Try again.',
-      },
-    ]);
-  }
+  // Read back and measured at the key this record carries, which is why it is
+  // `measureStored` rather than `storeAndMeasure`.
+  const measured = await measureStored(context, storageKey, {
+    message: 'The correction could not be stored.',
+    code: 'document_not_stored',
+    detail: 'The addendum did not land in storage, so nothing was recorded. Try again.',
+  });
 
   const correction: JobCorrection = {
     id,
@@ -259,8 +252,8 @@ export const raiseJobCorrection = async (
     acknowledged: null,
     documentFileName: fileName,
     documentStorageKey: storageKey,
-    documentSizeBytes: readBack.sizeBytes ?? readBack.bytes.byteLength,
-    documentChecksumSha256: readBack.sha256 ?? null,
+    documentSizeBytes: measured.sizeBytes,
+    documentChecksumSha256: measured.checksumSha256,
     createdAt: now,
   };
 

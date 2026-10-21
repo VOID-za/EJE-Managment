@@ -3,6 +3,7 @@ import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { audit } from './audit';
 import { StorageIntegrityFailed, type StoredDocument, type UploadedFile } from '@/services/ports';
+import { storeAndMeasure } from './stored-file';
 
 /**
  * FILES ATTACHED TO A CUSTOMER. October mandate §4.
@@ -106,34 +107,21 @@ export const attachCustomerDocument = async (
     ]);
   }
 
-  // The bytes, or nothing. `storeUpload` raises rather than returning a key
-  // for a write that did not happen.
-  const stored = await context.services.storage.storeUpload({
-    fileName: input.fileName,
-    contentType: input.contentType,
-    bytes: input.bytes,
-  });
-
   /*
-   * AND READ BACK, so the row describes a file that can be produced. The store
-   * measures the length and the hash on the way out (BACKUP-1), which is what
-   * makes the record able to say later whether the file is still the file.
+   * THE BYTES, OR NOTHING, AND THEN READ BACK — so the row describes a file
+   * that can be produced rather than one that was handed to a write call. The
+   * store measures the length and the hash on the way out (BACKUP-1), which is
+   * what lets the record say later whether the file is still the file.
+   *
+   * This was three copies of the same twenty lines, one per document path, and
+   * the copies had drifted: see `storeAndMeasure`, which exists because the
+   * drift is what let two paths record no checksum at all.
    */
-  let readBack: StoredDocument | null;
-  try {
-    readBack = await context.services.storage.getDocument(stored.storageKey);
-  } catch (cause) {
-    if (!(cause instanceof StorageIntegrityFailed)) throw cause;
-    readBack = null;
-  }
-  if (readBack === null || readBack.bytes.byteLength === 0) {
-    throw new WorkflowError('That document could not be stored.', [
-      {
-        code: 'document_not_stored',
-        message: 'The file did not land in storage, so nothing was recorded. Try again.',
-      },
-    ]);
-  }
+  const stored = await storeAndMeasure(
+    context,
+    { fileName: input.fileName, contentType: input.contentType, bytes: input.bytes },
+    { message: 'That document could not be stored.', code: 'document_not_stored' },
+  );
 
   const document: CustomerDocument = {
     id: context.services.ids.next('customer-document'),
@@ -142,8 +130,8 @@ export const attachCustomerDocument = async (
     caption,
     contentType: input.contentType,
     storageKey: stored.storageKey,
-    sizeBytes: readBack.sizeBytes ?? readBack.bytes.byteLength,
-    checksumSha256: readBack.sha256 ?? null,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
     // A file somebody really uploaded. Only the seed writes `simulated`, and

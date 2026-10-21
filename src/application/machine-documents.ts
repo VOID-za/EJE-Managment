@@ -9,6 +9,7 @@ import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { audit } from './audit';
 import { StorageIntegrityFailed, type StoredDocument, type UploadedFile } from '@/services/ports';
+import { storeAndMeasure } from './stored-file';
 
 /**
  * FILES ATTACHED TO A MACHINE. October mandate §4.
@@ -134,28 +135,13 @@ export const attachMachineDocument = async (
     ]);
   }
 
-  // The bytes, or nothing.
-  const stored = await context.services.storage.storeUpload({
-    fileName: input.fileName,
-    contentType: input.contentType,
-    bytes: input.bytes,
-  });
-
-  let readBack: StoredDocument | null;
-  try {
-    readBack = await context.services.storage.getDocument(stored.storageKey);
-  } catch (cause) {
-    if (!(cause instanceof StorageIntegrityFailed)) throw cause;
-    readBack = null;
-  }
-  if (readBack === null || readBack.bytes.byteLength === 0) {
-    throw new WorkflowError('That document could not be stored.', [
-      {
-        code: 'document_not_stored',
-        message: 'The file did not land in storage, so nothing was recorded. Try again.',
-      },
-    ]);
-  }
+  // The bytes, or nothing — then read back and measured. One helper for every
+  // path that stores a file; see `storeAndMeasure`.
+  const stored = await storeAndMeasure(
+    context,
+    { fileName: input.fileName, contentType: input.contentType, bytes: input.bytes },
+    { message: 'That document could not be stored.', code: 'document_not_stored' },
+  );
 
   const document: MachineDocument = {
     id: context.services.ids.next('machine-document'),
@@ -164,8 +150,8 @@ export const attachMachineDocument = async (
     caption,
     contentType: input.contentType,
     storageKey: stored.storageKey,
-    sizeBytes: readBack.sizeBytes ?? readBack.bytes.byteLength,
-    checksumSha256: readBack.sha256 ?? null,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     audience: input.audience,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,

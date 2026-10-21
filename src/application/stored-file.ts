@@ -17,6 +17,14 @@ import { WorkflowError } from './errors';
  *     `input.bytes.length`, and NO CHECKSUM AT ALL — `job_media` has had a
  *     `checksum_sha256` column the whole time and nothing ever wrote to it.
  *
+ * AND IT IS NOW ONE FUNCTION IN FACT AND NOT ONLY IN NAME. The three document
+ * paths — a customer's document, a machine's document, a post-signature
+ * correction — each still carried their own copy of the twenty lines after this
+ * helper was written, which is how the next drift would have started. They call
+ * this instead; the refusal wording and the violation code stay theirs, because
+ * a client may switch on the code and unifying it would have been an API change
+ * made for the convenience of this file.
+ *
  * SO A DAMAGED JOB PHOTOGRAPH COULD NOT BE TOLD FROM A SOUND ONE. The store
  * recomputes the hash on every read and refuses bytes that are not the bytes
  * that were written — but with no hash on the row, nothing could say whether a
@@ -48,10 +56,36 @@ export interface MeasuredFile {
   readonly checksumSha256: string | null;
 }
 
+/**
+ * What the caller is told when nothing landed.
+ *
+ * THE VIOLATION CODE IS THE CALLER'S because a client may already switch on
+ * it: the document paths answer `document_not_stored` and the media paths
+ * `file_not_stored`, and unifying the two here would have been an API change
+ * made for the convenience of this file.
+ */
+export interface StorageRefusal {
+  /** What the person who pressed the button reads. */
+  readonly message: string;
+  readonly code: string;
+  /** The sentence under it, when "the file" is not what this path calls it. */
+  readonly detail?: string;
+}
+
+const DEFAULT_DETAIL = 'The file did not land in storage, so nothing was recorded. Try again.';
+
+const DEFAULT_REFUSAL: StorageRefusal = {
+  message: 'That file could not be stored.',
+  code: 'file_not_stored',
+};
+
+const asRefusal = (refusal: string | StorageRefusal): StorageRefusal =>
+  typeof refusal === 'string' ? { message: refusal, code: DEFAULT_REFUSAL.code } : refusal;
+
 export const storeAndMeasure = async (
   context: OperationContext,
   file: { readonly fileName: string; readonly contentType: string; readonly bytes: Uint8Array },
-  refusal = 'That file could not be stored.',
+  refusal: string | StorageRefusal = DEFAULT_REFUSAL,
 ): Promise<MeasuredFile> => {
   const stored = await context.services.storage.storeUpload({
     fileName: file.fileName,
@@ -75,10 +109,11 @@ export const storeAndMeasure = async (
   }
 
   if (readBack === null || readBack.bytes.byteLength === 0) {
-    throw new WorkflowError(refusal, [
+    const said = asRefusal(refusal);
+    throw new WorkflowError(said.message, [
       {
-        code: 'file_not_stored',
-        message: 'The file did not land in storage, so nothing was recorded. Try again.',
+        code: said.code,
+        message: said.detail ?? DEFAULT_DETAIL,
       },
     ]);
   }
@@ -109,7 +144,7 @@ export const storeAndMeasure = async (
 export const measureStored = async (
   context: OperationContext,
   storageKey: string,
-  refusal = 'That file could not be stored.',
+  refusal: string | StorageRefusal = DEFAULT_REFUSAL,
 ): Promise<MeasuredFile> => {
   let readBack: StoredDocument | null;
   try {
@@ -120,10 +155,11 @@ export const measureStored = async (
   }
 
   if (readBack === null || readBack.bytes.byteLength === 0) {
-    throw new WorkflowError(refusal, [
+    const said = asRefusal(refusal);
+    throw new WorkflowError(said.message, [
       {
-        code: 'file_not_stored',
-        message: 'The file did not land in storage, so nothing was recorded. Try again.',
+        code: said.code,
+        message: said.detail ?? DEFAULT_DETAIL,
       },
     ]);
   }
