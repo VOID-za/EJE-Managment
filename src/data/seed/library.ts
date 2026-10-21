@@ -33,6 +33,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'leadwell-v40-machine-manual-rev4.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/leadwell-v40-machine-manual-rev4.pdf',
@@ -52,6 +54,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'leadwell-v40-electrical-rev2.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/leadwell-v40-electrical-rev2.pdf',
@@ -71,6 +75,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'haas-st20-service-manual-rev7.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/haas-st20-service-manual-rev7.pdf',
@@ -90,6 +96,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'eje-general-safety-procedure-v3-1.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/eje-general-safety-procedure-v3-1.pdf',
@@ -109,6 +117,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'eje-installation-procedure-v2-4.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/eje-installation-procedure-v2-4.pdf',
@@ -128,6 +138,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'eje-service-procedure-v2-0.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/eje-service-procedure-v2-0.pdf',
@@ -146,6 +158,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'archived',
     fileName: 'eje-service-procedure-v1-6.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/eje-service-procedure-v1-6.pdf',
@@ -164,6 +178,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'current',
     fileName: 'fanuc-0i-mf-alarm-reference.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/fanuc-0i-mf-alarm-reference.pdf',
@@ -182,6 +198,8 @@ export const seedDocuments: readonly TechnicalDocument[] = [
     status: 'pending_approval',
     fileName: 'amada-hfe1303-light-curtain.pdf',
     fileSizeBytes: 0,
+    /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+    checksumSha256: null,
     pageCount: 0,
     provenance: 'simulated',
     storageKey: 'library/amada-hfe1303-light-curtain.pdf',

@@ -120,6 +120,12 @@ export class PostgresDocumentRepository implements DocumentRepository {
       fileName: document.fileName,
       storageKey: document.storageKey,
       sizeBytes: document.fileSizeBytes,
+      /*
+       * MEASURED BY THE STORE, and written here — the column existed and
+       * nothing ever filled it. Without it a damaged manual could not be told
+       * from a lost one, on the document a technician works from on site.
+       */
+      checksumSha256: document.checksumSha256,
       pageCount: document.pageCount,
       // Written on the revision AND on the document below: they are allowed to
       // differ, and this is the one somebody downloads.
@@ -539,6 +545,7 @@ const toDomainDocument = ({
   status: document.status,
   fileName: version.fileName,
   fileSizeBytes: version.sizeBytes,
+  checksumSha256: version.checksumSha256,
   /*
    * ZERO MEANS UNKNOWN, and that is why the `?? 1` went. A metadata-only
    * record has no pages to count, and reporting one page for a manual nobody

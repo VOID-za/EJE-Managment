@@ -482,6 +482,28 @@ const v22ToV23 = (data: Loose): Loose => ({
   libraryOcrQueue: Array.isArray(data.libraryOcrQueue) ? data.libraryOcrQueue : [],
 });
 
+/**
+ * v23 -> v24. A checksum on a library revision. LIB-5's half of `0021`'s idea.
+ *
+ * The library was the last upload path that measured nothing: it recorded the
+ * length of what it HANDED to the write and no hash at all. The field is
+ * `string | null`, and a v23 record has neither — `undefined` where the type
+ * says null, which is a lie that surfaces somewhere far away.
+ *
+ * NULL, not a hash of the bytes the snapshot happens to hold: computing one
+ * would be recording a measurement nobody took.
+ */
+const v23ToV24 = (data: Loose): Loose => ({
+  ...data,
+  documents: Array.isArray(data.documents)
+    ? data.documents.map((document) =>
+        typeof document === 'object' && document !== null && !('checksumSha256' in document)
+          ? { ...(document as Record<string, unknown>), checksumSha256: null }
+          : document,
+      )
+    : data.documents,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -498,6 +520,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   20: v20ToV21,
   21: v21ToV22,
   22: v22ToV23,
+  23: v23ToV24,
 };
 
 /**

@@ -12,6 +12,7 @@ import { extractPdfText } from '@/lib/pdf/extract-text';
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { enqueueOcr } from './library-ocr';
+import { measureStored } from './stored-file';
 import { WorkflowError } from './errors';
 
 /**
@@ -57,7 +58,15 @@ export interface NewDocumentInput {
  * reads to say there is nothing stored — see `uploadDocument`, which replaces
  * both with what the file actually measures.
  */
-const NO_STORED_FILE = { fileSizeBytes: 0, pageCount: 0 } as const;
+/*
+ * A RECORD WITH NO FILE BEHIND IT, said in three fields rather than two.
+ *
+ * `checksumSha256: null` is the honest third: nothing has been measured,
+ * because there is nothing to measure. A zero-length string would claim a
+ * measurement, which is the mistake that made `final_documents.size_bytes`
+ * read 0 on documents that were perfectly intact.
+ */
+const NO_STORED_FILE = { fileSizeBytes: 0, pageCount: 0, checksumSha256: null } as const;
 
 /**
  * Where this revision's file lives.
@@ -405,10 +414,32 @@ export const uploadDocument = async (
     bytes: input.file.bytes,
   });
 
+  /*
+   * AND READ BACK, so the row describes a file that can be produced.
+   *
+   * This recorded `input.file.bytes.byteLength` — the length of what was
+   * HANDED to the write — and no checksum at all, on a column
+   * (`library_document_versions.checksum_sha256`) that has existed since the
+   * table did. It was the last upload path in the system that measured
+   * nothing, which meant a manual a technician works from on site could not be
+   * told from a damaged copy of itself. `measureStored` raises if the bytes did
+   * not land, so the row below cannot describe a file that is not there.
+   *
+   * `putDocument` rather than `storeUpload` because the key is the RECORD's:
+   * `addDocument` above generated it, so the bytes go to a key that already
+   * exists on a row. See `measureStored` for why that needs its own helper.
+   */
+  const measured = await measureStored(
+    context,
+    document.storageKey,
+    'That document could not be stored.',
+  );
+
   const index = await indexDocumentText(context, document, input.file.bytes);
   const stored = await context.repos.documents.save({
     ...document,
-    fileSizeBytes: input.file.bytes.byteLength,
+    fileSizeBytes: measured.sizeBytes,
+    checksumSha256: measured.checksumSha256,
     pageCount: Math.max(1, index.pages),
   });
 

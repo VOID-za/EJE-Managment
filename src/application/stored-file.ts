@@ -89,3 +89,48 @@ export const storeAndMeasure = async (
     checksumSha256: readBack.sha256 ?? null,
   };
 };
+
+/**
+ * Reads back and measures bytes written at an EXPLICIT key.
+ *
+ * WHY THERE ARE TWO OF THESE. `storeAndMeasure` both writes and measures, and
+ * it chooses the key — which is right for every path where the key is the
+ * store's business. The library is the exception: a revision's key is generated
+ * when the RECORD is created, because the record is what carries it, so the
+ * bytes go through `putDocument` at a key that already exists on a row.
+ *
+ * THE LIBRARY WAS THE LAST PATH THAT MEASURED NOTHING. It wrote the bytes and
+ * then recorded `input.file.bytes.byteLength` — the length of what was handed
+ * to the write — and `library_document_versions.checksum_sha256` has existed
+ * the whole time with nothing writing to it. Exactly the gap `job_media` had:
+ * a manual a technician works from on site could not be told from a damaged
+ * copy of itself.
+ */
+export const measureStored = async (
+  context: OperationContext,
+  storageKey: string,
+  refusal = 'That file could not be stored.',
+): Promise<MeasuredFile> => {
+  let readBack: StoredDocument | null;
+  try {
+    readBack = await context.services.storage.getDocument(storageKey);
+  } catch (cause) {
+    if (!(cause instanceof StorageIntegrityFailed)) throw cause;
+    readBack = null;
+  }
+
+  if (readBack === null || readBack.bytes.byteLength === 0) {
+    throw new WorkflowError(refusal, [
+      {
+        code: 'file_not_stored',
+        message: 'The file did not land in storage, so nothing was recorded. Try again.',
+      },
+    ]);
+  }
+
+  return {
+    storageKey,
+    sizeBytes: readBack.sizeBytes ?? readBack.bytes.byteLength,
+    checksumSha256: readBack.sha256 ?? null,
+  };
+};

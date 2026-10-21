@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chdir, cwd } from 'node:process';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -31,6 +32,11 @@ import { FilesystemStorageService } from '@/services/production/file-storage';
  *   - TWO FILES WITH THE SAME NAME. A technician photographing two nameplates
  *     on an iPhone sends `IMG_0001.jpg` twice.
  *   - TWO UPLOADS AT THE SAME INSTANT. Both must land, with their own bytes.
+ *   - IS THE ROW'S CHECKSUM THE FILE'S CHECKSUM? Every upload path now reads
+ *     its bytes back and records what the store measured. A test that only
+ *     asserts the column is non-empty would pass on a checksum of the wrong
+ *     file, so the hash is computed here, independently, off the bytes the
+ *     test sent.
  */
 const url = testDatabaseUrl();
 const describeDb = url === null ? describe.skip : describe;
@@ -40,6 +46,9 @@ const MASTER = 'elmarie@example-test.co.za';
 
 const pdf = (label: string): Uint8Array =>
   new TextEncoder().encode(`%PDF-1.4\n${label}\n%%EOF`);
+
+const sha256 = (bytes: Uint8Array): string =>
+  createHash('sha256').update(bytes).digest('hex');
 
 interface DocumentBody {
   readonly document: {
@@ -277,5 +286,60 @@ describeDb('the rest of an upload’s life, on PostgreSQL', () => {
     expect(byName.get('short.pdf')).toBe(pdf(short).byteLength);
     expect(byName.get('long.pdf')).toBe(pdf(long).byteLength);
     expect(byName.get('short.pdf')).not.toBe(byName.get('long.pdf'));
+  });
+  it('records the SHA-256 OF THE BYTES, not of anything else', async () => {
+    /*
+     * THE CUSTOMER DOCUMENT AND THE LIBRARY REVISION, in one test, because
+     * until this phase they disagreed: the customer path read its bytes back
+     * and recorded the store's own measurements, and the library path recorded
+     * `input.file.bytes.byteLength` with no checksum at all — on a column
+     * (`library_document_versions.checksum_sha256`) that has existed since the
+     * table did.
+     *
+     * THE HASH IS COMPUTED HERE, off the bytes this test sent, so the
+     * assertion cannot be satisfied by a checksum of the wrong file, by the
+     * hash of an empty buffer, or by anything the application chose to call a
+     * checksum. Two different documents are uploaded so a constant cannot pass
+     * either.
+     */
+    const master = await signIn(MASTER);
+
+    const customerBytes = pdf('the signed service agreement');
+    const attached = await attach(master, 'agreement.pdf', 'the signed service agreement');
+    expect(attached.status, JSON.stringify(attached.error)).toBe(200);
+
+    const manualBytes = pdf('the alarm list for the 0i-MF');
+    const uploaded = await master.upload<{
+      readonly document: { readonly id: string; readonly fileSizeBytes: number };
+    }>('/api/library/upload', {
+      name: 'fanuc-0i-mf-alarms.pdf',
+      type: 'application/pdf',
+      bytes: manualBytes,
+      fields: { name: 'Fanuc 0i-MF alarm list', documentType: 'service_manual', version: '1.0' },
+    });
+    expect(uploaded.status, JSON.stringify(uploaded.error)).toBe(200);
+
+    const [customerRow] = await db.select().from(schema.customerDocuments);
+    const [revision] = await db.select().from(schema.libraryDocumentVersions);
+
+    expect(customerRow?.checksumSha256).toBe(sha256(customerBytes));
+    expect(revision?.checksumSha256).toBe(sha256(manualBytes));
+
+    // And the two are DIFFERENT files, which is what rules out a constant.
+    expect(customerRow?.checksumSha256).not.toBe(revision?.checksumSha256);
+
+    /*
+     * AND THE LENGTH IS THE STORED LENGTH. `size_bytes` used to be the length
+     * of what was handed to the write; on a write that truncated, the row
+     * would describe a file nobody could reproduce.
+     */
+    expect(Number(revision?.sizeBytes)).toBe(manualBytes.byteLength);
+    expect(uploaded.data.document.fileSizeBytes).toBe(manualBytes.byteLength);
+
+    // The bytes really are there, under the key the row carries.
+    const store = new FilesystemStorageService({ root: storageRoot });
+    const stored = await store.getDocument(revision?.storageKey ?? '');
+    expect(stored).not.toBeNull();
+    expect(sha256(stored!.bytes)).toBe(sha256(manualBytes));
   });
 });

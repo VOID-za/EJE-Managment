@@ -62,6 +62,7 @@ describeDb('the technical library full-text index', () => {
       status: 'current',
       fileName: 'alarms.pdf',
       fileSizeBytes: 120_000,
+      checksumSha256: null,
       pageCount: 12,
       storageKey: `library/${id}/alarms.pdf`,
       uploadedAt: '2026-10-01T08:00:00.000Z',

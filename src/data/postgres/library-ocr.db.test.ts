@@ -48,6 +48,7 @@ const document = (id: DocumentId, name: string): TechnicalDocument => ({
   status: 'current',
   fileName: `${name}.pdf`,
   fileSizeBytes: 1024,
+  checksumSha256: null,
   pageCount: 214,
   storageKey: `uploads/${id}`,
   provenance: 'genuine',

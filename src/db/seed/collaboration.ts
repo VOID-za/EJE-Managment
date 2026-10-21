@@ -91,6 +91,8 @@ const document = (input: DocumentInput): TechnicalDocument => ({
    * real file or it is zero.
    */
   fileSizeBytes: 0,
+  /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+  checksumSha256: null,
   pageCount: 0,
   storageKey: `library/${fileNameFor(input.name, input.version)}`,
   uploadedAt: timeAgo(input.daysAgo ?? 300, 9),

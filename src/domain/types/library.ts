@@ -43,6 +43,20 @@ export interface TechnicalDocument {
    * now measured or absent.
    */
   readonly fileSizeBytes: number;
+  /**
+   * SHA-256 of the stored bytes, so a damaged manual can be told from a lost
+   * one. Null when nothing has measured them.
+   *
+   * WHY IT WAS MISSING: `library_document_versions` has carried the column
+   * since the table existed and nothing ever wrote to it, and the upload
+   * recorded the length of what it HANDED to the write rather than what came
+   * back. A manual a technician works from on site could not be told from a
+   * damaged copy of itself — the same gap `job_media` had.
+   *
+   * Null for every revision added as metadata alone, which is every seeded
+   * one: there are no bytes, so there is nothing to have measured.
+   */
+  readonly checksumSha256: string | null;
   /** Pages in the stored file. Zero when there is no file to count. */
   readonly pageCount: number;
   readonly storageKey: string;

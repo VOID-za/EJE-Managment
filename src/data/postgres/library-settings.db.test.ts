@@ -56,6 +56,7 @@ describeDb('the library, the settings and the reference data', () => {
       status: 'current',
       fileName: 'leadwell-v40-manual.pdf',
       fileSizeBytes: 2_400_000,
+      checksumSha256: null,
       pageCount: 184,
       storageKey: `library/${id}/leadwell-v40-manual.pdf`,
       uploadedAt: '2026-02-01T09:00:00.000Z',
