@@ -497,7 +497,17 @@ await step('a scanned document says it is not searchable, and why, with a retry'
     problems.push('the office is not told WHY the document cannot be searched');
   } else {
     const reason = await problem.innerText();
-    if (!/OCR/i.test(reason)) problems.push(`the reason does not mention OCR: ${reason}`);
+    /*
+     * THE CONCEPT, NOT THE JARGON. This asked for the literal string "OCR",
+     * which the reason carried while it was `index.failureReason` — a sentence
+     * written for whoever reads the code. The copy now comes from
+     * `describeSearchability` and says "its text has to be recognised", which
+     * is the same fact in words a technician uses. What the gate is for is
+     * that the office is told WHY and can act on it, so it accepts either.
+     */
+    if (!/OCR|recognis|recogniz/iu.test(reason)) {
+      problems.push(`the reason does not say the text has to be recognised: ${reason}`);
+    }
     const retry = card.getByTestId('library-reindex');
     if ((await retry.count()) === 0) problems.push('there is no route to try the index again');
     else {
