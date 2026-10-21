@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deploymentMismatch, deploymentModeOf, isDeclaredProduction } from './deployment-mode';
-import { checkDemoSwitcher, checkDeployment } from './preflight-rules';
+import { checkDemoSwitcher, checkDeployment, checkEmail } from './preflight-rules';
 import { isDemoSwitcherEnabled } from '@/server/dev/demo-switcher';
 import { resolveDemoSeedTarget, SeedRefused } from '@/db/seed/guards';
 
@@ -156,6 +156,49 @@ describe('the demonstration switcher, against a declared deployment', () => {
   it('warns a demonstration deployment that has no switcher at all', () => {
     const checks = checkDemoSwitcher({ EJE_DEPLOYMENT: 'demonstration', DATABASE_URL: DEMO_URL });
     expect(verdictFor(checks, 'EJE_DEMO_SWITCHER')).toBe('warn');
+  });
+});
+
+describe('customer e-mail, against a declared deployment', () => {
+  /**
+   * THE SAME MISTAKE THE SWITCHER CHECK MADE, IN THE OTHER DIRECTION.
+   *
+   * "No customer receives a job card" is a deployment blocker where there are
+   * customers and the intended state where there are not — and the
+   * demonstration site runs PostgreSQL, so the pre-existing `isDemoBackend`
+   * flag is false there and says nothing about whether anybody real is
+   * waiting for mail. The mandate's words: distinguish "a safe deployment
+   * with integrations intentionally disabled" from "a release that claims
+   * customer communications are ready".
+   */
+  const unconfigured = { DATABASE_URL: PRODUCTION_URL, NODE_ENV: 'production' };
+
+  it('WARNS a demonstration deployment with no mail configured', () => {
+    const checks = checkEmail({ ...unconfigured, EJE_DEPLOYMENT: 'demonstration' }, false);
+    expect(verdictFor(checks, 'Customer email')).toBe('warn');
+    expect(checks[0]?.detail).toMatch(/CORRECT for a demonstration deployment/u);
+    // And it still says where it IS a blocker, so the warning is not an excuse.
+    expect(checks[0]?.detail).toMatch(/blocker on a deployment declared production/u);
+  });
+
+  it('FAILS a production deployment with no mail configured', () => {
+    const checks = checkEmail({ ...unconfigured, EJE_DEPLOYMENT: 'production' }, false);
+    expect(verdictFor(checks, 'Customer email')).toBe('fail');
+  });
+
+  it('FAILS an UNDECLARED deployment, which keeps the stricter reading', () => {
+    const checks = checkEmail(unconfigured, false);
+    expect(verdictFor(checks, 'Customer email')).toBe('fail');
+  });
+
+  /** The missing VARIABLE NAMES are named; no value ever is. */
+  it('names variables and never values', () => {
+    const checks = checkEmail({ ...unconfigured, EJE_DEPLOYMENT: 'demonstration' }, false);
+    const detail = checks.map((check) => check.detail).join(' ');
+    expect(detail).toMatch(/EMAIL_GRAPH_TENANT_ID/u);
+    for (const secret of ['postgres://', 'password', '5432']) {
+      expect(detail).not.toContain(secret);
+    }
   });
 });
 

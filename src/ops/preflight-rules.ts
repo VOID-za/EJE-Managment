@@ -337,6 +337,21 @@ export const checkEmail = (env: PreflightEnvironment, isDemoBackend: boolean): r
     isProduction: value(env, 'NODE_ENV') === 'production',
     isDemoBackend,
   });
+  /*
+   * A DEMONSTRATION DEPLOYMENT WITH NO MAIL IS CORRECT, NOT BROKEN.
+   *
+   * The same mistake the switcher check used to make, in the other direction:
+   * "no customer receives a job card" is a deployment blocker where there are
+   * customers and the intended state where there are not. Judged on the
+   * DECLARED deployment rather than on which store is behind it, because the
+   * demonstration site runs PostgreSQL — `isDemoBackend` is false there and
+   * says nothing about whether anybody real is waiting for mail.
+   *
+   * An UNDECLARED deployment keeps the stricter reading. The mandate's words:
+   * distinguish "a safe deployment with integrations intentionally disabled"
+   * from "a release that claims customer communications are ready".
+   */
+  const demonstration = deploymentModeOf(env) === 'demonstration';
 
   const checks: Check[] = [];
   switch (transport) {
@@ -363,11 +378,19 @@ export const checkEmail = (env: PreflightEnvironment, isDemoBackend: boolean): r
       break;
     case 'refuse':
       checks.push(
-        fail(
-          'Customer email',
-          'Not configured, so this deployment REFUSES to send and no customer receives a job ' +
-            `card. Missing: ${report.missing.join(', ')}.`,
-        ),
+        demonstration
+          ? warn(
+              'Customer email',
+              'Not configured, so this deployment REFUSES to send and nothing reaches a ' +
+                'mailbox. That is CORRECT for a demonstration deployment and is not a blocker ' +
+                `here. Missing: ${report.missing.join(', ')}. It IS a blocker on a deployment ` +
+                'declared production.',
+            )
+          : fail(
+              'Customer email',
+              'Not configured, so this deployment REFUSES to send and no customer receives a job ' +
+                `card. Missing: ${report.missing.join(', ')}.`,
+            ),
       );
       break;
   }

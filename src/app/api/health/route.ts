@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { getDatabase } from '@/db/client';
 import { selectPersistenceBackend } from '@/data/backend';
+import { deploymentModeOf } from '@/ops/deployment-mode';
 import { isDemoSwitcherEnabled } from '@/server/dev/demo-switcher';
 import { readSmtpEmailConfiguration } from '@/services/development/email';
 import { chooseEmailTransport, readGraphEmailConfiguration } from '@/services/production/email';
@@ -58,6 +59,16 @@ export const GET = async (): Promise<NextResponse> => {
     builtAt: process.env.EJE_BUILD_TIME ?? 'unknown',
   };
   const demoSwitcher = isDemoSwitcherEnabled();
+  /*
+   * WHICH DEPLOYMENT THIS SAYS IT IS. October mandate, Workstream A.
+   *
+   * Reported so an outside check can see the two facts TOGETHER: a deployment
+   * calling itself `production` with `"demoSwitcher": true` would be the thing
+   * nobody wants, and reading them one at a time is how that goes unnoticed.
+   * `undeclared` is the honest answer where nobody has said, and is what the
+   * live site reports until the line is added.
+   */
+  const deployment = deploymentModeOf();
 
   if (backend !== 'postgres') {
     // Nothing to check: no database is configured for this process.
@@ -67,6 +78,7 @@ export const GET = async (): Promise<NextResponse> => {
       database: 'not-configured',
       email,
       demoSwitcher,
+      deployment,
       build,
     });
   }
@@ -79,6 +91,7 @@ export const GET = async (): Promise<NextResponse> => {
       database: 'reachable',
       email,
       demoSwitcher,
+      deployment,
       build,
     });
   } catch (cause) {
@@ -86,7 +99,7 @@ export const GET = async (): Promise<NextResponse> => {
     // to an unauthenticated caller.
     console.error('[health] database unreachable', cause);
     return NextResponse.json(
-      { status: 'degraded', backend, database: 'unreachable', email, demoSwitcher, build },
+      { status: 'degraded', backend, database: 'unreachable', email, demoSwitcher, deployment, build },
       { status: 503 },
     );
   }

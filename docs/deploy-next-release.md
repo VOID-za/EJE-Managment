@@ -33,8 +33,65 @@ somebody with root on the VPS.
 | New commands: `documents:reconcile`, `dump:inspect`, `integrations:check` | Run by hand. Nothing runs them automatically. |
 | `deploy/eje-backup*.{service,timer}` | **Not installed by this deployment.** Step 7. |
 
+### Added since: migrations 0015–0020 — read this before step 5
+
+| Migration | What it does | Risk |
+|---|---|---|
+| `0015_provenance_and_categories` | Adds `provenance` to four tables (default `genuine`) and five values to the library's type enum | Additive. **Backfills every existing row to `genuine`** — see the warning below |
+| `0016_customer_documents` | New table | Additive |
+| `0017_machine_documents` | New table | Additive |
+| `0018_provenance_unknown` | Widens the provenance CHECKs to admit `unknown`, changes the DEFAULT to `unknown`, creates `provenance_recording`, and **UPDATEs rows written before provenance existed** in five tables | **The only data-modifying migration in this release.** See below |
+| `0019_job_corrections` | New table, CHECKs and an append-only trigger | Additive |
+| `0020_unsigned_delivery_authorisations` | New table and an append-only trigger | Additive |
+
+**No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
+the six. Every `NOT NULL` is on a column of a new table.
+
+**0015 AND 0018 MUST BE APPLIED IN THE SAME RUN, and they will be.** 0015
+backfills `genuine` onto rows whose origin nobody recorded — including the six
+demonstration job cards. 0018 is what corrects that: it relabels the five
+tables that permit an UPDATE, and for `final_documents` (write-once, and the
+database refuses UPDATE on it) it records *when this database began recording*
+so `documents:reconcile` can tell a backfilled label from a chosen one.
+
+**If the run is interrupted between them**, `npm run documents:reconcile` will
+report the six demonstration job cards as **LOST CUSTOMER DOCUMENTS** and exit
+non-zero. That is alarming and wrong, and the remedy is to finish the
+migration: `npm run db:migrate` again, then re-run the reconcile.
+
+**What 0018 changes, and how to see it before and after:**
+
+```bash
+# BEFORE the migration — the current labels, per table:
+psql "$DATABASE_URL" -At -c "
+  select 'library',  provenance, count(*) from library_documents group by 2
+  union all select 'photos', provenance, count(*) from machine_photos group by 2
+  union all select 'final', provenance, count(*) from final_documents group by 2"
+
+# AFTER — the same query, plus the moment recording began:
+psql "$DATABASE_URL" -At -c "select recorded_from from provenance_recording where id='cutoff'"
+```
+
+Rows that read `genuine` before and `unknown` after are rows whose origin was
+never recorded. **Nothing else about them changes** — not a file, not a
+checksum, not a date — and no row is deleted.
+
+**Locks.** The CHECK constraints are dropped and re-added, which takes an
+`ACCESS EXCLUSIVE` lock on each table and validates the new constraint against
+every row. On this database (tens of rows) it is instantaneous; it would not be
+on a table of millions, and nothing here is.
+
+### And a new preflight line
+
+`EJE_DEPLOYMENT` must be set before step 4, to `production` or
+`demonstration`. The current live site is a **demonstration** deployment, and
+saying so is what makes its preflight pass honestly rather than being waved
+through — and what makes the demonstration switcher refuse to arm anywhere
+that says `production`. See `docs/demonstration-isolation.md`.
+
 Two things this release deliberately does **not** do: it does not write document
-bytes anywhere, and it does not modify, repair or delete any existing row.
+bytes anywhere, and — apart from 0018's provenance relabelling, described above
+— it does not modify, repair or delete any existing row.
 
 ## 1. Back up first, and prove the backup
 
@@ -176,7 +233,19 @@ What rollback does and does not need:
 - **The migration is not rolled back, and must not be.** `0014` only adds a
   table; the old code neither reads nor writes it. Dropping it would delete the
   observations recorded in step 7 — the only independent record of what each
-  document's bytes were.
+  document's bytes were. **The same holds for 0015–0020**, and more strongly:
+  `job_corrections` and `unsigned_delivery_authorisations` hold decisions
+  somebody took about a customer's document, `customer_documents` and
+  `machine_documents` hold files that exist on disk, and
+  `provenance_recording` is the one row that stops a backfilled label being
+  read as a chosen one. Dropping any of them destroys a record the old code
+  simply ignores.
+- **The old release runs unchanged against the new schema.** It does not read
+  the new tables, and the columns it does not know about have defaults. The one
+  behavioural difference is that a `final_documents` row inserted by the OLD
+  code now lands on `provenance = 'unknown'` rather than `'genuine'` — which is
+  correct (that code does not record provenance) and is exactly what the
+  reconcile is built to report rather than to hide.
 - **Documents written by the new release stay readable.** Their sidecars carry
   a length and checksum; the old code ignores both.
 - **The new `final_documents` rows stay correct.** They carry a size and a

@@ -84,16 +84,27 @@ describe('authentication is required', () => {
      * variable names, no addresses, no endpoints, no reasons, which stay in the
      * startup log next to the operator. The assertion below pins it to those
      * four words so a reason can never arrive in this field.
+     *
+     * `deployment` was added on 21 October 2026, and the decision is this. It
+     * is one of three words this deployment says about ITSELF — `production`,
+     * `demonstration` or `undeclared` — and it is here so an outside check can
+     * read it BESIDE `demoSwitcher`. A deployment calling itself production
+     * with one-click sign-in armed is the thing nobody wants, and reading the
+     * two facts one at a time is how that goes unnoticed. It names no
+     * database, no host and no credential; it is a word somebody typed in an
+     * environment file on purpose.
      */
     expect(Object.keys(payload).sort()).toEqual([
       'backend',
       'build',
       'database',
       'demoSwitcher',
+      'deployment',
       'email',
       'status',
     ]);
     expect(['graph', 'smtp', 'simulated', 'refuse']).toContain(payload.email);
+    expect(['production', 'demonstration', 'undeclared']).toContain(payload.deployment);
 
     const body = JSON.stringify(payload).toLowerCase();
     for (const secret of ['postgres://', 'postgresql://', 'password', 'localhost', '5432', 'error']) {
