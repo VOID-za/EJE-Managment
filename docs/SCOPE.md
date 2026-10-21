@@ -1226,7 +1226,7 @@ is deployed:** the live service still serves `4dede18`.*
 | **Two foreign keys PostgreSQL would have silently renamed** | **FIXED.** `NAMEDATALEN` cuts an identifier at 63 characters with a NOTICE in the middle of `drizzle-kit`'s output. Drizzle's generated names for `job_corrections.corrects_document_key` and `unsigned_delivery_authorisations.document_key` were 68 and 76, so both constraints would have existed under names appearing nowhere in this repository — and a later migration dropping one by the name in the file would fail. Both are named explicitly now, in the schema and in the SQL; `0014`'s is already applied to EJE's database and is recorded rather than edited, because changing an applied migration changes the hash drizzle holds against it. `src/db/migrations/identifiers.test.ts` fails the build on the next one |
 | **Eight more tablet acceptance checks** | **AWAITING PHYSICAL ACCEPTANCE.** Camera permission refused and then allowed, upload progress and retry on a bad connection, signing with finger and stylus across a rotation, the on-screen keyboard over a long write-up, a long form in portrait, session expiry with unsent work, and a deliberate sign-out with captures held. Each has a failure mode a headless browser cannot see, which is the test for belonging there |
 
-**Evidence:** lint, typecheck, build, **2 430** unit and route tests, **305** on
+**Evidence:** lint, typecheck, build, **2 471** unit and route tests, **305** on
 real PostgreSQL and real file storage, all 21 migrations applied from zero on a
 fresh database and again onto a database shaped like the live one, every
 browser suite, and a full backup → verify → key-check → restore-test cycle
