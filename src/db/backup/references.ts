@@ -46,6 +46,57 @@ export const REFERENCE_EXEMPT_TABLES: readonly string[] = ['final_document_verif
 export const scansForReferences = (table: string): boolean =>
   !REFERENCE_EXEMPT_TABLES.includes(table);
 
+/**
+ * The SQL that finds every column holding a storage key a file should exist
+ * under. One query, used by the backup and by the restore test, so the two
+ * cannot disagree about what a reference is.
+ *
+ * WHY IT IS NOT `column_name = 'storage_key'` ANY MORE. It was, and it missed
+ * the correction addenda: `job_corrections.document_storage_key` holds the only
+ * reference to an addendum PDF's bytes, so a correction lost from storage was
+ * not reported by the restore test at all. Anything whose name IS `storage_key`
+ * or ENDS IN `_storage_key` names a file of its own.
+ *
+ * WHAT IS STILL LEFT OUT, DELIBERATELY: a column holding somebody else's key.
+ * `job_corrections.corrects_document_key` and
+ * `unsigned_delivery_authorisations.document_key` are foreign keys to
+ * `final_documents.storage_key`, so the file they name is already counted
+ * once. Counting them again would report one missing job card two or three
+ * times, and a count that inflates with every feature stops meaning anything —
+ * the same failure `REFERENCE_EXEMPT_TABLES` exists for.
+ *
+ * `documents:reconcile`'s orphan scan uses a WIDER net on purpose: there, any
+ * mention at all means the file is not an orphan, and missing a mention would
+ * offer a referenced file for deletion.
+ */
+export const KEY_COLUMN_QUERY =
+  "SELECT table_name || '.' || column_name FROM information_schema.columns " +
+  "WHERE table_schema = 'public' " +
+  "AND (column_name = 'storage_key' OR column_name LIKE '%\\_storage\\_key') ORDER BY 1";
+
+/** `table.column`, as `KEY_COLUMN_QUERY` returns it, split and filtered. */
+export const keyColumnsFrom = (
+  output: string,
+): readonly { readonly table: string; readonly column: string }[] =>
+  output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const dot = line.indexOf('.');
+      return { table: line.slice(0, dot), column: line.slice(dot + 1) };
+    })
+    .filter((entry) => entry.table.length > 0 && entry.column.length > 0)
+    .filter((entry) => scansForReferences(entry.table))
+    /*
+     * BOTH NAMES CHECKED AGAIN HERE. They come from `information_schema`, not
+     * from a request, and they are interpolated into a query — so they are
+     * re-validated as plain identifiers rather than trusted because of where
+     * they came from.
+     */
+    .filter((entry) => /^[a-z_][a-z0-9_]*$/u.test(entry.table))
+    .filter((entry) => /^[a-z_][a-z0-9_]*$/u.test(entry.column));
+
 /** A storage key as some table in the database records it. */
 export interface StorageReference {
   readonly table: string;

@@ -9,10 +9,11 @@ import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
 import { skewDiagnosis } from './versions';
 import {
   describeReferences,
+  KEY_COLUMN_QUERY,
+  keyColumnsFrom,
   partitionOrphans,
   referenceId,
   resolveReferences,
-  scansForReferences,
   unresolved,
   type StorageReference,
 } from './references';
@@ -255,21 +256,14 @@ const main = async (): Promise<void> => {
      * RESTORED database rather than written out here, so a table added later
      * is covered by this check without anybody remembering to come back.
      */
-    const keyTables = psql(
-      target,
-      "SELECT table_name FROM information_schema.columns WHERE column_name = 'storage_key' " +
-        "AND table_schema = 'public' ORDER BY 1",
-    );
+    const keyTables = psql(target, KEY_COLUMN_QUERY);
     if (!keyTables.ok) throw new BackupRefused(`could not read the restored schema: ${keyTables.stderr}`);
 
     const present = new Set(files);
     const references: StorageReference[] = [];
-    for (const table of keyTables.stdout
-      .split('\n')
-      .filter((line) => line.length > 0)
-      .filter(scansForReferences)) {
-      const keys = psql(target, `SELECT storage_key FROM public.${table}`);
-      if (!keys.ok) throw new BackupRefused(`could not read ${table}: ${keys.stderr}`);
+    for (const { table, column } of keyColumnsFrom(keyTables.stdout)) {
+      const keys = psql(target, `SELECT ${column} FROM public.${table} WHERE ${column} IS NOT NULL`);
+      if (!keys.ok) throw new BackupRefused(`could not read ${table}.${column}: ${keys.stderr}`);
       for (const storageKey of keys.stdout.split('\n').filter((line) => line.length > 0)) {
         references.push({ table, storageKey });
       }

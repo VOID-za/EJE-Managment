@@ -375,25 +375,20 @@ export interface StorageService {
    */
   resolveUrl(storageKey: string): string;
   /**
-   * Allocates a key for a file whose BYTES ARE NOT SUPPLIED.
-   *
-   * The photo and machine-photo capture paths call this: the browser never
-   * sends the image, so what is recorded is a reference and the adapters say
-   * so. `getDocument` on such a key answers null, and no screen offers a
-   * download for one.
-   *
-   * For anything that genuinely carries bytes — a job attachment — use
-   * `storeUpload`, which cannot silently record a reference to nothing.
-   */
-  put(fileName: string, contentType: string, data: Blob | null): Promise<StoredFile>;
-  /**
    * Stores an uploaded file's bytes, durably, under a key IT chooses.
    *
-   * SEPARATE FROM `put` ON PURPOSE. `put` may legitimately record a reference
-   * with no content behind it; this may not. An implementation either writes
-   * the bytes somewhere they survive a restart or it raises — there is no
-   * third answer, because the alternative is a database row claiming a
-   * document exists when nothing does.
+   * THE ONLY WAY TO GET A NEW KEY, and that is the point. There used to be a
+   * second one — `put(fileName, contentType, null)` — which allocated a key
+   * with NO BYTES behind it, for capture paths where the browser sent a file
+   * name and a size it had made up. Every one of those paths now sends the
+   * image and goes through here, so `put` was removed rather than left as the
+   * one call in the system capable of recording a document that does not
+   * exist. A metadata row offering a download for nothing is the defect
+   * DEMO-1 §1.2 is about, and this is what makes it unreachable rather than
+   * merely unused.
+   *
+   * An implementation either writes the bytes somewhere they survive a restart
+   * or it raises — there is no third answer.
    *
    * The key is generated, never derived from the file name: a name is
    * user-controlled and a path built from one is a traversal waiting to happen.
@@ -409,6 +404,33 @@ export interface StorageService {
    */
   putDocument(document: StoredDocument): Promise<void>;
   getDocument(storageKey: string): Promise<StoredDocument | null>;
+  /**
+   * Deletes the bytes behind a key. FOR UNDOING A WRITE, AND NOTHING ELSE.
+   *
+   * WHY THIS EXISTS, and it is the only reason. Every upload path writes the
+   * bytes FIRST and records the row afterwards, which is the right order: a
+   * row pointing at a file that was never written is the failure that matters,
+   * because it tells somebody a customer's document exists when it does not.
+   * The cost of that order is the other direction — if the row cannot be
+   * written, the bytes are already on disk with nothing pointing at them.
+   * Nothing noticed, and nothing could remove them.
+   *
+   * So the unit of work remembers the keys it generated and calls this on the
+   * ones whose transaction rolled back. See `trackStorageWrites`.
+   *
+   * WHAT IT IS NOT. It is not a document-deletion feature and must never
+   * become one. EJE withdraw a document — the row is marked and the bytes are
+   * kept, because the audit history is the point (CUST-DOC-1, MACH-DOC-1). A
+   * signed job card may never be deleted at all. The only caller is the
+   * rollback, plus `documents:reconcile --remove-orphans`, which an operator
+   * has to ask for explicitly and which only ever offers files no row refers
+   * to.
+   *
+   * IT IS BEST-EFFORT AND MUST NOT RAISE for a key that is not there: it runs
+   * on a path that is already failing, and a cleanup that throws would replace
+   * the real error with its own.
+   */
+  remove(storageKey: string): Promise<void>;
 }
 
 /** Injectable clock, so tests and seeds are not at the mercy of wall time. */

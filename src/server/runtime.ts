@@ -30,6 +30,7 @@ import {
   type FileStore,
 } from '@/services/simulated/storage';
 import type { StorageService } from '@/services/ports';
+import { trackStorageWrites } from '@/services/storage-rollback';
 import {
   FilesystemStorageService,
   readStorageConfiguration,
@@ -243,6 +244,11 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
               draft.files[storageKey] = record;
             });
           },
+          delete: (storageKey) => {
+            store.commit((draft) => {
+              delete draft.files[storageKey];
+            });
+          },
         };
 
   const storage =
@@ -269,6 +275,32 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
   };
 
   return { services, outbox };
+};
+
+/**
+ * Runs one unit of work with its storage writes undone if it fails.
+ *
+ * WHY IT WRAPS `write` AND NOT THE UPLOAD ROUTE. The bytes are written deep
+ * inside an application operation, and the thing that fails is usually
+ * something else entirely — a constraint, an immutability trigger, the audit
+ * insert, a lost connection. Only the transaction boundary knows that the row
+ * did not survive, so the cleanup belongs where the boundary is. It then covers
+ * every caller, including the ones nobody has written yet.
+ *
+ * It rethrows the original error, always. See `trackStorageWrites` for what is
+ * and is not tracked, and why `putDocument` is not.
+ */
+const withStorageRollback = async <T>(
+  unit: UnitOfWork,
+  work: (unit: UnitOfWork) => Promise<T>,
+): Promise<T> => {
+  const tracked = trackStorageWrites(unit.services.storage);
+  try {
+    return await work({ ...unit, services: { ...unit.services, storage: tracked.storage } });
+  } catch (cause) {
+    await tracked.rollback();
+    throw cause;
+  }
 };
 
 const createRuntime = (): ServerRuntime => {
@@ -312,7 +344,7 @@ const createRuntime = (): ServerRuntime => {
      */
     let pending: Promise<unknown> = Promise.resolve();
     const serialise = <T>(work: (unit: UnitOfWork) => Promise<T>): Promise<T> => {
-      const next = pending.then(() => work(unit));
+      const next = pending.then(() => withStorageRollback(unit, work));
       pending = next.catch(() => undefined);
       return next;
     };
@@ -338,11 +370,14 @@ const createRuntime = (): ServerRuntime => {
     auth: new PostgresAuthStore(db),
     write: (work) =>
       withTransaction(db, (tx) =>
-        work({
-          repos: createPostgresRepositories(tx),
-          services,
-          idempotency: new PostgresIdempotencyStore(tx),
-        }),
+        withStorageRollback(
+          {
+            repos: createPostgresRepositories(tx),
+            services,
+            idempotency: new PostgresIdempotencyStore(tx),
+          },
+          work,
+        ),
       ),
     read: (work) =>
       work({

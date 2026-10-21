@@ -45,10 +45,10 @@ const document: StoredDocument = {
 
 const storage = (stored: StoredDocument | null = document): StorageService => ({
   resolveUrl: () => 'inert',
-  put: () => Promise.reject(new Error('not used')),
   storeUpload: () => Promise.reject(new Error('not used')),
   putDocument: () => Promise.resolve(),
   getDocument: () => Promise.resolve(stored),
+  remove: () => Promise.resolve(),
 });
 
 const message: EmailMessage = {

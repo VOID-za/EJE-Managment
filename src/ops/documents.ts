@@ -1,12 +1,14 @@
 import { writeFileSync } from 'node:fs';
 import postgres from 'postgres';
 import { loadEnvFiles } from '@/db/seed/env';
+import { filesUnder } from '@/db/backup/archive';
 import { scansForReferences } from '@/db/backup/references';
 import {
   FilesystemStorageService,
   readStorageConfiguration,
   StorageIntegrityFailed,
 } from '@/services/production/file-storage';
+import { describeScan, scanStore, type StoreScan } from './store-scan';
 import {
   classifyDocument,
   demonstrationJobNumbers,
@@ -34,6 +36,14 @@ import {
  *   npm run documents:reconcile                 report, write nothing
  *   npm run documents:reconcile -- --record     record what it found, as rows
  *   npm run documents:reconcile -- --report out.json
+ *   npm run documents:reconcile -- --remove-orphans --expect-orphans N
+ *
+ * IT ALSO ASKS THE OTHER DIRECTION NOW: are there files in the store that no
+ * row refers to? See `store-scan.ts`. Those are reported by default and
+ * removed only when an operator asks by name AND says how many they expect,
+ * which cannot be known without having run the report first. A count that does
+ * not match refuses: the store changed between the two runs, and deleting
+ * files on a stale number is how a cleanup becomes an incident.
  *
  * `--record` APPENDS to `final_document_verifications` — it does not update
  * `final_documents`, and the first version of this command that tried to was
@@ -106,9 +116,58 @@ const keyTables = async (sql: postgres.Sql): Promise<readonly string[]> => {
   return rows.map((row) => row.table_name).filter(scansForReferences);
 };
 
+/**
+ * Every storage key the database mentions, from EVERY column that could hold
+ * one — deliberately wider than the backup's reference count.
+ *
+ * The backup counts a file once, so it leaves out the foreign keys that point
+ * at a key another table already owns. Here the question is the opposite one:
+ * anything mentioned anywhere is NOT an orphan, and a mention this missed
+ * would offer a referenced file for deletion. So it takes `storage_key`,
+ * anything ending in `_storage_key`, anything ending in `_document_key`, and
+ * the outbox's `attachment_storage_keys` array.
+ */
+const everyMentionedKey = async (sql: postgres.Sql): Promise<ReadonlySet<string>> => {
+  const columns = await sql<{ table_name: string; column_name: string; data_type: string }[]>`
+    select table_name, column_name, data_type
+      from information_schema.columns
+     where table_schema = 'public'
+       and (column_name = 'storage_key'
+            or column_name like '%\_storage\_key'
+            or column_name like '%\_storage\_keys'
+            or column_name like '%\_document\_key')
+     order by 1, 2
+  `;
+
+  const mentioned = new Set<string>();
+  for (const column of columns) {
+    // From `information_schema`, not from a request — and re-checked anyway,
+    // because both names are interpolated into the query below.
+    if (!/^[a-z_][a-z0-9_]*$/u.test(column.table_name)) continue;
+    if (!/^[a-z_][a-z0-9_]*$/u.test(column.column_name)) continue;
+
+    const rows = await sql<{ key: string }[]>`
+      select ${
+        column.data_type === 'ARRAY'
+          ? sql`unnest(${sql(column.column_name)})`
+          : sql(column.column_name)
+      } as key
+        from ${sql(column.table_name)}
+       where ${sql(column.column_name)} is not null
+    `.catch(() => null);
+    if (rows === null) continue;
+    for (const row of rows) {
+      if (typeof row.key === 'string' && row.key.length > 0) mentioned.add(row.key);
+    }
+  }
+  return mentioned;
+};
+
 const main = async (): Promise<void> => {
   loadEnvFiles();
   const record = flag('record');
+  const removeOrphans = flag('remove-orphans');
+  const expectOrphans = argument('expect-orphans');
   const reportPath = argument('report');
   const url = (process.env.DATABASE_URL ?? '').trim();
   if (url.length === 0) {
@@ -296,6 +355,24 @@ const main = async (): Promise<void> => {
       }
     }
 
+    /*
+     * -- AND THE OTHER DIRECTION: FILES NOBODY REFERS TO -------------------
+     *
+     * Read from the store's own directory listing, against every key the
+     * database mentions anywhere. See `store-scan.ts` for why the net is
+     * deliberately wider here than the backup's reference count.
+     */
+    const storeRoot = readStorageConfiguration(process.env).root;
+    let scan: StoreScan | null = null;
+    try {
+      scan = scanStore(await filesUnder(storeRoot), await everyMentionedKey(sql));
+    } catch {
+      // A store that cannot be listed is not a reason to fail the reconcile of
+      // the records, which is the question this command is mainly for. It is
+      // said out loud below rather than passed over.
+      scan = null;
+    }
+
     /* -- say it ------------------------------------------------------------- */
     const summary = summarise(findings);
     process.stdout.write('\n=== EJE DOCUMENT RECONCILE ===\n');
@@ -341,11 +418,55 @@ const main = async (): Promise<void> => {
       );
     }
 
+    process.stdout.write(
+      scan === null
+        ? `\nThe store at ${storeRoot} could not be listed, so this run cannot say whether it ` +
+            'holds files no row refers to. The records above were still checked.\n'
+        : `\n${describeScan(scan, storeRoot)}\n`,
+    );
+
+    /*
+     * -- REMOVAL, AND EVERY GUARD ON IT -----------------------------------
+     *
+     * Deleting a file is the one thing in this command that cannot be undone,
+     * so it asks for three things that a careless run cannot supply: the flag
+     * itself, a count the operator can only know by having read a report, and
+     * a count that still matches. If the store changed between the two runs
+     * the number will not match, and the right answer then is to look again
+     * rather than to delete whatever is there now.
+     */
+    if (removeOrphans) {
+      if (scan === null) {
+        process.stdout.write('Nothing was removed: the store could not be listed.\n');
+      } else if (expectOrphans === null) {
+        process.stdout.write(
+          '--remove-orphans REFUSED: say how many you expect with --expect-orphans N. ' +
+            `This run found ${scan.orphans.length}.\n`,
+        );
+        process.exitCode = 1;
+        return;
+      } else if (Number(expectOrphans) !== scan.orphans.length) {
+        process.stdout.write(
+          `--remove-orphans REFUSED: you expected ${expectOrphans} and this run found ` +
+            `${scan.orphans.length}. The store changed since the report, so nothing was ` +
+            'removed. Run the report again and read it before deleting anything.\n',
+        );
+        process.exitCode = 1;
+        return;
+      } else {
+        for (const key of scan.orphans) await storage.remove(key);
+        process.stdout.write(
+          `${scan.orphans.length} orphaned file(s) removed from ${storeRoot}. No database row ` +
+            'was touched, because none referred to them.\n',
+        );
+      }
+    }
+
     if (reportPath !== null) {
       writeFileSync(
         reportPath,
         `${JSON.stringify(
-          { examinedAt: new Date().toISOString(), summary, references, findings },
+          { examinedAt: new Date().toISOString(), summary, references, findings, scan },
           null,
           2,
         )}\n`,

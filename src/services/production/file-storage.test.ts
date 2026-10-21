@@ -136,10 +136,17 @@ describe('where the bytes go', () => {
     expect(await storage.getDocument('uploads/00000000-0000-4000-8000-000000000000')).toBeNull();
   });
 
-  it('answers null for a key allocated with no content behind it', async () => {
-    // `put` is the photo path: a reference, and honest about carrying nothing.
-    const allocated = await storage.put('photo.jpg', 'image/jpeg', null);
-    expect(await storage.getDocument(allocated.storageKey)).toBeNull();
+  it('offers NO WAY to allocate a key without bytes', () => {
+    /*
+     * `put(fileName, contentType, null)` used to be that way, and it is the
+     * only call in the system that could have produced a database row
+     * describing a document nobody had uploaded. Every capture path now sends
+     * its image through `storeUpload`, so it was removed rather than left
+     * reachable. Asserted on the OBJECT rather than the type, because a type
+     * error is a compile-time fact and this is about what the running adapter
+     * can be asked to do.
+     */
+    expect((storage as unknown as Record<string, unknown>).put).toBeUndefined();
   });
 
   it('offers no URL a browser could fetch', async () => {

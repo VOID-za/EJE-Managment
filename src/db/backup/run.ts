@@ -16,8 +16,9 @@ import { encryptFile, keyFingerprint } from './crypto';
 import { filesUnder } from './archive';
 import { KEY_BESIDE_BACKUP_WARNING, strayKeyFiles } from './key-location';
 import {
+  KEY_COLUMN_QUERY,
+  keyColumnsFrom,
   resolveReferences,
-  scansForReferences,
   unresolved,
   type StorageReference,
 } from './references';
@@ -124,21 +125,26 @@ const referencedStorageKeys = (
       'ON_ERROR_STOP=1',
       '-At',
       '-c',
-      "SELECT table_name FROM information_schema.columns WHERE column_name = 'storage_key' " +
-        "AND table_schema = 'public' ORDER BY 1",
+      KEY_COLUMN_QUERY,
     ],
     { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
   );
   if (tables.status !== 0) return { keys: [], read: false };
 
   const keys: StorageReference[] = [];
-  for (const table of (tables.stdout ?? '')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .filter(scansForReferences)) {
+  for (const { table, column } of keyColumnsFrom(tables.stdout ?? '')) {
     const rows = spawnSync(
       'psql',
-      [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-At', '-c', `SELECT storage_key FROM public.${table}`],
+      [
+        databaseUrl,
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-At',
+        '-c',
+        // NOT NULL filtered here rather than counted as a dangling reference:
+        // a nullable key column that is null names no file at all.
+        `SELECT ${column} FROM public.${table} WHERE ${column} IS NOT NULL`,
+      ],
       { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
     );
     if (rows.status !== 0) return { keys: [], read: false };

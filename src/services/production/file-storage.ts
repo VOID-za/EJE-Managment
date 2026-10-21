@@ -214,18 +214,6 @@ export class FilesystemStorageService implements StorageService {
     return `#storage/${encodeURIComponent(storageKey)}`;
   }
 
-  /**
-   * A key with NO CONTENT behind it, for the capture paths that send none.
-   *
-   * Honest about what it is: nothing is written, so `getDocument` answers null
-   * and no screen can offer a download. Job attachments do not come this way —
-   * they use `storeUpload`, which writes bytes or raises.
-   */
-  put(_fileName: string, _contentType: string, _data: Blob | null): Promise<StoredFile> {
-    const storageKey = generatedStorageKey();
-    return Promise.resolve({ storageKey, url: this.resolveUrl(storageKey) });
-  }
-
   async storeUpload(file: UploadedFile): Promise<StoredFile> {
     const storageKey = generatedStorageKey();
 
@@ -286,6 +274,29 @@ export class FilesystemStorageService implements StorageService {
         `The document could not be stored: ${cause instanceof Error ? cause.message : 'write failed'}.`,
       );
     }
+  }
+
+  /**
+   * Deletes the bytes and the sidecar. Best-effort, and silent on absence.
+   *
+   * It runs on a path that is already failing — see the port — so every
+   * failure here is swallowed: a cleanup that raised would replace the error
+   * the caller is actually dealing with. `pathFor` still decides what may be
+   * touched, so a key that resolves outside the store deletes nothing.
+   */
+  async remove(storageKey: string): Promise<void> {
+    let binary: string;
+    let sidecarPath: string;
+    try {
+      binary = pathFor(this.config.root, storageKey, '.bin');
+      sidecarPath = pathFor(this.config.root, storageKey, '.json');
+    } catch {
+      return;
+    }
+    await Promise.all([
+      rm(binary, { force: true }).catch(() => undefined),
+      rm(sidecarPath, { force: true }).catch(() => undefined),
+    ]);
   }
 
   async getDocument(storageKey: string): Promise<StoredDocument | null> {

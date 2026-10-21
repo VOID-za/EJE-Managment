@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeReferences,
+  KEY_COLUMN_QUERY,
+  keyColumnsFrom,
   partitionOrphans,
   referenceId,
   resolveReferences,
@@ -130,5 +132,47 @@ describe('which tables are scanned at all', () => {
     expect(scansForReferences('final_documents')).toBe(true);
     expect(scansForReferences('job_media')).toBe(true);
     expect(scansForReferences('final_document_verifications')).toBe(false);
+  });
+});
+
+describe('which columns name a file of their own', () => {
+  it('takes storage_key and anything ending in _storage_key', () => {
+    const columns = keyColumnsFrom(
+      ['final_documents.storage_key', 'job_corrections.document_storage_key'].join('\n'),
+    );
+    expect(columns).toEqual([
+      { table: 'final_documents', column: 'storage_key' },
+      { table: 'job_corrections', column: 'document_storage_key' },
+    ]);
+  });
+
+  it('includes the correction addendum, which it used to miss entirely', () => {
+    /*
+     * `job_corrections.document_storage_key` holds the ONLY reference to an
+     * addendum PDF's bytes. While the scan asked for `column_name =
+     * 'storage_key'`, a correction lost from storage was not reported by the
+     * restore test at all — the one document class the restore test was blind
+     * to. Proved against a real backup afterwards: the reference count went
+     * from 16 to 17 and the resolved count from 7 to 8 on the same database.
+     */
+    expect(KEY_COLUMN_QUERY).toContain("column_name LIKE '%\\_storage\\_key'");
+    expect(keyColumnsFrom('job_corrections.document_storage_key')).toHaveLength(1);
+  });
+
+  it('leaves out the verification table, whose keys are observations', () => {
+    expect(keyColumnsFrom('final_document_verifications.storage_key')).toEqual([]);
+  });
+
+  it('refuses a table or column name that is not a plain identifier', () => {
+    // They come from `information_schema` and are interpolated into a query,
+    // so they are re-checked rather than trusted for their provenance.
+    expect(keyColumnsFrom('"evil table".storage_key')).toEqual([]);
+    expect(keyColumnsFrom('jobs.storage_key; drop table jobs')).toEqual([]);
+  });
+
+  it('ignores blank lines and whitespace, which psql emits', () => {
+    expect(keyColumnsFrom('\n  final_documents.storage_key  \n\n')).toEqual([
+      { table: 'final_documents', column: 'storage_key' },
+    ]);
   });
 });

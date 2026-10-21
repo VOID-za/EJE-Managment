@@ -20,6 +20,8 @@ export const generatedStorageKey = (): string => `uploads/${crypto.randomUUID()}
 export interface FileStore {
   get(storageKey: string): StoredFileRecord | undefined;
   set(storageKey: string, record: StoredFileRecord): void;
+  /** Forgets a key. Only the upload rollback and the reconcile call it. */
+  delete(storageKey: string): void;
 }
 
 export interface StoredFileRecord {
@@ -101,8 +103,8 @@ export const base64ToBytes = (base64: string): Uint8Array => {
  * differs is only how long that lasts, and this class says so rather than
  * implying otherwise.
  *
- * `put` still allocates a key with no content behind it, because the photo
- * capture paths call it without bytes — see the port.
+ * `put` IS GONE from both adapters. It allocated a key with nothing behind it,
+ * and every capture path now sends its bytes — see the port.
  */
 export class DemoStorageService implements StorageService {
   constructor(private readonly files: FileStore) {}
@@ -111,11 +113,6 @@ export class DemoStorageService implements StorageService {
     // Inert on purpose: everything a browser fetches goes through an
     // authenticated route, so this must never work as a public URL.
     return `#storage/${encodeURIComponent(storageKey)}`;
-  }
-
-  put(fileName: string, _contentType: string, _data: Blob | null): Promise<StoredFile> {
-    const storageKey = `uploads/${Date.now()}-${fileName}`;
-    return Promise.resolve({ storageKey, url: this.resolveUrl(storageKey) });
   }
 
   storeUpload(file: UploadedFile): Promise<StoredFile> {
@@ -136,6 +133,12 @@ export class DemoStorageService implements StorageService {
       renderer: document.renderer,
       backfilled: document.backfilled,
     });
+    return Promise.resolve();
+  }
+
+  /** Forgets the bytes. See the port: this undoes a write and nothing else. */
+  remove(storageKey: string): Promise<void> {
+    this.files.delete(storageKey);
     return Promise.resolve();
   }
 
@@ -170,6 +173,9 @@ export const inMemoryFileStore = (): FileStore => {
     get: (storageKey) => records.get(storageKey),
     set: (storageKey, record) => {
       records.set(storageKey, record);
+    },
+    delete: (storageKey) => {
+      records.delete(storageKey);
     },
   };
 };
