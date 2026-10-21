@@ -1255,14 +1255,18 @@ a failure.**
 | **Recognised text is labelled as recognised** | **TESTED — awaiting approval.** `library_document_text.source` is `text_layer` or `ocr`, and the library says *"Searchable (recognised text)"* for the second. Text out of a scanned wiring diagram contains mistakes — a `B` for an `8`, a missing minus sign — and a technician reading an alarm code needs to know whether they have the document or a machine's reading of it |
 | **A CHECK that accepted the row it was written to refuse — again** | **FIXED.** `(state = 'indexed' AND source IN (…)) OR (state <> 'indexed' AND source IS NULL)` admits an `indexed` row with a NULL source: `NULL IN (…)` is NULL, so the whole expression is NULL and a CHECK treats NULL as satisfied. The SECOND time this exact trap has been hit here, after `array_length` in `job_corrections`. Found by the db test both times |
 | **A retry policy that actually bounds anything** | **FIXED, and found by a test.** A `failed` job was not claimable at all, so the attempt cap could only ever bite on a stale reclaim. A failure may be the document (a blank scan) or the machine (a full disk, an engine killed on one page) and nothing can tell them apart, so it is retried under the cap. `unavailable` is NOT retried — nothing changed, and the next attempt would say the same thing |
+| **A screen that called a real e-mail "simulated"** | **FIXED.** The notifications screen read `(simulated)` against every e-mail and WhatsApp channel — hard-coded, written when both of them were. Both are real adapters now wherever they are configured, so a deployment with a Microsoft 365 tenant would have had a message that genuinely reached a customer labelled simulated. That is a screen somebody reads to decide whether to telephone the customer instead, so being wrong in the cautious direction is still being wrong. The transport is now read from the deployment, from the SAME `chooseEmailTransport` that `/api/health` uses, so the badge and the health route cannot disagree — and the test proves the answer CHANGES with the configuration, which a constant would also have passed, and that no tenant id, token or address is in the payload |
+| **A storage failure that told the office nothing** | **FIXED.** A failed `storeUpload` — a full disk, `EJE_STORAGE_DIR` pointed at something that is not a directory — fell through to *"Something went wrong. Please try again."* It is a known condition with a known remedy and the person who can act on it is whoever runs the server, so it says that. **The path is deliberately not in the message:** the filesystem's own text names the directory, which belongs in the server log and not in a browser. Asserted both ways |
+| **The last four cases from the mandate's §7 list** | **TESTED — awaiting approval.** A file surviving the application moving to a NEW RELEASE DIRECTORY (proved by reading it back through a fresh adapter while the process is chdir'd elsewhere — the symptom in production would be every pre-deployment document quietly 404ing); a failed storage write leaving NO row; two files with the same name, which an iPhone sends for every photograph it has ever taken; and two uploads at the same instant, each measured against its own bytes |
 | **The document pickers now say what they accept** | **TESTED — awaiting approval.** The customer and machine document inputs had no `accept` attribute and no size guidance, so a tablet offered every file on the device and the refusal arrived only after a failed upload. Both state the formats and the limit, from the same constants the server enforces |
 
-**Evidence:** lint, typecheck, build, **2 538** unit and route tests, the
-PostgreSQL suite on real file storage, 22 migrations applied from zero on a
-fresh database with `drizzle-kit check` clean, and the orphan scan driven
+**Evidence:** lint, typecheck, build, the unit and route suite, the PostgreSQL
+suite on real file storage, 23 migrations applied from zero on a fresh database
+with `drizzle-kit check` clean, every browser suite, and the orphan scan driven
 against a real database with a planted orphan — both removal guards refusing,
 the orphan removed on a matching count, and the correction PDF beside it never
-offered.
+offered. The exact counts are in the commit messages, which is where they stay
+true.
 
 ### Demonstration labelling and customer documents (20 October 2026, seventh batch)
 

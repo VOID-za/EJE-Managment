@@ -1,5 +1,6 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
+import { StorageWriteFailed } from '@/services/production/file-storage';
 import type { RuleViolation } from '@/domain';
 import { WorkflowError } from '@/application/errors';
 import { ConcurrencyError } from '@/data/postgres/transaction';
@@ -152,6 +153,42 @@ export const toApiError = (cause: unknown): ApiError => {
       ],
     );
   }
+  /*
+   * A STORAGE WRITE THAT FAILED IS A KNOWN CONDITION, NOT AN UNKNOWN ONE.
+   *
+   * It used to fall through to "Something went wrong. Please try again." — a
+   * full disk, or an `EJE_STORAGE_DIR` pointed at something that is not a
+   * directory, reported to the office as a mystery. It is neither: it says
+   * nothing about the file they chose, it will happen again on the next
+   * attempt, and the person who can fix it is whoever runs the server. So it
+   * says that.
+   *
+   * WHAT IT DELIBERATELY DOES NOT SAY IS WHERE. `StorageWriteFailed` carries
+   * the filesystem's own message, which contains the path — useful in the
+   * server log, which `logUnexpected` writes, and not something to hand to a
+   * browser. The message below is fixed text; nothing from the cause reaches
+   * the client.
+   *
+   * 500 AND NOT 422. A 422 means the business refused a well-formed request,
+   * and the business did not refuse anything: the server could not do its job.
+   * A client that retries on 5xx and gives up on 4xx should retry this.
+   */
+  if (cause instanceof StorageWriteFailed) {
+    return new ApiError(
+      'internal_error',
+      'The file could not be stored, so nothing was recorded.',
+      [
+        {
+          code: 'storage_unavailable',
+          message:
+            'The server could not write the file to its document store. Nothing was saved and ' +
+            'nothing was changed. Try again — and if it keeps happening, whoever runs the ' +
+            'server needs to look at the storage volume.',
+        },
+      ],
+    );
+  }
+
   return new ApiError('internal_error', 'Something went wrong. Please try again.');
 };
 

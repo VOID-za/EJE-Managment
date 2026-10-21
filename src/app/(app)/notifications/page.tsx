@@ -22,6 +22,7 @@ import {
   notifications as notificationsApi,
   outbox as outboxApi,
   reads,
+  type DeliveryTransports,
 } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -158,6 +159,7 @@ const NotificationsPageContent = () => {
             <li key={notification.id}>
               <NotificationRow
                 notification={notification}
+                delivery={query.data?.delivery}
                 jobNumber={
                   notification.jobId === null
                     ? null
@@ -180,14 +182,51 @@ const NotificationsPageContent = () => {
   );
 };
 
+/**
+ * WHAT A CHANNEL ACTUALLY DID WITH A MESSAGE. MANDATE-3.
+ *
+ * THE DEFECT: this read "(simulated)" for every e-mail and WhatsApp channel,
+ * hard-coded, written when both of them were. Both are real adapters now
+ * wherever they are configured, so on a deployment with a Microsoft 365 tenant
+ * the screen would call a message that genuinely reached a customer simulated —
+ * and this is a screen somebody reads to decide whether to telephone them
+ * instead. Lying in the safe direction is still lying.
+ *
+ * FOUR ANSWERS, because there are four things that happen: it went, it was
+ * kept in the visible outbox and nothing left the building, the deployment
+ * refused to pretend, or this client is older than the server and does not
+ * know. The last one says nothing rather than guessing.
+ */
+const channelNote = (
+  channel: NotificationChannel,
+  delivery: DeliveryTransports | undefined,
+): { readonly text: string; readonly tone: string } | null => {
+  if (channel === 'in_app' || delivery === undefined) return null;
+
+  const transport = channel === 'whatsapp' ? delivery.whatsapp : delivery.email;
+  if (transport === 'simulated') {
+    return { text: '(simulated)', tone: 'text-amber-eje-600' };
+  }
+  if (transport === 'refuse') {
+    return { text: '(not configured — nothing was sent)', tone: 'text-signal-600' };
+  }
+  // `graph`, `smtp` and `cloud_api` all mean a provider was handed the
+  // message. Whether the provider then DELIVERED it is the outbox's answer,
+  // not this badge's, so this says nothing more than that it went out.
+  return null;
+};
+
 const NotificationRow = ({
   notification,
   jobNumber,
+  delivery,
   onRead,
   onHandled,
 }: {
   readonly notification: AppNotification;
   readonly jobNumber: string | null;
+  /** What this deployment does with a message. Absent on an older server. */
+  readonly delivery: DeliveryTransports | undefined;
   readonly onRead: () => void;
   readonly onHandled: () => void;
 }) => {
@@ -251,12 +290,19 @@ const NotificationRow = ({
                   title={
                     channel === 'in_app'
                       ? 'In-app notification'
-                      : `${channel} delivery is simulated in this demonstration`
+                      : delivery === undefined
+                        ? `${channel} delivery`
+                        : `${channel} delivery on this deployment: ${
+                            channel === 'whatsapp' ? delivery.whatsapp : delivery.email
+                          }`
                   }
                 >
                   <Icon name={CHANNEL_ICONS[channel]} className="size-3" />
                   {channel === 'in_app' ? 'In app' : channel === 'whatsapp' ? 'WhatsApp' : 'Email'}
-                  {channel !== 'in_app' && <span className="text-amber-eje-600">(simulated)</span>}
+                  {(() => {
+                    const note = channelNote(channel, delivery);
+                    return note === null ? null : <span className={note.tone}>{note.text}</span>;
+                  })()}
                 </span>
               ))}
             </span>

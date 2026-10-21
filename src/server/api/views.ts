@@ -12,6 +12,10 @@ import {
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
+import { selectPersistenceBackend } from '@/data/backend';
+import { readSmtpEmailConfiguration } from '@/services/development/email';
+import { chooseEmailTransport, readGraphEmailConfiguration } from '@/services/production/email';
+import { readWhatsAppConfiguration } from '@/services/production/whatsapp';
 import { businessToday } from '@/lib/business-time';
 import { loadActivityFeed, loadJobActivity } from '@/application/activity-read';
 import { loadCalendar } from '@/application/calendar';
@@ -538,6 +542,9 @@ export const notificationsView = async ({ repos, actor }: ViewContext) => {
   return {
     notifications,
     jobNumbers: rows.map((row) => [row.job.id as string, row.job.jobNumber] as const),
+    // So the channel badges can say what this deployment really does with a
+    // message rather than the one word they were written with.
+    delivery: deliveryTransports(),
   };
 };
 
@@ -588,6 +595,44 @@ export const messagesView = async (context: ViewContext, conversationId: string 
   };
 };
 
+/**
+ * WHETHER THIS DEPLOYMENT ACTUALLY TRANSMITS. MANDATE-3.
+ *
+ * THE DEFECT THIS FIXES. The notifications screen labelled every e-mail and
+ * WhatsApp channel "(simulated)" — hard-coded, written when both were. Both are
+ * REAL adapters now wherever they are configured, so on a deployment with a
+ * Microsoft 365 tenant the screen would call a message that genuinely reached a
+ * customer simulated. Lying in the safe direction is still lying, and this is a
+ * screen somebody uses to decide whether to telephone the customer instead.
+ *
+ * THE TRANSPORT NAME AND NOTHING ELSE — no tenant, no number, no addresses, no
+ * variable names. `/api/health` reports the same words to an outside check and
+ * `chooseEmailTransport` is the single function that decides, so the badge on
+ * the screen and the health route cannot disagree.
+ *
+ * `simulated` means the message is kept in the visible outbox and nothing
+ * leaves the building. `refuse` means the deployment will not even pretend —
+ * which is what a PostgreSQL deployment with no credentials does, deliberately,
+ * so EJE are never left believing a customer was sent their job card.
+ */
+const deliveryTransports = () => {
+  const demo = selectPersistenceBackend() === 'demo';
+  return {
+    email: chooseEmailTransport({
+      graphConfigured: readGraphEmailConfiguration() !== null,
+      smtpConfigured: readSmtpEmailConfiguration() !== null,
+      isProduction: process.env.NODE_ENV === 'production',
+      isDemoBackend: demo,
+    }),
+    whatsapp:
+      readWhatsAppConfiguration() !== null
+        ? ('cloud_api' as const)
+        : demo
+          ? ('simulated' as const)
+          : ('refuse' as const),
+  };
+};
+
 export const shellView = async ({ repos, actor }: ViewContext) => {
   const [notifications, messages] = await Promise.all([
     repos.notifications.list(actor.id),
@@ -598,5 +643,6 @@ export const shellView = async ({ repos, actor }: ViewContext) => {
     unreadMessages: messages.filter(
       (message) => message.senderId !== actor.id && !message.readBy.includes(actor.id),
     ).length,
+    delivery: deliveryTransports(),
   };
 };

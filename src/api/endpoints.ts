@@ -36,6 +36,22 @@ import type {
  * NO STORAGE KEY: a screen addresses an attachment by its id through the
  * authenticated route, and a key is not a way in.
  */
+/**
+ * WHETHER A DEPLOYMENT ACTUALLY TRANSMITS. MANDATE-3.
+ *
+ * `simulated` means the message is kept in a visible outbox and nothing leaves
+ * the building; `refuse` means the deployment will not even pretend, which is
+ * what a PostgreSQL deployment with no credentials does — so EJE are never left
+ * believing a customer was sent their job card.
+ *
+ * OPTIONAL ON EVERY VIEW THAT CARRIES IT, so a client newer than the server it
+ * is talking to shows nothing rather than guessing.
+ */
+export interface DeliveryTransports {
+  readonly email: 'graph' | 'smtp' | 'simulated' | 'refuse';
+  readonly whatsapp: 'cloud_api' | 'simulated' | 'refuse';
+}
+
 interface MediaDescription {
   readonly id: string;
   readonly fileName: string;
@@ -319,7 +335,21 @@ export interface MessagesScreen {
 }
 
 export const reads = {
-  shell: () => query<{ unreadNotifications: number; unreadMessages: number }>('/api/shell'),
+  shell: () =>
+    query<{
+      unreadNotifications: number;
+      unreadMessages: number;
+      /**
+       * WHETHER THIS DEPLOYMENT ACTUALLY TRANSMITS. MANDATE-3.
+       *
+       * The transport name and nothing else. `simulated` means the message is
+       * kept in the visible outbox and nothing leaves the building; `refuse`
+       * means the deployment will not even pretend. A screen that says
+       * "(simulated)" over a message that genuinely reached a customer is a
+       * screen somebody uses to decide whether to telephone them instead.
+       */
+      delivery?: DeliveryTransports;
+    }>('/api/shell'),
   dashboard: () => query<DashboardScreen>('/api/dashboard'),
   jobs: () => query<{ rows: readonly JobListRow[]; closedCount: number }>('/api/jobs'),
   job: (jobNumber: string) => query<JobScreen>(`/api/jobs/${segment(jobNumber)}`),
@@ -374,6 +404,8 @@ export const reads = {
     query<{
       notifications: readonly AppNotification[];
       jobNumbers: readonly (readonly [string, string])[];
+      /** What this deployment really does with a message. MANDATE-3. */
+      delivery?: DeliveryTransports;
     }>('/api/notifications'),
   messages: (conversationId: string | null) =>
     query<MessagesScreen>(
