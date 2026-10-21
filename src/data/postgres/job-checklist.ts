@@ -53,6 +53,7 @@ const toDomainResponse = (
     provenance: 'genuine' as const,
     caption: photo.caption,
     storageKey: photo.storageKey,
+    checksumSha256: photo.checksumSha256,
     uploadedAt: photo.uploadedAt,
     uploadedBy: asUserId(photo.uploadedBy ?? ''),
     sizeBytes: photo.sizeBytes,
@@ -249,6 +250,8 @@ const replaceAnswers = async (
       fileName: photo.fileName,
       caption: photo.caption,
       sizeBytes: photo.sizeBytes,
+      // Measured by the store. The column arrived with `0021`.
+      checksumSha256: photo.checksumSha256,
       uploadedAt: photo.uploadedAt,
       uploadedBy: photo.uploadedBy.length === 0 ? null : (photo.uploadedBy as string),
     })),

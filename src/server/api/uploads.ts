@@ -1,5 +1,6 @@
 import 'server-only';
 import type { UploadedFile } from '@/services/ports';
+import { MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, megabytes } from '@/lib/upload-limits';
 import { ApiError } from './errors';
 
 /**
@@ -16,7 +17,16 @@ import { ApiError } from './errors';
  * format on it has a stable magic number, which is what makes sniffing
  * possible. Adding a format means adding a signature, deliberately.
  */
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/*
+ * THE LIMITS COME FROM `@/lib/upload-limits`, and are re-exported here so
+ * every caller that already imports them from this module keeps working.
+ *
+ * They moved because a limit has to be SAID ON A SCREEN before somebody
+ * records a two-minute video or picks a 40 MB scan, and this module is
+ * `server-only`. One definition, used by the rule and by the sentence that
+ * explains it.
+ */
+export { MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES };
 
 /** The canonical type for a shape of bytes. `null` means "not on the list". */
 interface Signature {
@@ -39,6 +49,58 @@ const SIGNATURES: readonly Signature[] = [
   { contentType: 'image/tiff', extension: 'tif', magic: [0x4d, 0x4d, 0x00, 0x2a], offset: 0 },
 ];
 
+/**
+ * VIDEO CONTAINERS. MEDIA-5.
+ *
+ * WHAT A PHONE ACTUALLY PRODUCES, which is the only list worth having: an
+ * Android camera writes MP4, an iPhone writes QuickTime, an older Android
+ * writes 3GP, and a browser's own recorder writes WebM. Nothing else is
+ * accepted, for the same reason the document list is short — a format with no
+ * stable magic number cannot be sniffed, and a type that cannot be sniffed can
+ * only be taken on the browser's word.
+ *
+ * MP4, MOV AND 3GP ARE ALL ISO BASE MEDIA FILES: four bytes of box length,
+ * then `ftyp`, then a four-character brand. So the check is `ftyp` at offset 4
+ * and the brand decides which it is — `isom`/`mp4`/`avc1`/`M4V` for MP4,
+ * `qt  ` for QuickTime, `3gp` for 3GP. A brand nobody recognises is refused
+ * rather than guessed at.
+ *
+ * WHY THE BRAND MATTERS AND NOT JUST `ftyp`: the same container carries audio
+ * (`M4A`) and images (`heic`, `avif`). Accepting any `ftyp` would let an HEIC
+ * photograph be filed as a video, which is a tile that will not play.
+ */
+const ISO_BRANDS: readonly { readonly prefix: string; readonly contentType: string; readonly extension: string }[] = [
+  { prefix: 'isom', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'iso2', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'mp41', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'mp42', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'avc1', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'M4V', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'dash', contentType: 'video/mp4', extension: 'mp4' },
+  { prefix: 'qt', contentType: 'video/quicktime', extension: 'mov' },
+  { prefix: '3gp', contentType: 'video/3gpp', extension: '3gp' },
+  { prefix: '3g2', contentType: 'video/3gpp', extension: '3gp' },
+];
+
+/** `ftyp` at offset 4, then a brand this accepts. */
+const sniffIsoMedia = (bytes: Uint8Array): Signature | null => {
+  if (bytes.length < 12) return null;
+  if (bytes[4] !== 0x66 || bytes[5] !== 0x74 || bytes[6] !== 0x79 || bytes[7] !== 0x70) return null;
+
+  const brand = String.fromCharCode(bytes[8] ?? 0, bytes[9] ?? 0, bytes[10] ?? 0, bytes[11] ?? 0);
+  const match = ISO_BRANDS.find((candidate) => brand.startsWith(candidate.prefix));
+  if (match === undefined) return null;
+  return { contentType: match.contentType, extension: match.extension, magic: [], offset: 0 };
+};
+
+/** Matroska and WebM both open with the EBML header `1A 45 DF A3`. */
+const isMatroska = (bytes: Uint8Array): boolean =>
+  bytes.length >= 4 &&
+  bytes[0] === 0x1a &&
+  bytes[1] === 0x45 &&
+  bytes[2] === 0xdf &&
+  bytes[3] === 0xa3;
+
 /** WEBP is RIFF....WEBP: two checks at two offsets, so it gets its own arm. */
 const isWebp = (bytes: Uint8Array): boolean =>
   bytes.length >= 12 &&
@@ -57,6 +119,9 @@ const matches = (bytes: Uint8Array, signature: Signature): boolean =>
 /** The type these bytes actually are, or null if it is not one EJE accept. */
 export const sniffContentType = (bytes: Uint8Array): Signature | null => {
   if (isWebp(bytes)) return { contentType: 'image/webp', extension: 'webp', magic: [], offset: 0 };
+  if (isMatroska(bytes)) return { contentType: 'video/webm', extension: 'webm', magic: [], offset: 0 };
+  const iso = sniffIsoMedia(bytes);
+  if (iso !== null) return iso;
   return SIGNATURES.find((signature) => matches(bytes, signature)) ?? null;
 };
 
@@ -82,6 +147,25 @@ export const PHOTO_CONTENT_TYPES: readonly string[] = [
   'image/tiff',
   'image/webp',
 ];
+
+/**
+ * The subset a VIDEO may be. MEDIA-5.
+ *
+ * THE SIZE LIMIT IS AN ENGINEERING ONE AND IS NOT A BUSINESS RULE. Nobody at
+ * EJE has said how long a clip may be, and nothing here decides it; what
+ * `MAX_VIDEO_BYTES` decides is how much a single request may occupy, which is
+ * a question about this server rather than about EJE's practice. The reasoning
+ * for the number, including why it is also a memory budget, is in
+ * `@/lib/upload-limits`.
+ */
+export const VIDEO_CONTENT_TYPES: readonly string[] = [
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'video/3gpp',
+];
+
+
 
 /**
  * A file name safe to record and safe to hand back in a download header.
@@ -121,32 +205,41 @@ export interface UploadCandidate {
  * The returned `contentType` is the SNIFFED one, so what is stored and what is
  * later served are both the server's finding rather than the client's claim.
  */
-export const validateUpload = (candidate: UploadCandidate): UploadedFile => {
+const validateAgainst = (
+  candidate: UploadCandidate,
+  rule: {
+    readonly maxBytes: number;
+    readonly allowed: readonly string[];
+    readonly tooLarge: string;
+    readonly wrongType: { readonly message: string; readonly detail: string };
+  },
+): UploadedFile => {
   if (candidate.bytes.length === 0) {
     throw refuse('That file is empty.', 'empty_file', 'An empty file has nothing to attach.');
   }
-  if (candidate.bytes.length > MAX_UPLOAD_BYTES) {
-    throw refuse(
-      'That file is too large.',
-      'file_too_large',
-      `Attachments are limited to ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`,
-    );
+  /*
+   * SIZE BEFORE TYPE, deliberately. "Too large" is something somebody can act
+   * on; being told the type is wrong would send them converting a file that
+   * was never going to fit.
+   */
+  if (candidate.bytes.length > rule.maxBytes) {
+    throw refuse('That file is too large.', 'file_too_large', rule.tooLarge);
   }
 
   const sniffed = sniffContentType(candidate.bytes);
-  if (sniffed === null) {
-    /*
-     * The message names the formats rather than what was sent.
-     *
-     * Telling somebody "that is a ZIP" is telling whoever is probing exactly
-     * what the sniffer understood, and it is no help to the person with a
-     * spreadsheet in their hand either.
-     */
-    throw refuse(
-      'That file type cannot be attached.',
-      'unsupported_file_type',
-      'Attach a PDF or an image (PNG, JPEG, TIFF or WebP).',
-    );
+  /*
+   * THE SNIFFED TYPE IS CHECKED AGAINST THE LIST, not merely required to be
+   * recognised. Those were the same thing until video arrived, and then they
+   * were not: the sniffer learned MP4, and `sniffed !== null` would have
+   * quietly let a video be filed as a customer's order on the document path.
+   * Every caller now names the types it accepts.
+   *
+   * The message names the formats rather than what was sent. Telling somebody
+   * "that is a ZIP" tells whoever is probing exactly what the sniffer
+   * understood, and it is no help to the person with a spreadsheet either.
+   */
+  if (sniffed === null || !rule.allowed.includes(sniffed.contentType)) {
+    throw refuse(rule.wrongType.message, 'unsupported_file_type', rule.wrongType.detail);
   }
 
   return {
@@ -156,21 +249,53 @@ export const validateUpload = (candidate: UploadCandidate): UploadedFile => {
   };
 };
 
+export const validateUpload = (candidate: UploadCandidate): UploadedFile =>
+  validateAgainst(candidate, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    allowed: ACCEPTED_CONTENT_TYPES,
+    tooLarge: `Attachments are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
+    wrongType: {
+      message: 'That file type cannot be attached.',
+      detail: 'Attach a PDF or an image (PNG, JPEG, TIFF or WebP).',
+    },
+  });
+
 /**
  * The same validation, narrowed to what a photograph may be. PWA-3.
  *
- * Built on `validateUpload` rather than beside it, so a photograph cannot end
- * up with a weaker size limit or a different sniffer than a document — the only
- * difference is the final list, and it is checked against the SNIFFED type.
+ * Shares `validateAgainst` rather than sitting beside it, so a photograph
+ * cannot end up with a different sniffer or a different order of checks than a
+ * document — only the list and the limit differ.
  */
-export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile => {
-  const file = validateUpload(candidate);
-  if (!PHOTO_CONTENT_TYPES.includes(file.contentType)) {
-    throw refuse(
-      'That file is not a photograph.',
-      'unsupported_file_type',
-      'Attach an image (PNG, JPEG, TIFF or WebP). A PDF belongs under Documents.',
-    );
-  }
-  return file;
-};
+export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile =>
+  validateAgainst(candidate, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    allowed: PHOTO_CONTENT_TYPES,
+    tooLarge: `Photographs are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
+    wrongType: {
+      message: 'That file is not a photograph.',
+      detail: 'Attach an image (PNG, JPEG, TIFF or WebP). A PDF belongs under Documents.',
+    },
+  });
+
+/**
+ * And what a VIDEO may be, with its own larger limit. MEDIA-5.
+ *
+ * The limit is the one place this path is genuinely more permissive, and it is
+ * also a memory budget — see `MAX_VIDEO_BYTES`. Everything else is the same
+ * machinery: the bytes are sniffed, the container's brand has to be one a
+ * camera actually writes, and the name is sanitised before it reaches a row or
+ * a header.
+ */
+export const validateVideoUpload = (candidate: UploadCandidate): UploadedFile =>
+  validateAgainst(candidate, {
+    maxBytes: MAX_VIDEO_BYTES,
+    allowed: VIDEO_CONTENT_TYPES,
+    tooLarge:
+      `Videos are limited to ${megabytes(MAX_VIDEO_BYTES)} MB — about ` +
+      '40 seconds at 1080p. Record a shorter clip, or photograph the fault instead.',
+    wrongType: {
+      message: 'That file is not a video this accepts.',
+      detail: 'Record with the tablet camera, or choose an MP4, MOV, WebM or 3GP file.',
+    },
+  });

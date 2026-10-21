@@ -399,6 +399,80 @@ const v20ToV21 = (data: Loose): Loose => ({
     : [],
 });
 
+/**
+ * v21 -> v22. A CHECKSUM ON EVERY ATTACHMENT. `0021`'s counterpart.
+ *
+ * Unlike every step above this one, it does not add a collection — it adds a
+ * FIELD to records that already exist, which is the other way a snapshot goes
+ * stale. `Attachment.checksumSha256` is `string | null`, and a v21 record has
+ * neither: reading it gives `undefined`, which is a type lie at runtime and the
+ * kind that surfaces somewhere far away.
+ *
+ * NULL, NOT A COMPUTED HASH. These bytes are in the snapshot and could be
+ * hashed — and doing so would be inventing a measurement that was never taken.
+ * Null says "nobody measured this", which is the truth, and is what the column
+ * says about every pre-`0021` row in PostgreSQL too.
+ */
+const withChecksum = (value: unknown): unknown => {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) =>
+    typeof item === 'object' && item !== null && !('checksumSha256' in item)
+      ? { ...(item as Record<string, unknown>), checksumSha256: null }
+      : item,
+  );
+};
+
+const v21ToV22 = (data: Loose): Loose => ({
+  ...data,
+  jobs: Array.isArray(data.jobs)
+    ? data.jobs.map((job) => {
+        if (typeof job !== 'object' || job === null) return job;
+        const row = job as Record<string, unknown>;
+        return {
+          ...row,
+          photos: withChecksum(row.photos),
+          videos: withChecksum(row.videos),
+          attachments: withChecksum(row.attachments),
+          /*
+           * CHECKLIST EVIDENCE IS NESTED TWO DEEP — a job's checklist holds
+           * responses and each response holds photographs. The flat spread
+           * above would have missed it, which is exactly the shape of bug
+           * these steps keep finding.
+           */
+          checklist:
+            typeof row.checklist === 'object' && row.checklist !== null
+              ? {
+                  ...(row.checklist as Record<string, unknown>),
+                  responses: Array.isArray((row.checklist as Record<string, unknown>).responses)
+                    ? ((row.checklist as Record<string, unknown>).responses as unknown[]).map(
+                        (response) =>
+                          typeof response === 'object' && response !== null
+                            ? {
+                                ...(response as Record<string, unknown>),
+                                photos: withChecksum(
+                                  (response as Record<string, unknown>).photos,
+                                ),
+                              }
+                            : response,
+                      )
+                    : (row.checklist as Record<string, unknown>).responses,
+                }
+              : row.checklist,
+        };
+      })
+    : data.jobs,
+  machines: Array.isArray(data.machines)
+    ? data.machines.map((machine) =>
+        typeof machine === 'object' && machine !== null
+          ? {
+              ...(machine as Record<string, unknown>),
+              photos: withChecksum((machine as Record<string, unknown>).photos),
+            }
+          : machine,
+      )
+    : data.machines,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -413,6 +487,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   18: v18ToV19,
   19: v19ToV20,
   20: v20ToV21,
+  21: v21ToV22,
 };
 
 /**

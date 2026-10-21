@@ -32,6 +32,8 @@ const photo = (id: string, fileName: string, caption: string, days: number): Att
   uploadedAt: timeOffset(days, 10),
   uploadedBy: asUserId('user-tech-sipho'),
   sizeBytes: 0,
+  /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+  checksumSha256: null,
   provenance: 'simulated',
 });
 

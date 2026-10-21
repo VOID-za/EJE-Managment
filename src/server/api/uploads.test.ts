@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCEPTED_CONTENT_TYPES,
   MAX_UPLOAD_BYTES,
+  MAX_VIDEO_BYTES,
   PHOTO_CONTENT_TYPES,
   safeFileName,
   sniffContentType,
   validatePhotoUpload,
   validateUpload,
+  validateVideoUpload,
+  VIDEO_CONTENT_TYPES,
 } from './uploads';
 import { ApiError } from './errors';
 
@@ -212,5 +215,113 @@ describe('a photograph is narrower than a document', () => {
     // size or by a different sniffer than a document. The subset relation is
     // the property worth pinning.
     for (const type of PHOTO_CONTENT_TYPES) expect(ACCEPTED_CONTENT_TYPES).toContain(type);
+  });
+});
+
+/**
+ * VIDEO. MEDIA-5.
+ *
+ * The containers a phone actually writes, and the ones that look like them.
+ * MP4, MOV and 3GP are all ISO base media files — four bytes of box length,
+ * then `ftyp`, then a brand — so the brand is the only thing distinguishing a
+ * video from an HEIC photograph or an M4A voice note in the same container.
+ * Those two cases are the reason the brand is checked rather than just `ftyp`.
+ */
+const iso = (brand: string): Uint8Array =>
+  new Uint8Array([
+    0x00,
+    0x00,
+    0x00,
+    0x18,
+    0x66,
+    0x74,
+    0x79,
+    0x70,
+    ...[...brand].map((character) => character.charCodeAt(0)),
+  ]);
+
+const MP4 = iso('isom');
+const MOV = iso('qt  ');
+const THREE_GP = iso('3gp4');
+const WEBM = bytes(0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+const HEIC = iso('heic');
+const M4A = iso('M4A ');
+
+describe('what a video may be', () => {
+  it('recognises what a tablet camera writes', () => {
+    expect(sniffContentType(MP4)?.contentType).toBe('video/mp4');
+    expect(sniffContentType(MOV)?.contentType).toBe('video/quicktime');
+    expect(sniffContentType(THREE_GP)?.contentType).toBe('video/3gpp');
+    expect(sniffContentType(WEBM)?.contentType).toBe('video/webm');
+  });
+
+  it('refuses an HEIC photograph in the same container', () => {
+    // `ftyp` alone would have accepted this and filed a still image as a
+    // video — a tile with a play button that plays nothing.
+    expect(sniffContentType(HEIC)).toBeNull();
+  });
+
+  it('refuses an M4A voice note in the same container', () => {
+    expect(sniffContentType(M4A)).toBeNull();
+  });
+
+  it('refuses a truncated ISO header rather than reading past it', () => {
+    expect(sniffContentType(bytes(0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70))).toBeNull();
+  });
+
+  it('accepts each container through the video validator', () => {
+    for (const video of [MP4, MOV, THREE_GP, WEBM]) {
+      expect(
+        VIDEO_CONTENT_TYPES.includes(
+          validateVideoUpload({ fileName: 'clip', declaredContentType: '', bytes: video })
+            .contentType,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('allows a video larger than the document limit, up to its own', () => {
+    const big = new Uint8Array(MAX_UPLOAD_BYTES + 1);
+    big.set(MP4, 0);
+    expect(
+      validateVideoUpload({ fileName: 'clip.mp4', declaredContentType: '', bytes: big })
+        .contentType,
+    ).toBe('video/mp4');
+  });
+
+  it('refuses one past the video limit, and says what to do instead', () => {
+    const tooBig = new Uint8Array(MAX_VIDEO_BYTES + 1);
+    tooBig.set(MP4, 0);
+    try {
+      validateVideoUpload({ fileName: 'film.mp4', declaredContentType: '', bytes: tooBig });
+      throw new Error('expected a refusal');
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      expect(error.violations[0]?.code).toBe('file_too_large');
+      expect(error.violations[0]?.message).toContain('shorter');
+    }
+  });
+
+  it('refuses a photograph sent as a video, and a video sent as a photograph', () => {
+    // `kind` picks the rule; the bytes decide the fact. Neither direction is
+    // taken on the client's word.
+    expect(
+      codesOf(() => validateVideoUpload({ fileName: 'x.mp4', declaredContentType: 'video/mp4', bytes: JPEG })),
+    ).toEqual(['unsupported_file_type']);
+    expect(
+      codesOf(() => validatePhotoUpload({ fileName: 'x.jpg', declaredContentType: 'image/jpeg', bytes: MP4 })),
+    ).toEqual(['unsupported_file_type']);
+  });
+
+  it('refuses a video on the DOCUMENT path, which the sniffer alone would have allowed', () => {
+    /*
+     * This is the regression the restructuring was for. `validateUpload` used
+     * to accept anything the sniffer recognised; the moment the sniffer learned
+     * MP4, a video would have been accepted as a customer's order. Every
+     * caller now names the types it accepts.
+     */
+    expect(
+      codesOf(() => validateUpload({ fileName: 'order.pdf', declaredContentType: '', bytes: MP4 })),
+    ).toEqual(['unsupported_file_type']);
   });
 });

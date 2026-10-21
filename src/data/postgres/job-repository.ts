@@ -823,6 +823,14 @@ export class PostgresJobRepository implements JobRepository {
           caption: item.caption,
           storageKey: item.storageKey,
           sizeBytes: item.sizeBytes,
+          /*
+           * MEASURED BY THE STORE, and written here — the column existed and
+           * nothing ever filled it. Without it a damaged photograph could not
+           * be told from a sound one, on exactly the evidence a customer
+           * signs for. `0021` added the same column to the machine register
+           * and to checklist evidence.
+           */
+          checksumSha256: item.checksumSha256,
           uploadedAt: item.uploadedAt,
           uploadedBy: item.uploadedBy,
         })

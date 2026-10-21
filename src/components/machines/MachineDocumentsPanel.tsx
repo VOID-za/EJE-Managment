@@ -15,6 +15,7 @@ import { machines as api } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatFileSize } from '@/lib/format';
+import { DOCUMENT_ACCEPT_ATTRIBUTE, DOCUMENT_TYPES_SENTENCE } from '@/lib/upload-limits';
 
 /**
  * PAPER ABOUT ONE MACHINE. October mandate §4.
@@ -233,6 +234,7 @@ export const MachineDocumentsPanel = ({
           <input
             ref={input}
             type="file"
+            accept={DOCUMENT_ACCEPT_ATTRIBUTE}
             className="hidden"
             data-testid="machine-document-file"
             onChange={(event) => {
@@ -255,8 +257,9 @@ export const MachineDocumentsPanel = ({
           </Button>
 
           <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
-            The server checks the file itself rather than its name, and records the size and
-            checksum of what it stored. A document nobody classifies stays office-only.
+            {DOCUMENT_TYPES_SENTENCE} The server checks the file itself rather than its name, and
+            records the size and checksum of what it stored. A document nobody classifies stays
+            office-only.
           </p>
 
           {uploading && (

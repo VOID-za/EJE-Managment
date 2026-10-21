@@ -26,6 +26,7 @@ import { holdMedia } from '@/lib/pwa/pending-media';
 import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatFileSize, formatRelative } from '@/lib/format';
+import { VIDEO_LIMIT_MB } from '@/lib/upload-limits';
 
 /**
  * PHOTOGRAPHS ON A JOB — THE REAL ONES NOW. PWA-3, CR-09 Phase 3.
@@ -72,6 +73,15 @@ export const JobMediaPanel = ({
   const [heldJustNow, setHeldJustNow] = useState(false);
   const [selection, setSelection] = useState<{
     readonly file: File;
+    /**
+     * WHICH BUTTON STARTED THIS. MEDIA-5.
+     *
+     * Decided when the file is chosen rather than guessed from its type: the
+     * browser's `file.type` is a claim like any other, and the server sniffs
+     * the bytes anyway. What this picks is which rule the request is judged
+     * by, and which preview element can actually play it.
+     */
+    readonly kind: 'photo' | 'video';
     readonly preview: string;
     /*
      * MINTED WHEN THE PHOTOGRAPH IS CHOSEN, NOT WHEN IT IS SENT. TAB-UPLOAD-1.
@@ -99,6 +109,8 @@ export const JobMediaPanel = ({
   useCaptureLock(selection !== null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
+  const videoCameraInput = useRef<HTMLInputElement>(null);
+  const videoLibraryInput = useRef<HTMLInputElement>(null);
 
   const definition = getJobTypeDefinition(job.jobType);
   const photosRequired = definition.photosRequired && job.photos.length === 0;
@@ -111,13 +123,18 @@ export const JobMediaPanel = ({
    * all day is the whole shift.
    */
   const previewUrl = useRef<string | null>(null);
-  const select = (picked: File | null) => {
+  const select = (picked: File | null, kind: 'photo' | 'video' = 'photo') => {
     if (previewUrl.current !== null) URL.revokeObjectURL(previewUrl.current);
     previewUrl.current = picked === null ? null : URL.createObjectURL(picked);
     setSelection(
       picked === null || previewUrl.current === null
         ? null
-        : { file: picked, preview: previewUrl.current, idempotencyKey: newIdempotencyKey() },
+        : {
+            file: picked,
+            kind,
+            preview: previewUrl.current,
+            idempotencyKey: newIdempotencyKey(),
+          },
     );
   };
   useEffect(
@@ -148,9 +165,9 @@ export const JobMediaPanel = ({
     operation.clearError();
   };
 
-  const chosen = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const chosen = (event: React.ChangeEvent<HTMLInputElement>, kind: 'photo' | 'video' = 'photo') => {
     const picked = event.target.files?.[0] ?? null;
-    select(picked);
+    select(picked, kind);
     setAttempted(false);
     operation.clearError();
     // Cleared so choosing the SAME file again still fires a change event — the
@@ -167,6 +184,24 @@ export const JobMediaPanel = ({
    */
   const hold = async (): Promise<boolean> => {
     if (selection === null) return false;
+    /*
+     * A VIDEO IS NOT HELD. MEDIA-5, OFF-MEDIA-1.
+     *
+     * The held-work store is capped at 40 MB for ALL of a technician's unsent
+     * captures, and one clip may be 60. Holding it would either fail at the
+     * cap or crowd out the photographs the job actually needs — so it is
+     * refused with the reason, which is the same answer the checklist and the
+     * signature give offline (OFF-QUEUE-10). The alternative is a queue that
+     * silently drops somebody's only photograph of a fault.
+     */
+    if (selection.kind === 'video') {
+      setHoldProblem(
+        'A video cannot be kept on this tablet — one clip would fill the space held for ' +
+          'unsent work. Film it again when you have a signal, or photograph the fault, which ' +
+          'can be held.',
+      );
+      return false;
+    }
     const outcome = await holdMedia({
       userId: currentUser?.id ?? '',
       jobId: job.id,
@@ -199,7 +234,10 @@ export const JobMediaPanel = ({
     const result = await operation.runFor(() =>
       jobs.uploadMedia(job.id, selection.file, {
         caption: caption.trim(),
-        visibility,
+        // A video is filed for the office; see the dialog for why it is not
+        // the technician's choice.
+        visibility: selection.kind === 'video' ? 'internal' : visibility,
+        kind: selection.kind,
         idempotencyKey: selection.idempotencyKey,
       }),
     );
@@ -275,7 +313,7 @@ export const JobMediaPanel = ({
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={chosen}
+            onChange={(event) => chosen(event, 'photo')}
             data-testid="job-photo-camera"
           />
           <input
@@ -283,8 +321,32 @@ export const JobMediaPanel = ({
             type="file"
             accept="image/png,image/jpeg,image/tiff,image/webp"
             className="hidden"
-            onChange={chosen}
+            onChange={(event) => chosen(event, 'photo')}
             data-testid="job-photo-gallery"
+          />
+          {/*
+            AND THE SAME TWO FOR VIDEO. MEDIA-5.
+            `video/*` on the camera input, because a device offers whatever its
+            own recorder produces and narrowing it there only makes the button
+            do nothing on a phone that records something else. The server is
+            what refuses, after looking at the bytes.
+          */}
+          <input
+            ref={videoCameraInput}
+            type="file"
+            accept="video/*"
+            capture="environment"
+            className="hidden"
+            onChange={(event) => chosen(event, 'video')}
+            data-testid="job-video-camera"
+          />
+          <input
+            ref={videoLibraryInput}
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm,video/3gpp"
+            className="hidden"
+            onChange={(event) => chosen(event, 'video')}
+            data-testid="job-video-library"
           />
           <Button
             leadingIcon={<Icon name="camera" className="size-4" />}
@@ -299,10 +361,33 @@ export const JobMediaPanel = ({
           >
             Choose photo
           </Button>
-          {/* Said once, where somebody might otherwise go looking for it. */}
-          <span className="text-xs text-steel-500">
-            Video capture is not available yet — it is awaiting the MEDIA-5 decision.
-          </span>
+          <Button
+            variant="secondary"
+            disabled={!online}
+            leadingIcon={<Icon name="camera" className="size-4" />}
+            onClick={() => videoCameraInput.current?.click()}
+            data-testid="job-video-record"
+          >
+            Record video
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!online}
+            leadingIcon={<Icon name="image" className="size-4" />}
+            onClick={() => videoLibraryInput.current?.click()}
+            data-testid="job-video-choose"
+          >
+            Choose video
+          </Button>
+          {/*
+            THE TWO THINGS A TECHNICIAN HAS TO KNOW BEFORE THEY FILM, said
+            before they film rather than after the upload fails. MEDIA-5.
+          */}
+          <p className="basis-full text-xs text-steel-500" data-testid="job-video-note">
+            {online
+              ? `Videos up to ${VIDEO_LIMIT_MB} MB — about 40 seconds at 1080p. A video stays with the office: the customer's job card is a PDF and cannot carry one.`
+              : 'Video needs a signal. Unlike a photograph it cannot be held on the tablet — one clip would fill the space kept for unsent work. Photograph the fault instead, or film it once you have signal.'}
+          </p>
         </div>
       )}
 
@@ -325,7 +410,7 @@ export const JobMediaPanel = ({
 
       <Modal
         open={selection !== null}
-        title="Attach photo"
+        title={selection?.kind === 'video' ? 'Attach video' : 'Attach photo'}
         description="The photograph is uploaded to the EJE server and stored against this job."
         onClose={close}
         footer={
@@ -334,7 +419,11 @@ export const JobMediaPanel = ({
               Cancel
             </Button>
             <Button onClick={submit} loading={operation.running}>
-              {attempted && operation.error !== null ? 'Try again' : 'Attach photo'}
+              {attempted && operation.error !== null
+                ? 'Try again'
+                : selection?.kind === 'video'
+                  ? 'Attach video'
+                  : 'Attach photo'}
             </Button>
           </>
         }
@@ -342,7 +431,11 @@ export const JobMediaPanel = ({
         <div className="space-y-4">
           {operation.error !== null && (
             <RuleViolationNotice
-              title="The photograph was not attached"
+              title={
+                selection?.kind === 'video'
+                  ? 'The video was not attached'
+                  : 'The photograph was not attached'
+              }
               message={operation.error}
               violations={operation.violations}
             />
@@ -356,17 +449,51 @@ export const JobMediaPanel = ({
           {selection !== null && (
             <>
               <div className="overflow-hidden rounded-[var(--radius-control)] border border-steel-200 bg-steel-900">
-                {/* eslint-disable-next-line @next/next/no-img-element -- a blob: URL from this device's camera; there is nothing for the image optimiser to fetch */}
-                <img
-                  src={selection.preview}
-                  alt="The photograph about to be attached"
-                  className="mx-auto max-h-64 w-auto object-contain"
-                  data-testid="job-photo-preview"
-                />
+                {selection.kind === 'video' ? (
+                  /*
+                    PLAYED BEFORE IT IS SENT, for the same reason a photograph
+                    is shown: a clip of the floor, or one that stopped
+                    recording after a second, is obvious here and invisible in
+                    a tile afterwards. `controls` and nothing else — no
+                    autoplay on a tablet, no muted loop, just the frame and a
+                    play button.
+                  */
+                  <video
+                    src={selection.preview}
+                    controls
+                    preload="metadata"
+                    className="mx-auto max-h-64 w-auto"
+                    data-testid="job-video-preview"
+                  />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element -- a blob: URL from this device's camera; there is nothing for the image optimiser to fetch */
+                  <img
+                    src={selection.preview}
+                    alt="The photograph about to be attached"
+                    className="mx-auto max-h-64 w-auto object-contain"
+                    data-testid="job-photo-preview"
+                  />
+                )}
               </div>
               <p className="text-xs text-steel-500">
                 {selection.file.name} · {formatFileSize(selection.file.size)}
               </p>
+              {/*
+                SAID AGAIN HERE, WITH THE REAL NUMBER IN FRONT OF THEM. A
+                technician who has just filmed something is about to find out
+                whether it fits, and the answer is better given before the
+                upload than as a refusal after it.
+              */}
+              {selection.kind === 'video' && selection.file.size > VIDEO_LIMIT_MB * 1024 * 1024 && (
+                <p
+                  className="text-xs font-medium text-signal-700"
+                  data-testid="job-video-too-large"
+                >
+                  That clip is {formatFileSize(selection.file.size)}, and the limit is{' '}
+                  {VIDEO_LIMIT_MB} MB. The server will refuse it. Record a shorter one, or
+                  photograph the fault instead.
+                </p>
+              )}
             </>
           )}
 
@@ -374,24 +501,47 @@ export const JobMediaPanel = ({
             label="Caption"
             value={caption}
             onChange={(event) => setCaption(event.target.value)}
-            placeholder="e.g. Spindle drive showing alarm 750"
-            hint="A customer-facing caption appears on the customer job card."
+            placeholder={
+              selection?.kind === 'video'
+                ? 'e.g. Spindle noise at 1 200 rpm, after the bearing change'
+                : 'e.g. Spindle drive showing alarm 750'
+            }
+            hint={
+              selection?.kind === 'video'
+                ? 'What the office should watch for. A video is not on the customer job card.'
+                : 'A customer-facing caption appears on the customer job card.'
+            }
           />
           {/*
             WHO IT IS FOR, asked at capture. MEDIA-1.
             Customer-facing by default, because most photographs on a job are
             evidence of the work. The technician marks the exceptions.
+
+            NOT ASKED FOR A VIDEO, and not asked rather than asked-and-ignored.
+            The customer's job card is a PDF and a PDF cannot carry a video, so
+            "appears on the job card" would be false whichever way the control
+            was set — and a control with no effect is worse than no control.
+            Video is recorded as INTERNAL, which is the conservative reading:
+            today the customer receives nothing, and promising otherwise is a
+            decision EJE have not taken. See docs/SCOPE.md, MEDIA-5.
           */}
-          <SelectField
-            label="Who it is for"
-            value={visibility}
-            onChange={(event) => setVisibility(event.target.value as MediaVisibility)}
-            options={[
-              { value: 'customer_facing', label: 'Customer — appears on the job card' },
-              { value: 'internal', label: 'Internal — EJE only, kept off the job card' },
-            ]}
-            hint="Internal is for what EJE needs and the customer does not: a damaged part being claimed for, an unsafe installation, a note to the workshop."
-          />
+          {selection?.kind === 'video' ? (
+            <p className="text-sm text-steel-600" data-testid="job-video-audience">
+              This video is kept for EJE. The customer&apos;s job card is a PDF and cannot carry
+              one, so it is filed against the job for the office rather than sent out.
+            </p>
+          ) : (
+            <SelectField
+              label="Who it is for"
+              value={visibility}
+              onChange={(event) => setVisibility(event.target.value as MediaVisibility)}
+              options={[
+                { value: 'customer_facing', label: 'Customer — appears on the job card' },
+                { value: 'internal', label: 'Internal — EJE only, kept off the job card' },
+              ]}
+              hint="Internal is for what EJE needs and the customer does not: a damaged part being claimed for, an unsafe installation, a note to the workshop."
+            />
+          )}
         </div>
       </Modal>
     </div>
@@ -416,8 +566,18 @@ const MediaGrid = ({
   readonly onReclassify?: (attachmentId: string, next: MediaVisibility) => void;
 }) => {
   if (items.length === 0) {
-    if (title === 'Videos') return null;
-    return (
+    /*
+     * THE VIDEO GRID USED TO DISAPPEAR, because there was no way to add one
+     * and an empty section would have been an invitation with nothing behind
+     * it. There is a way now, so it says what it is for. MEDIA-5.
+     */
+    return title === 'Videos' ? (
+      <EmptyState
+        title="No videos attached"
+        description="A short clip is for what a photograph cannot show: a noise, a movement, an intermittent fault. It is kept for the office and is not part of the customer job card."
+        icon={<Icon name="camera" />}
+      />
+    ) : (
       <EmptyState
         title="No photos attached"
         description="Photographs of the fault, the repair and the installed condition support the job card."
@@ -498,13 +658,18 @@ const MediaGrid = ({
 };
 
 /**
- * THE PHOTOGRAPH, OR AN HONEST ADMISSION THAT THERE IS NOT ONE.
+ * THE PHOTOGRAPH OR THE VIDEO, OR AN HONEST ADMISSION THAT THERE IS NEITHER.
  *
- * Every row captured before PWA-3 has a storage key with nothing behind it, and
- * a video has bytes this grid cannot render. Both answer with the icon tile
- * rather than a broken image, and the caption underneath still says what the
- * row claims to be — a placeholder is only dishonest when it is indistinguishable
- * from a photograph, which is what the old grid got wrong.
+ * A row captured before PWA-3 has a storage key with nothing behind it, so the
+ * image fails to load and the icon tile says so. The caption underneath still
+ * says what the row claims to be — a placeholder is only dishonest when it is
+ * indistinguishable from a photograph, which is what the old grid got wrong.
+ *
+ * A VIDEO IS PLAYED HERE, NOT REPRESENTED BY AN ICON. MEDIA-5. It used to be
+ * the icon, because there was no video to play; now there is, and a grid that
+ * showed a camera glyph over a stored clip would be hiding the one thing the
+ * office opened the job to watch. `preload="metadata"` so a job with four
+ * clips does not pull 240 MB through a tablet to draw a grid.
  */
 const MediaThumbnail = ({
   jobId,
@@ -515,12 +680,27 @@ const MediaThumbnail = ({
 }) => {
   const [failed, setFailed] = useState(false);
 
-  if (item.kind !== 'photo' || failed) {
+  if (failed) {
     return (
       <>
         <Icon name="camera" className="size-7" />
-        <span className="mt-1 text-[10px] font-medium tracking-wide uppercase">{item.kind}</span>
+        <span className="mt-1 text-[10px] font-medium tracking-wide uppercase">
+          {item.kind === 'video' ? 'video missing' : 'no file'}
+        </span>
       </>
+    );
+  }
+
+  if (item.kind === 'video') {
+    return (
+      <video
+        src={jobs.mediaUrl(jobId, item.id)}
+        controls
+        preload="metadata"
+        onError={() => setFailed(true)}
+        className="size-full object-cover"
+        data-testid="job-video-thumbnail"
+      />
     );
   }
 

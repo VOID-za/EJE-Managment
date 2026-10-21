@@ -358,3 +358,79 @@ describe('migrating a persisted snapshot', () => {
   });
 
 });
+
+describe('v21 -> v22: a checksum on every attachment', () => {
+  /**
+   * The step adds a FIELD to records that already exist, which is the other
+   * way a snapshot goes stale — every step before it added a collection. A
+   * v21 attachment has no `checksumSha256` at all, and reading it gives
+   * `undefined` where the type says `string | null`.
+   */
+  const v21WithMedia = (): Record<string, unknown> => ({
+    ...v8Snapshot(),
+    jobs: [
+      {
+        id: 'job-1',
+        photos: [{ id: 'a1', fileName: 'one.jpg', sizeBytes: 10 }],
+        videos: [{ id: 'a2', fileName: 'clip.mp4', sizeBytes: 20 }],
+        attachments: [{ id: 'a3', fileName: 'order.pdf', sizeBytes: 30 }],
+        checklist: {
+          responses: [{ itemId: 'q1', photos: [{ id: 'a4', fileName: 'evidence.png' }] }],
+        },
+      },
+    ],
+    machines: [{ id: 'machine-1', photos: [{ id: 'a5', fileName: 'plate.jpg' }] }],
+  });
+
+  const migrated = (): Record<string, unknown> =>
+    migrateDatabase(21, v21WithMedia(), 22) as unknown as Record<string, unknown>;
+
+  it('fills every job list', () => {
+    const job = (migrated().jobs as Record<string, unknown>[])[0] as Record<string, unknown>;
+    for (const list of ['photos', 'videos', 'attachments']) {
+      const items = job[list] as Record<string, unknown>[];
+      expect(items[0]?.checksumSha256, list).toBeNull();
+    }
+  });
+
+  it('reaches checklist evidence, which is nested two deep', () => {
+    // The flat spread over a job would have missed this, which is the shape of
+    // bug these steps keep finding.
+    const job = (migrated().jobs as Record<string, unknown>[])[0] as Record<string, unknown>;
+    const checklist = job.checklist as Record<string, unknown>;
+    const responses = checklist.responses as Record<string, unknown>[];
+    const photos = responses[0]?.photos as Record<string, unknown>[];
+    expect(photos[0]?.checksumSha256).toBeNull();
+  });
+
+  it('reaches machine photographs', () => {
+    const machine = (migrated().machines as Record<string, unknown>[])[0] as Record<
+      string,
+      unknown
+    >;
+    const photos = machine.photos as Record<string, unknown>[];
+    expect(photos[0]?.checksumSha256).toBeNull();
+  });
+
+  it('leaves a checksum that is already there alone', () => {
+    const snapshot = v21WithMedia();
+    (
+      ((snapshot.jobs as Record<string, unknown>[])[0] as Record<string, unknown>)
+        .photos as Record<string, unknown>[]
+    )[0]!.checksumSha256 = 'abc';
+    const job = (
+      migrateDatabase(21, snapshot, 22) as unknown as Record<string, unknown>
+    ).jobs as Record<string, unknown>[];
+    const photos = (job[0] as Record<string, unknown>).photos as Record<string, unknown>[];
+    expect(photos[0]?.checksumSha256).toBe('abc');
+  });
+
+  it('does not invent a hash from bytes it could have hashed', () => {
+    // The snapshot HOLDS these bytes, so a hash was computable — and computing
+    // one would be recording a measurement nobody took. Null is the truth, and
+    // it is what the PostgreSQL column says about every pre-0021 row.
+    const job = (migrated().jobs as Record<string, unknown>[])[0] as Record<string, unknown>;
+    const photos = job.photos as Record<string, unknown>[];
+    expect(photos[0]?.checksumSha256).not.toEqual(expect.any(String));
+  });
+});

@@ -47,6 +47,8 @@ const jobPhoto = (
   uploadedAt: timeOffset(days, hours),
   uploadedBy: asUserId(uploadedBy),
   sizeBytes: 2_140_000,
+  /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+  checksumSha256: null,
   /*
    * A DEMONSTRATION PHOTOGRAPH, which is metadata and no photograph.
    * October mandate §1: the row exists so the panels have something to draw,

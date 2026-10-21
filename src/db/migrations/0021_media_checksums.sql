@@ -1,0 +1,26 @@
+-- A CHECKSUM FOR EVERY STORED FILE. BACKUP-1, MEDIA-5.
+--
+-- WHAT WAS MISSING, and it was missing on exactly the files that matter most.
+-- A customer's filed document, a machine manual and an issued job card all
+-- recorded the SHA-256 of the bytes that were stored, so a damaged file could
+-- be told from a lost one. The PHOTOGRAPHS A CUSTOMER SIGNS FOR could not:
+--
+--   * job_media               had the column and nothing ever wrote to it
+--   * machine_photos          had no column
+--   * checklist_answer_photos had no column
+--
+-- The last of those gates job completion on an installation job type, so the
+-- evidence with the weakest integrity record in the system was the evidence a
+-- signature depends on.
+--
+-- NULLABLE, DELIBERATELY. Every row written before this is a row nobody
+-- measured, and null says exactly that. A zero-length string or a zero would
+-- claim a measurement that was never taken — the same mistake that made
+-- `final_documents.size_bytes` read 0 on documents that were perfectly intact.
+-- `npm run documents:reconcile` is what fills them in from the files.
+--
+-- ADDITIVE AND NOTHING ELSE: two ALTER TABLE ... ADD COLUMN on nullable text.
+-- No rewrite, no default to backfill, no lock beyond the catalogue update, and
+-- the old release runs unchanged against the new schema.
+ALTER TABLE "machine_photos" ADD COLUMN IF NOT EXISTS "checksum_sha256" text;--> statement-breakpoint
+ALTER TABLE "checklist_answer_photos" ADD COLUMN IF NOT EXISTS "checksum_sha256" text;

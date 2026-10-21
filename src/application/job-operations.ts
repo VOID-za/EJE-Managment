@@ -77,6 +77,7 @@ import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment } from './assignment-notice';
 import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
+import { storeAndMeasure } from './stored-file';
 import { loadJobView } from './job-view';
 import { WorkflowError } from './errors';
 
@@ -1212,11 +1213,13 @@ export const addMedia = async (
   assertEditable(context, job);
   assertCanCapture(context, job);
 
-  const stored = await context.services.storage.storeUpload({
-    fileName: input.fileName,
-    contentType: input.contentType,
-    bytes: input.bytes,
-  });
+  const stored = await storeAndMeasure(
+    context,
+    input,
+    input.kind === 'video'
+      ? 'That video could not be stored.'
+      : 'That photograph could not be stored.',
+  );
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
@@ -1227,7 +1230,14 @@ export const addMedia = async (
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: input.bytes.length,
+    /*
+     * BOTH MEASURED BY THE STORE, off the bytes it produced on the way back
+     * out. This used `input.bytes.length` — the length of what was HANDED to
+     * the write — and recorded no checksum at all, on a column that has
+     * existed since the table did. See `storeAndMeasure`.
+     */
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     // A photograph somebody really took, on a real job.
     provenance: 'genuine',
   };
@@ -1278,11 +1288,7 @@ export const attachDocument = async (
 ): Promise<Job> => {
   assertEditable(context, job);
 
-  const stored = await context.services.storage.storeUpload({
-    fileName: file.fileName,
-    contentType: file.contentType,
-    bytes: file.bytes,
-  });
+  const stored = await storeAndMeasure(context, file, 'That document could not be stored.');
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
@@ -1297,7 +1303,8 @@ export const attachDocument = async (
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: file.bytes.length,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     provenance: 'genuine',
   };
 
@@ -1835,11 +1842,7 @@ export const addChecklistPhoto = async (
     throw new WorkflowError('The checklist has not been started for this job.');
   }
 
-  const stored = await context.services.storage.storeUpload({
-    fileName: file.fileName,
-    contentType: file.contentType,
-    bytes: file.bytes,
-  });
+  const stored = await storeAndMeasure(context, file, 'That photograph could not be stored.');
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
@@ -1851,7 +1854,8 @@ export const addChecklistPhoto = async (
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: file.bytes.length,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     provenance: 'genuine',
   };
 

@@ -3,11 +3,12 @@ import { readJobMedia } from '@/application/job-operations';
 import { requireAuthenticatedActor } from '@/server/api/actor';
 import { loadVisibleJob } from '@/server/api/commands/jobs';
 import { errorResponse, logUnexpected, notFound, toApiError } from '@/server/api/errors';
-import { PHOTO_CONTENT_TYPES, safeFileName } from '@/server/api/uploads';
+import { PHOTO_CONTENT_TYPES, safeFileName, VIDEO_CONTENT_TYPES } from '@/server/api/uploads';
 import { getServerRuntime } from '@/server/runtime';
 
 /**
- * `GET /api/jobs/:jobId/media/:attachmentId` — the photograph itself. PWA-3.
+ * `GET /api/jobs/:jobId/media/:attachmentId` — the photograph or the video
+ * itself. PWA-3, MEDIA-5.
  *
  * WHY IT HAD TO EXIST. A capture nobody can look at is not a capture: the
  * technician has to see that the frame is the machine and not their thumb
@@ -27,9 +28,9 @@ import { getServerRuntime } from '@/server/runtime';
  * origin runs in this application's context. Here:
  *
  *   - the type is the SNIFFED type from capture, and the list is raster images
- *     only — there is no SVG and no HTML in it, so there is no document to
- *     execute. A row that somehow holds anything else is refused below rather
- *     than served;
+ *     and the four video containers — no SVG, no HTML, nothing with a script
+ *     in it, so there is no document to execute. A row that somehow holds
+ *     anything else is refused below rather than served;
  *   - `nosniff` stops the browser looking for a more interesting type;
  *   - the sandbox CSP means that even if a byte sequence were somehow treated
  *     as a document, it would have no script, no origin and no plugins.
@@ -54,10 +55,19 @@ export const GET = async (
     });
 
     if (found === null) throw notFound('That photograph does not exist.');
-    // Belt and braces: capture sniffs the bytes, and this refuses to serve a
-    // row that is not an image even so. One of the two has to be the last word,
-    // and it should be the one at the moment of serving.
-    if (!PHOTO_CONTENT_TYPES.includes(found.document.contentType)) {
+    /*
+     * Belt and braces: capture sniffs the bytes, and this refuses to serve a
+     * row that is not an image or a video even so. One of the two has to be
+     * the last word, and it should be the one at the moment of serving.
+     *
+     * THE LIST GREW WITH MEDIA-5 AND THE REFUSAL DID NOT WEAKEN. A video
+     * container is as inert as a JPEG in a browser: no script, no origin, and
+     * the sandbox CSP below holds for both. What is NOT on either list is
+     * anything a browser would treat as a document, which is the property this
+     * check exists to keep.
+     */
+    const servable = [...PHOTO_CONTENT_TYPES, ...VIDEO_CONTENT_TYPES];
+    if (!servable.includes(found.document.contentType)) {
       throw notFound('That photograph does not exist.');
     }
 
@@ -69,6 +79,15 @@ export const GET = async (
         'content-disposition': `inline; filename="${fileName}"`,
         'x-content-type-options': 'nosniff',
         'content-security-policy': "default-src 'none'; sandbox",
+        /*
+         * NO RANGE SUPPORT, SAID RATHER THAN IMPLIED. A `<video>` element asks
+         * for byte ranges to seek; without them a browser downloads the whole
+         * clip and plays it from the start, which is correct behaviour for a
+         * 60 MB maximum and one less thing to get wrong. `none` tells it not
+         * to try, instead of leaving it to infer from a 200 that ignored its
+         * `Range` header.
+         */
+        'accept-ranges': 'none',
         'cache-control': 'private, no-store',
       },
     });

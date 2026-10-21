@@ -257,6 +257,8 @@ export class PostgresMachineRepository implements MachineRepository {
           caption: photo.caption,
           storageKey: photo.storageKey,
           sizeBytes: photo.sizeBytes,
+          // Measured by the store. The column arrived with `0021`.
+          checksumSha256: photo.checksumSha256,
           uploadedAt: photo.uploadedAt,
           uploadedBy: photo.uploadedBy.length === 0 ? null : photo.uploadedBy,
           /*
@@ -322,6 +324,7 @@ export class PostgresMachineRepository implements MachineRepository {
         fileName: photo.fileName,
         caption: photo.caption,
         storageKey: photo.storageKey,
+        checksumSha256: photo.checksumSha256,
         // An unrecognised value reads as `unknown` rather than as an
         // accusation either way: see `asProvenance`.
         provenance: asProvenance(photo.provenance),

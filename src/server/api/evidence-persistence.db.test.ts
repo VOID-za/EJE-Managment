@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -175,6 +176,13 @@ describeDb('evidence that is actually stored, on PostgreSQL', () => {
     expect(rows[0]?.fileName).toBe('bearing.png');
     expect(rows[0]?.caption).toBe('Bearing');
     expect(Number(rows[0]?.sizeBytes)).toBe(bytes.length);
+    /*
+     * AND THE CHECKSUM, which this row could not carry until `0021` added the
+     * column. This is the evidence a `photoRequired` item gates completion on,
+     * so "is this still the photograph that was taken" has to be answerable
+     * about it — and it was the one upload path in the system where it was not.
+     */
+    expect(rows[0]?.checksumSha256).toBe(createHash('sha256').update(bytes).digest('hex'));
     expect(rows[0]?.uploadedBy).toBe(IDS.technician);
     // A real generated key, not a client-supplied path.
     expect(rows[0]?.storageKey.length).toBeGreaterThan(0);
@@ -320,6 +328,8 @@ describeDb('evidence that is actually stored, on PostgreSQL', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.caption).toBe('Rating plate');
     expect(Number(rows[0]?.sizeBytes)).toBe(bytes.length);
+    // The checksum too, since `0021` gave this table the column.
+    expect(rows[0]?.checksumSha256).toBe(createHash('sha256').update(bytes).digest('hex'));
     expect(rows[0]?.uploadedBy).toBe(IDS.master);
 
     const download = await master.download(

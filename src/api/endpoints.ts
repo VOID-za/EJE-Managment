@@ -26,6 +26,23 @@ import type {
   User,
   ChangeRequest,
 } from '@/domain';
+
+/**
+ * One attachment as the media route describes it back.
+ *
+ * Named because photographs and videos are described identically — only which
+ * list they land in differs — and two copies of the same shape would drift.
+ * NO STORAGE KEY: a screen addresses an attachment by its id through the
+ * authenticated route, and a key is not a way in.
+ */
+interface MediaDescription {
+  readonly id: string;
+  readonly fileName: string;
+  readonly caption: string;
+  readonly visibility: MediaVisibility;
+  readonly sizeBytes: number;
+  readonly uploadedAt: string;
+}
 import type { ActivityFeed } from '@/application/activity-read';
 import type { CaptureReferralRow } from '@/application/capture-referral-view';
 import type { CalendarData } from '@/application/calendar';
@@ -434,7 +451,7 @@ export const jobs = {
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),
   /**
-   * ATTACHES A PHOTOGRAPH, BYTES AND ALL. PWA-3.
+   * ATTACHES A PHOTOGRAPH OR A VIDEO, BYTES AND ALL. PWA-3, MEDIA-5.
    *
    * It used to be `jobAction(jobId, 'add_media', …)`: a JSON body carrying a
    * made-up file name and size, with no file anywhere in it. The bytes now go
@@ -447,24 +464,24 @@ export const jobs = {
     options: {
       readonly caption?: string;
       readonly visibility?: MediaVisibility;
+      /** `video` chooses the video validator and its larger limit. MEDIA-5. */
+      readonly kind?: 'photo' | 'video';
       /** Minted once per capture, so a retry replays instead of duplicating. */
       readonly idempotencyKey?: string;
     } = {},
   ) =>
     apiUpload<{
-      photos: readonly {
-        id: string;
-        fileName: string;
-        caption: string;
-        visibility: MediaVisibility;
-        sizeBytes: number;
-        uploadedAt: string;
-      }[];
+      photos: readonly MediaDescription[];
+      /** Present since MEDIA-5. Absent on a server older than this client. */
+      videos?: readonly MediaDescription[];
     }>(
       `/api/jobs/${segment(jobId)}/media`,
       file,
       options.caption ?? '',
-      { ...(options.visibility === undefined ? {} : { visibility: options.visibility }) },
+      {
+        ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
+        ...(options.kind === undefined ? {} : { kind: options.kind }),
+      },
       options.idempotencyKey,
     ),
   /** Where one photograph is read back from. Authorised on every request. */

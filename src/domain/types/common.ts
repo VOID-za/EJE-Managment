@@ -87,6 +87,23 @@ export interface Attachment {
   /** Measured off the stored bytes. Zero means nothing is stored. */
   readonly sizeBytes: number;
   /**
+   * SHA-256 of those bytes, lower-case hex. Null when nothing measured them.
+   *
+   * WHY IT WAS MISSING, because it is the kind of gap that hides in plain
+   * sight: `job_media` has carried a `checksum_sha256` column since the table
+   * existed and no code ever wrote to it. A customer's filed document and a
+   * machine manual both recorded one; the photographs a customer SIGNS FOR did
+   * not. So the store could refuse bytes that had changed since they were
+   * written, and nothing could say whether a photograph that reads back
+   * cleanly is the photograph the technician took.
+   *
+   * NULL MEANS NOBODY MEASURED IT and is the truth for every row written
+   * before this field existed, and for the seeded demonstration photographs,
+   * which have no bytes at all. A zero-length string would claim a
+   * measurement; null says there is none.
+   */
+  readonly checksumSha256: string | null;
+  /**
    * A real attachment, or demonstration data. October mandate §1.
    *
    * Defaulted nowhere: every path that records an attachment says which it is,

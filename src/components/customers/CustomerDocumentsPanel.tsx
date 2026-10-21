@@ -14,6 +14,7 @@ import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { customers as api } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
 import { formatDate, formatFileSize } from '@/lib/format';
+import { DOCUMENT_ACCEPT_ATTRIBUTE, DOCUMENT_TYPES_SENTENCE } from '@/lib/upload-limits';
 
 /**
  * THE CUSTOMER'S FILED PAPERWORK. October mandate §4.
@@ -192,6 +193,7 @@ export const CustomerDocumentsPanel = ({
         <input
           ref={input}
           type="file"
+          accept={DOCUMENT_ACCEPT_ATTRIBUTE}
           className="hidden"
           data-testid="customer-document-file"
           onChange={(event) => {
@@ -214,8 +216,8 @@ export const CustomerDocumentsPanel = ({
         </Button>
 
         <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
-          The server checks the file itself rather than its name, and records the size and checksum
-          of what it stored.
+          {DOCUMENT_TYPES_SENTENCE} The server checks the file itself rather than its name, and
+          records the size and checksum of what it stored.
         </p>
 
         {uploading && (

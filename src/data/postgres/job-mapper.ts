@@ -87,6 +87,7 @@ const attachmentFrom = (row: MediaRow): Attachment => ({
   fileName: row.fileName,
   caption: row.caption,
   storageKey: row.storageKey,
+  checksumSha256: row.checksumSha256,
   /*
    * JOB MEDIA IS ALWAYS GENUINE, and that is a fact about this system rather
    * than a default: every path that records one stores bytes first and the

@@ -224,6 +224,14 @@ export const checklistAnswerPhotos = pgTable(
     caption: text('caption').notNull().default(''),
     contentType: text('content_type').notNull().default(''),
     sizeBytes: cents('size_bytes').notNull().default(0),
+    /**
+     * SHA-256 of the stored bytes. Null when nothing measured them.
+     *
+     * This is the evidence a `photoRequired` checklist item gates completion
+     * on, so "is this still the photograph that was taken" is a question worth
+     * being able to answer about it.
+     */
+    checksumSha256: text('checksum_sha256'),
     uploadedAt: instant('uploaded_at').notNull(),
     uploadedBy: uuid('uploaded_by').references(() => users.id),
   },

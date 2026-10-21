@@ -18,6 +18,7 @@ import {
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { WorkflowError } from './errors';
+import { storeAndMeasure } from './stored-file';
 import type { RemovalResult } from './removal';
 
 /**
@@ -199,12 +200,9 @@ export const createMachine = async (
   const photos: Attachment[] = [];
   for (const photo of input.photos ?? []) {
     // Bytes first, record second — the order every upload in this system uses,
-    // so a machine cannot claim a photograph that was never written.
-    const stored = await context.services.storage.storeUpload({
-      fileName: photo.fileName,
-      contentType: photo.contentType,
-      bytes: photo.bytes,
-    });
+    // so a machine cannot claim a photograph that was never written. The size
+    // and the checksum are the store's own measurements of what came back.
+    const stored = await storeAndMeasure(context, photo, 'That photograph could not be stored.');
     photos.push({
       id: asAttachmentId(context.services.ids.next('att')),
       kind: 'photo',
@@ -215,7 +213,8 @@ export const createMachine = async (
       storageKey: stored.storageKey,
       uploadedAt: context.services.clock.now(),
       uploadedBy: context.actor.id,
-      sizeBytes: photo.bytes.length,
+      sizeBytes: stored.sizeBytes,
+      checksumSha256: stored.checksumSha256,
       // A photograph somebody really took of a real machine.
       provenance: 'genuine',
     });
@@ -347,13 +346,9 @@ export const addMachinePhoto = async (
     }
   }
 
-  // Bytes first. `storeUpload` writes them or raises, so the row below cannot
-  // exist over a file that is not there.
-  const stored = await context.services.storage.storeUpload({
-    fileName: photo.fileName,
-    contentType: photo.contentType,
-    bytes: photo.bytes,
-  });
+  // Bytes first, then read back and measured. `storeAndMeasure` writes them or
+  // raises, so the row below cannot exist over a file that is not there.
+  const stored = await storeAndMeasure(context, photo, 'That photograph could not be stored.');
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
@@ -365,7 +360,8 @@ export const addMachinePhoto = async (
     storageKey: stored.storageKey,
     uploadedAt: context.services.clock.now(),
     uploadedBy: context.actor.id,
-    sizeBytes: photo.bytes.length,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
     provenance: 'genuine',
   };
 

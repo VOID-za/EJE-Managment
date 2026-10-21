@@ -150,6 +150,12 @@ export const machinePhotos = pgTable(
     storageKey: text('storage_key').notNull(),
     contentType: text('content_type').notNull().default(''),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull().default(0),
+    /**
+     * SHA-256 of the stored bytes, so a damaged photograph can be told from a
+     * lost one. Null for every row written before `0021` and for the seeded
+     * demonstration photographs, which have no bytes.
+     */
+    checksumSha256: text('checksum_sha256'),
     uploadedAt: instant('uploaded_at').notNull(),
     uploadedBy: uuid('uploaded_by').references(() => users.id),
     /** A photograph of a real machine, or a demonstration one. Mandate §1. */

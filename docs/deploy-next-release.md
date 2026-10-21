@@ -33,7 +33,7 @@ somebody with root on the VPS.
 | New commands: `documents:reconcile`, `dump:inspect`, `integrations:check` | Run by hand. Nothing runs them automatically. |
 | `deploy/eje-backup*.{service,timer}` | **Not installed by this deployment.** Step 7. |
 
-### Added since: migrations 0015–0020 — read this before step 5
+### Added since: migrations 0015–0021 — read this before step 5
 
 | Migration | What it does | Risk |
 |---|---|---|
@@ -43,6 +43,7 @@ somebody with root on the VPS.
 | `0018_provenance_unknown` | Widens the provenance CHECKs to admit `unknown`, changes the DEFAULT to `unknown`, creates `provenance_recording`, and **UPDATEs rows written before provenance existed** in five tables | **The only data-modifying migration in this release.** See below |
 | `0019_job_corrections` | New table, CHECKs and an append-only trigger | Additive |
 | `0020_unsigned_delivery_authorisations` | New table and an append-only trigger | Additive |
+| `0021_media_checksums` | Adds a nullable `checksum_sha256` to `machine_photos` and `checklist_answer_photos` | Additive. Two `ADD COLUMN` on nullable text: no rewrite, no backfill, no lock beyond the catalogue update |
 
 **No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
 the six. Every `NOT NULL` is on a column of a new table.
@@ -203,12 +204,12 @@ sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE
   EJE_PRODUCTION_MIGRATION=eje_production npm run db:migrate
 ```
 
-**Migrations 0015–0020 all apply here, in one run.** Read §0 first: 0018 is the
+**Migrations 0015–0021 all apply here, in one run.** Read §0 first: 0018 is the
 only data-modifying migration in the release, and an interrupted run between
 0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
 LOST CUSTOMER DOCUMENTS until the run is finished.
 
-Every one of the six is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
+Every one of the seven is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
 no DELETE, and every NOT NULL on a column of a new table — so **the old code
 runs against the new schema**, which is what makes step 8's rollback safe. That
 is tested rather than asserted: an old-code-shaped INSERT that omits
@@ -273,7 +274,7 @@ What rollback does and does not need:
 - **The migration is not rolled back, and must not be.** `0014` only adds a
   table; the old code neither reads nor writes it. Dropping it would delete the
   observations recorded in step 7 — the only independent record of what each
-  document's bytes were. **The same holds for 0015–0020**, and more strongly:
+  document's bytes were. **The same holds for 0015–0021**, and more strongly:
   `job_corrections` and `unsigned_delivery_authorisations` hold decisions
   somebody took about a customer's document, `customer_documents` and
   `machine_documents` hold files that exist on disk, and

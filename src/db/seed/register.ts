@@ -425,6 +425,8 @@ const machinePhoto = (key: string, fileName: string, caption: string): Attachmen
   uploadedBy: TECH1,
   /* Metadata and no photograph; `1_842_000` was invented here. Mandate §1. */
   sizeBytes: 0,
+  /* No bytes exist, so nothing has been measured. Mandate §1.2. */
+  checksumSha256: null,
   provenance: 'simulated',
 });
 
