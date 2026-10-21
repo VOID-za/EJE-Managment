@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -249,9 +250,17 @@ export const jobCorrections = pgTable(
       .references(() => jobs.id, { onDelete: 'restrict' }),
     /** 1 for the first correction to this job. Printed on the addendum. */
     sequence: integer('sequence').notNull(),
-    correctsDocumentKey: text('corrects_document_key')
-      .notNull()
-      .references(() => finalDocuments.storageKey, { onDelete: 'restrict' }),
+    /*
+     * NAMED IN THE EXTRAS BELOW, NOT INLINE, AND THE REASON IS A SILENT
+     * TRUNCATION. Drizzle's generated name for this key —
+     * `job_corrections_corrects_document_key_final_documents_storage_key_fk`
+     * — is 68 characters, and PostgreSQL cuts an identifier at 63 with a
+     * NOTICE nobody reads. The constraint then exists under a name that does
+     * not appear anywhere in this repository, so a later migration that drops
+     * or renames it by the name written here would fail against a database
+     * that has it.
+     */
+    correctsDocumentKey: text('corrects_document_key').notNull(),
     reason: text('reason').notNull(),
     narrative: text('narrative').notNull(),
     /** Which parts of the job card are affected. At least one; see the CHECK. */
@@ -273,6 +282,11 @@ export const jobCorrections = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    foreignKey({
+      name: 'job_corrections_document_fk',
+      columns: [table.correctsDocumentKey],
+      foreignColumns: [finalDocuments.storageKey],
+    }).onDelete('restrict'),
     uniqueIndex('job_corrections_job_sequence_key').on(table.jobId, table.sequence),
     uniqueIndex('job_corrections_storage_key_key').on(table.documentStorageKey),
     index('job_corrections_job_idx').on(table.jobId, table.raisedAt),
@@ -327,10 +341,12 @@ export const unsignedDeliveryAuthorisations = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => jobs.id, { onDelete: 'restrict' }),
-    /** The bytes this authorises. A foreign key to the issued document. */
-    documentKey: text('document_key')
-      .notNull()
-      .references(() => finalDocuments.storageKey, { onDelete: 'restrict' }),
+    /**
+     * The bytes this authorises. A foreign key to the issued document, named
+     * in the extras below for the same reason as `job_corrections`: the
+     * generated name is 76 characters and PostgreSQL would cut it at 63.
+     */
+    documentKey: text('document_key').notNull(),
     /** Where it may be sent. Taken from the document, never from a browser. */
     recipient: text('recipient').notNull(),
     /** Why the office is sending a document the customer declined to sign. */
@@ -340,6 +356,11 @@ export const unsignedDeliveryAuthorisations = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    foreignKey({
+      name: 'unsigned_delivery_authorisations_document_fk',
+      columns: [table.documentKey],
+      foreignColumns: [finalDocuments.storageKey],
+    }).onDelete('restrict'),
     uniqueIndex('unsigned_delivery_authorisations_job_key').on(table.jobId),
     check(
       'unsigned_delivery_authorisations_reason_present',

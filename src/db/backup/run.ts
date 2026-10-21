@@ -14,6 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { encryptFile, keyFingerprint } from './crypto';
 import { filesUnder } from './archive';
+import { KEY_BESIDE_BACKUP_WARNING, strayKeyFiles } from './key-location';
 import {
   resolveReferences,
   scansForReferences,
@@ -395,6 +396,17 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     rmSync(join(dirname(plan.destination), name), { recursive: true, force: true });
   }
 
+  /*
+   * A KEY LEFT IN THE BACKUP ROOT, SAID OUT LOUD. BACKUP-2.
+   *
+   * The owner's rule is that the key must never be the backup's neighbour as
+   * the only way back. Nothing here can stop somebody putting it there, and
+   * deleting a file an operator chose to keep is not this command's business —
+   * so it is NAMED, every run, in the output a cron job mails out. Only the
+   * file's NAME is printed; what it contained never is.
+   */
+  const strays = strayKeyFiles(dirname(plan.destination));
+
   process.stdout.write(
     `backup   ${plan.destination}\n` +
       `backup   database ${plan.databaseName}, ${manifest.artefacts[0]?.bytes ?? 0} bytes\n` +
@@ -409,6 +421,11 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
       `backup   pg_dump ${clientMajor ?? '?'} against PostgreSQL ${serverMajor ?? '?'}\n` +
       versionLines.map((line) => `backup   ${line}\n`).join('') +
       offsiteLines.map((line) => `backup   ${line}\n`).join('') +
+      (strays.length === 0
+        ? ''
+        : `backup   WARNING: ${strays.join(', ')} in ${dirname(plan.destination)} ` +
+          `${strays.length === 1 ? 'is a backup key' : 'are backup keys'}. ` +
+          `${KEY_BESIDE_BACKUP_WARNING}\n`) +
       (pruning.remove.length === 0
         ? `backup   ${pruning.note}\n`
         : `backup   ${pruning.note} Removed ${pruning.remove.length}: ` +

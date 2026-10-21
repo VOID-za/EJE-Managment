@@ -114,6 +114,26 @@ PostgreSQL 16 database with real stored files: the environment's key matched,
 the same key read from a file matched, and a freshly generated key reported
 `NO MATCH` and exit code 1.
 
+**AND THE ONE ARRANGEMENT THAT MUST NEVER BE THE ONLY ONE IS NOW NAMED OUT
+LOUD.** A key kept in `/var/backups/eje/` is not a recovery method: the disk
+that loses the backups loses it, the stolen volume carries it, and every drill
+passes right up to the morning it matters. An encrypted backup whose key
+travels beside it is an unencrypted backup.
+
+Neither command can prevent it — a file an operator put on a server is not the
+application's to delete — so both **say so, every time**:
+
+- `npm run backup` names any file in the backup root whose entire contents are
+  a backup key. The file's NAME is printed; what it contained never is.
+- `npm run backup:key-check … --key-file <path>` warns before it answers when
+  that path is inside the backup directory or anywhere under the backup root.
+  It still answers `MATCH` or `NO MATCH`: the question is about the key, and an
+  operator working out which key they hold must not be stopped.
+
+Checking an escrowed key that lives on a USB stick, in a password manager's
+export or in an operator's home directory warns about nothing, which is the
+point — a warning that cries wolf is one somebody learns to skip.
+
 ## 3. Take one, and prove it
 
 ```bash

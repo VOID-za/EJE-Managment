@@ -54,7 +54,7 @@ CREATE TABLE "job_corrections" (
 );
 --> statement-breakpoint
 ALTER TABLE "job_corrections" ADD CONSTRAINT "job_corrections_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "job_corrections" ADD CONSTRAINT "job_corrections_corrects_document_key_final_documents_storage_key_fk" FOREIGN KEY ("corrects_document_key") REFERENCES "public"."final_documents"("storage_key") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_corrections" ADD CONSTRAINT "job_corrections_document_fk" FOREIGN KEY ("corrects_document_key") REFERENCES "public"."final_documents"("storage_key") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_corrections" ADD CONSTRAINT "job_corrections_raised_by_users_id_fk" FOREIGN KEY ("raised_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "job_corrections" ADD CONSTRAINT "job_corrections_acknowledgement_recorded_by_users_id_fk" FOREIGN KEY ("acknowledgement_recorded_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "job_corrections_job_sequence_key" ON "job_corrections" USING btree ("job_id","sequence");--> statement-breakpoint

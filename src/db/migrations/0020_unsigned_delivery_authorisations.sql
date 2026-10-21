@@ -35,7 +35,7 @@ CREATE TABLE "unsigned_delivery_authorisations" (
 );
 --> statement-breakpoint
 ALTER TABLE "unsigned_delivery_authorisations" ADD CONSTRAINT "unsigned_delivery_authorisations_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unsigned_delivery_authorisations" ADD CONSTRAINT "unsigned_delivery_authorisations_document_key_final_documents_storage_key_fk" FOREIGN KEY ("document_key") REFERENCES "public"."final_documents"("storage_key") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unsigned_delivery_authorisations" ADD CONSTRAINT "unsigned_delivery_authorisations_document_fk" FOREIGN KEY ("document_key") REFERENCES "public"."final_documents"("storage_key") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "unsigned_delivery_authorisations_job_key" ON "unsigned_delivery_authorisations" USING btree ("job_id");--> statement-breakpoint
 
 -- APPEND-ONLY. A decision somebody took is not edited afterwards; if the

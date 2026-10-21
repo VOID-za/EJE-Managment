@@ -254,7 +254,15 @@ describeDb('a correction to an issued job card, on PostgreSQL', () => {
         .insert(schema.jobCorrections)
         .values(correction({ correctsDocumentKey: 'jobcards/final/never-issued.pdf' })),
     );
-    expect(refused).toMatch(/corrects_document_key/u);
+    /*
+     * THE CONSTRAINT'S NAME, deliberately, because that is what PostgreSQL's
+     * message carries — the column appears only in the DETAIL line, which this
+     * helper does not read. The name is pinned here and in
+     * `0019_job_corrections.sql`; it is short because the generated name was 68
+     * characters and would have been truncated to something appearing nowhere
+     * in this repository. `src/db/migrations/identifiers.test.ts` keeps it so.
+     */
+    expect(refused).toMatch(/job_corrections_document_fk/u);
   });
 });
 
@@ -363,6 +371,7 @@ describeDb('authorising an unsigned job card, on PostgreSQL', () => {
         .insert(schema.unsignedDeliveryAuthorisations)
         .values(authorisation({ documentKey: 'jobcards/final/never-issued.pdf' })),
     );
-    expect(refused).toMatch(/document_key/u);
+    // The constraint's name, for the reason given on the correction above.
+    expect(refused).toMatch(/unsigned_delivery_authorisations_document_fk/u);
   });
 });

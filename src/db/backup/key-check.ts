@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { loadEnvFiles } from '@/db/seed/env';
 import { keyFingerprint, KEY_RECIPE, readBackupKey } from './crypto';
 import { readManifest } from './integrity';
+import { KEY_BESIDE_BACKUP_WARNING, keyIsBesideBackup } from './key-location';
 
 /**
  * IS THE KEY YOU ARE HOLDING THE KEY THIS BACKUP NEEDS? BACKUP-2.
@@ -43,10 +44,10 @@ const argument = (name: string): string | null => {
 };
 
 /** The candidate key: a file if one was named, otherwise the environment. */
-const candidateKey = (): { key: Buffer; source: string } => {
+const candidateKey = (): { key: Buffer; source: string; file: string | null } => {
   const file = argument('key-file');
   if (file === null) {
-    return { key: readBackupKey(process.env), source: 'EJE_BACKUP_KEY' };
+    return { key: readBackupKey(process.env), source: 'EJE_BACKUP_KEY', file: null };
   }
 
   let raw: string;
@@ -72,7 +73,7 @@ const candidateKey = (): { key: Buffer; source: string } => {
         `(A key is made with \`${KEY_RECIPE}\`.) Its contents are not printed here.`,
     );
   }
-  return { key: Buffer.from(trimmed, 'hex'), source: `--key-file ${file}` };
+  return { key: Buffer.from(trimmed, 'hex'), source: `--key-file ${file}`, file };
 };
 
 const main = (): void => {
@@ -88,7 +89,7 @@ const main = (): void => {
   }
 
   const manifest = readManifest(directory);
-  const { key, source } = candidateKey();
+  const { key, source, file } = candidateKey();
   const mine = keyFingerprint(key);
   const theirs = manifest.encryption.keyFingerprint;
 
@@ -99,6 +100,18 @@ const main = (): void => {
   process.stdout.write(`key from   ${source}\n`);
   process.stdout.write(`needs key  ${theirs}\n`);
   process.stdout.write(`you have   ${mine}\n\n`);
+
+  /*
+   * SAID BEFORE THE ANSWER, DELIBERATELY. A drill that ends in MATCH is read
+   * as "we can recover", and a key kept in the backup directory makes that
+   * conclusion wrong in the one scenario the drill exists for. It is a warning
+   * rather than a refusal because the command's job is to answer a question
+   * about a key, and refusing would stop an operator finding out which key
+   * they are holding — but it is printed whether the answer is yes or no.
+   */
+  if (file !== null && keyIsBesideBackup(directory, file)) {
+    process.stdout.write(`WARNING: ${KEY_BESIDE_BACKUP_WARNING}\n\n`);
+  }
 
   if (mine === theirs) {
     process.stdout.write(

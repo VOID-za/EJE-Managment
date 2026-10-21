@@ -93,6 +93,19 @@ Two things this release deliberately does **not** do: it does not write document
 bytes anywhere, and — apart from 0018's provenance relabelling, described above
 — it does not modify, repair or delete any existing row.
 
+**One name is wrong in an already-applied migration, and is deliberately left
+alone.** PostgreSQL cuts an identifier at 63 characters, with a NOTICE in the
+middle of `drizzle-kit`'s output. `0014`'s foreign key
+`final_document_verifications_final_document_id_final_documents_id_fk` is 68, so
+the constraint in EJE's database is really called
+`final_document_verifications_final_document_id_final_documents_`. Nothing is
+broken by that — the constraint works — but a future migration that drops or
+renames it must use the truncated name. It is not corrected here because editing
+an applied migration changes the hash drizzle recorded against it. Two foreign
+keys in `0019` and `0020` had the same fault and **were** corrected, because
+neither has been applied anywhere yet; `src/db/migrations/identifiers.test.ts`
+now fails the build on any new one.
+
 ## 1. Back up first, and prove the backup
 
 The one step that must not be skipped, and the first time it can be proved.
@@ -147,8 +160,28 @@ cd /opt/eje/releases/$COMMIT
 sudo -u eje git fetch origin claude/eje-job-card-demo-k2klb4
 sudo -u eje git checkout $COMMIT
 sudo -u eje npm ci
-sudo -u eje npm run build          # detached, per docs/vps-backups.md §0, if the SSH session is fragile
+sudo -u eje env EJE_BUILD_COMMIT=$COMMIT npm run build   # detached, per docs/vps-backups.md §0, if the SSH session is fragile
 ```
+
+**THE COMMIT IS STAMPED AT BUILD TIME, AND STEP 6 DEPENDS ON IT.**
+`next.config.ts` puts it in the bundle; the service environment cannot supply it
+afterwards, because by then the pages are already built. Left unset it falls
+back to `git rev-parse --short HEAD`, which IS right for the clone above — so
+passing `EJE_BUILD_COMMIT=$COMMIT` is belt and braces here, and the only thing
+standing between `/api/health` and the truth where there is no git directory (a
+tarball, a Docker layer) or where the checkout is not the commit being
+deployed. Setting it costs nothing and removes the case where it matters.
+
+Note what the preflight at step 4 does and does not tell you:
+
+    [ ok ] Build   Built output present. EJE_BUILD_COMMIT is not set, so
+                   /api/health cannot say which commit it serves.
+
+That line reads the ENVIRONMENT, not the built output, so it appears whenever
+the variable is absent from the service environment — including after a build
+that stamped the commit from git perfectly well. It is a prompt to check step
+6's answer, not proof that the stamp is missing. **Step 6 is the check that
+settles it**: `/api/health` must come back with `$COMMIT`.
 
 ## 4. Preflight the new release against the live configuration
 
@@ -170,9 +203,16 @@ sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE
   EJE_PRODUCTION_MIGRATION=eje_production npm run db:migrate
 ```
 
-`0014_document_verifications` creates one table and one trigger. It is additive,
-so **the old code runs against the new schema** — which is what makes step 8's
-rollback safe.
+**Migrations 0015–0020 all apply here, in one run.** Read §0 first: 0018 is the
+only data-modifying migration in the release, and an interrupted run between
+0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
+LOST CUSTOMER DOCUMENTS until the run is finished.
+
+Every one of the six is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
+no DELETE, and every NOT NULL on a column of a new table — so **the old code
+runs against the new schema**, which is what makes step 8's rollback safe. That
+is tested rather than asserted: an old-code-shaped INSERT that omits
+`provenance` succeeds and lands on `unknown`.
 
 ## 6. Switch, and prove what is serving
 
