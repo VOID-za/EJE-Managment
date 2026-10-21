@@ -441,7 +441,7 @@ export const adminView = async ({ repos, actor }: ViewContext) => {
 };
 
 export const libraryView = async ({ repos, actor }: ViewContext) => {
-  const [documents, favourites, recent, indexes] = await Promise.all([
+  const [documents, favourites, recent, indexes, ocr] = await Promise.all([
     repos.documents.list(),
     repos.documents.listFavourites(actor.id),
     repos.documents.listRecentlyViewed(actor.id),
@@ -453,6 +453,17 @@ export const libraryView = async ({ repos, actor }: ViewContext) => {
      * works in a demonstration and falls over on a real library.
      */
     repos.documents.listTextIndexes(),
+    /*
+     * AND WHETHER ANYBODY IS GOING TO TRY. LIB-5.
+     *
+     * The second half of the answer, and it has to travel with the first: "not
+     * searchable" and "not searchable yet, we are reading it" and "not
+     * searchable and nothing on this server can read it" are three different
+     * things to a technician looking for a manual, and only the last means
+     * somebody has to go and install something. `describeSearchability` is
+     * where the two are combined, so no screen does it twice.
+     */
+    repos.documents.listOcrJobs(),
   ]);
   /*
    * THE STORAGE KEY DOES NOT LEAVE THE SERVER. LIB-5.
@@ -482,7 +493,7 @@ export const libraryView = async ({ repos, actor }: ViewContext) => {
     ...rest,
     storedFile: rest.fileSizeBytes > 0,
   }));
-  return { documents: withoutStorageKeys, favourites, recent, indexes };
+  return { documents: withoutStorageKeys, favourites, recent, indexes, ocr };
 };
 
 export const activityView = ({ repos, actor }: ViewContext) => loadActivityFeed(repos, actor);

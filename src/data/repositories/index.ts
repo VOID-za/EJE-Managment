@@ -14,6 +14,8 @@ import type {
   CustomerId,
   DocumentId,
   DocumentTextIndex,
+  OcrJob,
+  OcrJobState,
   OutboxMessage,
   IsoDateTime,
   Job,
@@ -323,6 +325,33 @@ export interface DocumentRepository {
     documentIds: readonly DocumentId[],
     limit: number,
   ): Promise<readonly DocumentId[]>;
+
+  /*
+   * WORK WAITING FOR TEXT RECOGNITION. MASTER SCOPE LIB-5.
+   *
+   * SEPARATE FROM THE INDEX, and the separation is the point: the index answers
+   * "is this searchable", the queue answers "is anybody going to try". A single
+   * state carrying both would have to say something about searchability while a
+   * worker was halfway through a manual, and whatever it said would be wrong.
+   *
+   * `claimOcrJob` IS THE WHOLE CONCURRENCY STORY. It must hand the same job to
+   * at most one caller — on PostgreSQL a conditional UPDATE, in the
+   * demonstration store the serialised writer it already has — because two
+   * workers reading the same forty-page scan is forty pages of wasted time and
+   * a race over which text wins.
+   */
+  saveOcrJob(job: OcrJob): Promise<OcrJob>;
+  findOcrJob(documentId: DocumentId): Promise<OcrJob | null>;
+  listOcrJobs(states?: readonly OcrJobState[]): Promise<readonly OcrJob[]>;
+  /**
+   * Takes the oldest claimable job and marks it `running`, atomically.
+   *
+   * Null when there is nothing to do. A job is claimable when it is `queued`,
+   * or when it is `running` and has been for longer than `OCR_STALE_AFTER_MS` —
+   * a worker killed mid-page must not strand its document for good — and in
+   * both cases only while it is under `OCR_MAX_ATTEMPTS`.
+   */
+  claimOcrJob(now: IsoDateTime): Promise<OcrJob | null>;
 }
 
 export interface ChecklistTemplateRepository {

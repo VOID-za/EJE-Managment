@@ -11,6 +11,7 @@ import type { UploadedFile } from '@/services/ports';
 import { extractPdfText } from '@/lib/pdf/extract-text';
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
+import { enqueueOcr } from './library-ocr';
 import { WorkflowError } from './errors';
 
 /**
@@ -279,6 +280,9 @@ export const indexDocumentText = async (
       ? {
           documentId: document.id,
           state: 'indexed',
+          // Out of the PDF's own text layer: what the document SAYS, rather
+          // than a machine's reading of what it looks like. See LIB-5.
+          source: 'text_layer',
           extractedAt,
           characters: outcome.text.length,
           pages: outcome.pages,
@@ -293,6 +297,7 @@ export const indexDocumentText = async (
         ? {
             documentId: document.id,
             state: 'needs_ocr',
+            source: null,
             extractedAt,
             characters: 0,
             pages: outcome.pages,
@@ -303,6 +308,7 @@ export const indexDocumentText = async (
         : {
             documentId: document.id,
             state: 'failed',
+            source: null,
             extractedAt,
             characters: 0,
             pages: document.pageCount,
@@ -335,6 +341,22 @@ export const indexDocumentText = async (
         ? `${saved.characters} characters extracted from ${saved.pages} page(s)${saved.truncated ? ', cut at the index limit' : ''}.${saved.failureReason === '' ? '' : ` ${saved.failureReason}`}`
         : `${saved.state === 'needs_ocr' ? 'No searchable text' : 'The file could not be read'}: ${saved.failureReason}`,
   });
+
+  /*
+   * A SCANNED DOCUMENT IS QUEUED FOR RECOGNITION, not left as a dead end.
+   * LIB-5.
+   *
+   * `needs_ocr` has always been the honest answer — the document has no text
+   * and the library says so — and it was also the END of the matter: nothing
+   * could ever bring a document out of it except somebody uploading a
+   * different file. Now the work is recorded, and `npm run library:ocr` does
+   * it when an engine is installed.
+   *
+   * THE INDEX IS UNTOUCHED BY THE QUEUEING. Queued is not searchable, and the
+   * state that answers searchability is the one above. See
+   * `describeSearchability` for how the two are read together.
+   */
+  if (saved.state === 'needs_ocr') await enqueueOcr(context, document.id);
 
   return saved;
 };

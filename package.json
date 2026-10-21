@@ -39,7 +39,8 @@
     "backup:verify": "tsx src/db/backup/verify.ts",
     "backup:key-check": "tsx src/db/backup/key-check.ts",
     "backup:restore-test": "tsx src/db/backup/restore-test.ts",
-    "dump:inspect": "tsx src/db/backup/inspect-dump.ts"
+    "dump:inspect": "tsx src/db/backup/inspect-dump.ts",
+    "library:ocr": "tsx src/ops/library-ocr.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",

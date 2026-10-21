@@ -1,10 +1,15 @@
-import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import {
   asProvenance,
   asDocumentId,
   asUserId,
+  OCR_MAX_ATTEMPTS,
+  OCR_STALE_AFTER_MS,
   type DocumentId,
   type DocumentTextIndex,
+  type IsoDateTime,
+  type OcrJob,
+  type OcrJobState,
   type TechnicalDocument,
   type UserId,
 } from '@/domain';
@@ -256,6 +261,8 @@ export class PostgresDocumentRepository implements DocumentRepository {
   async saveTextIndex(index: DocumentTextIndex, content: string): Promise<DocumentTextIndex> {
     const values = {
       state: index.state,
+      // Null unless indexed, which is what the table's CHECK demands.
+      source: index.state === 'indexed' ? (index.source ?? 'text_layer') : null,
       extractedAt: index.extractedAt,
       characters: index.state === 'indexed' ? index.characters : 0,
       pages: index.pages,
@@ -304,6 +311,7 @@ export class PostgresDocumentRepository implements DocumentRepository {
       .select({
         documentId: schema.libraryDocumentText.documentId,
         state: schema.libraryDocumentText.state,
+        source: schema.libraryDocumentText.source,
         extractedAt: schema.libraryDocumentText.extractedAt,
         characters: schema.libraryDocumentText.characters,
         pages: schema.libraryDocumentText.pages,
@@ -370,11 +378,125 @@ export class PostgresDocumentRepository implements DocumentRepository {
 
     return rows.map((row) => asDocumentId(row.documentId));
   }
+
+  /* -- work waiting for text recognition. LIB-5 ------------------------- */
+
+  async saveOcrJob(job: OcrJob): Promise<OcrJob> {
+    const values = {
+      state: job.state,
+      attempts: job.attempts,
+      queuedAt: job.queuedAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      lastError: job.lastError,
+      engine: job.engine,
+    } as const;
+
+    await this.db
+      .insert(schema.libraryOcrQueue)
+      .values({ documentId: job.documentId, ...values })
+      .onConflictDoUpdate({
+        target: schema.libraryOcrQueue.documentId,
+        set: { ...values, updatedAt: sql`now()` },
+      });
+
+    const saved = await this.findOcrJob(job.documentId);
+    if (saved === null) throw new Error(`The OCR job for ${job.documentId} vanished during save.`);
+    return saved;
+  }
+
+  async findOcrJob(documentId: DocumentId): Promise<OcrJob | null> {
+    if (!isUuid(documentId)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.libraryOcrQueue)
+      .where(eq(schema.libraryOcrQueue.documentId, documentId))
+      .limit(1);
+    return rows[0] === undefined ? null : toDomainOcrJob(rows[0]);
+  }
+
+  async listOcrJobs(states?: readonly OcrJobState[]): Promise<readonly OcrJob[]> {
+    const wanted = states ?? null;
+    if (wanted !== null && wanted.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.libraryOcrQueue)
+      .where(wanted === null ? undefined : inArray(schema.libraryOcrQueue.state, [...wanted]))
+      .orderBy(asc(schema.libraryOcrQueue.queuedAt));
+    return rows.map(toDomainOcrJob);
+  }
+
+  /**
+   * Takes the oldest claimable job, atomically. ONE WORKER GETS IT.
+   *
+   * A CONDITIONAL UPDATE, not a read followed by a write. Two workers reading
+   * the queue a millisecond apart would both see the same `queued` row, both
+   * claim it, and both spend ten minutes reading the same forty-page scan — and
+   * then race over whose text is written. The `where` is what makes that
+   * impossible: the second UPDATE matches nothing, because the first one has
+   * already moved the row out of the state it was looking for.
+   *
+   * `RETURNING` is what makes it one statement rather than two. Drizzle's
+   * `.returning()` compiles to exactly that.
+   *
+   * THE SUBQUERY PICKS THE OLDEST CLAIMABLE ROW — `queued`, or `running` and
+   * stale, because a worker killed mid-page must not strand its document for
+   * good — and `FOR UPDATE SKIP LOCKED` means a second worker arriving in the
+   * same instant takes the NEXT one instead of waiting for this one.
+   */
+  async claimOcrJob(now: IsoDateTime): Promise<OcrJob | null> {
+    const staleBefore = new Date(Date.parse(now) - OCR_STALE_AFTER_MS).toISOString();
+
+    const claimed = await this.db
+      .update(schema.libraryOcrQueue)
+      .set({
+        state: 'running',
+        attempts: sql`${schema.libraryOcrQueue.attempts} + 1`,
+        startedAt: now,
+        finishedAt: null,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        sql`${schema.libraryOcrQueue.documentId} = (
+          select q.document_id from library_ocr_queue q
+           where q.attempts < ${OCR_MAX_ATTEMPTS}
+             and (
+               q.state = 'queued'
+               -- A failure may be the machine rather than the document: see
+               -- isOcrJobClaimable in the domain. The attempt cap bounds it.
+               -- (No backticks in here: this is inside a template literal and
+               -- one would end the string. Done it once before.)
+               or q.state = 'failed'
+               -- A worker killed mid-page must not strand its document.
+               or (q.state = 'running' and q.started_at <= ${staleBefore})
+             )
+           order by q.queued_at asc
+           limit 1
+           for update skip locked
+        )`,
+      )
+      .returning();
+
+    return claimed[0] === undefined ? null : toDomainOcrJob(claimed[0]);
+  }
 }
+
+const toDomainOcrJob = (row: typeof schema.libraryOcrQueue.$inferSelect): OcrJob => ({
+  documentId: asDocumentId(row.documentId),
+  // The column's own CHECK keeps this to the five known states.
+  state: row.state as OcrJob['state'],
+  attempts: row.attempts,
+  queuedAt: row.queuedAt,
+  startedAt: row.startedAt,
+  finishedAt: row.finishedAt,
+  lastError: row.lastError,
+  engine: row.engine,
+});
 
 const toDomainIndex = (row: {
   readonly documentId: string;
   readonly state: string;
+  readonly source: string | null;
   readonly extractedAt: string;
   readonly characters: number;
   readonly pages: number;
@@ -385,6 +507,13 @@ const toDomainIndex = (row: {
   documentId: asDocumentId(row.documentId),
   // The column's own CHECK keeps this to the three known states.
   state: row.state as DocumentTextIndex['state'],
+  /*
+   * NULL UNLESS INDEXED, which the column's CHECK also enforces. An
+   * unrecognised value reads as `text_layer`: it is the only source that
+   * existed before OCR, so an old row is what an unknown value will be, and
+   * claiming `ocr` would wrongly mark text as lower confidence.
+   */
+  source: row.state === 'indexed' ? (row.source === 'ocr' ? 'ocr' : 'text_layer') : null,
   extractedAt: row.extractedAt,
   characters: row.characters,
   pages: row.pages,

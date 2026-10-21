@@ -17,6 +17,7 @@ import type {
   Machine,
   MachineDocument,
   MediaVisibility,
+  OcrJob,
   Site,
   SystemSettings,
   DocumentTextIndex,
@@ -348,6 +349,14 @@ export const reads = {
       recent: readonly string[];
       /** Which documents hold searchable text, and which do not. LIB-5. */
       indexes: readonly DocumentTextIndex[];
+      /**
+       * Which of the unsearchable ones anybody is going to try to read. LIB-5.
+       *
+       * Travels WITH the indexes rather than being fetched separately: the
+       * answer a screen needs is made of both, and two requests would let the
+       * badge and the reason disagree. See `describeSearchability`.
+       */
+      ocr: readonly OcrJob[];
     }>('/api/library'),
   /** The words INSIDE the documents, paged. LIB-5. */
   librarySearch: (term: string, page = 1) =>

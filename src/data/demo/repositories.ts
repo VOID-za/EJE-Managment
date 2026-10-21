@@ -35,8 +35,10 @@ import type {
   UserId,
   ChangeRequest,
   ChangeRequestState,
+  OcrJob,
+  OcrJobState,
 } from '@/domain';
-import { isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
+import { isOcrJobClaimable, isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
 import { matchesAllTerms, tokenize } from '@/lib/text-search';
 import type {
   ActivityRepository,
@@ -667,6 +669,70 @@ class DemoDocumentRepository implements DocumentRepository {
       .sort((a, b) => b.hits - a.hits);
 
     return Promise.resolve(scored.slice(0, limit).map((entry) => entry.documentId));
+  }
+
+  /* -- work waiting for text recognition. LIB-5 ------------------------- */
+
+  saveOcrJob(job: OcrJob): Promise<OcrJob> {
+    this.context.commit((draft) => {
+      const index = draft.libraryOcrQueue.findIndex(
+        (entry) => entry.documentId === job.documentId,
+      );
+      if (index === -1) draft.libraryOcrQueue.push(job);
+      else draft.libraryOcrQueue[index] = job;
+    });
+    return Promise.resolve(job);
+  }
+
+  findOcrJob(documentId: DocumentId): Promise<OcrJob | null> {
+    return Promise.resolve(
+      this.context.read().libraryOcrQueue.find((job) => job.documentId === documentId) ?? null,
+    );
+  }
+
+  listOcrJobs(states?: readonly OcrJobState[]): Promise<readonly OcrJob[]> {
+    const wanted = states ?? null;
+    if (wanted !== null && wanted.length === 0) return Promise.resolve([]);
+    return Promise.resolve(
+      this.context
+        .read()
+        .libraryOcrQueue.filter((job) => wanted === null || wanted.includes(job.state))
+        .slice()
+        .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt)),
+    );
+  }
+
+  /**
+   * Takes the oldest claimable job and marks it running.
+   *
+   * ATOMIC BY THE SAME MECHANISM EVERY DEMONSTRATION WRITE USES: `commit` runs
+   * inside the store's serialised writer (IDEM-2), so the read of the queue and
+   * the write that claims a job cannot be interleaved with another claim. The
+   * PostgreSQL side gets there with a conditional UPDATE; the property both
+   * guarantee is that one job goes to one caller.
+   */
+  claimOcrJob(now: IsoDateTime): Promise<OcrJob | null> {
+    let claimed: OcrJob | null = null;
+    this.context.commit((draft) => {
+      const candidates = draft.libraryOcrQueue
+        .filter((job) => isOcrJobClaimable(job, now))
+        .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
+      const next = candidates[0];
+      if (next === undefined) return;
+
+      claimed = {
+        ...next,
+        state: 'running',
+        attempts: next.attempts + 1,
+        startedAt: now,
+        finishedAt: null,
+      };
+      const index = draft.libraryOcrQueue.findIndex(
+        (job) => job.documentId === next.documentId,
+      );
+      if (index !== -1) draft.libraryOcrQueue[index] = claimed;
+    });
+    return Promise.resolve(claimed);
   }
 }
 

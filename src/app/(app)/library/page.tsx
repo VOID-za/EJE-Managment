@@ -4,10 +4,12 @@ import { useMemo, useState } from 'react';
 import {
   can,
   type DocumentTextIndex,
+  type OcrJob,
   type TechnicalDocument,
   TECHNICAL_DOCUMENT_TYPE_LABEL,
   type TechnicalDocumentType,
 } from '@/domain';
+import { describeSearchability } from '@/application/library-ocr';
 import {
   Badge,
   Button,
@@ -74,6 +76,11 @@ const LibraryPage = () => {
 
   const documents = useMemo(() => query.data?.documents ?? [], [query.data]);
   /** Which documents hold searchable text, by document id. LIB-5. */
+  /** The queue, keyed the same way the indexes are. LIB-5. */
+  const ocrJobs = useMemo(
+    () => new Map((query.data?.ocr ?? []).map((job) => [job.documentId, job])),
+    [query.data?.ocr],
+  );
   const indexes = useMemo(
     () => new Map((query.data?.indexes ?? []).map((index) => [index.documentId, index])),
     [query.data],
@@ -326,6 +333,7 @@ const LibraryPage = () => {
               key={document.id}
               document={document}
               index={indexes.get(document.id) ?? null}
+              ocr={ocrJobs.get(document.id) ?? null}
               manages={seesPending}
               reindexing={reindexing === document.id}
               onReindex={() => void reindex(document)}
@@ -485,32 +493,54 @@ const STATUS_LABEL = {
  * Said on every row rather than inferred from an empty result: a scanned manual
  * is a perfectly good document that no search will ever find, and a technician
  * who does not know that concludes EJE has nothing on the machine.
+ *
+ * THE WORDS COME FROM `describeSearchability`, NOT FROM HERE. The answer is
+ * made of two records — the index says whether there is text, the queue says
+ * whether anybody is going to try — and combining them in a component is how
+ * the badge and the detail come to disagree. There are now five things this can
+ * say and only one of them means searchable:
+ *
+ *   Searchable · Searchable (recognised text) · Waiting for text recognition ·
+ *   Reading the pages now · Not searchable, with the reason
+ *
+ * The second one is not a decoration: recognised text contains mistakes, and a
+ * technician reading an alarm code needs to know which they have.
  */
-const IndexBadge = ({ index }: { readonly index: DocumentTextIndex | null }) => {
-  if (index === null) {
-    return (
-      <Badge tone="neutral" size="sm">
-        Not indexed
-      </Badge>
-    );
-  }
-  if (index.state === 'indexed') {
-    return (
-      <Badge tone="green" size="sm">
-        Searchable
-      </Badge>
-    );
-  }
+const IndexBadge = ({
+  index,
+  ocr,
+}: {
+  readonly index: DocumentTextIndex | null;
+  readonly ocr: OcrJob | null;
+}) => {
+  const said = describeSearchability(index, ocr);
+  const tone = said.searchable
+    ? index?.source === 'ocr'
+      ? 'blue'
+      : 'green'
+    : ocr?.state === 'queued' || ocr?.state === 'running'
+      ? 'blue'
+      : 'amber';
+
+  /*
+   * THE DETAIL IS A `title`, ON A WRAPPER. `Badge` takes no `title` prop and
+   * is not given one — it forwards only what it declares, which is the same
+   * lesson `Card` taught when a `data-testid` vanished. The reason a document
+   * is not searchable belongs beside the badge and does not fit in it.
+   */
   return (
-    <Badge tone="amber" size="sm">
-      {index.state === 'needs_ocr' ? 'Not searchable — scanned' : 'Not searchable'}
-    </Badge>
+    <span title={said.detail} data-testid="library-index-badge">
+      <Badge tone={tone} size="sm">
+        {said.label}
+      </Badge>
+    </span>
   );
 };
 
 const DocumentCard = ({
   document,
   index,
+  ocr,
   manages,
   reindexing,
   onReindex,
@@ -520,6 +550,8 @@ const DocumentCard = ({
 }: {
   readonly document: TechnicalDocument;
   readonly index: DocumentTextIndex | null;
+  /** The queue, so the card can say whether anybody is going to try. LIB-5. */
+  readonly ocr: OcrJob | null;
   /** The office may ask for a re-index; a technician may not. */
   readonly manages: boolean;
   readonly reindexing: boolean;
@@ -569,7 +601,7 @@ const DocumentCard = ({
       <Badge tone="neutral" size="sm">
         {document.version}
       </Badge>
-      <IndexBadge index={index} />
+      <IndexBadge index={index} ocr={ocr} />
       {/*
         DEMONSTRATION DATA SAYS SO IN THE LIST, not only on the detail view.
         October mandate §1.1: the label has to be wherever somebody might
@@ -594,17 +626,34 @@ const DocumentCard = ({
         className="mt-3 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3 py-2.5"
         data-testid="library-index-problem"
       >
-        <p className="text-xs leading-relaxed text-amber-eje-800">{index.failureReason}</p>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="mt-2"
-          loading={reindexing}
-          onClick={onReindex}
-          data-testid="library-reindex"
-        >
-          Index this document again
-        </Button>
+        {/*
+          THE REASON COMES FROM `describeSearchability` TOO. LIB-5.
+          It used to be `index.failureReason` alone, which says "this PDF
+          carries no extractable text" and stops — true, and no help, because
+          what the office needs to know next is whether anything is going to
+          read it. Now it says which of the five situations this is.
+        */}
+        <p className="text-xs leading-relaxed text-amber-eje-800">
+          {describeSearchability(index, ocr).detail}
+        </p>
+        {/*
+          THE RE-INDEX IS FOR THE TEXT LAYER, which is what this button has
+          always done: re-read the stored bytes. It is NOT offered while
+          recognition is in flight — re-extracting underneath a worker would
+          race it, and the text layer has already been read and found empty.
+        */}
+        {ocr?.state !== 'running' && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="mt-2"
+            loading={reindexing}
+            onClick={onReindex}
+            data-testid="library-reindex"
+          >
+            Index this document again
+          </Button>
+        )}
       </div>
     )}
 

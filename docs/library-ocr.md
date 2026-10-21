@@ -110,10 +110,50 @@ characters before it calls text usable, and an OCR path would use the same test.
 
 ## 4. What is true today, so nothing here is overstated
 
+*Rewritten 21 October 2026: the architecture recommended in §3.2 is now built.
+The DECISION in §3 is unchanged and is still EJE's — what follows is what the
+repository does, not what EJE have agreed to run.*
+
 - Text-based PDFs **are** searchable, and the search is tested on real
   PostgreSQL including that the GIN index serves the query.
 - A scanned document is **reported, not hidden**: a badge on the row, a count
   in the search answer, the reason against it for the office, and a retry.
-- No OCR exists, nothing in the application implies otherwise, and
-  `npm run integrations:check` has nothing to say about it because there is no
-  provider to check.
+- **The queue and the worker exist.** An upload that finds no text layer records
+  the document on `library_ocr_queue`, and `npm run library:ocr` does the work
+  afterwards — because recognising a 214-page manual is twenty minutes to an
+  hour and cannot happen inside an upload request.
+- **No engine is installed, and the application says exactly that.** `EJE_OCR`
+  is unset on every deployment, so every job settles as `unavailable` with
+  *"Install `tesseract-ocr` and `poppler-utils` and set EJE_OCR=local"* — the
+  package names, because "OCR failed" sends somebody to look at the document.
+- **Nothing is sent anywhere.** Option (c) is NOT implemented, deliberately: a
+  half-built client for a hosted service is a thing somebody switches on, and
+  the mandate forbids EJE's drawings leaving the premises without authorisation.
+- **Recognised text is labelled as recognised.** `library_document_text.source`
+  is `text_layer` or `ocr`, and the library says *"Searchable (recognised
+  text)"* for the second with a note that it can contain mistakes. Text out of a
+  scan is a machine's reading of a wiring diagram, not the diagram.
+- **Nothing is reported searchable unless text was indexed.** There are five
+  ways an attempt ends and only one touches the index; the other four leave the
+  document saying it is not searchable. Each has a test.
+
+### To turn it on, on a server EJE control
+
+```bash
+sudo apt-get install -y tesseract-ocr poppler-utils
+# then, in /etc/eje/eje.env:
+EJE_OCR=local
+# optionally: EJE_OCR_LANGUAGE=eng   EJE_OCR_MAX_PAGES=40
+
+sudo -u eje npm run library:ocr -- --report    # what is waiting
+sudo -u eje npm run library:ocr -- --max 5     # read five
+```
+
+Jobs that settled as `unavailable` before an engine existed are NOT retried
+automatically — nothing about them changed, and the next attempt would say the
+same thing. Ask for them again from the library screen once the engine is in
+place.
+
+**A cron entry is deliberately not shipped.** How often a library needs reading
+depends on how often EJE upload scans, and a timer nobody asked for is a timer
+nobody expects. `docs/vps-backups.md` shows the systemd pattern if EJE want one.

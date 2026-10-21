@@ -473,6 +473,15 @@ const v21ToV22 = (data: Loose): Loose => ({
     : data.machines,
 });
 
+/**
+ * v22 -> v23. LIB-5's OCR queue. The collection has to exist; nothing derives
+ * it, and nothing is seeded — no seeded document has an uploaded file.
+ */
+const v22ToV23 = (data: Loose): Loose => ({
+  ...data,
+  libraryOcrQueue: Array.isArray(data.libraryOcrQueue) ? data.libraryOcrQueue : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -488,6 +497,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   19: v19ToV20,
   20: v20ToV21,
   21: v21ToV22,
+  22: v22ToV23,
 };
 
 /**

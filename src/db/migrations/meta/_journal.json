@@ -155,6 +155,13 @@
       "when": 1792606460482,
       "tag": "0021_media_checksums",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792606461482,
+      "tag": "0022_library_ocr",
+      "breakpoints": true
     }
   ]
 }

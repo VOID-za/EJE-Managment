@@ -33,7 +33,7 @@ somebody with root on the VPS.
 | New commands: `documents:reconcile`, `dump:inspect`, `integrations:check` | Run by hand. Nothing runs them automatically. |
 | `deploy/eje-backup*.{service,timer}` | **Not installed by this deployment.** Step 7. |
 
-### Added since: migrations 0015–0021 — read this before step 5
+### Added since: migrations 0015–0022 — read this before step 5
 
 | Migration | What it does | Risk |
 |---|---|---|
@@ -44,6 +44,7 @@ somebody with root on the VPS.
 | `0019_job_corrections` | New table, CHECKs and an append-only trigger | Additive |
 | `0020_unsigned_delivery_authorisations` | New table and an append-only trigger | Additive |
 | `0021_media_checksums` | Adds a nullable `checksum_sha256` to `machine_photos` and `checklist_answer_photos` | Additive. Two `ADD COLUMN` on nullable text: no rewrite, no backfill, no lock beyond the catalogue update |
+| `0022_library_ocr` | Adds `source` to `library_document_text` with a CHECK, and creates `library_ocr_queue` | Additive. One `ADD COLUMN`, one `UPDATE` setting `source = 'text_layer'` on rows already `indexed` — which is true of all of them, since there was no other way to get text — one new table, one index |
 
 **No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
 the six. Every `NOT NULL` is on a column of a new table.
@@ -91,8 +92,9 @@ through — and what makes the demonstration switcher refuse to arm anywhere
 that says `production`. See `docs/demonstration-isolation.md`.
 
 Two things this release deliberately does **not** do: it does not write document
-bytes anywhere, and — apart from 0018's provenance relabelling, described above
-— it does not modify, repair or delete any existing row.
+bytes anywhere, and — apart from 0018's provenance relabelling and 0022 marking already-indexed
+library text as having come from a text layer, both described above — it does
+not modify, repair or delete any existing row.
 
 **One name is wrong in an already-applied migration, and is deliberately left
 alone.** PostgreSQL cuts an identifier at 63 characters, with a NOTICE in the
@@ -204,12 +206,12 @@ sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE
   EJE_PRODUCTION_MIGRATION=eje_production npm run db:migrate
 ```
 
-**Migrations 0015–0021 all apply here, in one run.** Read §0 first: 0018 is the
+**Migrations 0015–0022 all apply here, in one run.** Read §0 first: 0018 is the
 only data-modifying migration in the release, and an interrupted run between
 0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
 LOST CUSTOMER DOCUMENTS until the run is finished.
 
-Every one of the seven is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
+Every one of the eight is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
 no DELETE, and every NOT NULL on a column of a new table — so **the old code
 runs against the new schema**, which is what makes step 8's rollback safe. That
 is tested rather than asserted: an old-code-shaped INSERT that omits
@@ -274,7 +276,7 @@ What rollback does and does not need:
 - **The migration is not rolled back, and must not be.** `0014` only adds a
   table; the old code neither reads nor writes it. Dropping it would delete the
   observations recorded in step 7 — the only independent record of what each
-  document's bytes were. **The same holds for 0015–0021**, and more strongly:
+  document's bytes were. **The same holds for 0015–0022**, and more strongly:
   `job_corrections` and `unsigned_delivery_authorisations` hold decisions
   somebody took about a customer's document, `customer_documents` and
   `machine_documents` hold files that exist on disk, and

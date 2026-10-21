@@ -78,6 +78,7 @@ describeDb('the technical library full-text index', () => {
   ): DocumentTextIndex => ({
     documentId,
     state: 'indexed',
+    source: 'text_layer',
     extractedAt: '2026-10-01T08:00:05.000Z',
     characters: MANUAL.length,
     pages: 12,

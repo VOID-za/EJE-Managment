@@ -196,6 +196,15 @@ export const libraryDocumentText = pgTable(
       .primaryKey()
       .references(() => libraryDocuments.id, { onDelete: 'cascade' }),
     state: text('state').notNull(),
+    /**
+     * `text_layer` or `ocr`, and only on an `indexed` row. LIB-5.
+     *
+     * Text out of a PDF's text layer is what the document says; text out of
+     * recognised pixels is a machine's reading of what it looks like, and a
+     * technician searching an electrical diagram for an alarm code needs to
+     * know which. The CHECK below ties it to the state so the two cannot drift.
+     */
+    source: text('source'),
     extractedAt: instant('extracted_at').notNull(),
     characters: integer('characters').notNull().default(0),
     pages: integer('pages').notNull().default(1),
@@ -214,6 +223,19 @@ export const libraryDocumentText = pgTable(
     index('library_document_text_state_idx').on(table.state),
     // `indexed` is the only state that may carry text, and it must carry some:
     // the state and the index can never disagree about whether text exists.
+    /*
+     * NULL-PROOF, AND THE FIRST VERSION WAS NOT — it accepted an `indexed` row
+     * with a NULL source, the row it was written to refuse. `null in (...)` is
+     * NULL, so the whole expression came out NULL and a CHECK treats NULL as
+     * satisfied. The SECOND time this trap has been hit in this schema; see
+     * the migration for the first. An equality between two booleans, and a
+     * disjunction whose first arm is true on NULL, are both NULL-free.
+     */
+    check(
+      'library_document_text_source_matches_state',
+      sql`(${table.state} = 'indexed') = (${table.source} is not null)
+          and (${table.source} is null or ${table.source} in ('text_layer', 'ocr'))`,
+    ),
     check(
       'library_document_text_state_matches_content',
       sql`(${table.state} = 'indexed' and length(${table.content}) > 0)
@@ -222,6 +244,76 @@ export const libraryDocumentText = pgTable(
     check(
       'library_document_text_state_known',
       sql`${table.state} in ('indexed', 'needs_ocr', 'failed')`,
+    ),
+  ],
+);
+
+/**
+ * WORK WAITING FOR TEXT RECOGNITION. MASTER SCOPE LIB-5.
+ *
+ * WHY A TABLE AND NOT A FLAG. Lifting a PDF's text layer takes milliseconds and
+ * happens inside the upload request, which is right. RECOGNISING a scanned page
+ * takes 5 to 15 seconds, so a 214-page manual is twenty minutes to an hour —
+ * inside an HTTP request that timed out long ago, holding a transaction open,
+ * with the office watching a spinner. The upload records that the document
+ * needs recognition and returns; this is what the work is read out of
+ * afterwards by something allowed to take as long as it takes.
+ *
+ * ONE ROW PER REVISION, keyed by it and cascading with it, so a deleted
+ * document does not leave work behind for a document that no longer exists.
+ *
+ * NO STATE HERE MEANS "SEARCHABLE". That question has exactly one answer —
+ * `library_document_text.state` — and this table never duplicates it, which is
+ * what stops the two disagreeing. `done` means recognition finished and the
+ * index was updated; whether the index then says `indexed` is the index's
+ * business.
+ *
+ * `unavailable` IS NOT A FAILURE OF THE DOCUMENT, and is a separate state for
+ * exactly that reason: it means no engine is installed on this server, the
+ * remedy is an installation rather than a better scan, and the library says so
+ * in those words.
+ */
+export const libraryOcrQueue = pgTable(
+  'library_ocr_queue',
+  {
+    documentId: uuid('document_id')
+      .primaryKey()
+      .references(() => libraryDocuments.id, { onDelete: 'cascade' }),
+    state: text('state').notNull().default('queued'),
+    /** Attempts made, including one in flight. Bounds a permanent failure. */
+    attempts: integer('attempts').notNull().default(0),
+    queuedAt: instant('queued_at').notNull(),
+    /** Set while and only while a worker holds it; see the CHECK. */
+    startedAt: instant('started_at'),
+    finishedAt: instant('finished_at'),
+    /** The reason, in words an operator can act on. Never a stack trace. */
+    lastError: text('last_error').notNull().default(''),
+    /** Which engine produced the outcome, as the engine named itself. */
+    engine: text('engine').notNull().default(''),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('library_ocr_queue_state_idx').on(table.state, table.queuedAt),
+    check(
+      'library_ocr_queue_state_known',
+      sql`${table.state} in ('queued', 'running', 'done', 'failed', 'unavailable')`,
+    ),
+    check('library_ocr_queue_attempts_sane', sql`${table.attempts} >= 0`),
+    /*
+     * A CLAIMED JOB HAS A START TIME AND AN UNCLAIMED ONE DOES NOT.
+     *
+     * Without this a `running` row with no `started_at` could never be told
+     * from a worker that is still going, so the staleness rule would have
+     * nothing to measure and that document would be stuck for good.
+     */
+    check(
+      'library_ocr_queue_running_has_started',
+      sql`(${table.state} = 'running') = (${table.startedAt} is not null and ${table.finishedAt} is null)`,
+    ),
+    check(
+      'library_ocr_queue_finished_when_settled',
+      sql`(${table.state} in ('done', 'failed', 'unavailable') and ${table.finishedAt} is not null)
+          or (${table.state} in ('queued', 'running') and ${table.finishedAt} is null)`,
     ),
   ],
 );

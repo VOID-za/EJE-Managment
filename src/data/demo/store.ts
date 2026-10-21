@@ -17,6 +17,7 @@ import type {
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
   DocumentTextIndex,
+  OcrJob,
   ChatMessage,
   Conversation,
   User,
@@ -125,6 +126,15 @@ export interface DemoDatabase {
    * uploaded for it.
    */
   documentText: DocumentTextEntry[];
+  /**
+   * WORK WAITING FOR TEXT RECOGNITION, one entry per REVISION. LIB-5.
+   *
+   * Separate from `documentText` for the same reason the tables are separate:
+   * that one answers "is this searchable" and this one answers "is anybody
+   * going to try". Nothing is seeded — no seeded document has an uploaded
+   * file, so there is nothing to recognise.
+   */
+  libraryOcrQueue: OcrJob[];
 }
 
 export interface DocumentTextEntry {
@@ -172,7 +182,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -240,6 +250,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
    * says "not indexed" against each one instead, and an upload indexes itself.
    */
   documentText: [],
+  libraryOcrQueue: [],
 });
 
 const isBrowser = (): boolean => typeof window !== 'undefined';

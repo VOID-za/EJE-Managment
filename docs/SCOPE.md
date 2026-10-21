@@ -1251,6 +1251,10 @@ a failure.**
 | **`documents:reconcile` asks the other direction** | **TESTED — awaiting approval.** Not only "does every row describe a file that is there" but "is there a file here no row describes". Orphans, half-written keys, the litter of an interrupted durable write and anything that is not a stored document are reported separately, and only the first may be removed — with `--remove-orphans` AND `--expect-orphans N`, a count nobody can know without having read a report, refused when it no longer matches |
 | **`uploads.ts` has a test of its own** | **TESTED — awaiting approval.** The module that decides what the server accepts had none: three route tests exercised the happy path of each. A `.pdf` name AND content type on a ZIP, a signature one byte late, RIFF that is a WAV rather than a WebP, a filename carrying CRLF into a `Content-Disposition` header, and the size limit at the boundary and one byte past it |
 | **`MEDIA-5` — video capture** | **TESTED — awaiting approval.** See the MEDIA-5 row above for what was built. The decision EJE still owe is whether a customer ever receives a video and how; until then the server files it for the office |
+| **`LIB-5` — the asynchronous indexing architecture** | **TESTED — awaiting approval.** The queue (`library_ocr_queue`), the worker (`npm run library:ocr`), five truthful states, a bounded retry, and a local engine behind a port. Recognising a 214-page manual is twenty minutes to an hour, so it cannot be an upload: the upload records the need and returns. **No engine is installed** — every job settles as `unavailable` naming `tesseract-ocr` and `poppler-utils` — and the hosted option is deliberately NOT implemented, so nothing can leave the premises. Which engine EJE run is still EJE's decision (`docs/library-ocr.md` §3) |
+| **Recognised text is labelled as recognised** | **TESTED — awaiting approval.** `library_document_text.source` is `text_layer` or `ocr`, and the library says *"Searchable (recognised text)"* for the second. Text out of a scanned wiring diagram contains mistakes — a `B` for an `8`, a missing minus sign — and a technician reading an alarm code needs to know whether they have the document or a machine's reading of it |
+| **A CHECK that accepted the row it was written to refuse — again** | **FIXED.** `(state = 'indexed' AND source IN (…)) OR (state <> 'indexed' AND source IS NULL)` admits an `indexed` row with a NULL source: `NULL IN (…)` is NULL, so the whole expression is NULL and a CHECK treats NULL as satisfied. The SECOND time this exact trap has been hit here, after `array_length` in `job_corrections`. Found by the db test both times |
+| **A retry policy that actually bounds anything** | **FIXED, and found by a test.** A `failed` job was not claimable at all, so the attempt cap could only ever bite on a stale reclaim. A failure may be the document (a blank scan) or the machine (a full disk, an engine killed on one page) and nothing can tell them apart, so it is retried under the cap. `unavailable` is NOT retried — nothing changed, and the next attempt would say the same thing |
 | **The document pickers now say what they accept** | **TESTED — awaiting approval.** The customer and machine document inputs had no `accept` attribute and no size guidance, so a tablet offered every file on the device and the refusal arrived only after a failed upload. Both state the formats and the limit, from the same constants the server enforces |
 
 **Evidence:** lint, typecheck, build, **2 538** unit and route tests, the
@@ -1325,10 +1329,12 @@ requires. **Nothing here is deployed:** the steps and the rollback are in
 
 **Still not done, and still not claimed:** no message has reached a real mailbox
 from this codebase (MANDATE-3 stays PARTIAL); **no off-site backup exists**;
-the live deployment has not been updated past `4dede18`; DRAFT-1, COST-5 and
-LIB-5's OCR remain unbuilt, and `docs/outstanding-scope.md` says which of those
-are waiting on EJE rather than on us. *(MEDIA-5 was built on 21 October; see
-its row above and the ninth batch below.)*
+the live deployment has not been updated past `4dede18`; DRAFT-1 and COST-5
+remain unbuilt, and `docs/outstanding-scope.md` says which of those are waiting
+on EJE rather than on us. *(MEDIA-5 was built on 21 October, and LIB-5's OCR
+ARCHITECTURE with it — the queue, the worker, the truthful states and a local
+engine behind a port. No engine is installed and the choice of one is still
+EJE's. See the ninth batch below.)*
 
 ### Staging preparation and reports against the register (18 October 2026, fifth batch)
 
