@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createJob, releaseDraft } from './job-creation';
 import { WorkflowError } from './errors';
 import { loadActiveJobList, loadJobList, loadJobView } from './job-view';
+import { exportJobList } from './exports';
+import { emptyJobListFilters, type JobListFilters } from './job-list-filters';
 import { loadCalendar } from './calendar';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
@@ -324,5 +326,67 @@ describe('releasing a draft', () => {
     const released = await releaseDraft(harness.as(master), draft);
     const events = await harness.repos.activity.list(released.id);
     expect(events.some((event) => event.summary.includes('Draft released'))).toBe(true);
+  });
+});
+
+/**
+ * AND THE SPREADSHEET IS A SCREEN TOO. SEARCH-4 with DRAFT-1.
+ *
+ * Draft visibility is enforced in `loadActiveJobList`, and the Jobs export
+ * reads its rows from there — so it already holds. That is worth asserting
+ * rather than reading off the code, because the export is the one place a job's
+ * details leave the system in bulk: a Coordinator who cannot see a draft on the
+ * screen must not be able to download it, and a leak here is a file on
+ * somebody's laptop rather than a row on a page.
+ *
+ * THESE CASES ASK FOR DRAFTS EXPLICITLY, with `status: 'draft'`. The export's
+ * default filter is `open-work`, and a draft is not open work — so the default
+ * download contains none for anybody, including a Master. That is the filter
+ * doing its job and not an access rule, and a test resting on it would pass
+ * while proving nothing about who may see what.
+ */
+describe('the Jobs export honours draft visibility', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = build();
+  });
+
+  const draftOf = async (over: Record<string, unknown> = {}): Promise<Job> =>
+    createJob(harness.as(master), await input(harness, over), { asDraft: true });
+
+  const numberIn = async (
+    actor: User,
+    job: Job,
+    status: JobListFilters['status'],
+  ): Promise<boolean> => {
+    const file = await exportJobList(harness.repos, actor, { ...emptyJobListFilters, status });
+    return file.csv.includes(job.jobNumber);
+  };
+
+  it('leaves a draft out of a COORDINATOR’s download, asked for by status', async () => {
+    expect(await numberIn(coordinator, await draftOf(), 'draft')).toBe(false);
+  });
+
+  it('leaves it out of a Coordinator’s download of EVERYTHING', async () => {
+    expect(await numberIn(coordinator, await draftOf(), 'all')).toBe(false);
+  });
+
+  it('leaves it out of a TECHNICIAN’s download, even when they are named on it', async () => {
+    const draft = await draftOf({ primaryTechnicianId: technician.id });
+    expect(await numberIn(technician, draft, 'all')).toBe(false);
+  });
+
+  it('includes it for the MASTER, who is the one person it is for', async () => {
+    expect(await numberIn(master, await draftOf(), 'draft')).toBe(true);
+  });
+
+  it('is in NOBODY’s default download, because a draft is not open work', async () => {
+    const draft = await draftOf();
+    expect(await numberIn(master, draft, emptyJobListFilters.status)).toBe(false);
+  });
+
+  it('reaches everybody once it is RELEASED', async () => {
+    const released = await releaseDraft(harness.as(master), await draftOf());
+    expect(await numberIn(coordinator, released, 'all')).toBe(true);
   });
 });
