@@ -5,6 +5,9 @@ import { loadEnvFiles } from '@/db/seed/env';
 import {
   checkBackend,
   checkBackupKey,
+  checkExportAudit,
+  checkOffsiteBackup,
+  checkTextRecognition,
   checkDatabaseTarget,
   checkDemoSwitcher,
   checkDeployment,
@@ -202,7 +205,13 @@ const main = async (): Promise<void> => {
   checks.push(
     ...checkStorage(storageFacts((env.EJE_STORAGE_DIR ?? '').trim())),
     ...checkBackupKey(env),
+    // BACKUP-2: a backup that only exists here does not survive here.
+    ...checkOffsiteBackup(env),
     ...checkEmail(env, (env.EJE_PERSISTENCE ?? '').trim().toLowerCase() === 'demo'),
+    // LIB-5 and BD-18: a feature somebody believes is on, and monitoring that
+    // should never be a surprise.
+    ...checkTextRecognition(env),
+    ...checkExportAudit(env),
     // Which deployment this is, before the feature that depends on it.
     ...checkDeployment(env),
     ...checkDemoSwitcher(env),

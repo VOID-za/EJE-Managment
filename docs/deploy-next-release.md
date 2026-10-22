@@ -35,6 +35,8 @@ somebody with root on the VPS.
 
 ### Added since: migrations 0015–0022 — read this before step 5
 
+*(and 0023–0025 below them)*
+
 | Migration | What it does | Risk |
 |---|---|---|
 | `0015_provenance_and_categories` | Adds `provenance` to four tables (default `genuine`) and five values to the library's type enum | Additive. **Backfills every existing row to `genuine`** — see the warning below |
@@ -46,8 +48,30 @@ somebody with root on the VPS.
 | `0021_media_checksums` | Adds a nullable `checksum_sha256` to `machine_photos` and `checklist_answer_photos` | Additive. Two `ADD COLUMN` on nullable text: no rewrite, no backfill, no lock beyond the catalogue update |
 | `0022_library_ocr` | Adds `source` to `library_document_text` with a CHECK, and creates `library_ocr_queue` | Additive. One `ADD COLUMN`, one `UPDATE` setting `source = 'text_layer'` on rows already `indexed` — which is true of all of them, since there was no other way to get text — one new table, one index |
 
+### And since: migrations 0023–0025
+
+| Migration | What it does | Risk |
+|---|---|---|
+| `0023_job_charges_and_discounts` | COST-5. One new table (`job_additional_charges`), four nullable columns on `jobs` for the discount, two nullable columns on `pricing_snapshots` for the gross and the discount, and the snapshot-line amount CHECK made **stricter** per line kind | Additive. The tightened CHECK refuses two row shapes nothing has ever written (a discount line recorded as a positive amount, and one of zero), so no existing row can violate it — `ALTER TABLE ... ADD CONSTRAINT` validates the existing rows and would refuse the migration if any did |
+| `0024_machine_movements` | MACH-HIST. One new table. **Nothing is backfilled** — see below | Additive. No existing row is read or written |
+| `0025_customer_job_change_requests` | CUST-CR's job half. Two nullable columns on `customer_change_requests`, two foreign keys, one index, two CHECKs | Additive. Both CHECKs are satisfied by every existing row, which is a register report with no job and no customer contact |
+
 **No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
-the six. Every `NOT NULL` is on a column of a new table.
+the nine. Every `NOT NULL` is on a column of a new table.
+
+**MACH-HIST STARTS EMPTY, AND THAT IS DELIBERATE.** There is no record anywhere
+of where a machine stood before this release, and building an "installation"
+movement from `installation_date` and the machine's CURRENT site would assert
+that every machine has stood in its present bay since the day it was installed
+— which is exactly the false history the table exists to replace. The history
+fills from the next move. A screen shows the section only when there is
+something in it, and `machineLocationAsAt` returns NULL for a date it cannot
+answer for rather than guessing.
+
+**NOTHING IN THESE THREE CHANGES WHAT AN EXISTING JOB CARD SAYS.** A job with no
+charges and no discount prices exactly as it did; the document prints one
+subtotal as it did; and a closed job's issued figures are read from the
+write-once columns that were already there.
 
 **0015 AND 0018 MUST BE APPLIED IN THE SAME RUN, and they will be.** 0015
 backfills `genuine` onto rows whose origin nobody recorded — including the six
@@ -108,6 +132,22 @@ an applied migration changes the hash drizzle recorded against it. Two foreign
 keys in `0019` and `0020` had the same fault and **were** corrected, because
 neither has been applied anywhere yet; `src/db/migrations/identifiers.test.ts`
 now fails the build on any new one.
+
+### New configuration this release understands, all of it optional
+
+None of these has to be set, and the deployment behaves honestly with all of
+them absent — `npm run preflight` reports each one either way, which is how an
+operator sees what is actually on.
+
+| Variable | If unset | Why you might set it |
+|---|---|---|
+| `EJE_EXPORT_AUDIT` | Spreadsheet exports are not recorded on the audit trail | **BD-18, and it is EJE's decision.** `on` records who exported which list, when and with which filters. That is monitoring of EJE's own staff, and the retention of those events is unmanaged — they never expire on their own. Read the note in `deploy/eje.env.example` before switching it on |
+| `EJE_OCR` and its seven companions | A scanned library document is recorded as **not searchable**, and says so | **LIB-5, and it is EJE's decision** (`docs/library-ocr.md` §3). `local` needs `tesseract-ocr`, `tesseract-ocr-eng` and `poppler-utils` installed first; preflight WARNS so somebody checks with `npm run library:ocr -- --report` rather than assuming |
+
+**`jobs.exportPrices` is a capability NO ROLE HOLDS**, so no file EJE can
+produce today carries what any job was charged. That is BD-17 unanswered rather
+than a setting — granting it is a code change, deliberately, because it is a
+disclosure decision and not a deployment one.
 
 ### And the reverse proxy has to be changed, or video uploads fail with no reason
 
@@ -227,7 +267,7 @@ sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE
   EJE_PRODUCTION_MIGRATION=eje_production npm run db:migrate
 ```
 
-**Migrations 0015–0022 all apply here, in one run.** Read §0 first: 0018 is the
+**Migrations 0015–0025 all apply here, in one run.** Read §0 first: 0018 is the
 only data-modifying migration in the release, and an interrupted run between
 0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
 LOST CUSTOMER DOCUMENTS until the run is finished.
@@ -297,7 +337,7 @@ What rollback does and does not need:
 - **The migration is not rolled back, and must not be.** `0014` only adds a
   table; the old code neither reads nor writes it. Dropping it would delete the
   observations recorded in step 7 — the only independent record of what each
-  document's bytes were. **The same holds for 0015–0022**, and more strongly:
+  document's bytes were. **The same holds for 0015–0025**, and more strongly:
   `job_corrections` and `unsigned_delivery_authorisations` hold decisions
   somebody took about a customer's document, `customer_documents` and
   `machine_documents` hold files that exist on disk, and

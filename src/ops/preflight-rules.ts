@@ -322,6 +322,105 @@ export const checkBackupKey = (env: PreflightEnvironment): readonly Check[] => {
 };
 
 /**
+ * WHERE A BACKUP ALSO LIVES. BACKUP-2.
+ *
+ * A backup that exists only on the machine it is a backup OF does not survive
+ * that machine, which is the one failure a backup exists to cover. `npm run
+ * backup` already says so after every run — this says it BEFORE the service
+ * starts, where somebody is in a position to configure it.
+ *
+ * A WARNING AND NOT A FAILURE, deliberately: a deployment can legitimately run
+ * for a day without an off-site destination while somebody arranges one, and a
+ * check that refuses to start the service over it would be a check people
+ * learn to bypass.
+ */
+export const checkOffsiteBackup = (env: PreflightEnvironment): readonly Check[] => {
+  const directory = value(env, 'EJE_BACKUP_OFFSITE_DIR');
+  const remote = value(env, 'EJE_BACKUP_OFFSITE_RCLONE');
+  if (directory.length === 0 && remote.length === 0) {
+    return [
+      warn(
+        'Off-site backup',
+        'No off-site destination. Every backup would exist only on this machine, so it does ' +
+          'not survive this machine — set EJE_BACKUP_OFFSITE_DIR to a mounted volume or ' +
+          'EJE_BACKUP_OFFSITE_RCLONE to an rclone remote. See docs/vps-backups.md.',
+      ),
+    ];
+  }
+  return [
+    ok(
+      'Off-site backup',
+      directory.length > 0
+        ? 'A mounted volume is configured. Its path is not read here.'
+        : 'An rclone remote is configured. Its name is not read here.',
+    ),
+  ];
+};
+
+/**
+ * A FEATURE SOMEBODY BELIEVES IS ON. LIB-5.
+ *
+ * `EJE_OCR=local` is a deployment saying it has installed `tesseract` and
+ * `pdftoppm` and wants them used. If they are NOT there, every queued document
+ * settles as `unavailable` — which is honest, and invisible to whoever set the
+ * variable and thinks text recognition is working. This is where that gets
+ * noticed.
+ *
+ * UNSET IS FINE AND SAYS SO: no engine is the state every EJE deployment is in
+ * today, and whether to install one is EJE's decision (`docs/library-ocr.md`).
+ */
+export const checkTextRecognition = (env: PreflightEnvironment): readonly Check[] => {
+  const configured = value(env, 'EJE_OCR').toLowerCase();
+  if (configured.length === 0) {
+    return [
+      ok(
+        'Text recognition',
+        'Not configured. A scanned document is recorded as not searchable and says so, which ' +
+          'is the state every deployment is in until EJE decide otherwise.',
+      ),
+    ];
+  }
+  if (configured !== 'local') {
+    return [
+      fail(
+        'Text recognition',
+        `EJE_OCR is "${configured}", which is not an engine this build knows — the only value ` +
+          'is `local`. Nothing is being recognised, and somebody believes it is.',
+      ),
+    ];
+  }
+  return [
+    warn(
+      'Text recognition',
+      'EJE_OCR=local. Run `npm run library:ocr -- --report` to confirm the binaries are ' +
+        'actually installed — if they are not, every document settles as "no engine" and ' +
+        'nothing says so on a screen.',
+    ),
+  ];
+};
+
+/**
+ * MONITORING OF EJE'S OWN STAFF, IF IT IS ON. BD-18.
+ *
+ * `EJE_EXPORT_AUDIT=on` records who exported which list, when and with which
+ * filters. That is a defensible thing for EJE to want and a surprising thing
+ * for a deployment to do without anybody saying so — so it is REPORTED either
+ * way, which is the only reason this check exists. Neither state is a problem.
+ */
+export const checkExportAudit = (env: PreflightEnvironment): readonly Check[] => {
+  const on = value(env, 'EJE_EXPORT_AUDIT').toLowerCase() === 'on';
+  return [
+    ok(
+      'Export auditing',
+      on
+        ? 'ON. Every spreadsheet export is recorded on the audit trail with who took it and ' +
+            'which filters — monitoring of staff, and retention is unmanaged (BD-18).'
+        : 'Off. Spreadsheet exports are not recorded on the audit trail (BD-18, open).',
+    ),
+  ];
+};
+
+/**
  * WHETHER A CUSTOMER COULD ACTUALLY BE SENT THEIR JOB CARD. MANDATE-3.
  *
  * A real-database deployment with no email configuration refuses to send, which

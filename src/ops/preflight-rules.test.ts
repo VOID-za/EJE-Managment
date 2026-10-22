@@ -5,7 +5,10 @@ import {
   checkDatabaseTarget,
   checkDemoSwitcher,
   checkEmail,
+  checkExportAudit,
   checkMigrations,
+  checkOffsiteBackup,
+  checkTextRecognition,
   checkRuntime,
   checkStorage,
   passed,
@@ -331,5 +334,80 @@ describe('nothing printed is ever a configured value', () => {
     ]) {
       expect(report, secret.slice(0, 12)).not.toContain(secret);
     }
+  });
+});
+
+describe('the three things the last deployment pass could not see', () => {
+  /**
+   * EACH OF THESE IS A DEPLOYMENT THAT LOOKS FINE AND IS NOT.
+   *
+   * The preflight exists to catch exactly that, and what it could not see
+   * before was: a backup that only exists on the machine it is a backup of, a
+   * text-recognition engine somebody believes is on, and monitoring of EJE's
+   * own staff switched on without anybody saying so.
+   */
+  it('WARNS when a backup would exist only on this machine', () => {
+    const [check] = checkOffsiteBackup({});
+    expect(check?.verdict).toBe('warn');
+    // It names both remedies, because which one EJE have is not ours to guess.
+    expect(check?.detail).toMatch(/EJE_BACKUP_OFFSITE_DIR/u);
+    expect(check?.detail).toMatch(/EJE_BACKUP_OFFSITE_RCLONE/u);
+  });
+
+  it('is satisfied by either destination, and names NEITHER value', () => {
+    /*
+     * A WARNING, not a failure: a deployment can legitimately run for a day
+     * without one while somebody arranges it, and a check that refused to
+     * start the service over it is a check people learn to bypass.
+     */
+    const volume = checkOffsiteBackup({ EJE_BACKUP_OFFSITE_DIR: '/mnt/eje-offsite' });
+    expect(volume[0]?.verdict).toBe('ok');
+    expect(volume[0]?.detail).not.toContain('/mnt/eje-offsite');
+
+    const remote = checkOffsiteBackup({ EJE_BACKUP_OFFSITE_RCLONE: 'wasabi:eje-backups' });
+    expect(remote[0]?.verdict).toBe('ok');
+    expect(remote[0]?.detail).not.toContain('wasabi');
+  });
+
+  it('says text recognition is OFF without calling that a problem', () => {
+    // The state every EJE deployment is in, and whether to change it is EJE's
+    // decision — so this must not read as a fault.
+    const [check] = checkTextRecognition({});
+    expect(check?.verdict).toBe('ok');
+    expect(check?.detail).toMatch(/not searchable/u);
+  });
+
+  it('FAILS a text-recognition value this build does not know', () => {
+    /*
+     * `EJE_OCR=tesseract` is somebody who believes recognition is on. Every
+     * document would settle as "no engine", honestly and invisibly — which is
+     * the shape of problem a preflight is for.
+     */
+    const [check] = checkTextRecognition({ EJE_OCR: 'tesseract' });
+    expect(check?.verdict).toBe('fail');
+    expect(check?.detail).toMatch(/"tesseract"/u);
+    expect(check?.detail).toMatch(/somebody believes it is/u);
+  });
+
+  it('WARNS on EJE_OCR=local, because the binaries are not checked here', () => {
+    // The preflight reads configuration; whether tesseract is actually on the
+    // machine is what `library:ocr --report` answers, and it says so.
+    const [check] = checkTextRecognition({ EJE_OCR: 'local' });
+    expect(check?.verdict).toBe('warn');
+    expect(check?.detail).toMatch(/library:ocr/u);
+  });
+
+  it('REPORTS export auditing either way, which is the only reason it exists', () => {
+    const off = checkExportAudit({});
+    expect(off[0]?.verdict).toBe('ok');
+    expect(off[0]?.detail).toMatch(/BD-18/u);
+
+    const on = checkExportAudit({ EJE_EXPORT_AUDIT: 'on' });
+    expect(on[0]?.verdict).toBe('ok');
+    // It says what it IS — monitoring of staff, with unmanaged retention —
+    // because a deployment doing that without anybody saying so is the
+    // surprise this line prevents.
+    expect(on[0]?.detail).toMatch(/monitoring of staff/u);
+    expect(on[0]?.detail).toMatch(/retention/u);
   });
 });
