@@ -12,6 +12,7 @@ import type {
   Job,
   JobCorrection,
   JobId,
+  IssuedTotals,
   PricingSnapshot,
   PricingSnapshotTotals,
   UnsignedDeliveryAuthorisation,
@@ -320,6 +321,37 @@ export class PostgresJobRepository implements JobRepository {
   }
 
   /** One query. The archive asks for these; no other list ever does. */
+  /**
+   * WHAT EACH CLOSED JOB WAS CHARGED. BD-17.
+   *
+   * READ FROM THE WRITE-ONCE COLUMNS, not recomputed from the job's lines. That
+   * is the whole reason these columns exist: a Master may legitimately amend a
+   * job after the customer signed and before it is issued, and recomputing
+   * would then report what the job says TODAY rather than what the customer
+   * signed for.
+   */
+  async listIssuedTotals(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, IssuedTotals | null>> {
+    const found = new Map<JobId, IssuedTotals | null>();
+    if (jobIds.length === 0) return found;
+
+    const rows = await this.db
+      .select()
+      .from(schema.pricingSnapshots)
+      .where(inArray(schema.pricingSnapshots.jobId, [...jobIds] as string[]));
+
+    for (const row of rows) {
+      found.set(asJobId(row.jobId), {
+        subtotal: row.subtotalCents,
+        vat: row.vatCents,
+        total: row.totalCents,
+        capturedAt: row.capturedAt,
+      });
+    }
+    return found;
+  }
+
   async listPricingSnapshots(
     jobIds: readonly JobId[],
   ): Promise<ReadonlyMap<JobId, PricingSnapshot | null>> {

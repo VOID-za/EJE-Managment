@@ -1,4 +1,5 @@
 import {
+  can,
   jobStatusLabel,
   jobTypeLabel,
   priorityLabel,
@@ -64,6 +65,15 @@ export interface CsvExport {
   /** The whole file, BOM included. */
   readonly csv: string;
   readonly rowCount: number;
+  /**
+   * The headers this file actually carries. BD-17, BD-18.
+   *
+   * Reported rather than assumed, because the closed-job export's columns now
+   * depend on the ACTOR — and the export-audit record names the columns that
+   * were taken, which must be the ones in the file rather than a constant that
+   * could drift from it.
+   */
+  readonly columns: readonly string[];
 }
 
 /**
@@ -123,9 +133,70 @@ const CLOSED_JOB_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
   { header: 'Final job card', value: (row) => (row.job.finalDocument === null ? 'No' : 'Yes') },
 ];
 
+/**
+ * WHAT EVERY CLOSED JOB WAS CHARGED AT. BD-17, and nobody may export it today.
+ *
+ * The archive's read model carries each job's ISSUED pricing snapshot — it is
+ * there so a historical job card re-renders at its own rates — and these are
+ * the columns that would put it in a spreadsheet. They are built, ordered and
+ * tested, and they are appended only for an actor holding
+ * `jobs.exportPrices`, WHICH NO ROLE HOLDS.
+ *
+ * That is not a half-finished feature: it is BD-17's two questions separated
+ * from each other. "May the prices be exported at all" is answered by whether
+ * these columns exist; "by whom" is answered by granting the capability to a
+ * role. The first is now a decision EJE can see the shape of, and the second
+ * is one line in `access.ts`.
+ *
+ * PRICED FROM THE SNAPSHOT AND NOTHING ELSE. A closed job that carries none —
+ * one issued before snapshots existed, or closed without a signature — exports
+ * EMPTY CELLS rather than today's rates applied to old work, which would be a
+ * spreadsheet of figures EJE never charged.
+ */
+const CLOSED_JOB_PRICE_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
+  {
+    header: 'Subtotal (excl. VAT)',
+    value: (row) => centsOrEmpty(row.issuedTotals?.subtotal),
+  },
+  { header: 'VAT', value: (row) => centsOrEmpty(row.issuedTotals?.vat) },
+  { header: 'Total (incl. VAT)', value: (row) => centsOrEmpty(row.issuedTotals?.total) },
+  {
+    header: 'Priced at',
+    /*
+     * WHEN the rates were frozen, beside the figures. A total with no date is
+     * a figure somebody will compare against this year's rates and query.
+     */
+    value: (row) => isoDay(row.issuedTotals?.capturedAt ?? null),
+  },
+];
+
+/**
+ * Cents as a plain decimal, or EMPTY for a job that carries no snapshot.
+ *
+ * Not "0.00", which would say the job was done for nothing. A spreadsheet cell
+ * that is empty is a cell a person asks about; a zero is one they believe.
+ */
+const centsOrEmpty = (cents: number | undefined): string =>
+  cents === undefined ? '' : (cents / 100).toFixed(2);
+
+/**
+ * The columns this actor's closed-job export carries. BD-17.
+ *
+ * One function, so the HEADERS a test pins and the ROWS a file carries cannot
+ * disagree about who sees the money.
+ */
+export const closedJobColumnsFor = (
+  actor: Pick<User, 'role'>,
+): readonly CsvColumn<ClosedJobRow>[] =>
+  can(actor.role, 'jobs.exportPrices')
+    ? [...CLOSED_JOB_COLUMNS, ...CLOSED_JOB_PRICE_COLUMNS]
+    : CLOSED_JOB_COLUMNS;
+
 /** The column headers, exported so a test can pin them without a file. */
 export const jobListExportColumns = JOB_LIST_COLUMNS.map((column) => column.header);
 export const closedJobsExportColumns = CLOSED_JOB_COLUMNS.map((column) => column.header);
+/** The four BD-17 columns, by name, for a test that must not guess them. */
+export const closedJobPriceColumns = CLOSED_JOB_PRICE_COLUMNS.map((column) => column.header);
 
 /**
  * The operational Jobs list, as this actor may read it, filtered as they asked.
@@ -141,6 +212,7 @@ export const exportJobList = async (
     fileName: csvFileName('eje-jobs', businessToday()),
     csv: toCsv(JOB_LIST_COLUMNS, rows),
     rowCount: rows.length,
+    columns: jobListExportColumns,
   };
 };
 
@@ -158,9 +230,17 @@ export const exportClosedJobs = async (
 ): Promise<CsvExport> => {
   const page = await loadClosedJobs(repos, actor, filters, EXPORT_ROW_LIMIT + 1);
   if (page.rows.length > EXPORT_ROW_LIMIT) throw tooMany(page.matched);
+  /*
+   * THE COLUMNS DEPEND ON THE ACTOR. BD-17: the money is appended only for
+   * somebody holding `jobs.exportPrices`, which no role holds today — so every
+   * file EJE can produce right now carries none, which is the current
+   * behaviour and not the answer.
+   */
+  const columns = closedJobColumnsFor(actor);
   return {
     fileName: csvFileName('eje-closed-jobs', businessToday()),
-    csv: toCsv(CLOSED_JOB_COLUMNS, page.rows),
+    csv: toCsv(columns, page.rows),
     rowCount: page.rows.length,
+    columns: columns.map((column) => column.header),
   };
 };

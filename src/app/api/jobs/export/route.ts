@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { JOB_STATUS_ORDER, JOB_TYPE_CODES, PRIORITY_ORDER } from '@/domain';
-import { exportJobList, jobListExportColumns } from '@/application/exports';
+import { exportJobList } from '@/application/exports';
 import { describeExport, recordExport } from '@/application/export-audit';
 import { emptyJobListFilters, type JobListFilters } from '@/application/job-list-filters';
 import { downloadRoute, parseWith } from '@/server/api/handler';
@@ -89,7 +89,8 @@ export const GET = downloadRoute('jobs.export', async (context) => {
       actor: context.actor.user,
       filters: Object.fromEntries(context.request.nextUrl.searchParams),
       rowCount: file.rowCount,
-      columns: jobListExportColumns,
+      // The columns in the file; see the closed-job route. BD-17.
+      columns: file.columns,
       takenAt: context.services.clock.now(),
     }),
   );

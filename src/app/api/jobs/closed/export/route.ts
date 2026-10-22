@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { emptyClosedJobFilters, type ClosedJobFilters } from '@/application/closed-jobs';
-import { closedJobsExportColumns, exportClosedJobs } from '@/application/exports';
+import { exportClosedJobs } from '@/application/exports';
 import { describeExport, recordExport } from '@/application/export-audit';
 import { downloadRoute, parseWith } from '@/server/api/handler';
 
@@ -36,8 +36,10 @@ export const GET = downloadRoute('jobs.closed.export', async (context) => {
   const merged: ClosedJobFilters = { ...emptyClosedJobFilters, ...query };
   const file = await exportClosedJobs(context.repos, context.actor.user, merged);
 
-  // The export-audit boundary. BD-18 — writes nothing today. See the Jobs
-  // export route and `export-audit.ts`.
+  /*
+   * The export-audit boundary. BD-18 — off unless the deployment sets
+   * `EJE_EXPORT_AUDIT=on`. See `export-audit.ts`.
+   */
   await recordExport(
     { repos: context.repos, services: context.services, actor: context.actor.user },
     describeExport({
@@ -45,7 +47,12 @@ export const GET = downloadRoute('jobs.closed.export', async (context) => {
       actor: context.actor.user,
       filters: Object.fromEntries(context.request.nextUrl.searchParams),
       rowCount: file.rowCount,
-      columns: closedJobsExportColumns,
+      /*
+       * THE COLUMNS THAT ARE IN THE FILE, not a constant that could drift from
+       * it. BD-17 made this actor-dependent: a Master holding
+       * `jobs.exportPrices` — which nobody holds today — gets four more.
+       */
+      columns: file.columns,
       takenAt: context.services.clock.now(),
     }),
   );

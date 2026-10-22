@@ -273,7 +273,26 @@ export type Capability =
    * absent from every list, every tally and every read — including a
    * technician who happens to be named on one.
    */
-  | 'jobs.manageDrafts';
+  | 'jobs.manageDrafts'
+  /**
+   * EXPORTING WHAT EVERY CLOSED JOB WAS CHARGED AT. BD-17.
+   *
+   * **NO ROLE HOLDS THIS, and that is the current behaviour rather than an
+   * oversight.** The closed-job archive's read model carries each job's issued
+   * pricing snapshot — it is there so a historical job card re-renders at its
+   * own rates — and the archive SCREEN shows no figures, so the export carries
+   * none either.
+   *
+   * BD-17 (#56) is two questions: may the issued prices be exported at all,
+   * and if so by a Master only or by a Coordinator too. Granting this
+   * capability to a role is the whole of the second answer, and the columns
+   * themselves are built and tested behind it — so the day EJE answer, the
+   * change is one line in a list below and not a feature.
+   *
+   * Until then every role is refused, and `export-prices.test.ts` asserts that
+   * for all four of them.
+   */
+  | 'jobs.exportPrices';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',

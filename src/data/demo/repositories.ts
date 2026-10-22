@@ -1,4 +1,5 @@
 import type {
+  IssuedTotals,
   CustomerDocument,
   CaptureReferral,
   CaptureReferralState,
@@ -39,7 +40,12 @@ import type {
   OcrJob,
   OcrJobState,
 } from '@/domain';
-import { isOcrJobClaimable, isOutboxSendable, MAX_OUTBOX_ATTEMPTS } from '@/domain';
+import {
+  calculateJobTotals,
+  isOcrJobClaimable,
+  isOutboxSendable,
+  MAX_OUTBOX_ATTEMPTS,
+} from '@/domain';
 import { matchesAllTerms, tokenize } from '@/lib/text-search';
 import type {
   ActivityRepository,
@@ -103,6 +109,36 @@ class DemoJobRepository implements JobRepository {
     }
 
     return Promise.resolve(jobs);
+  }
+
+  /**
+   * WHAT EACH CLOSED JOB WAS CHARGED. BD-17.
+   *
+   * COMPUTED HERE, and read from write-once columns on PostgreSQL. The
+   * difference is deliberate and not a shortcut: this store has no
+   * amendment-after-signature story to protect — a demonstration job is
+   * whatever its snapshot says priced against its own lines — while the
+   * database has to answer "what did the customer sign for?" about a job a
+   * Master legitimately changed afterwards, which only a written-down figure
+   * can do.
+   */
+  listIssuedTotals(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, IssuedTotals | null>> {
+    const snapshot = this.context.read();
+    const wanted = new Set<string>(jobIds as readonly string[]);
+    const found = new Map<JobId, IssuedTotals | null>();
+    for (const job of snapshot.jobs) {
+      if (!wanted.has(job.id as string) || job.pricingSnapshot === null) continue;
+      const totals = calculateJobTotals(job, snapshot.settings);
+      found.set(job.id, {
+        subtotal: totals.subtotal,
+        vat: totals.vat,
+        total: totals.total,
+        capturedAt: job.pricingSnapshot.capturedAt,
+      });
+    }
+    return Promise.resolve(found);
   }
 
   /** The archive's snapshots, read from the jobs this store already holds. */

@@ -64,7 +64,17 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
     {
       value: 'records',
       label: 'Record changes',
-      types: ['customer_updated', 'machine_updated', 'document_viewed', 'checklist_completed'],
+      types: [
+        'customer_updated',
+        'machine_updated',
+        'document_viewed',
+        'checklist_completed',
+        // BD-18: where somebody looks for "who took the customer list". It is
+        // in this group rather than its own, because one more group for an
+        // event most deployments never write would be a filter that is always
+        // empty.
+        'data_exported',
+      ],
     },
   ];
 

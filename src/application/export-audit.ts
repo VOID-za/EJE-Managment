@@ -1,5 +1,6 @@
-import type { User } from '@/domain';
+import { roleLabel, userFullName, type User } from '@/domain';
 import type { OperationContext } from './context';
+import { audit } from './audit';
 
 /**
  * WHETHER AN EXPORT IS RECORDED IS NOT THIS FILE'S DECISION. BD-18.
@@ -40,11 +41,42 @@ import type { OperationContext } from './context';
  * screen, and decide retention. The `audit_events.type` column is `text`, so
  * no migration is needed. See BD-18 in `docs/SCOPE.md`.
  */
+/**
+ * WHETHER THIS DEPLOYMENT RECORDS EXPORTS. BD-18, and still EJE's to answer.
+ *
+ * IT IS NOW CONFIGURATION RATHER THAN A CONSTANT IN THE SOURCE, and the
+ * difference matters in both directions:
+ *
+ *  - A boolean in a file is flipped by whoever is reading the file, which is
+ *    how an unapproved record about EJE's own staff gets switched on by
+ *    somebody who thought they were finishing a feature. An environment
+ *    variable is a deployment decision, made by whoever administers the
+ *    server, in the file where the other decisions of that kind live.
+ *  - And it means ANSWERING BD-18 does not need a release. The write is built,
+ *    tested and off; `EJE_EXPORT_AUDIT=on` turns it on.
+ *
+ * OFF ON EVERY DEPLOYMENT TODAY, which `export-audit.test.ts` asserts by
+ * counting events before and after a real export. The three things that made
+ * this a decision rather than a detail are unchanged and are listed above.
+ */
+export const exportAuditEnabled = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => (env.EJE_EXPORT_AUDIT ?? '').trim().toLowerCase() === 'on';
+
 export const EXPORT_AUDIT = {
-  /** OFF until EJE answer BD-18. Nothing here writes to the trail. */
-  recording: false,
+  /**
+   * Whether the trail is written, read from the environment at call time.
+   *
+   * A getter rather than a value, so a test can set the variable and see the
+   * change without reloading the module — and so nothing caches a decision
+   * somebody made after the process started.
+   */
+  get recording(): boolean {
+    return exportAuditEnabled();
+  },
   reason:
-    'Whether an export is recorded on the audit trail is an open business decision (BD-18). The mechanism exists and writes nothing.',
+    'Whether an export is recorded on the audit trail is an open business decision (BD-18). ' +
+    'The mechanism is built and switched off: set EJE_EXPORT_AUDIT=on to record them.',
 } as const;
 
 /** Which export was taken. Not a capability and not a route — a name. */
@@ -106,19 +138,67 @@ export interface ExportAuditOutcome {
  * function rather than a change at every call site.
  */
 export const recordExport = async (
-  _context: OperationContext,
+  context: OperationContext,
   record: ExportRecord,
 ): Promise<ExportAuditOutcome> => {
   if (!EXPORT_AUDIT.recording) {
     return { written: false, record, reason: EXPORT_AUDIT.reason };
   }
+
   /*
-   * UNREACHABLE WHILE `recording` IS FALSE, and left as a refusal rather than
-   * a half-written `audit()` call: an implementation that looks finished is
-   * how an unapproved side effect gets switched on by somebody flipping a
-   * boolean they found. BD-18 names what else has to be decided first.
+   * THE WRITE, AND IT IS A REAL ONE NOW.
+   *
+   * It used to throw here, on the reasoning that an implementation which looks
+   * finished is how an unapproved side effect gets switched on. That reasoning
+   * was right about a BOOLEAN IN THE SOURCE and wrong about a deployment
+   * variable: a server that sets `EJE_EXPORT_AUDIT=on` has decided, and
+   * answering it with an exception would mean the exports stop working — which
+   * is a worse answer than either yes or no.
+   *
+   * WHAT IS WRITTEN: who, when, which export, which filters, how many rows and
+   * which columns. NOT THE ROWS — an audit entry holding a copy of the exported
+   * data would be a second, unreviewed store of the same customer information,
+   * and a trail is supposed to say what happened rather than keep the goods.
+   *
+   * `jobId: null` because an export is not about one job. It appears on the
+   * activity screen under "Record changes" with the `export` icon, which is
+   * where somebody looking for "who took the customer list" would look.
    */
-  throw new Error(
-    'Export auditing is not implemented: BD-18 is open, and enabling it needs an event type, an activity-screen filter and a retention decision.',
+  await audit(context, {
+    jobId: null,
+    type: 'data_exported',
+    summary: `${EXPORT_LABEL[record.kind]} exported: ${record.rowCount} row(s)`,
+    detail:
+      `${EXPORT_LABEL[record.kind]} downloaded as a spreadsheet by ${userFullName(context.actor)} ` +
+      `(${roleLabel(context.actor.role)}). ` +
+      `${record.rowCount} row(s), ${record.columns.length} column(s)` +
+      `${describeFilters(record.filters)}.`,
+    /*
+     * THE FILTERS AS STRUCTURED CHANGE VALUES, which is how AUDIT-2 carries
+     * anything a person may need to compare later. `from` is null for all of
+     * them: an export does not change a value, it records one that was asked
+     * for.
+     */
+    changes: Object.entries(record.filters)
+      .filter(([, value]) => value.length > 0 && value !== 'all')
+      .map(([field, value]) => ({ field, from: null, to: value })),
+  });
+
+  return { written: true, record, reason: '' };
+};
+
+/** How each export is named on the trail. Never invented twice. */
+const EXPORT_LABEL: Readonly<Record<ExportKind, string>> = {
+  jobs: 'The Jobs list',
+  'closed-jobs': 'The closed-job archive',
+};
+
+/** The filters in one readable clause, or nothing when none were applied. */
+const describeFilters = (filters: Readonly<Record<string, string>>): string => {
+  const applied = Object.entries(filters).filter(
+    ([, value]) => value.length > 0 && value !== 'all',
   );
+  return applied.length === 0
+    ? ', unfiltered'
+    : `, filtered by ${applied.map(([field, value]) => `${field}=${value}`).join(', ')}`;
 };

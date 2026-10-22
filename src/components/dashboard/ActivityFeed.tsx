@@ -36,6 +36,8 @@ const ICONS: Partial<Record<ActivityEvent['type'], IconName>> = {
   job_submitted: 'mail',
   job_closed: 'check',
   document_viewed: 'library',
+  // BD-18. A download reads as a download rather than as a record change.
+  data_exported: 'download',
   customer_updated: 'customers',
   machine_updated: 'machines',
 };

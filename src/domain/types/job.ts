@@ -21,6 +21,23 @@ import type { PricingInputs } from './settings';
  * The pricing that was in force when a job became a financial commitment, with
  * the moment it was frozen.
  */
+/**
+ * WHAT A JOB WAS ACTUALLY CHARGED, as the figures stood when the price froze.
+ * BD-17.
+ *
+ * Distinct from `PricingSnapshot`, which carries the RATES. Both exist because
+ * a Master may legitimately amend a job after the customer signed and before it
+ * is issued, so "the rates it was priced at" and "the figure the customer
+ * signed for" stop being the same question — see `materialisePricingSnapshot`.
+ */
+export interface IssuedTotals {
+  readonly subtotal: Cents;
+  readonly vat: Cents;
+  readonly total: Cents;
+  /** When the price was frozen. A total with no date gets queried. */
+  readonly capturedAt: IsoDateTime;
+}
+
 export interface PricingSnapshot extends PricingInputs {
   readonly capturedAt: IsoDateTime;
   /**

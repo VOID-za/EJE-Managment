@@ -20,6 +20,7 @@ import type {
   IsoDateTime,
   Job,
   JobCorrection,
+  IssuedTotals,
   JobId,
   AvailabilityRecord,
   Machine,
@@ -106,6 +107,24 @@ export interface JobRepository {
    * so it asks for the snapshots explicitly — by a call the authorization
    * check upstream has already gated.
    */
+  /**
+   * WHAT EACH CLOSED JOB WAS ACTUALLY CHARGED. BD-17.
+   *
+   * The snapshot above carries the RATES; this carries the FIGURES — the
+   * subtotal, the VAT and the total as they stood when the price was frozen.
+   * Separate because they come from different places and one of them must not
+   * be recomputed: on PostgreSQL these are the write-once columns on
+   * `pricing_snapshots`, so a job a Master legitimately amended after the
+   * signature still reports what the customer signed for.
+   *
+   * Null for a job that carries no snapshot — one issued before snapshots
+   * existed, or closed without a signature. The export writes an EMPTY cell
+   * for those rather than a zero, because a zero is a figure people believe.
+   */
+  listIssuedTotals(
+    jobIds: readonly JobId[],
+  ): Promise<ReadonlyMap<JobId, IssuedTotals | null>>;
+
   listPricingSnapshots(
     jobIds: readonly JobId[],
   ): Promise<ReadonlyMap<JobId, PricingSnapshot | null>>;

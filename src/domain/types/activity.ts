@@ -64,6 +64,19 @@ export type ActivityEventType =
   | 'discount_amended'
   | 'discount_removed'
   /**
+   * A BULK READ OF EJE'S OWN DATA. BD-18.
+   *
+   * The first READ on a trail where every other event is a CHANGE, and that
+   * is exactly why whether to write it is EJE's decision rather than ours —
+   * adding one kind of read makes the trail's silence about every other read
+   * significant in a way it was not before.
+   *
+   * The type exists so that answering BD-18 needs no release: the write is
+   * built and switched off behind `EJE_EXPORT_AUDIT`, and a type nobody emits
+   * costs nothing. `audit_events.type` is `text`, so no migration either.
+   */
+  | 'data_exported'
+  /**
    * A LABOUR, TRAVEL OR PARTS LINE TAKEN OFF A JOB. AUDIT-3.
    *
    * Its own type, and not a second `labour_added` with different wording,

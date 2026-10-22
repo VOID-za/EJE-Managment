@@ -2,6 +2,7 @@ import {
   can,
   userFullName,
   type IsoDate,
+  type IssuedTotals,
   type Job,
   type JobTypeCode,
   type PricingSnapshot,
@@ -71,6 +72,19 @@ export const emptyClosedJobFilters: ClosedJobFilters = {
 export interface ClosedJobRow extends JobListRow {
   /** What this job was priced at when it was issued. Never recalculated. */
   readonly pricingSnapshot: PricingSnapshot | null;
+  /**
+   * WHAT IT WAS ACTUALLY CHARGED. BD-17.
+   *
+   * The snapshot above is the RATES; this is the figures. Attached beside it
+   * and in the same place — after the office check at the top of
+   * `loadClosedJobs` — so neither can reach a technician.
+   *
+   * NOBODY MAY EXPORT IT TODAY: the archive screen shows no figures and the
+   * export appends the money only for `jobs.exportPrices`, which no role
+   * holds. It is read here because BD-17 cannot be ANSWERED without the shape
+   * of the answer existing.
+   */
+  readonly issuedTotals: IssuedTotals | null;
 }
 
 export interface ClosedJobsPage {
@@ -140,9 +154,10 @@ export const loadClosedJobs = async (
   const archived = jobs.filter(isArchivedJob);
   // The viewer is passed on, so a refusal on an archived job is redacted here
   // exactly as it is on the job screen.
-  const [baseRows, snapshots] = await Promise.all([
+  const [baseRows, snapshots, totals] = await Promise.all([
     loadJobRows(repos, archived, actor),
     repos.jobs.listPricingSnapshots(archived.map((job) => job.id)),
+    repos.jobs.listIssuedTotals(archived.map((job) => job.id)),
   ]);
   /*
    * The snapshot is attached HERE — after the office check at the top of this
@@ -151,6 +166,7 @@ export const loadClosedJobs = async (
   const allRows: readonly ClosedJobRow[] = baseRows.map((row) => ({
     ...row,
     pricingSnapshot: snapshots.get(row.job.id) ?? null,
+    issuedTotals: totals.get(row.job.id) ?? null,
   }));
   const needle = filters.term.trim().toLowerCase();
 
