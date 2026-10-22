@@ -52,10 +52,19 @@ export const POST = writeRoute({
   operation: 'customers.raiseChangeRequest',
   schema: z
     .object({
-      subject: z.enum(['customer', 'site', 'machine']),
+      subject: z.enum(['customer', 'site', 'machine', 'job']),
       customerId: z.string().min(1).max(100),
       siteId: z.string().min(1).max(100).nullable().optional(),
       machineId: z.string().min(1).max(100).nullable().optional(),
+      /*
+       * CUST-CR, THE JOB HALF. The job a CUSTOMER has asked for something on,
+       * and which of their contacts asked. Both resolved and checked by the
+       * operation — a job id from a browser is a claim like any other, and a
+       * request filed against another customer's job would put one customer's
+       * words on another's job card.
+       */
+      jobId: z.string().min(1).max(100).nullable().optional(),
+      requestedByContactId: z.string().min(1).max(100).nullable().optional(),
       details: z.string().min(1).max(CHANGE_REQUEST_DETAILS_LIMIT),
     })
     .strict(),
@@ -69,6 +78,10 @@ export const POST = writeRoute({
       ...(context.input.machineId === undefined
         ? {}
         : { machineId: context.input.machineId as never }),
+      ...(context.input.jobId === undefined ? {} : { jobId: context.input.jobId as never }),
+      ...(context.input.requestedByContactId === undefined
+        ? {}
+        : { requestedByContactId: context.input.requestedByContactId as never }),
       details: context.input.details,
     }),
 });

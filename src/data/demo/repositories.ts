@@ -1237,6 +1237,15 @@ class DemoChangeRequestRepository implements ChangeRequestRepository {
     );
   }
 
+  /** What the CUSTOMER has asked for on one job. CUST-CR, the job half. */
+  listForJob(jobId: JobId): Promise<readonly ChangeRequest[]> {
+    return Promise.resolve(
+      this.all()
+        .filter((entry) => entry.jobId === jobId)
+        .sort((left, right) => right.raisedAt.localeCompare(left.raisedAt)),
+    );
+  }
+
   listForCustomer(customerId: CustomerId): Promise<readonly ChangeRequest[]> {
     return Promise.resolve(
       this.all()

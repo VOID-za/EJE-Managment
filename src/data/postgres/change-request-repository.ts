@@ -1,10 +1,12 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type {
   ChangeRequest,
+  ContactId,
   ChangeRequestState,
   ChangeRequestSubject,
   CustomerId,
   IsoDateTime,
+  JobId,
   MachineId,
   SiteId,
   UserId,
@@ -21,6 +23,9 @@ const toRequest = (row: Row): ChangeRequest => ({
   customerId: row.customerId as CustomerId,
   siteId: row.siteId === null ? null : (row.siteId as SiteId),
   machineId: row.machineId === null ? null : (row.machineId as MachineId),
+  jobId: row.jobId === null ? null : (row.jobId as JobId),
+  requestedByContactId:
+    row.requestedByContactId === null ? null : (row.requestedByContactId as ContactId),
   details: row.details,
   raisedBy: (row.raisedBy ?? '') as UserId,
   raisedAt: row.raisedAt as IsoDateTime,
@@ -88,6 +93,16 @@ export class PostgresChangeRequestRepository implements ChangeRequestRepository 
     return rows.map(toRequest);
   }
 
+  /** What the customer has asked for on ONE job. CUST-CR, the job half. */
+  async listForJob(jobId: JobId): Promise<readonly ChangeRequest[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.customerChangeRequests)
+      .where(eq(schema.customerChangeRequests.jobId, jobId))
+      .orderBy(desc(schema.customerChangeRequests.raisedAt));
+    return rows.map(toRequest);
+  }
+
   async listForRaiser(raisedBy: UserId): Promise<readonly ChangeRequest[]> {
     const rows = await this.db
       .select()
@@ -116,6 +131,8 @@ export class PostgresChangeRequestRepository implements ChangeRequestRepository 
         customerId: request.customerId as string,
         siteId: request.siteId,
         machineId: request.machineId,
+        jobId: request.jobId,
+        requestedByContactId: request.requestedByContactId,
         details: request.details,
         raisedBy: request.raisedBy.length === 0 ? null : (request.raisedBy as string),
         raisedAt: request.raisedAt,

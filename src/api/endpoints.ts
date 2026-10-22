@@ -158,10 +158,14 @@ export const changeRequests = {
     ),
   mine: () => apiGet<{ rows: readonly ChangeRequest[] }>('/api/change-requests?mine=1'),
   raise: (input: {
-    readonly subject: 'customer' | 'site' | 'machine';
+    readonly subject: 'customer' | 'site' | 'machine' | 'job';
     readonly customerId: string;
     readonly siteId?: string | null;
     readonly machineId?: string | null;
+    /** CUST-CR, the job half: the job a CUSTOMER asked for something on. */
+    readonly jobId?: string | null;
+    /** Which of that customer's contacts asked. */
+    readonly requestedByContactId?: string | null;
     readonly details: string;
   }) => command<ChangeRequest>('/api/change-requests', input),
   resolve: (requestId: string, input: { readonly outcome: 'applied' | 'declined'; readonly note: string }) =>

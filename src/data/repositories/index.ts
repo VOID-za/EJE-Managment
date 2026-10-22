@@ -523,6 +523,13 @@ export interface ChangeRequestRepository {
   list(filter?: { readonly state?: ChangeRequestState }): Promise<readonly ChangeRequest[]>;
   /** Everything raised about one customer, including its sites and machines. */
   listForCustomer(customerId: CustomerId): Promise<readonly ChangeRequest[]>;
+  /**
+   * What the CUSTOMER has asked for on one job, newest first. CUST-CR.
+   *
+   * Its own method rather than a filter on `list`, because the job screen reads
+   * it for one job on every load and the office's queue reads by state.
+   */
+  listForJob(jobId: JobId): Promise<readonly ChangeRequest[]>;
   /** One person's own reports, newest first. */
   listForRaiser(raisedBy: UserId): Promise<readonly ChangeRequest[]>;
   findById(id: string): Promise<ChangeRequest | null>;

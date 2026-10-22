@@ -1,4 +1,5 @@
 import type {
+  ChangeRequest,
   JobCorrection,
   UnsignedDeliveryAuthorisation,
   ChecklistTemplate,
@@ -56,6 +57,21 @@ export interface JobView {
    * no checklist yet it is the current template for the job type.
    */
   readonly checklistTemplate: ChecklistTemplate | null;
+  /**
+   * WHAT THE CUSTOMER HAS ASKED FOR ON THIS JOB, newest first. CUST-CR.
+   *
+   * Visible to whoever may see the job, which is the whole of what a
+   * customer's request DOES to a job in progress: it is written down where the
+   * person doing the work will read it, and it changes nothing by itself.
+   */
+  readonly customerRequests: readonly ChangeRequest[];
+  /**
+   * Every contact this customer has, archived ones included. CUST-CR.
+   *
+   * For recording WHICH of them asked for something on the job — often not the
+   * person the paperwork goes to, which is `contact` above.
+   */
+  readonly customerContacts: readonly Contact[];
   /**
    * CORRECTIONS TO THIS JOB CARD, oldest first. BD-02, IMMUT-9.
    *
@@ -213,11 +229,36 @@ export const loadJobView = async (
             : Promise.resolve(null),
         ]);
 
+  /*
+   * WHAT THE CUSTOMER HAS ASKED FOR ON THIS JOB. CUST-CR, the job half.
+   *
+   * THIS IS THE WHOLE OF "what does it do to a job in progress": it is VISIBLE
+   * to whoever is working the job, and it changes nothing. A request that the
+   * office could see and the technician could not would be the office reading
+   * "while you are here, look at the Y axis too" and the technician driving
+   * away without it.
+   *
+   * Read for every job rather than only an issued one, unlike the corrections
+   * above: a customer asks for something while the work is being done, which
+   * is exactly when it matters.
+   */
+  const customerRequests = await repos.changeRequests.listForJob(job.id);
+
   return {
     job,
     customer,
     site,
     contact: contacts.find((candidate) => candidate.id === job.contactId) ?? null,
+    /*
+     * EVERY CONTACT THE CUSTOMER HAS. CUST-CR, the job half.
+     *
+     * The job's own recipient is `contact` above; this is the list the office
+     * picks from when recording WHO telephoned, which is often not the person
+     * the paperwork goes to. Archived ones included, because the person who
+     * telephoned last month may have left since and the record must still
+     * name them.
+     */
+    customerContacts: contacts,
     machine,
     primaryTechnician:
       users.find((candidate) => candidate.id === job.primaryTechnicianId) ?? null,
@@ -228,6 +269,7 @@ export const loadJobView = async (
     users,
     checklistTemplate,
     checklistVersionMissing,
+    customerRequests,
     corrections: corrections.map(({ documentStorageKey: _key, ...rest }) => rest),
     unsignedDeliveryAuthorisation,
   };

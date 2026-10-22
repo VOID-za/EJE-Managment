@@ -35,6 +35,7 @@ import { ChecklistRunner } from '@/components/jobs/ChecklistRunner';
 import { CompletionReportPanel } from '@/components/jobs/CompletionReportPanel';
 import { FinalDocumentCard } from '@/components/jobs/FinalDocumentCard';
 import { JobCorrectionsPanel } from '@/components/jobs/JobCorrectionsPanel';
+import { CustomerJobRequestsPanel } from '@/components/jobs/CustomerJobRequestsPanel';
 import { UnsignedDeliveryPanel } from '@/components/jobs/UnsignedDeliveryPanel';
 import { CompleteJobWizard } from '@/components/jobs/CompleteJobWizard';
 import { JobActionBar } from '@/components/jobs/JobActionBar';
@@ -326,6 +327,22 @@ const JobDetailPage = ({
           onChanged={refresh}
         />
       )}
+
+      {/*
+        WHAT THE CUSTOMER HAS ASKED FOR ON THIS JOB. CUST-CR, the job half.
+
+        Rendered for everybody who may see the job, which is the whole of what
+        a customer's request DOES to a job in progress: it is written down
+        where the person doing the work will read it. The office's decision
+        button is drawn only for the office, and the server checks it again.
+      */}
+      <CustomerJobRequestsPanel
+        job={job}
+        requests={view.customerRequests}
+        contacts={view.customerContacts}
+        users={users}
+        onChanged={refresh}
+      />
 
       {job.status === 'cancelled' && job.cancellation !== null && (
         <Card className="mb-5 border-signal-300 bg-signal-50">

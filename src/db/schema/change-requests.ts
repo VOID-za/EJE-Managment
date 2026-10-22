@@ -1,7 +1,8 @@
 import { check, index, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { createdAt, instant, primaryId } from './columns';
-import { customers, sites } from './customers';
+import { contacts, customers, sites } from './customers';
+import { jobs } from './jobs';
 import { machines } from './machines';
 import { users } from './identity';
 
@@ -47,6 +48,26 @@ export const customerChangeRequests = pgTable(
       .references(() => customers.id, { onDelete: 'restrict' }),
     siteId: uuid('site_id').references(() => sites.id, { onDelete: 'restrict' }),
     machineId: uuid('machine_id').references(() => machines.id, { onDelete: 'restrict' }),
+    /**
+     * THE JOB A CUSTOMER HAS ASKED FOR SOMETHING ON. CUST-CR, the job half.
+     *
+     * `restrict` like every other reference here: a job with a customer's
+     * request against it cannot be deleted out from under the record of them
+     * asking. Set on a `job` request and null on every other subject, both ways
+     * round, which the CHECK below enforces.
+     */
+    jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'restrict' }),
+    /**
+     * WHO AT THE CUSTOMER ASKED.
+     *
+     * `raised_by` is the EJE person who took the call; this is the customer
+     * contact who made it. Nullable, because the office does not always know
+     * which of four contacts telephoned — and a required field people fill in
+     * with "the customer" is worse than an empty one.
+     */
+    requestedByContactId: uuid('requested_by_contact_id').references(() => contacts.id, {
+      onDelete: 'restrict',
+    }),
     /** What the technician says is wrong, in their own words. */
     details: text('details').notNull(),
     raisedBy: uuid('raised_by').references(() => users.id),
@@ -63,6 +84,8 @@ export const customerChangeRequests = pgTable(
     index('customer_change_requests_state_idx').on(table.state, table.raisedAt),
     index('customer_change_requests_customer_idx').on(table.customerId, table.raisedAt),
     index('customer_change_requests_raised_by_idx').on(table.raisedBy, table.raisedAt),
+    // The job screen's own read: what the customer has asked for on this job.
+    index('customer_change_requests_job_idx').on(table.jobId, table.raisedAt),
     // A report must say something. An empty one is a telephone call nobody made.
     check('customer_change_requests_details_present', sql`length(btrim(${table.details})) > 0`),
     /*
@@ -77,6 +100,24 @@ export const customerChangeRequests = pgTable(
     check(
       'customer_change_requests_resolver_recorded',
       sql`${table.resolvedAt} is null or ${table.resolvedBy} is not null`,
+    ),
+    /*
+     * A JOB REQUEST NAMES A JOB, AND NOTHING ELSE DOES. CUST-CR, the job half.
+     *
+     * An equivalence, so it refuses both halves: a `job` request with no job —
+     * which is a request about nothing — and a `machine` request that happens
+     * to carry a job id, which would put a customer's request on a job screen
+     * under a heading about the register.
+     */
+    check(
+      'customer_change_requests_job_matches_subject',
+      sql`(${table.subject} = 'job') = (${table.jobId} is not null)`,
+    ),
+    // And only a customer's request has a customer contact behind it: on a
+    // register report there is nobody at the customer who asked.
+    check(
+      'customer_change_requests_contact_is_for_a_job',
+      sql`${table.requestedByContactId} is null or ${table.subject} = 'job'`,
     ),
   ],
 );

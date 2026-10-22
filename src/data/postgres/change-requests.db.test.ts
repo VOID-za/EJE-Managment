@@ -54,6 +54,9 @@ describeDb('the PostgreSQL change-request repository', () => {
     customerId: asCustomerId(IDS.customer),
     siteId: null,
     machineId: null,
+    // CUST-CR's job half: null on a register report, which is what these are.
+    jobId: null,
+    requestedByContactId: null,
     details: 'The accounts email bounces.',
     raisedBy: asUserId(IDS.technician),
     raisedAt: '2026-10-18T07:30:00.000Z',
@@ -245,5 +248,116 @@ describeDb('the PostgreSQL change-request repository', () => {
       db.delete(schema.sites).where(eq(schema.sites.id, siteId)),
     );
     expect(message).toMatch(/customer_change_requests/u);
+  });
+});
+
+/**
+ * THE JOB HALF, AND WHAT THE DATABASE REFUSES ABOUT IT. CUST-CR.
+ *
+ * Two equivalences, each refusing both halves of its own mistake: a `job`
+ * request with no job (a request about nothing), a register report carrying a
+ * job id (one customer's words filed under a heading about the register), and a
+ * customer contact recorded against a report no customer made.
+ */
+describeDb('a customer’s request about a job, on PostgreSQL', () => {
+  let db: Database;
+  const JOB = '00000000-0000-4000-8000-0000000000f1';
+
+  beforeAll(async () => {
+    db = await openTestDatabase(url ?? '');
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`select 1`);
+  });
+
+  const refusalOf = async (work: Promise<unknown>): Promise<string> => {
+    try {
+      await work;
+    } catch (error) {
+      const cause = (error as { cause?: unknown }).cause;
+      if (cause instanceof Error) return cause.message;
+      return error instanceof Error ? error.message : String(error);
+    }
+    throw new Error('the statement was expected to be refused, and was not');
+  };
+
+  beforeEach(async () => {
+    await truncateAll(db);
+    await seedBaseline(db);
+    await db.insert(schema.jobs).values({
+      id: JOB,
+      jobNumber: 'EJE-9201',
+      jobNumberSeq: 9201,
+      customerId: IDS.customer,
+      siteId: IDS.site,
+      contactId: IDS.contact,
+      machineId: IDS.machine,
+      jobTypeCode: 'service',
+      priority: 'normal',
+      status: 'in_progress',
+    });
+  });
+
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: crypto.randomUUID(),
+    subject: 'job',
+    customerId: IDS.customer,
+    jobId: JOB,
+    requestedByContactId: IDS.contact,
+    details: 'Also check the Y axis while you are here.',
+    raisedBy: IDS.master,
+    raisedAt: '2026-10-22T09:00:00.000Z',
+    state: 'open',
+    ...over,
+  });
+
+  it('stores one, with the job and the contact who asked', async () => {
+    await db.insert(schema.customerChangeRequests).values(row());
+
+    const [stored] = await db.select().from(schema.customerChangeRequests);
+    expect(stored?.jobId).toBe(JOB);
+    expect(stored?.requestedByContactId).toBe(IDS.contact);
+  });
+
+  it('REFUSES a `job` request with no job', async () => {
+    const said = await refusalOf(
+      db.insert(schema.customerChangeRequests).values(row({ jobId: null })),
+    );
+    expect(said).toMatch(/customer_change_requests_job_matches_subject/u);
+  });
+
+  it('REFUSES a register report that carries a job id', async () => {
+    const said = await refusalOf(
+      db
+        .insert(schema.customerChangeRequests)
+        .values(row({ subject: 'machine', requestedByContactId: null })),
+    );
+    expect(said).toMatch(/customer_change_requests_job_matches_subject/u);
+  });
+
+  it('REFUSES a customer contact on a report no customer made', async () => {
+    const said = await refusalOf(
+      db
+        .insert(schema.customerChangeRequests)
+        .values(row({ subject: 'customer', jobId: null })),
+    );
+    expect(said).toMatch(/customer_change_requests_contact_is_for_a_job/u);
+  });
+
+  it('REFUSES the job being deleted out from under it', async () => {
+    // `restrict`, like every other reference here: deleting the job to make
+    // the record of them asking disappear is the one thing that must not work.
+    await db.insert(schema.customerChangeRequests).values(row());
+    const said = await refusalOf(db.delete(schema.jobs).where(eq(schema.jobs.id, JOB)));
+    expect(said).toMatch(/customer_change_requests_job_id_jobs_id_fk|violates foreign key/u);
+  });
+
+  it('REFUSES the contact being deleted out from under it', async () => {
+    await db.insert(schema.customerChangeRequests).values(row());
+    const said = await refusalOf(
+      db.delete(schema.contacts).where(eq(schema.contacts.id, IDS.contact)),
+    );
+    expect(said).toMatch(/violates foreign key/u);
   });
 });

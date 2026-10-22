@@ -532,6 +532,29 @@ const v25ToV26 = (data: Loose): Loose => ({
   machineMovements: Array.isArray(data.machineMovements) ? data.machineMovements : [],
 });
 
+/**
+ * CUST-CR, the job half. Two fields on every change request.
+ *
+ * Both null on every existing row, which is the honest value: every request
+ * written before this is a report about the REGISTER, and a register report has
+ * no job and nobody at the customer behind it.
+ */
+const v26ToV27 = (data: Loose): Loose => ({
+  ...data,
+  changeRequests: Array.isArray(data.changeRequests)
+    ? data.changeRequests.map((request) => {
+        if (typeof request !== 'object' || request === null) return request;
+        const row = request as Record<string, unknown>;
+        return {
+          ...row,
+          jobId: 'jobId' in row ? row.jobId : null,
+          requestedByContactId:
+            'requestedByContactId' in row ? row.requestedByContactId : null,
+        };
+      })
+    : data.changeRequests,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -551,6 +574,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   23: v23ToV24,
   24: v24ToV25,
   25: v25ToV26,
+  26: v26ToV27,
 };
 
 /**

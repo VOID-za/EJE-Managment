@@ -176,6 +176,13 @@
       "when": 1792606463482,
       "tag": "0024_machine_movements",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792606464482,
+      "tag": "0025_customer_job_change_requests",
+      "breakpoints": true
     }
   ]
 }
