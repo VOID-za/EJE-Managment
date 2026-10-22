@@ -234,14 +234,29 @@ export const runOcrAttempt = async (
       characters: outcome.text.length,
       pages: outcome.pages,
       /*
-       * TRUNCATED WHEN THE ENGINE READ FEWER PAGES THAN THE DOCUMENT HAS.
-       * The engine reads up to its page bound, so a 214-page manual comes back
-       * as 40 pages of text — and an index that did not say so would be a
-       * partial index pretending to be a whole one.
+       * TRUNCATED IF THE ENGINE SAYS SO, OR IF IT READ FEWER PAGES THAN THE
+       * DOCUMENT HAS.
+       *
+       * The engine now reports its own truncation, and it knows more than this
+       * comparison can: a whole-document DEADLINE or a TEXT BUDGET stops it
+       * mid-document for reasons the page count cannot show — and the page
+       * bound itself is the engine's, not this function's. The comparison is
+       * kept as well, because a document whose pages simply did not all
+       * rasterise is also a partial index.
        */
-      truncated: outcome.pages < document.pageCount,
-      unreadableStreams: 0,
-      failureReason: '',
+      truncated: outcome.truncated || outcome.pages < document.pageCount,
+      /*
+       * PAGES THAT FAILED TO BE RECOGNISED, in the column the text-layer path
+       * uses for streams it could not decompress. The same fact — "this many
+       * parts of the document produced nothing" — so the same column, rather
+       * than a second one that means almost the same thing.
+       */
+      unreadableStreams: outcome.pagesFailed,
+      /*
+       * WHY IT IS PARTIAL, where the engine said. An index marked truncated
+       * with no reason sends somebody looking at the document.
+       */
+      failureReason: outcome.truncationReason,
     },
     outcome.text,
   );
@@ -276,18 +291,31 @@ export const describeSearchability = (
   job: OcrJob | null,
 ): { readonly searchable: boolean; readonly label: string; readonly detail: string } => {
   if (index !== null && index.state === 'indexed') {
+    /*
+     * PART OF A DOCUMENT IS SEARCHABLE, AND IT SAYS WHICH PART.
+     *
+     * A whole-document deadline, a text budget or the page bound can stop
+     * recognition before the document ends. `truncated` already said so; what
+     * was missing was WHY, which the engine now reports — because somebody
+     * searching a 214-page manual and not finding alarm 414 needs to know that
+     * only the first forty pages were read, rather than concluding the alarm
+     * is not in the book.
+     */
+    const partial =
+      index.truncated && index.failureReason.length > 0 ? ` ${index.failureReason}` : '';
     return index.source === 'ocr'
       ? {
           searchable: true,
-          label: 'Searchable (recognised text)',
+          label: index.truncated ? 'Searchable in part (recognised text)' : 'Searchable (recognised text)',
           detail:
             'The text was read off the scanned pages by text recognition, so it can contain ' +
-            'mistakes. Search for a code more than one way if the first does not find it.',
+            'mistakes. Search for a code more than one way if the first does not find it.' +
+            partial,
         }
       : {
           searchable: true,
-          label: 'Searchable',
-          detail: "The text came out of the document's own text layer.",
+          label: index.truncated ? 'Searchable in part' : 'Searchable',
+          detail: "The text came out of the document's own text layer." + partial,
         };
   }
 

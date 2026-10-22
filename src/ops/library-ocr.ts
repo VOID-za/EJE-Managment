@@ -9,7 +9,7 @@ import {
   type OcrAttempt,
   type OcrQueueSummary,
 } from '@/application/library-ocr';
-import { buildOcr } from '@/services/ocr';
+import { buildOcr, describeOcrLimits } from '@/services/ocr';
 import { FilesystemStorageService, readStorageConfiguration } from '@/services/production/file-storage';
 import { SystemClock, SequentialIdGenerator } from '@/services/simulated/system';
 import { UuidGenerator } from '@/services/production/ids';
@@ -114,6 +114,26 @@ const main = async (): Promise<void> => {
     capability.available
       ? `engine   ${capability.engine}\n`
       : `engine   NONE. ${capability.reason}\n`,
+  );
+
+  /*
+   * THE LIMITS THIS RUN WILL ACTUALLY APPLY, printed from the environment.
+   *
+   * An operator wondering why a 214-page manual came back as forty pages
+   * should be able to see the answer without reading the source — and an
+   * operator who set `EJE_OCR_MAX_PAGES=lots` should be able to see that it
+   * fell back to the default. Printed whether or not an engine is installed,
+   * because that is when somebody is configuring it.
+   */
+  const limits = describeOcrLimits(process.env);
+  process.stdout.write(
+    `limits   ${limits.maxPages} page(s) per document · ` +
+      `${limits.deadlineMinutes} minute deadline · ` +
+      `${limits.maxInputMb} MB file · ${limits.maxTextMb} MB of text · language ${limits.language}\n`,
+  );
+  process.stdout.write(
+    `         ${limits.rasteriser} + ${limits.recogniser}` +
+      `${limits.overridden.length === 0 ? ' (all defaults)' : ` (set: ${limits.overridden.join(', ')})`}\n`,
   );
 
   /*

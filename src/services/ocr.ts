@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+/** Whole megabytes, for a message a person reads. */
+const megabytes = (bytes: number): number => Math.round(bytes / (1024 * 1024));
+
 /**
  * READING THE PIXELS OF A SCANNED DOCUMENT. MASTER SCOPE LIB-5.
  *
@@ -44,7 +47,25 @@ export interface OcrCapability {
 
 export type OcrOutcome =
   /** Pixels were read and produced text. */
-  | { readonly kind: 'text'; readonly text: string; readonly pages: number; readonly engine: string }
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      /** Pages that produced text. */
+      readonly pages: number;
+      readonly engine: string;
+      /**
+       * True when a LIMIT stopped the read, rather than the document ending.
+       *
+       * The page bound, the whole-document deadline or the text budget. The
+       * index records it, so a partial index says it is partial instead of
+       * passing as a whole one.
+       */
+      readonly truncated: boolean;
+      /** Which limit, in words, when one bit. Empty when none did. */
+      readonly truncationReason: string;
+      /** Pages that were attempted and produced nothing, with why. */
+      readonly pagesFailed: number;
+    }
   /**
    * The engine ran and produced nothing usable.
    *
@@ -97,9 +118,37 @@ export const OCR_DEFAULT_MAX_PAGES = 40;
 /** Resolution to rasterise at. 300 dpi is what OCR engines are trained for. */
 const RASTER_DPI = 300;
 
-/** Both binaries, and how long each is given. */
+/**
+ * EVERY RESOURCE LIMIT, IN ONE PLACE, AND WHY EACH ONE IS THE NUMBER IT IS.
+ *
+ * This runs as a command-line worker on the same small VPS that serves the
+ * application, so an unbounded run is not merely slow — it is the web server
+ * becoming unresponsive, or the disk filling with page images. Each bound below
+ * is a thing that would otherwise be unbounded:
+ *
+ *   - PER-PROCESS TIMEOUTS bound ONE call. They were here already.
+ *   - THE WHOLE-DOCUMENT DEADLINE is new, and it is the one that mattered:
+ *     forty pages at a ten-minute page timeout is six and a half HOURS for a
+ *     single job. Pages are read until the deadline and the index then says it
+ *     is truncated — the same thing it already says about a page bound.
+ *   - THE INPUT SIZE bounds what is written to the workspace, and therefore
+ *     what `pdftoppm` can turn into PNGs. A 25 MB scan at 300 dpi is hundreds
+ *     of megabytes of images.
+ *   - THE TEXT BUDGET bounds what comes back. A badly-scanned page can produce
+ *     a megabyte of noise per page, and the index is a database column.
+ *
+ * Every one is overridable from the environment, because the right number
+ * depends on the machine — and every one is REPORTED when it bites, because a
+ * limit that silently truncates is indistinguishable from a bad scan.
+ */
 const RASTERISE_TIMEOUT_MS = 5 * 60 * 1000;
 const RECOGNISE_TIMEOUT_MS = 10 * 60 * 1000;
+/** Twenty minutes for one document, whatever its page count. */
+export const OCR_DEFAULT_DEADLINE_MS = 20 * 60 * 1000;
+/** 40 MB: larger than the 25 MB upload limit, so it bounds nothing legitimate. */
+export const OCR_DEFAULT_MAX_INPUT_BYTES = 40 * 1024 * 1024;
+/** 2 MB of recognised text. A 40-page manual is nearer 100 kB. */
+export const OCR_DEFAULT_MAX_TEXT_BYTES = 2 * 1024 * 1024;
 
 const binaryVersion = (binary: string, argument: string): string | null => {
   const result = spawnSync(binary, [argument], { encoding: 'utf8', timeout: 15_000 });
@@ -119,17 +168,27 @@ const binaryVersion = (binary: string, argument: string): string | null => {
  * is removed in a `finally` — a customer's drawing must not be left as a loose
  * file for somebody to find.
  */
-export const localOcr = (
-  config: {
-    readonly rasteriser?: string;
-    readonly recogniser?: string;
-    readonly language?: string;
-    readonly maxPages?: number;
-  } = {},
-): OcrService => {
+export interface LocalOcrConfig {
+  /** Path to `pdftoppm`, or the bare name to find it on PATH. */
+  readonly rasteriser?: string;
+  /** Path to `tesseract`, or the bare name. */
+  readonly recogniser?: string;
+  /** Tesseract language data to use, e.g. `eng` or `eng+afr`. */
+  readonly language?: string;
+  readonly maxPages?: number;
+  /** The whole-document deadline. See the limits above. */
+  readonly deadlineMs?: number;
+  readonly maxInputBytes?: number;
+  readonly maxTextBytes?: number;
+}
+
+export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
   const rasteriser = config.rasteriser ?? 'pdftoppm';
   const recogniser = config.recogniser ?? 'tesseract';
   const language = config.language ?? 'eng';
+  const deadlineMs = config.deadlineMs ?? OCR_DEFAULT_DEADLINE_MS;
+  const maxInputBytes = config.maxInputBytes ?? OCR_DEFAULT_MAX_INPUT_BYTES;
+  const maxTextBytes = config.maxTextBytes ?? OCR_DEFAULT_MAX_TEXT_BYTES;
 
   const describe = (): OcrCapability => {
     const recogniserVersion = binaryVersion(recogniser, '--version');
@@ -160,6 +219,25 @@ export const localOcr = (
       }
 
       const maxPages = options?.maxPages ?? config.maxPages ?? OCR_DEFAULT_MAX_PAGES;
+
+      /*
+       * THE INPUT SIZE, CHECKED BEFORE ANYTHING IS WRITTEN. A scan larger than
+       * this would be turned into hundreds of megabytes of page images on a
+       * VPS that also serves the application, so it is refused as a document
+       * this machine cannot read rather than attempted and abandoned halfway.
+       */
+      if (pdf.byteLength > maxInputBytes) {
+        return Promise.resolve({
+          kind: 'empty',
+          engine: describe().engine,
+          reason:
+            `The file is ${megabytes(pdf.byteLength)} MB, and this server reads up to ` +
+            `${megabytes(maxInputBytes)} MB at a time — rasterising a larger one would fill the ` +
+            'disk. Split it, or raise EJE_OCR_MAX_INPUT_MB on a machine with room.',
+        });
+      }
+
+      const startedAt = Date.now();
       const workspace = mkdtempSync(join(tmpdir(), 'eje-ocr-'));
       try {
         const source = join(workspace, 'document.pdf');
@@ -192,25 +270,93 @@ export const localOcr = (
         }
 
         const texts: string[] = [];
+        let bytesSoFar = 0;
+        let pagesRead = 0;
+        let pagesFailed = 0;
+        let truncationReason = '';
+
         for (const page of pages) {
+          /*
+           * THE WHOLE-DOCUMENT DEADLINE, CHECKED BETWEEN PAGES. The per-page
+           * timeout bounds one call; this bounds the job. Forty pages at a
+           * ten-minute page timeout is six and a half hours, which on this
+           * machine is the web server starved for an afternoon.
+           */
+          if (Date.now() - startedAt > deadlineMs) {
+            truncationReason =
+              `Recognition stopped after ${Math.round(deadlineMs / 60_000)} minutes, having read ` +
+              `${pagesRead} of ${pages.length} page(s). Raise EJE_OCR_DEADLINE_MINUTES to read more.`;
+            break;
+          }
+
           const output = join(workspace, `${page}.out`);
           const recognised = spawnSync(
             recogniser,
             [join(workspace, page), output, '-l', language],
             { timeout: RECOGNISE_TIMEOUT_MS, encoding: 'utf8' },
           );
+
+          /*
+           * MISSING LANGUAGE DATA IS A CONFIGURATION PROBLEM, NOT A BAD SCAN.
+           *
+           * Tesseract exits non-zero with "Error opening data file" when the
+           * trained data for the language is not installed — and every page
+           * fails the same way, so the document came back as "no text came out
+           * of any of them", which blames the customer's scan for an apt-get
+           * nobody ran. It is reported as UNAVAILABLE, naming the language, so
+           * the job is retried after somebody installs it rather than being
+           * recorded as an unreadable document.
+           */
+          const said = `${recognised.stdout ?? ''}${recognised.stderr ?? ''}`;
+          if (/Error opening data file|Failed loading language|tessdata/iu.test(said)) {
+            return Promise.resolve({
+              kind: 'unavailable',
+              reason:
+                `The "${language}" language data is not installed for ${recogniser}, so nothing ` +
+                'could be recognised. Install the tesseract language package (for English, ' +
+                '`tesseract-ocr-eng`) or set EJE_OCR_LANGUAGE to one that is installed.',
+            });
+          }
+
           /*
            * A PAGE THAT FAILS DOES NOT FAIL THE DOCUMENT. One unreadable page
            * in a forty-page manual should not throw away the other
            * thirty-nine; the text-layer path takes the same view of a stream it
-           * cannot decompress, and records how many.
+           * cannot decompress. COUNTED, though — a document where half the
+           * pages failed is a document somebody should look at, and silence
+           * about it reads as a clean read.
            */
-          if (recognised.error !== undefined || recognised.status !== 0) continue;
+          if (recognised.error !== undefined || recognised.status !== 0) {
+            pagesFailed += 1;
+            continue;
+          }
+
+          let pageText: string;
           try {
-            texts.push(readFileSync(`${output}.txt`, 'utf8'));
+            pageText = readFileSync(`${output}.txt`, 'utf8');
           } catch {
             // Nothing was written for this page. Same reasoning as above.
+            pagesFailed += 1;
+            continue;
           }
+
+          /*
+           * THE TEXT BUDGET. A badly-scanned page can produce a megabyte of
+           * noise, and what comes out of here goes into a database column and
+           * a search index. Stopping at the budget and SAYING SO beats
+           * either a refusal or a column nobody sized for it.
+           */
+          if (bytesSoFar + Buffer.byteLength(pageText, 'utf8') > maxTextBytes) {
+            truncationReason =
+              `Recognition stopped at ${megabytes(maxTextBytes)} MB of text, having read ` +
+              `${pagesRead} of ${pages.length} page(s). A scan producing this much text is ` +
+              'usually a poor scan rather than a long document.';
+            break;
+          }
+
+          bytesSoFar += Buffer.byteLength(pageText, 'utf8');
+          pagesRead += 1;
+          texts.push(pageText);
         }
 
         const text = texts.join('\n').trim();
@@ -219,11 +365,30 @@ export const localOcr = (
             kind: 'empty',
             engine: capability.engine,
             reason:
-              `${pages.length} page(s) were read and no text came out of any of them. The scan ` +
+              `${pages.length} page(s) were rasterised and no text came out of any of them` +
+              `${pagesFailed > 0 ? ` (${pagesFailed} failed to be recognised)` : ''}. The scan ` +
               'may be blank, too faint, or not of a document.',
           });
         }
-        return Promise.resolve({ kind: 'text', text, pages: pages.length, engine: capability.engine });
+        return Promise.resolve({
+          kind: 'text',
+          text,
+          pages: pagesRead,
+          engine: capability.engine,
+          /*
+           * TRUNCATED BY A LIMIT, OR BY THE PAGE BOUND. Both are this engine
+           * stopping before the document ended, which is what the index has to
+           * be able to say — see `OcrOutcome`.
+           */
+          truncated: truncationReason.length > 0 || pages.length >= maxPages,
+          truncationReason:
+            truncationReason.length > 0
+              ? truncationReason
+              : pages.length >= maxPages
+                ? `Only the first ${maxPages} page(s) were read. Raise EJE_OCR_MAX_PAGES to read more.`
+                : '',
+          pagesFailed,
+        });
       } catch (cause) {
         /*
          * A FAILURE OF THIS MACHINE, not of the document — a full disk, a
@@ -243,6 +408,61 @@ export const localOcr = (
 };
 
 /**
+ * WHAT THIS DEPLOYMENT WILL ACTUALLY DO, read from its own environment.
+ *
+ * For `npm run library:ocr --report`, so an operator wondering why a 214-page
+ * manual came back as forty pages can see the answer without reading the
+ * source — and so somebody who set `EJE_OCR_MAX_PAGES=lots` can see that it
+ * fell back to the default rather than silently doing nothing.
+ *
+ * `overridden` names the variables that are SET, not the values: a list of
+ * values would be a configuration dump, and this is printed to a terminal that
+ * may be logged.
+ */
+export interface OcrLimitSummary {
+  readonly maxPages: number;
+  readonly deadlineMinutes: number;
+  readonly maxInputMb: number;
+  readonly maxTextMb: number;
+  readonly language: string;
+  readonly rasteriser: string;
+  readonly recogniser: string;
+  /** Which of the variables below the deployment has set. */
+  readonly overridden: readonly string[];
+}
+
+const OCR_VARIABLES = [
+  'EJE_OCR',
+  'EJE_OCR_TESSERACT',
+  'EJE_OCR_PDFTOPPM',
+  'EJE_OCR_LANGUAGE',
+  'EJE_OCR_MAX_PAGES',
+  'EJE_OCR_DEADLINE_MINUTES',
+  'EJE_OCR_MAX_INPUT_MB',
+  'EJE_OCR_MAX_TEXT_MB',
+] as const;
+
+export const describeOcrLimits = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): OcrLimitSummary => {
+  const positive = (value: string | undefined, fallback: number): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+
+  return {
+    maxPages: Math.max(1, positive(env.EJE_OCR_MAX_PAGES, OCR_DEFAULT_MAX_PAGES)),
+    deadlineMinutes: positive(env.EJE_OCR_DEADLINE_MINUTES, OCR_DEFAULT_DEADLINE_MS / 60_000),
+    maxInputMb: positive(env.EJE_OCR_MAX_INPUT_MB, OCR_DEFAULT_MAX_INPUT_BYTES / (1024 * 1024)),
+    maxTextMb: positive(env.EJE_OCR_MAX_TEXT_MB, OCR_DEFAULT_MAX_TEXT_BYTES / (1024 * 1024)),
+    language: env.EJE_OCR_LANGUAGE ?? 'eng',
+    rasteriser: env.EJE_OCR_PDFTOPPM ?? 'pdftoppm',
+    recogniser: env.EJE_OCR_TESSERACT ?? 'tesseract',
+    overridden: OCR_VARIABLES.filter((name) => (env[name] ?? '').trim().length > 0),
+  };
+};
+
+/**
  * Which engine a deployment gets, from its own configuration.
  *
  * UNAVAILABLE UNLESS ASKED FOR. `EJE_OCR=local` is a deployment saying it has
@@ -257,11 +477,53 @@ export const buildOcr = (
 ): OcrService => {
   const configured = (env.EJE_OCR ?? '').trim().toLowerCase();
   if (configured === 'local') {
+    /*
+     * EVERY DEPENDENCY AND EVERY LIMIT, CONFIGURABLE FROM THE ENVIRONMENT.
+     *
+     * The BINARY PATHS matter as much as the limits: `tesseract` and
+     * `pdftoppm` are on PATH on a Debian image and somewhere else entirely in
+     * a container, on NixOS, or where an operator has built a newer tesseract
+     * into /opt. Hard-coding the bare names made the engine unusable on any of
+     * those for no reason — and "not installed" would have been the message,
+     * which is wrong and sends somebody to apt-get for a binary they have.
+     *
+     * A bad number falls back to the default rather than to zero or NaN: an
+     * unreadable `EJE_OCR_MAX_PAGES=lots` must not mean "read no pages".
+     */
+    const positive = (value: string | undefined, fallback: number): number => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    };
+
     return localOcr({
+      ...(env.EJE_OCR_TESSERACT === undefined ? {} : { recogniser: env.EJE_OCR_TESSERACT }),
+      ...(env.EJE_OCR_PDFTOPPM === undefined ? {} : { rasteriser: env.EJE_OCR_PDFTOPPM }),
       ...(env.EJE_OCR_LANGUAGE === undefined ? {} : { language: env.EJE_OCR_LANGUAGE }),
       ...(env.EJE_OCR_MAX_PAGES === undefined
         ? {}
-        : { maxPages: Math.max(1, Number(env.EJE_OCR_MAX_PAGES) || OCR_DEFAULT_MAX_PAGES) }),
+        : { maxPages: Math.max(1, positive(env.EJE_OCR_MAX_PAGES, OCR_DEFAULT_MAX_PAGES)) }),
+      ...(env.EJE_OCR_DEADLINE_MINUTES === undefined
+        ? {}
+        : {
+            deadlineMs:
+              positive(env.EJE_OCR_DEADLINE_MINUTES, OCR_DEFAULT_DEADLINE_MS / 60_000) * 60_000,
+          }),
+      ...(env.EJE_OCR_MAX_INPUT_MB === undefined
+        ? {}
+        : {
+            maxInputBytes:
+              positive(env.EJE_OCR_MAX_INPUT_MB, OCR_DEFAULT_MAX_INPUT_BYTES / (1024 * 1024)) *
+              1024 *
+              1024,
+          }),
+      ...(env.EJE_OCR_MAX_TEXT_MB === undefined
+        ? {}
+        : {
+            maxTextBytes:
+              positive(env.EJE_OCR_MAX_TEXT_MB, OCR_DEFAULT_MAX_TEXT_BYTES / (1024 * 1024)) *
+              1024 *
+              1024,
+          }),
     });
   }
   if (configured.length > 0) {

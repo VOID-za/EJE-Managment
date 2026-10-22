@@ -208,7 +208,15 @@ describe('text recognition', () => {
 
       const outcome = await runOcrAttempt(
         context,
-        engineThat({ kind: 'text', text: 'ALARM 750 SPINDLE DRIVE', pages: 40, engine: 'stub 1.0' }),
+        engineThat({
+          kind: 'text',
+          text: 'ALARM 750 SPINDLE DRIVE',
+          pages: 40,
+          engine: 'stub 1.0',
+          truncated: false,
+          truncationReason: '',
+          pagesFailed: 0,
+        }),
         claimed,
       );
 
@@ -299,7 +307,15 @@ describe('text recognition', () => {
 
       const outcome = await runOcrAttempt(
         context,
-        engineThat({ kind: 'text', text: 'should never be reached', pages: 1, engine: 'stub' }),
+        engineThat({
+          kind: 'text',
+          text: 'should never be reached',
+          pages: 1,
+          engine: 'stub',
+          truncated: false,
+          truncationReason: '',
+          pagesFailed: 0,
+        }),
         claimed,
       );
 

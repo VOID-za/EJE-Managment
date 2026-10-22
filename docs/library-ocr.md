@@ -140,14 +140,45 @@ repository does, not what EJE have agreed to run.*
 ### To turn it on, on a server EJE control
 
 ```bash
-sudo apt-get install -y tesseract-ocr poppler-utils
+sudo apt-get install -y tesseract-ocr tesseract-ocr-eng poppler-utils
 # then, in /etc/eje/eje.env:
 EJE_OCR=local
-# optionally: EJE_OCR_LANGUAGE=eng   EJE_OCR_MAX_PAGES=40
 
-sudo -u eje npm run library:ocr -- --report    # what is waiting
+sudo -u eje npm run library:ocr -- --report    # the engine, the limits, what is waiting
 sudo -u eje npm run library:ocr -- --max 5     # read five
 ```
+
+`tesseract-ocr-eng` is listed separately on purpose: the `tesseract-ocr`
+package on Debian does not always pull the English trained data, and without it
+EVERY page fails. The application reports that case as *"the eng language data
+is not installed"* rather than as an unreadable scan — a distinction worth
+having, because the second blames the customer's document for an `apt-get`
+nobody ran.
+
+### Every dependency and every limit, and what each one is for
+
+All optional. `npm run library:ocr -- --report` prints what this deployment
+will actually apply, and says which variables are set — so a 214-page manual
+coming back as forty pages has an answer that does not require reading the
+source.
+
+| Variable | Default | What it is for |
+|---|---|---|
+| `EJE_OCR_TESSERACT` | `tesseract` | Full path, where the binary is not on `PATH` — a container, NixOS, or a newer build in `/opt`. Without this, a tesseract that IS installed somewhere else reported as "not installed", which sends somebody to `apt-get` for a binary they have. |
+| `EJE_OCR_PDFTOPPM` | `pdftoppm` | The same, for poppler-utils. |
+| `EJE_OCR_LANGUAGE` | `eng` | Tesseract language data, e.g. `eng+afr`. It must be installed — see above. |
+| `EJE_OCR_MAX_PAGES` | `40` | Pages read per document. At 5–15 seconds a page this is five to ten minutes. |
+| `EJE_OCR_DEADLINE_MINUTES` | `20` | **The whole-document deadline**, and the one that matters most: forty pages at the ten-minute per-page timeout is six and a half HOURS for one job, on the machine that also serves the application. |
+| `EJE_OCR_MAX_INPUT_MB` | `40` | Larger than the 25 MB upload limit, so it bounds nothing legitimate. A larger scan rasterised at 300 dpi is hundreds of megabytes of page images. |
+| `EJE_OCR_MAX_TEXT_MB` | `2` | What one document may produce. A badly-scanned page can produce a megabyte of noise, and this goes into a database column and a search index. |
+
+**Every limit that bites is reported.** The index records that it is truncated
+AND why, and the library says *"Searchable in part"* with the reason — because a
+limit that silently truncates cannot be told from a bad scan, and somebody
+searching a manual and not finding alarm 414 would conclude it is not in the
+book. A bad number (`EJE_OCR_MAX_PAGES=lots`) falls back to the default rather
+than to zero, and `--report` still shows the variable as set so the discrepancy
+is visible.
 
 Jobs that settled as `unavailable` before an engine existed are NOT retried
 automatically — nothing about them changed, and the next attempt would say the
