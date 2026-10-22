@@ -526,6 +526,12 @@ const v24ToV25 = (data: Loose): Loose => ({
     : data.jobs,
 });
 
+/** MACH-HIST. A machine's movement history, empty until a machine is moved. */
+const v25ToV26 = (data: Loose): Loose => ({
+  ...data,
+  machineMovements: Array.isArray(data.machineMovements) ? data.machineMovements : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -544,6 +550,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   22: v22ToV23,
   23: v23ToV24,
   24: v24ToV25,
+  25: v25ToV26,
 };
 
 /**

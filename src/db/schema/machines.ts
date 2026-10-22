@@ -230,3 +230,68 @@ export const machineDocuments = pgTable(
     ),
   ],
 );
+
+/**
+ * WHERE A MACHINE HAS STOOD, AND SINCE WHEN. MACH-HIST.
+ *
+ * Append-only by convention and by the absence of any update path: nothing in
+ * the application amends a movement, because a movement is something that
+ * happened. A move recorded wrongly is corrected by recording the real one —
+ * the same discipline as a correction to an issued job card.
+ *
+ * `from_*` ARE NULL ON THE FIRST ROW, which is where the machine was installed.
+ * Both ends are stored so "where was it before" is one row rather than a scan
+ * of every other row in order.
+ *
+ * EVERY FOREIGN KEY RESTRICTS. A site cannot be deleted out from under a
+ * movement that names it — the history would then say the machine moved
+ * somewhere that no longer exists, which is worse than refusing the delete.
+ */
+export const machineMovements = pgTable(
+  'machine_movements',
+  {
+    id: primaryId(),
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id, { onDelete: 'cascade' }),
+    fromSiteId: uuid('from_site_id').references(() => sites.id, { onDelete: 'restrict' }),
+    fromCustomerId: uuid('from_customer_id').references(() => customers.id, {
+      onDelete: 'restrict',
+    }),
+    toSiteId: uuid('to_site_id')
+      .notNull()
+      .references(() => sites.id, { onDelete: 'restrict' }),
+    toCustomerId: uuid('to_customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'restrict' }),
+    /** The day the machine moved, as the office states it. Not the typing day. */
+    effectiveOn: date('effective_on').notNull(),
+    note: text('note').notNull().default(''),
+    recordedBy: uuid('recorded_by').references(() => users.id),
+    recordedAt: instant('recorded_at').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // Read newest-first for one machine, which is the only query there is.
+    index('machine_movements_machine_idx').on(table.machineId, table.effectiveOn),
+    /*
+     * A MOVE HAS TO MOVE SOMETHING.
+     *
+     * Both halves unchanged is not a movement — it is an edit to the serial
+     * number that happened to save the site as well, and recording it would
+     * fill the history with rows saying the machine stayed where it was. The
+     * first row has no `from_*` at all and is admitted by the first arm.
+     */
+    check(
+      'machine_movements_moves_something',
+      sql`(${table.fromSiteId} is null and ${table.fromCustomerId} is null)
+          or ${table.fromSiteId} <> ${table.toSiteId}
+          or ${table.fromCustomerId} <> ${table.toCustomerId}`,
+    ),
+    // Both `from_*` or neither: half a starting point is not a starting point.
+    check(
+      'machine_movements_from_is_whole',
+      sql`(${table.fromSiteId} is null) = (${table.fromCustomerId} is null)`,
+    ),
+  ],
+);

@@ -29,6 +29,8 @@ import { command, type CommandContext, type CommandRegistry } from './types';
  * the schema, which is `.strict()` throughout.
  */
 const text = (max: number) => z.string().max(max);
+/** `YYYY-MM-DD`, as a calendar date and not a timestamp. */
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD');
 const id = z.string().min(1).max(100);
 
 const address = z
@@ -117,6 +119,16 @@ const machineFields = z
      * is not editable from here at all.
      */
     active: z.boolean().optional(),
+    /*
+     * WHEN THE MACHINE MOVED, AND WHY. MACH-HIST.
+     *
+     * Both optional and both IGNORED unless the site or the customer actually
+     * changed. `movedOn` defaults to the business day in the operation, which
+     * is right for recording a move as it happens; the office states a date
+     * when it is catching up on one it has just heard about.
+     */
+    movedOn: isoDate.optional(),
+    moveNote: text(500).optional(),
   })
   .strict();
 
@@ -238,13 +250,19 @@ export const MACHINE_COMMANDS: CommandRegistry = {
        * record. A client that could set `approval: 'approved'` could put an
        * unconfirmed machine on the official register without a Master.
        */
-      return machines.updateMachine(context.operation, {
-        ...stored,
-        ...input,
-        active: input.active ?? stored.active,
-        customerId: asCustomerId(input.customerId),
-        siteId: asSiteId(input.siteId),
-      });
+      const { movedOn, moveNote, ...fields } = input;
+      return machines.updateMachine(
+        context.operation,
+        {
+          ...stored,
+          ...fields,
+          active: input.active ?? stored.active,
+          customerId: asCustomerId(input.customerId),
+          siteId: asSiteId(input.siteId),
+        },
+        movedOn,
+        moveNote,
+      );
     },
   }),
 

@@ -18,6 +18,7 @@ import {
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { WorkflowError } from './errors';
+import { businessToday } from '@/lib/business-time';
 import { storeAndMeasure } from './stored-file';
 import type { RemovalResult } from './removal';
 
@@ -445,9 +446,22 @@ export const approveMachine = async (
   return saved;
 };
 
+/**
+ * Amending the official machine record, and recording a MOVE as a move.
+ *
+ * `movedOn` is the day the machine actually moved, which the office states
+ * because it usually learns about a move after the fact — a technician arrives
+ * and the machine is in the next bay. It defaults to the business day, which is
+ * right for the common case of recording a move as it happens. `moveNote` is
+ * free text and usually empty.
+ *
+ * Both are ignored unless the site or the customer actually changed. MACH-HIST.
+ */
 export const updateMachine = async (
   context: OperationContext,
   machine: Machine,
+  movedOn?: string,
+  moveNote?: string,
 ): Promise<Machine> => {
   if (!can(context.actor.role, 'machines.manage')) {
     throw new WorkflowError('Only a Master can change the official machine record.', [
@@ -467,6 +481,40 @@ export const updateMachine = async (
   });
   const saved = await context.repos.machines.save(machine);
 
+  /*
+   * A MOVE IS RECORDED AS A MOVE. MACH-HIST.
+   *
+   * `machines.site_id` is the CURRENT site, so until this existed the register
+   * could answer "where is it" and nothing could answer "where was it" — and a
+   * job finished eighteen months ago resolved its site LIVE, which reads like a
+   * record of where the work happened and is not one.
+   *
+   * WRITTEN ONLY WHEN SOMETHING ACTUALLY MOVED, which the table also refuses:
+   * an amendment to the serial number that happens to save the same site is not
+   * a movement, and recording it would fill the history with rows saying the
+   * machine stayed where it was.
+   *
+   * THE EFFECTIVE DATE IS STATED, NOT ASSUMED, and defaults to the business day
+   * — see `movedOn`. The office usually learns about a move after the fact.
+   */
+  if (
+    previous !== null &&
+    (previous.siteId !== saved.siteId || previous.customerId !== saved.customerId)
+  ) {
+    await context.repos.machines.saveMovement({
+      id: context.services.ids.next('mov'),
+      machineId: saved.id,
+      fromSiteId: previous.siteId,
+      fromCustomerId: previous.customerId,
+      toSiteId: saved.siteId,
+      toCustomerId: saved.customerId,
+      effectiveOn: movedOn ?? businessToday(new Date(context.services.clock.now())),
+      note: moveNote ?? '',
+      recordedBy: context.actor.id,
+      recordedAt: context.services.clock.now(),
+    });
+  }
+
   const changes: string[] = [];
   if (previous !== null) {
     if (previous.serialNumber !== saved.serialNumber) {
@@ -478,6 +526,9 @@ export const updateMachine = async (
       );
     }
     if (previous.siteId !== saved.siteId) changes.push('site');
+    // MACH-HIST: a sale to another customer is a different event from a move
+    // between a customer's own sites, and the trail should say which.
+    if (previous.customerId !== saved.customerId) changes.push('customer');
     if (previous.active !== saved.active) {
       changes.push(saved.active ? 'returned to service' : 'taken out of service');
     }

@@ -169,6 +169,13 @@
       "when": 1792606462482,
       "tag": "0023_job_charges_and_discounts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792606463482,
+      "tag": "0024_machine_movements",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ import type {
   JobCorrection,
   Machine,
   MachineDocument,
+  MachineMovement,
   MachineId,
   NotificationId,
   OutboxMessage,
@@ -504,6 +505,31 @@ class DemoMachineRepository implements MachineRepository {
       else draft.machineDocuments[index] = document;
     });
     return Promise.resolve(document);
+  }
+
+  /* -- where a machine has stood. MACH-HIST ------------------------------- */
+
+  listMovements(machineId: MachineId): Promise<readonly MachineMovement[]> {
+    // Newest first, with `recordedAt` breaking a tie on the same day — the
+    // same order PostgreSQL returns, so `machineLocationAsAt` cannot give two
+    // answers depending on which backend is behind it.
+    const movements = this.context
+      .read()
+      .machineMovements.filter((movement) => movement.machineId === machineId)
+      .sort((a, b) =>
+        a.effectiveOn === b.effectiveOn
+          ? b.recordedAt.localeCompare(a.recordedAt)
+          : b.effectiveOn.localeCompare(a.effectiveOn),
+      );
+    return Promise.resolve(movements);
+  }
+
+  saveMovement(movement: MachineMovement): Promise<MachineMovement> {
+    // APPEND ONLY, like the table: nothing here looks for an existing row.
+    this.context.commit((draft) => {
+      draft.machineMovements.push(movement);
+    });
+    return Promise.resolve(movement);
   }
 }
 

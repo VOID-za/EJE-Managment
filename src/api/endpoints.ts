@@ -289,6 +289,35 @@ export interface MachineScreen {
   readonly documents: readonly MachineDocumentRow[];
   /** So the screen can name whoever filed a document. */
   readonly users: readonly User[];
+  /**
+   * WHERE THE MACHINE HAS STOOD, newest first. MACH-HIST.
+   *
+   * The names are resolved on the SERVER, because a movement carries ids and
+   * the sites may belong to another customer once the machine has been sold —
+   * which the browser has no way to look up.
+   *
+   * EMPTY IS NOT "IT HAS NEVER MOVED". Nothing was backfilled, so a machine
+   * that moved before this record existed has no history; the screen shows the
+   * section only when there is something in it, rather than printing a
+   * reassuring emptiness.
+   */
+  readonly movements: readonly MachineMovementRow[];
+}
+
+/** One recorded move, with its ids resolved to names. MACH-HIST. */
+export interface MachineMovementRow {
+  readonly id: string;
+  readonly effectiveOn: string;
+  readonly note: string;
+  readonly recordedBy: string;
+  readonly recordedAt: string;
+  /** Empty on the first record, which is where the machine was found. */
+  readonly fromSite: string;
+  readonly fromCustomer: string;
+  readonly toSite: string;
+  readonly toCustomer: string;
+  /** True when the machine changed hands, not merely bays. */
+  readonly changedCustomer: boolean;
 }
 
 export interface TechnicianScreen {

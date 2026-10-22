@@ -356,7 +356,7 @@ export const machineView = async ({ repos, services, actor }: ViewContext, machi
   const machine = await repos.machines.findById(id);
   if (machine === null) return null;
 
-  const [customer, sites, jobs, documents, users] = await Promise.all([
+  const [customer, sites, jobs, documents, users, movements] = await Promise.all([
     repos.customers.findById(machine.customerId),
     // Includes a withdrawn site: this machine may be archived itself, and it
     // still has to say where it stood.
@@ -374,7 +374,50 @@ export const machineView = async ({ repos, services, actor }: ViewContext, machi
     // So the screen can name whoever filed a document. The same list the
     // customer screen carries, for the same reason.
     repos.users.list(),
+    // WHERE IT HAS STOOD. MACH-HIST. Newest first, from the repository.
+    repos.machines.listMovements(id),
   ]);
+
+  /*
+   * THE MOVEMENT HISTORY, WITH THE NAMES RESOLVED HERE. MACH-HIST.
+   *
+   * Resolved on the server because a movement carries ids and the screen needs
+   * names — and because the sites a machine has stood at may belong to ANOTHER
+   * customer once it has been sold, which the browser has no way to look up.
+   * Every site and customer named in the history is fetched, not only the
+   * current customer's.
+   */
+  const movementCustomerIds = new Set(
+    movements.flatMap((movement) =>
+      [movement.fromCustomerId, movement.toCustomerId].filter(
+        (candidate): candidate is NonNullable<typeof candidate> => candidate !== null,
+      ),
+    ),
+  );
+  const historySites = (
+    await Promise.all(
+      [...movementCustomerIds].map((customerId) =>
+        repos.customers.listSites(customerId, { includeArchived: true }),
+      ),
+    )
+  ).flat();
+  /*
+   * `list()` takes no filter and already includes a withdrawn customer — a
+   * customer is archived rather than deleted, exactly so a historical record
+   * can still name them.
+   */
+  const allCustomers = await repos.customers.list();
+  const siteName = (siteId: string | null): string =>
+    siteId === null
+      ? ''
+      : (historySites.find((candidate) => candidate.id === siteId)?.name ??
+        sites.find((candidate) => candidate.id === siteId)?.name ??
+        'A site no longer on the register');
+  const customerName = (customerId: string | null): string =>
+    customerId === null
+      ? ''
+      : (allCustomers.find((candidate) => candidate.id === customerId)?.name ??
+        'A customer no longer on the register');
 
   return {
     machine,
@@ -383,6 +426,20 @@ export const machineView = async ({ repos, services, actor }: ViewContext, machi
     jobRows: await loadVisibleJobRows(repos, jobs, actor),
     documents: documents.map(({ storageKey: _storageKey, ...rest }) => rest),
     users,
+    movements: movements.map((movement) => ({
+      id: movement.id,
+      effectiveOn: movement.effectiveOn,
+      note: movement.note,
+      recordedBy: movement.recordedBy,
+      recordedAt: movement.recordedAt,
+      fromSite: siteName(movement.fromSiteId),
+      fromCustomer: customerName(movement.fromCustomerId),
+      toSite: siteName(movement.toSiteId),
+      toCustomer: customerName(movement.toCustomerId),
+      /** True when the machine changed hands, not merely bays. */
+      changedCustomer:
+        movement.fromCustomerId !== null && movement.fromCustomerId !== movement.toCustomerId,
+    })),
   };
 };
 

@@ -43,6 +43,9 @@ interface PhotoDraft {
 
 interface Draft {
   readonly siteId: string;
+  /** MACH-HIST. The day the machine moved, where the site is changing. */
+  readonly movedOn: string;
+  readonly moveNote: string;
   readonly manufacturer: string;
   readonly model: string;
   readonly serialNumber: string;
@@ -57,6 +60,8 @@ interface Draft {
 
 const emptyDraft = (sites: readonly Site[]): Draft => ({
   siteId: sites[0]?.id ?? '',
+  movedOn: '',
+  moveNote: '',
   manufacturer: '',
   model: '',
   serialNumber: '',
@@ -71,6 +76,9 @@ const emptyDraft = (sites: readonly Site[]): Draft => ({
 
 const draftFrom = (machine: Machine): Draft => ({
   siteId: machine.siteId,
+  // MACH-HIST. Blank: a move has not been proposed until the site changes.
+  movedOn: '',
+  moveNote: '',
   manufacturer: machine.manufacturer,
   model: machine.model,
   serialNumber: machine.serialNumber,
@@ -161,6 +169,15 @@ export const MachineDialog = ({
     setPhotoFailures([]);
   }, [open, machineId]);
 
+  /**
+   * Is this amendment a MOVE? MACH-HIST.
+   *
+   * Compared against the stored record rather than against the first site in
+   * the list, so re-saving a machine without touching the site is not a move —
+   * which is also what the database refuses.
+   */
+  const moving = machine !== null && draft.siteId !== machine.siteId;
+
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((current) => ({ ...current, [key]: value }));
 
@@ -189,6 +206,15 @@ export const MachineDialog = ({
           controlSystem: draft.controlSystem.trim(),
           notes: draft.notes.trim(),
           active: draft.active,
+          /*
+           * MACH-HIST. Only sent when the site is actually changing, and only
+           * when the office filled it in — the server defaults to today and
+           * ignores both unless something moved.
+           */
+          ...(moving && draft.movedOn.length > 0 ? { movedOn: draft.movedOn } : {}),
+          ...(moving && draft.moveNote.trim().length > 0
+            ? { moveNote: draft.moveNote.trim() }
+            : {}),
         });
         savedId = saved.id;
         return;
@@ -350,6 +376,43 @@ export const MachineDialog = ({
             containerClassName="sm:col-span-2"
           />
         </div>
+
+        {/*
+          MOVING A MACHINE IS AN EVENT, AND IT HAS A DATE. MACH-HIST.
+
+          Shown only while the site is actually CHANGING, so an ordinary
+          amendment to the serial number does not grow two fields nobody needs.
+          The date is the day the machine MOVED: the office usually hears about
+          a move after the fact, and recording the typing date would put the
+          machine in the wrong place for however long the paperwork took.
+
+          Blank is fine — the server records today, which is right for a move
+          being entered as it happens.
+        */}
+        {editing && moving && (
+          <div
+            className="space-y-3 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4"
+            data-testid="machine-move-fields"
+          >
+            <p className="text-sm font-medium text-amber-eje-800">
+              This machine is moving to a different site. The move is recorded against it.
+            </p>
+            <TextField
+              label="Day it moved"
+              type="date"
+              value={draft.movedOn}
+              onChange={(event) => set('movedOn', event.target.value)}
+              hint="Leave blank for today. Use the real date if the machine moved before you were told."
+            />
+            <TextAreaField
+              label="Why (optional)"
+              rows={2}
+              value={draft.moveNote}
+              onChange={(event) => set('moveNote', event.target.value)}
+              placeholder="e.g. Moved to the new bay after the workshop extension."
+            />
+          </div>
+        )}
 
         {editing && (
           <label className="flex items-start gap-2.5 text-sm text-steel-700">

@@ -8,6 +8,7 @@ import {
   asUserId,
   type Machine,
   type MachineDocument,
+  type MachineMovement,
   type MachineDocumentAudience,
   type MachineId,
 } from '@/domain';
@@ -30,6 +31,21 @@ type MachineDocumentRow = typeof schema.machineDocuments.$inferSelect;
  */
 const toDomainAudience = (value: string): MachineDocumentAudience =>
   value === 'field' ? 'field' : 'office_only';
+
+type MachineMovementRow = typeof schema.machineMovements.$inferSelect;
+
+const toDomainMachineMovement = (row: MachineMovementRow): MachineMovement => ({
+  id: row.id,
+  machineId: asMachineId(row.machineId),
+  fromSiteId: row.fromSiteId === null ? null : asSiteId(row.fromSiteId),
+  fromCustomerId: row.fromCustomerId === null ? null : asCustomerId(row.fromCustomerId),
+  toSiteId: asSiteId(row.toSiteId),
+  toCustomerId: asCustomerId(row.toCustomerId),
+  effectiveOn: row.effectiveOn,
+  note: row.note,
+  recordedBy: asUserId(row.recordedBy ?? ''),
+  recordedAt: row.recordedAt,
+});
 
 const toDomainMachineDocument = (row: MachineDocumentRow): MachineDocument => ({
   id: row.id,
@@ -194,6 +210,55 @@ export class PostgresMachineRepository implements MachineRepository {
       .limit(1);
     const row = rows[0];
     return row === undefined ? null : toDomainMachineDocument(row);
+  }
+
+  /* -- where a machine has stood. MACH-HIST ------------------------------- */
+
+  async listMovements(machineId: MachineId): Promise<readonly MachineMovement[]> {
+    if (!isUuid(machineId)) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.machineMovements)
+      .where(eq(schema.machineMovements.machineId, machineId))
+      /*
+       * Newest first, and `recorded_at` breaks a tie on the same day: two
+       * moves stated as effective on one date are ordered by which was
+       * written down second, so `machineLocationAsAt` gets the later one.
+       */
+      .orderBy(desc(schema.machineMovements.effectiveOn), desc(schema.machineMovements.recordedAt));
+    return rows.map(toDomainMachineMovement);
+  }
+
+  async saveMovement(movement: MachineMovement): Promise<MachineMovement> {
+    /*
+     * INSERT ONLY. There is deliberately no conflict clause: a movement is
+     * something that happened, and a save that could rewrite one would make
+     * the history editable. A move recorded wrongly is corrected by recording
+     * the real one.
+     */
+    const rows = await this.db
+      .insert(schema.machineMovements)
+      .values({
+        id: movement.id,
+        machineId: movement.machineId as string,
+        fromSiteId: movement.fromSiteId,
+        fromCustomerId: movement.fromCustomerId,
+        toSiteId: movement.toSiteId as string,
+        toCustomerId: movement.toCustomerId as string,
+        effectiveOn: movement.effectiveOn,
+        note: movement.note,
+        recordedBy: movement.recordedBy.length === 0 ? null : (movement.recordedBy as string),
+        recordedAt: movement.recordedAt,
+      })
+      .returning();
+    /*
+     * A plain insert, so a missing row is a bug rather than a lost race —
+     * `requireWritten` is for a conditional UPDATE and would be the wrong
+     * error here.
+     */
+    const row = rows[0];
+    if (row === undefined) throw new Error('the machine movement was not written');
+    return toDomainMachineMovement(row);
   }
 
   async saveDocument(document: MachineDocument): Promise<MachineDocument> {

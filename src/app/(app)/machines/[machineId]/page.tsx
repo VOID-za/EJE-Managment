@@ -54,7 +54,7 @@ const MachineDetailPage = ({
     );
   }
 
-  const { machine, customer, site, jobRows, documents, users } = data;
+  const { machine, customer, site, jobRows, documents, users, movements } = data;
   const history = [...jobRows].sort((a, b) =>
     (b.job.scheduledDate ?? b.job.createdAt).localeCompare(a.job.scheduledDate ?? a.job.createdAt),
   );
@@ -190,6 +190,56 @@ const MachineDetailPage = ({
           />
         </div>
       </div>
+
+      {/*
+        WHERE IT HAS STOOD. MACH-HIST.
+
+        Shown only when there IS a history, because an empty list here would
+        read as "this machine has never moved" — and the truth is that nothing
+        was recorded before this existed. Nothing was backfilled: inventing an
+        installation movement from the installation date and today's site would
+        assert that every machine has stood in its present bay since the day it
+        was installed, which is exactly the false history the record replaces.
+      */}
+      {movements.length > 0 && (
+        <div className="mt-6">
+          <SectionHeading
+            title="Where this machine has stood"
+            description="Each move as the office recorded it, most recent first. The date is the day the machine moved, not the day it was written down."
+            className="mb-3"
+          />
+          <Card padded={false}>
+            <ul className="divide-y divide-steel-100">
+              {movements.map((movement) => (
+                <li key={movement.id} className="px-5 py-4" data-testid="machine-movement">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
+                    <p className="text-sm font-medium text-steel-900">
+                      {movement.fromSite.length === 0 ? (
+                        <>Recorded at {movement.toSite}</>
+                      ) : (
+                        <>
+                          {movement.fromSite} → {movement.toSite}
+                        </>
+                      )}
+                    </p>
+                    <p className="tabular text-sm text-steel-500">
+                      {formatDate(movement.effectiveOn)}
+                    </p>
+                  </div>
+                  {movement.changedCustomer && (
+                    <p className="mt-1 text-sm text-amber-eje-700">
+                      Changed hands: {movement.fromCustomer} → {movement.toCustomer}
+                    </p>
+                  )}
+                  {movement.note.length > 0 && (
+                    <p className="mt-1 text-sm text-steel-600">{movement.note}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
 
       <div className="mt-6">
         <SectionHeading

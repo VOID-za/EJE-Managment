@@ -24,6 +24,7 @@ import type {
   AvailabilityRecord,
   Machine,
   MachineDocument,
+  MachineMovement,
   MachineId,
   NotificationId,
   Site,
@@ -270,6 +271,17 @@ export interface MachineRepository {
   ): Promise<readonly MachineDocument[]>;
   findDocumentById(id: string): Promise<MachineDocument | null>;
   saveDocument(document: MachineDocument): Promise<MachineDocument>;
+
+  /*
+   * WHERE THIS MACHINE HAS STOOD. MACH-HIST.
+   *
+   * Newest first. There is no `updateMovement` and no `deleteMovement`, and
+   * that absence is the append-only guarantee at this layer: a move recorded
+   * wrongly is corrected by recording the real one, because a movement is
+   * something that happened.
+   */
+  listMovements(machineId: MachineId): Promise<readonly MachineMovement[]>;
+  saveMovement(movement: MachineMovement): Promise<MachineMovement>;
 }
 
 export interface UserRepository {
