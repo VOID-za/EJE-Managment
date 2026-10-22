@@ -486,6 +486,8 @@ export const jobs = {
   updateTravel: (jobId: string, input: unknown) => jobAction(jobId, 'update_travel', input),
   addPart: (jobId: string, input: unknown) => jobAction(jobId, 'add_part', input),
   updatePart: (jobId: string, input: unknown) => jobAction(jobId, 'update_part', input),
+  // DRAFT-1. A Master releases a draft; the server refuses anybody else.
+  releaseDraft: (jobId: string) => jobAction(jobId, 'release_draft'),
   // COST-5. A charge that is neither labour, travel nor a part.
   addAdditionalCharge: (jobId: string, input: unknown) =>
     jobAction(jobId, 'add_additional_charge', input),

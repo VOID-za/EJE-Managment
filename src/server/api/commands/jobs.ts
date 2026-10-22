@@ -8,6 +8,7 @@ import {
   asSiteId,
   asUserId,
   can,
+  canSeeDraftJobs,
   canSeeJob,
   getJobTypeDefinition,
   isJobTechnician,
@@ -21,7 +22,7 @@ import * as jobs from '@/application/job-operations';
 import * as corrections from '@/application/job-corrections';
 import * as unsigned from '@/application/unsigned-delivery';
 import { WorkflowError } from '@/application/errors';
-import { createJob } from '@/application/job-creation';
+import { createJob, releaseDraft } from '@/application/job-creation';
 import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
 
@@ -54,6 +55,18 @@ export const loadVisibleJob = async (context: CommandContext, target: string): P
     (await context.repos.jobs.findById(asJobId(target))) ??
     (await context.repos.jobs.findByJobNumber(target));
   if (job === null) throw notFound('That job does not exist.');
+
+  /*
+   * A DRAFT IS NOT FOUND unless this actor may manage one. DRAFT-1.
+   *
+   * Before the `jobs.viewAll` short-circuit below, which is what the route
+   * test caught: a Coordinator releasing a draft was answered 403 by the
+   * operation, and a 403 confirms the job exists. NOT FOUND is the only answer
+   * that does not.
+   */
+  if (job.status === 'draft' && !canSeeDraftJobs(context.actor.role)) {
+    throw notFound('That job does not exist.');
+  }
 
   if (!can(context.actor.role, 'jobs.viewAll')) {
     const participated = await context.repos.jobs.listParticipatedJobs(context.actor.id);
@@ -376,6 +389,21 @@ export const JOB_COMMANDS: CommandRegistry = {
     async run(context, _input: Record<string, never>, target) {
       const job = await loadVisibleJob(context, target);
       return jobs.clearDiscount(context.operation, job);
+    },
+  }),
+
+  /**
+   * A DRAFT BECOMES A JOB. DRAFT-1.
+   *
+   * No input: everything the release needs is already on the job, and a
+   * release that took a body would be an edit wearing a workflow step's name.
+   * Edit the draft first, then release it.
+   */
+  release_draft: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      const job = await loadVisibleJob(context, target);
+      return releaseDraft(context.operation, job);
     },
   }),
 
@@ -880,6 +908,14 @@ export const createJobSchema = z
     courierCollection: z.boolean(),
     deliveryNote: text(120),
     /*
+     * DRAFT, OR RAISED? DRAFT-1.
+     *
+     * Optional and false by default, so every existing client keeps raising
+     * open jobs exactly as it did. `createJob` refuses anybody without
+     * `jobs.manageDrafts` — the flag asks, it does not decide.
+     */
+    asDraft: z.boolean().default(false),
+    /*
      * NO ATTACHMENTS HERE, deliberately.
      *
      * A document is bytes, and this request carries none. Accepting a list of
@@ -901,15 +937,20 @@ export const runCreateJob = async (
   // Proves the code is one the business actually has, before anything is built.
   getJobTypeDefinition(input.jobType);
 
-  const created = await createJob(context.operation, {
-    ...input,
-    customerId: asCustomerId(input.customerId),
-    siteId: asSiteId(input.siteId),
-    contactId: asContactId(input.contactId),
-    machineId: input.machineId === null ? null : asMachineId(input.machineId),
-    primaryTechnicianId:
-      input.primaryTechnicianId === null ? null : asUserId(input.primaryTechnicianId),
-    additionalTechnicianIds: input.additionalTechnicianIds.map(asUserId),
-  });
+  const { asDraft, ...job } = input;
+  const created = await createJob(
+    context.operation,
+    {
+      ...job,
+      customerId: asCustomerId(input.customerId),
+      siteId: asSiteId(input.siteId),
+      contactId: asContactId(input.contactId),
+      machineId: input.machineId === null ? null : asMachineId(input.machineId),
+      primaryTechnicianId:
+        input.primaryTechnicianId === null ? null : asUserId(input.primaryTechnicianId),
+      additionalTechnicianIds: input.additionalTechnicianIds.map(asUserId),
+    },
+    { asDraft },
+  );
   return respond(created, context.actor);
 };

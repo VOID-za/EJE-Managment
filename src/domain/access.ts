@@ -258,7 +258,22 @@ export type Capability =
    * `jobs.captureWork`, like a part, because a technician already enters part
    * prices and a consumable is the same act.
    */
-  | 'jobs.applyDiscount';
+  | 'jobs.applyDiscount'
+  /**
+   * RAISING, READING AND RELEASING A DRAFT JOB. DRAFT-1.
+   *
+   * A Master's alone, which is what the requirement says: "Draft jobs,
+   * Master-only". It is three rights in one deliberately — a draft a
+   * Coordinator could READ but not release would put half-finished job cards
+   * on the office's screen with nothing anybody could do about them, and the
+   * point of a draft is that it is not yet a job the business is working on.
+   *
+   * It governs VISIBILITY and not merely the buttons: `jobVisibilityFor`
+   * returns nothing at all for a draft to anybody without this, so a draft is
+   * absent from every list, every tally and every read — including a
+   * technician who happens to be named on one.
+   */
+  | 'jobs.manageDrafts';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -298,6 +313,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.authoriseUnsignedDelivery',
   // Money off a job: COST-5. Master's alone, for the same reason the rates are.
   'jobs.applyDiscount',
+  // Draft job cards: DRAFT-1. "Master-only" is the requirement's own wording.
+  'jobs.manageDrafts',
 ];
 
 /**

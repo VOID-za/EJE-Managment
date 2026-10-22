@@ -121,17 +121,26 @@ const NewJobPage = () => {
 
   const definition = getJobTypeDefinition(jobType);
 
-  const submit = async () => {
+  /*
+   * SAVING A DRAFT ASKS LESS, AND NOTHING ELSE IS RELAXED. DRAFT-1.
+   *
+   * The two facts a draft may omit are the ones the TECHNICIAN or the customer
+   * still has to supply — what the work is, and which machine. Everything else
+   * is still required, because a draft addressed to nobody is not a draft of a
+   * job card. The SERVER applies the identical rule, and re-asks both of them
+   * when the draft is released.
+   */
+  const submit = async (asDraft = false) => {
     const next: Record<string, string> = {};
     if (customerId.length === 0) next.customerId = 'Select a customer.';
     if (siteId.length === 0) next.siteId = 'Select a site.';
     if (contactId.length === 0) next.contactId = 'Select a site contact.';
     // A parts collection is a receipt for goods, not work on a machine.
-    if (definition.capturesLabourAndTravel && machineId.length === 0) {
+    if (!asDraft && definition.capturesLabourAndTravel && machineId.length === 0) {
       next.machineId = 'Select the machine this job is for.';
     }
     // Only where the job type collects one. CR-13.
-    if (!definition.officeProcessed && faultDescription.trim().length === 0) {
+    if (!asDraft && !definition.officeProcessed && faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
     // On a parts collection the order number is what ties the goods to what the
@@ -173,6 +182,7 @@ const NewJobPage = () => {
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
         courierCollection,
         deliveryNote,
+        asDraft,
       });
     });
 
@@ -678,10 +688,33 @@ const NewJobPage = () => {
             <Button variant="secondary" size="lg" onClick={() => router.push('/jobs')}>
               Cancel
             </Button>
-            <Button size="lg" onClick={submit} loading={saving}>
+            {/*
+              DRAFT-1. A Master's only, and the server refuses anybody else —
+              this decides whether the button is DRAWN, not whether the act is
+              allowed.
+            */}
+            {can(user.role, 'jobs.manageDrafts') && (
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() => submit(true)}
+                loading={saving}
+                data-testid="save-draft"
+              >
+                Save as draft
+              </Button>
+            )}
+            <Button size="lg" onClick={() => submit()} loading={saving}>
               Create job
             </Button>
           </div>
+          {can(user.role, 'jobs.manageDrafts') && (
+            <p className="text-right text-xs text-steel-500">
+              A draft is not open, nobody is assigned it and no technician is told. It can be
+              saved without the fault description or the machine, and both are asked for again
+              when it is released.
+            </p>
+          )}
         </div>
 
         <div className="space-y-5">

@@ -131,9 +131,12 @@ interface ResolvedRegister {
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
+/** Exactly the four ids this reads, so a caller cannot pass a cast. DRAFT-1. */
+type RegisterInput = Pick<NewJobInput, 'customerId' | 'siteId' | 'contactId' | 'machineId'>;
+
 const resolveRegister = async (
   context: OperationContext,
-  input: NewJobInput,
+  input: RegisterInput,
 ): Promise<ResolvedRegister> => {
   const customer = await context.repos.customers.findById(input.customerId);
   if (customer === null) {
@@ -202,9 +205,15 @@ const resolveRegister = async (
  * is done by somebody who attends machines. Checked as a set, so the refusal
  * happens before the job exists rather than leaving a job half-assigned.
  */
+/** Exactly the five fields this reads. See `RegisterInput`. */
+type TechnicianInput = Pick<
+  NewJobInput,
+  'jobType' | 'primaryTechnicianId' | 'additionalTechnicianIds' | 'scheduledDate' | 'scheduledEndDate'
+>;
+
 const resolveTechnicians = async (
   context: OperationContext,
-  input: NewJobInput,
+  input: TechnicianInput,
 ): Promise<{ primaryId: UserId | null; additionalIds: readonly UserId[] }> => {
   const eligible = async (id: UserId): Promise<void> => {
     const person = await context.repos.users.findById(id);
@@ -246,10 +255,79 @@ const resolveTechnicians = async (
   return { primaryId: input.primaryTechnicianId, additionalIds };
 };
 
+/**
+ * The two facts a job must carry before anybody can be sent to do it. DRAFT-1.
+ *
+ * Extracted so `createJob` and `releaseDraft` are held to the SAME rule rather
+ * than to two copies of it. That matters more here than it usually does: the
+ * whole of DRAFT-1 is "these may be blank for now", and the only thing that
+ * makes that safe is that releasing re-asks the identical question.
+ */
+const assertReadyForWork = (
+  definition: ReturnType<typeof getJobTypeDefinition>,
+  job: { readonly faultDescription: string; readonly machineId: MachineId | null },
+): void => {
+  if (!definition.officeProcessed && job.faultDescription.trim().length === 0) {
+    throw new WorkflowError('A job needs to say what the work is.', [
+      {
+        code: 'fault_description_required',
+        message:
+          'Describe the fault or the work required. It is what the technician is sent out on, and it is printed on the customer’s job card.',
+      },
+    ]);
+  }
+
+  if (definition.capturesLabourAndTravel && job.machineId === null) {
+    throw new WorkflowError('A machine is required for this job type.', [
+      {
+        code: 'machine_required',
+        message: `A ${definition.label.toLowerCase()} job is work on a machine, so it has to say which.`,
+      },
+    ]);
+  }
+};
+
+/**
+ * RAISING A JOB, OR DRAFTING ONE. DRAFT-1.
+ *
+ * `asDraft` changes exactly three things and nothing else:
+ *
+ *   1. the two checks in `assertReadyForWork` are not applied YET — the fault
+ *      description and the machine may be blank, because they are what the
+ *      technician or the customer still has to tell the office;
+ *   2. the status is `draft` rather than `open` (or `completion`);
+ *   3. nobody is NOTIFIED. A draft may name the technician the Master has in
+ *      mind, and telling them about a job that may never be raised is worse
+ *      than telling them late.
+ *
+ * WHAT IS NOT RELAXED: the customer, the site and the contact are resolved
+ * against the register exactly as they always were, because a draft addressed
+ * to nobody is not a draft of a job card — and the job number IS allocated,
+ * because a draft is a job that was raised. Abandoning one cancels it, which is
+ * the record a cancelled job already leaves. **That is the shipped
+ * recommendation; see `docs/SCOPE.md` DRAFT-1 and issue #21 for the
+ * alternative, which is a separate draft sequence.**
+ */
+export interface CreateJobOptions {
+  readonly asDraft?: boolean;
+}
+
 export const createJob = async (
   context: OperationContext,
   input: NewJobInput,
+  options: CreateJobOptions = {},
 ): Promise<Job> => {
+  const asDraft = options.asDraft === true;
+  if (asDraft && !can(context.actor.role, 'jobs.manageDrafts')) {
+    throw new WorkflowError('A draft job card is a Master’s.', [
+      {
+        code: 'not_permitted',
+        message:
+          'Only a Master drafts a job. Raise it as an open job, or ask a Master to draft it.',
+      },
+    ]);
+  }
+
   if (!can(context.actor.role, 'jobs.create')) {
     throw new WorkflowError('A job can only be raised by the office.', [
       {
@@ -305,24 +383,17 @@ export const createJob = async (
    * section entirely rather than printing a heading over nothing.
    */
   const faultDescription = definition.officeProcessed ? '' : input.faultDescription.trim();
-  if (!definition.officeProcessed && faultDescription.length === 0) {
-    throw new WorkflowError('A job needs to say what the work is.', [
-      {
-        code: 'fault_description_required',
-        message:
-          'Describe the fault or the work required. It is what the technician is sent out on, and it is printed on the customer’s job card.',
-      },
-    ]);
-  }
 
-  if (definition.capturesLabourAndTravel && input.machineId === null) {
-    throw new WorkflowError('A machine is required for this job type.', [
-      {
-        code: 'machine_required',
-        message: `A ${definition.label.toLowerCase()} job is work on a machine, so it has to say which.`,
-      },
-    ]);
-  }
+  /*
+   * DRAFT-1. A DRAFT IS NOT HELD TO THESE TWO, AND NOTHING ELSE IS RELAXED.
+   *
+   * These are the facts the TECHNICIAN supplies the answer to — what the work
+   * is, and which machine — and a Master drafting a job before the customer has
+   * telephoned back does not have them yet. `releaseDraft` runs exactly this
+   * function against the stored job, so a draft cannot become a real job
+   * without satisfying them: the validation is DEFERRED, never weakened.
+   */
+  if (!asDraft) assertReadyForWork(definition, { faultDescription, machineId: input.machineId });
 
   const settings = await context.repos.settings.get();
   const allocated = await allocateJobNumber(context, settings);
@@ -366,7 +437,12 @@ export const createJob = async (
      * `acceptedAt` stays null, deliberately. Nobody accepted it; saying
      * somebody did would put a fact in the record that never happened.
      */
-    status: definition.officeProcessed ? 'completion' : 'open',
+    /*
+     * DRAFT-1. A draft sits at `draft`, whose only moves are `open` and
+     * `cancelled` — both already in the state machine, so no new transition
+     * and no new terminal state were invented for this.
+     */
+    status: asDraft ? 'draft' : definition.officeProcessed ? 'completion' : 'open',
     scheduledDate: definition.officeProcessed ? null : input.scheduledDate,
     scheduledEndDate: definition.schedulesDateRange ? input.scheduledEndDate : null,
     orderNumber: input.orderNumber.trim(),
@@ -443,8 +519,10 @@ export const createJob = async (
   await audit(context, {
     jobId: saved.id,
     type: 'job_created',
-    summary: 'Job created',
-    detail: `${definition.label} job raised by ${userFullName(context.actor)}.`,
+    summary: asDraft ? 'Draft job created' : 'Job created',
+    detail: asDraft
+      ? `${definition.label} job DRAFTED by ${userFullName(context.actor)}. It is not yet open, nobody has been assigned it, and no technician has been told.`
+      : `${definition.label} job raised by ${userFullName(context.actor)}.`,
   });
 
   /*
@@ -454,7 +532,14 @@ export const createJob = async (
    * is what reaches them. Both the primary and anybody attending with them get
    * one, because "you are on EJE-1103 tomorrow" is news to an assistant too.
    */
-  if (saved.primaryTechnicianId !== null) {
+  /*
+   * A DRAFT TELLS NOBODY. DRAFT-1.
+   *
+   * It may name the technician the Master has in mind — that is the point of
+   * drafting — but "you are on EJE-1103 tomorrow" about a job that may never be
+   * raised is worse than hearing it a day later. `releaseDraft` sends it.
+   */
+  if (!asDraft && saved.primaryTechnicianId !== null) {
     const details = await assignmentDetails(context, saved);
 
     const assigned: { id: UserId; occasion: AssignmentOccasion }[] = [
@@ -484,4 +569,136 @@ export const createJob = async (
   }
 
   return saved;
+};
+
+/**
+ * A DRAFT BECOMES A JOB. DRAFT-1.
+ *
+ * The release is where every rule a draft was let off is asked again, against
+ * the job as it now STANDS rather than against the request that drafted it:
+ *
+ *   - `assertReadyForWork` — the same function `createJob` uses, so there is
+ *     one rule and not two copies of it;
+ *   - the technicians named on the draft are re-validated, because somebody
+ *     drafted weeks ago may have left, or may be on leave on the day;
+ *   - the site and contact are re-read from the register, because a site
+ *     withdrawn since the draft was written must not open a job.
+ *
+ * WHICH DAY'S RATES. None, and this is not a gap: a job carries no pricing
+ * until the customer signs (COST-8 freezes the snapshot at signature), so there
+ * is nothing captured at drafting for a rate change to invalidate. A released
+ * draft prices exactly as a job raised that morning does. The question in issue
+ * #21 — "the rates of the release day or the drafting day" — is answered by the
+ * system EJE already have.
+ *
+ * NOTHING IS RE-ALLOCATED. The job number was taken when the draft was raised
+ * and the job keeps it, so releasing does not move the commercial sequence.
+ */
+export const releaseDraft = async (context: OperationContext, job: Job): Promise<Job> => {
+  if (!can(context.actor.role, 'jobs.manageDrafts')) {
+    throw new WorkflowError('Releasing a draft is a Master’s.', [
+      {
+        code: 'not_permitted',
+        message: 'Ask a Master to release it. Until then it is not a job anybody can work.',
+      },
+    ]);
+  }
+
+  if (job.status !== 'draft') {
+    throw new WorkflowError(`${job.jobNumber} is not a draft.`, [
+      {
+        code: 'not_a_draft',
+        message:
+          'It has already been released, or it was never drafted. Reload the job and look again.',
+      },
+    ]);
+  }
+
+  const definition = getJobTypeDefinition(job.jobType);
+  assertReadyForWork(definition, job);
+
+  /*
+   * THE REGISTER AND THE PEOPLE, RE-ASKED.
+   *
+   * A draft may have been written weeks ago. `resolveRegister` reads the LIVE
+   * register, so a site withdrawn since then refuses the release — which is
+   * right: a new job may not be raised against one, and this IS the moment the
+   * job is raised. `resolveTechnicians` re-checks eligibility for the same
+   * reason: the person the Master had in mind may have left.
+   */
+  const { customer, site, contact, machine } = await resolveRegister(context, {
+    customerId: job.customerId,
+    siteId: job.siteId,
+    machineId: job.machineId,
+    contactId: job.contactId,
+  });
+
+  const { primaryId, additionalIds } = await resolveTechnicians(context, {
+    jobType: job.jobType,
+    primaryTechnicianId: job.primaryTechnicianId,
+    additionalTechnicianIds: job.additionalTechnicianIds,
+    scheduledDate: job.scheduledDate,
+    scheduledEndDate: job.scheduledEndDate,
+  });
+
+  const released = await context.repos.jobs.save({
+    ...job,
+    // The same rule `createJob` applies: an office-processed job opens in its
+    // own close-out, everything else in the pool.
+    status: definition.officeProcessed ? 'completion' : 'open',
+    customerId: customer.id,
+    siteId: site.id,
+    contactId: contact.id,
+    machineId: machine === null ? null : machine.id,
+    primaryTechnicianId: primaryId,
+    additionalTechnicianIds: [...additionalIds],
+  });
+
+  await audit(context, {
+    jobId: released.id,
+    type: 'job_created',
+    summary: 'Draft released as a job',
+    detail:
+      `Released by ${userFullName(context.actor)}. ` +
+      (definition.officeProcessed
+        ? 'It is now in its close-out.'
+        : primaryId === null
+          ? 'It is now in the open pool for a technician to accept.'
+          : 'It is now open and the technician has been told.'),
+  });
+
+  /*
+   * AND NOW THE TECHNICIAN IS TOLD. The notification the draft deliberately
+   * did not send — same shape as `createJob`, because it is the same event
+   * happening at a different moment.
+   */
+  if (released.primaryTechnicianId !== null) {
+    const details = await assignmentDetails(context, released);
+    const assigned: { id: UserId; occasion: AssignmentOccasion }[] = [
+      { id: released.primaryTechnicianId, occasion: 'primary' },
+      ...released.additionalTechnicianIds.map((id) => ({ id, occasion: 'additional' as const })),
+    ];
+
+    for (const { id, occasion } of assigned) {
+      const technician = await context.repos.users.findById(id);
+      if (technician === null) continue;
+
+      await audit(context, {
+        jobId: released.id,
+        type: occasion === 'primary' ? 'job_assigned' : 'technician_added',
+        summary:
+          occasion === 'primary'
+            ? `Job assigned to ${userFullName(technician)}`
+            : `${userFullName(technician)} added to the job`,
+        detail:
+          occasion === 'primary'
+            ? 'Assigned as primary technician when the draft was released.'
+            : 'Added as an additional technician when the draft was released.',
+      });
+
+      await notifyAssignment(context, released, technician, occasion, details);
+    }
+  }
+
+  return released;
 };

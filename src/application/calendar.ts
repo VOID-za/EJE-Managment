@@ -140,6 +140,22 @@ export const loadCalendar = async (
     // job history; only the live schedule drops them.
     if (isJobInactive(job)) continue;
 
+    /*
+     * A DRAFT IS NOT BOOKED WORK EITHER. DRAFT-1.
+     *
+     * Separate from `isJobInactive`, which means "has LEFT the active
+     * workflow": a draft has not entered it. The planner's calendar is what
+     * the business has committed to, and a date on a draft is an intention —
+     * drawing it as a bar would have somebody counting a technician as busy on
+     * a day nobody has promised them to anybody.
+     *
+     * Only a Master can see a draft at all, so this affects one screen for one
+     * role. Whether a draft should instead appear as a distinct PENCILLED bar
+     * is a presentation question for EJE, recorded with DRAFT-1 rather than
+     * answered here.
+     */
+    if (job.status === 'draft') continue;
+
     const window = jobScheduleWindow(job);
     if (window === null) continue;
     if (!overlapsRange(window.start, window.end, range)) continue;

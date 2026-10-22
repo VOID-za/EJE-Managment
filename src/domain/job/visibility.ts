@@ -71,11 +71,40 @@ export type JobVisibility =
   /** Finished work on a machine they have worked. Read-only, prices withheld. */
   | 'machine_history';
 
+/**
+ * A DRAFT IS INVISIBLE TO ANYBODY WHO MAY NOT MANAGE ONE. DRAFT-1.
+ *
+ * Checked before everything else, including `jobs.viewAll` and including being
+ * NAMED on the job, and that order is the whole rule. A draft is not yet a job
+ * the business is working on: a Coordinator seeing one on the Jobs screen would
+ * be seeing work that may never be raised, and a technician named on one as an
+ * intention would be seeing an assignment nobody has made.
+ */
+export const canSeeDraftJobs = (role: User['role']): boolean => can(role, 'jobs.manageDrafts');
+
+/**
+ * Drops drafts a viewer may not see, for a read that short-circuits on
+ * `jobs.viewAll` and therefore never reaches `jobVisibilityFor`.
+ *
+ * It exists because those short-circuits are a PERFORMANCE decision — the
+ * office may read everything, so why ask per row — and DRAFT-1 is the first
+ * rule where "the office" is not one thing. Applied in the four list reads
+ * rather than inside each screen, so a new screen inherits it.
+ */
+export const withoutHiddenDrafts = <T extends Pick<Job, 'status'>>(
+  viewer: Pick<User, 'role'>,
+  jobs: readonly T[],
+): readonly T[] =>
+  canSeeDraftJobs(viewer.role) ? jobs : jobs.filter((job) => job.status !== 'draft');
+
 export const jobVisibilityFor = (
   viewer: Pick<User, 'id' | 'role'>,
   job: Pick<Job, 'id' | 'status' | 'primaryTechnicianId' | 'additionalTechnicianIds' | 'machineId'>,
   history: TechnicianHistory,
 ): JobVisibility | null => {
+  // DRAFT-1, and FIRST: see `canSeeDraftJobs` for why the order is the rule.
+  if (job.status === 'draft') return canSeeDraftJobs(viewer.role) ? 'office' : null;
+
   if (can(viewer.role, 'jobs.viewAll')) return 'office';
 
   if (job.primaryTechnicianId === viewer.id) return 'assigned';

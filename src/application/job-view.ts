@@ -11,6 +11,8 @@ import type {
   User,
 } from '@/domain';
 import {
+  canSeeDraftJobs,
+  withoutHiddenDrafts,
   can,
   getJobTypeDefinition,
   jobVisibilityFor,
@@ -95,6 +97,21 @@ const resolveVisibility = async (
   job: Job,
   viewer: Pick<User, 'id' | 'role'> | null,
 ): Promise<JobVisibility | null> => {
+  /*
+   * A DRAFT, BEFORE ANYTHING ELSE. DRAFT-1.
+   *
+   * Found by the route test, which asked for a draft as a Coordinator and was
+   * answered 200: the LIST reads had the rule and this one did not, because
+   * `jobs.viewAll` short-circuits here too. The lesson is the pattern, not the
+   * line — every one of these short-circuits is a place DRAFT-1 has to be
+   * repeated, which is why `canSeeDraftJobs` exists as one named rule.
+   *
+   * `viewer === null` is a SERVER-SIDE read with no person in it (a document
+   * render, a reconcile), and those see everything: there is no screen and
+   * nobody to hide a draft from.
+   */
+  if (job.status === 'draft' && viewer !== null && !canSeeDraftJobs(viewer.role)) return null;
+
   if (viewer === null) return 'office';
   if (can(viewer.role, 'jobs.viewAll')) return 'office';
   const participated = await repos.jobs.listParticipatedJobs(viewer.id);
@@ -250,7 +267,9 @@ export const loadJobList = async (
   repos: RepositoryBundle,
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly JobListRow[]> => {
-  const jobs = await repos.jobs.listSummaries();
+  // DRAFT-1 FIRST, because the `jobs.viewAll` short-circuit below never reaches
+  // `jobVisibilityFor` and a draft is not visible to the whole office.
+  const jobs = withoutHiddenDrafts(actor, await repos.jobs.listSummaries());
   if (can(actor.role, 'jobs.viewAll')) return loadJobRows(repos, jobs, actor);
 
   const participated = await repos.jobs.listParticipatedJobs(actor.id);
@@ -301,7 +320,11 @@ export const loadActiveJobList = async (
   repos: RepositoryBundle,
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly JobListRow[]> => {
-  const jobs = await repos.jobs.listSummaries({ statuses: ACTIVE_JOB_STATUSES });
+  // DRAFT-1, as in `loadJobList`.
+  const jobs = withoutHiddenDrafts(
+    actor,
+    await repos.jobs.listSummaries({ statuses: ACTIVE_JOB_STATUSES }),
+  );
   if (can(actor.role, 'jobs.viewAll')) return loadJobRows(repos, jobs, actor);
 
   const participated = await repos.jobs.listParticipatedJobs(actor.id);
@@ -384,10 +407,12 @@ export const loadVisibleJobs = async (
   jobs: readonly Job[],
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly Job[]> => {
-  if (can(actor.role, 'jobs.viewAll')) return jobs;
+  // DRAFT-1, before the short-circuit, as in the three reads above.
+  const visible = withoutHiddenDrafts(actor, jobs);
+  if (can(actor.role, 'jobs.viewAll')) return visible;
 
   const participated = await repos.jobs.listParticipatedJobs(actor.id);
-  return visibleJobsFor(actor, jobs, technicianHistoryFrom(participated));
+  return visibleJobsFor(actor, visible, technicianHistoryFrom(participated));
 };
 
 /**
@@ -408,10 +433,13 @@ export const loadVisibleSummaries = async (
   jobs: readonly JobSummary[],
   actor: Pick<User, 'id' | 'role'>,
 ): Promise<readonly JobSummary[]> => {
-  if (can(actor.role, 'jobs.viewAll')) return jobs;
+  // DRAFT-1. A tally that counted drafts would tell a Coordinator a customer
+  // has four open jobs when the screen behind it lists three.
+  const visible = withoutHiddenDrafts(actor, jobs);
+  if (can(actor.role, 'jobs.viewAll')) return visible;
 
   const participated = await repos.jobs.listParticipatedJobs(actor.id);
-  return summariesVisibleTo(actor, jobs, technicianHistoryFrom(participated));
+  return summariesVisibleTo(actor, visible, technicianHistoryFrom(participated));
 };
 
 export const loadVisibleJobRows = async (

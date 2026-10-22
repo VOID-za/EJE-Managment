@@ -148,6 +148,14 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
    * deciding what happens when the job moved underneath it, which is the
    * reason amending any line is online-only too (OFF-9).
    */
+  /*
+   * DRAFT-1. A technician never sees a draft at all, so this reason is for
+   * completeness rather than for a screen: the inventory test requires every
+   * command to declare a posture, and declaring it is how a command that
+   * SHOULD be holdable cannot be forgotten.
+   */
+  release_draft:
+    'Releasing a draft is a Master’s act in the office, and it re-checks the register on the server.',
   add_additional_charge:
     'A charge is added by the office against what it is being charged for, so it needs a connection.',
   update_additional_charge:

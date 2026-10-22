@@ -67,10 +67,34 @@ export const JobActionBar = ({
   const [submitting, setSubmitting] = useState(false);
   const [takingOver, setTakingOver] = useState(false);
   const [ending, setEnding] = useState<'cancel' | 'delete' | null>(null);
+  const [releasing, setReleasing] = useState(false);
 
   const signatureReadiness = checkReadyForSignature(job);
 
   const actions: React.ReactNode[] = [];
+
+  /*
+   * RELEASING A DRAFT. DRAFT-1.
+   *
+   * First in the bar, because on a draft it is the only thing to do: a draft
+   * is not open, nobody can accept it, and there is no work to capture. Only a
+   * Master sees a draft at all — `jobVisibilityFor` returns nothing for one to
+   * anybody else — so the capability check here is about the BUTTON, and the
+   * operation re-checks everything including the register.
+   */
+  if (job.status === 'draft' && can(currentUser.role, 'jobs.manageDrafts')) {
+    actions.push(
+      <Button
+        key="release-draft"
+        size="lg"
+        onClick={() => setReleasing(true)}
+        leadingIcon={<Icon name="check" className="size-5" />}
+        data-testid="release-draft"
+      >
+        Release as a job
+      </Button>,
+    );
+  }
 
   if (canAcceptJob(job, currentUser)) {
     actions.push(
@@ -440,6 +464,35 @@ export const JobActionBar = ({
         open={confirmAccept}
         onClose={() => setConfirmAccept(false)}
         onAccepted={onChanged}
+      />
+
+      {/* DRAFT-1. Releasing is confirmed, because it tells a technician. */}
+      <ConfirmDialog
+        open={releasing}
+        title="Release this draft?"
+        message={
+          <>
+            <p>
+              <span className="font-semibold">{job.jobNumber}</span> becomes a live job
+              {job.primaryTechnicianId === null
+                ? ' in the open pool for a technician to accept.'
+                : ', and the technician on it is told.'}
+            </p>
+            <p className="mt-2 text-steel-500">
+              The fault description, the machine, the site and the technician are all checked
+              again now — a site withdrawn since the draft was written, or a technician who has
+              left, will refuse the release.
+            </p>
+          </>
+        }
+        confirmLabel="Release the job"
+        busy={operation.running}
+        onConfirm={async () => {
+          const ok = await operation.run(() => jobs.releaseDraft(job.id));
+          setReleasing(false);
+          if (ok) onChanged();
+        }}
+        onCancel={() => setReleasing(false)}
       />
 
       <ConfirmDialog
