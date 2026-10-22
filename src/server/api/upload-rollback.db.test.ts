@@ -64,6 +64,34 @@ describeDb('an upload whose database write fails', () => {
       .filter((entry) => entry.isFile() && entry.name.endsWith('.bin'))
       .map((entry) => entry.name);
 
+  /** Every file under the store, whatever it is called. */
+  const allFiles = async (): Promise<readonly string[]> =>
+    (await readdir(storageRoot, { recursive: true, withFileTypes: true }))
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
+
+  const refuseLibraryInserts = async (): Promise<void> => {
+    await db.execute(sql`
+      create or replace function test_refuse_library_version() returns trigger as $$
+      begin
+        raise exception 'test fixture: this insert is refused';
+      end
+      $$ language plpgsql
+    `);
+    await db.execute(sql`
+      create trigger test_refuse_library_version
+        before update on library_document_versions
+        for each row execute function test_refuse_library_version()
+    `);
+  };
+
+  const allowLibraryInserts = async (): Promise<void> => {
+    await db.execute(
+      sql`drop trigger if exists test_refuse_library_version on library_document_versions`,
+    );
+    await db.execute(sql`drop function if exists test_refuse_library_version()`);
+  };
+
   const refuseInserts = async (): Promise<void> => {
     await db.execute(sql`
       create or replace function test_refuse_customer_document() returns trigger as $$
@@ -103,6 +131,7 @@ describeDb('an upload whose database write fails', () => {
 
   afterAll(async () => {
     await allowInserts();
+    await allowLibraryInserts();
     await db.$client.end({ timeout: 5 });
     await rm(storageRoot, { recursive: true, force: true });
     delete process.env.EJE_STORAGE_DIR;
@@ -110,6 +139,7 @@ describeDb('an upload whose database write fails', () => {
 
   beforeEach(async () => {
     await allowInserts();
+    await allowLibraryInserts();
     await truncateAll(db);
     await seedBaseline(db);
     await db.update(schema.users).set({ passwordHash: await hashPassword(PASSWORD) });
@@ -196,5 +226,52 @@ describeDb('an upload whose database write fails', () => {
     expect(await storedFiles()).toHaveLength(1);
     const rows = await db.select().from(schema.customerDocuments);
     expect(rows).toHaveLength(1);
+  });
+  it('LEAVES NO FILE BEHIND ON THE PATH THAT WRITES AT ITS OWN KEY EITHER', async () => {
+    /*
+     * THE LIBRARY, WHICH IS THE OTHER SHAPE OF WRITE. A revision's storage key
+     * is generated when the RECORD is built, so the bytes go through
+     * `putDocument` at a key that already exists on a row rather than through
+     * `storeUpload`, which generates one. The rollback tracker could not touch
+     * a `putDocument` at all until it learnt to ask whether the key held
+     * anything beforehand — so a refused insert here left a manual on the disk
+     * for the rest of the deployment's life with nothing pointing at it.
+     *
+     * THE TRIGGER REFUSES THE UPDATE AND NOT THE INSERT, which matters: the
+     * revision row is inserted BEFORE the bytes are written (it is what
+     * carries the key), and the measurements are written back onto it
+     * afterwards. Refusing the insert would fail the request before anything
+     * reached the disk and prove nothing at all — which is exactly what the
+     * first version of this test did.
+     */
+    const master = await signIn(MASTER);
+    await refuseLibraryInserts();
+
+    const uploaded = await master.upload('/api/library/upload', {
+      name: 'fanuc-0i-mf-alarms.pdf',
+      type: 'application/pdf',
+      bytes: new TextEncoder().encode('%PDF-1.4\nthe alarm list\n%%EOF'),
+      fields: { name: 'Fanuc 0i-MF alarm list', documentType: 'service_manual', version: '1.0' },
+    });
+
+    expect(uploaded.status).toBeGreaterThanOrEqual(400);
+    expect(await db.select().from(schema.libraryDocumentVersions)).toHaveLength(0);
+    // AND NOTHING ON THE DISK — not the bytes, not the sidecar beside them.
+    expect(await allFiles()).toEqual([]);
+  });
+
+  it('keeps the library file when the insert is allowed, which is what proves that fixture', async () => {
+    const master = await signIn(MASTER);
+
+    const uploaded = await master.upload('/api/library/upload', {
+      name: 'fanuc-0i-mf-alarms.pdf',
+      type: 'application/pdf',
+      bytes: new TextEncoder().encode('%PDF-1.4\nthe alarm list\n%%EOF'),
+      fields: { name: 'Fanuc 0i-MF alarm list', documentType: 'service_manual', version: '1.0' },
+    });
+
+    expect(uploaded.status, JSON.stringify(uploaded.error)).toBe(200);
+    expect(await db.select().from(schema.libraryDocumentVersions)).toHaveLength(1);
+    expect((await allFiles()).length).toBeGreaterThan(0);
   });
 });

@@ -24,19 +24,29 @@ import type { StorageService, StoredDocument, StoredFile, UploadedFile } from '.
  * runtime removes exactly those keys and rethrows the original error. If the
  * work succeeds, nothing is removed.
  *
- * WHAT IT DELIBERATELY DOES NOT TRACK: `putDocument`. That one is given an
- * EXPLICIT key by its caller, and the key may already hold bytes a row has
- * referred to for months — the final job card rendered on first download is
- * exactly that case. Removing it on a rollback would delete a document the
- * database still points at, which is the very failure this file exists to
- * prevent, in the worse direction. `storeUpload` GENERATES a fresh key, so a
- * key it returned cannot be referred to by anything that existed before this
- * transaction, and removing it is safe by construction.
+ * THE TWO KINDS OF WRITE, AND WHY ONE NEEDS A QUESTION ASKED FIRST.
+ * `storeUpload` GENERATES a fresh key, so a key it returned cannot be referred
+ * to by anything that existed before this transaction: removing it is safe by
+ * construction. `putDocument` is handed an EXPLICIT key by its caller, and that
+ * key may already hold bytes a row has referred to for months — the final job
+ * card rendered on first download is exactly that case. Removing THAT on a
+ * rollback would delete a document the database still points at, which is the
+ * failure this file exists to prevent, in the worse direction.
  *
- * Untracked `putDocument` writes are therefore still capable of orphaning
- * bytes. They are not hidden: `npm run documents:reconcile` reports every file
- * in the store that no row refers to, and will remove them only when an
- * operator asks for it by name.
+ * So a `putDocument` is tracked only when the key held NOTHING beforehand,
+ * which is asked before the write and not guessed at afterwards. A write that
+ * created the file is this transaction's to undo; a write that replaced one is
+ * not, and is left alone. That covers the two paths whose key belongs to the
+ * record rather than to the store — a library revision and a post-signature
+ * addendum — which until now could orphan their bytes on a failed insert.
+ *
+ * IF THE QUESTION CANNOT BE ANSWERED, THE KEY IS NOT TRACKED. A store that
+ * refuses to say whether a file is there — `StorageIntegrityFailed` on bytes
+ * that are present but damaged, or a read that throws — is a store where
+ * deleting on a guess could destroy a referenced document. Leaving the bytes
+ * is the recoverable mistake; `documents:reconcile` reports anything in the
+ * store that no row refers to, and removes it only when an operator asks for
+ * it by name.
  *
  * CLEANUP NEVER RAISES. It runs on a path that is already failing, and an
  * exception from a cleanup would replace the real error with its own.
@@ -60,8 +70,22 @@ export const trackStorageWrites = (inner: StorageService): TrackedStorage => {
     resolveUrl: (storageKey) => inner.resolveUrl(storageKey),
     getDocument: (storageKey) => inner.getDocument(storageKey),
     remove: (storageKey) => inner.remove(storageKey),
-    // Explicit key, possibly pre-existing. NOT tracked — see above.
-    putDocument: (document: StoredDocument) => inner.putDocument(document),
+    putDocument: async (document: StoredDocument): Promise<void> => {
+      /*
+       * ASKED BEFORE THE WRITE, because afterwards there is no way to tell a
+       * file this transaction created from one it replaced. Anything other
+       * than a plain "there is nothing there" leaves the key untracked: see
+       * above for why the cautious direction is to keep the bytes.
+       */
+      let existed = true;
+      try {
+        existed = (await inner.getDocument(document.storageKey)) !== null;
+      } catch {
+        existed = true;
+      }
+      await inner.putDocument(document);
+      if (!existed) created.push(document.storageKey);
+    },
 
     storeUpload: async (file: UploadedFile): Promise<StoredFile> => {
       const stored = await inner.storeUpload(file);

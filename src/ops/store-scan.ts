@@ -8,12 +8,13 @@
  * WHY IT MATTERS, AND IT IS NOT TIDINESS. Every upload writes the bytes first
  * and records the row afterwards. When the row cannot be written — a refused
  * trigger, a constraint, a lost connection — the transaction rolls back and the
- * bytes stay. `trackStorageWrites` now undoes those as they happen, but it
- * cannot undo the ones written before it existed, and it deliberately does not
- * track `putDocument`. So a customer's document that a technician was told
- * failed to upload may be sitting in the storage directory, in every backup of
- * it, and in every restore of those backups, with no row to say whose it is or
- * who may read it.
+ * bytes stay. `trackStorageWrites` now undoes those as they happen — including
+ * a `putDocument` that CREATED its file, though never one that replaced an
+ * existing document — but it cannot undo the ones written before it existed,
+ * and it leaves a key alone when the store cannot say whether a file was there.
+ * So a customer's document that a technician was told failed to upload may be
+ * sitting in the storage directory, in every backup of it, and in every restore
+ * of those backups, with no row to say whose it is or who may read it.
  *
  * THE SAFE DIRECTION IS TO OVER-REPORT A REFERENCE, NEVER AN ORPHAN. A file
  * wrongly called an orphan is one an operator may delete; a reference this

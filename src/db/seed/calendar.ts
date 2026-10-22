@@ -1,4 +1,5 @@
 import type { IsoDate, IsoDateTime } from '@/domain';
+import { BUSINESS_UTC_OFFSET_MINUTES, businessDateOf, businessToday } from '@/lib/business-time';
 
 /**
  * Seed dates, relative to the day the seed is run.
@@ -12,31 +13,37 @@ import type { IsoDate, IsoDateTime } from '@/domain';
  * assert against line by line; this one belongs to the database seed. Coupling
  * them would mean a change made for one silently rewrote the other.
  */
-const startOfToday = (): Date => {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+/*
+ * "TODAY" IS THE BUSINESS DAY, NOT THE RUNNER'S DAY. QA-5.
+ *
+ * `new Date().getDate()` is the LOCAL date of whatever machine runs the seed —
+ * UTC on the server and on CI — while everything that reads the data back asks
+ * in the business zone. The two disagree between 22:00 and midnight UTC, and
+ * for those two hours a day the seeded availability, the scheduled jobs and the
+ * dashboard tiles were all a day out. See the same note in
+ * `src/data/seed/reference.ts`, which carried the identical defect.
+ */
+const businessComponents = (): readonly [number, number, number] => {
+  const [year, month, day] = businessToday().split('-').map(Number);
+  return [year ?? 1970, month ?? 1, day ?? 1];
 };
 
-export const toIsoDate = (date: Date): IsoDate => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+export const toIsoDate = (date: Date): IsoDate =>
+  businessDateOf(date.toISOString()) ?? '1970-01-01';
 
 /** A calendar date offset from today. Negative is the past. */
 export const dayOffset = (days: number): IsoDate => {
-  const date = startOfToday();
-  date.setDate(date.getDate() + days);
-  return toIsoDate(date);
+  const [year, month, day] = businessComponents();
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10) as IsoDate;
 };
 
-/** A timestamp at a given hour on a day offset from today. */
+/** A timestamp at a given hour ON EJE'S CLOCK, on a day offset from today. */
 export const timeOffset = (days: number, hours: number, minutes = 0): IsoDateTime => {
-  const date = startOfToday();
-  date.setDate(date.getDate() + days);
-  date.setHours(hours, minutes, 0, 0);
-  return date.toISOString();
+  const [year, month, day] = businessComponents();
+  const instant =
+    Date.UTC(year, month - 1, day + days, hours, minutes) -
+    BUSINESS_UTC_OFFSET_MINUTES * 60_000;
+  return new Date(instant).toISOString();
 };
 
 /**
@@ -67,8 +74,9 @@ export const minutesAgo = (minutes: number): IsoDateTime => {
  * week boundary — correct either way, but a poor first impression.
  */
 export const nextMonday = (addDays = 0): IsoDate => {
-  const date = startOfToday();
-  const untilMonday = (8 - date.getDay()) % 7 || 7;
-  date.setDate(date.getDate() + untilMonday + addDays);
-  return toIsoDate(date);
+  const [year, month, day] = businessComponents();
+  const base = new Date(Date.UTC(year, month - 1, day));
+  const untilMonday = (8 - base.getUTCDay()) % 7 || 7;
+  base.setUTCDate(base.getUTCDate() + untilMonday + addDays);
+  return base.toISOString().slice(0, 10) as IsoDate;
 };

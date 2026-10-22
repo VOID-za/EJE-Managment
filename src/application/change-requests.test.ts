@@ -72,9 +72,22 @@ describe('raising a report that the register is wrong', () => {
   });
 
   it('records it on the audit trail as a REQUEST, not as a change', async () => {
-    // The demonstration data has a history of its own, so what this asserts is
-    // what RAISING added — not what the trail happens to contain.
-    const before = (await harness.repos.activity.list(undefined)).length;
+    /*
+     * The demonstration data has a history of its own, so what this asserts is
+     * what RAISING added — not what the trail happens to contain.
+     *
+     * BY IDENTITY AND NOT BY POSITION. This counted the rows, then read that
+     * many off the front of the list — which assumes every seeded event sorts
+     * BELOW an event created a moment ago. Seeded events stamped "today at
+     * 07:10" are in the FUTURE to a suite run before seven in the morning, so
+     * they sort above it, and the slice returned somebody else's history
+     * (QA-5's shape: a test that passes for twenty-three hours a day). The ids
+     * present beforehand cannot be confused with the one this added, whatever
+     * order the list is in.
+     */
+    const before = new Set(
+      (await harness.repos.activity.list(undefined)).map((event) => event.id),
+    );
 
     await raiseChangeRequest(harness.as(technician), {
       subject: 'customer',
@@ -83,7 +96,9 @@ describe('raising a report that the register is wrong', () => {
     });
 
     const everything = await harness.repos.activity.list(undefined);
-    const types = everything.slice(0, everything.length - before).map((event) => event.type);
+    const types = everything
+      .filter((event) => !before.has(event.id))
+      .map((event) => event.type);
     expect(types).toContain('customer_change_requested');
     // The one thing it must not say: that the register changed.
     expect(types).not.toContain('customer_updated');
@@ -280,7 +295,9 @@ describe('the office deciding what to do about one', () => {
    */
   it('does NOT touch the register when a report is applied', async () => {
     const before = await harness.repos.customers.findById(CUSTOMER);
-    const existing = (await harness.repos.activity.list(undefined)).length;
+    const existing = new Set(
+      (await harness.repos.activity.list(undefined)).map((event) => event.id),
+    );
 
     await resolveChangeRequest(harness.as(master), requestId, {
       outcome: 'applied',
@@ -290,11 +307,14 @@ describe('the office deciding what to do about one', () => {
     const after = await harness.repos.customers.findById(CUSTOMER);
     expect(after).toEqual(before);
 
-    // And the trail says a decision was recorded, not that a record changed.
-    // Only the events this action added are examined: the demonstration data
-    // has its own history, including edits the office made months ago.
+    /*
+     * And the trail says a decision was recorded, not that a record changed.
+     * Only the events this action added are examined — identified by id, not by
+     * their position in the list, for the reason given on the raising test
+     * above.
+     */
     const everything = await harness.repos.activity.list(undefined);
-    const added = everything.slice(0, everything.length - existing);
+    const added = everything.filter((event) => !existing.has(event.id));
     const types = added.map((event) => event.type);
     expect(types).toContain('customer_change_resolved');
     expect(types).not.toContain('customer_updated');
