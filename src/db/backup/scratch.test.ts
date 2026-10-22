@@ -65,18 +65,38 @@ describe('the scratch database name', () => {
    * generated within one second was identical. Ten thousand names at ONE fixed
    * instant is the strongest statement of the fix that does not involve the
    * clock at all: if uniqueness came from the timestamp, every one of these
-   * would be the same string.
+   * would be the same string — a set of size 1.
+   *
+   * AND IT ASKED FOR SOMETHING RANDOMNESS CANNOT PROMISE. It asserted exactly
+   * 10,000 distinct names, which with the four-byte suffix it was written
+   * against collides about once in eighty runs — expected collisions are
+   * n²/2N, 10⁸/2^33 ≈ 0.012 — and duly failed on CI. The suffix is eight bytes
+   * now, which makes a collision here about one run in 2.7 × 10¹¹, but an
+   * assertion about a random draw states a BOUND and says what the bound is,
+   * rather than pretending to a certainty and failing on the day the dice say
+   * so. Nine thousand nine hundred and ninety still refutes the defect by
+   * three and a half orders of magnitude.
    */
   it('generates distinct names at the SAME instant — 10,000 of them', () => {
     const names = new Set(
       Array.from({ length: 10_000 }, () => scratchDatabaseName(NOW)),
     );
-    expect(names.size).toBe(10_000);
+    expect(names.size).toBeGreaterThan(9_990);
+  });
+
+  it('is a name PostgreSQL will not truncate', () => {
+    /*
+     * 63 characters, and an identifier cut short is a database whose name is
+     * not the one this code will later ask to drop. The suffix grew on
+     * 22 October, so this is the assertion that says it may not grow again
+     * without somebody checking.
+     */
+    expect(scratchDatabaseName(NOW).length).toBeLessThanOrEqual(63);
   });
 
   it('generates a suffix that is eight hex characters', () => {
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      expect(randomSuffix()).toMatch(/^[0-9a-f]{8}$/u);
+      expect(randomSuffix()).toMatch(/^[0-9a-f]{16}$/u);
     }
   });
 

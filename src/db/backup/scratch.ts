@@ -17,16 +17,23 @@ import { BackupRefused, backupStamp, redactSecrets } from './plan';
  * *Amended 17 October 2026, issue #23:* the name used to be the timestamp
  * alone, to the second, so two invocations starting inside the same second
  * computed the SAME name and the second was refused for a collision rather
- * than a real conflict. It now carries four random bytes as well. The
- * collision check has not been relaxed to make room for that — it is the
- * backstop, and `claimScratchDatabase` below is what proves the two work
- * together.
+ * than a real conflict. It now carries random bytes as well. The collision
+ * check has not been relaxed to make room for that — it is the backstop, and
+ * `claimScratchDatabase` below is what proves the two work together.
+ *
+ * *Amended 22 October 2026:* EIGHT random bytes rather than four. Four is
+ * ample for the purpose — two restore tests starting in the same second
+ * collide with probability 2^-32, and the collision check catches even that —
+ * but it is not enough for anything to assert exact uniqueness over a large
+ * sample, and the test that tried fails about one run in eighty. Sixteen hex
+ * characters brings the whole name to 54, comfortably inside PostgreSQL's
+ * 63-character limit, and costs nothing.
  */
 
 const SCRATCH_PREFIX = 'eje_restore_test_';
 
-/** Four bytes of randomness, as eight characters a database name may carry. */
-export const randomSuffix = (): string => randomBytes(4).toString('hex');
+/** Eight bytes of randomness, as sixteen characters a database name may carry. */
+export const randomSuffix = (): string => randomBytes(8).toString('hex');
 
 /**
  * The name this test will create and then drop. Generated, never supplied.
