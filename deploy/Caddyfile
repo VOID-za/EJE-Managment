@@ -36,9 +36,22 @@ eje.syncza.co.za {
 		header_up X-Forwarded-For {http.request.client_ip}
 	}
 
-	# Uploads: a job card photograph from a tablet is bigger than the default.
+	# Uploads: a job card photograph from a tablet is bigger than the default,
+	# and a short video is bigger again.
+	#
+	# THIS NUMBER HAS TO COVER THE LARGEST THING THE APPLICATION ACCEPTS, which
+	# is `MAX_VIDEO_BYTES` in `src/lib/upload-limits.ts` — 60 MB — plus room for
+	# the multipart envelope and the other fields. At 30 MB this refused a video
+	# the application would have taken, and refused it HERE: a 413 from the
+	# proxy, with none of the application's own wording about what the limit is
+	# or what to do instead, and nothing in the application's log to say it
+	# happened. A technician would have seen a failure with no reason.
+	#
+	# If either limit changes, change both. The application is still the one
+	# that measures and refuses properly; this is only the outer bound that
+	# stops a deliberately enormous body being buffered at all.
 	request_body {
-		max_size 30MB
+		max_size 70MB
 	}
 
 	log {

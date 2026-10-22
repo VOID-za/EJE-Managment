@@ -109,6 +109,27 @@ keys in `0019` and `0020` had the same fault and **were** corrected, because
 neither has been applied anywhere yet; `src/db/migrations/identifiers.test.ts`
 now fails the build on any new one.
 
+### And the reverse proxy has to be changed, or video uploads fail with no reason
+
+This release accepts a **60 MB** video (`MAX_VIDEO_BYTES`). The Caddy site block
+on the VPS caps a request body at **30 MB**, so until it is raised a
+technician's video is refused *by Caddy* — a bare `413` with none of the
+application's own wording and nothing in the application's log to say it
+happened. `deploy/Caddyfile` in this release says `70MB`; the file on the server
+is the one that matters:
+
+```bash
+sudo diff -u /etc/caddy/Caddyfile /opt/eje/releases/<commit>/deploy/Caddyfile
+# raise request_body max_size to 70MB, then:
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Do it **before** the switch in step 6: the limit only has to be raised, so a
+reload with the new value is safe against the release that is still running.
+`src/ops/deploy-limits.test.ts` fails the build if the two numbers ever disagree
+again.
+
 ## 1. Back up first, and prove the backup
 
 The one step that must not be skipped, and the first time it can be proved.
