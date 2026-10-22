@@ -32,7 +32,6 @@ import {
   addDays,
   addMonths,
   rangeOfDays,
-  toIso,
   viewLabel,
   viewRange,
   type CalendarView,
@@ -40,6 +39,7 @@ import {
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { cn } from '@/lib/cn';
+import { businessToday } from '@/lib/business-time';
 
 const VIEWS: readonly { id: CalendarView; label: string }[] = [
   { id: 'day', label: 'Day' },
@@ -70,7 +70,18 @@ const SHOW_FILTERS: readonly { id: ShowFilter; label: string }[] = [
  * from the application layer, so the views are pure rendering.
  */
 const CalendarPage = () => {
-  const today = toIso(new Date());
+  /*
+   * TODAY IS EJE'S DAY, NOT THE DEVICE'S. QA-5 again, here.
+   *
+   * `toIso(new Date())` was the LOCAL date of whoever renders: UTC during the
+   * server render and whatever a tablet's clock says in the browser. Between
+   * midnight and 02:00 in Johannesburg those are different days, and this value
+   * is the one the calendar opens on and the one "Today" is highlighted by — so
+   * a planner looking at half past midnight opened on yesterday, and the day
+   * ring sat on the wrong square. `businessToday` is the same answer the
+   * availability dialog and the work-capture panel already use.
+   */
+  const today = businessToday();
   const [view, setView] = useState<CalendarView>('month');
   const [anchor, setAnchor] = useState(today);
   const [technicianFilter, setTechnicianFilter] = useState('all');

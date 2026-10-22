@@ -5,6 +5,7 @@ import { DemoStore } from '@/data/demo/demo-store';
 import { rangeOfDays, toIso } from '@/components/calendar/calendar-grid';
 import type { RepositoryBundle } from '@/data/repositories';
 import { asUserId, type User } from '@/domain';
+import { businessToday } from '@/lib/business-time';
 
 /**
  * Calendar assembly.
@@ -17,7 +18,18 @@ const buildRepos = (): RepositoryBundle => {
   return createDemoRepositories({ read: store.read, commit: store.commit });
 };
 
-const today = toIso(new Date());
+/*
+ * THE DAY THESE CASES MEAN. QA-5.
+ *
+ * The seed places its data relative to `businessToday()` — EJE's day, UTC+02:00
+ * — and `toIso(new Date())` is the day of whatever machine runs the test, which
+ * is UTC on CI. For the two hours between 22:00 UTC and midnight those are
+ * different dates, and "the seeded sick leave straddles today" became false
+ * because the leave started on the runner's today rather than before it. A
+ * suite that fails for two hours a day reads as a flake; it was the test's
+ * clock that was wrong, not the calendar's.
+ */
+const today = businessToday();
 const offset = (days: number): string => {
   const date = new Date(`${today}T00:00:00`);
   date.setDate(date.getDate() + days);
