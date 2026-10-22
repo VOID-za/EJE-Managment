@@ -77,14 +77,31 @@ EXCEPTION
 	WHEN duplicate_object THEN NULL;
 END $$;
 --> statement-breakpoint
-ALTER TABLE "jobs" DROP CONSTRAINT IF EXISTS "jobs_discount_is_whole_or_absent";--> statement-breakpoint
+-- A CHECK IS REPLACED BY DROPPING IT FIRST, AND THE DROP IS WHERE THE QUIET GOES.
+--
+-- `ADD CONSTRAINT` inside `EXCEPTION WHEN duplicate_object THEN NULL` is the
+-- right idiom for a constraint that is NEW — it is how every foreign key above
+-- is added, and a second run is a no-op. It is the WRONG idiom for a constraint
+-- this migration REDEFINES: swallowing the duplicate leaves the OLD definition
+-- in place and reports success, which is how `pricing_snapshot_lines_amounts_
+-- non_negative` kept refusing the discount line it was rewritten to allow.
+--
+-- So the drop is unconditional and the ADD is unconditional, and the NOTICE
+-- that `DROP CONSTRAINT IF EXISTS` prints on a fresh database — which reads
+-- like an error in a deployment log — is swallowed as `undefined_object`
+-- instead. Re-runnable, silent, and it installs the definition written here.
+DO $$ BEGIN
+	ALTER TABLE "jobs" DROP CONSTRAINT "jobs_discount_is_whole_or_absent";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "jobs" ADD CONSTRAINT "jobs_discount_is_whole_or_absent" CHECK (
 	("discount_cents" IS NOT NULL) = ("discount_authorised_by" IS NOT NULL)
 	AND ("discount_cents" IS NOT NULL) = ("discount_authorised_at" IS NOT NULL)
 	AND ("discount_cents" IS NULL OR "discount_reason" ~ '[^[:space:]]')
 	AND ("discount_cents" IS NOT NULL OR "discount_reason" !~ '[^[:space:]]')
 );--> statement-breakpoint
-ALTER TABLE "jobs" DROP CONSTRAINT IF EXISTS "jobs_discount_is_positive";--> statement-breakpoint
+DO $$ BEGIN
+	ALTER TABLE "jobs" DROP CONSTRAINT "jobs_discount_is_positive";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "jobs" ADD CONSTRAINT "jobs_discount_is_positive" CHECK (
 	"discount_cents" IS NULL OR "discount_cents" > 0
 );
@@ -102,7 +119,9 @@ ALTER TABLE "jobs" ADD CONSTRAINT "jobs_discount_is_positive" CHECK (
 -- subtotal, and a zero would claim a measurement nobody took.
 ALTER TABLE "pricing_snapshots" ADD COLUMN IF NOT EXISTS "gross_subtotal_cents" bigint;--> statement-breakpoint
 ALTER TABLE "pricing_snapshots" ADD COLUMN IF NOT EXISTS "discount_cents" bigint;--> statement-breakpoint
-ALTER TABLE "pricing_snapshots" DROP CONSTRAINT IF EXISTS "pricing_snapshots_discount_within_gross";--> statement-breakpoint
+DO $$ BEGIN
+	ALTER TABLE "pricing_snapshots" DROP CONSTRAINT "pricing_snapshots_discount_within_gross";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "pricing_snapshots" ADD CONSTRAINT "pricing_snapshots_discount_within_gross" CHECK (
 	("gross_subtotal_cents" IS NOT NULL) = ("discount_cents" IS NOT NULL)
 	AND ("discount_cents" IS NULL OR "discount_cents" >= 0)
@@ -115,7 +134,9 @@ ALTER TABLE "pricing_snapshots" ADD CONSTRAINT "pricing_snapshots_discount_withi
 -- kind. This REFUSES two rows the old one accepted: a discount recorded as a
 -- positive amount, which anything summing the lines would have ADDED, and a
 -- discount of zero.
-ALTER TABLE "pricing_snapshot_lines" DROP CONSTRAINT IF EXISTS "pricing_snapshot_lines_amounts_non_negative";--> statement-breakpoint
+DO $$ BEGIN
+	ALTER TABLE "pricing_snapshot_lines" DROP CONSTRAINT "pricing_snapshot_lines_amounts_non_negative";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "pricing_snapshot_lines" ADD CONSTRAINT "pricing_snapshot_lines_amounts_non_negative" CHECK (
 	CASE WHEN "line_kind" = 'discount'
 		THEN "unit_price_cents" < 0 AND "line_total_cents" < 0

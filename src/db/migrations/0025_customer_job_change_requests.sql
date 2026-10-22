@@ -50,11 +50,28 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "customer_change_requests_job_idx" ON "customer_change_requests" USING btree ("job_id","raised_at");--> statement-breakpoint
-ALTER TABLE "customer_change_requests" DROP CONSTRAINT IF EXISTS "customer_change_requests_job_matches_subject";--> statement-breakpoint
+-- A CHECK IS REPLACED BY DROPPING IT FIRST, AND THE DROP IS WHERE THE QUIET GOES.
+--
+-- `ADD CONSTRAINT` inside `EXCEPTION WHEN duplicate_object THEN NULL` is the
+-- right idiom for a constraint that is NEW — it is how every foreign key above
+-- is added, and a second run is a no-op. It is the WRONG idiom for a constraint
+-- this migration REDEFINES: swallowing the duplicate leaves the OLD definition
+-- in place and reports success, which is how `pricing_snapshot_lines_amounts_
+-- non_negative` kept refusing the discount line it was rewritten to allow.
+--
+-- So the drop is unconditional and the ADD is unconditional, and the NOTICE
+-- that `DROP CONSTRAINT IF EXISTS` prints on a fresh database — which reads
+-- like an error in a deployment log — is swallowed as `undefined_object`
+-- instead. Re-runnable, silent, and it installs the definition written here.
+DO $$ BEGIN
+	ALTER TABLE "customer_change_requests" DROP CONSTRAINT "customer_change_requests_job_matches_subject";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "customer_change_requests" ADD CONSTRAINT "customer_change_requests_job_matches_subject" CHECK (
 	("subject" = 'job') = ("job_id" IS NOT NULL)
 );--> statement-breakpoint
-ALTER TABLE "customer_change_requests" DROP CONSTRAINT IF EXISTS "customer_change_requests_contact_is_for_a_job";--> statement-breakpoint
+DO $$ BEGIN
+	ALTER TABLE "customer_change_requests" DROP CONSTRAINT "customer_change_requests_contact_is_for_a_job";
+EXCEPTION WHEN undefined_object THEN NULL; END $$;--> statement-breakpoint
 ALTER TABLE "customer_change_requests" ADD CONSTRAINT "customer_change_requests_contact_is_for_a_job" CHECK (
 	"requested_by_contact_id" IS NULL OR "subject" = 'job'
 );
