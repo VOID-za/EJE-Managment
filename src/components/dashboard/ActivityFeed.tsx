@@ -16,6 +16,13 @@ const ICONS: Partial<Record<ActivityEvent['type'], IconName>> = {
   labour_added: 'clock',
   travel_added: 'truck',
   part_added: 'box',
+  // COST-5. A charge reads as money, a discount as money coming off — neither
+  // is another "line captured".
+  additional_charge_added: 'edit',
+  additional_charge_amended: 'edit',
+  discount_applied: 'edit',
+  discount_amended: 'edit',
+  discount_removed: 'edit',
   // AUDIT-3. A removal reads as a removal at a glance, and a charge changing
   // reads as an edit — neither is another "line captured".
   line_item_removed: 'trash',

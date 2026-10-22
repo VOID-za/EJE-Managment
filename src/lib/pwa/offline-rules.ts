@@ -137,6 +137,24 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   save_report:
     'The completion report replaces what is on the server, so it cannot be written offline.',
   set_callout: 'The call-out flag replaces a value on the job, so it needs a connection.',
+  /*
+   * COST-5. CHARGES AND DISCOUNTS ARE OFFICE WORK, NOT FIELD CAPTURE.
+   *
+   * The queue exists for work a technician cannot otherwise record — hours at
+   * a machine with no signal. These four are decided at a desk: a charge is
+   * priced against something the office is holding an invoice for, and a
+   * discount is a Master's commercial decision whose figure is checked against
+   * the job as the SERVER has it. Holding either on a tablet would mean
+   * deciding what happens when the job moved underneath it, which is the
+   * reason amending any line is online-only too (OFF-9).
+   */
+  add_additional_charge:
+    'A charge is added by the office against what it is being charged for, so it needs a connection.',
+  update_additional_charge:
+    'Changing a charge replaces a value on the job, so it needs a connection.',
+  apply_discount:
+    'A discount is a Master’s decision and its amount is checked against the job on the server, so it needs a connection.',
+  clear_discount: 'Removing a discount changes the record on the server, so it needs a connection.',
   set_collection: 'The collection method replaces a value on the job, so it needs a connection.',
   set_media_visibility: 'Reclassifying a photograph changes a stored value, so it needs a connection.',
   add_media:

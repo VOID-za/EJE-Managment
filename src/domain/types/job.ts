@@ -307,6 +307,63 @@ export interface PartEntry {
   readonly capturedBy: UserId;
 }
 
+/**
+ * A charge that is neither labour, nor travel, nor a part. COST-5.
+ *
+ * Consumables, a workshop bench fee, a sub-contractor's invoice passed through,
+ * courier costs on a part that had to be flown in — the things an office adds
+ * to a job that have no quantity and no rate behind them, only a description
+ * and an amount.
+ *
+ * NO QUANTITY AND NO UNIT PRICE, deliberately. A part has both because a part
+ * is a thing you can count; this is a sum of money with a reason next to it,
+ * and inventing a quantity of 1 at a unit price equal to the total would put
+ * two numbers on the customer's document that say nothing and can disagree.
+ *
+ * It is priced ON THE LINE, like a part and unlike labour: there is no rate in
+ * settings for "consumables", so the amount is historical the moment it is
+ * written and no rate change can reach it.
+ */
+export interface AdditionalChargeEntry {
+  readonly id: LineItemId;
+  readonly description: string;
+  /** The whole charge, in cents. Positive; a reduction is a discount. */
+  readonly amount: Cents;
+  readonly capturedAt: IsoDateTime;
+  /** Who put it on the job. */
+  readonly capturedBy: UserId;
+}
+
+/**
+ * Money taken OFF a job, and on whose authority. COST-5.
+ *
+ * ONE PER JOB, AND IT CARRIES ITS REASON. A discount is not a line of work: it
+ * is a commercial decision about the whole job, so it is recorded once, against
+ * the subtotal, with the person who authorised it and why. A list of discounts
+ * would be a list of edits to the same decision, and the audit trail is where
+ * edits belong.
+ *
+ * A FIXED AMOUNT RATHER THAN A PERCENTAGE. A percentage of a subtotal that
+ * changes every time a line is captured is a figure nobody can quote to the
+ * customer until the job is finished; an amount is the number the office agreed
+ * with them. **This is the shipped recommendation and not a settled EJE rule —
+ * see `docs/SCOPE.md` COST-5 and issue #24 for the exact question.**
+ *
+ * APPLIED BEFORE VAT, because VAT is charged on what the customer actually
+ * pays. Taking it off after VAT would charge them tax on money they were not
+ * asked for.
+ */
+export interface JobDiscount {
+  /** How much is taken off, in cents. Positive. */
+  readonly amount: Cents;
+  /**
+   * Why. REQUIRED — a discount with no reason is a figure nobody can defend
+   * when the invoice is queried a month later.
+   */
+  readonly reason: string;
+  readonly authorisedBy: UserId;
+  readonly authorisedAt: IsoDateTime;
+}
 
 /**
  * A part a job is waiting for. SPARE-2.
@@ -459,6 +516,19 @@ export interface Job {
   readonly labour: readonly LabourEntry[];
   readonly travel: readonly TravelEntry[];
   readonly parts: readonly PartEntry[];
+  /**
+   * Charges that are not labour, travel or parts. COST-5.
+   *
+   * Empty on almost every job. See `AdditionalChargeEntry`.
+   */
+  readonly additionalCharges: readonly AdditionalChargeEntry[];
+  /**
+   * Money taken off the whole job, and on whose authority. COST-5.
+   *
+   * Null on almost every job, which is what makes a discount legible when
+   * there is one. See `JobDiscount`.
+   */
+  readonly discount: JobDiscount | null;
   readonly photos: readonly Attachment[];
   readonly videos: readonly Attachment[];
   readonly notes: readonly JobNote[];

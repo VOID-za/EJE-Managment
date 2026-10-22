@@ -388,6 +388,8 @@ export const createJob = async (
     labour: [],
     travel: [],
     parts: [],
+    additionalCharges: [],
+    discount: null,
     photos: [],
     videos: [],
     notes: [],

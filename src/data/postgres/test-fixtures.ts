@@ -185,6 +185,8 @@ export const jobFixture = (jobNumber: string, over: Partial<Job> = {}): Job => (
   labour: [],
   travel: [],
   parts: [],
+  additionalCharges: [],
+  discount: null,
   photos: [],
   videos: [],
   notes: [],

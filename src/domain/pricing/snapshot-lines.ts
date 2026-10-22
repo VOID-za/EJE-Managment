@@ -1,7 +1,7 @@
 import type { Cents } from '../types/common';
-import type { Job, PricingSnapshot } from '../types/job';
+import type { PricingSnapshot } from '../types/job';
 import type { SystemSettings } from '../types/settings';
-import { calculateJobTotals } from './totals';
+import { calculateJobTotals, type CostedJob } from './totals';
 
 /**
  * Settings that will never be consulted.
@@ -37,7 +37,21 @@ const settingsFromSnapshot = (snapshot: PricingSnapshot): SystemSettings =>
  * domain already worked out, so the persistence layer never has to.
  */
 
-export type PricingLineKind = 'labour' | 'callout' | 'travel' | 'part';
+export type PricingLineKind =
+  | 'labour'
+  | 'callout'
+  | 'travel'
+  | 'part'
+  /** COST-5. A charge that is not labour, travel or a part. */
+  | 'additional_charge'
+  /**
+   * COST-5. Money taken off, written down as a line of its own.
+   *
+   * `lineTotal` is NEGATIVE, because the lines have to add up to the
+   * subtotal: a reader summing them must get the figure the customer signed,
+   * not that figure plus twice the discount.
+   */
+  | 'discount';
 
 export interface PricingSnapshotLine {
   readonly kind: PricingLineKind;
@@ -55,6 +69,9 @@ export interface PricingSnapshotLine {
 }
 
 export interface PricingSnapshotTotals {
+  /** COST-5. What the work came to before the discount below. */
+  readonly grossSubtotal: Cents;
+  readonly discount: Cents;
   readonly subtotal: Cents;
   readonly vat: Cents;
   readonly total: Cents;
@@ -73,7 +90,7 @@ export interface MaterialisedPricingSnapshot {
  * answer as a reread of an already-frozen job.
  */
 export const materialisePricingSnapshot = (
-  job: Pick<Job, 'labour' | 'travel' | 'parts' | 'calloutApplied' | 'pricingSnapshot'>,
+  job: CostedJob,
   snapshot: PricingSnapshot,
 ): MaterialisedPricingSnapshot => {
   const totals = calculateJobTotals(
@@ -114,9 +131,39 @@ export const materialisePricingSnapshot = (
   totals.partLines.forEach((line, index) => {
     push('part', job.parts[index]?.id ?? null, line);
   });
+  // COST-5, after the work and before the discount, which is how it prints.
+  totals.additionalChargeLines.forEach((line, index) => {
+    push('additional_charge', job.additionalCharges[index]?.id ?? null, line);
+  });
+
+  /*
+   * THE DISCOUNT IS WRITTEN DOWN AS A NEGATIVE LINE. COST-5.
+   *
+   * It has to be here, not only in the totals: this projection exists so that
+   * "what did the customer actually sign for?" survives a later amendment, and
+   * a discount is the single figure most likely to be queried. `discountTotal`
+   * rather than the recorded amount, because the capped figure is the one that
+   * was charged — see `JobTotals.discountTotal`.
+   */
+  if (totals.discountTotal > 0) {
+    push('discount', null, {
+      label: 'Discount',
+      detail: job.discount?.reason ?? '',
+      quantity: 1,
+      unit: 'ea',
+      unitPrice: -totals.discountTotal,
+      total: -totals.discountTotal,
+    });
+  }
 
   return {
     lines,
-    totals: { subtotal: totals.subtotal, vat: totals.vat, total: totals.total },
+    totals: {
+      grossSubtotal: totals.grossSubtotal,
+      discount: totals.discountTotal,
+      subtotal: totals.subtotal,
+      vat: totals.vat,
+      total: totals.total,
+    },
   };
 };

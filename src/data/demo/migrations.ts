@@ -504,6 +504,28 @@ const v23ToV24 = (data: Loose): Loose => ({
     : data.documents,
 });
 
+/**
+ * COST-5. Charges and a discount on every job.
+ *
+ * Both absent on every snapshot written before this, and both have an honest
+ * empty value — no charges, and no discount — so nothing has to be guessed.
+ * Reached two deep, because a job is the only thing that carries them.
+ */
+const v24ToV25 = (data: Loose): Loose => ({
+  ...data,
+  jobs: Array.isArray(data.jobs)
+    ? data.jobs.map((job) => {
+        if (typeof job !== 'object' || job === null) return job;
+        const row = job as Record<string, unknown>;
+        return {
+          ...row,
+          additionalCharges: 'additionalCharges' in row ? row.additionalCharges : [],
+          discount: 'discount' in row ? row.discount : null,
+        };
+      })
+    : data.jobs,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -521,6 +543,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   21: v21ToV22,
   22: v22ToV23,
   23: v23ToV24,
+  24: v24ToV25,
 };
 
 /**

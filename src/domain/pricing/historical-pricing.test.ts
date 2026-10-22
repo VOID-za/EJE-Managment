@@ -87,12 +87,14 @@ const workedJob = (overrides: Partial<Job> = {}) =>
         capturedBy: technicianId,
       },
     ],
+    additionalCharges: [],
+    discount: null,
     calloutApplied: true,
     pricingSnapshot: null,
     ...overrides,
   }) satisfies Pick<
     Job,
-    'labour' | 'travel' | 'parts' | 'calloutApplied' | 'pricingSnapshot'
+    'labour' | 'travel' | 'parts' | 'additionalCharges' | 'discount' | 'calloutApplied' | 'pricingSnapshot'
   >;
 
 const freeze = (settings: SystemSettings): PricingSnapshot => ({

@@ -21,6 +21,8 @@ import {
   type JobCorrection,
   type JobNote,
   type LabourEntry,
+  type AdditionalChargeEntry,
+  type JobDiscount,
   type PartEntry,
   type PricingSnapshot,
   type SignatureRefusal,
@@ -46,6 +48,7 @@ type JobRow = typeof schema.jobs.$inferSelect;
 type LabourRow = typeof schema.jobLabour.$inferSelect;
 type TravelRow = typeof schema.jobTravel.$inferSelect;
 type PartRow = typeof schema.jobParts.$inferSelect;
+type AdditionalChargeRow = typeof schema.jobAdditionalCharges.$inferSelect;
 type NoteRow = typeof schema.jobNotes.$inferSelect;
 type MediaRow = typeof schema.jobMedia.$inferSelect;
 type SignatureRow = typeof schema.jobSignatures.$inferSelect;
@@ -63,6 +66,8 @@ export interface JobRowSet {
   readonly labour: readonly LabourRow[];
   readonly travel: readonly TravelRow[];
   readonly parts: readonly PartRow[];
+  /** COST-5. Empty on almost every job. */
+  readonly additionalCharges: readonly AdditionalChargeRow[];
   readonly notes: readonly NoteRow[];
   readonly media: readonly MediaRow[];
   readonly signature: SignatureRow | null;
@@ -129,6 +134,32 @@ const partFrom = (row: PartRow): PartEntry => ({
   capturedAt: row.capturedAt,
   capturedBy: asUserId(row.capturedBy ?? ''),
 });
+
+const additionalChargeFrom = (row: AdditionalChargeRow): AdditionalChargeEntry => ({
+  id: asLineItemId(row.id),
+  description: row.description,
+  amount: row.amountCents,
+  capturedAt: row.capturedAt,
+  capturedBy: asUserId(row.capturedBy ?? ''),
+});
+
+/**
+ * The discount, from the four columns that carry it. COST-5.
+ *
+ * All four or none: the database refuses anything else
+ * (`jobs_discount_is_whole_or_absent`), and this reads the amount as the one
+ * that decides — so a row that somehow carried a reason alone presents as no
+ * discount rather than as a discount of nothing.
+ */
+const discountFrom = (row: JobRow): JobDiscount | null =>
+  row.discountCents === null || row.discountAuthorisedAt === null
+    ? null
+    : {
+        amount: row.discountCents,
+        reason: row.discountReason,
+        authorisedBy: asUserId(row.discountAuthorisedBy ?? ''),
+        authorisedAt: row.discountAuthorisedAt,
+      };
 
 const noteFrom = (row: NoteRow): JobNote => ({
   id: row.id,
@@ -323,6 +354,8 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     labour: rows.labour.map(labourFrom),
     travel: rows.travel.map(travelFrom),
     parts: rows.parts.map(partFrom),
+    additionalCharges: rows.additionalCharges.map(additionalChargeFrom),
+    discount: discountFrom(rows.job),
     notes: rows.notes.map(noteFrom),
 
     completionReport: {

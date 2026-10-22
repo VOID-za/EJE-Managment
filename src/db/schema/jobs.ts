@@ -154,6 +154,20 @@ export const jobs = pgTable(
     reportRecommendations: text('report_recommendations').notNull().default(''),
     reportGeneralNotes: text('report_general_notes').notNull().default(''),
 
+    /* ---- discount: money off the whole job, and on whose authority. COST-5 ---- */
+    /**
+     * Inline rather than its own table because there is at most ONE.
+     *
+     * A discount is a single commercial decision about the job, not a line of
+     * work — see `JobDiscount`. The four columns are all-or-nothing, which the
+     * CHECK below enforces: a reason with no amount, or an amount nobody
+     * authorised, is a discount nobody can defend when the invoice is queried.
+     */
+    discountCents: cents('discount_cents'),
+    discountReason: text('discount_reason').notNull().default(''),
+    discountAuthorisedBy: uuid('discount_authorised_by').references(() => users.id),
+    discountAuthorisedAt: instant('discount_authorised_at'),
+
     /* ---- cancellation: a legitimate job that will not happen ---- */
     cancellationReason: cancellationReason('cancellation_reason'),
     cancellationDescription: text('cancellation_description').notNull().default(''),
@@ -210,6 +224,29 @@ export const jobs = pgTable(
     check(
       'jobs_cancelled_has_reason',
       sql`${table.status} <> 'cancelled' or ${table.cancellationReason} is not null`,
+    ),
+    /*
+     * A DISCOUNT IS ALL FOUR COLUMNS OR NONE OF THEM. COST-5.
+     *
+     * Written as an equivalence rather than an implication so it refuses BOTH
+     * halves of the mistake: an amount with nobody behind it, and an
+     * authorisation with no amount. The reason is checked for being non-blank
+     * rather than non-null, because the column is `not null default ''` — and
+     * `btrim(…) <> ''` is the only form that refuses a reason of spaces.
+     */
+    check(
+      'jobs_discount_is_whole_or_absent',
+      sql`(${table.discountCents} is not null) = (${table.discountAuthorisedBy} is not null)
+          and (${table.discountCents} is not null) = (${table.discountAuthorisedAt} is not null)
+          and (${table.discountCents} is null or ${table.discountReason} ~ '[^[:space:]]')
+          and (${table.discountCents} is not null
+               or ${table.discountReason} !~ '[^[:space:]]')`,
+    ),
+    // Money off, not money on: a negative discount would be a charge wearing
+    // the wrong name, and zero is not a discount at all.
+    check(
+      'jobs_discount_is_positive',
+      sql`${table.discountCents} is null or ${table.discountCents} > 0`,
     ),
   ],
 );
@@ -393,6 +430,48 @@ export const jobParts = pgTable(
     index('job_parts_part_number_idx').on(sql`lower(${table.partNumber})`),
     check('job_parts_quantity_positive', sql`${table.quantity} > 0`),
     check('job_parts_unit_price_non_negative', sql`${table.unitPriceCents} >= 0`),
+  ],
+);
+
+/**
+ * Charges that are neither labour, nor travel, nor a part. COST-5.
+ *
+ * Its own table, like parts, because there can be many and each is its own line
+ * on the customer's document. No quantity and no unit price: see
+ * `AdditionalChargeEntry` for why inventing a quantity of one would put two
+ * numbers on a document that can disagree.
+ */
+export const jobAdditionalCharges = pgTable(
+  'job_additional_charges',
+  {
+    id: primaryId(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    description: text('description').notNull(),
+    amountCents: cents('amount_cents').notNull(),
+    capturedAt: instant('captured_at').notNull(),
+    capturedBy: uuid('captured_by').references(() => users.id),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    index('job_additional_charges_job_idx').on(table.jobId),
+    /*
+     * A charge has to say what it is for. "Additional charge: R450" on a
+     * customer's document with nothing beside it is a query, not a line.
+     *
+     * `~ '[^[:space:]]'` AND NOT `btrim(...) <> ''`, and the difference is not
+     * pedantic: `btrim` with no second argument trims SPACES ONLY, so a
+     * description of a single tab passes it. The db test caught exactly that.
+     * This asks the question that was meant — is there one character here that
+     * is not whitespace — and it is the form the rest of this schema should
+     * move to.
+     */
+    check('job_additional_charges_has_description', sql`${table.description} ~ '[^[:space:]]'`),
+    // Positive: money off the job is a discount, which is a different thing
+    // with a different authority behind it.
+    check('job_additional_charges_amount_positive', sql`${table.amountCents} > 0`),
   ],
 );
 

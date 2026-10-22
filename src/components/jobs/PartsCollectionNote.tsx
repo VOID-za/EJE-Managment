@@ -163,9 +163,36 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
               ))}
             </tbody>
             <tfoot>
+              {/*
+                COST-5. A collection note can carry a discount too — goods
+                handed over at the counter are priced like anything else. Both
+                figures and the reason, for the same reason as the job card.
+              */}
+              {model.charges.discount !== null && (
+                <>
+                  <tr className="border-t border-steel-300">
+                    <td colSpan={3} className="py-1 text-steel-600">
+                      Subtotal
+                    </td>
+                    <td />
+                    <td className="tabular py-1 text-right text-steel-700">
+                      {model.charges.discount.grossSubtotal}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td colSpan={3} className="py-1 text-steel-600 italic">
+                      Discount — {model.charges.discount.reason}
+                    </td>
+                    <td />
+                    <td className="tabular py-1 text-right text-steel-700">
+                      −{model.charges.discount.amount}
+                    </td>
+                  </tr>
+                </>
+              )}
               <tr className="border-t-2 border-steel-900">
                 <td colSpan={3} className="py-2 font-bold text-steel-900">
-                  Subtotal
+                  {model.charges.discount === null ? 'Subtotal' : 'Subtotal after discount'}
                 </td>
                 <td />
                 <td className="tabular py-2 text-right font-bold text-steel-900">

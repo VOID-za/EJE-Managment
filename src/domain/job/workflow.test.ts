@@ -43,6 +43,8 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   labour: [],
   travel: [],
   parts: [],
+  additionalCharges: [],
+  discount: null,
   photos: [],
   videos: [],
   notes: [],

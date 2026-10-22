@@ -486,8 +486,20 @@ export const jobs = {
   updateTravel: (jobId: string, input: unknown) => jobAction(jobId, 'update_travel', input),
   addPart: (jobId: string, input: unknown) => jobAction(jobId, 'add_part', input),
   updatePart: (jobId: string, input: unknown) => jobAction(jobId, 'update_part', input),
-  removeLine: (jobId: string, kind: 'labour' | 'travel' | 'part', lineId: string) =>
-    jobAction(jobId, 'remove_line', { kind, lineId }),
+  // COST-5. A charge that is neither labour, travel nor a part.
+  addAdditionalCharge: (jobId: string, input: unknown) =>
+    jobAction(jobId, 'add_additional_charge', input),
+  updateAdditionalCharge: (jobId: string, input: unknown) =>
+    jobAction(jobId, 'update_additional_charge', input),
+  // COST-5. Money off the whole job. The server refuses anybody but a Master.
+  applyDiscount: (jobId: string, amount: number, reason: string) =>
+    jobAction(jobId, 'apply_discount', { amount, reason }),
+  clearDiscount: (jobId: string) => jobAction(jobId, 'clear_discount'),
+  removeLine: (
+    jobId: string,
+    kind: 'labour' | 'travel' | 'part' | 'additional_charge',
+    lineId: string,
+  ) => jobAction(jobId, 'remove_line', { kind, lineId }),
   setCallout: (jobId: string, applied: boolean) => jobAction(jobId, 'set_callout', { applied }),
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),

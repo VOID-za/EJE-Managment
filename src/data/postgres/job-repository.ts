@@ -37,6 +37,9 @@ import { isUuid } from './identifiers';
 
 /** The three money columns a snapshot carries, named once. */
 const totalsOf = (totals: PricingSnapshotTotals) => ({
+  // COST-5 added the two below. Both or neither; see the table's own CHECK.
+  grossSubtotalCents: totals.grossSubtotal,
+  discountCents: totals.discount,
   subtotalCents: totals.subtotal,
   vatCents: totals.vat,
   totalCents: totals.total,
@@ -784,6 +787,26 @@ export class PostgresJobRepository implements JobRepository {
       );
     }
 
+    /*
+     * COST-5. Same delete-and-reinsert shape as the lines above, which is what
+     * makes an amendment and a removal the same write.
+     */
+    await this.db
+      .delete(schema.jobAdditionalCharges)
+      .where(eq(schema.jobAdditionalCharges.jobId, job.id));
+    if (job.additionalCharges.length > 0) {
+      await this.db.insert(schema.jobAdditionalCharges).values(
+        job.additionalCharges.map((entry) => ({
+          id: entry.id as string,
+          jobId: job.id as string,
+          description: entry.description,
+          amountCents: entry.amount,
+          capturedAt: entry.capturedAt,
+          capturedBy: entry.capturedBy,
+        })),
+      );
+    }
+
     await this.db.delete(schema.jobNotes).where(eq(schema.jobNotes.jobId, job.id));
     if (job.notes.length > 0) {
       await this.db.insert(schema.jobNotes).values(
@@ -1199,6 +1222,7 @@ export class PostgresJobRepository implements JobRepository {
       labour,
       travel,
       parts,
+      additionalCharges,
       notes,
       media,
       signatures,
@@ -1212,6 +1236,10 @@ export class PostgresJobRepository implements JobRepository {
       this.db.select().from(schema.jobLabour).where(inArray(schema.jobLabour.jobId, ids)),
       this.db.select().from(schema.jobTravel).where(inArray(schema.jobTravel.jobId, ids)),
       this.db.select().from(schema.jobParts).where(inArray(schema.jobParts.jobId, ids)),
+      this.db
+        .select()
+        .from(schema.jobAdditionalCharges)
+        .where(inArray(schema.jobAdditionalCharges.jobId, ids)),
       this.db.select().from(schema.jobNotes).where(inArray(schema.jobNotes.jobId, ids)),
       this.db.select().from(schema.jobMedia).where(inArray(schema.jobMedia.jobId, ids)),
       this.db.select().from(schema.jobSignatures).where(inArray(schema.jobSignatures.jobId, ids)),
@@ -1248,6 +1276,7 @@ export class PostgresJobRepository implements JobRepository {
         labour: by(labour, job.id),
         travel: by(travel, job.id),
         parts: by(parts, job.id),
+        additionalCharges: by(additionalCharges, job.id),
         notes: by(notes, job.id),
         media: by(media, job.id),
         signature: by(signatures, job.id)[0] ?? null,

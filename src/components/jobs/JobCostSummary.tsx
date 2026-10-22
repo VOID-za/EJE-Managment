@@ -33,6 +33,19 @@ export const JobCostSummary = ({
       detail: `${job.parts.length} ${job.parts.length === 1 ? 'line' : 'lines'}`,
       value: totals.partsTotal,
     },
+    // COST-5. Shown only when there are any, so the panel does not grow a row
+    // of zero on every ordinary job.
+    ...(job.additionalCharges.length > 0
+      ? [
+          {
+            label: 'Additional charges',
+            detail: `${job.additionalCharges.length} ${
+              job.additionalCharges.length === 1 ? 'line' : 'lines'
+            }`,
+            value: totals.additionalChargesTotal,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -48,12 +61,57 @@ export const JobCostSummary = ({
           </div>
         ))}
 
-        <div className="flex items-baseline justify-between gap-3 border-t border-steel-200 pt-2.5 text-sm">
-          <dt className="font-medium text-steel-700">Subtotal</dt>
-          <dd className="tabular font-semibold text-steel-900">
-            {formatCurrency(totals.subtotal)}
-          </dd>
-        </div>
+        {/*
+          COST-5. THE DISCOUNT IS SHOWN AS A LINE, BETWEEN TWO SUBTOTALS.
+          The office is asked "what was it before you came down", so both
+          figures are on the screen and both go on the customer's document.
+        */}
+        {job.discount === null ? (
+          <div className="flex items-baseline justify-between gap-3 border-t border-steel-200 pt-2.5 text-sm">
+            <dt className="font-medium text-steel-700">Subtotal</dt>
+            <dd className="tabular font-semibold text-steel-900">
+              {formatCurrency(totals.subtotal)}
+            </dd>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between gap-3 border-t border-steel-200 pt-2.5 text-sm">
+              <dt className="text-steel-600">Subtotal before discount</dt>
+              <dd className="tabular text-steel-800">{formatCurrency(totals.grossSubtotal)}</dd>
+            </div>
+            <div
+              className="flex items-baseline justify-between gap-3 text-sm"
+              data-testid="job-discount-line"
+            >
+              <dt className="text-steel-600">
+                Discount
+                <span className="ml-1.5 text-xs text-steel-400">{job.discount.reason}</span>
+              </dt>
+              <dd className="tabular font-medium text-verdant-700">
+                −{formatCurrency(totals.discountTotal)}
+              </dd>
+            </div>
+            {/*
+              THE RECORDED FIGURE AND THE ONE CHARGED CAN DIFFER, and when they
+              do the screen says so rather than quietly showing the smaller
+              number. It happens when a line is removed AFTER a discount was
+              agreed: the discount cannot exceed the work left.
+            */}
+            {totals.discountCapped && (
+              <p className="text-xs text-amber-eje-700">
+                {formatCurrency(totals.discountRecorded)} was authorised, but the job now comes to{' '}
+                {formatCurrency(totals.grossSubtotal)} — so the whole of it is taken off and no
+                more. Amend the discount if that is not what was agreed.
+              </p>
+            )}
+            <div className="flex items-baseline justify-between gap-3 border-t border-steel-200 pt-2.5 text-sm">
+              <dt className="font-medium text-steel-700">Subtotal</dt>
+              <dd className="tabular font-semibold text-steel-900">
+                {formatCurrency(totals.subtotal)}
+              </dd>
+            </div>
+          </>
+        )}
         <div className="flex items-baseline justify-between gap-3 text-sm">
           <dt className="text-steel-600">VAT @ {totals.pricing.vatPercentage}%</dt>
           <dd className="tabular text-steel-800">{formatCurrency(totals.vat)}</dd>

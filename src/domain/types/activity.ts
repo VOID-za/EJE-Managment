@@ -43,6 +43,27 @@ export type ActivityEventType =
   | 'travel_added'
   | 'part_added'
   /**
+   * COST-5. A charge that is not labour, travel or a part.
+   *
+   * Its own types rather than another `part_added`, for the reason the removal
+   * and the amendment already have their own: the office filtering for "why is
+   * this invoice higher" needs to see a charge as a charge, and a charge going
+   * ON is a different question from one being CHANGED.
+   */
+  | 'additional_charge_added'
+  | 'additional_charge_amended'
+  /**
+   * COST-5. Money off the whole job, and who authorised it.
+   *
+   * Four types, because four different things happen and each is asked about
+   * separately: a discount was agreed, the figure was changed, it was taken off
+   * again — and all three are a Master's act, which is the point of recording
+   * them apart from the work.
+   */
+  | 'discount_applied'
+  | 'discount_amended'
+  | 'discount_removed'
+  /**
    * A LABOUR, TRAVEL OR PARTS LINE TAKEN OFF A JOB. AUDIT-3.
    *
    * Its own type, and not a second `labour_added` with different wording,

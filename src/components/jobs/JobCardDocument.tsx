@@ -184,9 +184,38 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
               ))}
             </tbody>
             <tfoot>
+              {/*
+                COST-5. THE DISCOUNT, WITH ITS REASON, ON THE CUSTOMER'S OWN
+                COPY. Printed between the two subtotals so the paper answers
+                "what was it before you came down" without anybody adding the
+                lines back up. The reason is required when the discount is
+                applied precisely so it can be shown here.
+              */}
+              {model.charges.discount !== null && (
+                <>
+                  <tr>
+                    <td colSpan={2} />
+                    <td className="py-1.5 text-right text-steel-600">Subtotal</td>
+                    <td className="tabular py-1.5 text-right">
+                      {model.charges.discount.grossSubtotal}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td colSpan={2} className="py-1.5 pr-2 text-steel-600 italic">
+                      Discount — {model.charges.discount.reason}
+                    </td>
+                    <td className="py-1.5 text-right text-steel-600">Discount</td>
+                    <td className="tabular py-1.5 text-right font-medium">
+                      −{model.charges.discount.amount}
+                    </td>
+                  </tr>
+                </>
+              )}
               <tr>
                 <td colSpan={2} />
-                <td className="py-1.5 text-right text-steel-600">Subtotal</td>
+                <td className="py-1.5 text-right text-steel-600">
+                  {model.charges.discount === null ? 'Subtotal' : 'Subtotal after discount'}
+                </td>
                 <td className="tabular py-1.5 text-right font-medium">
                   {model.charges.subtotal}
                 </td>

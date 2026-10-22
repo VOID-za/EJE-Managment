@@ -104,6 +104,19 @@ export interface JobCardModel {
 
   readonly charges: {
     readonly rows: readonly ChargeRow[];
+    /**
+     * COST-5. The two figures a discount makes necessary.
+     *
+     * Null when there is no discount, so an ordinary job card prints one
+     * subtotal and not three lines saying the same thing. When there IS one,
+     * both are printed: the office is asked "what was it before you came
+     * down", and the answer belongs on the paper the customer keeps.
+     */
+    readonly discount: {
+      readonly grossSubtotal: string;
+      readonly amount: string;
+      readonly reason: string;
+    } | null;
     readonly subtotal: string;
     readonly vatLabel: string;
     readonly vat: string;
@@ -265,6 +278,21 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       amount: formatCurrency(totals.partLines[index]?.total ?? 0),
       mono: true,
     })),
+    /*
+     * COST-5. After the work, because that is the order the money was decided
+     * in: what was done, then what else it cost.
+     *
+     * No quantity and no rate: the cells are blank rather than carrying a "1"
+     * and a repeat of the amount, which would be two numbers on a customer's
+     * document that say nothing.
+     */
+    ...job.additionalCharges.map((entry) => ({
+      description: 'Additional charge',
+      detail: entry.description,
+      quantity: '',
+      rate: '',
+      amount: formatCurrency(entry.amount),
+    })),
   ];
 
   const progress =
@@ -417,6 +445,23 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
         ? null
         : {
             rows: chargeRows,
+            /*
+             * COST-5. THE REASON IS PRINTED, not only the figure.
+             *
+             * A discount with no reason on the customer's own copy is the
+             * thing their accounts department telephones about, and the reason
+             * is required when it is applied precisely so it can be shown
+             * here. `discountTotal` rather than the recorded amount, because
+             * what the document must say is what was actually taken off.
+             */
+            discount:
+              job.discount === null || totals.discountTotal === 0
+                ? null
+                : {
+                    grossSubtotal: formatCurrency(totals.grossSubtotal),
+                    amount: formatCurrency(totals.discountTotal),
+                    reason: job.discount.reason,
+                  },
             subtotal: formatCurrency(totals.subtotal),
             vatLabel: `VAT @ ${totals.pricing.vatPercentage}%`,
             vat: formatCurrency(totals.vat),

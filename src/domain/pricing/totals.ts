@@ -30,10 +30,35 @@ export interface JobTotals {
   readonly calloutLines: readonly CostLine[];
   readonly travelLines: readonly CostLine[];
   readonly partLines: readonly CostLine[];
+  /** COST-5. One line per charge that is not labour, travel or a part. */
+  readonly additionalChargeLines: readonly CostLine[];
   readonly labourTotal: Cents;
   readonly calloutTotal: Cents;
   readonly travelTotal: Cents;
   readonly partsTotal: Cents;
+  readonly additionalChargesTotal: Cents;
+  /**
+   * What the work comes to BEFORE a discount. COST-5.
+   *
+   * Named rather than left implicit because it is what a discount is measured
+   * against, and because the document prints both: the office is asked "what
+   * was it before you came down", and the answer has to be on the paper.
+   */
+  readonly grossSubtotal: Cents;
+  /**
+   * The discount actually taken off, which is NOT always what was recorded.
+   *
+   * A discount is agreed against the job as it stood. If a line is removed
+   * afterwards the recorded amount can exceed what is left, and an invoice for
+   * a negative sum is not a thing EJE can issue — so it is capped at the gross
+   * subtotal here and `discountCapped` says so. The recorded figure is never
+   * rewritten: the job still says what was agreed.
+   */
+  readonly discountTotal: Cents;
+  readonly discountCapped: boolean;
+  /** The discount as RECORDED, before any capping. */
+  readonly discountRecorded: Cents;
+  /** `grossSubtotal` less `discountTotal`. What VAT is charged on. */
   readonly subtotal: Cents;
   readonly vat: Cents;
   readonly total: Cents;
@@ -88,10 +113,19 @@ export const labourRateLabel = (rateType: LabourRateType): string => {
   }
 };
 
-export const calculateJobTotals = (
-  job: Pick<Job, 'labour' | 'travel' | 'parts' | 'calloutApplied' | 'pricingSnapshot'>,
-  settings: SystemSettings,
-): JobTotals => {
+/** The cost-bearing parts of a job: everything `calculateJobTotals` reads. */
+export type CostedJob = Pick<
+  Job,
+  | 'labour'
+  | 'travel'
+  | 'parts'
+  | 'additionalCharges'
+  | 'discount'
+  | 'calloutApplied'
+  | 'pricingSnapshot'
+>;
+
+export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): JobTotals => {
   // A signed job prices at its snapshot; everything else prices at current rates.
   const pricing = resolveJobPricing(job, settings);
 
@@ -140,6 +174,21 @@ export const calculateJobTotals = (
     total: roundCents(entry.quantity * entry.unitPrice),
   }));
 
+  /*
+   * COST-5. Priced on the line, like a part: there is no rate in settings for
+   * "consumables", so the amount is historical the moment it is written and no
+   * rate change can reach it. One unit, because a sum of money with a reason
+   * next to it has no quantity — see `AdditionalChargeEntry`.
+   */
+  const additionalChargeLines: CostLine[] = job.additionalCharges.map((entry) => ({
+    label: 'Additional charge',
+    detail: entry.description,
+    quantity: 1,
+    unit: 'ea',
+    unitPrice: entry.amount,
+    total: entry.amount,
+  }));
+
   const sum = (lines: readonly CostLine[]): Cents =>
     lines.reduce((acc, line) => acc + line.total, 0);
 
@@ -147,7 +196,23 @@ export const calculateJobTotals = (
   const calloutTotal = sum(calloutLines);
   const travelTotal = sum(travelLines);
   const partsTotal = sum(partLines);
-  const subtotal = labourTotal + calloutTotal + travelTotal + partsTotal;
+  const additionalChargesTotal = sum(additionalChargeLines);
+  const grossSubtotal =
+    labourTotal + calloutTotal + travelTotal + partsTotal + additionalChargesTotal;
+
+  /*
+   * THE DISCOUNT, CAPPED AT THE WORK. COST-5.
+   *
+   * The write path refuses a discount larger than the job, but a line removed
+   * AFTERWARDS can leave one stranded above what is left, and an invoice for a
+   * negative sum is not something EJE can issue. The recorded figure is left
+   * alone — the job still says what was agreed — and the capping is reported so
+   * a screen can say the discount now covers the whole job rather than silently
+   * showing a smaller number than the one on the record.
+   */
+  const discountRecorded = job.discount?.amount ?? 0;
+  const discountTotal = Math.min(discountRecorded, grossSubtotal);
+  const subtotal = grossSubtotal - discountTotal;
   const vat = roundCents((subtotal * pricing.vatPercentage) / 100);
 
   return {
@@ -157,10 +222,16 @@ export const calculateJobTotals = (
     calloutLines,
     travelLines,
     partLines,
+    additionalChargeLines,
     labourTotal,
     calloutTotal,
     travelTotal,
     partsTotal,
+    additionalChargesTotal,
+    grossSubtotal,
+    discountTotal,
+    discountCapped: discountTotal < discountRecorded,
+    discountRecorded,
     subtotal,
     vat,
     total: subtotal + vat,

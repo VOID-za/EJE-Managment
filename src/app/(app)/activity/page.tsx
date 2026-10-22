@@ -41,6 +41,13 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
         'labour_added',
         'travel_added',
         'part_added',
+        // COST-5: money added to and taken off a job is what the office is
+        // looking for when it asks why an invoice moved.
+        'additional_charge_added',
+        'additional_charge_amended',
+        'discount_applied',
+        'discount_amended',
+        'discount_removed',
         // AUDIT-3: what was taken off a job belongs with what was put on it —
         // the office looking for "why is this invoice lower" filters here.
         'line_item_removed',

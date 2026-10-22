@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Job, PricingSnapshot } from '../types/job';
+import type { PricingSnapshot } from '../types/job';
 import { materialisePricingSnapshot } from './snapshot-lines';
+import type { CostedJob } from './totals';
 
 /**
  * Writing down what the customer signed for.
@@ -26,7 +27,7 @@ const SNAPSHOT: PricingSnapshot = {
   reason: 'customer_signature',
 };
 
-type Priceable = Pick<Job, 'labour' | 'travel' | 'parts' | 'calloutApplied' | 'pricingSnapshot'>;
+type Priceable = CostedJob;
 
 const priceable = (over: Partial<Priceable> = {}): Priceable => ({
   labour: [
@@ -63,6 +64,8 @@ const priceable = (over: Partial<Priceable> = {}): Priceable => ({
       capturedBy: 'user-tech-sipho',
     },
   ],
+  additionalCharges: [],
+  discount: null,
   calloutApplied: true,
   pricingSnapshot: null,
   ...over,
@@ -131,7 +134,10 @@ describe('materialising a pricing snapshot', () => {
       SNAPSHOT,
     );
     expect(empty.lines).toEqual([]);
-    expect(empty.totals).toEqual({ subtotal: 0, vat: 0, total: 0 });
+    // COST-5 added the gross and the discount. Both zero on a job with
+    // nothing on it, which is what distinguishes it from a job discounted
+    // to nothing — that one has a gross and a discount that match.
+    expect(empty.totals).toEqual({ grossSubtotal: 0, discount: 0, subtotal: 0, vat: 0, total: 0 });
   });
 
   it('labels every line so the document can be rebuilt from the record alone', () => {

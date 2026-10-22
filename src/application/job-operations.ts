@@ -34,6 +34,7 @@ import {
   canTakeOverSubmission,
   submissionCover,
   finalizedRefusal,
+  calculateJobTotals,
   labourRateLabel,
   siteAddressLine,
   siteNavigationUrl,
@@ -50,6 +51,7 @@ import {
   type JobCompletionReport,
   type LabourEntry,
   type TravelEntry,
+  type AdditionalChargeEntry,
   type PartEntry,
   type JobStatus,
   type LabourRateType,
@@ -70,7 +72,7 @@ import {
   deliveryRetryAdvice,
 } from '@/domain';
 import { businessDateOf } from '@/lib/business-time';
-import { formatHours, formatKilometres } from '@/lib/format';
+import { formatCurrency, formatHours, formatKilometres } from '@/lib/format';
 import { deliveryFailureKindOf } from '@/services/ports';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
@@ -796,6 +798,251 @@ export const addPart = async (
 };
 
 /**
+ * A charge that is neither labour, nor travel, nor a part. COST-5.
+ *
+ * WHAT THE OFFICE DID INSTEAD, UNTIL NOW. There were three places money could
+ * go on a job — labour at a rate, travel per kilometre, parts per unit — so a
+ * consumable, a workshop bench fee or a sub-contractor's invoice went onto a
+ * PART line with a made-up part number. That is how a parts search starts
+ * returning things that are not parts, and how "what did we charge for
+ * consumables last year" becomes unanswerable.
+ *
+ * NO NEW CAPABILITY, deliberately: it rides on `jobs.captureWork` like a part,
+ * because a technician already enters part prices and a consumable is the same
+ * act. Money OFF is the one that needs authority — see `applyDiscount`.
+ */
+export interface AdditionalChargeInput {
+  readonly description: string;
+  /** The whole charge in cents, as an integer. Positive. */
+  readonly amount: number;
+}
+
+/**
+ * A charge HAS to say what it is for.
+ *
+ * Found by the route test, which added one with a description of three spaces
+ * and was answered 200. "Additional charge — R450" on a customer's document
+ * with nothing beside it is a telephone call from their accounts department,
+ * and the database refuses it (`job_additional_charges_has_description`) — so
+ * without this the demonstration backend accepted a row PostgreSQL would not.
+ */
+const chargeDescription = (value: string): string => {
+  const description = value.trim();
+  if (description.length === 0) {
+    throw new WorkflowError('That charge has to say what it is for.', [
+      {
+        code: 'charge_description_required',
+        message:
+          'Describe what is being charged. It is printed on the customer’s job card, and a figure with nothing beside it is a query rather than a line.',
+      },
+    ]);
+  }
+  return description;
+};
+
+export const addAdditionalCharge = async (
+  context: OperationContext,
+  job: Job,
+  input: AdditionalChargeInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+  const description = chargeDescription(input.description);
+  const entry: AdditionalChargeEntry = {
+    id: asLineItemId(context.services.ids.next('chg')),
+    description,
+    amount: input.amount,
+    capturedAt: context.services.clock.now(),
+    capturedBy: context.actor.id,
+  };
+
+  const saved = await context.repos.jobs.save({
+    ...job,
+    additionalCharges: [...job.additionalCharges, entry],
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'additional_charge_added',
+    summary: `Additional charge captured: ${formatCurrency(input.amount)}`,
+    detail: `${description}.` + administrativeNote(context, job),
+    changes: changesBetween('additional_charge', lineItemNulls('additional_charge'), {
+      description,
+      amount: input.amount,
+    }),
+  });
+  await recordPostSignatureChange(context, saved, 'An additional charge was added.');
+  return saved;
+};
+
+export const updateAdditionalCharge = async (
+  context: OperationContext,
+  job: Job,
+  lineId: string,
+  input: AdditionalChargeInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+  const existing = job.additionalCharges.find((entry) => entry.id === lineId);
+  if (existing === undefined) {
+    throw new WorkflowError('That charge is no longer on this job.', [
+      {
+        code: 'line_not_on_job',
+        message: 'It may already have been removed. Reload the job and look again.',
+      },
+    ]);
+  }
+
+  const description = chargeDescription(input.description);
+  const saved = await context.repos.jobs.save({
+    ...job,
+    additionalCharges: job.additionalCharges.map((entry) =>
+      entry.id === lineId ? { ...entry, description, amount: input.amount } : entry,
+    ),
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'additional_charge_amended',
+    summary: `Additional charge amended: ${formatCurrency(input.amount)}`,
+    detail: `${description}.` + administrativeNote(context, job),
+    changes: changesBetween(
+      'additional_charge',
+      lineItemValues('additional_charge', existing),
+      { description, amount: input.amount },
+    ),
+  });
+  await recordPostSignatureChange(context, saved, 'An additional charge was amended.');
+  return saved;
+};
+
+/**
+ * MONEY OFF THE WHOLE JOB, AND ON WHOSE AUTHORITY. COST-5.
+ *
+ * A Master's alone — `jobs.applyDiscount` — for EJE's own stated reason: the
+ * charge-out rates stay with a Master, and a discount is that decision made for
+ * one customer instead of all of them.
+ *
+ * ONE PER JOB, REPLACED RATHER THAN ADDED TO. A second discount would be an
+ * edit to the same commercial decision, and the audit trail is where edits
+ * belong — so applying one over an existing one records the before and the
+ * after, and the job carries a single figure the office can quote.
+ *
+ * REFUSED ABOVE THE GROSS SUBTOTAL, because an invoice for a negative sum is
+ * not something EJE can issue. The figure is checked against the job as it
+ * stands; a line removed afterwards can still strand it, which is why
+ * `calculateJobTotals` caps it as well and says it has.
+ *
+ * **The shape is the shipped recommendation, not a settled rule.** A fixed
+ * amount rather than a percentage, applied to the subtotal before VAT, at
+ * Master authority. Issue #24 carries the exact questions.
+ */
+export interface DiscountInput {
+  /** Cents off, as a positive integer. */
+  readonly amount: number;
+  readonly reason: string;
+}
+
+export const applyDiscount = async (
+  context: OperationContext,
+  job: Job,
+  input: DiscountInput,
+): Promise<Job> => {
+  assertEditable(context, job);
+  if (!can(context.actor.role, 'jobs.applyDiscount')) {
+    throw new WorkflowError('A discount is a Master’s decision.', [
+      {
+        code: 'not_permitted',
+        message:
+          'Ask a Master to apply it. What a customer is let off is priced like a rate, and the rates are theirs.',
+      },
+    ]);
+  }
+
+  const reason = input.reason.trim();
+  if (reason.length === 0) {
+    throw new WorkflowError('A discount has to say why.', [
+      {
+        code: 'discount_reason_required',
+        message:
+          'Record what was agreed and with whom. A figure with no reason beside it cannot be defended when the invoice is queried.',
+      },
+    ]);
+  }
+
+  const settings = await context.repos.settings.get();
+  const { grossSubtotal } = calculateJobTotals(job, settings);
+  if (input.amount > grossSubtotal) {
+    throw new WorkflowError('That is more than the job comes to.', [
+      {
+        code: 'discount_exceeds_job',
+        message:
+          `The work on this job totals ${formatCurrency(grossSubtotal)} before VAT. ` +
+          'A discount cannot be larger than that — EJE cannot issue an invoice for a negative amount.',
+      },
+    ]);
+  }
+
+  const previous = job.discount;
+  const discount = {
+    amount: input.amount,
+    reason,
+    authorisedBy: context.actor.id,
+    authorisedAt: context.services.clock.now(),
+  };
+  const saved = await context.repos.jobs.save({ ...job, discount });
+
+  await audit(context, {
+    jobId: job.id,
+    type: previous === null ? 'discount_applied' : 'discount_amended',
+    summary:
+      previous === null
+        ? `Discount applied: ${formatCurrency(input.amount)}`
+        : `Discount changed to ${formatCurrency(input.amount)}`,
+    detail: `${reason}.` + administrativeNote(context, job),
+    changes: changesBetween(
+      'discount',
+      { amount: previous?.amount ?? null, reason: previous?.reason ?? null },
+      { amount: input.amount, reason },
+    ),
+  });
+  await recordPostSignatureChange(context, saved, 'A discount was applied.');
+  return saved;
+};
+
+/** Takes the discount off again. Master's, like applying one. */
+export const clearDiscount = async (context: OperationContext, job: Job): Promise<Job> => {
+  assertEditable(context, job);
+  if (!can(context.actor.role, 'jobs.applyDiscount')) {
+    throw new WorkflowError('A discount is a Master’s decision.', [
+      { code: 'not_permitted', message: 'Ask a Master to remove it.' },
+    ]);
+  }
+  const previous = job.discount;
+  if (previous === null) {
+    throw new WorkflowError('There is no discount on this job.', [
+      {
+        code: 'no_discount',
+        message: 'It may already have been removed. Reload the job and look again.',
+      },
+    ]);
+  }
+
+  const saved = await context.repos.jobs.save({ ...job, discount: null });
+  await audit(context, {
+    jobId: job.id,
+    type: 'discount_removed',
+    summary: `Discount removed: ${formatCurrency(previous.amount)}`,
+    detail: `It was applied for: ${previous.reason}. The job prices at full value again.`,
+    changes: changesBetween(
+      'discount',
+      { amount: previous.amount, reason: previous.reason },
+      { amount: null, reason: null },
+    ),
+  });
+  await recordPostSignatureChange(context, saved, 'A discount was removed.');
+  return saved;
+};
+
+/**
  * Amends an existing labour line.
  *
  * The line keeps its id and its original `capturedAt`, so the audit trail and
@@ -969,7 +1216,7 @@ export const updatePart = async (
   return saved;
 };
 
-export type LineItemKind = 'labour' | 'travel' | 'part';
+export type LineItemKind = 'labour' | 'travel' | 'part' | 'additional_charge';
 
 /**
  * A removed line, in the three shapes the audit trail needs. AUDIT-3.
@@ -979,20 +1226,30 @@ export type LineItemKind = 'labour' | 'travel' | 'part';
  * records the WHOLE line and not the part the sentence happens to mention.
  */
 const lineItemLabel = (kind: LineItemKind): string =>
-  kind === 'labour' ? 'Labour' : kind === 'travel' ? 'Travel' : 'Part';
+  kind === 'labour'
+    ? 'Labour'
+    : kind === 'travel'
+      ? 'Travel'
+      : kind === 'part'
+        ? 'Part'
+        : 'Additional charge';
 
-const describeLineItem = (kind: LineItemKind, line: LabourEntry | TravelEntry | PartEntry): string => {
+type AnyLine = LabourEntry | TravelEntry | PartEntry | AdditionalChargeEntry;
+
+const describeLineItem = (kind: LineItemKind, line: AnyLine): string => {
   if (kind === 'labour') {
     const labour = line as LabourEntry;
     return `${formatHours(labour.hours)} ${labourRateLabel(labour.rateType).toLowerCase()}`;
   }
   if (kind === 'travel') return formatKilometres((line as TravelEntry).kilometres);
-  return (line as PartEntry).partNumber;
+  if (kind === 'part') return (line as PartEntry).partNumber;
+  // COST-5. The description IS the charge — there is no part number to name.
+  return (line as AdditionalChargeEntry).description;
 };
 
 const lineItemValues = (
   kind: LineItemKind,
-  line: LabourEntry | TravelEntry | PartEntry,
+  line: AnyLine,
 ): Readonly<Record<string, AuditValue>> => {
   if (kind === 'labour') {
     const labour = line as LabourEntry;
@@ -1006,6 +1263,10 @@ const lineItemValues = (
   if (kind === 'travel') {
     const travel = line as TravelEntry;
     return { date: travel.date, kilometres: travel.kilometres, description: travel.description };
+  }
+  if (kind === 'additional_charge') {
+    const charge = line as AdditionalChargeEntry;
+    return { description: charge.description, amount: charge.amount };
   }
   const part = line as PartEntry;
   return {
@@ -1029,6 +1290,7 @@ const LINE_FIELDS: Record<LineItemKind, readonly string[]> = {
   labour: ['date', 'rateType', 'hours', 'description'],
   travel: ['date', 'kilometres', 'description'],
   part: ['partNumber', 'description', 'quantity', 'unitPrice'],
+  additional_charge: ['description', 'amount'],
 };
 
 /** The same keys, all null: what a removal moves every field TO. */
@@ -1059,15 +1321,20 @@ export const removeLineItem = async (
       ? job.labour.find((entry) => entry.id === lineId)
       : kind === 'travel'
         ? job.travel.find((entry) => entry.id === lineId)
-        : job.parts.find((entry) => entry.id === lineId);
+        : kind === 'part'
+          ? job.parts.find((entry) => entry.id === lineId)
+          : job.additionalCharges.find((entry) => entry.id === lineId);
 
   if (existing === undefined) {
-    throw new WorkflowError(`That ${kind} line is no longer on this job.`, [
-      {
-        code: 'line_not_on_job',
-        message: 'It may already have been removed. Reload the job and look again.',
-      },
-    ]);
+    throw new WorkflowError(
+      `That ${lineItemLabel(kind).toLowerCase()} line is no longer on this job.`,
+      [
+        {
+          code: 'line_not_on_job',
+          message: 'It may already have been removed. Reload the job and look again.',
+        },
+      ],
+    );
   }
 
   const next: Job =
@@ -1075,7 +1342,12 @@ export const removeLineItem = async (
       ? { ...job, labour: job.labour.filter((entry) => entry.id !== lineId) }
       : kind === 'travel'
         ? { ...job, travel: job.travel.filter((entry) => entry.id !== lineId) }
-        : { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) };
+        : kind === 'part'
+          ? { ...job, parts: job.parts.filter((entry) => entry.id !== lineId) }
+          : {
+              ...job,
+              additionalCharges: job.additionalCharges.filter((entry) => entry.id !== lineId),
+            };
 
   const saved = await context.repos.jobs.save(next);
 
@@ -1095,7 +1367,11 @@ export const removeLineItem = async (
 
   // Unchanged: the refusal-resolution path still records an amendment of its
   // own. `assertEditable` has already refused a signed job outright.
-  await recordPostSignatureChange(context, saved, `A ${kind} line was removed.`);
+  await recordPostSignatureChange(
+    context,
+    saved,
+    `A ${lineItemLabel(kind).toLowerCase()} line was removed.`,
+  );
   return saved;
 };
 

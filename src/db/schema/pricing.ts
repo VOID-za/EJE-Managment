@@ -49,6 +49,18 @@ export const pricingSnapshots = pgTable(
     vatPercentBasisPoints: integer('vat_percent_basis_points').notNull(),
 
     /* ---- the totals that were actually shown ---- */
+    /**
+     * What the work came to BEFORE the discount, and the discount. COST-5.
+     *
+     * Both written down, because the question the office is asked afterwards is
+     * "what was it before you came down" and the answer has to be in the record
+     * rather than reconstructed by adding the lines back up. Nullable: every
+     * snapshot taken before COST-5 existed has no discount to record and no
+     * gross figure distinct from `subtotal_cents`, and a zero would claim a
+     * measurement that was never taken.
+     */
+    grossSubtotalCents: cents('gross_subtotal_cents'),
+    discountCents: cents('discount_cents'),
     subtotalCents: cents('subtotal_cents').notNull(),
     vatCents: cents('vat_cents').notNull(),
     totalCents: cents('total_cents').notNull(),
@@ -65,6 +77,18 @@ export const pricingSnapshots = pgTable(
       sql`${table.subtotalCents} >= 0 and ${table.vatCents} >= 0 and ${table.totalCents} >= 0`,
     ),
     check('pricing_snapshots_attempt_positive', sql`${table.attempt} >= 1`),
+    /*
+     * COST-5. The discount cannot exceed the work, and the two new columns are
+     * both present or both absent — a gross figure with no discount beside it
+     * cannot be told from a snapshot written before this existed.
+     */
+    check(
+      'pricing_snapshots_discount_within_gross',
+      sql`(${table.grossSubtotalCents} is not null) = (${table.discountCents} is not null)
+          and (${table.discountCents} is null or ${table.discountCents} >= 0)
+          and (${table.grossSubtotalCents} is null
+               or ${table.grossSubtotalCents} >= ${table.discountCents})`,
+    ),
   ],
 );
 
@@ -89,7 +113,7 @@ export const pricingSnapshotLines = pgTable(
     snapshotId: uuid('snapshot_id')
       .notNull()
       .references(() => pricingSnapshots.id, { onDelete: 'cascade' }),
-    /** `labour` | `travel` | `part` | `callout`. */
+    /** `labour` | `travel` | `part` | `callout` | `additional_charge` | `discount`. */
     lineKind: text('line_kind').notNull(),
     /** The id of the job line this was priced from. Not an FK, by design. */
     sourceLineId: uuid('source_line_id'),
@@ -106,9 +130,22 @@ export const pricingSnapshotLines = pgTable(
   (table) => [
     uniqueIndex('pricing_snapshot_lines_position_key').on(table.snapshotId, table.position),
     index('pricing_snapshot_lines_snapshot_idx').on(table.snapshotId),
+    /*
+     * COST-5 MADE THIS STRICTER RATHER THAN LOOSER.
+     *
+     * It read "every amount is non-negative", which was right while every line
+     * was work. A discount line is money OFF and its total is negative, so the
+     * rule is now per kind: a discount must be strictly negative, everything
+     * else non-negative. That refuses two rows the old check accepted — a
+     * discount recorded as a positive amount, which would have been ADDED by
+     * anything summing the lines, and a discount of zero.
+     */
     check(
       'pricing_snapshot_lines_amounts_non_negative',
-      sql`${table.unitPriceCents} >= 0 and ${table.lineTotalCents} >= 0`,
+      sql`case when ${table.lineKind} = 'discount'
+               then ${table.unitPriceCents} < 0 and ${table.lineTotalCents} < 0
+               else ${table.unitPriceCents} >= 0 and ${table.lineTotalCents} >= 0
+          end`,
     ),
   ],
 );

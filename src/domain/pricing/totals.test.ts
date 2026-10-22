@@ -24,7 +24,7 @@ const technicianId = asUserId('user-tech-1');
 
 describe('calculateJobTotals', () => {
   it('returns zeroes for a job with no captured work', () => {
-    const totals = calculateJobTotals({ labour: [], travel: [], parts: [], calloutApplied: false, pricingSnapshot: null }, settings);
+    const totals = calculateJobTotals({ labour: [], travel: [], parts: [], additionalCharges: [], discount: null, calloutApplied: false, pricingSnapshot: null }, settings);
     expect(totals.subtotal).toBe(0);
     expect(totals.vat).toBe(0);
     expect(totals.total).toBe(0);
@@ -57,6 +57,8 @@ describe('calculateJobTotals', () => {
         ],
         travel: [],
         parts: [],
+        additionalCharges: [],
+        discount: null,
         calloutApplied: false,
         pricingSnapshot: null,
       },
@@ -94,6 +96,8 @@ describe('calculateJobTotals', () => {
             capturedBy: technicianId,
           },
         ],
+        additionalCharges: [],
+        discount: null,
         calloutApplied: false,
         pricingSnapshot: null,
       },
@@ -124,6 +128,8 @@ describe('calculateJobTotals', () => {
         ],
         travel: [],
         parts: [],
+        additionalCharges: [],
+        discount: null,
         calloutApplied: false,
         pricingSnapshot: null,
       },

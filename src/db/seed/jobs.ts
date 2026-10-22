@@ -175,6 +175,8 @@ const base = (jobNumber: string): Job => ({
   labour: [],
   travel: [],
   parts: [],
+  additionalCharges: [],
+  discount: null,
   photos: [],
   videos: [],
   notes: [],

@@ -239,7 +239,26 @@ export type Capability =
    * the Coordinator's (`jobs.resolveSignatureRefusal`); deciding that the
    * customer should nevertheless be sent the unsigned document is not.
    */
-  | 'jobs.authoriseUnsignedDelivery';
+  | 'jobs.authoriseUnsignedDelivery'
+  /**
+   * TAKING MONEY OFF A JOB. COST-5.
+   *
+   * A Master's alone, and the reasoning is EJE's own: `settings.manage` is
+   * Master-only precisely so that "the charge-out rates stay with a Master",
+   * and a discount is the same decision made for one customer instead of all of
+   * them. A Coordinator captures the work and prices the parts; what the
+   * customer is let off is not clerical.
+   *
+   * **This is the shipped recommendation, not a settled EJE rule.** Issue #24
+   * carries the question: may a Coordinator discount, and up to what figure? If
+   * the answer is "up to R500 without asking", this capability gains a limit
+   * and the Coordinator gains the capability — one list and one check.
+   *
+   * ADDING a charge deliberately needs no new capability: it rides on
+   * `jobs.captureWork`, like a part, because a technician already enters part
+   * prices and a consumable is the same act.
+   */
+  | 'jobs.applyDiscount';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -277,6 +296,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.recordCorrectionAcknowledgement',
   // Sending a job card the customer did not sign: BD-06. Master's alone.
   'jobs.authoriseUnsignedDelivery',
+  // Money off a job: COST-5. Master's alone, for the same reason the rates are.
+  'jobs.applyDiscount',
 ];
 
 /**

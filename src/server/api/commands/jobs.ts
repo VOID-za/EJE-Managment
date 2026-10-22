@@ -330,10 +330,59 @@ export const JOB_COMMANDS: CommandRegistry = {
     (context, job, { lineId, ...input }) => jobs.updatePart(context.operation, job, lineId, input),
   ),
 
+  /*
+   * COST-5. Charges ride on `jobs.captureWork` like a part; a DISCOUNT needs
+   * `jobs.applyDiscount`, which the operation checks — not here, because a
+   * refusal belongs with the rule rather than at the boundary.
+   */
+  add_additional_charge: withInput(
+    z
+      .object({
+        description: text(500),
+        // Cents, as an integer, like a part's unit price. A charge of nothing
+        // is not a charge; the database refuses one too.
+        amount: z.number().int().positive().max(1_000_000_000),
+      })
+      .strict(),
+    (context, job, input) => jobs.addAdditionalCharge(context.operation, job, input),
+  ),
+
+  update_additional_charge: withInput(
+    z
+      .object({
+        lineId: z.string().min(1).max(100),
+        description: text(500),
+        amount: z.number().int().positive().max(1_000_000_000),
+      })
+      .strict(),
+    (context, job, { lineId, ...input }) =>
+      jobs.updateAdditionalCharge(context.operation, job, lineId, input),
+  ),
+
+  apply_discount: withInput(
+    z
+      .object({
+        amount: z.number().int().positive().max(1_000_000_000),
+        // Required, and the operation trims and refuses blank: a discount with
+        // no reason is a figure nobody can defend a month later.
+        reason: text(500),
+      })
+      .strict(),
+    (context, job, input) => jobs.applyDiscount(context.operation, job, input),
+  ),
+
+  clear_discount: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      const job = await loadVisibleJob(context, target);
+      return jobs.clearDiscount(context.operation, job);
+    },
+  }),
+
   remove_line: withInput(
     z
       .object({
-        kind: z.enum(['labour', 'travel', 'part']),
+        kind: z.enum(['labour', 'travel', 'part', 'additional_charge']),
         lineId: z.string().min(1).max(100),
       })
       .strict(),
