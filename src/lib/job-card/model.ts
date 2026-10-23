@@ -381,6 +381,28 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       ...(definition.capturesDeliveryNote && job.deliveryNote.length > 0
         ? [{ label: 'Delivery note', value: job.deliveryNote }]
         : []),
+      /*
+       * THE TEST & REPAIR FIELDS ON THE CUSTOMER'S DOCUMENT. Test & Repair §4.
+       *
+       * Printed only where the job type captures them AND the office filled
+       * them in, which is the rule the delivery note above already follows:
+       * an empty row on a signed document is a question, not information.
+       *
+       * The unit booked in belongs here more than most fields do — it is what
+       * the customer handed over, and the document is their receipt for it.
+       */
+      ...(definition.capturesQuoteNumber && job.quoteNumber.length > 0
+        ? [{ label: 'Quote number', value: job.quoteNumber }]
+        : []),
+      ...(definition.capturesRepairItem && job.repairItem.partNumber.length > 0
+        ? [{ label: 'Part number', value: job.repairItem.partNumber }]
+        : []),
+      ...(definition.capturesRepairItem && job.repairItem.description.length > 0
+        ? [{ label: 'Unit', value: job.repairItem.description }]
+        : []),
+      ...(definition.capturesRepairItem && job.repairItem.quantity !== null
+        ? [{ label: 'Quantity received', value: String(job.repairItem.quantity) }]
+        : []),
       ...(definition.collectedOnCompletion
         ? [
             {

@@ -1,4 +1,5 @@
 import {
+  emptyRepairItem,
   asAttachmentId,
   asChecklistTemplateId,
   asContactId,
@@ -161,6 +162,8 @@ const baseJob = (jobNumber: string): Job => ({
   scheduledEndDate: null,
   orderNumber: '',
   referenceNumber: '',
+  repairItem: emptyRepairItem(),
+  quoteNumber: '',
   faultDescription: '',
   attachments: [],
   primaryTechnicianId: null,

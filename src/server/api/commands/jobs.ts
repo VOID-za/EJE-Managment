@@ -900,6 +900,22 @@ export const createJobSchema = z
     orderNumber: text(120),
     referenceNumber: text(120),
     /*
+     * THE TEST & REPAIR FIELDS. Test & Repair §4.
+     *
+     * All optional at the protocol level, which is also what they are as a
+     * rule. The server CLEARS them on a job type that does not capture them
+     * rather than refusing the request: a screen switching job type sends what
+     * it had, and a 400 there would be a worse answer than storing nothing.
+     *
+     * The quantity is a positive whole number WHEN GIVEN. Zero is refused by
+     * the schema, because "zero of them arrived" is not a thing a counter
+     * records, and the database refuses it again.
+     */
+    repairPartNumber: text(120).optional(),
+    repairDescription: text(500).optional(),
+    repairQuantity: z.number().int().positive().max(100_000).nullable().optional(),
+    quoteNumber: text(120).optional(),
+    /*
      * PRESENT, BUT NOT NECESSARILY FILLED IN. CR-13.
      *
      * It used to be `.min(1)` here as well as in the operation — a blank body
@@ -947,11 +963,33 @@ export const runCreateJob = async (
   // Proves the code is one the business actually has, before anything is built.
   getJobTypeDefinition(input.jobType);
 
-  const { asDraft, ...job } = input;
+  const {
+    asDraft,
+    repairPartNumber,
+    repairDescription,
+    repairQuantity,
+    quoteNumber,
+    ...job
+  } = input;
   const created = await createJob(
     context.operation,
     {
       ...job,
+      /*
+       * THE THREE RECEIVED-ITEM FIELDS ARRIVE FLAT AND ARE GROUPED HERE.
+       * Test & Repair §4.
+       *
+       * Flat on the wire because a form posts flat fields; one value in the
+       * domain because the three describe one thing on the counter and are
+       * optional together. The operation trims them and clears them on a job
+       * type that does not capture them.
+       */
+      repairItem: {
+        partNumber: repairPartNumber ?? '',
+        description: repairDescription ?? '',
+        quantity: repairQuantity ?? null,
+      },
+      quoteNumber: quoteNumber ?? '',
       customerId: asCustomerId(input.customerId),
       siteId: asSiteId(input.siteId),
       contactId: asContactId(input.contactId),

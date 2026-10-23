@@ -6,6 +6,7 @@ import {
   can,
   contactFullName,
   getJobTypeDefinition,
+  hasRepairItem,
   jobScheduleWindow,
   machineDisplayName,
   userFullName,
@@ -141,6 +142,40 @@ export const JobOverviewPanel = ({
                 label: 'Reference number',
                 value: job.referenceNumber.length > 0 ? job.referenceNumber : '—',
               },
+              /*
+               * THE TEST & REPAIR FIELDS, ONLY WHERE THE TYPE CARRIES THEM.
+               * Test & Repair §4.
+               *
+               * Spread in rather than always present, so a breakdown's detail
+               * grid does not grow four rows of em-dashes for fields its job
+               * type never offered.
+               */
+              ...(definition.capturesQuoteNumber
+                ? [
+                    {
+                      label: 'Quote number',
+                      value: job.quoteNumber.length > 0 ? job.quoteNumber : '—',
+                    },
+                  ]
+                : []),
+              ...(definition.capturesRepairItem
+                ? [
+                    {
+                      label: 'Unit booked in',
+                      value: hasRepairItem(job.repairItem)
+                        ? [
+                            job.repairItem.partNumber,
+                            job.repairItem.description,
+                            job.repairItem.quantity === null
+                              ? ''
+                              : `× ${job.repairItem.quantity}`,
+                          ]
+                            .filter((part) => part.length > 0)
+                            .join(' · ')
+                        : '—',
+                    },
+                  ]
+                : []),
               { label: 'Created', value: formatDateTime(job.createdAt) },
               { label: 'Accepted', value: formatDateTime(job.acceptedAt) },
               { label: 'Completed', value: formatDateTime(job.completedAt) },

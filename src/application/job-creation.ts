@@ -12,7 +12,9 @@ import {
   type Customer,
   type CustomerId,
   type Job,
+  emptyRepairItem,
   type JobPriority,
+  type RepairItem,
   type JobTypeCode,
   type Machine,
   type MachineId,
@@ -60,6 +62,17 @@ export interface NewJobInput {
   readonly scheduledEndDate: string | null;
   readonly orderNumber: string;
   readonly referenceNumber: string;
+  /**
+   * What was booked in, where the job type takes one. Test & Repair §4.
+   *
+   * OPTIONAL ON THE INPUT, because the fields themselves are optional and the
+   * job types that do not capture them have nothing to send. A caller that
+   * omits it is not thereby saying something different from one that sends an
+   * empty item — so there is no reason to make every call site spell it out.
+   */
+  readonly repairItem?: RepairItem;
+  /** The customer's quote reference, where the job type takes one. */
+  readonly quoteNumber?: string;
   readonly faultDescription: string;
   /**
    * Who the customer's copy of the job card goes to.
@@ -278,7 +291,16 @@ const assertReadyForWork = (
     readonly priority: JobPriority | null;
   },
 ): void => {
-  if (!definition.officeProcessed && job.faultDescription.trim().length === 0) {
+  /*
+   * WHAT THE WORK IS, WHERE THE JOB TYPE NEEDS IT SAID. Test & Repair §4.
+   *
+   * `requiresFaultDescription` rather than `!officeProcessed`: a TEST & REPAIR
+   * unit is booked in at the counter before anybody has diagnosed it, and what
+   * is recorded at that moment is the unit (`capturesRepairItem`). A breakdown,
+   * an installation and a service each send a technician somewhere, and still
+   * have to say what for.
+   */
+  if (definition.requiresFaultDescription && job.faultDescription.trim().length === 0) {
     throw new WorkflowError('A job needs to say what the work is.', [
       {
         code: 'fault_description_required',
@@ -508,6 +530,26 @@ export const createJob = async (
     scheduledEndDate: definition.schedulesDateRange ? input.scheduledEndDate : null,
     orderNumber: input.orderNumber.trim(),
     referenceNumber: input.referenceNumber.trim(),
+    /*
+     * WHAT CAME IN FOR TEST AND REPAIR, AND THE CUSTOMER'S QUOTE NUMBER.
+     * Test & Repair §4.
+     *
+     * Trimmed and kept as given. Offered only where the job type captures them
+     * (`capturesRepairItem` / `capturesQuoteNumber`), and the server CLEARS
+     * them on a type that does not — so a request that carries a quote number
+     * on a parts collection does not quietly store one the screen will never
+     * show. Nothing is required: a unit can be booked in while somebody is
+     * still looking for the part number on the casting.
+     */
+    repairItem:
+      definition.capturesRepairItem && input.repairItem !== undefined
+        ? {
+            partNumber: input.repairItem.partNumber.trim(),
+            description: input.repairItem.description.trim(),
+            quantity: input.repairItem.quantity,
+          }
+        : emptyRepairItem(),
+    quoteNumber: definition.capturesQuoteNumber ? (input.quoteNumber ?? '').trim() : '',
     faultDescription,
     /*
      * A NEW JOB HAS NO ATTACHMENTS, and cannot be given one here.

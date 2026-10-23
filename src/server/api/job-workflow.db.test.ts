@@ -8,6 +8,13 @@ import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/
 import { hashPassword } from '@/server/auth/passwords';
 import { ApiTestClient, startPostgresTestServer } from '@/test/api-harness';
 
+/*
+ * A PHOTOGRAPH, because the new-job attachment route takes photographs and
+ * videos since Create New Job §3C. Nothing in this file is about file types:
+ * what is being proved is the row, the bytes on disk and who may read them.
+ */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+
 /**
  * Job creation, assignment and acceptance ON REAL POSTGRESQL.
  *
@@ -150,9 +157,9 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     // The document goes up separately, because a JSON creation request carries
     // no bytes and an attachment with no bytes is the fiction being removed.
     const uploaded = await master.upload(`/api/jobs/${created.data.id}/attachments`, {
-      name: 'order-77120.pdf',
-      type: 'application/pdf',
-      bytes: new TextEncoder().encode('%PDF-1.4 the order'),
+      name: 'nameplate-77120.png',
+      type: 'image/png',
+      bytes: PNG,
     });
     expect(uploaded.status).toBe(200);
 
@@ -194,7 +201,7 @@ describeDb('job creation and assignment on PostgreSQL', () => {
       .where(eq(schema.jobMedia.jobId, created.data.id));
     expect(media).toHaveLength(1);
     expect(media[0]?.kind).toBe('document');
-    expect(media[0]?.fileName).toBe('order-77120.pdf');
+    expect(media[0]?.fileName).toBe('nameplate-77120.png');
     expect(media[0]?.uploadedBy).toBe(IDS.master);
     // The row locates the object; the bytes are not duplicated into PostgreSQL.
     expect(media[0]?.storageKey).toMatch(/^uploads\//u);

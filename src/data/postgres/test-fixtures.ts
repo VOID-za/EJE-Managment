@@ -1,4 +1,5 @@
 import {
+  emptyRepairItem,
   asContactId,
   asCustomerId,
   asJobId,
@@ -178,6 +179,8 @@ export const jobFixture = (jobNumber: string, over: Partial<Job> = {}): Job => (
   scheduledEndDate: null,
   orderNumber: '',
   referenceNumber: '',
+  repairItem: emptyRepairItem(),
+  quoteNumber: '',
   faultDescription: 'Spindle drive alarm 750.',
   attachments: [],
   primaryTechnicianId: null,

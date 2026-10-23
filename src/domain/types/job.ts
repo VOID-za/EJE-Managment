@@ -496,6 +496,40 @@ export const emptyCompletionReport = (): JobCompletionReport => ({
   generalNotes: '',
 });
 
+/**
+ * THE UNIT A TEST & REPAIR JOB WAS BOOKED IN WITH. Test & Repair §4.
+ *
+ * Its own type rather than three loose fields on `Job`, because the three
+ * belong together: they describe one thing on the counter, they are all
+ * optional together, and a reader asking "what came in?" wants all three or
+ * none. Empty strings and a null quantity mean nobody filled it in — which is
+ * allowed, and is why the quantity is nullable rather than defaulting to 1.
+ */
+export interface RepairItem {
+  /** The manufacturer's part number, as it reads on the unit. */
+  readonly partNumber: string;
+  /** What the unit is, in the office's words. */
+  readonly description: string;
+  /**
+   * How many were booked in.
+   *
+   * Null when nobody said. A positive whole number when they did — the
+   * database refuses zero and negatives, because neither describes goods on a
+   * counter.
+   */
+  readonly quantity: number | null;
+}
+
+export const emptyRepairItem = (): RepairItem => ({
+  partNumber: '',
+  description: '',
+  quantity: null,
+});
+
+/** Whether anybody has recorded what came in. */
+export const hasRepairItem = (item: RepairItem): boolean =>
+  item.partNumber.length > 0 || item.description.length > 0 || item.quantity !== null;
+
 export interface Job {
   readonly id: JobId;
   readonly jobNumber: string;
@@ -629,6 +663,32 @@ export interface Job {
    * `JobTypeDefinition.capturesDeliveryNote`.
    */
   readonly deliveryNote: string;
+
+  /**
+   * THE UNIT BOOKED IN FOR TEST AND REPAIR. Test & Repair §4.
+   *
+   * What arrived on the counter: its part number, what it is, and how many. A
+   * DIFFERENT THING from the parts CONSUMED in repairing it, which are priced
+   * lines (`PartEntry`, `job_parts`) and already existed — a customer sends in
+   * three identical sensors and EJE fit one new connector to each, and those
+   * are two separate facts about the same job.
+   *
+   * ALL THREE OPTIONAL, and offered only where
+   * `JobTypeDefinition.capturesRepairItem` is true. The owner asked for the
+   * fields, not for new obligations: a unit can be booked in while somebody is
+   * still looking for the part number on the casting.
+   */
+  readonly repairItem: RepairItem;
+
+  /**
+   * The customer's quote number, where they work by one. Test & Repair §4.
+   *
+   * Optional, and offered only where `JobTypeDefinition.capturesQuoteNumber` is
+   * true — which is Test & Repair alone. It is deliberately NOT on a parts
+   * collection: the owner struck it out there, and a parts collection is
+   * reconciled by its order number, which is already required on that type.
+   */
+  readonly quoteNumber: string;
 
   /**
    * The rates this job is priced at, frozen when the customer signed.

@@ -341,6 +341,14 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     scheduledEndDate: rows.job.scheduledEndDate,
     orderNumber: rows.job.orderNumber,
     referenceNumber: rows.job.referenceNumber,
+    // Test & Repair §4. The three text columns default to '' so there is no
+    // null-versus-empty ambiguity; the quantity is genuinely nullable.
+    repairItem: {
+      partNumber: rows.job.repairPartNumber,
+      description: rows.job.repairDescription,
+      quantity: rows.job.repairQuantity,
+    },
+    quoteNumber: rows.job.quoteNumber,
     faultDescription: rows.job.faultDescription,
 
     attachments: media.filter((row) => row.kind === 'document').map(attachmentFrom),
@@ -434,6 +442,10 @@ export const toJobRow = (
   scheduledEndDate: job.scheduledEndDate,
   orderNumber: job.orderNumber,
   referenceNumber: job.referenceNumber,
+  repairPartNumber: job.repairItem.partNumber,
+  repairDescription: job.repairItem.description,
+  repairQuantity: job.repairItem.quantity,
+  quoteNumber: job.quoteNumber,
   faultDescription: job.faultDescription,
   primaryTechnicianId: job.primaryTechnicianId,
   calloutApplied: job.calloutApplied,

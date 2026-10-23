@@ -29,7 +29,12 @@ const describeDb = url === null ? describe.skip : describe;
 const PASSWORD = 'a-real-test-password';
 const MASTER = 'elmarie@example-test.co.za';
 
-const PDF = new TextEncoder().encode('%PDF-1.4 the customer order');
+/*
+ * A PHOTOGRAPH, because the new-job attachment route takes photographs and
+ * videos since Create New Job §3C. Nothing in this file is about file types:
+ * what is being proved is the row, the bytes on disk and who may read them.
+ */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 
 describeDb('durable storage and the outbox on PostgreSQL', () => {
   let db: Database;
@@ -94,7 +99,7 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
 
     const uploaded = await master.upload<{ attachments: readonly { id: string }[] }>(
       `/api/jobs/${job.data.id}/attachments`,
-      { name: 'customer-order.pdf', type: 'application/pdf', bytes: PDF },
+      { name: 'nameplate.png', type: 'image/png', bytes: PNG },
     );
     expect(uploaded.status).toBe(200);
 
@@ -105,7 +110,7 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
 
     expect(media).toHaveLength(1);
     expect(media[0]?.kind).toBe('document');
-    expect(media[0]?.sizeBytes).toBe(PDF.length);
+    expect(media[0]?.sizeBytes).toBe(PNG.length);
     /*
      * THE DATABASE IS THE INDEX, NOT THE STORE.
      *
@@ -121,7 +126,7 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
     const job = await raise(master);
     const uploaded = await master.upload<{ attachments: readonly { id: string }[] }>(
       `/api/jobs/${job.data.id}/attachments`,
-      { name: 'customer-order.pdf', type: 'application/pdf', bytes: PDF },
+      { name: 'nameplate.png', type: 'image/png', bytes: PNG },
     );
     const attachmentId = uploaded.data.attachments[0]?.id ?? '';
 
@@ -140,7 +145,7 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
     );
 
     expect(download.status).toBe(200);
-    expect(Array.from(download.bytes)).toEqual(Array.from(PDF));
+    expect(Array.from(download.bytes)).toEqual(Array.from(PNG));
   });
 
   it('records nothing when the bytes could not be stored', async () => {
@@ -159,9 +164,9 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
     await writeFile(join(storageRoot, 'blocked-by-a-file'), 'not a directory');
 
     const response = await retry.upload(`/api/jobs/${job.data.id}/attachments`, {
-      name: 'order.pdf',
-      type: 'application/pdf',
-      bytes: PDF,
+      name: 'nameplate.png',
+      type: 'image/png',
+      bytes: PNG,
     });
 
     expect(response.status).toBe(500);
@@ -196,7 +201,7 @@ describeDb('durable storage and the outbox on PostgreSQL', () => {
     const job = await raise(master, { primaryTechnicianId: IDS.technician });
     const uploaded = await master.upload<{ attachments: readonly { id: string }[] }>(
       `/api/jobs/${job.data.id}/attachments`,
-      { name: 'order.pdf', type: 'application/pdf', bytes: PDF },
+      { name: 'nameplate.png', type: 'image/png', bytes: PNG },
     );
 
     const other = await signIn('lerato@example-test.co.za');

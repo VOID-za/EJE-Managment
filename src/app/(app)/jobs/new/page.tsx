@@ -81,6 +81,17 @@ const NewJobPage = () => {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [courierCollection, setCourierCollection] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState('');
+  /*
+   * THE TEST & REPAIR FIELDS. Test & Repair §4.
+   *
+   * The quantity is held as a STRING because that is what an input gives, and
+   * because "" has to stay distinguishable from 0 — blank means nobody
+   * counted, and the server is sent null rather than a number nobody chose.
+   */
+  const [repairPartNumber, setRepairPartNumber] = useState('');
+  const [repairDescription, setRepairDescription] = useState('');
+  const [repairQuantity, setRepairQuantity] = useState('');
+  const [quoteNumber, setQuoteNumber] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -163,10 +174,25 @@ const NewJobPage = () => {
     if (!asDraft && definition.requiresPriority && priority === null) {
       next.priority = 'Choose how urgent this job is.';
     }
-    // Only where the job type collects one. CR-13.
-    if (!asDraft && !definition.officeProcessed && faultDescription.trim().length === 0) {
+    // Only where the job type requires one. CR-13, and Test & Repair §4: a
+    // workshop repair is booked in before the fault is diagnosed.
+    if (!asDraft && definition.requiresFaultDescription && faultDescription.trim().length === 0) {
       next.faultDescription = 'Describe the fault or the work requested.';
     }
+    /*
+     * A QUANTITY THAT WAS TYPED IS A REAL ONE. Test & Repair §4.
+     *
+     * Blank is fine and means nobody counted. Anything else has to be a whole
+     * number above zero, which is what the schema and the database both say —
+     * so the person is told here rather than by a 400.
+     */
+    if (repairQuantity.trim() !== '') {
+      const parsed = Number(repairQuantity);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        next.repairQuantity = 'Enter a whole number of units, or leave it blank.';
+      }
+    }
+
     // On a parts collection the order number is what ties the goods to what the
     // customer ordered, so it is not optional the way it is on a site visit.
     if (definition.requiresOrderNumber && orderNumber.trim().length === 0) {
@@ -206,6 +232,18 @@ const NewJobPage = () => {
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
         courierCollection,
         deliveryNote,
+        /*
+         * THE TEST & REPAIR FIELDS. Test & Repair §4.
+         *
+         * Sent flat, as a form posts them; the server groups the three
+         * received-item values and clears all four on a job type that does not
+         * capture them. A blank quantity is sent as NULL rather than as 0,
+         * because nobody counted.
+         */
+        repairPartNumber,
+        repairDescription,
+        repairQuantity: repairQuantity.trim() === '' ? null : Number(repairQuantity),
+        quoteNumber,
         asDraft,
       });
     });
@@ -389,6 +427,20 @@ const NewJobPage = () => {
                      * refused by the server — or worse, silently dropped, and
                      * the office would go on believing it had booked a date.
                      */
+                    /*
+                     * Nothing a job type does not capture survives the switch.
+                     * Test & Repair §4, and the same reasoning as the
+                     * collection fields below: left behind, these would be sent
+                     * on the request and cleared by the server anyway — and the
+                     * office would be looking at a field it believed it had
+                     * filled in.
+                     */
+                    if (!chosen.capturesRepairItem) {
+                      setRepairPartNumber('');
+                      setRepairDescription('');
+                      setRepairQuantity('');
+                    }
+                    if (!chosen.capturesQuoteNumber) setQuoteNumber('');
                     if (getJobTypeDefinition(code).officeProcessed) {
                       setScheduledDate('');
                       setTechnicianId('');
@@ -518,14 +570,22 @@ const NewJobPage = () => {
               */}
               {!definition.officeProcessed && (
                 <TextAreaField
-                  label="Fault description / work requested"
-                  required
+                  label={
+                    definition.requiresFaultDescription
+                      ? 'Fault description / work requested'
+                      : 'Fault description / work requested (optional)'
+                  }
+                  required={definition.requiresFaultDescription}
                   rows={4}
                   value={faultDescription}
                   error={errors.faultDescription}
                   onChange={(event) => setFaultDescription(event.target.value)}
                   placeholder="e.g. Machine stopped during operation. Spindle fault reported."
-                  hint="Record what the customer reported, in their words where possible."
+                  hint={
+                    definition.requiresFaultDescription
+                      ? 'Record what the customer reported, in their words where possible.'
+                      : 'Optional on a workshop repair — the unit is booked in before it is diagnosed. Record what the customer reported if they said.'
+                  }
                 />
               )}
 
@@ -555,14 +615,78 @@ const NewJobPage = () => {
                     one their accounts department cannot match. */}
                 {definition.capturesDeliveryNote && (
                   <TextField
-                    label="Delivery note"
+                    label="Delivery note / waybill number"
                     value={deliveryNote}
                     onChange={(event) => setDeliveryNote(event.target.value)}
                     placeholder="e.g. DN-12345"
                     hint="Optional. The customer’s own delivery note number, printed on the collection document."
                   />
                 )}
+                {/*
+                  THE CUSTOMER'S QUOTE NUMBER. Test & Repair §4.
+
+                  Test & Repair only. The owner struck it out on a parts
+                  collection, which is reconciled by its order number — and
+                  that one is already required there.
+                */}
+                {definition.capturesQuoteNumber && (
+                  <TextField
+                    label="Quote number"
+                    value={quoteNumber}
+                    onChange={(event) => setQuoteNumber(event.target.value)}
+                    placeholder="e.g. Q-20451"
+                    hint="Optional. The quote this repair was accepted against."
+                  />
+                )}
               </div>
+
+              {/*
+                WHAT WAS BOOKED IN. Test & Repair §4.
+
+                The unit on the counter: its part number, what it is, and how
+                many. NOT the parts consumed in repairing it — those are priced
+                lines captured on the job as the work is done, and a customer
+                who sends in three sensors may have one connector fitted to
+                each.
+
+                All three optional. A unit can be booked in while somebody is
+                still looking for the part number on the casting.
+              */}
+              {definition.capturesRepairItem && (
+                <div className="mt-4 rounded-[var(--radius-control)] border border-violet-eje-200 bg-violet-eje-50 p-4">
+                  <p className="text-sm font-semibold text-violet-eje-700">
+                    Unit booked in for test &amp; repair
+                  </p>
+                  <p className="mt-1 text-sm text-steel-700">
+                    What arrived on the counter. Optional — fill in what is known now.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <TextField
+                      label="Part number"
+                      value={repairPartNumber}
+                      onChange={(event) => setRepairPartNumber(event.target.value)}
+                      placeholder="As it reads on the unit"
+                    />
+                    <TextField
+                      label="Description"
+                      value={repairDescription}
+                      onChange={(event) => setRepairDescription(event.target.value)}
+                      placeholder="e.g. Proximity sensor assembly"
+                    />
+                    <TextField
+                      label="Quantity"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={repairQuantity}
+                      error={errors.repairQuantity}
+                      onChange={(event) => setRepairQuantity(event.target.value)}
+                      placeholder="e.g. 3"
+                      hint="Leave blank if nobody has counted."
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
 

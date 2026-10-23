@@ -18,7 +18,12 @@ import {
   asSiteId,
   asUserId,
 } from '../types/common';
-import { emptyCompletionReport, type Job, type JobTypeCode } from '../types/job';
+import {
+  emptyCompletionReport,
+  emptyRepairItem,
+  type Job,
+  type JobTypeCode,
+} from '../types/job';
 
 const technicianId = asUserId('user-tech-1');
 
@@ -36,6 +41,8 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   scheduledEndDate: null,
   orderNumber: 'PO-88123',
   referenceNumber: 'REF-2291',
+  repairItem: emptyRepairItem(),
+  quoteNumber: '',
   faultDescription: 'Machine stopped during operation. Spindle fault reported.',
   attachments: [],
   primaryTechnicianId: technicianId,

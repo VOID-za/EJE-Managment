@@ -100,6 +100,22 @@ export const jobs = pgTable(
     scheduledEndDate: date('scheduled_end_date'),
 
     orderNumber: text('order_number').notNull().default(''),
+    /*
+     * THE UNIT BOOKED IN FOR TEST AND REPAIR, AND THE CUSTOMER'S QUOTE NUMBER.
+     * Test & Repair §4.
+     *
+     * Four columns, all optional, all defaulted so every existing job reads as
+     * "nobody filled this in" rather than as null-vs-empty ambiguity. The
+     * quantity is the one that can be genuinely absent, so it stays nullable —
+     * a zero would claim somebody counted nothing.
+     *
+     * DISTINCT FROM `job_parts`, which is what was CONSUMED in the repair and
+     * is priced. This is what arrived on the counter.
+     */
+    repairPartNumber: text('repair_part_number').notNull().default(''),
+    repairDescription: text('repair_description').notNull().default(''),
+    repairQuantity: integer('repair_quantity'),
+    quoteNumber: text('quote_number').notNull().default(''),
     /**
      * DECISION 2: an Installation or Service job may proceed without an order
      * number only through an explicit acknowledgement, which is recorded.
@@ -219,6 +235,19 @@ export const jobs = pgTable(
       .on(table.createdAt)
       .where(sql`${table.status} = 'open' and ${table.primaryTechnicianId} is null`),
 
+    /*
+     * A QUANTITY THAT EXISTS IS A REAL ONE. Test & Repair §4.
+     *
+     * Null is allowed and means nobody counted. Zero is not: it claims
+     * somebody counted nothing, which is not goods on a counter. Negatives are
+     * not either, for the obvious reason. `job_parts_quantity_positive` says
+     * the same thing about the parts CONSUMED, and this is the same rule for
+     * the unit that came IN.
+     */
+    check(
+      'jobs_repair_quantity_positive',
+      sql`${table.repairQuantity} is null or ${table.repairQuantity} > 0`,
+    ),
     check(
       'jobs_schedule_end_needs_start',
       sql`${table.scheduledEndDate} is null or ${table.scheduledDate} is not null`,

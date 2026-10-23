@@ -106,6 +106,22 @@ export interface JobTypeDefinition {
    */
   readonly requiresMachine: boolean;
   /**
+   * THE JOB HAS TO SAY WHAT THE WORK IS, BEFORE IT CAN BE RAISED.
+   * Test & Repair §4.
+   *
+   * It used to be `!officeProcessed` — every job type except a parts
+   * collection. The owner has made it optional on TEST & REPAIR, and the
+   * reason is the workflow: a unit arrives on the counter and is booked in
+   * before anybody has diagnosed it. What IS recorded at that moment is the
+   * unit itself (`capturesRepairItem`), and the fault is written up once the
+   * workshop has looked at it.
+   *
+   * Still required on a breakdown, an installation and a service: each is a
+   * technician being sent somewhere, and "what am I going for" is the one
+   * thing they cannot be sent without.
+   */
+  readonly requiresFaultDescription: boolean;
+  /**
    * A PRIORITY HAS TO BE CHOSEN ON THIS JOB TYPE. Create New Job §3B / §4.
    *
    * False on the two types the owner asked for, where the office raises the
@@ -151,6 +167,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'optional',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresFaultDescription: true,
     requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: false,
@@ -172,6 +189,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresFaultDescription: true,
     requiresMachine: true,
     requiresPriority: true,
     capturesRepairItem: false,
@@ -193,6 +211,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresFaultDescription: true,
     requiresMachine: true,
     requiresPriority: true,
     capturesRepairItem: false,
@@ -216,6 +235,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'required',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
+    requiresFaultDescription: false,
     requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: false,
@@ -238,6 +258,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'optional',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
+    requiresFaultDescription: false,
     requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: true,

@@ -43,7 +43,12 @@ const describeDb = url === null ? describe.skip : describe;
 const PASSWORD = 'a-real-test-password';
 const MASTER = 'elmarie@example-test.co.za';
 const TECHNICIAN = 'sipho@example-test.co.za';
-const PDF = new TextEncoder().encode('%PDF-1.4 the customer order');
+/*
+ * A PHOTOGRAPH, because the new-job attachment route takes photographs and
+ * videos since Create New Job §3C. Nothing in this file is about file types:
+ * what is being proved is the row, the bytes on disk and who may read them.
+ */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 
 /** The database's own words, which the driver keeps on the cause. */
 const reason = (error: unknown): string => {
@@ -152,9 +157,9 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     }
     if (evidence.media === true) {
       const uploaded = await tech.upload(`/api/jobs/${id}/attachments`, {
-        name: 'nameplate.pdf',
-        type: 'application/pdf',
-        bytes: PDF,
+        name: 'nameplate.png',
+        type: 'image/png',
+        bytes: PNG,
       });
       expect(uploaded.status).toBe(200);
     }
