@@ -48,7 +48,14 @@ export interface NewJobInput {
   readonly siteId: SiteId;
   readonly machineId: MachineId | null;
   readonly jobType: JobTypeCode;
-  readonly priority: JobPriority;
+  /**
+   * How urgent, or null where the office has not graded it yet.
+   *
+   * Optional on the two types the owner named, and the form sends null rather
+   * than a pre-selected value on those — see `JobTypeDefinition.
+   * requiresPriority`.
+   */
+  readonly priority: JobPriority | null;
   readonly scheduledDate: string | null;
   readonly scheduledEndDate: string | null;
   readonly orderNumber: string;
@@ -265,7 +272,11 @@ const resolveTechnicians = async (
  */
 const assertReadyForWork = (
   definition: ReturnType<typeof getJobTypeDefinition>,
-  job: { readonly faultDescription: string; readonly machineId: MachineId | null },
+  job: {
+    readonly faultDescription: string;
+    readonly machineId: MachineId | null;
+    readonly priority: JobPriority | null;
+  },
 ): void => {
   if (!definition.officeProcessed && job.faultDescription.trim().length === 0) {
     throw new WorkflowError('A job needs to say what the work is.', [
@@ -277,11 +288,41 @@ const assertReadyForWork = (
     ]);
   }
 
-  if (definition.capturesLabourAndTravel && job.machineId === null) {
+  /*
+   * A MACHINE, WHERE THE JOB TYPE NEEDS ONE. Create New Job §3A / §4.
+   *
+   * This used to read `definition.capturesLabourAndTravel` — "this type charges
+   * hours, so it must be work on a machine" — which was an inference rather
+   * than a rule, and the owner has separated the two. `requiresMachine` says it
+   * directly, and it is false for a breakdown (called in before anybody knows
+   * which machine) and for a test-and-repair unit (which may not be on the
+   * register at all). An installation and a service still require one.
+   *
+   * Nothing is invented where it is optional: no machine is fabricated and the
+   * job is not attached to an arbitrary one to fill the column.
+   */
+  if (definition.requiresMachine && job.machineId === null) {
     throw new WorkflowError('A machine is required for this job type.', [
       {
         code: 'machine_required',
         message: `A ${definition.label.toLowerCase()} job is work on a machine, so it has to say which.`,
+      },
+    ]);
+  }
+
+  /*
+   * AND A PRIORITY, WHERE THE JOB TYPE NEEDS ONE. Create New Job §3B / §4.
+   *
+   * Required on an installation and a service, which are planned work the
+   * office grades when it books them. Not required on a breakdown or a
+   * test-and-repair job, where it stays null until somebody says — see
+   * `Job.priority` for why null rather than a default.
+   */
+  if (definition.requiresPriority && job.priority === null) {
+    throw new WorkflowError('A priority is required for this job type.', [
+      {
+        code: 'priority_required',
+        message: `A ${definition.label.toLowerCase()} is planned work, so it has to say how urgent it is.`,
       },
     ]);
   }
@@ -393,7 +434,16 @@ export const createJob = async (
    * function against the stored job, so a draft cannot become a real job
    * without satisfying them: the validation is DEFERRED, never weakened.
    */
-  if (!asDraft) assertReadyForWork(definition, { faultDescription, machineId: input.machineId });
+  if (!asDraft) {
+    assertReadyForWork(definition, {
+      faultDescription,
+      machineId: input.machineId,
+      // A parts collection carries no priority at all, so the readiness check
+      // is handed the value creation will actually write rather than the one
+      // the request sent — see the `priority` field below.
+      priority: definition.officeProcessed ? null : input.priority,
+    });
+  }
 
   const settings = await context.repos.settings.get();
   const allocated = await allocateJobNumber(context, settings);
@@ -423,7 +473,18 @@ export const createJob = async (
      * than trusted from the client, because this is the rule and the form is
      * only its reflection.
      */
-    priority: definition.officeProcessed ? definition.defaultPriority : input.priority,
+    /*
+     * A PARTS COLLECTION HAS NO PRIORITY AT ALL, and now says so.
+     *
+     * It used to be written as the type's `defaultPriority` — "normal" — on a
+     * job that has no urgency to express: `officeProcessed` turns the field off
+     * entirely, because a collection is a counter transaction and not a visit
+     * somebody is dispatched to. That default was invisible, and it put a
+     * grading on the Jobs list for a job nobody could have graded.
+     *
+     * Null is the truthful value, and it is now a value the column can hold.
+     */
+    priority: definition.officeProcessed ? null : input.priority,
     /*
      * OFFICE-PROCESSED JOBS OPEN IN THEIR OWN CLOSE-OUT. CR-12.
      *

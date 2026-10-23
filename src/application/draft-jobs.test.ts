@@ -296,9 +296,26 @@ describe('releasing a draft', () => {
     expect(view?.job.status).toBe('draft');
   });
 
-  it('RE-ASKS for the machine too', async () => {
-    const draft = await draftOf({ machineId: null });
+  /*
+   * AND RE-ASKS FOR THE MACHINE WHERE THE JOB TYPE NEEDS ONE.
+   *
+   * On an INSTALLATION, which still requires one. It used to be asserted on a
+   * breakdown, and the owner has since made the machine optional there (Create
+   * New Job §3A) — so a breakdown draft with no machine now releases, which is
+   * the second case below. The point of both is unchanged: releasing applies
+   * the SAME rule creation would have applied, so the validation is deferred
+   * rather than weakened.
+   */
+  it('RE-ASKS for the machine on a job type that requires one', async () => {
+    const draft = await draftOf({ machineId: null, jobType: 'installation' });
     await expect(releaseDraft(harness.as(master), draft)).rejects.toThrow(WorkflowError);
+  });
+
+  it('releases a BREAKDOWN draft with no machine, because none is required', async () => {
+    const draft = await draftOf({ machineId: null });
+    const released = await releaseDraft(harness.as(master), draft);
+    expect(released.status).toBe('open');
+    expect(released.machineId).toBeNull();
   });
 
   it('refuses to release something that is not a draft', async () => {

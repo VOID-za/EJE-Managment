@@ -884,7 +884,17 @@ export const createJobSchema = z
     contactId: z.string().min(1).max(100),
     machineId: z.string().min(1).max(100).nullable(),
     jobType: z.enum(['breakdown', 'installation', 'service', 'parts', 'test_and_repair']),
-    priority: z.enum(['low', 'normal', 'high', 'urgent']),
+    /*
+     * NULLABLE, BECAUSE A JOB MAY BE UNGRADED. Create New Job §3B / §4.
+     *
+     * The protocol allows the absence; WHICH job types may use it is the
+     * operation's rule (`JobTypeDefinition.requiresPriority`), for the same
+     * reason the fault description's length moved there — a rule that is true
+     * of some job types and not others belongs where the job type is known.
+     * So an installation with no priority is a 422 from the rules, not a 400
+     * from the schema.
+     */
+    priority: z.enum(['low', 'normal', 'high', 'urgent']).nullable(),
     scheduledDate: isoDate.nullable(),
     scheduledEndDate: isoDate.nullable(),
     orderNumber: text(120),

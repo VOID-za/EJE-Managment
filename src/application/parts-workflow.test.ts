@@ -113,7 +113,16 @@ describe('raising a parts collection', () => {
     expect(job.acceptedAt).toBeNull();
     // Both were sent on the request and both are the server's to decide.
     expect(job.scheduledDate).toBeNull();
-    expect(job.priority).toBe(getJobTypeDefinition('parts').defaultPriority);
+    /*
+     * NO PRIORITY AT ALL, which is what this case has always been called.
+     *
+     * It used to assert the type's `defaultPriority` — "normal" — because the
+     * column could not hold the absence. It can now (Create New Job §3B), and
+     * a collection has no urgency to express: `officeProcessed` turns the field
+     * off entirely, because it is a counter transaction rather than a visit
+     * somebody is dispatched to. So the assertion finally matches the name.
+     */
+    expect(job.priority).toBeNull();
   });
 
   it('refuses a request that names a technician, rather than quietly dropping it', async () => {

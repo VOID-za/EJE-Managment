@@ -49,7 +49,9 @@ describe('raising a collection over the API', () => {
     expect(job.acceptedAt).toBeNull();
     // Sent on the request, and decided by the server regardless.
     expect(job.scheduledDate).toBeNull();
-    expect(job.priority).toBe('normal');
+    // Null, not "normal": a collection has no urgency to express, and the
+    // column can now say so. Create New Job §3B.
+    expect(job.priority).toBeNull();
     expect(job.courierCollection).toBe(false);
   });
 

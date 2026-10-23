@@ -89,6 +89,48 @@ export interface JobTypeDefinition {
    * `showsPricesOnCollectionDocument`.
    */
   readonly collectedOnCompletion: boolean;
+  /**
+   * A MACHINE HAS TO BE NAMED ON THIS JOB TYPE. Create New Job §3A / §4.
+   *
+   * Explicit, because it used to be inferred from `capturesLabourAndTravel` —
+   * "this job type charges hours, so it must be work on a machine" — and the
+   * owner has since separated the two. A BREAKDOWN is called in before anybody
+   * knows which machine it is ("the line is down"), and a TEST & REPAIR
+   * arrives as a unit on the counter that may not be on the register at all.
+   * An INSTALLATION or a SERVICE is booked against a known machine and still
+   * requires one.
+   *
+   * Where it is false, the machine is OPTIONAL and not defaulted: nothing
+   * invents one, and nothing attaches the job to an arbitrary machine to
+   * satisfy a column.
+   */
+  readonly requiresMachine: boolean;
+  /**
+   * A PRIORITY HAS TO BE CHOSEN ON THIS JOB TYPE. Create New Job §3B / §4.
+   *
+   * False on the two types the owner asked for, where the office raises the
+   * job before the urgency is known, and on a parts collection, which has no
+   * priority at all (`officeProcessed` already turns the field off). Where it
+   * is false the job carries NO priority — not a quietly defaulted one, which
+   * would put "Urgent" on a breakdown nobody had graded.
+   */
+  readonly requiresPriority: boolean;
+  /**
+   * THE REPAIR ITEM: part number, description and quantity. Test & Repair §4.
+   *
+   * What was booked IN for test and repair — the unit on the counter — which
+   * is a different thing from the parts CONSUMED in repairing it. Those are
+   * priced lines (`job_parts`) and already exist.
+   */
+  readonly capturesRepairItem: boolean;
+  /** A customer's quote number may be recorded. Test & Repair §4. */
+  readonly capturesQuoteNumber: boolean;
+  /**
+   * The priority a screen OFFERS first where one is required.
+   *
+   * Not a value anything writes on the job's behalf: where `requiresPriority`
+   * is false the job's priority stays null until somebody chooses one.
+   */
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
   readonly accent: 'red' | 'blue' | 'green' | 'violet' | 'amber';
@@ -109,6 +151,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'optional',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresMachine: false,
+    requiresPriority: false,
+    capturesRepairItem: false,
+    capturesQuoteNumber: false,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -126,6 +172,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresMachine: true,
+    requiresPriority: true,
+    capturesRepairItem: false,
+    capturesQuoteNumber: false,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -143,6 +193,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'expected',
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
+    requiresMachine: true,
+    requiresPriority: true,
+    capturesRepairItem: false,
+    capturesQuoteNumber: false,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -162,6 +216,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'required',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
+    requiresMachine: false,
+    requiresPriority: false,
+    capturesRepairItem: false,
+    capturesQuoteNumber: false,
     defaultPriority: 'normal',
     accent: 'amber',
   },
@@ -180,6 +238,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     orderNumberExpectation: 'optional',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
+    requiresMachine: false,
+    requiresPriority: false,
+    capturesRepairItem: true,
+    capturesQuoteNumber: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },
@@ -215,4 +277,25 @@ export const priorityLabel = (priority: JobPriority): string => {
   }
 };
 
-export const priorityRank = (priority: JobPriority): number => PRIORITY_ORDER.indexOf(priority);
+/**
+ * Where a priority sorts, most urgent first.
+ *
+ * AN UNGRADED JOB SORTS LAST, after "Low", rather than first. A job nobody has
+ * graded is not thereby the most urgent thing on the list — and putting it at
+ * the top is how an ungraded breakdown would outrank a genuine Urgent one.
+ * `PRIORITY_ORDER.length` is one past Low, which is exactly "after everything
+ * that was graded".
+ */
+export const priorityRank = (priority: JobPriority | null): number =>
+  priority === null ? PRIORITY_ORDER.length : PRIORITY_ORDER.indexOf(priority);
+
+/**
+ * What a screen or a document calls a priority, including its absence.
+ *
+ * `priorityLabel` takes a real priority and stays that way, because most
+ * callers have one. This is the one for a field that may be null, and it says
+ * "Not graded" rather than returning an empty string: a blank cell in a
+ * spreadsheet column headed "Priority" reads as data loss.
+ */
+export const priorityLabelOrUngraded = (priority: JobPriority | null): string =>
+  priority === null ? 'Not graded' : priorityLabel(priority);

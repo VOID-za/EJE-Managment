@@ -72,7 +72,17 @@ export const jobs = pgTable(
     jobTypeCode: text('job_type_code')
       .notNull()
       .references(() => jobTypes.code),
-    priority: jobPriority('priority').notNull(),
+    /*
+     * HOW URGENT, OR NOT YET GRADED. Create New Job §3B / §4.
+     *
+     * Nullable since 0027. A breakdown is called in before anybody has graded
+     * it and a test-and-repair unit arrives on the counter without one, so the
+     * column has to be able to say "nobody has said" — and the alternative,
+     * defaulting to a grade, would put an urgency on the job list and the
+     * customer's job card that no person chose. Which job types must carry one
+     * is `JobTypeDefinition.requiresPriority`, enforced in the operation.
+     */
+    priority: jobPriority('priority'),
     status: jobStatus('status').notNull(),
 
     /**

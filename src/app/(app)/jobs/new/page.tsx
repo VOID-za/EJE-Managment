@@ -55,7 +55,16 @@ const NewJobPage = () => {
   const [contactId, setContactId] = useState('');
   const [machineId, setMachineId] = useState('');
   const [jobType, setJobType] = useState<JobTypeCode>('breakdown');
-  const [priority, setPriority] = useState<JobPriority>('urgent');
+  /*
+   * UNSET UNTIL SOMEBODY CHOOSES, where the job type allows that. §3B.
+   *
+   * It used to start at 'urgent' — the breakdown default — so every job
+   * carried a grading nobody had made, and the office had no way to say "we do
+   * not know yet". It now starts null and is defaulted only when the chosen
+   * job type REQUIRES one (see the job-type effect below), which is the only
+   * case where a pre-selection is a convenience rather than an invention.
+   */
+  const [priority, setPriority] = useState<JobPriority | null>(null);
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledEndDate, setScheduledEndDate] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
@@ -135,9 +144,20 @@ const NewJobPage = () => {
     if (customerId.length === 0) next.customerId = 'Select a customer.';
     if (siteId.length === 0) next.siteId = 'Select a site.';
     if (contactId.length === 0) next.contactId = 'Select a site contact.';
-    // A parts collection is a receipt for goods, not work on a machine.
-    if (!asDraft && definition.capturesLabourAndTravel && machineId.length === 0) {
+    /*
+     * A MACHINE ONLY WHERE THE JOB TYPE NEEDS ONE. Create New Job §3A / §4.
+     *
+     * `requiresMachine` rather than `capturesLabourAndTravel`: a breakdown is
+     * telephoned in before anybody knows which machine it is, and a
+     * test-and-repair unit may not be on the register at all. The SERVER
+     * applies the identical rule.
+     */
+    if (!asDraft && definition.requiresMachine && machineId.length === 0) {
       next.machineId = 'Select the machine this job is for.';
+    }
+    // And a priority only where the job type needs one. §3B / §4.
+    if (!asDraft && definition.requiresPriority && priority === null) {
+      next.priority = 'Choose how urgent this job is.';
     }
     // Only where the job type collects one. CR-13.
     if (!asDraft && !definition.officeProcessed && faultDescription.trim().length === 0) {
@@ -300,8 +320,8 @@ const NewJobPage = () => {
                 }))}
               />
               <SelectField
-                label={definition.capturesLabourAndTravel ? 'Machine' : 'Machine (optional)'}
-                required={definition.capturesLabourAndTravel}
+                label={definition.requiresMachine ? 'Machine' : 'Machine (optional)'}
+                required={definition.requiresMachine}
                 value={machineId}
                 error={errors.machineId}
                 placeholder={siteId.length === 0 ? 'Select a site first' : 'Select a machine'}
@@ -343,7 +363,19 @@ const NewJobPage = () => {
                   onChange={(event) => {
                     const code = event.target.value as JobTypeCode;
                     setJobType(code);
-                    setPriority(getJobTypeDefinition(code).defaultPriority);
+                    /*
+                     * THE DEFAULT IS OFFERED ONLY WHERE A PRIORITY IS REQUIRED.
+                     * Create New Job §3B / §4.
+                     *
+                     * Switching to an installation or a service pre-selects the
+                     * type's usual grading, which is a convenience on planned
+                     * work the office grades as it books it. Switching to a
+                     * breakdown or a test-and-repair job clears it instead, so
+                     * the field says "Not graded yet" rather than quietly
+                     * carrying "Urgent" from the default.
+                     */
+                    const chosen = getJobTypeDefinition(code);
+                    setPriority(chosen.requiresPriority ? chosen.defaultPriority : null);
                     // Only service work is booked across a range.
                     if (!getJobTypeDefinition(code).schedulesDateRange) setScheduledEndDate('');
                     /*
@@ -368,15 +400,34 @@ const NewJobPage = () => {
                 />
                 {!definition.officeProcessed && (
                   <>
+                    {/*
+                      NOT GRADED IS AN ANSWER. Create New Job §3B / §4.
+
+                      Where the job type does not require a priority the list
+                      carries an explicit "Not graded yet" and starts there, so
+                      the office can raise a breakdown without grading it. The
+                      empty option is absent where a priority IS required, so an
+                      installation cannot be left ungraded by accident.
+                    */}
                     <SelectField
-                      label="Priority"
-                      required
-                      value={priority}
-                      onChange={(event) => setPriority(event.target.value as JobPriority)}
-                      options={PRIORITY_ORDER.map((value) => ({
-                        value,
-                        label: priorityLabel(value),
-                      }))}
+                      label={definition.requiresPriority ? 'Priority' : 'Priority (optional)'}
+                      required={definition.requiresPriority}
+                      value={priority ?? ''}
+                      error={errors.priority}
+                      onChange={(event) =>
+                        setPriority(
+                          event.target.value === '' ? null : (event.target.value as JobPriority),
+                        )
+                      }
+                      options={[
+                        ...(definition.requiresPriority
+                          ? []
+                          : [{ value: '', label: 'Not graded yet' }]),
+                        ...PRIORITY_ORDER.map((value) => ({
+                          value,
+                          label: priorityLabel(value),
+                        })),
+                      ]}
                     />
                     <TextField
                       label={

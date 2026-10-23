@@ -108,7 +108,9 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     expect(row?.primaryTechnicianId).toBeNull();
     expect(row?.scheduledDate).toBeNull();
     expect(row?.faultDescription).toBe('');
-    expect(row?.priority).toBe('normal');
+    // Null, not "normal": a collection has no urgency to express, and the
+    // column can hold the absence since 0027. Create New Job §3B.
+    expect(row?.priority).toBeNull();
     expect(row?.courierCollection).toBe(false);
 
     // And no technician rows were written for it.

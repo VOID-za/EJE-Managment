@@ -51,7 +51,8 @@ export interface JobCalendarEntry extends CalendarEntryBase {
   readonly jobNumber: string;
   readonly jobType: JobTypeCode;
   readonly status: JobStatus;
-  readonly priority: JobPriority;
+  /** Null on a job nobody has graded. The chip shows no priority dot. */
+  readonly priority: JobPriority | null;
   readonly customerName: string;
   readonly siteName: string;
   readonly machineLabel: string;

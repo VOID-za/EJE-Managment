@@ -44,13 +44,29 @@ const PRIORITY_TONES: Record<JobPriority, BadgeTone> = {
 };
 
 /** Urgent is deliberately the loudest thing on any screen it appears on. */
+/**
+ * HOW URGENT, OR THAT NOBODY HAS SAID. Create New Job §3B.
+ *
+ * A null priority is a real state on a breakdown or a test-and-repair job:
+ * the office raised it before the urgency was known. It renders as "Not
+ * graded" rather than as nothing, because a blank cell beside a status and a
+ * job type reads as a rendering fault — and rather than as "Normal", which
+ * would be this component inventing a grading nobody chose.
+ */
 export const PriorityBadge = ({
   priority,
   size = 'md',
 }: {
-  readonly priority: JobPriority;
+  readonly priority: JobPriority | null;
   readonly size?: 'sm' | 'md';
 }) => {
+  if (priority === null) {
+    return (
+      <Badge tone="neutral" size={size}>
+        Not graded
+      </Badge>
+    );
+  }
   if (priority === 'urgent') {
     return (
       <span

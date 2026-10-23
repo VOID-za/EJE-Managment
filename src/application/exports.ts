@@ -2,7 +2,7 @@ import {
   can,
   jobStatusLabel,
   jobTypeLabel,
-  priorityLabel,
+  priorityLabelOrUngraded,
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
@@ -100,7 +100,9 @@ const isoDay = (value: string | null): string => (value === null ? '' : value.sl
 const JOB_LIST_COLUMNS: readonly CsvColumn<JobListRow>[] = [
   { header: 'Job number', value: (row) => row.job.jobNumber },
   { header: 'Status', value: (row) => jobStatusLabel(row.job.status) },
-  { header: 'Priority', value: (row) => priorityLabel(row.job.priority) },
+  // "Not graded" rather than an empty cell: a blank under this header
+  // reads as data loss rather than as a job nobody has graded.
+  { header: 'Priority', value: (row) => priorityLabelOrUngraded(row.job.priority) },
   { header: 'Job type', value: (row) => jobTypeLabel(row.job.jobType) },
   { header: 'Customer', value: (row) => row.customerName },
   { header: 'Site', value: (row) => row.siteName },

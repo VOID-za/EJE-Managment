@@ -510,7 +510,21 @@ export interface Job {
    */
   readonly machineId: MachineId | null;
   readonly jobType: JobTypeCode;
-  readonly priority: JobPriority;
+  /**
+   * HOW URGENT, OR NOT YET GRADED. Create New Job §3B / §4.
+   *
+   * Null where the job type does not require one — a breakdown called in
+   * before anybody has graded it, a test-and-repair unit on the counter, a
+   * parts collection that has no urgency at all. `JobTypeDefinition.
+   * requiresPriority` decides which types must carry one.
+   *
+   * NULL RATHER THAN A DEFAULT, deliberately: writing "Urgent" onto a
+   * breakdown nobody had graded would put a grading on the job list, the
+   * calendar and the customer's job card that no person chose. Everything that
+   * reads this handles the absence — lists sort it last, filters match it only
+   * under "All", and the job card prints nothing for it.
+   */
+  readonly priority: JobPriority | null;
   readonly status: JobStatus;
   /** First day of the booking. For most job types this is the only date. */
   readonly scheduledDate: IsoDate | null;

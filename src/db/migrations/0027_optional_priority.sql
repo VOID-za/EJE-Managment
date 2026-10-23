@@ -1,0 +1,23 @@
+-- A JOB MAY BE UNGRADED. Create New Job §3B / §4.
+--
+-- `jobs.priority` was NOT NULL with a per-type default supplied by the form, so
+-- every job carried a grading whether or not a person had chosen one. The owner
+-- asked that priority stop being mandatory on a BREAKDOWN — which is telephoned
+-- in as "the line is down", before anybody grades it — and on a TEST & REPAIR,
+-- which arrives as a unit on the counter.
+--
+-- NULL RATHER THAN A DEFAULT is the whole point. Writing "normal" (or worse,
+-- the breakdown default of "urgent") onto a job nobody had graded would put an
+-- urgency on the Jobs list, the calendar and the customer's job card that no
+-- person chose, and nothing afterwards could tell it apart from a real grading.
+--
+-- WHICH TYPES STILL REQUIRE ONE is a business rule, not a column constraint:
+-- `JobTypeDefinition.requiresPriority` is true for an installation and a
+-- service, and the creation operation refuses those without a priority. It is
+-- deliberately NOT a CHECK here, because the job type's rules live in one place
+-- and a second copy in the database is a copy that will disagree.
+--
+-- EXISTING ROWS ARE UNTOUCHED: every job already in the database keeps the
+-- grading it has. Dropping NOT NULL widens what is allowed and rewrites
+-- nothing.
+ALTER TABLE "jobs" ALTER COLUMN "priority" DROP NOT NULL;

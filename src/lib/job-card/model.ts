@@ -362,7 +362,19 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       // "Breakdown · Urgent · Status: Review" as something addressed to them —
       // which it never was.
       { label: 'Job type', value: definition.label },
-      { label: 'Priority', value: priorityLabel(job.priority) },
+      /*
+       * ONLY WHERE SOMEBODY GRADED IT. Create New Job §3B.
+       *
+       * The row is omitted on an ungraded job rather than printed as "Not
+       * graded", because this is the document the CUSTOMER signs: a line
+       * reading "Priority: Not graded" tells them about EJE's internal
+       * paperwork, which is not what the job card is for. DOC-1 already omits
+       * an empty section rather than printing a bare heading; this is the same
+       * rule one row down.
+       */
+      ...(job.priority === null
+        ? []
+        : [{ label: 'Priority', value: priorityLabel(job.priority) }]),
       { label: 'Order number', value: job.orderNumber.length > 0 ? job.orderNumber : '—' },
       { label: 'Reference', value: job.referenceNumber.length > 0 ? job.referenceNumber : '—' },
       // Only where the customer works by one, and only when they gave us one.

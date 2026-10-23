@@ -199,10 +199,29 @@ describe('what a job must say', () => {
     ).toContain('fault_description_required');
   });
 
-  it('still refuses a field job with no machine', async () => {
+  /*
+   * A MACHINE IS REQUIRED WHERE THE JOB TYPE SAYS SO, AND NOT EVERYWHERE.
+   * Create New Job §3A / §4.
+   *
+   * This case used to raise a BREAKDOWN with no machine and expect a refusal,
+   * because the requirement was inferred from `capturesLabourAndTravel` — "this
+   * type charges hours, so it is work on a machine". The owner has separated
+   * the two: a breakdown is telephoned in before anybody knows which machine it
+   * is. So the refusal is asserted on an INSTALLATION, which is planned work
+   * booked against a known machine and still requires one, and the permission
+   * is asserted on the breakdown.
+   */
+  it('refuses an INSTALLATION with no machine', async () => {
     expect(
-      await codesFrom(() => createJob(harness.as(master), baseInput({ machineId: null }))),
+      await codesFrom(() =>
+        createJob(harness.as(master), baseInput({ machineId: null, jobType: 'installation' })),
+      ),
     ).toContain('machine_required');
+  });
+
+  it('ALLOWS a breakdown with no machine, and invents nothing in its place', async () => {
+    const job = await createJob(harness.as(master), baseInput({ machineId: null }));
+    expect(job.machineId).toBeNull();
   });
 });
 

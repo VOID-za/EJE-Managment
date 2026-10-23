@@ -33,7 +33,8 @@ export interface CachedJob {
   readonly jobNumber: string;
   readonly status: string;
   readonly jobType: string;
-  readonly priority: string;
+  /** Null where nobody has graded the job. Create New Job §3B. */
+  readonly priority: string | null;
   readonly scheduledDate: string | null;
   readonly faultDescription: string;
   readonly customerName: string;
@@ -68,6 +69,8 @@ export const toCachedJob = (row: JobListRow): CachedJob => ({
   jobNumber: row.job.jobNumber,
   status: row.job.status,
   jobType: row.job.jobType,
+  // Null where nobody has graded the job. The cached list shows it ungraded
+  // rather than guessing a grade the tablet was never given.
   priority: row.job.priority,
   scheduledDate: row.job.scheduledDate,
   faultDescription: row.job.faultDescription,
@@ -153,7 +156,7 @@ export interface JobDetailSource {
     readonly jobNumber: string;
     readonly status: string;
     readonly jobType: string;
-    readonly priority: string;
+    readonly priority: string | null;
     readonly scheduledDate: string | null;
     readonly faultDescription: string;
     readonly orderNumber: string;

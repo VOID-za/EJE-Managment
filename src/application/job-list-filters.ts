@@ -111,6 +111,14 @@ export const filterJobListRows = (
         : matchesJobListStatus(row.job.status, filters.status, row.job.scheduledDate),
     )
     .filter((row) => filters.jobType === 'all' || row.job.jobType === filters.jobType)
+    /*
+     * A JOB NOBODY HAS GRADED MATCHES ONLY "ALL". Create New Job §3B.
+     *
+     * `row.job.priority === filters.priority` already does this, because null
+     * equals none of the four grades — stated here because it is a decision
+     * rather than a consequence: filtering to "Normal" must not sweep in the
+     * ungraded jobs, and filtering to "Urgent" certainly must not.
+     */
     .filter((row) => filters.priority === 'all' || row.job.priority === filters.priority)
     .filter(
       (row) =>
