@@ -634,26 +634,80 @@ await step('the office files a document against a customer, and gets those bytes
   await page.screenshot({ path: `${shots}/14b-customer-document.png`, fullPage: false });
 });
 
-await step('a technician cannot read the customer register’s files', async () => {
+await step('a technician READS the customer register’s files and cannot change them', async () => {
+  /*
+   * CUST-DOC-2, the owner's decision of 23 October 2026. This step asserted
+   * the opposite — a 403 at both ends — for three releases, deliberately,
+   * because whether a technician should see a customer's paperwork was a
+   * question recorded rather than guessed at. They answered it: a technician
+   * may VIEW AND DOWNLOAD what is filed against a customer. Filing and
+   * withdrawing are still the office's.
+   */
   await signOut();
   await signInAs(page, 'Sipho Mahlangu');
 
-  // The office's own route, asked for by a technician's browser with their own
-  // session: refused by the server, not merely hidden by a screen.
-  const refused = await page.evaluate(async (base) => {
-    const response = await fetch(`${base}/api/customers/cust-abc/documents`, {
+  const asked = await page.evaluate(async (base) => {
+    const list = await fetch(`${base}/api/customers/cust-abc/documents`, {
       credentials: 'include',
     });
-    return response.status;
+    const body = list.ok ? await list.json() : null;
+    const documents = body?.data?.documents ?? [];
+    const first = documents[0] ?? null;
+
+    // THE BYTES, through the technician's own session.
+    const file =
+      first === null
+        ? null
+        : await fetch(`${base}/api/customers/cust-abc/documents/${first.id}`, {
+            credentials: 'include',
+          });
+
+    // And the writes, which the decision did NOT widen.
+    const withdrawn =
+      first === null
+        ? null
+        : await fetch(`${base}/api/customers/cust-abc/documents/${first.id}/withdraw`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          });
+
+    return {
+      list: list.status,
+      count: documents.length,
+      hasKey: documents.some((document) => 'storageKey' in document),
+      file: file === null ? null : file.status,
+      fileLength: file === null || !file.ok ? 0 : (await file.arrayBuffer()).byteLength,
+      withdraw: withdrawn === null ? null : withdrawn.status,
+    };
   }, BASE);
-  if (refused !== 403) {
-    throw new Error(`the customer document list answered a technician HTTP ${refused}`);
+
+  if (asked.list !== 200) {
+    throw new Error(`the customer document list answered a technician HTTP ${asked.list}`);
+  }
+  if (asked.count === 0) throw new Error('the technician was sent no customer documents');
+  if (asked.hasKey) throw new Error('a storage key reached a technician’s browser');
+  if (asked.file !== 200) {
+    throw new Error(`the technician's download answered HTTP ${asked.file}`);
+  }
+  if (asked.fileLength === 0) throw new Error('the technician’s download carried no bytes');
+  if (asked.withdraw !== 403) {
+    throw new Error(`a technician's withdrawal answered HTTP ${asked.withdraw}, not 403`);
   }
 
-  // And their own customer screen carries none of them.
+  // And their own customer screen shows them, with no control to change them.
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
-  if ((await page.getByTestId('customer-documents').count()) !== 0) {
-    throw new Error('a technician’s customer screen is showing the register’s files');
+  await page.getByRole('tab', { name: 'Notes & Documents' }).click();
+  await page.getByTestId('customer-document-row').first().waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('customer-document-choose').count()) !== 0) {
+    throw new Error('a technician is being offered the document uploader');
+  }
+  if ((await page.getByTestId('customer-document-withdraw').count()) !== 0) {
+    throw new Error('a technician is being offered Withdraw');
+  }
+  if ((await page.getByTestId('customer-document-download').count()) === 0) {
+    throw new Error('a technician is not offered the download');
   }
 });
 
