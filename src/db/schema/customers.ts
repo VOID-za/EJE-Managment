@@ -90,8 +90,25 @@ export const customerNotes = pgTable(
     body: text('body').notNull(),
     authorId: uuid('author_id').references(() => users.id),
     createdAt: createdAt(),
+    /*
+     * WHO CORRECTED THE NOTE, AND WHEN. Customers §2.
+     *
+     * Both null on a note nobody has edited, and all-or-nothing: a timestamp
+     * with nobody against it, or somebody with no moment, would each be half a
+     * record. `author_id` and `created_at` are deliberately NOT touched by an
+     * edit — they say who wrote the note and when, which an edit does not
+     * change.
+     */
+    editedBy: uuid('edited_by').references(() => users.id),
+    editedAt: instant('edited_at'),
   },
-  (table) => [index('customer_notes_customer_idx').on(table.customerId, table.createdAt)],
+  (table) => [
+    index('customer_notes_customer_idx').on(table.customerId, table.createdAt),
+    check(
+      'customer_notes_edit_is_whole_or_absent',
+      sql`(${table.editedBy} IS NOT NULL) = (${table.editedAt} IS NOT NULL)`,
+    ),
+  ],
 );
 
 /**

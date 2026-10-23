@@ -9,6 +9,7 @@ import {
   type Contact,
   type Customer,
   type CustomerId,
+  type CustomerNote,
   type PostalAddress,
   type Site,
   type SiteId,
@@ -21,14 +22,20 @@ import type { RemovalResult } from './removal';
 /**
  * Customer register operations.
  *
- * The official customer record belongs to the office: only a Master may create
- * or change it. Technicians read it and raise change requests against it, which
- * is why the permission check sits here rather than being left to whichever
- * screen happens to call in.
+ * The official customer record belongs to THE OFFICE — a Master or a
+ * Coordinator, both of whom hold `customers.manage`. Technicians read it and
+ * raise change requests against it, which is why the permission check sits here
+ * rather than being left to whichever screen happens to call in.
+ *
+ * THE REFUSAL USED TO SAY "ONLY A MASTER", AND THAT WAS NEVER WHAT IT CHECKED.
+ * A Coordinator has held `customers.manage` since the roles were written, so
+ * the sentence described a rule the code did not implement — and a Coordinator
+ * reading it had every reason to believe the register was closed to them. The
+ * check is unchanged; the wording now matches it.
  */
 const assertManages = (context: OperationContext): void => {
   if (can(context.actor.role, 'customers.manage')) return;
-  throw new WorkflowError('Only a Master can change official customer information.', [
+  throw new WorkflowError('Only the office can change official customer information.', [
     {
       code: 'not_permitted',
       message: 'Technicians can view customers and raise change requests, but not edit them.',
@@ -173,6 +180,164 @@ export const updateCustomer = async (
     summary: `Customer updated: ${saved.name}`,
     detail: `Official customer details amended by ${context.actor.firstName} ${context.actor.lastName}.`,
   });
+  return saved;
+};
+
+/**
+ * THE LONGEST USEFUL ACCOUNT NOTE.
+ *
+ * Long enough for the standing instruction a note exists to carry — who to ask
+ * for at the gate, which purchase-order rules this account works to — and short
+ * enough that a contract does not get pasted into one. A contract is a
+ * DOCUMENT, and the panel beside this one takes those.
+ */
+export const CUSTOMER_NOTE_LIMIT = 2000;
+
+/**
+ * AN ACCOUNT NOTE, WRITTEN BY THE OFFICE. Customers §2.
+ *
+ * The notes were READ-ONLY EVERYWHERE, for every role, and had been since the
+ * register was built: `Customer.notes` was rendered on the screen, persisted by
+ * `replaceNotes`, seeded with demonstration data — and there was no operation,
+ * no route and no control that could add one. A Coordinator asked to keep
+ * account notes could not, and neither could a Master.
+ *
+ * WHO MAY: the office, `customers.manage`, the same rule as every other change
+ * to the official record. A technician who finds a note wrong raises a change
+ * request, exactly as they do for a serial number.
+ *
+ * WHAT IS RECORDED: the author and the moment, because a note is somebody's
+ * statement about an account rather than a field on it. That is also why
+ * `editCustomerNote` keeps both and records the correction separately — see
+ * there.
+ */
+export const addCustomerNote = async (
+  context: OperationContext,
+  customer: Customer,
+  body: string,
+): Promise<Customer> => {
+  assertManages(context);
+
+  const text = body.trim();
+  if (text.length === 0) {
+    throw new WorkflowError('A note needs something in it.', [
+      {
+        code: 'note_body_required',
+        message: 'Write the note before saving it. An empty note records nothing.',
+      },
+    ]);
+  }
+  if (text.length > CUSTOMER_NOTE_LIMIT) {
+    throw new WorkflowError('That note is too long.', [
+      {
+        code: 'note_too_long',
+        message: `A note is limited to ${CUSTOMER_NOTE_LIMIT} characters. Attach a document instead.`,
+      },
+    ]);
+  }
+
+  const note: CustomerNote = {
+    id: context.services.ids.next('customer-note'),
+    body: text,
+    authorId: context.actor.id,
+    createdAt: context.services.clock.now(),
+    editedBy: null,
+    editedAt: null,
+  };
+
+  const saved = await context.repos.customers.save({
+    ...customer,
+    notes: [...customer.notes, note],
+  });
+
+  await audit(context, {
+    jobId: null,
+    type: 'customer_updated',
+    summary: `Account note added: ${saved.name}`,
+    detail: `${context.actor.firstName} ${context.actor.lastName} added an account note.`,
+    changes: [{ field: 'Account note', from: null, to: text }],
+  });
+
+  return saved;
+};
+
+/**
+ * CORRECTING A NOTE, WITHOUT PRETENDING IT WAS ALWAYS THAT.
+ *
+ * The owner asked that the office be able to EDIT account notes, so this
+ * replaces the body — and keeps the original author and the original moment,
+ * because they are facts about who said something and when, and an edit does
+ * not change either. Who corrected it and when is recorded alongside, so the
+ * screen can say a note was edited rather than quietly showing new words under
+ * somebody else's name.
+ *
+ * The before and after both go on the audit trail (AUDIT-2), which is the only
+ * place the previous wording survives — the note itself holds one body, as a
+ * note does.
+ */
+export const editCustomerNote = async (
+  context: OperationContext,
+  customer: Customer,
+  noteId: string,
+  body: string,
+): Promise<Customer> => {
+  assertManages(context);
+
+  const existing = customer.notes.find((note) => note.id === noteId);
+  if (existing === undefined) {
+    throw new WorkflowError('That note is not on this customer.', [
+      {
+        code: 'note_not_found',
+        message: 'The note may have been removed. Reload the customer and try again.',
+      },
+    ]);
+  }
+
+  const text = body.trim();
+  if (text.length === 0) {
+    throw new WorkflowError('A note needs something in it.', [
+      {
+        code: 'note_body_required',
+        message:
+          'A note cannot be emptied. Rewrite it, or add a new note saying the old one no longer applies.',
+      },
+    ]);
+  }
+  if (text.length > CUSTOMER_NOTE_LIMIT) {
+    throw new WorkflowError('That note is too long.', [
+      {
+        code: 'note_too_long',
+        message: `A note is limited to ${CUSTOMER_NOTE_LIMIT} characters. Attach a document instead.`,
+      },
+    ]);
+  }
+
+  // Nothing to record and nothing to save: an "edit" that changes no character
+  // should not put a correction marker on somebody else's note.
+  if (text === existing.body) return customer;
+
+  const saved = await context.repos.customers.save({
+    ...customer,
+    notes: customer.notes.map((note) =>
+      note.id === noteId
+        ? {
+            ...note,
+            body: text,
+            editedBy: context.actor.id,
+            editedAt: context.services.clock.now(),
+          }
+        : note,
+    ),
+  });
+
+  await audit(context, {
+    jobId: null,
+    type: 'customer_updated',
+    summary: `Account note edited: ${saved.name}`,
+    detail: `${context.actor.firstName} ${context.actor.lastName} corrected an account note.`,
+    changes: [{ field: 'Account note', from: existing.body, to: text }],
+  });
+
   return saved;
 };
 

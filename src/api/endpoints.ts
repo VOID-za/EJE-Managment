@@ -739,6 +739,11 @@ export const customers = {
     command<Site>(`/api/customers/${segment(customerId)}/add_site`, input),
   addContact: (customerId: string, input: unknown) =>
     command<Contact>(`/api/customers/${segment(customerId)}/add_contact`, input),
+  /** An account note, written by the office. Customers §2. */
+  addNote: (customerId: string, body: string) =>
+    command<Customer>(`/api/customers/${segment(customerId)}/add_note`, { body }),
+  editNote: (customerId: string, noteId: string, body: string) =>
+    command<Customer>(`/api/customers/${segment(customerId)}/edit_note`, { noteId, body }),
   updateSite: (siteId: string, input: unknown) =>
     command<Site>(`/api/sites/${segment(siteId)}/update`, input),
   removeSite: (siteId: string) =>

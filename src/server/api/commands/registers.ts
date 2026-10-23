@@ -182,6 +182,36 @@ export const CUSTOMER_COMMANDS: CommandRegistry = {
     },
   }),
 
+  /*
+   * AN ACCOUNT NOTE. Customers §2.
+   *
+   * `customers.manage` is applied by the operation, as every other command here
+   * leaves it: the office writes notes and a technician raises a change
+   * request. The body is bounded by the schema AND trimmed and refused by the
+   * operation, because a schema has nothing to say about a note of three
+   * spaces.
+   */
+  add_note: command({
+    schema: z.object({ body: z.string().min(1).max(customers.CUSTOMER_NOTE_LIMIT) }).strict(),
+    async run(context, input, target) {
+      const stored = await loadCustomer(context, target);
+      return customers.addCustomerNote(context.operation, stored, input.body);
+    },
+  }),
+
+  edit_note: command({
+    schema: z
+      .object({
+        noteId: z.string().min(1).max(200),
+        body: z.string().min(1).max(customers.CUSTOMER_NOTE_LIMIT),
+      })
+      .strict(),
+    async run(context, input, target) {
+      const stored = await loadCustomer(context, target);
+      return customers.editCustomerNote(context.operation, stored, input.noteId, input.body);
+    },
+  }),
+
   add_contact: command({
     schema: contactFields.extend({ siteId: id.nullable() }),
     async run(context, input, target) {

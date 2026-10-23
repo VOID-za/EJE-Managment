@@ -117,6 +117,8 @@ describeDb('the PostgreSQL registers', () => {
             body: 'Pays on presentation. Always asks for the technician by name.',
             authorId: IDS.master,
             createdAt: '2026-01-06T09:00:00.000Z',
+            editedBy: null,
+            editedAt: null,
           },
         ],
       });

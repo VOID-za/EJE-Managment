@@ -555,6 +555,37 @@ const v26ToV27 = (data: Loose): Loose => ({
     : data.changeRequests,
 });
 
+/**
+ * ACCOUNT NOTES CAN NOW BE EDITED, so every stored note gains the two fields
+ * that say whether anybody has. Customers §2.
+ *
+ * Null on each of them, which is the truth about a note written before editing
+ * existed: nobody has corrected it. Writing the current user in would claim an
+ * edit that never happened.
+ */
+const v27ToV28 = (data: Loose): Loose => ({
+  ...data,
+  customers: Array.isArray(data.customers)
+    ? data.customers.map((customer) => {
+        if (typeof customer !== 'object' || customer === null) return customer;
+        const row = customer as Record<string, unknown>;
+        if (!Array.isArray(row.notes)) return row;
+        return {
+          ...row,
+          notes: row.notes.map((note) => {
+            if (typeof note !== 'object' || note === null) return note;
+            const stored = note as Record<string, unknown>;
+            return {
+              ...stored,
+              editedBy: 'editedBy' in stored ? stored.editedBy : null,
+              editedAt: 'editedAt' in stored ? stored.editedAt : null,
+            };
+          }),
+        };
+      })
+    : data.customers,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -575,6 +606,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   24: v24ToV25,
   25: v25ToV26,
   26: v26ToV27,
+  27: v27ToV28,
 };
 
 /**

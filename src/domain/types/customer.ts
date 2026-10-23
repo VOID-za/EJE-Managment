@@ -88,8 +88,21 @@ export interface Site {
 export interface CustomerNote {
   readonly id: string;
   readonly body: string;
+  /** Who wrote it. Unchanged by an edit: an edit does not change who said it. */
   readonly authorId: string;
+  /** When it was written. Unchanged by an edit, for the same reason. */
   readonly createdAt: IsoDateTime;
+  /**
+   * WHO CORRECTED IT, AND WHEN. Both null until somebody does. Customers §2.
+   *
+   * The office may edit a note, and a screen showing new words under the
+   * original author's name with the original date would be a quiet rewrite of
+   * somebody's statement. These two fields are what let it say "edited by …"
+   * instead. The previous wording lives on the audit trail, not here: a note
+   * holds one body, as a note does.
+   */
+  readonly editedBy: string | null;
+  readonly editedAt: IsoDateTime | null;
 }
 
 /**

@@ -183,6 +183,13 @@
       "when": 1792606464482,
       "tag": "0025_customer_job_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792606465482,
+      "tag": "0026_customer_note_edits",
+      "breakpoints": true
     }
   ]
 }

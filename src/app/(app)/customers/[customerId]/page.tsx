@@ -1,7 +1,6 @@
 'use client';
 
 import { use, useState } from 'react';
-import { userFullName } from '@/domain';
 import {
   Badge,
   Button,
@@ -21,11 +20,11 @@ import { CustomerSitesTab } from '@/components/customers/CustomerSitesTab';
 import { ChangeRequestDialog } from '@/components/customers/ChangeRequestDialog';
 import { ChangeRequestsPanel } from '@/components/customers/ChangeRequestsPanel';
 import { CustomerDocumentsPanel } from '@/components/customers/CustomerDocumentsPanel';
+import { CustomerNotesPanel } from '@/components/customers/CustomerNotesPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { can } from '@/domain';
-import { formatRelative } from '@/lib/format';
 
 type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes';
 
@@ -155,19 +154,6 @@ const CustomerDetailPage = ({
             />
           )}
 
-          {/*
-            THE CUSTOMER'S FILED PAPERWORK. October mandate §4.
-            Office-only on screen, and office-only on the server too: the view
-            sends a technician no documents at all, and the routes refuse them.
-          */}
-          {manages && (
-            <CustomerDocumentsPanel
-              customerId={customer.id}
-              documents={documents}
-              users={users}
-              onChanged={query.refetch}
-            />
-          )}
         </div>
       )}
 
@@ -200,46 +186,54 @@ const CustomerDetailPage = ({
         />
       )}
 
+      {/*
+        NOTES AND DOCUMENTS, AND BOTH OF THEM REAL. Customers §2.
+
+        This tab used to be the one place on the screen that lied. The notes
+        were rendered with no way to add one — for any role, Master included —
+        and beside them sat a Documents card that said "No documents uploaded …
+        storage is simulated in this demonstration", hard-coded, while the REAL
+        documents panel was on the Overview tab holding real stored files. A
+        Coordinator asked to keep account notes and file paperwork came to the
+        tab named for both and found neither.
+
+        So the real panels are here, where their names say they are, and the
+        card that claimed otherwise is gone. Both are office work
+        (`customers.manage` — a Master or a Coordinator) and the server refuses
+        them to anybody else regardless: a technician's own response carries no
+        documents at all.
+      */}
       {tab === 'notes' && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <Card>
-            <CardHeader title="Account notes" description="Visible to the office and technicians." />
-            {customer.notes.length === 0 ? (
-              <p className="mt-4 text-sm text-steel-500">No notes recorded.</p>
-            ) : (
-              <ul className="mt-4 space-y-3">
-                {customer.notes.map((note) => {
-                  const author = users.find((candidate) => candidate.id === note.authorId);
-                  return (
-                    <li
-                      key={note.id}
-                      className="rounded-[var(--radius-control)] border border-steel-200 p-3"
-                    >
-                      <p className="text-sm leading-relaxed text-steel-700">{note.body}</p>
-                      <p className="mt-2 text-xs text-steel-400">
-                        {author === undefined ? 'Unknown' : userFullName(author)} ·{' '}
-                        {formatRelative(note.createdAt)}
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+          <CustomerNotesPanel
+            customer={customer}
+            users={users}
+            canManage={manages}
+            onChanged={query.refetch}
+          />
 
-          <Card>
-            <CardHeader
-              title="Documents"
-              description="Contracts, rate agreements and site inductions."
+          {manages ? (
+            <CustomerDocumentsPanel
+              customerId={customer.id}
+              documents={documents}
+              users={users}
+              onChanged={query.refetch}
             />
-            <div className="mt-4">
-              <EmptyState
-                title="No documents uploaded"
-                description="Customer documents will be stored here. Document storage is represented by the storage service and is simulated in this demonstration."
-                icon={<Icon name="document" />}
+          ) : (
+            <Card>
+              <CardHeader
+                title="Documents"
+                description="Contracts, rate agreements and site inductions."
               />
-            </div>
-          </Card>
+              <div className="mt-4">
+                <EmptyState
+                  title="The office holds these"
+                  description="A customer's filed paperwork is read by the office. Raise a change request if something here is wrong."
+                  icon={<Icon name="document" />}
+                />
+              </div>
+            </Card>
+          )}
         </div>
       )}
     </>

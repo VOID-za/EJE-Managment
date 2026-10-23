@@ -413,6 +413,10 @@ export class PostgresCustomerRepository implements CustomerRepository {
         body: note.body,
         authorId: note.authorId.length === 0 ? null : note.authorId,
         createdAt: note.createdAt,
+        // Customers §2: who corrected the note, if anybody has. All-or-nothing,
+        // and the database enforces that.
+        editedBy: note.editedBy === null || note.editedBy.length === 0 ? null : note.editedBy,
+        editedAt: note.editedAt,
       })),
     );
   }
@@ -460,6 +464,8 @@ export class PostgresCustomerRepository implements CustomerRepository {
         body: note.body,
         authorId: note.authorId ?? '',
         createdAt: note.createdAt,
+        editedBy: note.editedBy,
+        editedAt: note.editedAt,
       })),
       // See the class docblock: nothing captures these, so nothing stores them.
       documents: [],
