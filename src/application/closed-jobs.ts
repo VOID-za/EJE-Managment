@@ -79,10 +79,12 @@ export interface ClosedJobRow extends JobListRow {
    * and in the same place — after the office check at the top of
    * `loadClosedJobs` — so neither can reach a technician.
    *
-   * NOBODY MAY EXPORT IT TODAY: the archive screen shows no figures and the
-   * export appends the money only for `jobs.exportPrices`, which no role
-   * holds. It is read here because BD-17 cannot be ANSWERED without the shape
-   * of the answer existing.
+   * WHO MAY EXPORT IT: the archive screen shows no figures, and the export
+   * appends the money only for `jobs.exportPrices` — which **BD-17, answered
+   * on 23 October 2026, grants to a Master and a Coordinator and to no
+   * technician**. It was held by no role at all for one release, deliberately,
+   * because BD-17 could not be ANSWERED without the shape of the answer
+   * existing.
    */
   readonly issuedTotals: IssuedTotals | null;
 }

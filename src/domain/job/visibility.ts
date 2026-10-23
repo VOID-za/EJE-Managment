@@ -228,6 +228,18 @@ export type JobSummary = Pick<
   | 'referenceNumber'
   | 'orderNumber'
   | 'faultDescription'
+  /*
+   * THE TEST & REPAIR FIELDS. TR-1.
+   *
+   * Columns on `jobs`, like the order number beside them, and the archive
+   * export reconciles the work with them — a spreadsheet of closed jobs that
+   * cannot say which unit was booked in is no use for the job type it
+   * describes. They are not what this type withholds: a summary carries no
+   * parts, no pricing snapshot and no callout flag, and a part NUMBER is not a
+   * price (`withoutPrices` keeps part numbers and quantities deliberately).
+   */
+  | 'quoteNumber'
+  | 'repairItem'
   | 'customerId'
   | 'siteId'
   | 'machineId'
@@ -284,6 +296,8 @@ export const toJobSummary = (job: JobSummary): JobSummary => ({
   referenceNumber: job.referenceNumber,
   orderNumber: job.orderNumber,
   faultDescription: job.faultDescription,
+  quoteNumber: job.quoteNumber,
+  repairItem: job.repairItem,
   customerId: job.customerId,
   siteId: job.siteId,
   machineId: job.machineId,

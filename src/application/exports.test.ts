@@ -248,6 +248,25 @@ describe('the closed-job archive export', () => {
     );
   });
 
+  it('carries the Test & Repair unit, so the archive can be reconciled. TR-1', async () => {
+    /*
+     * "PERSIST THROUGH ... RELEVANT EXPORTS" is the requirement, and the
+     * archive is the relevant one: it is where the office reconciles work
+     * after it is done. A spreadsheet of closed jobs that cannot say WHICH
+     * UNIT was booked in is no use for the job type it describes.
+     *
+     * The four columns are EMPTY on every other job type, exactly as Order
+     * number and Reference number already are — and they are references and
+     * quantities, not money, so they are not what BD-17 gates.
+     */
+    const file = await exportClosedJobs(harness.repos, master, closedFilters());
+    const header = file.csv.replace('\uFEFF', '').split('\r\n')[0] ?? '';
+    expect(header).toContain('Quote number');
+    expect(header).toContain('Part number');
+    expect(header).toContain('Part description');
+    expect(header).toContain('Quantity');
+  });
+
   it('says whether the final job card exists, and never where it is stored', async () => {
     const file = await exportClosedJobs(harness.repos, master, closedFilters());
     expect(file.csv).toContain('Final job card');

@@ -106,6 +106,41 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 | ~~**MACH-HIST** (#28)~~ | ~~Machine location history.~~ | **BUILT** on 22 October, `1299e4a`. Insert-only movements with the office’s own effective date, written only when the site or the customer actually changed, and `machineLocationAsAt` to answer *"where did it stand on that day"*. **It stops before the job screen on purpose:** showing a historical site on a finished job changes what that job appears to say about work already done, which is BD-20. The history starts EMPTY and that is deliberate — there is nothing to import, and a first movement invented from today’s register would be a statement nobody made. |
 | ~~**IMMUT-9** (#20)~~ | ~~Addendum mechanism for post-signature corrections.~~ | **BUILT** on 21 October, now that BD-02 is answered. `job_corrections`, append-only with a write-once acknowledgement, its own addendum PDF, and the original untouched — proved by reading the original's bytes before and after in a browser. |
 
+## Found on 23 October 2026, and recorded rather than guessed
+
+**JOB-EDIT-1 — a job's recorded details cannot be changed after creation, by
+anybody.** Not the order number, not the customer reference, not the fault
+description, not the delivery note, and not the Test & Repair fields added as
+TR-1. There is no operation, no command and no control: every one of these is
+written by `createJob` and never again.
+
+This surfaced while verifying TR-1's "persist through edits". **It is not a
+defect I introduced and it is not specific to Test & Repair** — it has been true
+of every job-detail field since the system was written, and the new fields
+simply inherit it. It matters more for them than for the others, though, because
+the owner asked that they be OPTIONAL: a unit is booked in at the counter while
+somebody is still looking for the part number on the casting, and today that
+blank can never be filled in. The nearest thing available is a technician's
+change request (CUST-CR), which reports that a record is wrong and still ends
+with the office unable to correct it.
+
+**It is reported rather than built, for two reasons.** It is a feature nobody
+asked for in any mandate, and it is not a small one: an edit path has to decide
+what may change after the customer has signed (IMMUT-9's rules), what reaches
+the audit trail as a change rather than an event, and whether a technician may
+correct the fault description they wrote. Inventing those rules here would be
+answering three business questions by implementation.
+
+**Recommended default, if EJE want it:** the office (`jobs.editDetails`, a new
+capability held by Master and Coordinator) may change the order number,
+reference number, delivery note, quote number, fault description and the
+Test & Repair received-item fields while the job is EDITABLE — that is, before
+`assertEditable` stops applying at signature — with every change on the audit
+trail as a `from`/`to` pair, exactly as a customer note edit already records.
+After signature, nothing changes and the existing addendum mechanism is the
+remedy. That is one operation, one command and one panel, and it invents no new
+rule: it reuses the two that already govern this question.
+
 ## Decisions only EJE can make
 
 > **As of 23 October 2026 NOTHING IN THIS SECTION BLOCKS WORK.** Every row is

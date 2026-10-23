@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createJob } from './job-creation';
+import { addLabour, addNote, addPart } from './job-operations';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
 import type { OperationContext } from './context';
@@ -167,6 +168,64 @@ describe('raising a Test & Repair job with every field filled in', () => {
     const view = await loadJobView(harness.repos, job.jobNumber);
     expect(view!.job.repairItem.partNumber).toBe('1FK7042-2AF71-1SG0');
     expect(view!.job.quoteNumber).toBe('Q-20451');
+  });
+
+  it('SURVIVES the rest of the job — labour, a part and a discount', async () => {
+    /*
+     * "PERSIST THROUGH EDITS" is the requirement, and this is the shape that
+     * matters in practice: every later operation saves the WHOLE job, so a
+     * field a handler forgot to carry would be silently blanked by the next
+     * thing anybody did. Nothing asserts that per operation, so it is asserted
+     * once across a representative sequence.
+     */
+    const job = await createJob(harness.as(master), await input(harness, full));
+
+    const withLabour = await addLabour(harness.as(master), job, {
+      date: '2026-10-23',
+      rateType: 'normal',
+      hours: 2.5,
+      description: 'Bench test and rewind',
+    });
+    const withPart = await addPart(harness.as(master), withLabour, {
+      partNumber: 'BRG-6205',
+      description: 'Bearing',
+      quantity: 2,
+      unitPrice: 14_500,
+    });
+    const withNote = await addNote(harness.as(master), withPart, {
+      body: 'Rewound and tested on the bench.',
+    });
+    const reloaded = (await harness.repos.jobs.findById(job.id))!;
+
+    for (const stage of [withLabour, withPart, withNote, reloaded]) {
+      expect(stage.quoteNumber).toBe('Q-20451');
+      expect(stage.repairItem).toEqual({
+        partNumber: '1FK7042-2AF71-1SG0',
+        description: 'Servo motor, 3 kW',
+        quantity: 3,
+      });
+      expect(stage.referenceNumber).toBe('CUST-REF-9931');
+      expect(stage.deliveryNote).toBe('DN-55120');
+    }
+
+    // The part FITTED is not the unit BOOKED IN, which is the whole design.
+    expect(reloaded.parts.map((part) => part.partNumber)).toEqual(['BRG-6205']);
+  });
+
+  it('reaches the closed-job ARCHIVE EXPORT, which is where the office reconciles', async () => {
+    const job = await createJob(harness.as(master), await input(harness, full));
+    const summary = (await harness.repos.jobs.listSummaries()).find(
+      (candidate) => candidate.id === job.id,
+    );
+    /*
+     * THROUGH THE SUMMARY, which is the narrow row the list path produces —
+     * not the full job. A field missing from the summary is a column that is
+     * empty on PostgreSQL and full in the demonstration store, which is the
+     * worst of both.
+     */
+    expect(summary?.quoteNumber).toBe('Q-20451');
+    expect(summary?.repairItem.partNumber).toBe('1FK7042-2AF71-1SG0');
+    expect(summary?.repairItem.quantity).toBe(3);
   });
 });
 

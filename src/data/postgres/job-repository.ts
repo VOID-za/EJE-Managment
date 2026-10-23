@@ -249,6 +249,12 @@ export class PostgresJobRepository implements JobRepository {
         referenceNumber: schema.jobs.referenceNumber,
         orderNumber: schema.jobs.orderNumber,
         faultDescription: schema.jobs.faultDescription,
+        // TR-1: the unit booked in, for the archive export. Three scalar
+        // columns on `jobs`, like the order number above.
+        quoteNumber: schema.jobs.quoteNumber,
+        repairPartNumber: schema.jobs.repairPartNumber,
+        repairDescription: schema.jobs.repairDescription,
+        repairQuantity: schema.jobs.repairQuantity,
         customerId: schema.jobs.customerId,
         siteId: schema.jobs.siteId,
         machineId: schema.jobs.machineId,
@@ -304,6 +310,12 @@ export class PostgresJobRepository implements JobRepository {
       referenceNumber: row.referenceNumber,
       orderNumber: row.orderNumber,
       faultDescription: row.faultDescription,
+      quoteNumber: row.quoteNumber ?? '',
+      repairItem: {
+        partNumber: row.repairPartNumber ?? '',
+        description: row.repairDescription ?? '',
+        quantity: row.repairQuantity,
+      },
       customerId: asCustomerId(row.customerId),
       siteId: asSiteId(row.siteId),
       machineId: row.machineId === null ? null : asMachineId(row.machineId),

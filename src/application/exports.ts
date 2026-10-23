@@ -113,6 +113,18 @@ const JOB_LIST_COLUMNS: readonly CsvColumn<JobListRow>[] = [
   { header: 'Scheduled end', value: (row) => row.job.scheduledEndDate ?? '' },
   { header: 'Order number', value: (row) => row.job.orderNumber },
   { header: 'Reference number', value: (row) => row.job.referenceNumber },
+  /*
+   * THE TEST & REPAIR FIELDS ARE ON THE CLOSED-JOB EXPORT AND NOT THIS ONE.
+   * TR-1.
+   *
+   * Not an oversight. This export runs off `JobSummary`, which exists
+   * precisely so the operational list is not an aggregate read of every job in
+   * the business — and pulling four fields that only one job type captures
+   * into every summary would undo that for the sake of four mostly-empty
+   * columns. The unit booked in is on the job's own screen, on its job card,
+   * and on the ARCHIVE export below, which is where the office reconciles the
+   * work after it is done.
+   */
   { header: 'Fault description', value: (row) => row.job.faultDescription },
 ];
 
@@ -127,6 +139,28 @@ const CLOSED_JOB_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
   { header: 'Technician', value: (row) => row.technicianName },
   { header: 'Order number', value: (row) => row.job.orderNumber },
   { header: 'Reference number', value: (row) => row.job.referenceNumber },
+  /*
+   * THE TEST & REPAIR FIELDS. TR-1, and "relevant exports" is why they are
+   * here.
+   *
+   * Empty on every job type that does not capture them, exactly as Order
+   * number and Reference number already are — a spreadsheet of jobs that
+   * cannot say WHICH UNIT was booked in is no use for reconciling the work it
+   * describes. These are REFERENCES AND QUANTITIES, not money: `withoutPrices`
+   * strips what anybody paid and deliberately keeps part numbers and
+   * quantities, because a technician needs to know two encoders were fitted.
+   * So a technician's own export carries these and still carries no prices.
+   */
+  { header: 'Quote number', value: (row) => row.job.quoteNumber },
+  { header: 'Part number', value: (row) => row.job.repairItem.partNumber },
+  { header: 'Part description', value: (row) => row.job.repairItem.description },
+  {
+    header: 'Quantity',
+    // Empty rather than 0: nobody recorded a quantity, which is not the same
+    // as recording none of them.
+    value: (row) =>
+      row.job.repairItem.quantity === null ? '' : String(row.job.repairItem.quantity),
+  },
   /*
    * WHETHER the document exists, which is what the screen's icon says. Not
    * where it is: the storage key is internal and is no business of a

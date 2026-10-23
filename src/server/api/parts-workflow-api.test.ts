@@ -12,6 +12,9 @@ import { DEMO_USERS, signedInAs, startTestServer, type ApiTestClient } from '@/t
  * to each of them whatever the browser was shown.
  */
 
+/** A real PNG header, so what is stored is a photograph by its bytes. */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+
 const PARTS_JOB = {
   customerId: 'cust-abc',
   siteId: 'site-abc-jhb',
@@ -175,5 +178,39 @@ describe('the server refuses field-service operations on a collection', () => {
     });
     expect(response.status).toBe(200);
     expect(response.data.parts).toHaveLength(1);
+  });
+
+  it('TAKES A PHOTOGRAPH, which the owner asked be kept on this page', async () => {
+    /*
+     * The handwritten feedback struck the new fields off the Parts page and
+     * marked the photograph attachment to KEEP. Nothing about a parts
+     * collection restricts media — `addMedia` has no job-type guard, unlike
+     * labour and travel — and there was no test saying so, which is how a
+     * restriction gets added later by somebody tidying up.
+     *
+     * The BYTES, through the real route: a parts collection is where a
+     * photograph of the box on the counter belongs.
+     */
+    const master = await signedInAs(DEMO_USERS.master);
+    const job = await collection(master);
+
+    const attached = await master.upload<{
+      readonly photos: readonly { readonly id: string; readonly caption: string }[];
+    }>(`/api/jobs/${job.id}/media`, {
+      name: 'collection.png',
+      type: 'image/png',
+      bytes: PNG,
+      fields: { kind: 'photo', caption: 'Encoders on the counter' },
+    });
+    expect(attached.status, JSON.stringify(attached.error)).toBe(200);
+    expect(attached.data.photos).toHaveLength(1);
+    expect(attached.data.photos[0]?.caption).toBe('Encoders on the counter');
+
+    // Served back as the BYTES that went in, through the authorised route.
+    const served = await master.download(
+      `/api/jobs/${job.id}/media/${attached.data.photos[0]?.id ?? ''}`,
+    );
+    expect(served.status, JSON.stringify(served.error)).toBe(200);
+    expect(new Uint8Array(served.bytes)).toEqual(PNG);
   });
 });

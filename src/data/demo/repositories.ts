@@ -183,6 +183,8 @@ class DemoJobRepository implements JobRepository {
       referenceNumber: job.referenceNumber,
       orderNumber: job.orderNumber,
       faultDescription: job.faultDescription,
+      quoteNumber: job.quoteNumber,
+      repairItem: job.repairItem,
       customerId: job.customerId,
       siteId: job.siteId,
       machineId: job.machineId,
