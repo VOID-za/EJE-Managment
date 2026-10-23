@@ -18,6 +18,20 @@ import { buildOcr, localOcr } from './ocr';
  * silently passed by doing nothing would be worse than one that says it
  * skipped.
  *
+ * AND IT NEEDS A TIMEOUT OF ITS OWN. Vitest allows a test 5 seconds, which is
+ * the right default for a suite of pure functions and is not remotely enough
+ * for real optical character recognition: recognising this three-page fixture
+ * takes 7 to 22 seconds on the development container, measured. Without an
+ * explicit timeout these cases passed on a warm machine and failed on a busy
+ * one — and the one that cleans up after itself then failed too, because a
+ * timed-out test never reaches its `finally`.
+ *
+ * `OCR_TIMEOUT_MS` is deliberately generous rather than tuned to the fastest
+ * observed run: it is a bound on the TEST, not a performance assertion, and a
+ * test that fails because a machine was busy teaches nobody anything. Real
+ * recognition is bounded by `EJE_OCR_DEADLINE_MS` — twenty minutes, in the
+ * engine itself — and that is where the production limit lives.
+ *
  * THE FIXTURE HAS NO TEXT LAYER. It was built by rendering words to an IMAGE
  * and wrapping the image in a PDF, so `pdftotext` returns nothing from it — if
  * it had a text layer this test would pass without any recognition happening at
@@ -27,6 +41,9 @@ const engineInstalled = localOcr().describe().available;
 const describeEngine = engineInstalled ? describe : describe.skip;
 
 const SCAN = readFileSync(join(import.meta.dirname, '__fixtures__/scan-three-pages.pdf'));
+
+/** Enough for three pages of real recognition on a busy machine. See above. */
+const OCR_TIMEOUT_MS = 180_000;
 
 describeEngine('pdftoppm and tesseract, on a scan with no text layer', () => {
   it('reads every page, and gets the words right', async () => {
@@ -46,7 +63,7 @@ describeEngine('pdftoppm and tesseract, on a scan with no text layer', () => {
     expect(outcome.truncated).toBe(false);
     // The engine names itself, which the queue records against the job.
     expect(outcome.engine).toMatch(/tesseract/iu);
-  });
+  }, OCR_TIMEOUT_MS);
 
   it('TRUNCATES at the page bound, and says which bound', async () => {
     const outcome = await buildOcr({ EJE_OCR: 'local', EJE_OCR_MAX_PAGES: '1' }).read(SCAN);
@@ -61,14 +78,14 @@ describeEngine('pdftoppm and tesseract, on a scan with no text layer', () => {
     // The REASON, because an index marked truncated with no reason sends
     // somebody looking at the document instead of at the setting.
     expect(outcome.truncationReason).toMatch(/EJE_OCR_MAX_PAGES/u);
-  });
+  }, OCR_TIMEOUT_MS);
 
   it('REFUSES a file past the input bound before writing it anywhere', async () => {
     const outcome = await buildOcr({ EJE_OCR: 'local', EJE_OCR_MAX_INPUT_MB: '0.001' }).read(SCAN);
     // 0.001 is not a whole MB, so it is used as given: the file is larger.
     expect(outcome.kind).toBe('empty');
     if (outcome.kind === 'empty') expect(outcome.reason).toMatch(/EJE_OCR_MAX_INPUT_MB/u);
-  });
+  }, OCR_TIMEOUT_MS);
 
   it('reports MISSING LANGUAGE DATA as a configuration problem, not a bad scan', async () => {
     /*
@@ -88,18 +105,31 @@ describeEngine('pdftoppm and tesseract, on a scan with no text layer', () => {
     // And it names the package, because "OCR failed" sends somebody to the
     // document and this sends them to the right place.
     expect(outcome.reason).toMatch(/tesseract-ocr-eng/u);
-  });
+  }, OCR_TIMEOUT_MS);
 
   it('leaves no workspace behind, even on the path that succeeded', async () => {
     const { readdirSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('eje-ocr-'));
+    const workspaces = (): readonly string[] =>
+      readdirSync(tmpdir()).filter((name) => name.startsWith('eje-ocr-'));
 
+    const before = new Set(workspaces());
     await buildOcr({ EJE_OCR: 'local', EJE_OCR_MAX_PAGES: '1' }).read(SCAN);
 
-    // A customer's drawing must not be left as a loose file on the server.
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('eje-ocr-'))).toEqual(before);
-  });
+    /*
+     * WHAT THIS READ LEFT BEHIND, not what the whole temp directory holds.
+     *
+     * It used to compare the listing against a snapshot, which made it fail
+     * whenever anything ELSE had left a workspace — including a sibling case in
+     * this file that had just timed out before reaching its own `finally`. That
+     * is somebody else's mess and a different bug; this case is about whether
+     * `read` cleans up after ITSELF.
+     *
+     * A customer's drawing must not be left as a loose file on the server.
+     */
+    const added = workspaces().filter((name) => !before.has(name));
+    expect(added).toEqual([]);
+  }, OCR_TIMEOUT_MS);
 });
 
 describe('whether this machine has the engine', () => {
