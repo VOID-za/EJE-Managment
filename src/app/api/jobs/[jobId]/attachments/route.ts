@@ -1,10 +1,17 @@
 import { attachDocument } from '@/application/job-operations';
 import { loadVisibleJob } from '@/server/api/commands/jobs';
 import { uploadRoute } from '@/server/api/handler';
-import { MAX_UPLOAD_BYTES, validateUpload } from '@/server/api/uploads';
+import { MAX_VIDEO_BYTES, validateJobMediaUpload } from '@/server/api/uploads';
 
 /**
- * `POST /api/jobs/:jobId/attachments` — attach a document to a job.
+ * `POST /api/jobs/:jobId/attachments` — attach a PHOTOGRAPH OR A VIDEO to a
+ * job as it is raised. Create New Job §3C.
+ *
+ * PHOTOGRAPHS AND VIDEOS ONLY, and no documents. This route has exactly one
+ * caller — the Create New Job attachment control — so the owner's rule about
+ * that control is this route's rule. The Technical Library, the customer's
+ * document register and the machine's each have their own route and still
+ * accept a PDF; nothing here changes them.
  *
  * THE ORDER, and every step of it matters:
  *
@@ -18,13 +25,16 @@ import { MAX_UPLOAD_BYTES, validateUpload } from '@/server/api/uploads';
  * the job exists. `attachDocument` then applies the ordinary rule about who
  * may change a job at its current stage.
  *
- * The file itself is never trusted: `validateUpload` measures the bytes and
- * sniffs them, and what is stored is the server's finding rather than the
- * browser's claim.
+ * The file itself is never trusted: `validateJobMediaUpload` measures the bytes
+ * and sniffs them, so a PDF renamed `fault.jpg` is refused on what it IS. The
+ * route's own bound is the larger of the two limits, because `maxBytes` is
+ * checked against `Content-Length` before the body is read; a photograph is
+ * still held to the photograph limit once the bytes have arrived, so the looser
+ * outer bound only decides how much is read before anybody looks.
  */
 export const POST = uploadRoute({
   operation: 'jobs.attach_document',
-  maxBytes: MAX_UPLOAD_BYTES,
+  maxBytes: MAX_VIDEO_BYTES,
   handler: async (context) => {
     const job = await loadVisibleJob(
       {
@@ -36,7 +46,7 @@ export const POST = uploadRoute({
       context.params.jobId ?? '',
     );
 
-    const file = validateUpload({
+    const file = validateJobMediaUpload({
       fileName: context.file.name,
       declaredContentType: context.file.type,
       bytes: new Uint8Array(await context.file.arrayBuffer()),

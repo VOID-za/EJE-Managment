@@ -6,6 +6,7 @@ import {
   PHOTO_CONTENT_TYPES,
   safeFileName,
   sniffContentType,
+  validateJobMediaUpload,
   validatePhotoUpload,
   validateUpload,
   validateVideoUpload,
@@ -323,5 +324,121 @@ describe('what a video may be', () => {
     expect(
       codesOf(() => validateUpload({ fileName: 'order.pdf', declaredContentType: '', bytes: MP4 })),
     ).toEqual(['unsupported_file_type']);
+  });
+});
+
+/**
+ * WHAT THE NEW-JOB ATTACHMENT CONTROL ACCEPTS. Create New Job §3C.
+ *
+ * The owner asked that the control offer photographs and videos rather than
+ * arbitrary documents, so `validateJobMediaUpload` is the union of the two
+ * media lists and nothing else. Two things make it more than a list:
+ *
+ *  - THE LIMIT FOLLOWS WHAT THE FILE IS. A video gets the video budget and a
+ *    photograph is still held to the photograph one, so a 26 MB photograph is
+ *    refused on a route whose outer bound is 60 MB.
+ *  - THE ORDER OF REFUSALS IS UNCHANGED. Empty, then size, then type — so an
+ *    empty file is reported as empty, and an oversized PDF is reported as the
+ *    wrong TYPE rather than as too large, because converting it would not have
+ *    helped.
+ */
+describe('what may be attached to a new job', () => {
+  it('accepts every photograph format', () => {
+    for (const photo of [PNG, JPEG, TIFF_LE, TIFF_BE, WEBP]) {
+      expect(validateJobMediaUpload({ fileName: 'f', declaredContentType: '', bytes: photo }))
+        .toBeDefined();
+    }
+  });
+
+  it('accepts every video format', () => {
+    for (const video of [MP4, MOV, THREE_GP, WEBM]) {
+      expect(validateJobMediaUpload({ fileName: 'f', declaredContentType: '', bytes: video }))
+        .toBeDefined();
+    }
+  });
+
+  it('REFUSES a PDF, which the document path still accepts', () => {
+    expect(
+      codesOf(() =>
+        validateJobMediaUpload({
+          fileName: 'order.pdf',
+          declaredContentType: 'application/pdf',
+          bytes: PDF,
+        }),
+      ),
+    ).toContain('unsupported_file_type');
+
+    // The same bytes on the DOCUMENT path are fine, which is the point: this
+    // narrowing is one control's, not the whole system's.
+    expect(
+      validateUpload({
+        fileName: 'order.pdf',
+        declaredContentType: 'application/pdf',
+        bytes: PDF,
+      }).contentType,
+    ).toBe('application/pdf');
+  });
+
+  it('refuses a ZIP and an ELF binary', () => {
+    for (const hostile of [ZIP, ELF]) {
+      expect(
+        codesOf(() =>
+          validateJobMediaUpload({
+            fileName: 'fault.png',
+            declaredContentType: 'image/png',
+            bytes: hostile,
+          }),
+        ),
+      ).toContain('unsupported_file_type');
+    }
+  });
+
+  it('holds a PHOTOGRAPH to the photograph limit', () => {
+    const huge = new Uint8Array(MAX_UPLOAD_BYTES + 1);
+    huge.set(PNG, 0);
+    expect(
+      codesOf(() =>
+        validateJobMediaUpload({ fileName: 'big.png', declaredContentType: '', bytes: huge }),
+      ),
+    ).toContain('file_too_large');
+  });
+
+  it('allows a VIDEO past the photograph limit, up to the video one', () => {
+    const large = new Uint8Array(MAX_UPLOAD_BYTES + 1024);
+    large.set(MP4, 0);
+    expect(
+      validateJobMediaUpload({ fileName: 'clip.mp4', declaredContentType: '', bytes: large })
+        .contentType,
+    ).toBe('video/mp4');
+
+    const tooLarge = new Uint8Array(MAX_VIDEO_BYTES + 1);
+    tooLarge.set(MP4, 0);
+    expect(
+      codesOf(() =>
+        validateJobMediaUpload({ fileName: 'clip.mp4', declaredContentType: '', bytes: tooLarge }),
+      ),
+    ).toContain('file_too_large');
+  });
+
+  it('reports an EMPTY file as empty rather than as the wrong type', () => {
+    expect(
+      codesOf(() =>
+        validateJobMediaUpload({
+          fileName: 'nothing.png',
+          declaredContentType: 'image/png',
+          bytes: new Uint8Array(),
+        }),
+      ),
+    ).toContain('empty_file');
+  });
+
+  it('sanitises the file name exactly as every other path does', () => {
+    expect(
+      validateJobMediaUpload({
+        fileName: '../../etc/fault.png',
+        declaredContentType: '',
+        bytes: PNG,
+      }).fileName,
+    ).toBe('fault.png');
   });
 });

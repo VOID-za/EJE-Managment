@@ -187,10 +187,20 @@ describe('capturing a video on a job', () => {
     expect(refused.status).toBe(400);
   });
 
-  it('REFUSES an MP4 on the document path', async () => {
-    // A video is not a customer's order, and the document route's list is what
-    // says so now that the sniffer recognises both.
-    const refused = await sipho.upload(`/api/jobs/${job.id}/attachments`, {
+  it('REFUSES an MP4 on a DOCUMENT path', async () => {
+    /*
+     * A video is not a customer's order, and the document route's list is what
+     * says so now that the sniffer recognises both.
+     *
+     * ASSERTED ON THE CUSTOMER-DOCUMENT ROUTE since Create New Job §3C. It used
+     * to be asserted on `/api/jobs/:jobId/attachments`, which the owner has
+     * since narrowed to photographs and videos — so a video there is now
+     * correct, and the rule being guarded moved to the routes that really do
+     * take documents. `attachments-api.test.ts` asserts the other half: that a
+     * PDF is refused on the new-job control.
+     */
+    const master = await signedInAs(DEMO_USERS.master);
+    const refused = await master.upload('/api/customers/cust-abc/documents', {
       name: 'order.pdf',
       type: 'application/pdf',
       bytes: MP4(),

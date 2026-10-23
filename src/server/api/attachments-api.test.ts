@@ -5,6 +5,13 @@ import { ApiTestClient, DEMO_USERS, signedInAs, startTestServer } from '@/test/a
  * Job attachments over the real HTTP surface: upload, retrieval, and every way
  * of trying to reach a file that is not yours.
  *
+ * PHOTOGRAPHS AND VIDEOS ONLY, SINCE Create New Job §3C. This route has one
+ * caller — the Create New Job attachment control — and the owner asked that it
+ * offer photographs and videos rather than arbitrary documents. So the cases
+ * that merely need A FILE now send a PNG, and the refusal of a PDF is asserted
+ * in its own right below. The library, customer-document and machine-document
+ * routes are unaffected and still take a PDF; each has its own tests.
+ *
  * THE THING BEING PROVED. A storage key is not a credential and is never
  * treated as one. Authorisation happens before retrieval, against the JOB, using
  * the same visibility rule every other job read goes through — so editing the
@@ -16,6 +23,15 @@ const PDF = new Uint8Array([
 ]);
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+
+/** A real ISO-media header: `ftyp` with a brand a camera actually writes. */
+const MP4 = new Uint8Array([
+  0x00, 0x00, 0x00, 0x18,
+  ...new TextEncoder().encode('ftyp'),
+  ...new TextEncoder().encode('isom'),
+  0x00, 0x00, 0x02, 0x00,
+  ...new TextEncoder().encode('isomiso2mp41'),
+]);
 
 interface JobBody {
   readonly id: string;
@@ -56,9 +72,9 @@ describe('attaching a document to a job', () => {
   const attach = (
     client: ApiTestClient,
     jobId: string,
-    name = 'customer-order.pdf',
-    type = 'application/pdf',
-    bytes: Uint8Array = PDF,
+    name = 'fault.png',
+    type = 'image/png',
+    bytes: Uint8Array = PNG,
   ) => client.upload<AttachmentList>(`/api/jobs/${jobId}/attachments`, { name, type, bytes });
 
   it('uploads, and the job then carries it', async () => {
@@ -66,7 +82,7 @@ describe('attaching a document to a job', () => {
 
     expect(uploaded.status).toBe(200);
     expect(uploaded.data.attachments).toHaveLength(1);
-    expect(uploaded.data.attachments[0]?.fileName).toBe('customer-order.pdf');
+    expect(uploaded.data.attachments[0]?.fileName).toBe('fault.png');
   });
 
   it('never hands the storage key back to the client', async () => {
@@ -85,8 +101,8 @@ describe('attaching a document to a job', () => {
     }>(`/api/jobs/${job.jobNumber}`);
 
     const [file] = view.data.view.job.attachments;
-    expect(file?.fileName).toBe('customer-order.pdf');
-    expect(file?.sizeBytes).toBe(PDF.length);
+    expect(file?.fileName).toBe('fault.png');
+    expect(file?.sizeBytes).toBe(PNG.length);
   });
 
   it('gives back the exact bytes that went up', async () => {
@@ -95,18 +111,18 @@ describe('attaching a document to a job', () => {
 
     const download = await master.download(`/api/jobs/${job.id}/attachments/${id}`);
     expect(download.status).toBe(200);
-    expect(Array.from(download.bytes)).toEqual(Array.from(PDF));
+    expect(Array.from(download.bytes)).toEqual(Array.from(PNG));
   });
 
   it('serves it as a download, with the type the SERVER decided', async () => {
-    const uploaded = await attach(master, job.id, 'order.pdf', 'text/html', PDF);
+    const uploaded = await attach(master, job.id, 'plate.png', 'text/html', PNG);
     const id = uploaded.data.attachments[0]?.id ?? '';
 
     const download = await master.download(`/api/jobs/${job.id}/attachments/${id}`);
 
-    // The browser claimed text/html. The bytes are a PDF, and the bytes win —
+    // The browser claimed text/html. The bytes are a PNG, and the bytes win —
     // otherwise an "attachment" could be made to run in this origin.
-    expect(download.headers.get('content-type')).toBe('application/pdf');
+    expect(download.headers.get('content-type')).toBe('image/png');
     expect(download.headers.get('content-disposition')).toContain('attachment;');
     expect(download.headers.get('x-content-type-options')).toBe('nosniff');
     expect(download.headers.get('cache-control')).toContain('no-store');
@@ -126,8 +142,36 @@ describe('what the server will accept as a file', () => {
   const attach = (name: string, type: string, bytes: Uint8Array) =>
     master.upload<AttachmentList>(`/api/jobs/${jobId}/attachments`, { name, type, bytes });
 
-  it('accepts a PNG as well as a PDF', async () => {
+  it('accepts a PHOTOGRAPH', async () => {
     expect((await attach('plate.png', 'image/png', PNG)).status).toBe(200);
+  });
+
+  it('accepts a VIDEO, with the larger budget', async () => {
+    expect((await attach('noise.mp4', 'video/mp4', MP4)).status).toBe(200);
+  });
+
+  /*
+   * AND REFUSES A DOCUMENT. Create New Job §3C.
+   *
+   * The owner's rule for this control, enforced on the BYTES rather than on the
+   * name — the two cases below send a real PDF under an honest name and under a
+   * photograph's name, and both are refused for the same reason.
+   */
+  it('REFUSES a PDF, which belongs where documents are kept', async () => {
+    const response = await attach('customer-order.pdf', 'application/pdf', PDF);
+
+    expect(response.status).toBe(400);
+    expect((response.error?.violations ?? []).map((v) => v.code)).toContain(
+      'unsupported_file_type',
+    );
+  });
+
+  it('REFUSES a PDF renamed as a photograph, because the bytes decide', async () => {
+    const response = await attach('fault.png', 'image/png', PDF);
+    expect(response.status).toBe(400);
+    expect((response.error?.violations ?? []).map((v) => v.code)).toContain(
+      'unsupported_file_type',
+    );
   });
 
   it('refuses an executable wearing a .pdf name', async () => {
@@ -135,7 +179,7 @@ describe('what the server will accept as a file', () => {
     // PDF; the first bytes say Windows executable, and those are the ones that
     // are not editable in a form.
     const exe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]);
-    const response = await attach('invoice.pdf', 'application/pdf', exe);
+    const response = await attach('plate.png', 'image/png', exe);
 
     expect(response.status).toBe(400);
     expect((response.error?.violations ?? []).map((v) => v.code)).toContain(
@@ -144,30 +188,42 @@ describe('what the server will accept as a file', () => {
   });
 
   it('refuses an empty file', async () => {
-    expect((await attach('nothing.pdf', 'application/pdf', new Uint8Array())).status).toBe(400);
+    // Reported as EMPTY rather than as the wrong type: the ordering inside
+    // `validateAgainst` is unchanged, and "that file is empty" is the thing
+    // somebody can act on.
+    const response = await attach('nothing.png', 'image/png', new Uint8Array());
+    expect(response.status).toBe(400);
+    expect((response.error?.violations ?? []).map((v) => v.code)).toContain('empty_file');
   });
 
-  it('refuses a file beyond the size limit', async () => {
+  it('refuses a PHOTOGRAPH beyond the photograph limit, even though videos may be larger', async () => {
+    // 26 MB is past the 25 MB photograph limit and well inside the video one,
+    // which is the point: the limit follows what the file actually IS.
     const huge = new Uint8Array(26 * 1024 * 1024);
-    huge.set(PDF, 0);
-    const response = await attach('enormous.pdf', 'application/pdf', huge);
+    huge.set(PNG, 0);
+    const response = await attach('enormous.png', 'image/png', huge);
 
     expect(response.status).toBe(400);
     expect((response.error?.violations ?? []).map((v) => v.code)).toContain('file_too_large');
   });
 
   it('strips a path out of the file name rather than honouring it', async () => {
-    const response = await attach('../../etc/passwd.pdf', 'application/pdf', PDF);
+    const response = await attach('../../etc/passwd.png', 'image/png', PNG);
 
     expect(response.status).toBe(200);
     // The name is metadata, never a path — and it is recorded without the
     // directory somebody tried to put in it.
-    expect(response.data.attachments[0]?.fileName).toBe('passwd.pdf');
+    expect(response.data.attachments[0]?.fileName).toBe('passwd.png');
   });
 
   it('refuses a request with no file in it', async () => {
     const response = await master.post(`/api/jobs/${jobId}/attachments`, {});
     expect(response.status).toBe(400);
+  });
+
+  it('refuses an executable, whatever it is called', async () => {
+    const exe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]);
+    expect((await attach('fault.png', 'image/png', exe)).status).toBe(400);
   });
 });
 
@@ -193,9 +249,9 @@ describe('reaching an attachment that is not yours', () => {
     jobNumber = created.data.jobNumber;
 
     const uploaded = await master.upload<AttachmentList>(`/api/jobs/${jobId}/attachments`, {
-      name: 'customer-order.pdf',
-      type: 'application/pdf',
-      bytes: PDF,
+      name: 'fault.png',
+      type: 'image/png',
+      bytes: PNG,
     });
     attachmentId = uploaded.data.attachments[0]?.id ?? '';
     expect(attachmentId).not.toBe('');
@@ -211,8 +267,8 @@ describe('reaching an attachment that is not yours', () => {
   it('refuses an unauthenticated upload', async () => {
     const response = await new ApiTestClient().upload(`/api/jobs/${jobId}/attachments`, {
       name: 'x.pdf',
-      type: 'application/pdf',
-      bytes: PDF,
+      type: 'image/png',
+      bytes: PNG,
     });
     expect(response.status).toBe(401);
   });
@@ -230,7 +286,7 @@ describe('reaching an attachment that is not yours', () => {
     });
     const file = await master2.upload<AttachmentList>(
       `/api/jobs/${assigned.data.id}/attachments`,
-      { name: 'private.pdf', type: 'application/pdf', bytes: PDF },
+      { name: 'private.png', type: 'image/png', bytes: PNG },
     );
 
     const other = await signedInAs(DEMO_USERS.otherTechnician);
@@ -276,8 +332,8 @@ describe('reaching an attachment that is not yours', () => {
     const other = await signedInAs(DEMO_USERS.otherTechnician);
     const response = await other.upload(`/api/jobs/${assigned.data.id}/attachments`, {
       name: 'pushed.pdf',
-      type: 'application/pdf',
-      bytes: PDF,
+      type: 'image/png',
+      bytes: PNG,
     });
 
     expect(response.status).toBe(404);
@@ -286,7 +342,7 @@ describe('reaching an attachment that is not yours', () => {
   it('refuses a cross-site upload', async () => {
     const response = await master.upload(
       `/api/jobs/${jobId}/attachments`,
-      { name: 'x.pdf', type: 'application/pdf', bytes: PDF },
+      { name: 'x.png', type: 'image/png', bytes: PNG },
       { crossSite: true },
     );
     expect(response.status).toBe(403);
@@ -305,6 +361,6 @@ describe('reaching an attachment that is not yours', () => {
     const response = await sipho.download(`/api/jobs/${jobNumber}/attachments/${attachmentId}`);
 
     expect(response.status).toBe(200);
-    expect(Array.from(response.bytes)).toEqual(Array.from(PDF));
+    expect(Array.from(response.bytes)).toEqual(Array.from(PNG));
   });
 });

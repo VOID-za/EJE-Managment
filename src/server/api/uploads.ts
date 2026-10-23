@@ -279,6 +279,43 @@ export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile =>
   });
 
 /**
+ * WHAT MAY BE ATTACHED WHILE A JOB IS BEING RAISED. Create New Job §3C.
+ *
+ * A PHOTOGRAPH OR A VIDEO, AND NO DOCUMENT. The owner's reasoning is the
+ * control's purpose: what is attached as a job is raised is what the caller
+ * sent in — a photograph of the fault, a clip of the noise the machine is
+ * making — and a PDF belongs where documents are kept and read. This route is
+ * the ONLY caller of `/api/jobs/:jobId/attachments`, so narrowing it narrows
+ * exactly that control: the Technical Library, the customer-document register
+ * and the machine-document register each have their own route and keep
+ * `validateUpload`, which still accepts a PDF.
+ *
+ * THE LIMIT FOLLOWS WHAT THE FILE ACTUALLY IS. A video is allowed the video
+ * budget and a photograph is held to the photograph one, which is why the type
+ * is sniffed BEFORE the rule is chosen rather than after. The ordering inside
+ * `validateAgainst` is unchanged — empty, then size, then type — so an empty
+ * file is still reported as empty, and a 60 MB PDF is still refused for its
+ * TYPE rather than for its size, because converting it would not have helped.
+ */
+export const validateJobMediaUpload = (candidate: UploadCandidate): UploadedFile => {
+  const sniffed = sniffContentType(candidate.bytes);
+  const isVideo = sniffed !== null && VIDEO_CONTENT_TYPES.includes(sniffed.contentType);
+  return validateAgainst(candidate, {
+    maxBytes: isVideo ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES,
+    allowed: [...PHOTO_CONTENT_TYPES, ...VIDEO_CONTENT_TYPES],
+    tooLarge: isVideo
+      ? `Videos are limited to ${megabytes(MAX_VIDEO_BYTES)} MB — about 40 seconds at 1080p.`
+      : `Photographs are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
+    wrongType: {
+      message: 'Only photographs and videos can be attached to a new job.',
+      detail:
+        'Attach an image (PNG, JPEG, TIFF or WebP) or a video (MP4, MOV, WebM or 3GP). ' +
+        'A PDF belongs in the Technical Library, or against the customer or the machine.',
+    },
+  });
+};
+
+/**
  * And what a VIDEO may be, with its own larger limit. MEDIA-5.
  *
  * The limit is the one place this path is genuinely more permissive, and it is

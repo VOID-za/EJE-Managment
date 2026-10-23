@@ -287,9 +287,12 @@ describe('capturing a photograph on a job', () => {
     const attached = await master.upload<{
       attachments: readonly { id: string }[];
     }>(`/api/jobs/${job.id}/attachments`, {
-      name: 'order.pdf',
-      type: 'application/pdf',
-      bytes: PDF,
+      // A photograph rather than a PDF: the new-job control takes photographs
+      // and videos since Create New Job §3C, and this case is about one
+      // route's id being usable on the other — not about file types.
+      name: 'fault.png',
+      type: 'image/png',
+      bytes: PNG,
     });
 
     const response = await sipho.download(

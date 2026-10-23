@@ -37,6 +37,10 @@ import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
+import {
+  JOB_MEDIA_ACCEPT_ATTRIBUTE,
+  JOB_MEDIA_TYPES_SENTENCE,
+} from '@/lib/upload-limits';
 
 /**
  * Job creation.
@@ -651,15 +655,28 @@ const NewJobPage = () => {
           )}
 
           <Card>
+            {/*
+              PHOTOGRAPHS AND VIDEOS, AND NO DOCUMENTS. Create New Job §3C.
+
+              What gets attached while a job is being RAISED is what the caller
+              sent in — a photograph of the fault, a clip of the noise the
+              machine is making. A document belongs where documents are kept and
+              read: the Technical Library, or the customer's or the machine's own
+              register, each of which still takes a PDF.
+
+              `accept` only narrows the picker. The SERVER sniffs the bytes
+              (`validateJobMediaUpload`), so a PDF renamed `fault.jpg` is
+              refused on what it is.
+            */}
             <CardHeader
-              title="Attachments"
-              description="Quotes, customer orders or drawings the technician needs on site."
+              title="Photographs and videos"
+              description={`What the caller sent in, or what the fault looks like. ${JOB_MEDIA_TYPES_SENTENCE}`}
             />
             <input
               type="file"
               multiple
               className="mt-4 block w-full text-sm text-steel-700 file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-steel-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-steel-700 hover:file:bg-steel-200"
-              accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp"
+              accept={JOB_MEDIA_ACCEPT_ATTRIBUTE}
               onChange={(event) => {
                 /*
                  * READ THE FILES FIRST.

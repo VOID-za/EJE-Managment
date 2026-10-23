@@ -61,3 +61,21 @@ export const DOCUMENT_TYPES_SENTENCE = `PDF or image (PNG, JPEG, TIFF, WebP), up
 export const PHOTO_ACCEPT_ATTRIBUTE = 'image/png,image/jpeg,image/tiff,image/webp';
 
 export const VIDEO_ACCEPT_ATTRIBUTE = 'video/mp4,video/quicktime,video/webm,video/3gpp';
+
+/**
+ * WHAT THE NEW-JOB ATTACHMENT CONTROL OFFERS. Create New Job §3C.
+ *
+ * Photographs and videos, and no documents. The owner's reasoning is the
+ * control's purpose: what gets attached while a job is being RAISED is what the
+ * caller sent in — a photograph of the fault, a clip of the noise it is making
+ * — and a PDF belongs where documents are kept and read, which is the
+ * Technical Library, the customer's document register or the machine's.
+ *
+ * `accept` IS A HINT AND NOTHING MORE, as above. `validateJobMediaUpload`
+ * sniffs the bytes on the server and that is the check.
+ */
+export const JOB_MEDIA_ACCEPT_ATTRIBUTE = `${PHOTO_ACCEPT_ATTRIBUTE},${VIDEO_ACCEPT_ATTRIBUTE}`;
+
+export const JOB_MEDIA_TYPES_SENTENCE =
+  `Photographs (PNG, JPEG, TIFF, WebP) up to ${UPLOAD_LIMIT_MB} MB, ` +
+  `or a video (MP4, MOV, WebM, 3GP) up to ${VIDEO_LIMIT_MB} MB.`;
