@@ -79,7 +79,6 @@ const NewJobPage = () => {
   /** The real files, held until the job exists to attach them to. */
   const [attachments, setAttachments] = useState<readonly File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [courierCollection, setCourierCollection] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState('');
   /*
    * THE TEST & REPAIR FIELDS. Test & Repair §4.
@@ -230,7 +229,15 @@ const NewJobPage = () => {
         faultDescription: definition.officeProcessed ? '' : faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? technicianId : null,
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
-        courierCollection,
+        /*
+         * ALWAYS FALSE FROM THIS SCREEN. Job completion §6.
+         *
+         * Sent explicitly rather than omitted, because the field is part of
+         * the request contract and a screen that leaves it out would be relying
+         * on a schema default. The SERVER writes false at creation whatever
+         * arrives, which is where the rule actually lives.
+         */
+        courierCollection: false,
         deliveryNote,
         /*
          * THE TEST & REPAIR FIELDS. Test & Repair §4.
@@ -445,7 +452,6 @@ const NewJobPage = () => {
                       setScheduledDate('');
                       setTechnicianId('');
                       setAdditionalIds([]);
-                      setCourierCollection(false);
                       setFaultDescription('');
                     }
                   }}
@@ -527,36 +533,24 @@ const NewJobPage = () => {
               )}
 
               {/*
-                Offered wherever the work is collected from the counter: a
-                repaired unit leaves on the same kind of trip a box of parts
-                does, and a courier must not see the customer's prices on
-                either document.
+                WHO IS COLLECTING IS NOT ASKED HERE. Job completion §6.
 
-                NOT ON A PARTS COLLECTION. CR-12: who is collecting is asked at
-                the COLLECTION step, with whoever actually turned up standing at
-                the counter — asking it days earlier only records a guess, and
-                asking it twice is how the two answers come to disagree. A
-                workshop repair keeps it here, because it is booked in advance
-                and the office plans the return leg when it takes the job in.
+                This used to carry a "Courier Collection" tick box on a
+                workshop repair, and the owner has asked for it to be gone until
+                the job is finished. The reasoning was already written down one
+                job type over, for a parts collection, and is the same here: who
+                was EXPECTED and who TURNS UP are not the same question. A
+                customer who said they would collect sends a driver often enough
+                that an answer recorded at creation is a guess — and the
+                consequence of a wrong guess is a courier holding a document
+                with the customer's prices on it.
+
+                It is asked in the close-out wizard, at the collection, with
+                whoever actually turned up standing at the counter. The server
+                agrees: creation writes `false` whatever the request sends, and
+                `setCollectionMethod` refuses before the job reaches
+                `completion`.
               */}
-              {definition.collectedOnCompletion && !definition.officeProcessed && (
-                <div className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-4">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-semibold text-amber-eje-700">
-                    <input
-                      type="checkbox"
-                      checked={courierCollection}
-                      onChange={(event) => setCourierCollection(event.target.checked)}
-                      className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-                    />
-                    Courier Collection
-                  </label>
-                  <p className="mt-1.5 text-sm text-steel-700">
-                    {courierCollection
-                      ? 'Prices will be hidden from the collection document. The courier has no reason to see them; the prices stay on the job for EJE costing.'
-                      : 'The customer is collecting themselves, so prices may be shown on the collection document. Whoever actually turns up is confirmed again at the collection.'}
-                  </p>
-                </div>
-              )}
 
               {/*
                 A COLLECTION IS NOT RAISED ON A DESCRIPTION. CR-13.

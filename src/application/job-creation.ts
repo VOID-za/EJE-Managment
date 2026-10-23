@@ -584,17 +584,21 @@ export const createJob = async (
     /*
      * WHO IS COLLECTING IS ASKED AT THE COLLECTION STEP, NOT HERE. CR-12.
      *
-     * On a parts collection it is false whatever the request said: the person
-     * raising the job does not yet know whether the customer will come in or
-     * send a driver, and `setCollectionMethod` is where the answer is recorded
-     * — at the counter, with whoever turned up standing there. A workshop
-     * repair still carries the expectation from creation, because it is booked
-     * in advance and the office plans the return leg.
+     * FALSE AT CREATION ON EVERY JOB TYPE. Job completion §6.
+     *
+     * The owner asked that the collection answer not be available until the job
+     * is finished, and this is the other half of that: not merely absent from
+     * the form, but unwritable at creation whatever a request sends.
+     *
+     * The reasoning was already in this file for a parts collection and now
+     * applies to a workshop repair too — who was EXPECTED and who TURNS UP are
+     * not the same question. A customer who said they would collect sends a
+     * driver often enough that an answer recorded days earlier is a guess, and
+     * a wrong guess means a courier holding a document with the customer's
+     * prices on it. `setCollectionMethod` records the answer at the collection,
+     * and refuses before `completion`.
      */
-    courierCollection:
-      getJobTypeDefinition(input.jobType).collectedOnCompletion && !definition.officeProcessed
-        ? input.courierCollection
-        : false,
+    courierCollection: false,
     waybillNumber: '',
     deliveryNote: getJobTypeDefinition(input.jobType).capturesDeliveryNote
       ? input.deliveryNote.trim()

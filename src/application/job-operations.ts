@@ -34,6 +34,7 @@ import {
   canTakeOverSubmission,
   submissionCover,
   finalizedRefusal,
+  isJobAtOrPastCompletion,
   calculateJobTotals,
   labourRateLabel,
   siteAddressLine,
@@ -2801,12 +2802,57 @@ export const setCollectionMethod = async (
   input: CollectionInput,
 ): Promise<Job> => {
   assertCanCapture(context, job);
+  /*
+   * AND THE ORDINARY RULE ABOUT CHANGING A JOB. Job completion §6.
+   *
+   * It was missing: every other mutation in this module passes through
+   * `assertEditable`, and this one did not — so the collection answer on a
+   * SIGNED job card could be changed, which would leave the record saying one
+   * thing and the document the customer holds saying another. The document's
+   * bytes cannot change; this makes the record match them.
+   */
+  assertEditable(context, job);
 
+  /*
+   * THE JOB TYPE IS ASKED FIRST, and the order is deliberate. A breakdown will
+   * NEVER have a collection, whatever its status — so answering "it is not
+   * completed yet" would send somebody to wait for something that was never
+   * going to help.
+   */
   if (!getJobTypeDefinition(job.jobType).collectedOnCompletion) {
     throw new WorkflowError(`${job.jobNumber} is not collected from the counter.`, [
       {
         code: 'not_a_collection',
         message: 'This job type is completed on the customer’s site, not collected.',
+      },
+    ]);
+  }
+
+  /*
+   * NOT BEFORE THE WORK IS FINISHED. Job completion §6.
+   *
+   * The owner asked that the collection answer not be available until the job
+   * is finished, and `completion` is what "finished" is in this state machine:
+   * the work is done and the job is being closed out. It is also exactly where
+   * the close-out wizard asks the question, with whoever turned up standing at
+   * the counter.
+   *
+   * WHY IT MATTERS RATHER THAN BEING TIDINESS: who was EXPECTED and who TURNS
+   * UP are not the same question. A customer who said they would collect sends
+   * a driver often enough that an answer recorded at creation is a guess — and
+   * the consequence of a wrong guess is a courier holding a document with the
+   * customer's prices on it (`showsPricesOnCollectionDocument`).
+   *
+   * The same reasoning was already written down for a parts collection, where
+   * creation has never carried the answer. This extends it to a workshop
+   * repair, which is the type the owner's note was about.
+   */
+  if (!isJobAtOrPastCompletion(job.status)) {
+    throw new WorkflowError(`${job.jobNumber} has not been completed yet.`, [
+      {
+        code: 'job_not_completed',
+        message:
+          'Who is collecting is recorded at the collection, once the work is finished — not when the job is raised.',
       },
     ]);
   }

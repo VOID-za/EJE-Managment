@@ -735,6 +735,30 @@ export const finalizedRefusal = (job: Pick<Job, 'signature' | 'status'>): string
   return 'This job card has been issued to the customer, so the record must keep matching it.';
 };
 
+/**
+ * WHETHER THE WORK IS FINISHED. Job completion §6.
+ *
+ * `completion` is where the work is done and the job is being closed out — the
+ * write-up, the signature and, where the goods are collected, who is collecting
+ * them. Everything after it is further along the same road.
+ *
+ * WHAT IS DELIBERATELY NOT HERE: `draft`, `open`, `in_progress` and
+ * `awaiting_spares`, which are a job that has not been finished; and
+ * `cancelled`, which is a job that never will be. A cancelled job is not "past
+ * completion" in any sense that should unlock a close-out step.
+ *
+ * This is a question about the STAGE, so it takes a status. Whether the record
+ * may still be CHANGED is a different question with a different answer —
+ * `finalizedRefusal` and `canEditJob` — because a signed job card is past
+ * completion and is also untouchable.
+ */
+export const isJobAtOrPastCompletion = (status: JobStatus): boolean =>
+  status === 'completion' ||
+  status === 'customer_signature' ||
+  status === 'review' ||
+  status === 'submitted' ||
+  status === 'closed';
+
 export const isJobOpenWork = (status: JobStatus): boolean =>
   status === 'open' ||
   status === 'in_progress' ||
