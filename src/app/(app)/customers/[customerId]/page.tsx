@@ -4,8 +4,6 @@ import { use, useState } from 'react';
 import {
   Badge,
   Button,
-  Card,
-  CardHeader,
   EmptyState,
   Icon,
   LoadingPanel,
@@ -198,10 +196,17 @@ const CustomerDetailPage = ({
         tab named for both and found neither.
 
         So the real panels are here, where their names say they are, and the
-        card that claimed otherwise is gone. Both are office work
-        (`customers.manage` — a Master or a Coordinator) and the server refuses
-        them to anybody else regardless: a technician's own response carries no
-        documents at all.
+        card that claimed otherwise is gone.
+
+        WHO SEES WHAT, AND IT IS TWO DIFFERENT RULES. CUST-DOC-2. Writing — a
+        note, a filed document, a withdrawal — is office work
+        (`customers.manage`: a Master or a Coordinator). READING the documents
+        is now every role that may open this customer at all, because the owner
+        decided a technician may view and download them. So the real panel is
+        rendered for everybody and told which of the two it is looking at; the
+        stand-in card that said "the office holds these" is gone, because it is
+        no longer true. The server enforces both halves regardless — the screen
+        is not the permission.
       */}
       {tab === 'notes' && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -212,28 +217,13 @@ const CustomerDetailPage = ({
             onChanged={query.refetch}
           />
 
-          {manages ? (
-            <CustomerDocumentsPanel
-              customerId={customer.id}
-              documents={documents}
-              users={users}
-              onChanged={query.refetch}
-            />
-          ) : (
-            <Card>
-              <CardHeader
-                title="Documents"
-                description="Contracts, rate agreements and site inductions."
-              />
-              <div className="mt-4">
-                <EmptyState
-                  title="The office holds these"
-                  description="A customer's filed paperwork is read by the office. Raise a change request if something here is wrong."
-                  icon={<Icon name="document" />}
-                />
-              </div>
-            </Card>
-          )}
+          <CustomerDocumentsPanel
+            customerId={customer.id}
+            documents={documents}
+            users={users}
+            canManage={manages}
+            onChanged={query.refetch}
+          />
         </div>
       )}
     </>

@@ -7,11 +7,13 @@ import { MAX_UPLOAD_BYTES, validateUpload } from '@/server/api/uploads';
  * `GET /api/customers/:customerId/documents` — the customer's filed paperwork.
  * `POST` — attach a file to it. October mandate §4.
  *
- * AUTHORISATION IS THE OPERATION'S, not this file's. `listCustomerDocuments`
- * and `attachCustomerDocument` both require `customers.manage`, and the reason
- * they are the office's is written down where the rule lives rather than
- * repeated here — a rule stated twice is a rule that will disagree with
- * itself.
+ * AUTHORISATION IS THE OPERATION'S, not this file's, and the two halves are no
+ * longer the same rule: `listCustomerDocuments` needs `customers.view` since
+ * CUST-DOC-2 (the owner decided a technician may view and download a
+ * customer's paperwork) and `attachCustomerDocument` still needs
+ * `customers.manage`. Both reasons are written down where the rules live
+ * rather than repeated here — a rule stated twice is a rule that will
+ * disagree with itself.
  *
  * THE ORDER on an upload, and every step of it matters:
  *
@@ -31,9 +33,19 @@ export const GET = readRoute('customers.documents', async (context) => {
     services: context.services,
     actor: context.actor.user,
   };
+  /*
+   * `?includeArchived=true` — the office reviewing what it took off the
+   * screen. Withdrawn, never deleted, is the register's rule, and until this
+   * was wired a withdrawn document could never be looked at again by anybody:
+   * the row and the bytes were kept for an audit that had no way to ask for
+   * them. The OPERATION decides who may (the office), so a technician passing
+   * it is answered with the live list rather than refused — see
+   * `listCustomerDocuments`.
+   */
   const documents = await listCustomerDocuments(
     operation,
     asCustomerId(context.params.customerId ?? ''),
+    { includeArchived: context.request.nextUrl.searchParams.get('includeArchived') === 'true' },
   );
   // The storage key stays on the server: the download route resolves it after
   // deciding who is asking, and a key is not a way in.

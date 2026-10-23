@@ -283,21 +283,25 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     : [];
 
   /*
-   * THE CUSTOMER'S OWN FILED PAPERWORK. October mandate §4.
+   * THE CUSTOMER'S OWN FILED PAPERWORK. October mandate §4, widened by
+   * CUST-DOC-2.
    *
-   * Office-only for the same reason as the reports above, and composed here
-   * rather than fetched by the browser so the scoping is a server fact rather
-   * than a screen's choice: a technician's response does not carry the
-   * customer's credit application at all.
+   * Office-only for one release, which is no longer the rule: the owner
+   * decided a technician may view and download what is filed against a
+   * customer. So this follows the capability that already decides who may open
+   * the customer — the same `customers.view` the read above required — and
+   * the technician's response now carries the live list.
+   *
+   * WITHDRAWN DOCUMENTS ARE NOT IN IT FOR ANYBODY: `listDocuments` leaves them
+   * out by default, and the operation refuses to serve one to a role that
+   * cannot see it listed.
    *
    * The storage keys are stripped — the download route resolves one after
    * deciding who is asking, and a key is not a way in.
    */
-  const documents = can(actor.role, 'customers.manage')
-    ? (await repos.customers.listDocuments(id)).map(
-        ({ storageKey: _storageKey, ...rest }) => rest,
-      )
-    : [];
+  const documents = (await repos.customers.listDocuments(id)).map(
+    ({ storageKey: _storageKey, ...rest }) => rest,
+  );
 
   return {
     customer,

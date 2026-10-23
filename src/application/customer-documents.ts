@@ -14,18 +14,29 @@ import { storeAndMeasure } from './stored-file';
  * purchase-order authority lived in somebody's mailbox, which is where a
  * document goes to be unfindable the week somebody leaves.
  *
- * WHO MAY, AND WHY IT IS THE OFFICE. Uploading and reading both need
- * `customers.manage`, which is the office's capability over the register
- * itself. That is the narrow answer and it is deliberate: a customer's
- * commercial paperwork is not field reference material, and the scope says
- * nothing about technicians reading it. Widening it later is one line; a
- * technician who has already read a customer's credit application cannot be
- * un-shown it.
+ * WHO MAY, AND THE OWNER HAS NOW ANSWERED IT. CUST-DOC-2.
  *
- *   NOT A GUESS DRESSED AS A RULE: whether a technician should see a specific
- *   customer document — a site induction certificate is the obvious candidate
- *   — is a question for EJE, recorded in `docs/outstanding-scope.md` rather
- *   than answered here.
+ * Reading these documents was `customers.manage` for one release — the office
+ * only — and the question of whether a technician should see them was recorded
+ * as EJE's to answer rather than guessed at. **They answered it: a technician
+ * may view and download the documents on a customer's profile.** So:
+ *
+ *   - READING follows `customers.view`, the capability that already decides
+ *     who may open a customer at all. A technician holds it, which is the
+ *     whole point of them being able to read the register before driving out
+ *     — and a site induction certificate or a safety procedure is exactly the
+ *     paperwork they need on the way.
+ *   - EVERY CHANGE — attaching, withdrawing — stays `customers.manage`. The
+ *     decision widened who may READ; it said nothing about who may file, and
+ *     inferring that would be inventing a rule.
+ *
+ * WHY THE READ RULE IS `customers.view` AND NOT A LIST OF RELATED CUSTOMERS.
+ * A technician can already open any customer on the register and read who they
+ * are, where their sites are and what machines stand on them; that is a
+ * deliberate decision (`views.ts`, `customersView`). Gating the DOCUMENTS on
+ * some narrower relation would be a second, different answer to "which
+ * customers may this technician see", and two answers to one question is how
+ * they come to disagree. The documents follow the record they are attached to.
  *
  * THE BYTES LAND FIRST, as everywhere else in this system (MEDIA-6,
  * CHK-EVIDENCE-1): `storeUpload` writes them or raises, and only then is the
@@ -46,8 +57,25 @@ const requireOffice = (context: OperationContext, what: string): void => {
     {
       code: 'not_permitted',
       message:
-        'A customer’s documents are the office’s register. Your role may read the customer, ' +
-        'not their filed paperwork.',
+        'Filing and withdrawing a customer’s paperwork is the office’s work. Your role may ' +
+        'read these documents, not change what is on file.',
+    },
+  ]);
+};
+
+/**
+ * May this actor read this register at all. CUST-DOC-2.
+ *
+ * The same capability that decides whether they may open the customer, so a
+ * role that can see the customer can see the customer's paperwork, and a role
+ * that cannot see either is refused both the same way.
+ */
+const requireRegisterReader = (context: OperationContext, what: string): void => {
+  if (can(context.actor.role, 'customers.view')) return;
+  throw new WorkflowError(what, [
+    {
+      code: 'not_permitted',
+      message: 'The customer register is not available to your role.',
     },
   ]);
 };
@@ -57,8 +85,17 @@ export const listCustomerDocuments = async (
   customerId: CustomerId,
   options: { readonly includeArchived?: boolean } = {},
 ): Promise<readonly CustomerDocument[]> => {
-  requireOffice(context, 'Those documents are not available to your role.');
-  return context.repos.customers.listDocuments(customerId, options);
+  requireRegisterReader(context, 'Those documents are not available to your role.');
+  /*
+   * A WITHDRAWN DOCUMENT IS THE OFFICE'S BUSINESS, so only the office may ask
+   * for one. `includeArchived` is how the office reviews what it took off the
+   * screen; a technician asking for it gets the live list, not a refusal,
+   * because what they asked for is not something they may not see — it is
+   * something that is not theirs to review.
+   */
+  const includeArchived =
+    (options.includeArchived ?? false) && can(context.actor.role, 'customers.manage');
+  return context.repos.customers.listDocuments(customerId, { includeArchived });
 };
 
 export const attachCustomerDocument = async (
@@ -167,10 +204,21 @@ export const readCustomerDocument = async (
   customerId: CustomerId,
   documentId: string,
 ): Promise<{ readonly document: CustomerDocument; readonly file: StoredDocument } | null> => {
-  requireOffice(context, 'That document is not available to your role.');
+  requireRegisterReader(context, 'That document is not available to your role.');
 
   const document = await context.repos.customers.findDocumentById(documentId);
   if (document === null || document.customerId !== customerId) return null;
+
+  /*
+   * A WITHDRAWN DOCUMENT IS NOT SERVED TO A ROLE THAT CANNOT SEE IT LISTED.
+   * CUST-DOC-2.
+   *
+   * The office withdrew it, so the office may still fetch it — that is what
+   * archiving rather than deleting is for. For everybody else it is the same
+   * 404 as a document that never existed, because a download link that
+   * outlives the listing is the one way a withdrawn document keeps circulating.
+   */
+  if (document.archivedAt !== null && !can(context.actor.role, 'customers.manage')) return null;
 
   /*
    * A DAMAGED FILE IS NOT A MISSING ONE, and it must not be served.

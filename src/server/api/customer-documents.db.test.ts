@@ -148,16 +148,33 @@ describeDb('customer documents on PostgreSQL', () => {
     expect(new TextDecoder().decode(file.bytes)).toBe(AGREEMENT);
   });
 
-  it('REFUSES to let a technician read the register’s files', async () => {
+  it('serves a technician the stored BYTES, and refuses them the register’s writes', async () => {
     const master = await signIn(MASTER);
     const attached = await attach(master);
+    const id = attached.data.document.id;
     const technician = await signIn(TECHNICIAN);
 
-    expect((await technician.get(`/api/customers/${IDS.customer}/documents`)).status).toBe(403);
-    const file = await technician.download(
-      `/api/customers/${IDS.customer}/documents/${attached.data.document.id}`,
+    /*
+     * CUST-DOC-2, on real PostgreSQL and real file storage: this answered 403
+     * at both ends until the owner decided a technician may view and download
+     * a customer's filed paperwork. What they get is the file — read out of
+     * the store, past its checksum — and not a row that merely describes one.
+     */
+    const listed = await technician.get<{ readonly documents: readonly { id: string }[] }>(
+      `/api/customers/${IDS.customer}/documents`,
     );
-    expect([403, 404]).toContain(file.status);
+    expect(listed.status, JSON.stringify(listed.error)).toBe(200);
+    expect(listed.data.documents.map((document) => document.id)).toContain(id);
+
+    const file = await technician.download(`/api/customers/${IDS.customer}/documents/${id}`);
+    expect(file.status, JSON.stringify(file.error)).toBe(200);
+    expect(new TextDecoder().decode(file.bytes)).toBe(AGREEMENT);
+
+    // The writes are still the office's: the decision widened the read.
+    const withdrawn = await technician.post(
+      `/api/customers/${IDS.customer}/documents/${id}/withdraw`,
+    );
+    expect(withdrawn.status).toBe(403);
   });
 
   /* -- what the database itself refuses ------------------------------------ */

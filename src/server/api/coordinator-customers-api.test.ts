@@ -151,10 +151,19 @@ describe('a Coordinator on the customers screen', () => {
     );
   });
 
-  it('sends a technician NO customer documents, so the field cannot leak', async () => {
-    const response = await technician.get<{ readonly documents?: readonly unknown[] }>(
-      `/api/customers/${customerId}/documents`,
-    );
-    expect(response.status).toBe(403);
+  it('sends a technician the customer documents, and no storage key. CUST-DOC-2', async () => {
+    /*
+     * This answered 403 until the owner decided a technician may view and
+     * download a customer's filed paperwork. What is still withheld from every
+     * role is the STORAGE KEY: the download route resolves one after deciding
+     * who is asking, and a key is not a way in.
+     */
+    const response = await technician.get<{
+      readonly documents: readonly Record<string, unknown>[];
+    }>(`/api/customers/${customerId}/documents`);
+    expect(response.status, JSON.stringify(response.error)).toBe(200);
+    for (const document of response.data.documents) {
+      expect(document).not.toHaveProperty('storageKey');
+    }
   });
 });

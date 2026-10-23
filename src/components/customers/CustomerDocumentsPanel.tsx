@@ -23,9 +23,15 @@ import { DOCUMENT_ACCEPT_ATTRIBUTE, DOCUMENT_TYPES_SENTENCE } from '@/lib/upload
  * certificate, the written purchase-order authority — documents that belong to
  * the customer rather than to any one job, and which had nowhere to live.
  *
- * THE OFFICE'S PANEL. It is rendered only where the viewer holds
- * `customers.manage`, and the server refuses the routes to anybody else
- * regardless — the screen is not the permission.
+ * TWO PANELS IN ONE, AND THE PROP SAYS WHICH. CUST-DOC-2.
+ *
+ * Reading is every role that may open the customer — the owner decided a
+ * technician may view and download what is filed — and FILING is still office
+ * work. So `canManage` false renders the list and the download links and
+ * nothing else: no caption field, no file picker, no withdrawal. Not because
+ * the screen is the permission (the server refuses each route on its own) but
+ * because a control that is going to be refused is a worse answer than no
+ * control.
  *
  * WHAT IT WILL NOT DO. It will not claim an upload succeeded that did not: the
  * list is re-read from the server after every upload, so what is on screen is
@@ -37,6 +43,7 @@ export const CustomerDocumentsPanel = ({
   customerId,
   documents,
   users,
+  canManage,
   onChanged,
 }: {
   readonly customerId: string;
@@ -47,6 +54,8 @@ export const CustomerDocumentsPanel = ({
    */
   readonly documents: readonly Omit<CustomerDocument, 'storageKey'>[];
   readonly users: readonly User[];
+  /** Office: may file and withdraw. False: may read and download only. */
+  readonly canManage: boolean;
   readonly onChanged: () => void;
 }) => {
   const input = useRef<HTMLInputElement | null>(null);
@@ -109,7 +118,9 @@ export const CustomerDocumentsPanel = ({
 
       {documents.length === 0 ? (
         <p className="mt-4 text-sm text-steel-500" data-testid="customer-documents-empty">
-          Nothing is filed against this customer yet.
+          {canManage
+            ? 'Nothing is filed against this customer yet.'
+            : 'The office has filed nothing against this customer yet.'}
         </p>
       ) : (
         <ul className="mt-4 divide-y divide-steel-100" data-testid="customer-documents">
@@ -151,101 +162,108 @@ export const CustomerDocumentsPanel = ({
                   the bytes stay, so an audit can still resolve what was on
                   file when a decision was taken; this only takes it off the
                   screen. There is no delete, deliberately.
+
+                  Office only: the read was widened by CUST-DOC-2, not the
+                  write.
                 */}
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-steel-500 underline-offset-2 hover:underline"
-                  onClick={() => void withdraw(document.id)}
-                  data-testid="customer-document-withdraw"
-                >
-                  Withdraw
-                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-steel-500 underline-offset-2 hover:underline"
+                    onClick={() => void withdraw(document.id)}
+                    data-testid="customer-document-withdraw"
+                  >
+                    Withdraw
+                  </button>
+                )}
               </div>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="mt-4 border-t border-steel-100 pt-3">
-        <label
-          className="text-xs font-semibold tracking-wide text-steel-500 uppercase"
-          htmlFor="customer-document-caption"
-        >
-          What this document is
-        </label>
-        <input
-          id="customer-document-caption"
-          value={caption}
-          maxLength={300}
-          onChange={(event) => setCaption(event.target.value)}
-          placeholder="Signed service agreement, 2026"
-          className="mt-1 h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface px-3 text-sm placeholder:text-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
-          data-testid="customer-document-caption"
-        />
+      {canManage && (
+        <div className="mt-4 border-t border-steel-100 pt-3">
+          <label
+            className="text-xs font-semibold tracking-wide text-steel-500 uppercase"
+            htmlFor="customer-document-caption"
+          >
+            What this document is
+          </label>
+          <input
+            id="customer-document-caption"
+            value={caption}
+            maxLength={300}
+            onChange={(event) => setCaption(event.target.value)}
+            placeholder="Signed service agreement, 2026"
+            className="mt-1 h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface px-3 text-sm placeholder:text-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
+            data-testid="customer-document-caption"
+          />
 
-        {/*
-          A HIDDEN INPUT BEHIND A REAL BUTTON, and not for looks.
-          A bare `<input type="file">` renders about 20px tall, which the
-          responsive gate refuses as a touch target — correctly: the office
-          uses this on a tablet. The pattern is `PhotoCaptureButtons`'s, so the
-          three upload surfaces behave the same way on the device that matters.
-        */}
-        <input
-          ref={input}
-          type="file"
-          accept={DOCUMENT_ACCEPT_ATTRIBUTE}
-          className="hidden"
-          data-testid="customer-document-file"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            // Cleared so choosing the SAME file again still fires.
-            event.target.value = '';
-            if (file !== undefined) void send(file);
-          }}
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          className="mt-3"
-          loading={uploading}
-          onClick={() => input.current?.click()}
-          data-testid="customer-document-choose"
-        >
-          <Icon name="document" className="size-4" />
-          Choose a document
-        </Button>
+          {/*
+            A HIDDEN INPUT BEHIND A REAL BUTTON, and not for looks.
+            A bare `<input type="file">` renders about 20px tall, which the
+            responsive gate refuses as a touch target — correctly: the office
+            uses this on a tablet. The pattern is `PhotoCaptureButtons`'s, so the
+            three upload surfaces behave the same way on the device that matters.
+          */}
+          <input
+            ref={input}
+            type="file"
+            accept={DOCUMENT_ACCEPT_ATTRIBUTE}
+            className="hidden"
+            data-testid="customer-document-file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Cleared so choosing the SAME file again still fires.
+              event.target.value = '';
+              if (file !== undefined) void send(file);
+            }}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-3"
+            loading={uploading}
+            onClick={() => input.current?.click()}
+            data-testid="customer-document-choose"
+          >
+            <Icon name="document" className="size-4" />
+            Choose a document
+          </Button>
 
-        <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
-          {DOCUMENT_TYPES_SENTENCE} The server checks the file itself rather than its name, and
-          records the size and checksum of what it stored.
-        </p>
-
-        {uploading && (
-          <p className="mt-2 text-xs text-steel-500" data-testid="customer-document-uploading">
-            Sending…
+          <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
+            {DOCUMENT_TYPES_SENTENCE} The server checks the file itself rather than its name, and
+            records the size and checksum of what it stored.
           </p>
-        )}
 
-        {failure !== null && (
-          <div className="mt-3">
-            <RuleViolationNotice
-              title="That document was not attached"
-              message={failure.message}
-              violations={failure.violations.map((message) => ({ code: 'upload', message }))}
-            />
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-2"
-              loading={uploading}
-              onClick={() => void send(failure.file)}
-              data-testid="customer-document-retry"
-            >
-              Try again with the same file
-            </Button>
-          </div>
-        )}
-      </div>
+          {uploading && (
+            <p className="mt-2 text-xs text-steel-500" data-testid="customer-document-uploading">
+              Sending…
+            </p>
+          )}
+
+          {failure !== null && (
+            <div className="mt-3">
+              <RuleViolationNotice
+                title="That document was not attached"
+                message={failure.message}
+                violations={failure.violations.map((message) => ({ code: 'upload', message }))}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2"
+                loading={uploading}
+                onClick={() => void send(failure.file)}
+                data-testid="customer-document-retry"
+              >
+                Try again with the same file
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 };

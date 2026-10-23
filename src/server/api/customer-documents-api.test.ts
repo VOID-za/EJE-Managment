@@ -12,8 +12,8 @@ import type { CustomerDocument } from '@/domain';
  * These are about the HTTP boundary, where the actor comes from a session and
  * every identifier comes from a browser:
  *
- *   - the office may attach and read; a technician may do NEITHER, and the
- *     refusal is the same whichever end they try;
+ *   - the office may attach, withdraw and read; a technician may READ and
+ *     DOWNLOAD (CUST-DOC-2, the owner's decision) and may change nothing;
  *   - a document id from one customer must not resolve under another customer's
  *     URL, and the refusal must not say which of the two was wrong;
  *   - what is stored is the server's finding about the bytes, never the
@@ -80,7 +80,7 @@ describe('customer documents', () => {
     expect(file.headers.get('cache-control')).toContain('no-store');
   });
 
-  it('puts it on the office’s customer screen and NOT a technician’s', async () => {
+  it('puts it on the customer screen for the office AND for a technician', async () => {
     await attach(master);
 
     const office = await master.get<{ documents: readonly DocumentRow[] }>(
@@ -88,12 +88,18 @@ describe('customer documents', () => {
     );
     expect(office.data.documents).toHaveLength(1);
 
-    // Empty in the RESPONSE, not hidden by the screen.
+    /*
+     * CUST-DOC-2: this response was deliberately EMPTY for a technician for one
+     * release, and the owner has since decided they may view and download a
+     * customer's filed paperwork. It is in the RESPONSE now, not revealed by a
+     * screen — and the storage key is still not, for anybody.
+     */
     const field = await technician.get<{ documents: readonly DocumentRow[] }>(
       `/api/customers/${CUSTOMER}`,
     );
     expect(field.status).toBe(200);
-    expect(field.data.documents).toEqual([]);
+    expect(field.data.documents).toHaveLength(1);
+    expect(field.data.documents[0]).not.toHaveProperty('storageKey');
   });
 
   /* -- who may, and who may not -------------------------------------------- */
@@ -109,14 +115,96 @@ describe('customer documents', () => {
     expect(listed.data.documents).toEqual([]);
   });
 
-  it('REFUSES a technician reading the list or the file', async () => {
+  it('lets a technician read the list and download the SAME BYTES. CUST-DOC-2', async () => {
     const attached = await attach(master);
 
-    expect((await technician.get(`/api/customers/${CUSTOMER}/documents`)).status).toBe(403);
+    const listed = await technician.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents`,
+    );
+    expect(listed.status, JSON.stringify(listed.error)).toBe(200);
+    expect(listed.data.documents).toHaveLength(1);
+    expect(listed.data.documents[0]).not.toHaveProperty('storageKey');
+
+    /*
+     * THE BYTES, through the technician's own session, compared as BYTES.
+     * `response.text()` would mangle any file that is not UTF-8, so a check
+     * that passes on this PDF would pass on a corrupted photograph too.
+     */
     const file = await technician.download(
       `/api/customers/${CUSTOMER}/documents/${attached.data.document.id}`,
     );
-    expect([403, 404]).toContain(file.status);
+    expect(file.status, JSON.stringify(file.error)).toBe(200);
+    expect(new Uint8Array(file.bytes)).toEqual(new TextEncoder().encode(PDF));
+    expect(file.headers.get('content-disposition')).toContain('attachment');
+  });
+
+  it('REFUSES a technician a document under ANOTHER customer’s URL, with a 404', async () => {
+    const attached = await attach(master);
+
+    /*
+     * THE WHOLE POINT OF THE DECISION BEING ABOUT A PROFILE. A technician may
+     * read what is filed against the customer they are looking at; changing
+     * the id in the URL must not hand them somebody else's document, and the
+     * refusal must not say which of the two ids was the wrong one.
+     */
+    const other = await technician.download(
+      `/api/customers/cust-xyz/documents/${attached.data.document.id}`,
+    );
+    expect(other.status).toBe(404);
+
+    const invented = await technician.download(
+      `/api/customers/${CUSTOMER}/documents/customer-document-does-not-exist`,
+    );
+    expect(invented.status).toBe(404);
+  });
+
+  it('REFUSES a technician a WITHDRAWN document, which the office may still fetch', async () => {
+    const attached = await attach(master);
+    const id = attached.data.document.id;
+    expect((await master.post(`/api/customers/${CUSTOMER}/documents/${id}/withdraw`)).status).toBe(
+      200,
+    );
+
+    /*
+     * A withdrawn document is off the screen but on file — that is what
+     * archiving rather than deleting is for, and the office may still resolve
+     * it. For a technician it is the same 404 as one that never existed: a
+     * download link that outlives the listing is how a withdrawn document
+     * keeps circulating.
+     */
+    const field = await technician.download(`/api/customers/${CUSTOMER}/documents/${id}`);
+    expect(field.status).toBe(404);
+
+    const listed = await technician.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents`,
+    );
+    expect(listed.data.documents).toEqual([]);
+
+    const office = await master.download(`/api/customers/${CUSTOMER}/documents/${id}`);
+    expect(office.status, JSON.stringify(office.error)).toBe(200);
+  });
+
+  it('REFUSES a technician asking for the withdrawn list, and answers the live one', async () => {
+    const attached = await attach(master);
+    const id = attached.data.document.id;
+    await master.post(`/api/customers/${CUSTOMER}/documents/${id}/withdraw`);
+
+    /*
+     * `includeArchived` is the office reviewing what it took off the screen.
+     * A technician passing it is not refused — nothing they asked for is
+     * secret — they are answered with the live list, which is what they may
+     * see. Were it honoured, the query string alone would undo the rule above.
+     */
+    const asked = await technician.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents?includeArchived=true`,
+    );
+    expect(asked.status).toBe(200);
+    expect(asked.data.documents).toEqual([]);
+
+    const office = await master.get<{ documents: readonly DocumentRow[] }>(
+      `/api/customers/${CUSTOMER}/documents?includeArchived=true`,
+    );
+    expect(office.data.documents).toHaveLength(1);
   });
 
   it('lets a Coordinator attach one, because the register is theirs too', async () => {

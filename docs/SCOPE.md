@@ -1329,6 +1329,19 @@ been updated past `4dede18`; **nothing was installed on the production VPS and
 OCR was not enabled there**; and no physical tablet, real provider delivery or
 disaster-recovery acceptance has been carried out.
 
+### The final outstanding work (23 October 2026, twelfth batch)
+
+*The final outstanding work mandate of 23 October 2026: the owner's decision on
+technician access to customer documents, ordinary PDF text extraction as the
+library's primary search path, and the verification pass over the five answered
+decisions and the handwritten page changes. **Nothing here is approved:** every
+row is TESTED and awaits the owner (PROC-4). **Nothing here is deployed:** the
+live service still serves `4dede18`.*
+
+| ID | Requirement | Status and evidence |
+|---|---|---|
+| CUST-DOC-2 | **A technician may read what is filed against a customer** | **TESTED — awaiting approval**. *The owner's decision of 23 October 2026, answering the question recorded as OPEN in the seventh batch above.* Reading a customer's documents was `customers.manage` — the office — and whether a technician should see them was written down as EJE's question rather than guessed at. **The answer is yes, and it is applied in one place:** `listCustomerDocuments` and `readCustomerDocument` now require `customers.view`, the capability that already decides who may open a customer at all. **EVERY CHANGE STAYS THE OFFICE'S** (`customers.manage`): the decision widened who may READ, said nothing about who may file, and inferring the rest would be inventing a rule. **WHY `customers.view` AND NOT A LIST OF RELATED CUSTOMERS:** a technician can already open any customer and read who they are, where their sites are and what machines stand on them, so gating the documents on some narrower relation would be a second, different answer to "which customers may this technician see" — and two answers to one question is how they come to disagree. The documents follow the record they are attached to. **A WITHDRAWN DOCUMENT IS STILL THE OFFICE'S:** it is 404 for every other role, because a download link that outlives the listing is how a withdrawn document keeps circulating. **A GAP FOUND ON THE WAY:** `?includeArchived=true` was never wired to the route, so "withdrawn, never deleted" kept a row and bytes that no screen or API could ever ask for again; the office can now review them and a technician passing the option is answered with the live list rather than refused |
+
 ### The remaining features, the OCR engine and deployment preparation (22 October 2026, tenth batch)
 
 *The continuation mandate of 22 October 2026, priorities 1 to 7. **Nothing here
@@ -1392,7 +1405,7 @@ is deployed:** the live service still serves `4dede18`.*
 | **A technician's refusal on an office-only document is a 404, not a 403** | **TESTED — awaiting approval**. A 403 would tell a technician which machines carry paperwork the office is keeping from them, which is information and not an answer |
 | **The reconcile was counting a system two tables smaller than the one in front of it** — `KEY_TABLES` was a literal list of five, and `customer_documents` and `machine_documents` were not on it | **FIXED**. It now reads `information_schema` like `backup/run.ts` and `backup/restore-test.ts` already did, so a table that gains a `storage_key` is counted without anybody remembering |
 | **A demonstration snapshot upgraded to v18 had no `customerDocuments` array at all** — the key was introduced by that step and the step did not create it, so the first customer screen after an upgrade would have thrown on `undefined.filter` | **FIXED**. Both steps now create their collection, and v18 → v19 exists for the machine one |
-| Whether a technician may read a specific customer document (a site induction certificate is the obvious candidate) | **OPEN.** Office-only is the conservative answer; widening it is one line, and a technician who has read a credit application cannot be un-shown it. **A machine's documents answer this question the other way**, deliberately: the office classifies each one, because a machine manual exists to be read at the machine |
+| ~~Whether a technician may read a specific customer document (a site induction certificate is the obvious candidate)~~ | **ANSWERED, 23 October 2026 — a technician may view and download the documents on a customer's profile.** Implemented as CUST-DOC-2 in the twelfth batch below: reading follows `customers.view`, every change stays `customers.manage`. The conservative answer held for three releases and the question was recorded rather than guessed, which is what let the decision be applied in one place |
 | Whether `field` should be the DEFAULT audience for a machine document | **OPEN.** It is not, and the safe direction is what is implemented. EJE may find that most of what they file is field material and that the default is backwards for them |
 
 **Evidence:** 2361 unit and route tests, 283 on real PostgreSQL and real file

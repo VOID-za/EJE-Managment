@@ -6,7 +6,11 @@ import {
   editCustomerNote,
   updateCustomer,
 } from './customer-operations';
-import { attachCustomerDocument, listCustomerDocuments } from './customer-documents';
+import {
+  attachCustomerDocument,
+  listCustomerDocuments,
+  withdrawCustomerDocument,
+} from './customer-documents';
 import { WorkflowError } from './errors';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
@@ -304,12 +308,43 @@ describe('a Coordinator files a customer document', () => {
     expect(listed.map((document) => document.id)).toContain(saved.id);
   });
 
-  it('is refused to a technician — both the attach and the list', async () => {
+  it('refuses a technician the ATTACH and allows them the LIST. CUST-DOC-2', async () => {
+    /*
+     * The list was refused too, until the owner decided a technician may view
+     * and download a customer's filed paperwork. The two halves are now
+     * different rules on purpose: reading follows `customers.view`, which the
+     * technician holds, and filing stays `customers.manage`.
+     */
     await expect(attachCustomerDocument(harness.as(technician), customer.id, pdf)).rejects.toThrow(
       WorkflowError,
     );
-    await expect(listCustomerDocuments(harness.as(technician), customer.id)).rejects.toThrow(
-      WorkflowError,
-    );
+
+    const saved = await attachCustomerDocument(harness.as(coordinator), customer.id, pdf);
+    const listed = await listCustomerDocuments(harness.as(technician), customer.id);
+    expect(listed.map((document) => document.id)).toContain(saved.id);
+  });
+
+  it('refuses a technician the WITHDRAWN list, answering the live one instead', async () => {
+    const saved = await attachCustomerDocument(harness.as(coordinator), customer.id, pdf);
+    await withdrawCustomerDocument(harness.as(coordinator), customer.id, saved.id);
+
+    // Not a refusal: nothing they asked for is secret. They are answered with
+    // what they may see, so the option alone cannot undo the rule.
+    const asked = await listCustomerDocuments(harness.as(technician), customer.id, {
+      includeArchived: true,
+    });
+    expect(asked).toEqual([]);
+
+    const office = await listCustomerDocuments(harness.as(coordinator), customer.id, {
+      includeArchived: true,
+    });
+    expect(office.map((document) => document.id)).toContain(saved.id);
+  });
+
+  it('refuses a technician the WITHDRAW, which is still the office’s', async () => {
+    const saved = await attachCustomerDocument(harness.as(coordinator), customer.id, pdf);
+    await expect(
+      withdrawCustomerDocument(harness.as(technician), customer.id, saved.id),
+    ).rejects.toThrow(WorkflowError);
   });
 });
