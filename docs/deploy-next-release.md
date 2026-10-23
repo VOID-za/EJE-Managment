@@ -293,11 +293,22 @@ only data-modifying migration in the release, and an interrupted run between
 0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
 LOST CUSTOMER DOCUMENTS until the run is finished.
 
-Every one of the eight is additive — no DROP TABLE, no DROP COLUMN, no TRUNCATE,
-no DELETE, and every NOT NULL on a column of a new table — so **the old code
+Every one of the thirteen is additive — no DROP TABLE, no DROP COLUMN, no
+TRUNCATE, no DELETE, and every NOT NULL either on a column of a new table or
+with a default and a backfill (`0029`'s `pages_indexed`) — so **the old code
 runs against the new schema**, which is what makes step 8's rollback safe. That
 is tested rather than asserted: an old-code-shaped INSERT that omits
 `provenance` succeeds and lands on `unknown`.
+
+**`0027` and `0029` are the two to read twice.** `0027` DROPS a NOT NULL on
+`jobs.priority`, which the old code cannot be harmed by — it always wrote a
+value — but which means a job created by the NEW code with no priority would be
+a row the old code renders as a blank badge rather than crashing. `0029`
+REPLACES three CHECK constraints on `library_document_text`: after it, a row
+with `state = 'partially_indexed'` is legal, and the old code would render that
+state's label as an unknown string. Neither is a reason not to roll back; both
+are reasons to roll the CODE back and leave the schema alone, which is what
+step 8 says.
 
 ## 6. Switch, and prove what is serving
 
@@ -358,13 +369,14 @@ What rollback does and does not need:
 - **The migration is not rolled back, and must not be.** `0014` only adds a
   table; the old code neither reads nor writes it. Dropping it would delete the
   observations recorded in step 7 — the only independent record of what each
-  document's bytes were. **The same holds for 0015–0025**, and more strongly:
+  document's bytes were. **The same holds for 0015–0029**, and more strongly:
   `job_corrections` and `unsigned_delivery_authorisations` hold decisions
   somebody took about a customer's document, `customer_documents` and
   `machine_documents` hold files that exist on disk, and
   `provenance_recording` is the one row that stops a backfilled label being
-  read as a chosen one. Dropping any of them destroys a record the old code
-  simply ignores.
+  read as a chosen one, and `library_document_pages` holds the per-page text
+  index that took CPU to produce and would have to be produced again. Dropping
+  any of them destroys a record the old code simply ignores.
 - **The old release runs unchanged against the new schema.** It does not read
   the new tables, and the columns it does not know about have defaults. The one
   behavioural difference is that a `final_documents` row inserted by the OLD

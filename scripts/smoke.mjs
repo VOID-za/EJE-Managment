@@ -20,7 +20,22 @@ import { deflateSync } from 'node:zlib';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
 
-const BASE = process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+/*
+ * ONE VARIABLE CAN POINT EVERY GATE AT ONE SERVER. 23 October 2026.
+ *
+ * This read `EJE_SMOKE_BASE_URL` and nothing else, and defaulted to port 3210
+ * while `check-routes`, `e2e`, `tablet-pdf-check` and `responsive-check` all
+ * default to 3000 and all accept `EJE_E2E_URL`. A runner that started one
+ * server and exported `EJE_E2E_URL` therefore ran four gates against it and
+ * sent this one to a port with nothing on it — ERR_CONNECTION_REFUSED, which
+ * reads as a failure of the application. WORSE: if anything IS listening on
+ * 3210, this gate silently tests that instead, which can be a stale build.
+ *
+ * `EJE_SMOKE_BASE_URL` still wins where it is set, so nothing that uses it
+ * changes.
+ */
+const BASE =
+  process.env.EJE_SMOKE_BASE_URL ?? process.env.EJE_E2E_URL ?? 'http://localhost:3210';
 
 /**
  * A calendar date IN THE BUSINESS ZONE, offset by `days`.
@@ -3864,7 +3879,11 @@ await step('SEARCH-4: the archive downloads as a CSV, built by the server', asyn
    * columns after the operational ones. The technician's refusal and the
    * Coordinator's permission are the next step.
    */
-  const operational = 'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,Reference number,Final job card';
+  const operational =
+    'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,' +
+    // TR-1: the Test & Repair unit, so the archive can be reconciled. Empty on
+    // every other job type, exactly as Order number already is.
+    'Reference number,Quote number,Part number,Part description,Quantity,Final job card';
   const prices = 'Subtotal (excl. VAT),VAT,Total (incl. VAT),Priced at';
   if (header !== `${operational},${prices}`) {
     throw new Error(`unexpected export columns: ${header}`);

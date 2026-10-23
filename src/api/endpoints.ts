@@ -981,6 +981,21 @@ export const library = {
     command<TechnicalDocument>(`/api/library/${segment(documentId)}/archive`),
   addVersion: (documentId: string, input: unknown) =>
     command<TechnicalDocument>(`/api/library/${segment(documentId)}/add_version`, input),
+  /**
+   * A new revision WITH ITS FILE. LIB-REV-1.
+   *
+   * `addVersion` above records a revision and no bytes, which left a `current`
+   * revision nobody could download or search and no way to supply the file.
+   * Both are kept: a library record that is metadata by design still uses
+   * `addVersion`, and a revision of a manual EJE actually hold uses this.
+   */
+  uploadVersion: (documentId: string, file: File, fields: Readonly<Record<string, string>>) =>
+    apiUpload<LibraryUploadResult>(
+      `/api/library/${segment(documentId)}/upload_version`,
+      file,
+      '',
+      fields,
+    ),
   toggleFavourite: (documentId: string) =>
     command<{ favourites: readonly string[] }>(
       `/api/library/${segment(documentId)}/toggle_favourite`,

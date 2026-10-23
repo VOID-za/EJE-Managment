@@ -68,7 +68,12 @@ const FIELDS = {
 } as const;
 
 interface UploadBody {
-  readonly document: { readonly id: string; readonly status: string; readonly pageCount: number };
+  readonly document: {
+    readonly id: string;
+    readonly status: string;
+    readonly pageCount: number;
+    readonly version?: string;
+  };
   readonly index: { readonly state: string; readonly characters: number; readonly failureReason: string };
 }
 
@@ -284,6 +289,147 @@ describe('opening a stored document', () => {
   it('never hands a storage key to a client', async () => {
     const library = await master.get('/api/library');
     expect(JSON.stringify(library.raw)).not.toContain('library/');
+  });
+});
+
+describe('a new revision WITH its file. LIB-REV-1', () => {
+  let master: Client;
+  let technician: Client;
+
+  beforeEach(async () => {
+    startTestServer();
+    master = await signedInAs(DEMO_USERS.master);
+    technician = await signedInAs(DEMO_USERS.technician);
+  });
+
+  const upload = (client: Client) =>
+    client.upload<UploadBody>('/api/library/upload', {
+      name: FIELDS.name,
+      type: 'application/pdf',
+      bytes: pdf('Revision one: alarm 300500 is a drive enable fault.'),
+      fields: { ...FIELDS },
+    });
+
+  const reviseWithFile = (
+    client: Client,
+    documentId: string,
+    body: string,
+    version = '2.0',
+  ) =>
+    client.upload<UploadBody>(`/api/library/${documentId}/upload_version`, {
+      name: 'manual-rev-b.pdf',
+      type: 'application/pdf',
+      bytes: pdf(body),
+      fields: { version, description: 'Revision B, reissued after the drive change.' },
+    });
+
+  it('stores, measures and INDEXES the new revision, and archives the old one', async () => {
+    /*
+     * THE DEAD END THIS CLOSES. `add_version` records a revision and generates
+     * a storage key, and nothing ever sent the bytes — the library's only
+     * upload route creates a NEW DOCUMENT. So a Master revising a manual
+     * produced a `current` revision that could not be downloaded and could not
+     * be searched, and the download route's own refusal told them to upload
+     * the PDF with no way to do it.
+     */
+    const first = await upload(master);
+    await master.post(`/api/library/${first.data.document.id}/approve`);
+
+    const revised = await reviseWithFile(
+      master,
+      first.data.document.id,
+      'Revision two: alarm 300500 now needs terminal 71 checked first.',
+    );
+    expect(revised.status, JSON.stringify(revised.error)).toBe(200);
+    expect(revised.data.document.status).toBe('current');
+    expect(revised.data.index.state).toBe('indexed');
+    expect(revised.data.index.characters).toBeGreaterThan(20);
+    // The page count comes from the FILE, not from a form.
+    expect(revised.data.document.pageCount).toBe(1);
+    // The key never leaves the server.
+    expect(revised.data.document).not.toHaveProperty('storageKey');
+
+    /*
+     * THE PREVIOUS REVISION IS STILL RESOLVABLE, which is what a job that
+     * referenced v1.0 depends on. Proved by FETCHING ITS FILE rather than by
+     * reading a status: a revision archived and then unreadable is the failure
+     * archiving-rather-than-deleting exists to prevent.
+     */
+    const oldFile = await master.download(`/api/library/${first.data.document.id}/file`);
+    expect(oldFile.status, JSON.stringify(oldFile.error)).toBe(200);
+  });
+
+  it('serves the NEW revision’s bytes, and the old revision keeps its own', async () => {
+    const first = await upload(master);
+    await master.post(`/api/library/${first.data.document.id}/approve`);
+
+    /*
+     * COMPARED AS BYTES, not as text. These PDFs compress their content
+     * stream, so the sentence is not in the file as characters — a substring
+     * check would fail on a correct file and, worse, would pass on a
+     * corrupted one whose header survived.
+     */
+    const secondBytes = pdf('Revision two: terminal 71 first.');
+    const revised = await master.upload<UploadBody>(
+      `/api/library/${first.data.document.id}/upload_version`,
+      {
+        name: 'manual-rev-b.pdf',
+        type: 'application/pdf',
+        bytes: secondBytes,
+        fields: { version: '2.0', description: '' },
+      },
+    );
+    expect(revised.status, JSON.stringify(revised.error)).toBe(200);
+
+    const newFile = await master.download(`/api/library/${revised.data.document.id}/file`);
+    expect(newFile.status, JSON.stringify(newFile.error)).toBe(200);
+    expect(new Uint8Array(newFile.bytes)).toEqual(secondBytes);
+
+    // A revision cannot inherit or be shadowed by the bytes of the one it
+    // supersedes: both the file and the index are keyed by the revision's id.
+    const oldFile = await master.download(`/api/library/${first.data.document.id}/file`);
+    expect(oldFile.status).toBe(200);
+    expect(new Uint8Array(oldFile.bytes)).not.toEqual(secondBytes);
+  });
+
+  it('REFUSES a version number that is blank or already in use', async () => {
+    const first = await upload(master);
+
+    const blank = await reviseWithFile(master, first.data.document.id, 'x', '');
+    expect(blank.status).toBe(400);
+
+    const same = await reviseWithFile(
+      master,
+      first.data.document.id,
+      'x',
+      first.data.document.version ?? '1.0',
+    );
+    expect([400, 422]).toContain(same.status);
+  });
+
+  it('REFUSES a technician, because revising is the office’s', async () => {
+    const first = await upload(master);
+    const refused = await reviseWithFile(technician, first.data.document.id, 'x');
+    expect([403, 404]).toContain(refused.status);
+  });
+
+  it('REFUSES a file that is not a PDF, by its BYTES', async () => {
+    const first = await upload(master);
+    const refused = await master.upload(
+      `/api/library/${first.data.document.id}/upload_version`,
+      {
+        name: 'manual-rev-b.pdf',
+        type: 'application/pdf',
+        bytes: jpeg(),
+        fields: { version: '2.0', description: '' },
+      },
+    );
+    expect(refused.status).toBe(400);
+  });
+
+  it('answers 404 for a document that does not exist, before storing anything', async () => {
+    const refused = await reviseWithFile(master, 'library-document-does-not-exist', 'x');
+    expect(refused.status).toBe(404);
   });
 });
 

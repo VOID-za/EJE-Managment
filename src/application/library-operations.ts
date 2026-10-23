@@ -538,6 +538,80 @@ export const uploadDocument = async (
 };
 
 /**
+ * Publishes a new revision WITH ITS FILE. MASTER SCOPE LIB-5, LIB-REV-1.
+ *
+ * THE DEAD END THIS CLOSES. `addDocumentVersion` records a revision and
+ * generates a storage key for it, and nothing ever sent the bytes: the only
+ * upload route in the library (`POST /api/library/upload`) creates a NEW
+ * DOCUMENT. So a Master revising a manual produced a `current` revision that
+ * could never be downloaded and could never be searched — the download route
+ * refused it honestly ("this record describes a document that was never
+ * uploaded … upload the PDF and it will be stored"), and there was no way to
+ * do what the refusal said. The only route out was to upload the manual again
+ * as a second document, which leaves the library holding a duplicate.
+ *
+ * THE REVISION HISTORY IS PRESERVED, because this does not reimplement it:
+ * `addDocumentVersion` archives the previous revision and keeps it resolvable,
+ * and that is what a job referencing v1.0 depends on. What is added here is
+ * the three steps the file needs, in the order every other upload path uses:
+ *
+ *   store the bytes → read them back and measure → index the text
+ *
+ * SO A NEW APPROVED REVISION IS RE-INDEXED, which §3.1 of the mandate asks
+ * for. The index is keyed by the REVISION's own id, so the new revision
+ * indexes itself and cannot inherit or be shadowed by the text of the one it
+ * supersedes — and the superseded revision's index stays exactly as it was,
+ * which is what keeps the archived copy findable through the job that used it.
+ *
+ * THE PAGE COUNT COMES FROM THE FILE, not from the form. `addDocumentVersion`
+ * takes one because the metadata-only path has nothing better; here the
+ * extractor counted the pages, so the asserted number is overwritten by the
+ * measured one.
+ */
+export const uploadDocumentVersion = async (
+  context: OperationContext,
+  previous: TechnicalDocument,
+  input: {
+    readonly version: string;
+    readonly description: string;
+    readonly file: UploadedFile;
+  },
+): Promise<{ readonly document: TechnicalDocument; readonly index: DocumentTextIndex }> => {
+  // `addDocumentVersion` asserts the capability and refuses a version number
+  // that is blank or already in use, before anything is stored.
+  const revision = await addDocumentVersion(context, previous, {
+    version: input.version,
+    fileName: input.file.fileName,
+    description: input.description,
+    // Corrected below from the file itself.
+    pageCount: 1,
+  });
+
+  await context.services.storage.putDocument({
+    storageKey: revision.storageKey,
+    fileName: input.file.fileName,
+    contentType: input.file.contentType,
+    bytes: input.file.bytes,
+  });
+
+  const measured = await measureStored(
+    context,
+    revision.storageKey,
+    'That revision could not be stored.',
+  );
+
+  const index = await indexDocumentText(context, revision, input.file.bytes);
+  const stored = await context.repos.documents.save({
+    ...revision,
+    fileSizeBytes: measured.sizeBytes,
+    checksumSha256: measured.checksumSha256,
+    pageCount: Math.max(1, index.pages),
+  });
+
+  return { document: stored, index };
+};
+
+/**
  * WHO MAY OPEN A DOCUMENT'S FILE. MASTER SCOPE LIB-5, MOD-3.
  *
  * The same three-way answer the library screen gives, stated once so the

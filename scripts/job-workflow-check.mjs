@@ -23,7 +23,22 @@
 import { chromium } from 'playwright';
 import { signInAs, signOut } from './sign-in.mjs';
 
-const BASE = process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+/*
+ * ONE VARIABLE CAN POINT EVERY GATE AT ONE SERVER. 23 October 2026.
+ *
+ * This read `EJE_SMOKE_BASE_URL` and nothing else, and defaulted to port 3210
+ * while `check-routes`, `e2e`, `tablet-pdf-check` and `responsive-check` all
+ * default to 3000 and all accept `EJE_E2E_URL`. A runner that started one
+ * server and exported `EJE_E2E_URL` therefore ran four gates against it and
+ * sent this one to a port with nothing on it — ERR_CONNECTION_REFUSED, which
+ * reads as a failure of the application. WORSE: if anything IS listening on
+ * 3210, this gate silently tests that instead, which can be a stale build.
+ *
+ * `EJE_SMOKE_BASE_URL` still wins where it is set, so nothing that uses it
+ * changes.
+ */
+const BASE =
+  process.env.EJE_SMOKE_BASE_URL ?? process.env.EJE_E2E_URL ?? 'http://localhost:3210';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
 const browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });

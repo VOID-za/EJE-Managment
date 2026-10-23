@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { TechnicalDocument, TechnicalDocumentType } from '@/domain';
 import {
   Badge,
@@ -230,6 +230,18 @@ const DocumentDialog = ({
   const [fileName, setFileName] = useState(revising ? '' : (existing?.fileName ?? ''));
   const [pageCount, setPageCount] = useState(`${existing?.pageCount ?? 12}`);
   const [tags, setTags] = useState((existing?.tags ?? []).join(', '));
+  /**
+   * The PDF of a new revision, where one is being published. LIB-REV-1.
+   *
+   * `addVersion` records a revision and no bytes, which produced a `current`
+   * revision nobody could download or search — and the download route's own
+   * refusal told the office to upload the PDF with no way to do it. Choosing a
+   * file here sends it through `uploadVersion` instead, which stores, measures
+   * and indexes it exactly as the first upload does. Choosing none keeps the
+   * metadata-only path, which EJE's existing records use.
+   */
+  const [revisionFile, setRevisionFile] = useState<File | null>(null);
+  const filePicker = useRef<HTMLInputElement | null>(null);
 
   const title =
     editing.mode === 'create'
@@ -257,12 +269,16 @@ const DocumentDialog = ({
         });
       }
       if (revising) {
-        return library.addVersion(editing.document.id, {
-          version,
-          fileName,
-          pageCount: pages,
-          description,
-        });
+        // WITH THE FILE where one was chosen, which stores, measures and
+        // indexes it; without, the metadata-only revision as before.
+        return revisionFile === null
+          ? library.addVersion(editing.document.id, {
+              version,
+              fileName,
+              pageCount: pages,
+              description,
+            })
+          : library.uploadVersion(editing.document.id, revisionFile, { version, description });
       }
       return library.update(editing.document.id, {
         name: name.trim(),
@@ -384,7 +400,62 @@ const DocumentDialog = ({
                 onChange={(event) => setFileName(event.target.value)}
                 placeholder="leadwell-v40-manual-rev-b.pdf"
                 containerClassName="sm:col-span-2"
+                hint={
+                  revising && revisionFile !== null
+                    ? 'Taken from the chosen file.'
+                    : revising
+                      ? 'Only needed when no file is attached below.'
+                      : undefined
+                }
+                disabled={revising && revisionFile !== null}
               />
+              {revising && (
+                <div className="sm:col-span-2">
+                  <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                    The revision’s PDF
+                  </p>
+                  {/*
+                    A HIDDEN INPUT BEHIND A REAL BUTTON — a bare file input
+                    renders about 20px tall, which the responsive gate refuses
+                    as a touch target. The same pattern the document panels use.
+                  */}
+                  <input
+                    ref={filePicker}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    data-testid="library-revision-file"
+                    onChange={(event) => {
+                      const chosen = event.target.files?.[0] ?? null;
+                      // Cleared so choosing the SAME file again still fires.
+                      event.target.value = '';
+                      setRevisionFile(chosen);
+                      if (chosen !== null) setFileName(chosen.name);
+                    }}
+                  />
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => filePicker.current?.click()}
+                      data-testid="library-revision-choose"
+                    >
+                      <Icon name="document" className="size-4" />
+                      {revisionFile === null ? 'Choose the PDF' : 'Choose a different PDF'}
+                    </Button>
+                    {revisionFile !== null && (
+                      <span className="text-xs text-steel-600" data-testid="library-revision-chosen">
+                        {revisionFile.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
+                    {revisionFile === null
+                      ? 'Without a PDF the revision is recorded as metadata only — it cannot be downloaded or searched.'
+                      : 'The file is stored, measured and indexed; the page count comes from the file itself.'}
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>

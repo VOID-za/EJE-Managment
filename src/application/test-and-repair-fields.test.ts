@@ -192,9 +192,12 @@ describe('raising a Test & Repair job with every field filled in', () => {
       quantity: 2,
       unitPrice: 14_500,
     });
-    const withNote = await addNote(harness.as(master), withPart, {
-      body: 'Rewound and tested on the bench.',
-    });
+    const withNote = await addNote(
+      harness.as(master),
+      withPart,
+      'Rewound and tested on the bench.',
+      false,
+    );
     const reloaded = (await harness.repos.jobs.findById(job.id))!;
 
     for (const stage of [withLabour, withPart, withNote, reloaded]) {
