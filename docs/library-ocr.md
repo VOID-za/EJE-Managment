@@ -69,6 +69,49 @@ stops at page 40 anyway. **The library would have reported EJE's own manuals as
 dependency that is not really optional.** It is also already required by
 recognition, so a server set up for OCR has it.
 
+### Measured: a 214-page manual, and the one limit that now bites
+
+A representative manual built for the purpose — 214 pages, 45 lines of alarm
+text per page, Flate-compressed content streams, a cross-reference table, text
+on every page — read through the real service on this container
+(`pdftotext 24.02.0`, 4 cores):
+
+| | |
+|---|---|
+| Wall clock | **0.21 s** (0.13–0.20 s for `pdftotext` alone, three runs) |
+| Pages with text | 214 of 214 |
+| Text produced | **896 kB** — about 4 kB a page |
+| Pages actually indexed | **96 of 214** |
+| State recorded | `partially_indexed`, truncated, with the reason |
+
+**The time is the point of comparison.** The same document through recognition
+is 83 to 89 minutes (§5) and stops at page 40. Extraction is **about 25 000
+times faster**, which is why it happens inside the upload request and
+recognition cannot.
+
+**THE LIMIT THAT NOW BITES IS `MAX_INDEXED_CHARACTERS = 400 000`**, in
+`src/lib/pdf/extract-text.ts`. It was sized when the byte reader was the only
+engine and most real manuals came out unreadable; now that they come out whole,
+an ordinary 214-page manual exceeds it at **page 96** and the remaining 118
+pages are not searchable. The library says so — *"Searchable — 96 of 214
+pages"*, with *"the document is longer than one index entry may carry and was
+cut"* — so nobody is misled, and somebody searching for an alarm on page 150
+still finds nothing.
+
+**This is reported rather than changed.** Raising it is a decision about how
+much of EJE's database one document may occupy, which is the same class of
+decision as BD-21's page cap, and the mandate's own instruction is to keep the
+current limits unless measured evidence **and an approved decision** justify a
+change. The evidence is above; the decision is EJE's.
+
+**Recommended default:** raise it to **2 000 000 characters** (about 500 pages
+of this manual's density, 2 MB of text per revision). On a library of 200 such
+manuals that is roughly 400 MB of text plus its full-text vectors — well
+within what the VPS's PostgreSQL holds, and it makes the common case whole. The
+per-page rows carry the same text again, so the real figure is about double;
+2 MB a revision is still the right order of magnitude for a machine that
+already stores the PDFs themselves.
+
 
 ## 1. What is actually unsearchable
 

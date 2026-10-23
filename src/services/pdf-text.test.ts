@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { extractPdfText } from '@/lib/pdf/extract-text';
+import { extractPdfText, MAX_INDEXED_CHARACTERS } from '@/lib/pdf/extract-text';
 import { buildPdfText, builtinPdfText, popplerPdfText } from './pdf-text';
 
 /**
@@ -61,6 +61,59 @@ describe('PDF text extraction', () => {
       expect(reading.pagesWithoutText).toEqual([3]);
       expect(reading.truncated).toBe(false);
       expect(reading.engine).toMatch(/pdftotext/iu);
+    });
+  });
+
+  describe('a manual the length of a real one', () => {
+    /*
+     * THE TWO FACTS ONLY A LONG DOCUMENT ESTABLISHES, both of which
+     * `docs/library-ocr.md` §0 records with the numbers.
+     */
+    const LONG = readFileSync('src/services/__fixtures__/long-manual.pdf');
+
+    it('is read in well under a second, which is why it happens in the request', () => {
+      const started = Date.now();
+      const reading = popplerPdfText().read(bytesOf(LONG));
+      const elapsed = Date.now() - started;
+
+      expect(reading.kind).toBe('text');
+      if (reading.kind !== 'text') throw new Error('unreachable');
+      expect(reading.totalPages).toBe(214);
+      expect(reading.pagesWithoutText).toEqual([]);
+
+      /*
+       * Measured at about 210 ms on the development container. The assertion
+       * is generous — five seconds — because it is a CI machine's clock and
+       * the point is the ORDER OF MAGNITUDE: the same document through
+       * recognition is 83 to 89 minutes (BD-21), which is why extraction
+       * happens inside the upload request and recognition cannot.
+       */
+      expect(elapsed).toBeLessThan(5_000);
+    });
+
+    it('is CUT at the index budget, and says so rather than hiding it', () => {
+      const reading = popplerPdfText().read(bytesOf(LONG));
+      expect(reading.kind).toBe('text');
+      if (reading.kind !== 'text') throw new Error('unreachable');
+
+      /*
+       * THE LIMIT THAT NOW BITES. `MAX_INDEXED_CHARACTERS` was sized when the
+       * byte reader was the only engine and most real manuals came out
+       * unreadable. Now that they come out whole, an ordinary 214-page manual
+       * exceeds it at about page 96 — so 118 pages are not searchable, the
+       * index says `truncated`, and the library says "Searchable — 96 of 214
+       * pages". Nobody is misled, and somebody searching for an alarm on page
+       * 150 still finds nothing: see docs/library-ocr.md §0 for the
+       * measurement and the recommendation.
+       */
+      expect(reading.truncated).toBe(true);
+      expect(reading.pages.length).toBeLessThan(reading.totalPages);
+      expect(reading.pages.length).toBeGreaterThan(50);
+      expect(reading.text.length).toBeLessThanOrEqual(MAX_INDEXED_CHARACTERS + 1_000);
+      // The pages that ARE indexed are the first ones, in order, so a
+      // technician reading the caveat knows which part of the book it covers.
+      expect(reading.pages[0]?.pageNumber).toBe(1);
+      expect(reading.pages[reading.pages.length - 1]?.pageNumber).toBe(reading.pages.length);
     });
   });
 
