@@ -565,6 +565,15 @@ await step('the office files a document against a customer, and gets those bytes
   await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
 
+  /*
+   * ON THE "NOTES & DOCUMENTS" TAB, since Customers §2.
+   *
+   * The panel used to be on Overview while the tab named for it showed a
+   * hard-coded "storage is simulated" empty state. Both real panels are on
+   * that tab now, so this step goes where a person would go.
+   */
+  await page.getByRole('tab', { name: 'Notes & Documents' }).click();
+
   const panel = page.getByTestId('customer-documents-empty');
   await panel.waitFor({ timeout: 10000 });
 
@@ -2082,36 +2091,46 @@ await step('closed job is read-only', async () => {
 /*
  * THE REGISTER IS TODAY'S, AND THE JOB SCREEN SAYS SO. MACH-HIST (#28).
  *
- * A job carries its machine and site by identifier, so a finished job's screen
- * shows the register as it stands NOW — which reads like a record of where the
- * work happened and is not one. The customer's copy is the history, and its
- * bytes cannot change. Saying that is a label, not a movement ledger: whether
- * EJE record a machine's moves is still their decision.
+ * WHERE THE MACHINE STOOD WHEN THE WORK WAS DONE. BD-20, answered.
  *
- * Both halves are asserted, because a label that appears everywhere says
- * nothing: it is on the closed job and absent from one still in progress.
+ * This step used to assert a LABEL — "this is the register as it stands today"
+ * — which was the honest thing to show while BD-20 was open. The owner
+ * answered on 23 October 2026: a closed job shows the location at the time of
+ * the work, and where the history cannot establish it, it says UNKNOWN rather
+ * than letting today's register be read as historical fact.
+ *
+ * The demonstration data records no machine movements, so the unknown branch is
+ * what a closed job shows — and that is the branch worth proving in a browser,
+ * because it is the one that stops a screen misreporting where a customer's
+ * machine was. Both halves are still asserted: it is on the closed job and
+ * absent from one still in progress.
  */
-await step('a finished job says the machine and site are the register of TODAY', async () => {
+await step('a finished job says where the machine stood, or that it is not known', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  const note = page.getByTestId('register-is-present-day');
+  const note = page.getByTestId('machine-location-at-work-unknown');
   await note.waitFor({ timeout: 10000 });
   const text = (await note.innerText()).trim();
-  if (!text.includes('register as it stands today')) {
-    throw new Error(`the note does not say what it is: ${text}`);
+  if (!text.includes('not known')) {
+    throw new Error(`the note does not say the location is unknown: ${text}`);
+  }
+  if (!text.toLowerCase().includes('today')) {
+    throw new Error('the note does not say the register card is the present day');
   }
   if (!text.includes('cannot change')) {
     throw new Error('the note does not say the issued document is the historical record');
   }
   if ((await page.getByTestId('register-is-present-day-site').count()) === 0) {
-    throw new Error('the site card does not carry the same warning');
+    throw new Error('the site card does not carry its own warning');
   }
 
   // An open job must NOT carry it: there the register is simply the record a
   // technician needs, and a warning on every screen is a warning on none.
   await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1049' }).waitFor({ timeout: 10000 });
-  if ((await page.getByTestId('register-is-present-day').count()) !== 0) {
-    throw new Error('an unfinished job was told its register data is historical');
+  for (const id of ['machine-location-at-work', 'machine-location-at-work-unknown']) {
+    if ((await page.getByTestId(id).count()) !== 0) {
+      throw new Error('an unfinished job was told something historical about its machine');
+    }
   }
 });
 
@@ -2331,20 +2350,34 @@ await step('a Test & Repair offers a delivery note when the job is raised', asyn
   await page.getByRole('heading', { name: 'New Job' }).first().waitFor({ timeout: 15000 });
 
   // Nothing on a breakdown, which nobody collects and which has no delivery note.
-  if ((await page.getByLabel('Delivery note').count()) !== 0) {
+  if ((await page.getByLabel('Delivery note / waybill number').count()) !== 0) {
     throw new Error('a breakdown was offered a delivery note');
   }
+  /*
+   * AND NOBODY IS OFFERED THE COLLECTION QUESTION HERE AT ALL, since Job
+   * completion §6. It used to be on a Test & Repair; the owner asked for it to
+   * wait until the job is finished, and it is now asked in the close-out
+   * wizard with whoever turned up standing at the counter.
+   */
   if ((await page.getByText('Courier Collection').count()) !== 0) {
     throw new Error('a breakdown was offered a courier collection');
   }
 
   await page.getByLabel('Job type').selectOption('test_and_repair');
-  await page.getByLabel('Delivery note').waitFor({ timeout: 8000 });
-  await page.getByText('Courier Collection').first().waitFor({ timeout: 8000 });
+  await page.getByLabel('Delivery note / waybill number').waitFor({ timeout: 8000 });
+  if ((await page.getByText('Courier Collection').count()) !== 0) {
+    throw new Error('a Test & Repair was offered the collection question at creation');
+  }
+  // The Test & Repair fields the owner asked for. §4.
+  await page.getByLabel('Quote number').waitFor({ timeout: 8000 });
+  await page.getByLabel('Part number').waitFor({ timeout: 8000 });
 
   // And on a parts collection too, which is the other thing collected.
   await page.getByLabel('Job type').selectOption('parts');
-  await page.getByLabel('Delivery note').waitFor({ timeout: 8000 });
+  await page.getByLabel('Delivery note / waybill number').waitFor({ timeout: 8000 });
+  if ((await page.getByLabel('Quote number').count()) !== 0) {
+    throw new Error('a parts collection was offered a quote number');
+  }
   await page.screenshot({ path: `${shots}/27-new-job-delivery-note.png`, fullPage: false });
 });
 
@@ -3825,20 +3858,24 @@ await step('SEARCH-4: the archive downloads as a CSV, built by the server', asyn
 
   if (!csv.startsWith('\uFEFF')) throw new Error('the CSV has no BOM, so Excel will mis-read it');
   const [header, ...rows] = csv.replace('\uFEFF', '').trimEnd().split('\r\n');
-  if (header !== 'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,Reference number,Final job card') {
+  /*
+   * BD-17, decided by the owner: the Master is one of the two roles allowed the
+   * prices a closed job was issued at, so this file carries the four commercial
+   * columns after the operational ones. The technician's refusal and the
+   * Coordinator's permission are the next step.
+   */
+  const operational = 'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,Reference number,Final job card';
+  const prices = 'Subtotal (excl. VAT),VAT,Total (incl. VAT),Priced at';
+  if (header !== `${operational},${prices}`) {
     throw new Error(`unexpected export columns: ${header}`);
   }
   if (!rows.some((row) => row.startsWith('EJE-1044,'))) {
     throw new Error('EJE-1044 is in the archive on screen and missing from the file');
   }
-  // What a closed job was charged at is NOT in this file — see `exports.ts`.
-  if (/total|price|rate|vat/i.test(header)) {
-    throw new Error('the archive export carries a commercial column');
-  }
   console.log(`      ${rows.length} archive row(s) exported`);
 });
 
-await step('SEARCH-4: a technician is refused the archive file, and gets their own list', async () => {
+await step('SEARCH-4: a technician is refused the archive file, the Coordinator is not', async () => {
   /*
    * THE SERVER REFUSES IT, NOT THE SCREEN. Asked as the technician's own
    * browser asks — same cookie, same origin — so what is proved is the route's
@@ -3869,6 +3906,25 @@ await step('SEARCH-4: a technician is refused the archive file, and gets their o
   }
   if (/total|price|rate|vat/i.test(own.body.split('\r\n')[0] ?? '')) {
     throw new Error('the technician export carries a commercial column');
+  }
+
+  /*
+   * BD-17 named two roles, not one. The Coordinator is the other, so the same
+   * request that the technician was refused is served to her — with the price
+   * columns, because the grant is the point of the decision.
+   */
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut();
+  await signInAs(page, 'Christene van Niekerk');
+  const coordinator = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/closed/export`);
+    return { status: response.status, body: (await response.text()).slice(0, 400) };
+  }, BASE);
+  if (coordinator.status !== 200) {
+    throw new Error(`the Coordinator got HTTP ${coordinator.status} for the archive export`);
+  }
+  if (!coordinator.body.includes('Total (incl. VAT)')) {
+    throw new Error('the Coordinator export is missing the prices BD-17 allows her');
   }
 
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
