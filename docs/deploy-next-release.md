@@ -216,6 +216,83 @@ backup was taken". On this deployment that is expected: the six seeded
 demonstration job cards are rendered on first download. It must **not** report
 anything as lost.
 
+### THE RESTORE TEST ON THE INSTALLED RELEASE IS BROKEN, AND THAT IS THE "26"
+
+**Read this before trying to recover any document.** If the restore test on the
+live server has reported something like *"26 document references pointing at
+files missing from the backup"*, naming `EJE-2015.pdf`, `EJE-2016.pdf` and
+`EJE-2017.pdf` — **nothing has been lost, and there is nothing to recover.**
+The check itself is the fault, and the fix is in the release this document
+deploys.
+
+**What the installed release does.** `4dede18`'s restore test resolves a
+reference with `if (!present.has(key))` — a storage KEY compared against a FILE
+NAME. The store writes `<key>.bin` and `<key>.json`, so `present` holds
+`jobcards/final/EJE-2015.pdf.bin` while `key` is `jobcards/final/EJE-2015.pdf`.
+**Nothing ever matches, so every reference in the database is reported as a
+missing document.** The number you see is the total count of storage-key
+references, not a count of losses. `36623b1` fixes the resolution and adds the
+manifest's `danglingReferences` list so a pre-existing absence can be told from
+a loss; both are in this release and neither is in the running one.
+
+**Why those three job numbers are the harmless ones.** `EJE-2015`, `EJE-2016`
+and `EJE-2017` are seeded demonstration jobs with fictional customers
+(`acme-demo.local`, `jia-demo.local`). `src/db/seed/jobs.ts` says it outright:
+
+> NOTHING HAS MEASURED THESE BYTES, because they do not exist yet: a seed cannot
+> ship binary content, so a seeded job card is rendered on first download.
+> Recording a length here would be describing a file nobody has written.
+
+So their `final_documents` rows carry `size_bytes: null` and
+`checksum_sha256: null` and point at keys with no bytes **by design**. Rendering
+a replacement now would be a new document wearing an old one's date, which
+`src/ops/document-rules.ts` refuses for exactly that reason.
+
+**Rehearsed on 23 October 2026** against an isolated database that reproduces
+this condition — all 29 migrations, the production seed, nine real stored files
+written through the real storage service, a real encrypted backup, and the
+restore test into a scratch database that was dropped afterwards:
+
+```
+backup   15 storage key(s) referenced, 6 with no file — recorded in the manifest
+         so a restore test can tell them from documents this backup loses
+restore  9 of 15 storage key(s) resolved to a stored file
+restore  6 were ALREADY missing when this backup was taken (recorded in its
+         manifest), so the backup did not lose them
+restore  RESTORE-TESTED — recorded in manifest.json          [exit 0]
+```
+
+`unresolved-references.json` from that run named the six, and
+`lostByThisBackup` was **empty**:
+
+```
+jobcards/final/EJE-2015.pdf    bytes_missing
+jobcards/final/EJE-2016.pdf    bytes_missing
+jobcards/final/EJE-2017.pdf    bytes_missing
+jobcards/final/EJE-2019.pdf    bytes_missing
+partsnotes/final/EJE-2020.pdf  bytes_missing
+partsnotes/final/EJE-2021.pdf  bytes_missing
+```
+
+**It passed without `EJE_RESTORE_ALLOW_ORPHANS`**, which is the point: the flag
+is not needed and must not be used here.
+
+**So the sequencing is the other way round.** A pre-deploy restore test run with
+the INSTALLED release will fail however healthy the data is, because the check
+cannot resolve a key. Take and verify the backup as step 1 says — that part is
+sound, and `backup:verify` does not depend on the broken comparison — and then
+run `backup:restore-test` **again from the new release directory after step 3
+and before step 5**, where it is the fixed check doing the work:
+
+```bash
+cd /opt/eje/releases/<commit>
+sudo -u eje --preserve-env npm run backup:restore-test /var/backups/eje/eje-eje_production-<stamp>
+```
+
+That run is the one whose result decides whether to proceed. If **it** reports
+anything under `lostByThisBackup`, stop: that is a real loss, and no flag may be
+used to get past it.
+
 ## 2. Look at the documents before changing the code
 
 ```bash
