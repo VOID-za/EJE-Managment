@@ -20,6 +20,19 @@
 > `docs/SCOPE.md` for the evidence, and BD-19 to BD-21 there for the three
 > questions this batch RAISED by building the features that needed them.
 
+> **Updated again, 23 October 2026**, by the consolidated implementation
+> mandate. **ALL FIVE OPEN DECISIONS WERE ANSWERED BY THE OWNER** — BD-17,
+> BD-18, BD-19, BD-20 and BD-21 — and **two of them needed no code at all**,
+> which is what building up to a decision rather than past it is for: BD-19
+> chose the shape that had already shipped, and BD-17 was a capability added to
+> two role lists. The owner's handwritten feedback on the Coordinator,
+> Customers, Create New Job, Test & Repair, Parts and job-completion screens is
+> implemented as CUST-NOTE-1, JOB-OPT-1, TR-1, JOB-ATT-1 and COLL-1. **So this
+> document no longer has an "only EJE can answer" list with anything on it that
+> blocks work** — see *Decisions only EJE can make* below, where every row is
+> now struck through or cosmetic. What is left is in the two sections at the
+> end: approval, and the things no repository can settle.
+
 A classification of the outstanding scope, made by reading the implementation
 against `docs/SCOPE.md` and the 57 open issues, and by running every gate the
 repository has against this tree. It exists because "what is left" had become
@@ -95,6 +108,12 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 
 ## Decisions only EJE can make
 
+> **As of 23 October 2026 NOTHING IN THIS SECTION BLOCKS WORK.** Every row is
+> either struck through — answered by the owner and implemented — or marked
+> cosmetic. The table is kept rather than deleted because the third column is
+> the record of what each decision cost once answered, and in two cases the
+> answer cost no code at all.
+
 These block real work. Each one has an issue; none may be answered by
 implementation.
 
@@ -109,16 +128,16 @@ reasoning that made them decisions is what the implementation had to respect.
 |---|---|---|
 | ~~**BD-02** (#34)~~ | ~~What is the post-signature correction/addendum mechanism?~~ | **ANSWERED by the owner on 21 October and IMPLEMENTED.** A signed job card stays immutable; a Master raises a correction with its own addendum, linked to the exact bytes of the original. IMMUT-9 and AUD-3 are answered by it, and both await the owner's approval — no issue is closed. **One sub-question remains open:** *when* is the customer's acknowledgement required? The Master states it per correction; nothing in the application decides it. |
 | ~~**BD-06** (#33)~~ | ~~Does closing *Without Customer Signature* email the customer their copy, and under whose authority?~~ | **ANSWERED by the owner on 21 October and IMPLEMENTED.** No automatic delivery; a Master authorises an exceptional send with a reason, to the job's own contact, recorded against the exact document. DELIV-7 and AUD-4 are answered by it, and both await the owner's approval — no issue is closed. |
-| **BD-17** (#56) | May the issued prices be exported, and by whom? | **Moved to a one-line change, 22 October** `9959a91`. The four columns exist and are tested behind `jobs.exportPrices`, **a capability no role holds** — so every file is byte-for-byte what it was, and answering this means naming the roles in `src/domain/access.ts`. |
-| **BD-18** (#57) | Is a spreadsheet export recorded on the audit trail? | **Moved to a one-line change, 22 October** `9959a91`. The switch left the source for the environment: `EJE_EXPORT_AUDIT=on` writes a real `data_exported` event — who, when, which export, which filters, how many rows, **never the rows** — and it is unset on every deployment. Answering this no longer needs a release. |
+| ~~**BD-17** (#56)~~ | ~~May the issued prices be exported, and by whom?~~ | **ANSWERED 23 October: THE OFFICE — a Master AND a Coordinator**, implemented `0ad0500`. A technician may not, and the archive was already office-only. Asserted against the file bytes for the granted roles and the refused one. |
+| ~~**BD-18** (#57)~~ | ~~Is a spreadsheet export recorded on the audit trail?~~ | **ANSWERED 23 October: ALL OF THEM, KEPT INDEFINITELY**, implemented `0ad0500`. The switch is GONE — there is no configuration that turns it off, proved by setting the old `EJE_EXPORT_AUDIT=off` and watching the event be written anyway. Exports have their own activity group; the record names the columns and never the rows; a refused export records nothing. Retention is indefinite by behaviour: no retention job, no sweeper, no TTL. |
 | **BD-20 / MACH-HIST** (#28) | ~~Do EJE record a machine’s moves~~ — **they are recorded now** — and what should a job screen then show? | **Half answered by building it, 22 October.** The record exists and the function that reads it as at a date is tested; no job screen calls it, because that changes what a finished job card appears to say. **Recommended: both on a closed job** — the historical site as where the work happened, the current one labelled as the register today. Whether an approved change request may MOVE a machine by itself is still open. |
 | ~~**CUST-CR** (#27)~~ | ~~Who raises a CUSTOMER’s change request to a JOB, what may it change, what does it do to a job in progress?~~ | **ANSWERED BY THE SYSTEM’S OWN FACTS and BUILT, 22 October** `6a8b7c8`. A customer has no account, no portal and no role here, so the request arrives by telephone and somebody at EJE writes down who made it; it changes nothing by itself, exactly as the register half does not; and because it carries no proposed value it cannot touch a job in progress or a signed one, so CR-01’s finality is untouched and the post-signature question stays BD-02’s. **Resolution authority follows the subject:** `jobs.viewAll` for a job, `customers.manage` for the register. |
 | **BD-04** (#35) | Is the order number mandatory, or is the DECISION 2 waiver correct? | JOB-5. |
 | **BD-05** (#36) | Accept the PostgreSQL outbox in place of v2.0's Redis queues? | ARCH-2. Nothing is waiting on it in practice. |
 | **BD-11** (#37) | An explicit "cannot submit" state for an unreachable technician? | TAKEOVER-1's condition. |
-| **BD-19** (new) | What shape is a discount — percentage or amount, per line or per job, before or after VAT, and may a Coordinator authorise one up to a limit? | Nothing: COST-5 is built and working to the recommended shape. Answering it changes a rule, not a feature. **Recommended: keep the fixed amount before VAT, and add a Coordinator ceiling with a figure EJE name.** |
-| **BD-20** (#28) | Does a job screen show where the machine stood AT THE TIME of the work? | Nothing: the record and the function exist. **Recommended: both on a closed job, the register alone on one in progress.** |
-| **BD-21** (#26) | Is local text recognition switched on, with which limits, and on which machine? | Nothing: unsearchable scans say they are unsearchable, which is truthful. **Recommended: switch it on for the DEMONSTRATION first, with the defaults, and measure what a real manual costs before deciding about production.** Twenty minutes to an hour of CPU per 214-page manual, on a VPS that also serves the tablets. |
+| ~~**BD-19** (#61)~~ | ~~What shape is a discount?~~ | **ANSWERED 23 October: THE RECOMMENDED SHAPE STANDS** — fixed amount, before VAT, Master only — **and the Coordinator ceiling was DECLINED.** No code changed; `7203721` adds the assertion that a Coordinator does NOT hold `jobs.applyDiscount`, so granting it later is a deliberate act. |
+| ~~**BD-20** (#62)~~ | ~~Does a job screen show where the machine stood AT THE TIME of the work?~~ | **ANSWERED 23 October: yes on a CLOSED job, the register on one in progress**, implemented `7203721` as at the day the work was COMPLETED. **Where the history cannot answer it says UNKNOWN** rather than presenting today's register as historical fact — the common case today, and the part the owner was explicit about. |
+| ~~**BD-21** (#63)~~ | ~~Is local text recognition switched on, with which limits, and on which machine?~~ | **ANSWERED 23 October: THE DEMONSTRATION FIRST, MEASURED**, implemented `fe3dd1e`. **23–25 seconds per A4 page at 300 dpi**, two samples, byte-identical text — so **a 214-page manual is ~83–89 minutes and cannot be read under the shipped defaults**, and is partially indexed. Raising a limit is a decision about how much of the VPS one document may occupy, and is REPORTED in `docs/library-ocr.md` §5 rather than taken. Nothing was installed on the production VPS. |
 | **BD-03** (#38), **BD-08** (#39), **BD-10** (#40) | Naming and visibility questions. | Cosmetic. |
 
 ## By the areas asked about
@@ -136,6 +155,24 @@ and whether `field` should be the default audience — both decisions, neither w
 **User administration** — built and tested, including who may create whom (a
 Coordinator may add a Technician and nothing else; only a Master may add a
 Master). Exercised again on PostgreSQL in this pass.
+
+**Customer notes and documents** — **BUILT** on 23 October. The tab named
+"Notes & Documents" held neither: account notes could not be written by anybody
+(no operation, no route, no control — since the register was built), and the
+Documents card beside them was hard-coded to say storage was simulated while
+the real panel sat on the Overview tab. Both real panels are now on that tab,
+and an edit to a note says it is an edit while keeping the original author and
+date. A Coordinator could always create and edit customers; the refusal message
+said otherwise and was wrong.
+
+**Create New Job** — **BUILT** on 23 October. Machine and priority are optional
+on a breakdown and a test-and-repair job, and NULL rather than defaulted — a
+breakdown used to carry "Urgent" that nobody chose. The attachment control takes
+photographs and videos only, enforced on the bytes. Test & Repair carries the
+unit booked in (part number, description, quantity) and the customer's quote
+number, with the fault description optional there. The Counter Collection tick
+box is gone: who is collecting is recorded at the collection, and the server
+refuses it before the job is finished.
 
 **Draft-job release** — **BUILT** on 22 October and invisible to everybody but a
 Master, including a Coordinator who may otherwise read every job and a technician
