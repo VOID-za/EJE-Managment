@@ -397,6 +397,27 @@ describe('the three things the last deployment pass could not see', () => {
     expect(check?.detail).toMatch(/library:ocr/u);
   });
 
+  it('WARNS when text recognition is on in PRODUCTION, which BD-21 did not ask for', () => {
+    /*
+     * BD-21 was answered as "the demonstration environment first, and measure
+     * before deciding about production". A production deployment running it is
+     * therefore recognition nobody approved, on the machine that also serves
+     * the tablets — a warning rather than a failure, because the deployment
+     * works and nothing leaves the premises.
+     */
+    const production = checkTextRecognition({ EJE_OCR: 'local', EJE_DEPLOYMENT: 'production' })[0];
+    expect(production?.verdict).toBe('warn');
+    expect(production?.detail).toMatch(/PRODUCTION/u);
+    expect(production?.detail).toMatch(/BD-21/u);
+    // The measured cost, because "it is slow" is not something to act on.
+    expect(production?.detail).toMatch(/25 seconds/u);
+
+    // And the demonstration posture is the one it was asked for.
+    const demonstration = checkTextRecognition({ EJE_OCR: 'local' })[0];
+    expect(demonstration?.verdict).toBe('warn');
+    expect(demonstration?.detail).toMatch(/demonstration posture/u);
+  });
+
   it('REPORTS export auditing as always on, with nothing to configure', () => {
     /*
      * BD-18 was answered on 23 October 2026: every export is recorded and the

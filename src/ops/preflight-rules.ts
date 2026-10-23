@@ -389,12 +389,39 @@ export const checkTextRecognition = (env: PreflightEnvironment): readonly Check[
       ),
     ];
   }
+  /*
+   * ON IN PRODUCTION IS NOT WHAT THE OWNER ASKED FOR. BD-21, answered.
+   *
+   * They answered on 23 October 2026: the DEMONSTRATION environment first, and
+   * measure before deciding about production. So a production deployment with
+   * `EJE_OCR=local` is running something nobody has approved, on the machine
+   * that also serves the tablets — and the measured cost is why that matters:
+   * about 25 seconds of CPU per scanned A4 page on the development container,
+   * which puts a 214-page manual near an hour and a half.
+   *
+   * A WARNING RATHER THAN A FAILURE, deliberately: the deployment works, the
+   * recognition is real and local, and nothing leaves the premises. What is
+   * wrong is that it is a decision nobody recorded, which is a thing to tell an
+   * operator rather than a thing to refuse to start over.
+   */
+  const production = value(env, 'EJE_DEPLOYMENT').toLowerCase() === 'production';
+  if (production) {
+    return [
+      warn(
+        'Text recognition',
+        'EJE_OCR=local on a deployment that declares itself PRODUCTION. BD-21 was answered as ' +
+          '"the demonstration environment first, and measure before deciding about production" — ' +
+          'so this is recognition nobody has approved, on the machine that also serves the ' +
+          'tablets (about 25 seconds of CPU per scanned page, measured).',
+      ),
+    ];
+  }
   return [
     warn(
       'Text recognition',
       'EJE_OCR=local. Run `npm run library:ocr -- --report` to confirm the binaries are ' +
         'actually installed — if they are not, every document settles as "no engine" and ' +
-        'nothing says so on a screen.',
+        'nothing says so on a screen. This is the demonstration posture BD-21 asked for.',
     ),
   ];
 };
