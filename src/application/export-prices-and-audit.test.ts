@@ -7,12 +7,7 @@ import {
 } from './exports';
 import { emptyClosedJobFilters } from './closed-jobs';
 import { emptyJobListFilters } from './job-list-filters';
-import {
-  describeExport,
-  EXPORT_AUDIT,
-  exportAuditEnabled,
-  recordExport,
-} from './export-audit';
+import { describeExport, recordExport } from './export-audit';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
@@ -27,20 +22,22 @@ import type { User, UserRole } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 
 /**
- * TWO OPEN DECISIONS, EACH BUILT UP TO THE POINT WHERE ONLY THE DECISION IS
- * LEFT. BD-17, BD-18.
+ * TWO DECISIONS, BOTH ANSWERED BY THE OWNER ON 23 OCTOBER 2026.
+ * BD-17, BD-18.
  *
- * BD-17 — MAY THE ISSUED PRICES BE EXPORTED, AND BY WHOM? Two questions, and
- * the implementation separates them: the COLUMNS exist (so "may it be exported
- * at all" is a decision EJE can see the shape of) and they are appended only
- * for `jobs.exportPrices`, WHICH NO ROLE HOLDS (so "by whom" is one line in
- * `access.ts`). Every role is asserted refused below.
+ * BD-17 — MAY THE ISSUED PRICES BE EXPORTED, AND BY WHOM? **The office: a
+ * Master and a Coordinator.** A technician may not, and these cases assert that
+ * against the FILE BYTES as well as the column list — a column list that
+ * drifted from the writer would pass the cheap assertion and leak the money.
  *
- * BD-18 — IS AN EXPORT RECORDED ON THE AUDIT TRAIL? The write is built and
- * switched off behind `EJE_EXPORT_AUDIT`, which is a DEPLOYMENT decision rather
- * than a boolean in the source that whoever reads the file might flip. Off, the
- * trail is untouched; on, a real event is written — and both are asserted,
- * because "the mechanism exists" is a claim about code that nobody has run.
+ * BD-18 — IS AN EXPORT RECORDED ON THE AUDIT TRAIL? **Yes, all of them, kept
+ * indefinitely.** There is no longer any configuration that turns it off, and
+ * one case below proves that by setting the old variable to "off" and watching
+ * the event be written anyway.
+ *
+ * WHAT STAYS TRUE WHICHEVER WAY THEY HAD ANSWERED: the audit record names which
+ * COLUMNS were taken and never the rows, and the figures come from the
+ * write-once pricing snapshot rather than being recomputed from today's rates.
  */
 const master = seedUsers.find((user) => user.role === 'master')!;
 
@@ -72,57 +69,77 @@ const build = (actor: User = master): Harness => {
   };
 };
 
-describe('BD-17: the issued prices', () => {
-  it('are NOT in any role’s export today, which is the current behaviour', () => {
-    /*
-     * EVERY ROLE THE SYSTEM HAS. Listed here because `UserRole` is a type
-     * union with no runtime list beside it — and the `satisfies` below is what
-     * makes a role added later fail to compile until somebody decides whether
-     * it may export the money.
-     */
-    const roles = ['master', 'coordinator', 'technician'] satisfies readonly UserRole[];
+describe('BD-17: the issued prices, now that the office may export them', () => {
+  /*
+   * EVERY ROLE THE SYSTEM HAS. Listed here because `UserRole` is a type union
+   * with no runtime list beside it — and the `satisfies` is what makes a role
+   * added later fail to compile until somebody decides whether it may export
+   * the money.
+   */
+  const roles = ['master', 'coordinator', 'technician'] satisfies readonly UserRole[];
+
+  it('are in the OFFICE’s export, and in no technician’s', () => {
+    const permitted = new Set(['master', 'coordinator']);
 
     for (const role of roles) {
       const headers = closedJobColumnsFor({ role }).map((column) => column.header);
       for (const priced of closedJobPriceColumns) {
-        expect(headers, `${role} / ${priced}`).not.toContain(priced);
+        if (permitted.has(role)) {
+          expect(headers, `${role} / ${priced}`).toContain(priced);
+        } else {
+          expect(headers, `${role} / ${priced}`).not.toContain(priced);
+        }
       }
     }
   });
 
-  it('are not in the BYTES of a real export either', async () => {
-    // Asserted against the file, not the column list: a column list that
-    // drifted from the writer would pass the test above and leak the money.
+  it('are in the BYTES of a Master’s export', async () => {
     const harness = build();
     const file = await exportClosedJobs(harness.repos, master, emptyClosedJobFilters);
 
     expect(file.csv.length).toBeGreaterThan(0);
     for (const priced of closedJobPriceColumns) {
-      expect(file.csv).not.toContain(priced);
+      expect(file.csv).toContain(priced);
     }
     // And the reported columns match the file, which is what the audit record
     // names.
     for (const header of file.columns) expect(file.csv).toContain(header);
   });
 
-  it('ARE built, so answering BD-17 is a capability grant and not a feature', () => {
-    /*
-     * The other half of the decision. A hypothetical role holding
-     * `jobs.exportPrices` gets four more columns, in a fixed order, with the
-     * date the rates were frozen beside the figures — because a total with no
-     * date is a figure somebody compares against this year's rates and
-     * queries.
-     */
-    const headers = closedJobColumnsFor({ role: 'master' }).map((column) => column.header);
-    expect(headers).not.toContain('Total (incl. VAT)');
+  it('are in the BYTES of a Coordinator’s export too', async () => {
+    const coordinator = seedUsers.find((user) => user.role === 'coordinator')!;
+    const harness = build(coordinator);
+    const file = await exportClosedJobs(harness.repos, coordinator, emptyClosedJobFilters);
 
-    // The columns themselves, pinned so the shape of the answer is visible.
+    for (const priced of closedJobPriceColumns) {
+      expect(file.csv).toContain(priced);
+    }
+  });
+
+  it('pins the four columns and their order, so the shape of the answer is visible', () => {
     expect(closedJobPriceColumns).toEqual([
       'Subtotal (excl. VAT)',
       'VAT',
       'Total (incl. VAT)',
       'Priced at',
     ]);
+  });
+
+  it('come from the FROZEN snapshot, never recomputed from today’s rates', async () => {
+    /*
+     * The figures are read from `listIssuedTotals`, which reads the write-once
+     * `pricing_snapshots` columns. A job with no snapshot exports an EMPTY cell
+     * rather than "0.00" — a zero is a figure people believe.
+     */
+    const harness = build();
+    const file = await exportClosedJobs(harness.repos, master, emptyClosedJobFilters);
+    const lines = file.csv.split('\r\n').filter((line) => line.length > 0);
+
+    expect(lines.length).toBeGreaterThan(1);
+    // No row claims a zero total: either a real figure or nothing at all.
+    for (const line of lines.slice(1)) {
+      expect(line).not.toMatch(/,"?0\.00"?,/u);
+    }
   });
 });
 
@@ -148,46 +165,33 @@ describe('BD-18: recording an export', () => {
       takenAt: harness.context.services.clock.now(),
     });
 
-  it('is OFF unless the deployment says otherwise', () => {
-    expect(exportAuditEnabled({})).toBe(false);
-    expect(exportAuditEnabled({ EJE_EXPORT_AUDIT: 'yes' })).toBe(false);
-    expect(exportAuditEnabled({ EJE_EXPORT_AUDIT: 'on' })).toBe(true);
-    // The getter reads the environment at call time, so a test can change it.
-    expect(EXPORT_AUDIT.recording).toBe(false);
-  });
-
-  it('writes NOTHING to the trail while it is off', async () => {
+  it('CANNOT BE TURNED OFF, which is what "audit all exports" means', async () => {
+    /*
+     * The old `EJE_EXPORT_AUDIT` is no longer read anywhere. Setting it to the
+     * value that used to mean "off" must change nothing — this is the case that
+     * would fail if somebody reintroduced a switch.
+     */
+    process.env.EJE_EXPORT_AUDIT = 'off';
     const harness = build();
     const before = (await harness.repos.activity.list(undefined)).length;
 
     const outcome = await recordExport(harness.context, record(harness, 12));
 
-    expect(outcome.written).toBe(false);
-    expect(outcome.reason).toMatch(/BD-18/u);
-    expect((await harness.repos.activity.list(undefined)).length).toBe(before);
+    expect(outcome.written).toBe(true);
+    expect((await harness.repos.activity.list(undefined)).length).toBe(before + 1);
   });
 
-  it('is still off after a REAL export, asserted on the trail', async () => {
-    // Through the route's own path rather than a direct call, because that is
-    // where an accidental write would appear.
+  it('writes the event with the variable unset, too', async () => {
+    delete process.env.EJE_EXPORT_AUDIT;
     const harness = build();
-    const before = new Set((await harness.repos.activity.list(undefined)).map((e) => e.id));
+    const before = (await harness.repos.activity.list(undefined)).length;
 
-    await exportJobList(harness.repos, master, emptyJobListFilters);
-    await exportClosedJobs(harness.repos, master, emptyClosedJobFilters);
+    await recordExport(harness.context, record(harness, 4));
 
-    const after = await harness.repos.activity.list(undefined);
-    expect(after.filter((event) => !before.has(event.id))).toEqual([]);
+    expect((await harness.repos.activity.list(undefined)).length).toBe(before + 1);
   });
 
-  it('WRITES A REAL EVENT when the deployment switches it on', async () => {
-    /*
-     * The half that was previously a `throw`. A server that sets
-     * `EJE_EXPORT_AUDIT=on` has decided, and answering that with an exception
-     * would mean the exports stop working — a worse answer than either yes or
-     * no.
-     */
-    process.env.EJE_EXPORT_AUDIT = 'on';
+  it('WRITES A REAL EVENT, with the figures and the filters', async () => {
     const harness = build();
 
     const outcome = await recordExport(harness.context, record(harness, 12));

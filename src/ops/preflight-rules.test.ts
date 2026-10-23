@@ -397,17 +397,30 @@ describe('the three things the last deployment pass could not see', () => {
     expect(check?.detail).toMatch(/library:ocr/u);
   });
 
-  it('REPORTS export auditing either way, which is the only reason it exists', () => {
-    const off = checkExportAudit({});
-    expect(off[0]?.verdict).toBe('ok');
-    expect(off[0]?.detail).toMatch(/BD-18/u);
+  it('REPORTS export auditing as always on, with nothing to configure', () => {
+    /*
+     * BD-18 was answered on 23 October 2026: every export is recorded and the
+     * records are kept indefinitely. This check used to report whether
+     * `EJE_EXPORT_AUDIT` was set; there is no longer anything to set, and the
+     * line now states the behaviour and the retention.
+     */
+    const check = checkExportAudit({})[0];
+    expect(check?.verdict).toBe('ok');
+    expect(check?.detail).toMatch(/always/iu);
+    expect(check?.detail).toMatch(/indefinitely/u);
+    // What is recorded and what is not, because "audited" without that is a
+    // word somebody has to go and look up.
+    expect(check?.detail).toMatch(/never the rows/iu);
+  });
 
-    const on = checkExportAudit({ EJE_EXPORT_AUDIT: 'on' });
-    expect(on[0]?.verdict).toBe('ok');
-    // It says what it IS — monitoring of staff, with unmanaged retention —
-    // because a deployment doing that without anybody saying so is the
-    // surprise this line prevents.
-    expect(on[0]?.detail).toMatch(/monitoring of staff/u);
-    expect(on[0]?.detail).toMatch(/retention/u);
+  it('SAYS SO when a stale EJE_EXPORT_AUDIT is still in the file', () => {
+    /*
+     * An operator who set the variable on an earlier release would otherwise
+     * never learn that it is now dead — and might believe they could turn the
+     * auditing back off with it.
+     */
+    const check = checkExportAudit({ EJE_EXPORT_AUDIT: 'on' })[0];
+    expect(check?.verdict).toBe('ok');
+    expect(check?.detail).toMatch(/NO LONGER READ/u);
   });
 });

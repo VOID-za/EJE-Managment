@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EXPORT_ROW_LIMIT,
+  closedJobColumnsFor,
   closedJobsExportColumns,
   exportClosedJobs,
   exportJobList,
@@ -191,37 +192,57 @@ describe('the closed-job archive export', () => {
     ).rejects.toThrowError(/office screen/);
   });
 
-  it('is served to the office', async () => {
+  it('is served to the office, with that role’s own columns', async () => {
+    /*
+     * THE HEADER IS THE ROLE'S COLUMN LIST, not the base one. Since BD-17 was
+     * answered both office roles hold `jobs.exportPrices`, so their file
+     * carries the four price columns after the base ones — and asserting
+     * against `closedJobColumnsFor` is what keeps this case honest whichever
+     * roles EJE name.
+     */
     for (const actor of [master, coordinator]) {
       const file = await exportClosedJobs(harness.repos, actor, closedFilters());
       expect(file.rowCount).toBeGreaterThan(0);
       expect(file.csv.replace(CSV_BOM, '').split('\r\n')[0]).toBe(
-        closedJobsExportColumns.join(','),
+        closedJobColumnsFor(actor)
+          .map((column) => column.header)
+          .join(','),
       );
     }
   });
 
   /*
-   * THE ONE EXCLUSION THAT IS A DECISION RATHER THAN AN OVERSIGHT.
+   * THE MONEY IS BEHIND A CAPABILITY, AND THE BASE LIST STILL HAS NONE OF IT.
    *
-   * `ClosedJobRow` carries the pricing snapshot the job was issued at — it is
-   * there so a historical document re-renders at its own rates. The archive
-   * SCREEN shows no figures, so the file does not either, and who may have a
-   * spreadsheet of what every job was charged at is a question for EJE.
+   * BD-17 was answered on 23 October 2026: the office may export the issued
+   * prices. What remains true, and is what this case now guards, is that the
+   * figures arrive ONLY through `jobs.exportPrices` — the base column list
+   * carries no money at all, so a role that does not hold the capability gets
+   * a file with none in it. `export-prices-and-audit.test.ts` asserts the
+   * granted and refused roles against the bytes.
+   *
+   * ALSO STILL TRUE: the RATES are never exported. `ClosedJobRow` carries the
+   * pricing snapshot so a historical document re-renders at its own rates, and
+   * none of those rate figures reaches the file — what the office gets is the
+   * four issued TOTALS, not the hourly rates behind them.
    */
-  it('carries no part of the issued price, although the read model holds it', async () => {
+  it('keeps the money out of the base column list, and the RATES out of the file', async () => {
     const file = await exportClosedJobs(harness.repos, master, closedFilters());
     const snapshots = await harness.repos.jobs.listPricingSnapshots(
       (await harness.repos.jobs.listSummaries({ statuses: ['closed'] })).map((job) => job.id),
     );
-    const amounts = [...snapshots.values()]
+    const rates = [...snapshots.values()]
       .flatMap((snapshot) => (snapshot === null ? [] : Object.values(snapshot)))
       .filter((value): value is number => typeof value === 'number' && value > 1000);
 
-    expect(amounts.length).toBeGreaterThan(0);
-    for (const amount of amounts) {
-      expect(file.csv).not.toContain(String(amount));
+    expect(rates.length).toBeGreaterThan(0);
+    for (const rate of rates) {
+      // The rate in cents, as the snapshot holds it, appears nowhere.
+      expect(file.csv).not.toContain(String(rate));
     }
+
+    // And the base list — what a role without the capability receives — names
+    // no figure of any kind.
     expect(closedJobsExportColumns.join(' ').toLowerCase()).not.toMatch(
       /total|price|rate|amount|vat/,
     );

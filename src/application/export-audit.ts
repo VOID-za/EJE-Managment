@@ -3,82 +3,39 @@ import type { OperationContext } from './context';
 import { audit } from './audit';
 
 /**
- * WHETHER AN EXPORT IS RECORDED IS NOT THIS FILE'S DECISION. BD-18.
+ * EVERY SPREADSHEET EXPORT IS RECORDED, AND KEPT. BD-18, ANSWERED.
  *
- * SEARCH-4 gave the office two spreadsheet exports. Issue #25 asked a third
- * question with them — *"is an export recorded in the audit trail (a bulk read
- * of customer data is worth a trail)?"* — and it has not been answered. This
- * file is the mechanism, built so that answering it is a one-line change and
- * so that NOT answering it costs nothing.
+ * The owner answered BD-18 (#57) on 23 October 2026: audit all exports, and
+ * retain the records indefinitely. So this file no longer has a switch.
  *
- * IT WRITES NOTHING TODAY, deliberately and visibly:
+ * WHAT IT USED TO BE, because the history explains the shape. It began as a
+ * mechanism that wrote NOTHING — `EXPORT_AUDIT.recording === false` — and then
+ * as an environment variable, `EJE_EXPORT_AUDIT`, so that answering the
+ * question would not need a release. Both were ways of not deciding on EJE's
+ * behalf. The decision is made, so the conditional is gone: there is no
+ * configuration that turns this off, which is what "audit all exports" means.
  *
- *   `EXPORT_AUDIT.recording === false`
+ * THE THREE THINGS THAT MADE IT A DECISION, and what the answer settles:
  *
- * and `recordExport` returns the record it WOULD have written. The export
- * routes call it, so the call site is real and tested rather than imagined, and
- * the activity trail is untouched — which `export-audit.test.ts` asserts by
- * counting events before and after an export.
+ *  1. WHAT THE TRAIL MEANS. Every other event on it is a CHANGE to a record;
+ *     this is the first READ. The owner has accepted that, and the activity
+ *     screen gives exports their own filter group so the two kinds stay
+ *     distinguishable rather than mixed into "Record changes".
+ *  2. WHAT THE OFFICE SEES. One group, on a screen only the office can read
+ *     (`activity.viewAll` — a Master or a Coordinator, never a technician).
+ *  3. WHAT EJE RETAIN ABOUT THEIR OWN STAFF. "Who exported the customer list,
+ *     when, with which filters" is monitoring, and the owner has decided it is
+ *     monitoring EJE want, kept indefinitely. NOTHING IN THIS SYSTEM EXPIRES
+ *     OR DELETES AN AUDIT EVENT — there is no retention job, no sweeper and no
+ *     TTL, so "indefinitely" is the behaviour rather than a promise. The
+ *     backup carries the events with every other row.
  *
- * WHY NOT JUST WRITE THE EVENT AND BE DONE. Three reasons, each a change to
- * something the owner owns:
- *
- *  1. IT CHANGES WHAT THE TRAIL MEANS. Every event in it today is a CHANGE to
- *     a record — a job accepted, a line amended, a document approved. Reads are
- *     not on it, anywhere. Adding one kind of read makes the trail's silence
- *     about every other read significant in a way it was not before.
- *  2. IT CHANGES WHAT THE OFFICE SEES. The activity screen is where a Master
- *     looks for what happened to a job. A trail where every download of the
- *     Jobs list appears is a trail somebody has to filter before it is useful,
- *     and that is a decision about their screen, not a detail of an export.
- *  3. IT IS A NEW RETAINED RECORD ABOUT A PERSON. "Who exported the customer
- *     list, when, and with which filters" is monitoring of staff. Useful,
- *     defensible, and not something to switch on without asking.
- *
- * WHAT ENABLING IT WOULD TAKE, so the recommendation is precise rather than
- * "wire it up": set `recording` to true, add `data_exported` to
- * `ActivityEventType`, give it an icon and a filter group on the activity
- * screen, and decide retention. The `audit_events.type` column is `text`, so
- * no migration is needed. See BD-18 in `docs/SCOPE.md`.
+ * WHAT IS NEVER RECORDED: THE ROWS. An audit entry holding a copy of the
+ * exported data would be a second, unreviewed store of the same customer
+ * information, and a trail is supposed to say what happened rather than keep
+ * the goods. No prices either, even now that the office may export them — the
+ * record says which COLUMNS were taken, not what was in them.
  */
-/**
- * WHETHER THIS DEPLOYMENT RECORDS EXPORTS. BD-18, and still EJE's to answer.
- *
- * IT IS NOW CONFIGURATION RATHER THAN A CONSTANT IN THE SOURCE, and the
- * difference matters in both directions:
- *
- *  - A boolean in a file is flipped by whoever is reading the file, which is
- *    how an unapproved record about EJE's own staff gets switched on by
- *    somebody who thought they were finishing a feature. An environment
- *    variable is a deployment decision, made by whoever administers the
- *    server, in the file where the other decisions of that kind live.
- *  - And it means ANSWERING BD-18 does not need a release. The write is built,
- *    tested and off; `EJE_EXPORT_AUDIT=on` turns it on.
- *
- * OFF ON EVERY DEPLOYMENT TODAY, which `export-audit.test.ts` asserts by
- * counting events before and after a real export. The three things that made
- * this a decision rather than a detail are unchanged and are listed above.
- */
-export const exportAuditEnabled = (
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): boolean => (env.EJE_EXPORT_AUDIT ?? '').trim().toLowerCase() === 'on';
-
-export const EXPORT_AUDIT = {
-  /**
-   * Whether the trail is written, read from the environment at call time.
-   *
-   * A getter rather than a value, so a test can set the variable and see the
-   * change without reloading the module — and so nothing caches a decision
-   * somebody made after the process started.
-   */
-  get recording(): boolean {
-    return exportAuditEnabled();
-  },
-  reason:
-    'Whether an export is recorded on the audit trail is an open business decision (BD-18). ' +
-    'The mechanism is built and switched off: set EJE_EXPORT_AUDIT=on to record them.',
-} as const;
-
 /** Which export was taken. Not a capability and not a route — a name. */
 export type ExportKind = 'jobs' | 'closed-jobs';
 
@@ -122,48 +79,44 @@ export const describeExport = (input: {
 });
 
 export interface ExportAuditOutcome {
-  /** False while BD-18 is open. There is no other value today. */
+  /**
+   * Always true since BD-18 was answered.
+   *
+   * Kept on the outcome rather than removed, because the export ROUTES read it
+   * and a test asserts it — and because a field that is always true is a
+   * cheaper thing to read than a comment claiming it.
+   */
   readonly written: boolean;
-  /** The record that would have been written, for a test to inspect. */
+  /** The record that was written, for a test to inspect. */
   readonly record: ExportRecord;
   readonly reason: string;
 }
 
 /**
- * The boundary. Called by the export routes; writes nothing while BD-18 is open.
+ * THE BOUNDARY, AND IT WRITES. BD-18, answered.
  *
- * It takes an `OperationContext` it does not currently use, and that is the
- * point: the signature is the one a real implementation needs (an actor, a
- * clock and a repository bundle), so switching it on is a change inside this
- * function rather than a change at every call site.
+ * Called by both export routes, AFTER the file has been built — so an export
+ * that was refused for authority or for being too large records nothing, which
+ * is right: nothing left the building.
+ *
+ * WHAT IS WRITTEN: who, when, which export, which filters, how many rows and
+ * which columns. NOT THE ROWS — an audit entry holding a copy of the exported
+ * data would be a second, unreviewed store of the same customer information,
+ * and a trail is supposed to say what happened rather than keep the goods.
+ *
+ * `jobId: null` because an export is not about one job. It appears on the
+ * activity screen under its own "Exports" group, which is where somebody
+ * looking for "who took the customer list" would look — and which keeps it
+ * distinguishable from the record CHANGES that are every other event there.
+ *
+ * IT IS PERSISTED LIKE EVERY OTHER AUDIT EVENT, through `audit` into
+ * `audit_events`, inside the caller's transaction. Nothing in this system
+ * expires or deletes one.
  */
 export const recordExport = async (
   context: OperationContext,
   record: ExportRecord,
 ): Promise<ExportAuditOutcome> => {
-  if (!EXPORT_AUDIT.recording) {
-    return { written: false, record, reason: EXPORT_AUDIT.reason };
-  }
-
-  /*
-   * THE WRITE, AND IT IS A REAL ONE NOW.
-   *
-   * It used to throw here, on the reasoning that an implementation which looks
-   * finished is how an unapproved side effect gets switched on. That reasoning
-   * was right about a BOOLEAN IN THE SOURCE and wrong about a deployment
-   * variable: a server that sets `EJE_EXPORT_AUDIT=on` has decided, and
-   * answering it with an exception would mean the exports stop working — which
-   * is a worse answer than either yes or no.
-   *
-   * WHAT IS WRITTEN: who, when, which export, which filters, how many rows and
-   * which columns. NOT THE ROWS — an audit entry holding a copy of the exported
-   * data would be a second, unreviewed store of the same customer information,
-   * and a trail is supposed to say what happened rather than keep the goods.
-   *
-   * `jobId: null` because an export is not about one job. It appears on the
-   * activity screen under "Record changes" with the `export` icon, which is
-   * where somebody looking for "who took the customer list" would look.
-   */
   await audit(context, {
     jobId: null,
     type: 'data_exported',

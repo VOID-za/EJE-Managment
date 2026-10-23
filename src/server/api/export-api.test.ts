@@ -125,23 +125,39 @@ describe('an export and the audit trail', () => {
   });
 
   /*
-   * BD-18 IS OPEN, so an export must change nothing about the trail. The
-   * mechanism is called by both export routes and writes nothing; if it is
-   * ever switched on without the decision, this is what fails.
+   * BD-18 IS ANSWERED: every export is recorded. Asserted through the ROUTES
+   * rather than the operation, because the routes are where the call site lives
+   * and a boundary that nobody calls is the failure this guards against.
    */
-  it('records no activity event, because whether it should is undecided', async () => {
-    const before = await master.get<{ events: readonly { id: string; type: string }[] }>(
-      '/api/activity',
-    );
+  it('records an activity event for EACH export', async () => {
+    const trail = async () =>
+      (
+        await master.get<{ events: readonly { id: string; type: string }[] }>('/api/activity')
+      ).data.events;
+
+    const before = await trail();
 
     expect((await master.download('/api/jobs/export?status=all')).status).toBe(200);
     expect((await master.download('/api/jobs/closed/export')).status).toBe(200);
 
-    const after = await master.get<{ events: readonly { id: string; type: string }[] }>(
-      '/api/activity',
-    );
-    expect(after.data.events).toHaveLength(before.data.events.length);
-    expect(after.data.events.some((event) => /export/i.test(event.type))).toBe(false);
+    const after = await trail();
+    expect(after.length).toBe(before.length + 2);
+    expect(after.filter((event) => event.type === 'data_exported')).toHaveLength(2);
+  });
+
+  it('records NOTHING when the export was refused, because nothing left the building', async () => {
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const trail = async () =>
+      (
+        await master.get<{ events: readonly { id: string; type: string }[] }>('/api/activity')
+      ).data.events;
+
+    const before = await trail();
+    // The archive is office-only: `loadClosedJobs` refuses before it reads a
+    // row, so there is no export to record.
+    expect((await technician.download('/api/jobs/closed/export')).status).toBe(403);
+
+    expect(await trail()).toHaveLength(before.length);
   });
 
   it('produces byte-identical output across repeated requests', async () => {

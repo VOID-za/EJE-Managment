@@ -69,12 +69,23 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
         'machine_updated',
         'document_viewed',
         'checklist_completed',
-        // BD-18: where somebody looks for "who took the customer list". It is
-        // in this group rather than its own, because one more group for an
-        // event most deployments never write would be a filter that is always
-        // empty.
-        'data_exported',
       ],
+    },
+    {
+      /*
+       * EXPORTS, IN A GROUP OF THEIR OWN. BD-18, answered.
+       *
+       * It used to sit under "Record changes", on the reasoning that one more
+       * group for an event most deployments never wrote would be a filter that
+       * was always empty. The owner has since decided that EVERY export is
+       * recorded, so the group is never empty — and the separation now earns
+       * itself: every other event on this trail is a CHANGE to a record, and an
+       * export is a READ. Mixing the two would make "Record changes" mean
+       * something it does not.
+       */
+      value: 'exports',
+      label: 'Exports',
+      types: ['data_exported'],
     },
   ];
 

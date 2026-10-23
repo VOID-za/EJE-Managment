@@ -408,14 +408,25 @@ export const checkTextRecognition = (env: PreflightEnvironment): readonly Check[
  * way, which is the only reason this check exists. Neither state is a problem.
  */
 export const checkExportAudit = (env: PreflightEnvironment): readonly Check[] => {
-  const on = value(env, 'EJE_EXPORT_AUDIT').toLowerCase() === 'on';
+  /*
+   * BD-18 IS ANSWERED, SO THERE IS NOTHING TO CONFIGURE. 23 October 2026.
+   *
+   * This used to report whether `EJE_EXPORT_AUDIT` was set, because the owner
+   * had not decided. They have: every export is recorded and the records are
+   * kept indefinitely. The variable no longer does anything, which is worth
+   * SAYING rather than silently ignoring — an operator who set it on an earlier
+   * release would otherwise never learn that it is now dead, and might believe
+   * they could turn the auditing off with it.
+   */
+  const stale = value(env, 'EJE_EXPORT_AUDIT').length > 0;
   return [
     ok(
       'Export auditing',
-      on
-        ? 'ON. Every spreadsheet export is recorded on the audit trail with who took it and ' +
-            'which filters — monitoring of staff, and retention is unmanaged (BD-18).'
-        : 'Off. Spreadsheet exports are not recorded on the audit trail (BD-18, open).',
+      'ON, always. Every spreadsheet export is recorded with who took it, when, the filters and ' +
+        'the columns — never the rows. Records are kept indefinitely (BD-18, answered).' +
+        (stale
+          ? ' EJE_EXPORT_AUDIT is set and is NO LONGER READ; it can be removed from this file.'
+          : ''),
     ),
   ];
 };

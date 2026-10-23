@@ -1,21 +1,24 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { EXPORT_AUDIT, describeExport, recordExport } from './export-audit';
+import { describeExport, recordExport } from './export-audit';
 import { exportClosedJobs, closedJobsExportColumns } from './exports';
 import { emptyClosedJobFilters } from './closed-jobs';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
 /**
- * THE EXPORT-AUDIT MECHANISM, AND THE FACT THAT IT IS OFF. BD-18.
+ * THE EXPORT AUDIT, NOW THAT IT WRITES. BD-18, ANSWERED.
  *
- * Issue #25 asked whether a spreadsheet export belongs on the audit trail.
- * Nobody has answered, so this is a mechanism and not a feature: the export
- * routes call it, it writes nothing, and these tests hold both halves of that
- * — the record it WOULD write is right, and the trail is untouched.
+ * Issue #25 asked whether a spreadsheet export belongs on the audit trail, and
+ * the owner answered on 23 October 2026: audit all exports, keep the records
+ * indefinitely. These cases used to assert the opposite — that the mechanism
+ * was built and wrote NOTHING — and the inversion is the decision, not a
+ * relaxation: the discriminating test still takes a REAL export through the
+ * real operation and then reads the trail, it just expects to find the event
+ * now instead of expecting the trail to be untouched.
  *
- * The second half is the one worth having. An audit event that appeared
- * quietly would change what the trail means (today it records CHANGES, never
- * reads), what the office's activity screen shows, and what EJE retain about
- * their own staff. None of those is an implementation detail.
+ * WHAT DID NOT CHANGE, and is still the important half: the record carries who,
+ * when, which export, the filters, the row count and the columns — and NEVER
+ * THE ROWS. An audit entry holding a copy of the exported data would be a
+ * second, unreviewed store of the same customer information.
  */
 const master = seedUser('user-master-elmarie');
 
@@ -62,19 +65,14 @@ describe('what an export record would say', () => {
   });
 });
 
-describe('the boundary, while BD-18 is open', () => {
+describe('the boundary, now that BD-18 is answered', () => {
   let harness: Harness;
 
   beforeEach(() => {
     harness = buildHarness();
   });
 
-  it('is off, and says why', () => {
-    expect(EXPORT_AUDIT.recording).toBe(false);
-    expect(EXPORT_AUDIT.reason).toMatch(/BD-18/);
-  });
-
-  it('writes nothing, and hands back the record it would have written', async () => {
+  it('writes the event, and reports that it wrote', async () => {
     const before = await harness.repos.activity.list();
 
     const outcome = await recordExport(
@@ -89,22 +87,44 @@ describe('the boundary, while BD-18 is open', () => {
       }),
     );
 
-    expect(outcome.written).toBe(false);
-    expect(outcome.reason).toMatch(/open business decision/i);
+    expect(outcome.written).toBe(true);
     expect(outcome.record.rowCount).toBe(7);
 
     const after = await harness.repos.activity.list();
-    expect(after).toHaveLength(before.length);
+    expect(after).toHaveLength(before.length + 1);
+  });
+
+  it('has NO configuration that turns it off, which is what "audit all" means', async () => {
+    // The variable that used to control this is no longer read anywhere. Set
+    // it to the old "off" and the export is still recorded.
+    const previous = process.env.EJE_EXPORT_AUDIT;
+    process.env.EJE_EXPORT_AUDIT = 'off';
+    try {
+      const before = await harness.repos.activity.list();
+      await recordExport(
+        harness.as(master),
+        describeExport({
+          kind: 'jobs',
+          actor: master,
+          filters: {},
+          rowCount: 1,
+          columns: ['Job number'],
+          takenAt: harness.services.clock.now(),
+        }),
+      );
+      expect(await harness.repos.activity.list()).toHaveLength(before.length + 1);
+    } finally {
+      if (previous === undefined) delete process.env.EJE_EXPORT_AUDIT;
+      else process.env.EJE_EXPORT_AUDIT = previous;
+    }
   });
 
   /*
-   * THE DISCRIMINATING TEST. Taking a real export through the real operation
-   * must leave the trail exactly as it was — if an event is ever written
-   * without BD-18 being answered, this is what fails.
+   * THE DISCRIMINATING TEST, inverted. Taking a REAL export through the real
+   * operation must now leave an event on the trail — and that event must not
+   * contain any of the exported data.
    */
-  it('leaves the audit trail untouched when an export is actually taken', async () => {
-    const before = await harness.repos.activity.list();
-
+  it('records a real export, naming what was taken and not what was in it', async () => {
     const file = await exportClosedJobs(harness.repos, master, emptyClosedJobFilters);
     expect(file.rowCount).toBeGreaterThan(0);
 
@@ -120,8 +140,40 @@ describe('the boundary, while BD-18 is open', () => {
       }),
     );
 
-    const after = await harness.repos.activity.list();
-    expect(after).toHaveLength(before.length);
-    expect(JSON.stringify(after)).not.toMatch(/export/i);
+    const events = await harness.repos.activity.list();
+    const event = events.find((candidate) => candidate.type === 'data_exported');
+    expect(event).toBeDefined();
+    expect(event!.summary).toMatch(/closed-job archive/i);
+    expect(event!.summary).toContain(String(file.rowCount));
+    expect(event!.detail).toMatch(/elmarie/i);
+
+    /*
+     * AND NOT THE GOODS. A job number out of the real exported file must not
+     * appear anywhere in the trail entry — which is the assertion that would
+     * catch somebody "improving" the record by attaching the rows.
+     */
+    const firstDataLine = file.csv.split('\r\n')[1] ?? '';
+    const jobNumber = firstDataLine.split(',')[0]?.replace(/"/gu, '') ?? '';
+    expect(jobNumber).toMatch(/^EJE-/u);
+    expect(JSON.stringify(event)).not.toContain(jobNumber);
+  });
+
+  it('is a READ on a trail of changes, so it carries no job id', async () => {
+    await recordExport(
+      harness.as(master),
+      describeExport({
+        kind: 'jobs',
+        actor: master,
+        filters: {},
+        rowCount: 3,
+        columns: ['Job number'],
+        takenAt: harness.services.clock.now(),
+      }),
+    );
+
+    const event = (await harness.repos.activity.list()).find(
+      (candidate) => candidate.type === 'data_exported',
+    );
+    expect(event!.jobId).toBeNull();
   });
 });

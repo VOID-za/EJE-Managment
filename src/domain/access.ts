@@ -275,27 +275,33 @@ export type Capability =
    */
   | 'jobs.manageDrafts'
   /**
-   * EXPORTING WHAT EVERY CLOSED JOB WAS CHARGED AT. BD-17.
+   * EXPORTING WHAT EVERY CLOSED JOB WAS CHARGED AT. BD-17, ANSWERED.
    *
-   * **NO ROLE HOLDS THIS, and that is the current behaviour rather than an
-   * oversight.** The closed-job archive's read model carries each job's issued
-   * pricing snapshot — it is there so a historical job card re-renders at its
-   * own rates — and the archive SCREEN shows no figures, so the export carries
-   * none either.
+   * **THE OFFICE: A MASTER AND A COORDINATOR.** The owner answered BD-17 (#56)
+   * on 23 October 2026 — the issued prices may be exported, by both office
+   * roles. A TECHNICIAN IS NOT ONE OF THEM, and that is the part worth stating
+   * rather than leaving to the lists below: the closed-job archive is already
+   * office-only (`loadClosedJobs` refuses a role without `jobs.viewAll` before
+   * it reads a row), and this narrows the money further still.
    *
-   * BD-17 (#56) is two questions: may the issued prices be exported at all,
-   * and if so by a Master only or by a Coordinator too. Granting this
-   * capability to a role is the whole of the second answer, and the columns
-   * themselves are built and tested behind it — so the day EJE answer, the
-   * change is one line in a list below and not a feature.
+   * WHAT THE COLUMNS CARRY: the subtotal excluding VAT, the VAT, the total
+   * including VAT, and the date the figures were frozen — read from the
+   * write-once pricing snapshot, never recomputed, because a Master may amend
+   * a job after the customer signed and before it is issued, and recomputing
+   * would report what the job says TODAY rather than what the customer SIGNED
+   * FOR. A job with no snapshot exports an empty cell, not "0.00".
    *
-   * Until then every role is refused, and `export-prices.test.ts` asserts that
-   * for all four of them.
+   * `export-prices-and-audit.test.ts` asserts the granted roles against the
+   * FILE BYTES and the refused ones against the bytes too — a column list that
+   * drifted from the writer would pass a cheaper assertion and leak the money.
    */
   | 'jobs.exportPrices';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
+  // BD-17, answered by the owner on 23 October 2026: the office may export
+  // what each closed job was charged at. A technician may not.
+  'jobs.exportPrices',
   'jobs.create',
   'jobs.assign',
   'jobs.acceptField',
@@ -352,6 +358,9 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
  */
 const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
+  // BD-17, answered: the Coordinator is the office too, and the owner named
+  // both roles.
+  'jobs.exportPrices',
   'jobs.create',
   'jobs.assign',
   'jobs.captureWork',
