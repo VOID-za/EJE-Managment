@@ -354,17 +354,48 @@ export const JobOverviewPanel = ({
                 MACH-HIST and is open — so nothing here invents an effective
                 date or a previous location.
               */}
-              {historicalJob && (
-                <p
-                  className="mt-3 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2 text-xs text-steel-600"
-                  data-testid="register-is-present-day"
-                >
-                  This is the register as it stands today. If the machine has
-                  been moved or amended since {formatDate(job.submittedAt ?? job.closedAt ?? '')},
-                  the job card issued to the customer still shows what was
-                  recorded then — that document cannot change.
-                </p>
-              )}
+              {/*
+                WHERE THE MACHINE STOOD WHEN THE WORK WAS DONE. BD-20, answered.
+
+                The owner answered on 23 October 2026: a CLOSED job shows the
+                location at the time of the work; a job in progress shows the
+                current register. So on a finished job this states the
+                HISTORICAL site from the recorded movement history — and when
+                the history cannot answer it SAYS SO, rather than letting
+                today's register be read as a record of where the work happened.
+
+                That last case is the common one today, because
+                `machine_movements` records only moves made from now on. Saying
+                "not known" is the honest answer and the one the owner asked
+                for; the alternative is a screen that quietly misreports where
+                a customer's machine was.
+              */}
+              {view.machineLocationAtWork !== null &&
+                (view.machineLocationAtWork.known ? (
+                  <p
+                    className="mt-3 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 px-3 py-2 text-xs text-eje-800"
+                    data-testid="machine-location-at-work"
+                  >
+                    <span className="font-semibold">When this work was done </span>
+                    ({formatDate(view.machineLocationAtWork.asAt)}) the machine stood at{' '}
+                    <span className="font-semibold">{view.machineLocationAtWork.siteName}</span>,{' '}
+                    {view.machineLocationAtWork.customerName}.
+                    {view.machineLocationAtWork.movedSince
+                      ? ' It has been moved since — the register above is where it stands today.'
+                      : ' It has not been moved since.'}
+                  </p>
+                ) : (
+                  <p
+                    className="mt-3 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2 text-xs text-steel-600"
+                    data-testid="machine-location-at-work-unknown"
+                  >
+                    <span className="font-semibold">
+                      Where the machine stood when this work was done is not known.{' '}
+                    </span>
+                    {view.machineLocationAtWork.reason} The job card issued to the customer still
+                    shows what was recorded then — that document cannot change.
+                  </p>
+                ))}
               {/* BD-14: the technician at the machine photographs it from the
                   job that put them there. The register itself stays the
                   office's screen and the record stays unchanged. */}

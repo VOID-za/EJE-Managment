@@ -1,6 +1,9 @@
 import type {
   ChangeRequest,
+  CustomerId,
+  IsoDate,
   JobCorrection,
+  SiteId,
   UnsignedDeliveryAuthorisation,
   ChecklistTemplate,
   Contact,
@@ -17,7 +20,9 @@ import {
   can,
   getJobTypeDefinition,
   jobVisibilityFor,
+  isJobAtOrPastCompletion,
   machineLabel as machineLabelFor,
+  machineLocationAsAt,
   redactRefusalsForViewer,
   showsPricesAt,
   technicianHistoryFrom,
@@ -36,6 +41,34 @@ import type { RepositoryBundle } from '@/data/repositories';
  * Assembling this in one place keeps screens free of ad-hoc lookups and mirrors
  * the shape the production API will return for `GET /jobs/:jobNumber`.
  */
+/**
+ * THE ANSWER TO "WHERE WAS THE MACHINE WHEN THIS WORK HAPPENED?". BD-20.
+ *
+ * A discriminated union rather than a nullable site, because "we do not know"
+ * and "it was here" are different answers and the screen says different things
+ * about them. Collapsing them to null would leave the panel unable to tell the
+ * office that the record cannot answer — which is the whole point of the
+ * owner's instruction.
+ */
+export type MachineLocationAtWork =
+  | {
+      readonly known: true;
+      /** The day the answer is given AS AT: when the work was completed. */
+      readonly asAt: IsoDate;
+      readonly siteId: SiteId;
+      readonly siteName: string;
+      readonly customerId: CustomerId;
+      readonly customerName: string;
+      /** True when the machine has since moved somewhere else. */
+      readonly movedSince: boolean;
+    }
+  | {
+      readonly known: false;
+      readonly asAt: IsoDate | null;
+      /** Why it cannot be answered, in words a person can act on. */
+      readonly reason: string;
+    };
+
 export interface JobView {
   readonly job: Job;
   readonly customer: Customer;
@@ -91,6 +124,28 @@ export interface JobView {
    * authorised — which is the state the panel exists to state plainly.
    */
   readonly unsignedDeliveryAuthorisation: UnsignedDeliveryAuthorisation | null;
+  /**
+   * WHERE THE MACHINE STOOD WHEN THE WORK WAS DONE. BD-20, answered.
+   *
+   * The owner answered BD-20 on 23 October 2026: a CLOSED job shows the
+   * machine's location at the time of the work, and a job in progress shows the
+   * current register. So this is:
+   *
+   *  - `null` on a job that is not finished — the screen shows the register, as
+   *    it always has, because there is nothing historical about a job still
+   *    being worked;
+   *  - a resolved site on a finished job whose history can answer;
+   *  - and `{ known: false }` on a finished job whose history CANNOT. That is
+   *    the case the owner was explicit about: show it as unknown rather than
+   *    presenting the current register as historical fact. It is the common
+   *    case today, because movement history starts empty and only records moves
+   *    made from now on.
+   *
+   * Resolved HERE rather than in the browser because naming a site means
+   * reading the register — including sites since withdrawn, which a machine's
+   * history will name.
+   */
+  readonly machineLocationAtWork: MachineLocationAtWork | null;
   /**
    * Set when the job records a checklist version that is no longer held. The UI
    * must say so rather than quietly rendering today's wording.
@@ -244,6 +299,8 @@ export const loadJobView = async (
    */
   const customerRequests = await repos.changeRequests.listForJob(job.id);
 
+  const machineLocationAtWork = await resolveMachineLocationAtWork(repos, job, machine);
+
   return {
     job,
     customer,
@@ -272,6 +329,90 @@ export const loadJobView = async (
     customerRequests,
     corrections: corrections.map(({ documentStorageKey: _key, ...rest }) => rest),
     unsignedDeliveryAuthorisation,
+    machineLocationAtWork,
+  };
+};
+
+/**
+ * WHERE THE MACHINE STOOD WHEN THE WORK WAS DONE. BD-20, answered.
+ *
+ * NULL ON A JOB THAT IS NOT FINISHED, which is the owner's answer for the
+ * in-progress case: the screen shows the current register, as it always has,
+ * and there is nothing historical about a job still being worked. So nothing is
+ * read for one, which also means no extra query on the screens the field is not
+ * for.
+ *
+ * ON A FINISHED JOB the answer comes from the recorded movement history, as at
+ * THE DAY THE WORK WAS COMPLETED. That date rather than the scheduled one: a
+ * job booked for Tuesday and done on Thursday was done on Thursday, and the
+ * machine was wherever it was then.
+ *
+ * AND WHEN THE HISTORY CANNOT ANSWER, it says so — `{ known: false }` with the
+ * reason. The owner was explicit about this: show it as unknown rather than
+ * presenting the current register location as historical fact. It is the common
+ * case today, because `machine_movements` starts empty and records only moves
+ * made from now on, and inventing a first movement from today's register would
+ * be a statement nobody made.
+ */
+const resolveMachineLocationAtWork = async (
+  repos: RepositoryBundle,
+  job: Job,
+  machine: Machine | null,
+): Promise<MachineLocationAtWork | null> => {
+  if (!isJobAtOrPastCompletion(job.status)) return null;
+  if (machine === null) return null;
+
+  /*
+   * The day the work was finished. A job that reached completion has one; the
+   * guard is here because the status says the stage and this says the moment,
+   * and a record with the stage but not the moment is one this cannot answer.
+   */
+  const completedOn = job.completedAt === null ? null : (job.completedAt.slice(0, 10) as IsoDate);
+  if (completedOn === null) {
+    return {
+      known: false,
+      asAt: null,
+      reason: 'This job has no completion date, so there is no day to look the machine up on.',
+    };
+  }
+
+  const movements = await repos.machines.listMovements(machine.id);
+  const at = machineLocationAsAt(movements, completedOn);
+  if (at === null) {
+    return {
+      known: false,
+      asAt: completedOn,
+      reason:
+        movements.length === 0
+          ? 'No move has ever been recorded for this machine, so where it stood then is not known. The register below is where it stands TODAY.'
+          : 'The recorded moves all happened after this job, so where the machine stood then is not known. The register below is where it stands TODAY.',
+    };
+  }
+
+  /*
+   * NAMED FROM THE REGISTER, archived records included: a machine's history
+   * will name sites that have since been withdrawn, and a history that cannot
+   * say where the work happened is no history at all.
+   */
+  const [sites, customers] = await Promise.all([
+    repos.customers.listSites(undefined, { includeArchived: true }),
+    // `list()` takes no filter: the customer register has no archived split
+    // the way sites do.
+    repos.customers.list(),
+  ]);
+  const site = sites.find((candidate) => candidate.id === at.siteId);
+  const customer = customers.find((candidate) => candidate.id === at.customerId);
+
+  return {
+    known: true,
+    asAt: completedOn,
+    siteId: at.siteId,
+    siteName: site?.name ?? 'A site no longer on the register',
+    customerId: at.customerId,
+    customerName: customer?.name ?? 'A customer no longer on the register',
+    // Whether the machine has moved on since. `machine.siteId` is the register
+    // as it stands today, which is exactly what the panel contrasts this with.
+    movedSince: machine.siteId !== at.siteId,
   };
 };
 
