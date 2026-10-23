@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { extractPdfText, MAX_INDEXED_CHARACTERS } from '@/lib/pdf/extract-text';
 import { buildPdfText, builtinPdfText, popplerPdfText } from './pdf-text';
 
@@ -19,6 +19,29 @@ import { buildPdfText, builtinPdfText, popplerPdfText } from './pdf-text';
  * because it is the fallback for a deployment with no poppler, and the contrast
  * is the evidence.
  */
+/**
+ * POPPLER IS REQUIRED FOR THIS FILE, and the failure says so in one line.
+ *
+ * `pdftotext` is the library's PRIMARY engine, so these tests must exercise the
+ * real one rather than skipping to the fallback — a suite that quietly tests the
+ * byte reader instead would report the primary search path as covered when it is
+ * not. It is NOT on the GitHub runner image (CI installs it explicitly, which is
+ * how this was found: six cryptic assertion failures that all meant one missing
+ * package).
+ *
+ * So the absence is reported ONCE, naming the package, instead of as six
+ * mismatched expectations.
+ */
+const requirePoppler = (): void => {
+  const capability = popplerPdfText().describe();
+  if (capability.perPage) return;
+  throw new Error(
+    'These tests need `pdftotext` (package poppler-utils), which is not installed on this ' +
+      'machine: `sudo apt-get install -y poppler-utils`. It is the library\u2019s primary text ' +
+      `engine \u2014 see docs/library-ocr.md §0. The engine reported: ${capability.reason}`,
+  );
+};
+
 const CID_MANUAL = readFileSync('src/services/__fixtures__/cid-manual.pdf');
 const SCAN = readFileSync('src/services/__fixtures__/scan-three-pages.pdf');
 
@@ -26,6 +49,7 @@ const bytesOf = (file: Buffer): Uint8Array => new Uint8Array(file);
 
 describe('PDF text extraction', () => {
   describe('a manual encoded the way real manuals are', () => {
+    beforeAll(requirePoppler);
     it('is NOT readable by the built-in reader, which is the defect', () => {
       /*
        * THE MEASUREMENT THIS WHOLE CHANGE RESTS ON. Not a hypothetical: the
@@ -65,6 +89,7 @@ describe('PDF text extraction', () => {
   });
 
   describe('a manual the length of a real one', () => {
+    beforeAll(requirePoppler);
     /*
      * THE TWO FACTS ONLY A LONG DOCUMENT ESTABLISHES, both of which
      * `docs/library-ocr.md` §0 records with the numbers.
@@ -118,6 +143,7 @@ describe('PDF text extraction', () => {
   });
 
   describe('a document that really is a scan', () => {
+    beforeAll(requirePoppler);
     it('is reported as needing recognition, with every page named', () => {
       const reading = popplerPdfText().read(bytesOf(SCAN));
       expect(reading.kind).toBe('needs_ocr');
@@ -129,6 +155,7 @@ describe('PDF text extraction', () => {
   });
 
   describe('what it refuses, and how it says so', () => {
+    beforeAll(requirePoppler);
     it('reports a file that is not a PDF as failed, not as a scan', () => {
       const reading = popplerPdfText().read(new TextEncoder().encode('this is not a PDF at all'));
       expect(reading.kind).toBe('failed');
@@ -182,6 +209,7 @@ describe('PDF text extraction', () => {
   });
 
   describe('which engine a deployment gets', () => {
+    beforeAll(requirePoppler);
     it('is poppler by default, with no configuration at all', () => {
       expect(buildPdfText({}).describe().engine).toMatch(/pdftotext/iu);
     });

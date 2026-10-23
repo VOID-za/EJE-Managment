@@ -77,6 +77,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # THE LIBRARY'S PRIMARY SEARCH ENGINE. LIB-TEXT-1.
+      #
+      # `pdftotext` is what reads a manufacturer's manual: the built-in
+      # fallback cannot resolve a subset font's /ToUnicode map, which is how
+      # nearly every real manual is encoded. Installed EXPLICITLY rather than
+      # relied on: the GitHub runner image happens to carry poppler today, and
+      # a gate whose result depends on an undeclared package in somebody
+      # else's image is a gate that will change its answer without a commit.
+      # It is the same package the VPS needs, so this is also the dependency
+      # the deployment doc names.
+      - name: Install poppler-utils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          pdftotext -v
+
       - name: Lint
         run: npm run lint
 
@@ -195,6 +211,22 @@ jobs:
       # viewer. That is the more faithful of the two environments and it stays:
       # the suites assert whichever frame the browser is given, and
       # `tablet-pdf-check` below pins both capabilities explicitly.
+      # THE LIBRARY'S PRIMARY SEARCH ENGINE. LIB-TEXT-1.
+      #
+      # `pdftotext` is what reads a manufacturer's manual: the built-in
+      # fallback cannot resolve a subset font's /ToUnicode map, which is how
+      # nearly every real manual is encoded. Installed EXPLICITLY rather than
+      # relied on: the GitHub runner image happens to carry poppler today, and
+      # a gate whose result depends on an undeclared package in somebody
+      # else's image is a gate that will change its answer without a commit.
+      # It is the same package the VPS needs, so this is also the dependency
+      # the deployment doc names.
+      - name: Install poppler-utils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          pdftotext -v
+
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
