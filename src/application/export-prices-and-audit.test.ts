@@ -14,6 +14,7 @@ import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { builtinPdfText } from '@/services/pdf-text';
 import { inMemoryFileStore, DemoStorageService } from '@/services/simulated/storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
@@ -63,6 +64,7 @@ const build = (actor: User = master): Harness => {
         email: new SimulatedEmailService(outbox, clock, ids),
         whatsapp: new SimulatedWhatsAppService(outbox, clock, ids),
         pdf: new SimulatedPdfService(clock),
+        pdfText: builtinPdfText(),
         storage: new DemoStorageService(inMemoryFileStore()),
       },
     },

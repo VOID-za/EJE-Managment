@@ -56,8 +56,28 @@ somebody with root on the VPS.
 | `0024_machine_movements` | MACH-HIST. One new table. **Nothing is backfilled** — see below | Additive. No existing row is read or written |
 | `0025_customer_job_change_requests` | CUST-CR's job half. Two nullable columns on `customer_change_requests`, two foreign keys, one index, two CHECKs | Additive. Both CHECKs are satisfied by every existing row, which is a register report with no job and no customer contact |
 
+### And since: migrations 0026–0029
+
+| Migration | What it does | Risk |
+|---|---|---|
+| `0026_customer_note_edits` | CUST-NOTE-1. Two nullable columns on `customer_notes` (`edited_by`, `edited_at`), one foreign key, one CHECK that the pair is whole or absent | Additive. Every existing note has neither column set, which the CHECK permits |
+| `0027_optional_priority` | JOB-OPT-1. `ALTER TABLE "jobs" ALTER COLUMN "priority" DROP NOT NULL` | **Relaxes a constraint and rewrites nothing.** No existing row changes; a dropped NOT NULL cannot fail against existing data |
+| `0028_test_and_repair_fields` | TR-1. Four nullable columns on `jobs` and one CHECK that a recorded quantity is a whole number above zero | Additive. The CHECK is satisfied by every existing row, all of which have NULL |
+| `0029_library_page_text` | LIB-TEXT-1. One new table (`library_document_pages`), one column on `library_document_text` (`pages_indexed`), **three replaced CHECKs** and one new one | Additive, with a **backfill of the new column** (`pages_indexed = pages` for rows already `indexed`), which runs BEFORE the CHECK that depends on it. The three replaced CHECKs use a quiet DROP and an unconditional ADD — see the note below |
+
+**`0029` REPLACES THREE CHECK CONSTRAINTS, and the form matters.** A
+`DO ... EXCEPTION WHEN duplicate_object THEN NULL` block is right for a NEW
+constraint and WRONG for a replaced one: on a database that already carries the
+old definition it swallows the error and **keeps the old rule**, so the
+migration reports success while the constraint still refuses what the new code
+writes. `0029` therefore drops each one quietly
+(`EXCEPTION WHEN undefined_object`) and adds the new definition
+unconditionally. `src/db/migrations/redefinitions.test.ts` is the lint that
+holds this rule for every future migration.
+
 **No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
-the nine. Every `NOT NULL` is on a column of a new table.
+the thirteen. Every `NOT NULL` is on a column of a new table, or has a default
+and a backfill (`0029`'s `pages_indexed`).
 
 **MACH-HIST STARTS EMPTY, AND THAT IS DELIBERATE.** There is no record anywhere
 of where a machine stood before this release, and building an "installation"
@@ -141,7 +161,8 @@ operator sees what is actually on.
 
 | Variable | If unset | Why you might set it |
 |---|---|---|
-| `EJE_EXPORT_AUDIT` | Spreadsheet exports are not recorded on the audit trail | **BD-18, and it is EJE's decision.** `on` records who exported which list, when and with which filters. That is monitoring of EJE's own staff, and the retention of those events is unmanaged — they never expire on their own. Read the note in `deploy/eje.env.example` before switching it on |
+| ~~`EJE_EXPORT_AUDIT`~~ | **OBSOLETE — must be ABSENT from the live environment file** | **BD-18 was answered on 23 October 2026: every export is recorded, always.** There is nothing to configure, and the variable no longer does anything. Delete the line from `/etc/eje/eje.env` as part of this release; `npm run preflight` flags it if it is still there, because a setting that looks like a switch and is not is worse than no setting |
+| `EJE_PDF_TEXT` / `EJE_PDF_TEXT_BINARY` | **poppler, when it is installed** — nothing to set | **LIB-TEXT-1, and this is the one dependency that is not really optional.** `pdftotext` is what reads a manufacturer's manual; the built-in fallback cannot resolve a subset font's `/ToUnicode` map, so it reports most real manuals as scans needing recognition. **`sudo apt-get install -y poppler-utils`** before the release, and `npm run preflight` reports which engine is in use (WARN when it is the fallback) |
 | `EJE_OCR` and its seven companions | A scanned library document is recorded as **not searchable**, and says so | **LIB-5, and it is EJE's decision** (`docs/library-ocr.md` §3). `local` needs `tesseract-ocr`, `tesseract-ocr-eng` and `poppler-utils` installed first; preflight WARNS so somebody checks with `npm run library:ocr -- --report` rather than assuming |
 
 **`jobs.exportPrices` is a capability NO ROLE HOLDS**, so no file EJE can

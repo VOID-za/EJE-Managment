@@ -83,6 +83,7 @@ describeDb('the technical library full-text index', () => {
     extractedAt: '2026-10-01T08:00:05.000Z',
     characters: MANUAL.length,
     pages: 12,
+    pagesIndexed: 12,
     truncated: false,
     unreadableStreams: 0,
     failureReason: '',

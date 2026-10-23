@@ -932,9 +932,15 @@ export const updateAdditionalCharge = async (
  * stands; a line removed afterwards can still strand it, which is why
  * `calculateJobTotals` caps it as well and says it has.
  *
- * **The shape is the shipped recommendation, not a settled rule.** A fixed
- * amount rather than a percentage, applied to the subtotal before VAT, at
- * Master authority. Issue #24 carries the exact questions.
+ * **THE SHAPE IS NOW SETTLED. BD-19, answered by the owner on 23 October
+ * 2026:** a FIXED AMOUNT rather than a percentage, applied to the subtotal
+ * BEFORE VAT, at MASTER authority, with **no Coordinator discount authority**.
+ * That is what was already shipped as the recommendation, so the decision cost
+ * no code — which is the point of having built it up to the decision rather
+ * than past it. Four rules carry it, and each is refused in its own place: the
+ * amount is a whole positive number of cents (schema, 400), the reason is
+ * required and may not be spaces (here, 422), the figure may not exceed the
+ * gross subtotal (here, 422) and the authority is a Master's (here, 403).
  */
 export interface DiscountInput {
   /** Cents off, as a positive integer. */

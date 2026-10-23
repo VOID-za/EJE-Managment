@@ -13,6 +13,8 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  DocumentPageMatch,
+  DocumentPageText,
   DocumentTextIndex,
   OcrJob,
   OcrJobState,
@@ -338,7 +340,20 @@ export interface DocumentRepository {
    * show. Writing a revision's index REPLACES whatever was there, so a
    * re-extraction cannot leave the old text searchable.
    */
-  saveTextIndex(index: DocumentTextIndex, content: string): Promise<DocumentTextIndex>;
+  saveTextIndex(
+    index: DocumentTextIndex,
+    content: string,
+    /**
+     * The per-page detail, REPLACING whatever was there. LIB-TEXT-1.
+     *
+     * Written in the same call as the index for the same reason the text is:
+     * page rows that disagree with the state in front of them are exactly the
+     * inconsistency the library must never show. An empty array is the right
+     * answer for an engine that cannot attribute text to a page, and clears
+     * any rows a previous extraction left.
+     */
+    pages?: readonly (DocumentPageText & { readonly content: string })[],
+  ): Promise<DocumentTextIndex>;
   findTextIndex(documentId: DocumentId): Promise<DocumentTextIndex | null>;
   /** Every revision's index state, or just the ones asked for. */
   listTextIndexes(documentIds?: readonly DocumentId[]): Promise<readonly DocumentTextIndex[]>;
@@ -356,6 +371,34 @@ export interface DocumentRepository {
     documentIds: readonly DocumentId[],
     limit: number,
   ): Promise<readonly DocumentId[]>;
+  /**
+   * The pages of ONE revision whose text matches every term. LIB-TEXT-1.
+   *
+   * Read only for the rows on the result page being shown, like
+   * `findTextContent` — a manual's pages are hundreds of thousands of
+   * characters between them. Empty when this revision has no page detail,
+   * which is a deployment without poppler and not an absence of matches: the
+   * caller falls back to the whole-document snippet.
+   */
+  findPageMatches(
+    documentId: DocumentId,
+    terms: readonly string[],
+    limit: number,
+  ): Promise<readonly DocumentPageMatch[]>;
+  /**
+   * Every page of one revision WITH its text, for the recognition worker.
+   * LIB-TEXT-1.
+   *
+   * The content comes back because the one caller needs it: `saveTextIndex`
+   * REPLACES the page rows — which is what stops a re-extraction leaving
+   * pages it did not mention still searchable — so a worker adding recognised
+   * pages has to hand back the pages it is keeping. This runs in a worker
+   * rather than a request, so reading a manual's text once is the cheaper
+   * answer than a second method that exists to avoid it.
+   */
+  listPageText(
+    documentId: DocumentId,
+  ): Promise<readonly (DocumentPageText & { readonly content: string })[]>;
 
   /*
    * WORK WAITING FOR TEXT RECOGNITION. MASTER SCOPE LIB-5.

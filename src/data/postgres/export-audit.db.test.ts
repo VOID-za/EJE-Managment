@@ -7,6 +7,7 @@ import { describeExport, recordExport } from '@/application/export-audit';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { builtinPdfText } from '@/services/pdf-text';
 import { inMemoryFileStore, DemoStorageService } from '@/services/simulated/storage';
 import { SystemClock } from '@/services/simulated/system';
 import { UuidGenerator } from '@/services/production/ids';
@@ -71,6 +72,7 @@ describeDb('the export audit, on PostgreSQL', () => {
         email: new SimulatedEmailService(outbox, clock, ids),
         whatsapp: new SimulatedWhatsAppService(outbox, clock, ids),
         pdf: new SimulatedPdfService(clock),
+        pdfText: builtinPdfText(),
         storage: new DemoStorageService(inMemoryFileStore()),
       },
     };

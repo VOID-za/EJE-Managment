@@ -24,6 +24,7 @@ import {
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { buildPdfText } from '@/services/pdf-text';
 import {
   inMemoryFileStore,
   DemoStorageService,
@@ -271,6 +272,10 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
     email: buildEmail(backend, outbox, clock, ids, storage),
     whatsapp: buildWhatsApp(backend, outbox, clock, ids),
     pdf: new SimulatedPdfService(clock),
+    // LIB-TEXT-1: `pdftotext` where poppler is installed, the byte reader
+    // where it is not. See `buildPdfText` for why the better engine needs no
+    // configuration to be the default.
+    pdfText: buildPdfText(),
     storage,
   };
 

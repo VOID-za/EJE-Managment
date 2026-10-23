@@ -15,6 +15,8 @@ import type {
   Customer,
   CustomerId,
   DocumentId,
+  DocumentPageMatch,
+  DocumentPageText,
   DocumentTextIndex,
   IsoDateTime,
   Job,
@@ -44,9 +46,10 @@ import {
   calculateJobTotals,
   isOcrJobClaimable,
   isOutboxSendable,
+  isSearchableState,
   MAX_OUTBOX_ATTEMPTS,
 } from '@/domain';
-import { matchesAllTerms, tokenize } from '@/lib/text-search';
+import { matchesAllTerms, snippetsFor, tokenize } from '@/lib/text-search';
 import type {
   ActivityRepository,
   ChecklistTemplateRepository,
@@ -663,12 +666,24 @@ class DemoDocumentRepository implements DocumentRepository {
    * searchable text: a document re-extracted after a better copy was uploaded
    * must not still match on the words of the copy it replaced.
    */
-  saveTextIndex(index: DocumentTextIndex, content: string): Promise<DocumentTextIndex> {
+  saveTextIndex(
+    index: DocumentTextIndex,
+    content: string,
+    pages: readonly (DocumentPageText & { readonly content: string })[] = [],
+  ): Promise<DocumentTextIndex> {
+    const indexed = isSearchableState(index.state);
     this.context.commit((draft) => {
       const kept = draft.documentText.filter((entry) => entry.index.documentId !== index.documentId);
       // The text is kept only where the state says there IS text.
       draft.documentText = [
-        { index, content: index.state === 'indexed' ? content : '' },
+        {
+          index,
+          content: indexed ? content : '',
+          // REPLACED, not merged: a re-extraction with a better engine can
+          // produce a different set of pages, and keeping the ones it did not
+          // mention would leave them searchable. LIB-TEXT-1.
+          pages: indexed ? pages.map((page) => ({ ...page })) : [],
+        },
         ...kept,
       ];
     });
@@ -720,7 +735,9 @@ class DemoDocumentRepository implements DocumentRepository {
       .documentText.filter(
         (entry) =>
           allowed.has(entry.index.documentId) &&
-          entry.index.state === 'indexed' &&
+          // A partially indexed manual is searchable in the pages that ARE
+          // indexed. LIB-TEXT-1.
+          isSearchableState(entry.index.state) &&
           matchesAllTerms(entry.content, terms),
       )
       .map((entry) => {
@@ -731,6 +748,56 @@ class DemoDocumentRepository implements DocumentRepository {
       .sort((a, b) => b.hits - a.hits);
 
     return Promise.resolve(scored.slice(0, limit).map((entry) => entry.documentId));
+  }
+
+  /**
+   * The pages of one revision that match every term. LIB-TEXT-1.
+   *
+   * The same whole-word rule as the document search, applied page by page, so
+   * a page cannot match by a different rule than the document it belongs to —
+   * which is what keeps a search result identical on a sales laptop and in
+   * production. Ordered by how many times the terms occur, then by page.
+   */
+  findPageMatches(
+    documentId: DocumentId,
+    terms: readonly string[],
+    limit: number,
+  ): Promise<readonly DocumentPageMatch[]> {
+    if (terms.length === 0) return Promise.resolve([]);
+    const entry = this.context
+      .read()
+      .documentText.find((candidate) => candidate.index.documentId === documentId);
+    if (entry === undefined) return Promise.resolve([]);
+
+    const matched = (entry.pages ?? [])
+      .filter((page) => matchesAllTerms(page.content, terms))
+      .map((page) => ({
+        page,
+        hits: tokenize(page.content).filter((word) => terms.includes(word)).length,
+      }))
+      .sort((a, b) => b.hits - a.hits || a.page.pageNumber - b.page.pageNumber)
+      .slice(0, limit);
+
+    return Promise.resolve(
+      matched.map(({ page }) => ({
+        documentId,
+        pageNumber: page.pageNumber,
+        source: page.source,
+        characters: page.characters,
+        snippets: snippetsFor(page.content, terms),
+      })),
+    );
+  }
+
+  listPageText(
+    documentId: DocumentId,
+  ): Promise<readonly (DocumentPageText & { readonly content: string })[]> {
+    const entry = this.context
+      .read()
+      .documentText.find((candidate) => candidate.index.documentId === documentId);
+    return Promise.resolve(
+      [...(entry?.pages ?? [])].sort((a, b) => a.pageNumber - b.pageNumber),
+    );
   }
 
   /* -- work waiting for text recognition. LIB-5 ------------------------- */

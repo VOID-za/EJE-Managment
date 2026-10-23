@@ -13,6 +13,7 @@ import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system'
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { builtinPdfText } from '@/services/pdf-text';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { buildOcr, localOcr } from '@/services/ocr';
 import {
@@ -123,6 +124,7 @@ describeChain('a scanned document becoming searchable, end to end', () => {
         email: new SimulatedEmailService(outbox, clock, ids),
         whatsapp: new SimulatedWhatsAppService(outbox, clock, ids),
         pdf: new SimulatedPdfService(clock),
+        pdfText: builtinPdfText(),
         storage: new FilesystemStorageService({ root: storageRoot }),
       },
     } as unknown as OperationContext;
@@ -201,12 +203,28 @@ describeChain('a scanned document becoming searchable, end to end', () => {
       claimed!,
     );
 
-    expect(outcome.index?.state).toBe('indexed');
+    /*
+     * PARTIALLY INDEXED, which is what one page of three actually is.
+     * LIB-TEXT-1.
+     *
+     * This asserted `indexed` with `truncated: true` beside it — a document
+     * claiming to be searchable with a flag most readers never looked at. The
+     * state now says it and the page tally says how much, which is the
+     * overstatement the partial state exists to prevent. `truncated` is still
+     * true and still carries WHICH limit bit, because "stopped at the page
+     * bound" and "two pages are pictures" send somebody to different places.
+     */
+    expect(outcome.index?.state).toBe('partially_indexed');
+    expect(outcome.index?.pagesIndexed).toBe(1);
+    expect(outcome.index?.pages).toBe(3);
     expect(outcome.index?.truncated).toBe(true);
-    // WHY it is partial, in the index itself — so the library can say
-    // "searchable in part" and name the setting rather than the document.
+    // WHY it is partial, in the index itself — the SETTING rather than the
+    // document, so nobody goes looking at the scan for a limit nobody raised.
     expect(outcome.index?.failureReason).toMatch(/EJE_OCR_MAX_PAGES/u);
-    expect(describeSearchability(outcome.index, outcome.job).label).toMatch(/in part/iu);
+    const said = describeSearchability(outcome.index, outcome.job);
+    expect(said.searchable).toBe(true);
+    expect(said.label).toMatch(/1 of 3 pages/u);
+    expect(said.detail).toMatch(/EJE_OCR_MAX_PAGES/u);
 
     // The first page IS findable; the third is not, which is what truncated
     // means and what the label is warning about.

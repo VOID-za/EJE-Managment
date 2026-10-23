@@ -1,4 +1,10 @@
-import { can, type DocumentTextIndex, type TechnicalDocument, type User } from '@/domain';
+import {
+  can,
+  type DocumentPageMatch,
+  type DocumentTextIndex,
+  type TechnicalDocument,
+  type User,
+} from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import {
   MAX_QUERY_LENGTH,
@@ -52,6 +58,20 @@ export interface LibrarySearchHit {
   /** Where the words were found, in the words around them. */
   readonly snippets: readonly string[];
   readonly index: DocumentTextIndex;
+  /**
+   * THE PAGES THE WORDS WERE ON. LIB-TEXT-1.
+   *
+   * "Alarm 414 is in the drive manual" sends a technician to a 214-page PDF;
+   * "page 212 of the drive manual" sends them to the answer. Each match
+   * carries the provenance of ITS OWN page, because one manual can hold both —
+   * typeset pages that are what the document says, and a recognised diagram
+   * that is a machine's reading of what it looks like.
+   *
+   * EMPTY IS NOT "NO MATCHES". It means this revision has no page detail: a
+   * deployment whose extractor cannot attribute text to a page. The
+   * whole-document `snippets` are the answer then, exactly as before.
+   */
+  readonly pageMatches: readonly DocumentPageMatch[];
 }
 
 export interface LibrarySearchPage {
@@ -72,9 +92,27 @@ export interface LibrarySearchPage {
     readonly failed: number;
     readonly notIndexed: number;
   };
+  /**
+   * Documents this actor may search that are only PARTLY in the index.
+   * LIB-TEXT-1.
+   *
+   * Reported separately from `notSearchable` because they are a different
+   * thing to a person: these ARE searchable, and some of their pages are not.
+   * A technician who finds nothing needs to be able to tell "the library has
+   * nothing about that alarm" from "two of these manuals have pages nobody has
+   * read yet".
+   */
+  readonly partiallySearchable: number;
 }
 
 export const LIBRARY_SEARCH_PAGE_SIZE = 10;
+/**
+ * The most pages of ONE document a result will name.
+ *
+ * A term like "bolt" is on ninety pages of a manual, and ninety page numbers
+ * is not an answer. The best few are, and the document is still there to open.
+ */
+const MAX_PAGE_MATCHES = 5;
 /** More than this and the office is browsing, not searching. */
 const MAX_MATCHES = 200;
 const MAX_PAGE = 20;
@@ -149,6 +187,7 @@ export const searchLibraryText = async (
   ]);
 
   const stateById = new Map(states.map((state) => [state.documentId, state]));
+  const partiallySearchable = states.filter((state) => state.state === 'partially_indexed').length;
   const notSearchable = {
     needsOcr: states.filter((state) => state.state === 'needs_ocr').length,
     failed: states.filter((state) => state.state === 'failed').length,
@@ -170,10 +209,25 @@ export const searchLibraryText = async (
     const document = byId.get(documentId);
     const index = stateById.get(documentId);
     if (document === undefined || index === undefined) continue;
-    const content = await repos.documents.findTextContent(documentId);
+    const [content, pageMatches] = await Promise.all([
+      repos.documents.findTextContent(documentId),
+      /*
+       * THE PAGES, read only for the rows on THIS result page — the same rule
+       * the whole-document text follows and for the same reason: a manual's
+       * pages are hundreds of thousands of characters between them.
+       */
+      repos.documents.findPageMatches(documentId, terms, MAX_PAGE_MATCHES),
+    ]);
     hits.push({
       document,
       index,
+      pageMatches,
+      /*
+       * The whole-document snippet is still produced, and it is not redundant:
+       * it is what a deployment with no page detail shows, and it is what
+       * matches a phrase that CROSSES a page break — which no single page's
+       * text contains.
+       */
       snippets: content === null ? [] : snippetsFor(content, terms),
     });
   }
@@ -185,5 +239,6 @@ export const searchLibraryText = async (
     page: query.page,
     pageSize,
     notSearchable,
+    partiallySearchable,
   };
 };

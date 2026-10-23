@@ -8,6 +8,7 @@ import type {
   StorageService,
   WhatsAppService,
 } from '@/services/ports';
+import type { PdfTextService } from '@/services/pdf-text';
 
 /**
  * Everything an application operation is allowed to touch.
@@ -20,6 +21,17 @@ export interface AppServices {
   readonly email: EmailService;
   readonly whatsapp: WhatsAppService;
   readonly pdf: PdfService;
+  /**
+   * READING THE TEXT A PDF ALREADY CONTAINS. LIB-TEXT-1.
+   *
+   * A service rather than a direct call so the engine can be swapped: a
+   * deployment with poppler reads a manual whose fonts are subset, and one
+   * without it falls back to the byte reader. A test substitutes either, which
+   * is what lets the index be proved without spawning a process.
+   *
+   * NOT the same thing as `pdf`, which WRITES EJE's own documents.
+   */
+  readonly pdfText: PdfTextService;
   readonly storage: StorageService;
   readonly clock: Clock;
   readonly ids: IdGenerator;

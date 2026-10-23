@@ -16,6 +16,7 @@ import { UuidGenerator } from '@/services/production/ids';
 import type { OperationContext } from '@/application/context';
 import type { AppServices } from '@/application/context';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { buildPdfText } from '@/services/pdf-text';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
@@ -82,6 +83,9 @@ const buildServices = (): AppServices => {
     ids,
     storage,
     pdf: new SimulatedPdfService(clock),
+    // The same engine the upload used, so a re-extraction during
+    // recognition reads the document the same way. LIB-TEXT-1.
+    pdfText: buildPdfText(),
     email: new SimulatedEmailService(outbox, clock, messageIds),
     whatsapp: new SimulatedWhatsAppService(outbox, clock, messageIds),
   };

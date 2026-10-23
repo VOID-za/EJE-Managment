@@ -52,6 +52,17 @@ export type OcrOutcome =
       readonly text: string;
       /** Pages that produced text. */
       readonly pages: number;
+      /**
+       * The text of each page that produced any, by its REAL page number.
+       * LIB-TEXT-1.
+       *
+       * Not merely a convenience: when recognition is aimed at pages 7 and 94
+       * of a manual whose other pages came out of the text layer, the index has
+       * to be able to put each page's text back where it belongs. Page numbers
+       * are the document's, not the rasteriser's — recovered from the file
+       * names `pdftoppm` writes, which carry the original page number.
+       */
+      readonly pageTexts: readonly { readonly pageNumber: number; readonly text: string }[];
       readonly engine: string;
       /**
        * True when a LIMIT stopped the read, rather than the document ending.
@@ -91,7 +102,22 @@ export interface OcrService {
    * `unavailable`. Both are outcomes the queue records, and an exception would
    * turn either into a crashed worker.
    */
-  read(pdf: Uint8Array, options?: { readonly maxPages?: number }): Promise<OcrOutcome>;
+  read(
+    pdf: Uint8Array,
+    options?: {
+      readonly maxPages?: number;
+      /**
+       * Only these pages, one-based. LIB-TEXT-1.
+       *
+       * THE DIFFERENCE BETWEEN 25 SECONDS AND 83 MINUTES. A manufacturer's
+       * manual is typeset text with the occasional scanned diagram, so the
+       * pages that need recognising are the handful that carry no text — and
+       * the extractor already knows which. Omitted means the whole document,
+       * which is the right answer for a scan.
+       */
+      readonly pages?: readonly number[];
+    },
+  ): Promise<OcrOutcome>;
 }
 
 /** The default. Recognises nothing, and says what would be needed. */
@@ -182,6 +208,27 @@ export interface LocalOcrConfig {
   readonly maxTextBytes?: number;
 }
 
+/** `page-07.png` -> 7. Null when the name carries no number. */
+const pageNumberOf = (fileName: string): number | null => {
+  const digits = /(\d+)/u.exec(fileName);
+  if (digits === null) return null;
+  const parsed = Number(digits[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+/** [7, 94, 95] -> [{from:7,to:7},{from:94,to:95}]. Input must be sorted. */
+const contiguousRanges = (
+  pages: readonly number[],
+): readonly { readonly from: number; readonly to: number }[] => {
+  const ranges: { from: number; to: number }[] = [];
+  for (const page of pages) {
+    const last = ranges[ranges.length - 1];
+    if (last !== undefined && page === last.to + 1) last.to = page;
+    else if (last === undefined || page !== last.to) ranges.push({ from: page, to: page });
+  }
+  return ranges;
+};
+
 export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
   const rasteriser = config.rasteriser ?? 'pdftoppm';
   const recogniser = config.recogniser ?? 'tesseract';
@@ -243,19 +290,47 @@ export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
         const source = join(workspace, 'document.pdf');
         writeFileSync(source, pdf, { mode: 0o600 });
 
-        const rastered = spawnSync(
-          rasteriser,
-          ['-png', '-r', String(RASTER_DPI), '-f', '1', '-l', String(maxPages), source, join(workspace, 'page')],
-          { timeout: RASTERISE_TIMEOUT_MS, encoding: 'utf8' },
-        );
-        if (rastered.error !== undefined || rastered.status !== 0) {
-          return Promise.resolve({
-            kind: 'empty',
-            engine: capability.engine,
-            reason:
-              'The pages could not be turned into images, so there was nothing to recognise. ' +
-              'The file may be encrypted or damaged.',
-          });
+        /*
+         * THE RANGES TO RASTERISE. LIB-TEXT-1.
+         *
+         * Asked for specific pages, they are grouped into CONTIGUOUS RANGES
+         * and `pdftoppm` is run once per range: pages 7, 94 and 95 are two
+         * calls rather than three, and a scan with no page list is still the
+         * single ranged call it always was. The page bound applies to how many
+         * pages are READ either way, so a manual with ninety scanned pages is
+         * still bounded.
+         */
+        const wanted = options?.pages;
+        const ranges: readonly { readonly from: number; readonly to: number }[] =
+          wanted === undefined || wanted.length === 0
+            ? [{ from: 1, to: maxPages }]
+            : contiguousRanges([...wanted].sort((a, b) => a - b).slice(0, maxPages));
+
+        for (const range of ranges) {
+          const rastered = spawnSync(
+            rasteriser,
+            [
+              '-png',
+              '-r',
+              String(RASTER_DPI),
+              '-f',
+              String(range.from),
+              '-l',
+              String(range.to),
+              source,
+              join(workspace, 'page'),
+            ],
+            { timeout: RASTERISE_TIMEOUT_MS, encoding: 'utf8' },
+          );
+          if (rastered.error !== undefined || rastered.status !== 0) {
+            return Promise.resolve({
+              kind: 'empty',
+              engine: capability.engine,
+              reason:
+                'The pages could not be turned into images, so there was nothing to recognise. ' +
+                'The file may be encrypted or damaged.',
+            });
+          }
         }
 
         const pages = readdirSync(workspace)
@@ -270,6 +345,7 @@ export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
         }
 
         const texts: string[] = [];
+        const pageTexts: { pageNumber: number; text: string }[] = [];
         let bytesSoFar = 0;
         let pagesRead = 0;
         let pagesFailed = 0;
@@ -357,6 +433,16 @@ export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
           bytesSoFar += Buffer.byteLength(pageText, 'utf8');
           pagesRead += 1;
           texts.push(pageText);
+          /*
+           * THE DOCUMENT'S OWN PAGE NUMBER, out of the file name `pdftoppm`
+           * wrote. Counting the loop would give 1, 2, 3 for pages 7, 94 and
+           * 95 — and a search result that sends a technician to page 1 of a
+           * manual is worse than one that sends them to no page at all.
+           */
+          const trimmed = pageText.trim();
+          if (trimmed.length > 0) {
+            pageTexts.push({ pageNumber: pageNumberOf(page) ?? pagesRead, text: trimmed });
+          }
         }
 
         const text = texts.join('\n').trim();
@@ -374,6 +460,7 @@ export const localOcr = (config: LocalOcrConfig = {}): OcrService => {
           kind: 'text',
           text,
           pages: pagesRead,
+          pageTexts,
           engine: capability.engine,
           /*
            * TRUNCATED BY A LIMIT, OR BY THE PAGE BOUND. Both are this engine

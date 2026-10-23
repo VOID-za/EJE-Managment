@@ -17,6 +17,7 @@ import type {
   SystemSettings,
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
+  DocumentPageText,
   DocumentTextIndex,
   OcrJob,
   ChatMessage,
@@ -143,6 +144,15 @@ export interface DemoDatabase {
 export interface DocumentTextEntry {
   readonly index: DocumentTextIndex;
   readonly content: string;
+  /**
+   * PER PAGE, where the engine could attribute it. LIB-TEXT-1.
+   *
+   * Optional, and absent on every snapshot written before v29 — which is
+   * correct for them: the built-in reader could not say which page a word was
+   * on, so there is nothing to migrate and nothing to invent. A reader must
+   * treat its absence as "no page detail", never as "no pages".
+   */
+  readonly pages?: readonly (DocumentPageText & { readonly content: string })[];
 }
 
 export interface StoredFileRecord {

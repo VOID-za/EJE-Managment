@@ -139,6 +139,26 @@ describe('a discount over the API', () => {
     expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
   });
 
+  it('refuses a zero, a negative and a fractional amount by SCHEMA, with a 400', async () => {
+    /*
+     * BD-19 is a FIXED AMOUNT OFF, so the only amounts that mean anything are
+     * whole positive cents. A zero is a discount nobody took, a negative one is
+     * a surcharge wearing a discount's name — and it would ADD to the subtotal
+     * while the audit trail recorded "discount applied", which is the one way
+     * this figure could misstate an invoice. Refused at the schema (400), not
+     * by the operation, so no refusal depends on reaching the money code.
+     */
+    const job = await jobOf(master, 'EJE-1061');
+    for (const amount of [0, -5_000, 12.5]) {
+      const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
+        amount,
+        reason: 'Not a discount at all',
+      });
+      expect(response.status, `amount ${amount}`).toBe(400);
+    }
+    expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
+  });
+
   it('refuses more than the job comes to, naming the figure', async () => {
     const job = await jobOf(master, 'EJE-1061');
     const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {

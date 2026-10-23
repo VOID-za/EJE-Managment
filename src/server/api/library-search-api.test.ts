@@ -16,14 +16,41 @@ import type { LibrarySearchPage } from '@/application/library-search';
  *  4. A MALFORMED QUERY IS A BAD REQUEST, and a query the application refuses
  *     comes back with the application's own wording.
  */
+/**
+ * A PDF A REAL READER ACCEPTS, which this helper did not used to produce.
+ *
+ * It had no cross-reference table, no `/MediaBox` and no font RESOURCE for the
+ * `/F1` its content stream selected. The built-in byte reader does not care —
+ * it scans for streams and pulls the text operators out — so the test passed
+ * while asserting against a file no PDF viewer would render. Since LIB-TEXT-1
+ * made `pdftotext` the primary engine, the fixture has to be a document, and
+ * that is a better test rather than a concession: what is asserted now is that
+ * the real engine reads a real file.
+ */
 const pdf = (text: string): Uint8Array => {
   const content = deflateSync(Buffer.from(`BT /F1 11 Tf 40 800 Td (${text}) Tj ET\n`, 'latin1'));
-  const body =
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n' +
-    `4 0 obj\n<< /Length ${content.length} /Filter /FlateDecode >>\nstream\n${content.toString('latin1')}\nendstream\nendobj\n`;
-  return new Uint8Array(Buffer.from(`%PDF-1.4\n${body}trailer\n<< /Root 1 0 R >>\n%%EOF\n`, 'latin1'));
+  const objects: readonly string[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] ' +
+      '/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${content.length} /Filter /FlateDecode >>\nstream\n${content.toString('latin1')}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((object, offset) => {
+    offsets.push(Buffer.byteLength(body, 'latin1'));
+    body += `${offset + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const startxref = Buffer.byteLength(body, 'latin1');
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) body += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
+
+  return new Uint8Array(Buffer.from(body, 'latin1'));
 };
 
 /** A real JPEG header, so what refuses it is the sniffing and not the name. */

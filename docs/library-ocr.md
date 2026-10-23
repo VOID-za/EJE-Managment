@@ -1,11 +1,16 @@
 # OCR for the technical library: what it would take, and what it would cost
 
 LIB-5 asks for full-text search of the library. **Text-based PDFs are searchable
-today** — a first-party extractor reads the content streams, the text goes into
-`library_document_text`, and the search is a PostgreSQL `tsvector` with a GIN
-index. What is not implemented is **OCR**: a scanned manual is recorded as
+today** — `pdftotext` reads them page by page (and a first-party byte reader is
+the fallback where poppler is not installed), the text goes into
+`library_document_text` and `library_document_pages`, and the search is a
+PostgreSQL `tsvector` with a GIN index. A scanned manual is recorded as
 `needs_ocr` with the reason, and the library says so against the row rather
 than pretending the document is searchable.
+
+**§0 below is the most important section of this document** and was written
+after the rest: the first-party extractor could not read a manual encoded the
+way real manuals are encoded, which made every one of them look like a scan.
 
 The October mandate §3 asks for an investigation of a **local** implementation
 and its operational cost **before** choosing a service, and forbids incurring a
@@ -14,6 +19,56 @@ investigation. **Nothing in it has been implemented**, and no dependency has
 been added.
 
 ---
+
+## 0. The thing that was wrong, and is now fixed (LIB-TEXT-1)
+
+**EJE's library holds manufacturer manuals, not scanned paperwork.** That makes
+ordinary PDF text extraction the PRIMARY search path and recognition the
+fallback — and the extractor that shipped could not read the primary case.
+
+`src/lib/pdf/extract-text.ts` reads the file's bytes itself, and states
+honestly that it cannot map a CID font: a PDF whose fonts are subset with
+`Identity-H` encoding stores GLYPH IDS rather than characters, and reading them
+without the font's `/ToUnicode` map yields mojibake. **That is not an edge
+case.** It is what Acrobat, InDesign and FrameMaker all produce, which is to say
+nearly every manual a machine builder ships. Measured on a fixture encoded
+exactly that way (`src/services/__fixtures__/cid-manual.pdf`, built by the
+script beside it):
+
+| Engine | Result on the same bytes |
+|---|---|
+| Built-in byte reader | `needs_ocr` — *"7% readable, which means the fonts carry no usable encoding"* |
+| `pdftotext` (poppler) | the text, page by page |
+
+The consequence was not merely a missed index. The document was then QUEUED FOR
+RECOGNITION at the **23–25 seconds per page** §5 measures, so a 214-page manual
+full of perfectly good text became an 83-minute job that `EJE_OCR_MAX_PAGES`
+stops at page 40 anyway. **The library would have reported EJE's own manuals as
+"not searchable yet".**
+
+### What changed
+
+- `pdftotext` is the PRIMARY engine wherever poppler is installed, and it needs
+  no configuration to be: unlike recognition, lifting text that is already in
+  the file costs milliseconds, sends nothing anywhere and has no decision
+  attached to it. `EJE_PDF_TEXT=builtin` forces the byte reader; a misspelt
+  value FAILS preflight rather than quietly changing engine.
+- The text is recorded **per page** (`library_document_pages`), which is what
+  lets a search result say *page 212 of the drive manual* instead of *the drive
+  manual*.
+- A manual with a scanned diagram in it is `partially_indexed` and NAMES the
+  pages that are pictures, rather than being called searchable or unsearchable
+  as if it were wholly one thing.
+- **Recognition is aimed at the pages that carry no text.** A 214-page manual
+  with one scanned diagram is about 25 seconds of work rather than 83 minutes
+  of it, and the text-layer pages are kept rather than overwritten.
+- Without poppler the application still runs and is still honest; `npm run
+  preflight` WARNS and names the package.
+
+**`sudo apt-get install -y poppler-utils` is therefore the one library
+dependency that is not really optional.** It is also already required by
+recognition, so a server set up for OCR has it.
+
 
 ## 1. What is actually unsearchable
 

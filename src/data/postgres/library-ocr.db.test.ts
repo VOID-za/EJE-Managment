@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   asDocumentId,
   asUserId,
@@ -294,6 +294,7 @@ describeDb('the OCR queue on PostgreSQL', () => {
           extractedAt: '2026-10-02T09:10:00.000Z',
           characters: 11,
           pages: 40,
+          pagesIndexed: 40,
           truncated: true,
           unreadableStreams: 0,
           failureReason: '',
@@ -315,6 +316,7 @@ describeDb('the OCR queue on PostgreSQL', () => {
           extractedAt: '2026-10-02T09:10:00.000Z',
           characters: 0,
           pages: 214,
+          pagesIndexed: 0,
           truncated: false,
           unreadableStreams: 0,
           failureReason: 'This PDF carries no extractable text.',
@@ -348,9 +350,228 @@ describeDb('the OCR queue on PostgreSQL', () => {
             source: null,
             extractedAt: '2026-10-02T09:10:00.000Z',
             content: 'some text',
+            // The page tally is made to AGREE with the state, so the only rule
+            // this row breaks is the one under test. LIB-TEXT-1 added a second
+            // CHECK that an `indexed` row with the default `pages_indexed` of
+            // zero also breaks, and a test that accepted either message would
+            // have stopped discriminating.
+            pages: 1,
+            pagesIndexed: 1,
           }),
         ),
       ).toMatch(/library_document_text_source_matches_state/u);
+    });
+  });
+
+  /* -- the page index. LIB-TEXT-1 ---------------------------------------- */
+
+  describe('the per-page index', () => {
+    it('round trips a page, its provenance and its own search vector', async () => {
+      const repository = new PostgresDocumentRepository(db);
+      await repository.saveTextIndex(
+        {
+          documentId: DOCUMENT,
+          state: 'partially_indexed',
+          source: 'text_layer',
+          extractedAt: '2026-10-02T09:10:00.000Z',
+          characters: 40,
+          pages: 3,
+          pagesIndexed: 2,
+          truncated: false,
+          unreadableStreams: 0,
+          failureReason: 'No text could be read from page 2.',
+        },
+        'ALARM 414 HYDRAULIC PRESSURE\n\nTORQUE SETTINGS MAST BOLTS',
+        [
+          {
+            documentId: DOCUMENT,
+            pageNumber: 1,
+            source: 'text_layer',
+            characters: 28,
+            content: 'ALARM 414 HYDRAULIC PRESSURE',
+          },
+          {
+            documentId: DOCUMENT,
+            pageNumber: 3,
+            source: 'ocr',
+            characters: 26,
+            content: 'TORQUE SETTINGS MAST BOLTS',
+          },
+        ],
+      );
+
+      const pages = await repository.listPageText(DOCUMENT);
+      expect(pages.map((page) => [page.pageNumber, page.source])).toEqual([
+        [1, 'text_layer'],
+        [3, 'ocr'],
+      ]);
+
+      /*
+       * THE GENERATED VECTOR IS WHAT SERVES THE SEARCH, so the match comes out
+       * of PostgreSQL's own index rather than a JavaScript scan — and the page
+       * number it names is the document's.
+       */
+      const matches = await repository.findPageMatches(DOCUMENT, ['torque'], 5);
+      expect(matches.map((match) => match.pageNumber)).toEqual([3]);
+      expect(matches[0]?.source).toBe('ocr');
+      expect(matches[0]?.snippets.join(' ')).toMatch(/torque/iu);
+    });
+
+    it('REPLACES the pages on a re-extraction, leaving none of the old ones', async () => {
+      const repository = new PostgresDocumentRepository(db);
+      const index = {
+        documentId: DOCUMENT,
+        state: 'indexed' as const,
+        source: 'text_layer' as const,
+        extractedAt: '2026-10-02T09:10:00.000Z',
+        characters: 10,
+        pages: 1,
+        pagesIndexed: 1,
+        truncated: false,
+        unreadableStreams: 0,
+        failureReason: '',
+      };
+
+      await repository.saveTextIndex(index, 'OLD TEXT', [
+        {
+          documentId: DOCUMENT,
+          pageNumber: 1,
+          source: 'text_layer',
+          characters: 8,
+          content: 'OLD TEXT',
+        },
+      ]);
+      await repository.saveTextIndex(index, 'NEW TEXT', [
+        {
+          documentId: DOCUMENT,
+          pageNumber: 1,
+          source: 'text_layer',
+          characters: 8,
+          content: 'NEW TEXT',
+        },
+      ]);
+
+      // Stale searchable text is the defect this design exists to prevent.
+      expect(await repository.findPageMatches(DOCUMENT, ['old'], 5)).toEqual([]);
+      expect((await repository.findPageMatches(DOCUMENT, ['new'], 5)).length).toBe(1);
+      expect((await repository.listPageText(DOCUMENT)).length).toBe(1);
+    });
+
+    it('refuses an EMPTY page, a page zero and an unknown source, by CHECK', async () => {
+      const common = {
+        documentId: DOCUMENT,
+        extractedAt: '2026-10-02T09:10:00.000Z',
+      } as const;
+
+      expect(
+        await refusalOf(
+          db.insert(schema.libraryDocumentPages).values({
+            ...common,
+            pageNumber: 1,
+            source: 'text_layer',
+            characters: 1,
+            content: '',
+          }),
+        ),
+      ).toMatch(/library_document_pages_content_present/u);
+
+      expect(
+        await refusalOf(
+          db.insert(schema.libraryDocumentPages).values({
+            ...common,
+            pageNumber: 0,
+            source: 'text_layer',
+            characters: 1,
+            content: 'x',
+          }),
+        ),
+      ).toMatch(/library_document_pages_numbered_from_one/u);
+
+      expect(
+        await refusalOf(
+          db.insert(schema.libraryDocumentPages).values({
+            ...common,
+            pageNumber: 1,
+            source: 'guessed',
+            characters: 1,
+            content: 'x',
+          }),
+        ),
+      ).toMatch(/library_document_pages_source_known/u);
+    });
+
+    it('refuses a page tally that disagrees with the state, by CHECK', async () => {
+      /*
+       * BOTH DIRECTIONS. `indexed` with four pages of two hundred would be a
+       * document OVERSTATING what is searchable — the failure the partial
+       * state exists to prevent — and `partially_indexed` with every page
+       * indexed would be one understating itself.
+       */
+      expect(
+        await refusalOf(
+          db.insert(schema.libraryDocumentText).values({
+            documentId: DOCUMENT,
+            state: 'indexed',
+            source: 'text_layer',
+            extractedAt: '2026-10-02T09:10:00.000Z',
+            content: 'some text',
+            pages: 200,
+            pagesIndexed: 4,
+          }),
+        ),
+      ).toMatch(/library_document_text_pages_indexed_matches_state/u);
+
+      expect(
+        await refusalOf(
+          db.insert(schema.libraryDocumentText).values({
+            documentId: DOCUMENT,
+            state: 'partially_indexed',
+            source: 'text_layer',
+            extractedAt: '2026-10-02T09:10:00.000Z',
+            content: 'some text',
+            pages: 4,
+            pagesIndexed: 4,
+          }),
+        ),
+      ).toMatch(/library_document_text_pages_indexed_matches_state/u);
+    });
+
+    it('takes its pages with it when the revision is deleted', async () => {
+      const repository = new PostgresDocumentRepository(db);
+      await repository.saveTextIndex(
+        {
+          documentId: DOCUMENT,
+          state: 'indexed',
+          source: 'text_layer',
+          extractedAt: '2026-10-02T09:10:00.000Z',
+          characters: 8,
+          pages: 1,
+          pagesIndexed: 1,
+          truncated: false,
+          unreadableStreams: 0,
+          failureReason: '',
+        },
+        'SOME TEXT',
+        [
+          {
+            documentId: DOCUMENT,
+            pageNumber: 1,
+            source: 'text_layer',
+            characters: 9,
+            content: 'SOME TEXT',
+          },
+        ],
+      );
+
+      await db.delete(schema.libraryDocuments).where(eq(schema.libraryDocuments.id, DOCUMENT));
+
+      // Words in the index pointing at a document that no longer exists would
+      // be a search that answers with nothing openable.
+      const left = await db
+        .select()
+        .from(schema.libraryDocumentPages)
+        .where(eq(schema.libraryDocumentPages.documentId, DOCUMENT));
+      expect(left).toEqual([]);
     });
   });
 });

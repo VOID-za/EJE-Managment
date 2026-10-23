@@ -71,6 +71,7 @@ describe('text recognition', () => {
         extractedAt: '2026-10-01T08:00:05.000Z',
         characters: 0,
         pages: 214,
+        pagesIndexed: 0,
         truncated: false,
         unreadableStreams: 0,
         failureReason: 'This PDF carries no extractable text: it is a scan.',
@@ -206,12 +207,20 @@ describe('text recognition', () => {
       await enqueueOcr(context, id);
       const claimed = await claim();
 
+      // The engine read the first forty pages of a 214-page scan and reports
+      // each page's text, as the real local engine does.
+      const recognised = Array.from({ length: 40 }, (_unused, offset) => ({
+        pageNumber: offset + 1,
+        text: `ALARM 750 SPINDLE DRIVE page ${offset + 1}`,
+      }));
+
       const outcome = await runOcrAttempt(
         context,
         engineThat({
           kind: 'text',
-          text: 'ALARM 750 SPINDLE DRIVE',
+          text: recognised.map((page) => page.text).join('\n\n'),
           pages: 40,
+          pageTexts: recognised,
           engine: 'stub 1.0',
           truncated: false,
           truncationReason: '',
@@ -221,12 +230,110 @@ describe('text recognition', () => {
       );
 
       expect(outcome.job.state).toBe('done');
-      expect(outcome.index?.state).toBe('indexed');
+      /*
+       * PARTIALLY INDEXED, which is what forty pages of two hundred and
+       * fourteen actually is. LIB-TEXT-1.
+       *
+       * This asserted `indexed` with `truncated: true` — a document claiming
+       * to be searchable with a flag beside it that most readers never looked
+       * at. The state now says it, and the page tally says how much, which is
+       * the overstatement `partially_indexed` exists to prevent.
+       */
+      expect(outcome.index?.state).toBe('partially_indexed');
+      expect(outcome.index?.pagesIndexed).toBe(40);
+      expect(outcome.index?.pages).toBe(214);
       // The one assertion that makes recognised text honest downstream.
       expect(outcome.index?.source).toBe('ocr');
-      expect(outcome.index?.characters).toBe('ALARM 750 SPINDLE DRIVE'.length);
-      // 40 pages read out of 214: a partial index that admits it is partial.
-      expect(outcome.index?.truncated).toBe(true);
+      expect(outcome.index?.characters).toBeGreaterThan(40);
+    });
+
+    it('KEEPS the text-layer pages and adds the recognised ones. LIB-TEXT-1', async () => {
+      /*
+       * THE REGRESSION THIS GUARDS AGAINST IS THE EXPENSIVE ONE. Before pages
+       * existed, recognition REPLACED the index — correct while only wholly
+       * scanned documents were ever queued, and catastrophic once a manual
+       * with 210 typeset pages and 4 scanned diagrams is queued for the four:
+       * it would throw away the 210 to keep the 4.
+       */
+      const id = await scannedDocument();
+      await context.repos.documents.saveTextIndex(
+        {
+          documentId: id,
+          state: 'partially_indexed',
+          source: 'text_layer',
+          extractedAt: '2026-10-01T08:00:05.000Z',
+          characters: 40,
+          pages: 3,
+          pagesIndexed: 2,
+          truncated: false,
+          unreadableStreams: 0,
+          failureReason: 'No text could be read from page 2.',
+        },
+        'TORQUE SETTINGS\n\nMAST BOLTS 210 NM',
+        [
+          {
+            documentId: id,
+            pageNumber: 1,
+            source: 'text_layer',
+            characters: 15,
+            content: 'TORQUE SETTINGS',
+          },
+          {
+            documentId: id,
+            pageNumber: 3,
+            source: 'text_layer',
+            characters: 17,
+            content: 'MAST BOLTS 210 NM',
+          },
+        ],
+      );
+
+      await enqueueOcr(context, id);
+      const claimed = await claim();
+      let askedFor: readonly number[] | undefined;
+      const engine = engineThat({
+        kind: 'text',
+        text: 'WIRING DIAGRAM X1 X2',
+        pages: 1,
+        pageTexts: [{ pageNumber: 2, text: 'WIRING DIAGRAM X1 X2' }],
+        engine: 'stub 1.0',
+        truncated: false,
+        truncationReason: '',
+        pagesFailed: 0,
+      });
+
+      const outcome = await runOcrAttempt(
+        context,
+        {
+          describe: engine.describe,
+          read: (pdf, options) => {
+            askedFor = options?.pages;
+            return engine.read(pdf, options);
+          },
+        },
+        claimed,
+      );
+
+      // RECOGNITION WAS AIMED AT THE ONE PAGE THAT NEEDED IT.
+      expect(askedFor).toEqual([2]);
+
+      expect(outcome.index?.state).toBe('indexed');
+      expect(outcome.index?.pagesIndexed).toBe(3);
+      // BOTH provenances in one document, so a result can say which it read.
+      expect(outcome.index?.source).toBe('mixed');
+
+      const pages = await context.repos.documents.listPageText(id);
+      expect(pages.map((page) => [page.pageNumber, page.source])).toEqual([
+        [1, 'text_layer'],
+        [2, 'ocr'],
+        [3, 'text_layer'],
+      ]);
+
+      // The typeset text is still searchable, which is the whole point.
+      const content = await context.repos.documents.findTextContent(id);
+      expect(content).toContain('TORQUE SETTINGS');
+      expect(content).toContain('WIRING DIAGRAM X1 X2');
+      expect(content).toContain('MAST BOLTS 210 NM');
     });
 
     it('LEAVES THE INDEX ALONE when the engine found nothing', async () => {
@@ -311,6 +418,7 @@ describe('text recognition', () => {
           kind: 'text',
           text: 'should never be reached',
           pages: 1,
+          pageTexts: [{ pageNumber: 1, text: 'recognised' }],
           engine: 'stub',
           truncated: false,
           truncationReason: '',
@@ -335,6 +443,7 @@ describe('text recognition', () => {
           extractedAt: 'x',
           characters: 10,
           pages: 1,
+          pagesIndexed: 1,
           truncated: false,
           unreadableStreams: 0,
           failureReason: '',
@@ -354,6 +463,7 @@ describe('text recognition', () => {
           extractedAt: 'x',
           characters: 10,
           pages: 1,
+          pagesIndexed: 1,
           truncated: false,
           unreadableStreams: 0,
           failureReason: '',

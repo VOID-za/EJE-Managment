@@ -4,6 +4,7 @@ import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
 import { SimulatedOutbox } from '@/services/simulated/outbox';
 import { SimulatedPdfService } from '@/services/simulated/pdf';
+import { builtinPdfText } from '@/services/pdf-text';
 import { inMemoryFileStore, DemoStorageService } from '@/services/simulated/storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
@@ -117,7 +118,16 @@ export const historicalMasterReview = async (
     completedAt: job.completedAt ?? at,
   });
 
-export const buildHarness = (): Harness => {
+/**
+ * The services a harness builds, overridable one at a time.
+ *
+ * `pdfText` is the one that matters in practice: the default is the BYTE
+ * READER, so a unit test indexes a PDF without spawning a process, and a test
+ * about LIB-TEXT-1's real engine passes `popplerPdfText()` instead. The
+ * default being the fallback is deliberate — most of these tests are about
+ * what the library does with a reading, not about which engine produced it.
+ */
+export const buildHarness = (overrides: Partial<Harness['services']> = {}): Harness => {
   const store = new DemoStore();
   const repos = createDemoRepositories({ read: store.read, commit: store.commit });
   const clock = new SystemClock();
@@ -130,7 +140,9 @@ export const buildHarness = (): Harness => {
     email: new SimulatedEmailService(outbox, clock, ids),
     whatsapp: new SimulatedWhatsAppService(outbox, clock, ids),
     pdf: new SimulatedPdfService(clock),
+    pdfText: builtinPdfText(),
     storage: new DemoStorageService(inMemoryFileStore()),
+    ...overrides,
   };
 
   return { repos, outbox, services, as: (user) => ({ repos, services, actor: user }) };

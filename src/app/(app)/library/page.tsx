@@ -416,6 +416,21 @@ const InsideDocuments = ({
                 {unsearchable === 1 ? 'it was' : 'they were'} not searched.
               </span>
             )}
+            {/* A DIFFERENT THING FROM THE ABOVE, and said separately.
+                These WERE searched; some of their pages are not in the index.
+                A technician who finds nothing needs to tell "the library has
+                nothing about that alarm" from "two of these manuals have
+                pages nobody has read yet". LIB-TEXT-1. */}
+            {page.partiallySearchable > 0 && (
+              <span data-testid="library-partially-searchable">
+                {' '}
+                {page.partiallySearchable} document
+                {page.partiallySearchable === 1 ? '' : 's'}{' '}
+                {page.partiallySearchable === 1 ? 'has' : 'have'} pages that are not in the index
+                yet, so {page.partiallySearchable === 1 ? 'it was' : 'they were'} searched only in
+                part.
+              </span>
+            )}
           </p>
 
           {page.hits.map((hit) => (
@@ -429,20 +444,65 @@ const InsideDocuments = ({
                   <p className="text-xs text-steel-500">
                     {hit.document.manufacturer} · {hit.document.machineModel} ·{' '}
                     {hit.document.version} · {hit.index.pages} pages
+                    {/* Said on the result, not only on the document's own row:
+                        somebody who searched and found one page of a manual
+                        needs to know four of its pages were never read. */}
+                    {hit.index.state === 'partially_indexed' && (
+                      <span className="text-amber-700">
+                        {' '}
+                        · {hit.index.pagesIndexed} of {hit.index.pages} pages searched
+                      </span>
+                    )}
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => onOpen(hit.document)}>
                   Open
                 </Button>
               </div>
-              {hit.snippets.map((snippet) => (
-                <p
-                  key={snippet}
-                  className="mt-2 border-l-2 border-eje-200 pl-3 text-sm leading-relaxed text-steel-700"
-                >
-                  {snippet}
-                </p>
-              ))}
+              {/*
+                THE PAGE, WHERE THE ENGINE COULD SAY WHICH. LIB-TEXT-1.
+
+                "Alarm 414 is in the drive manual" sends a technician to a
+                214-page PDF; "page 212" sends them to the answer. Each page
+                carries ITS OWN provenance, because one manual can hold both:
+                typeset pages that are what the document says, and a
+                recognised diagram that is a machine's reading of what it
+                looks like — and a `B` read for an `8` in a tolerance is the
+                difference between a repair and a return visit.
+
+                No page detail is not an absence of matches: it is a
+                deployment whose extractor cannot attribute text to a page, and
+                the whole-document snippets below are the answer then.
+              */}
+              {hit.pageMatches.length > 0
+                ? hit.pageMatches.map((match) => (
+                    <div key={match.pageNumber} className="mt-2" data-testid="library-page-match">
+                      <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                        Page {match.pageNumber}
+                        {match.source === 'ocr' && (
+                          <span className="ml-2 font-normal normal-case text-amber-700">
+                            recognised text — may contain mistakes
+                          </span>
+                        )}
+                      </p>
+                      {match.snippets.map((snippet) => (
+                        <p
+                          key={snippet}
+                          className="mt-1 border-l-2 border-eje-200 pl-3 text-sm leading-relaxed text-steel-700"
+                        >
+                          {snippet}
+                        </p>
+                      ))}
+                    </div>
+                  ))
+                : hit.snippets.map((snippet) => (
+                    <p
+                      key={snippet}
+                      className="mt-2 border-l-2 border-eje-200 pl-3 text-sm leading-relaxed text-steel-700"
+                    >
+                      {snippet}
+                    </p>
+                  ))}
             </div>
           ))}
 

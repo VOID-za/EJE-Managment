@@ -1,6 +1,7 @@
 import {
   asDocumentId,
   can,
+  isSearchableState,
   userFullName,
   type User,
   type DocumentTextIndex,
@@ -8,7 +9,6 @@ import {
   type TechnicalDocumentType,
 } from '@/domain';
 import type { UploadedFile } from '@/services/ports';
-import { extractPdfText } from '@/lib/pdf/extract-text';
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { enqueueOcr } from './library-ocr';
@@ -260,15 +260,68 @@ export const addDocumentVersion = async (
 /* -------------------------------------------------------------------------- */
 
 /**
+ * What was NOT read, in a sentence somebody can act on. LIB-TEXT-1.
+ *
+ * `failureReason` on an indexed row is not a failure — it is the caveat, and a
+ * caveat nobody is shown is the same as no caveat. Three things can hold part
+ * of a manual out of the index, and they send somebody to three different
+ * places: pages that are pictures (upload a text copy, or wait for
+ * recognition), streams that would not decompress (the file is damaged), and
+ * the index budget (the document is longer than one entry may carry).
+ */
+const describePartialRead = (reading: {
+  readonly pagesWithoutText: readonly number[];
+  readonly unreadableStreams: number;
+  readonly truncated: boolean;
+}): string => {
+  const said: string[] = [];
+  if (reading.pagesWithoutText.length > 0) {
+    const pages = reading.pagesWithoutText;
+    // Named individually up to five, because "pages 7, 94 and 211" is
+    // actionable and "47 pages" is not; counted beyond that, because a list of
+    // ninety page numbers is not a sentence.
+    const named =
+      pages.length <= 5
+        ? `page${pages.length === 1 ? '' : 's'} ${pages.join(', ')}`
+        : `${pages.length} pages`;
+    said.push(
+      `No text could be read from ${named}: those pages are pictures, so they are not ` +
+        'searchable until the text on them is recognised.',
+    );
+  }
+  if (reading.unreadableStreams > 0) {
+    said.push(
+      `${reading.unreadableStreams} stream(s) in this document could not be decompressed, so ` +
+        'part of its text may be missing from the index.',
+    );
+  }
+  if (reading.truncated) {
+    said.push('The document is longer than one index entry may carry and was cut.');
+  }
+  return said.join(' ');
+};
+
+/**
  * Indexes one revision's uploaded PDF, and records what happened either way.
  *
- * THE RECORD IS WRITTEN FOR ALL THREE OUTCOMES, which is the point. A scanned
+ * THE RECORD IS WRITTEN FOR EVERY OUTCOME, which is the point. A scanned
  * manual is stored as `needs_ocr` with the reason; a file that could not be
- * read at all is stored as `failed` with the reason; only a document whose text
- * really was extracted is `indexed`. Nothing is dropped, so the library can say
- * which of its documents are searchable and which are not — and a technician
- * who searches for an alarm code is never left to conclude EJE has no manual
- * for a machine when what actually happened is that nobody could read the file.
+ * read at all is stored as `failed` with the reason; a manual with a scanned
+ * diagram in it is `partially_indexed` and says which pages are missing; only
+ * a document read from end to end is `indexed`. Nothing is dropped, so the
+ * library can say which of its documents are searchable and which are not —
+ * and a technician who searches for an alarm code is never left to conclude
+ * EJE has no manual for a machine when what actually happened is that nobody
+ * could read the file.
+ *
+ * ORDINARY TEXT EXTRACTION IS THE PRIMARY PATH, AND IT IS A SERVICE NOW.
+ * LIB-TEXT-1. EJE's library holds manufacturer manuals, so the text a PDF
+ * already contains is what the search is built on and recognition is the
+ * fallback for the pages that are pictures. `services.pdfText` is `pdftotext`
+ * where poppler is installed and the built-in byte reader where it is not —
+ * and the difference is not cosmetic: the byte reader cannot read a manual
+ * whose fonts are subset, which is nearly every manual a machine builder
+ * ships, and reported them all as scans needing 23–25 seconds a page.
  *
  * IT DOES NOT THROW ON A DOCUMENT IT CANNOT READ. An unreadable PDF is still a
  * document the library should hold — the office may have nothing else — so the
@@ -281,38 +334,58 @@ export const indexDocumentText = async (
   document: TechnicalDocument,
   bytes: Uint8Array,
 ): Promise<DocumentTextIndex> => {
-  const outcome = extractPdfText(bytes);
+  const reading = context.services.pdfText.read(bytes);
   const extractedAt = context.services.clock.now();
 
+  /*
+   * PARTIALLY INDEXED IS A COUNT, NOT A JUDGEMENT. A page either contributed
+   * text to the index or it did not, and the state follows from the two
+   * numbers. An engine that cannot attribute text to a page reports no
+   * candidates, so every page counts as indexed — which is what the built-in
+   * reader has always effectively claimed, now said rather than implied.
+   */
+  const pageRows =
+    reading.kind === 'text'
+      ? reading.pages.map((page) => ({
+          documentId: document.id,
+          pageNumber: page.pageNumber,
+          source: 'text_layer' as const,
+          characters: page.text.length,
+          content: page.text,
+        }))
+      : [];
+
   const index: DocumentTextIndex =
-    outcome.kind === 'text'
+    reading.kind === 'text'
       ? {
           documentId: document.id,
-          state: 'indexed',
+          state: reading.pagesWithoutText.length === 0 ? 'indexed' : 'partially_indexed',
           // Out of the PDF's own text layer: what the document SAYS, rather
           // than a machine's reading of what it looks like. See LIB-5.
           source: 'text_layer',
           extractedAt,
-          characters: outcome.text.length,
-          pages: outcome.pages,
-          truncated: outcome.truncated,
-          unreadableStreams: outcome.unreadableStreams,
-          failureReason:
-            outcome.unreadableStreams === 0
-              ? ''
-              : `${outcome.unreadableStreams} stream(s) in this document could not be decompressed, so part of its text may be missing from the index.`,
+          characters: reading.text.length,
+          pages: reading.totalPages,
+          pagesIndexed:
+            reading.pagesWithoutText.length === 0
+              ? reading.totalPages
+              : reading.totalPages - reading.pagesWithoutText.length,
+          truncated: reading.truncated,
+          unreadableStreams: reading.unreadableStreams,
+          failureReason: describePartialRead(reading),
         }
-      : outcome.kind === 'needs_ocr'
+      : reading.kind === 'needs_ocr'
         ? {
             documentId: document.id,
             state: 'needs_ocr',
             source: null,
             extractedAt,
             characters: 0,
-            pages: outcome.pages,
+            pages: reading.totalPages,
+            pagesIndexed: 0,
             truncated: false,
-            unreadableStreams: outcome.unreadableStreams,
-            failureReason: outcome.reason,
+            unreadableStreams: reading.unreadableStreams,
+            failureReason: reading.reason,
           }
         : {
             documentId: document.id,
@@ -321,14 +394,16 @@ export const indexDocumentText = async (
             extractedAt,
             characters: 0,
             pages: document.pageCount,
+            pagesIndexed: 0,
             truncated: false,
             unreadableStreams: 0,
-            failureReason: outcome.reason,
+            failureReason: reading.reason,
           };
 
   const saved = await context.repos.documents.saveTextIndex(
     index,
-    outcome.kind === 'text' ? outcome.text : '',
+    reading.kind === 'text' ? reading.text : '',
+    pageRows,
   );
 
   /*
@@ -344,11 +419,14 @@ export const indexDocumentText = async (
     summary:
       saved.state === 'indexed'
         ? `Document indexed: ${document.name}`
-        : `Document NOT searchable: ${document.name}`,
-    detail:
-      saved.state === 'indexed'
-        ? `${saved.characters} characters extracted from ${saved.pages} page(s)${saved.truncated ? ', cut at the index limit' : ''}.${saved.failureReason === '' ? '' : ` ${saved.failureReason}`}`
-        : `${saved.state === 'needs_ocr' ? 'No searchable text' : 'The file could not be read'}: ${saved.failureReason}`,
+        : saved.state === 'partially_indexed'
+          ? `Document indexed in part: ${document.name}`
+          : `Document NOT searchable: ${document.name}`,
+    detail: isSearchableState(saved.state)
+      ? `${saved.characters} characters extracted from ${saved.pagesIndexed} of ${saved.pages} ` +
+        `page(s) by ${reading.engine}${saved.truncated ? ', cut at the index limit' : ''}.` +
+        `${saved.failureReason === '' ? '' : ` ${saved.failureReason}`}`
+      : `${saved.state === 'needs_ocr' ? 'No searchable text' : 'The file could not be read'}: ${saved.failureReason}`,
   });
 
   /*
@@ -365,7 +443,20 @@ export const indexDocumentText = async (
    * state that answers searchability is the one above. See
    * `describeSearchability` for how the two are read together.
    */
-  if (saved.state === 'needs_ocr') await enqueueOcr(context, document.id);
+  /*
+   * A SCANNED DOCUMENT IS QUEUED, AND SO IS A PARTLY SCANNED ONE.
+   * LIB-TEXT-1.
+   *
+   * `partially_indexed` is the ordinary case for a real manual — typeset text
+   * with a scanned diagram — and leaving it out of the queue would mean the
+   * one page a technician most often wants (the wiring diagram) is the one
+   * page never indexed. The queue carries the document; which pages still need
+   * reading is answered by the page rows, so recognition reads those pages and
+   * not the whole book.
+   */
+  if (saved.state === 'needs_ocr' || saved.state === 'partially_indexed') {
+    await enqueueOcr(context, document.id);
+  }
 
   return saved;
 };

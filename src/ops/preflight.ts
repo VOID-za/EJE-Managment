@@ -7,6 +7,7 @@ import {
   checkBackupKey,
   checkExportAudit,
   checkOffsiteBackup,
+  checkPdfTextEngine,
   checkTextRecognition,
   checkDatabaseTarget,
   checkDemoSwitcher,
@@ -210,6 +211,7 @@ const main = async (): Promise<void> => {
     ...checkEmail(env, (env.EJE_PERSISTENCE ?? '').trim().toLowerCase() === 'demo'),
     // LIB-5 and BD-18: a feature somebody believes is on, and monitoring that
     // should never be a surprise.
+    ...checkPdfTextEngine(env),
     ...checkTextRecognition(env),
     ...checkExportAudit(env),
     // Which deployment this is, before the feature that depends on it.

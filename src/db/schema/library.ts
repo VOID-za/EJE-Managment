@@ -197,17 +197,31 @@ export const libraryDocumentText = pgTable(
       .references(() => libraryDocuments.id, { onDelete: 'cascade' }),
     state: text('state').notNull(),
     /**
-     * `text_layer` or `ocr`, and only on an `indexed` row. LIB-5.
+     * `text_layer`, `ocr` or `mixed`, and only on a row that indexed something.
+     * LIB-5, LIB-TEXT-1.
      *
      * Text out of a PDF's text layer is what the document says; text out of
      * recognised pixels is a machine's reading of what it looks like, and a
      * technician searching an electrical diagram for an alarm code needs to
-     * know which. The CHECK below ties it to the state so the two cannot drift.
+     * know which. `mixed` is a manual that holds both — typeset pages read
+     * from the text layer, a scanned diagram recognised afterwards — and the
+     * per-page rows say which page is which. The CHECK below ties it to the
+     * state so the two cannot drift.
      */
     source: text('source'),
     extractedAt: instant('extracted_at').notNull(),
     characters: integer('characters').notNull().default(0),
     pages: integer('pages').notNull().default(1),
+    /**
+     * Pages whose text is in the index. LIB-TEXT-1.
+     *
+     * The CHECK below ties it to the state: equal to `pages` when `indexed`,
+     * between 1 and `pages` - 1 when `partially_indexed`, zero otherwise. So
+     * "searchable" cannot quietly mean "four of two hundred and fourteen
+     * pages", and `partially_indexed` cannot be written for a document that is
+     * either wholly in or wholly out of the index.
+     */
+    pagesIndexed: integer('pages_indexed').notNull().default(0),
     truncated: boolean('truncated').notNull().default(false),
     unreadableStreams: integer('unreadable_streams').notNull().default(0),
     failureReason: text('failure_reason').notNull().default(''),
@@ -233,18 +247,94 @@ export const libraryDocumentText = pgTable(
      */
     check(
       'library_document_text_source_matches_state',
-      sql`(${table.state} = 'indexed') = (${table.source} is not null)
-          and (${table.source} is null or ${table.source} in ('text_layer', 'ocr'))`,
+      sql`(${table.state} in ('indexed', 'partially_indexed')) = (${table.source} is not null)
+          and (${table.source} is null or ${table.source} in ('text_layer', 'ocr', 'mixed'))`,
     ),
     check(
       'library_document_text_state_matches_content',
-      sql`(${table.state} = 'indexed' and length(${table.content}) > 0)
-          or (${table.state} <> 'indexed' and ${table.content} = '')`,
+      sql`(${table.state} in ('indexed', 'partially_indexed') and length(${table.content}) > 0)
+          or (${table.state} not in ('indexed', 'partially_indexed') and ${table.content} = '')`,
     ),
     check(
       'library_document_text_state_known',
-      sql`${table.state} in ('indexed', 'needs_ocr', 'failed')`,
+      sql`${table.state} in ('indexed', 'partially_indexed', 'needs_ocr', 'failed')`,
     ),
+    /*
+     * THE PAGE TALLY AND THE STATE CANNOT DISAGREE. LIB-TEXT-1.
+     *
+     * `partially_indexed` with every page indexed would be a document
+     * understating itself; `indexed` with four pages of two hundred would be
+     * one overstating itself, which is the failure this state exists to
+     * prevent. Both are refused here rather than trusted to the writer.
+     */
+    check(
+      'library_document_text_pages_indexed_matches_state',
+      sql`(${table.state} = 'indexed' and ${table.pagesIndexed} = ${table.pages})
+          or (${table.state} = 'partially_indexed'
+              and ${table.pagesIndexed} > 0
+              and ${table.pagesIndexed} < ${table.pages})
+          or (${table.state} not in ('indexed', 'partially_indexed') and ${table.pagesIndexed} = 0)`,
+    ),
+  ],
+);
+
+/**
+ * ONE ROW PER PAGE OF SEARCHABLE TEXT. MASTER SCOPE LIB-TEXT-1.
+ *
+ * WHY THIS EXISTS ALONGSIDE `library_document_text` RATHER THAN REPLACING IT.
+ * The whole-document row is the index a phrase crossing a page break matches,
+ * and it is what every existing search and snippet already reads. These rows
+ * are ADDITIVE and answer the three questions a single blob cannot:
+ *
+ *   - WHICH PAGE a result is on, so a technician is sent to page 212 of the
+ *     drive manual rather than to the drive manual;
+ *   - WHICH PAGES are in the index at all, which is what makes
+ *     `partially_indexed` a fact rather than a hedge;
+ *   - WHICH PAGES still need recognising, which turns a 214-page manual with
+ *     one scanned diagram from 83 minutes of OCR into 25 seconds of it.
+ *
+ * `source` IS PER PAGE AND NOT PER DOCUMENT, because on a mixed manual the two
+ * provenances sit in one file: the typeset pages are what the document says
+ * and the recognised page is a machine's reading of what it looks like. A
+ * result has to be able to say which it came from.
+ *
+ * NO ROWS IS A VALID STATE. An engine that cannot attribute text to a page
+ * writes none, and the library behaves as it did before — so a deployment
+ * without poppler loses the page numbers and nothing else.
+ *
+ * `search` is GENERATED from `content` with the same `simple` configuration as
+ * the document index, so the two can never disagree about what matches.
+ */
+export const libraryDocumentPages = pgTable(
+  'library_document_pages',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => libraryDocuments.id, { onDelete: 'cascade' }),
+    pageNumber: integer('page_number').notNull(),
+    source: text('source').notNull(),
+    characters: integer('characters').notNull(),
+    content: text('content').notNull(),
+    search: tsvector('search').generatedAlwaysAs(
+      (): ReturnType<typeof sql> => sql`to_tsvector('simple', content)`,
+    ),
+    extractedAt: instant('extracted_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('library_document_pages_pkey').on(table.documentId, table.pageNumber),
+    index('library_document_pages_search_idx').using('gin', table.search),
+    check('library_document_pages_numbered_from_one', sql`${table.pageNumber} >= 1`),
+    check(
+      'library_document_pages_source_known',
+      sql`${table.source} in ('text_layer', 'ocr')`,
+    ),
+    /*
+     * A PAGE ROW IS A PAGE THAT HAS TEXT. An empty one would be a page claiming
+     * to be in the index while contributing nothing to it, which is the same
+     * lie the document-level CHECK above refuses.
+     */
+    check('library_document_pages_content_present', sql`length(${table.content}) > 0`),
+    check('library_document_pages_characters_sane', sql`${table.characters} > 0`),
   ],
 );
 

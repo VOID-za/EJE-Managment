@@ -8,6 +8,7 @@ import {
   checkExportAudit,
   checkMigrations,
   checkOffsiteBackup,
+  checkPdfTextEngine,
   checkTextRecognition,
   checkRuntime,
   checkStorage,
@@ -367,6 +368,42 @@ describe('the three things the last deployment pass could not see', () => {
     const remote = checkOffsiteBackup({ EJE_BACKUP_OFFSITE_RCLONE: 'wasabi:eje-backups' });
     expect(remote[0]?.verdict).toBe('ok');
     expect(remote[0]?.detail).not.toContain('wasabi');
+  });
+
+  it('names the PDF text engine when poppler is there. LIB-TEXT-1', () => {
+    const [check] = checkPdfTextEngine({});
+    expect(check?.verdict).toBe('ok');
+    expect(check?.detail).toMatch(/pdftotext/iu);
+    expect(check?.detail).toMatch(/page by page/u);
+  });
+
+  it('WARNS when poppler is not installed, naming the package', () => {
+    /*
+     * NOT A FAILURE AND NOT SILENCE. Without poppler the application works and
+     * the fallback is honest — but it reports EJE's own manuals as scans
+     * needing recognition at 25 seconds a page, which is a far less useful
+     * library than EJE expect. That is a thing to tell an operator.
+     */
+    const [check] = checkPdfTextEngine({ EJE_PDF_TEXT_BINARY: '/nonexistent/pdftotext' });
+    expect(check?.verdict).toBe('warn');
+    expect(check?.detail).toMatch(/poppler-utils/u);
+    expect(check?.detail).toMatch(/name the page/u);
+  });
+
+  it('WARNS when the byte reader was asked for on purpose', () => {
+    const [check] = checkPdfTextEngine({ EJE_PDF_TEXT: 'builtin' });
+    expect(check?.verdict).toBe('warn');
+    expect(check?.detail).toMatch(/unless that is deliberate/u);
+  });
+
+  it('FAILS a PDF-text engine value this build does not know', () => {
+    // Same rule as EJE_OCR: an unset value and a misspelt one must say
+    // different things, or a setting somebody believes is on turns a feature
+    // off in silence.
+    const [check] = checkPdfTextEngine({ EJE_PDF_TEXT: 'popler' });
+    expect(check?.verdict).toBe('fail');
+    expect(check?.detail).toMatch(/"popler"/u);
+    expect(check?.detail).toMatch(/somebody believes a better one is/u);
   });
 
   it('says text recognition is OFF without calling that a problem', () => {

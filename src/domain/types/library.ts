@@ -79,8 +79,18 @@ export interface TechnicalDocument {
  * honest answers and only one of them is yes, so the state is named rather
  * than implied:
  *
- *  - `indexed`    — text was extracted and is searchable. `characters` says how
- *                   much, so "indexed" cannot hide an empty index.
+ *  - `indexed`    — text was extracted from EVERY page and is searchable.
+ *                   `characters` says how much, so "indexed" cannot hide an
+ *                   empty index.
+ *  - `partially_indexed`
+ *                 — SOME pages carry text and some do not. LIB-TEXT-1. A real
+ *                   manual is mostly typeset text with the occasional scanned
+ *                   diagram, and this is that document: searchable now, and
+ *                   honest about which pages are not in the index. It is the
+ *                   state that makes "I searched and found nothing" mean
+ *                   something, because the alternative — calling it `indexed`
+ *                   — says the whole book was read when four pages of it were
+ *                   pictures.
  *  - `needs_ocr`  — the file is a PDF and has no readable text in it: a scanned
  *                   manual, or one whose fonts carry no usable encoding. It is
  *                   NOT searchable and the library says so. This is a state a
@@ -98,7 +108,11 @@ export interface TechnicalDocument {
  * The extracted text itself is not on this record: it is held separately and
  * read back only for the snippets of a result page. See `library-search.ts`.
  */
-export type DocumentIndexState = 'indexed' | 'needs_ocr' | 'failed';
+export type DocumentIndexState = 'indexed' | 'partially_indexed' | 'needs_ocr' | 'failed';
+
+/** The two states that mean a search can find something in this document. */
+export const isSearchableState = (state: DocumentIndexState): boolean =>
+  state === 'indexed' || state === 'partially_indexed';
 
 /**
  * WHERE THE INDEXED TEXT CAME FROM. LIB-5.
@@ -114,28 +128,80 @@ export type DocumentIndexState = 'indexed' | 'needs_ocr' | 'failed';
  * So a search result from OCR text is labelled as such, and this is what makes
  * that possible. `null` while nothing has been indexed.
  */
-export type DocumentTextSource = 'text_layer' | 'ocr';
+export type DocumentTextSource = 'text_layer' | 'ocr' | 'mixed';
 
 export interface DocumentTextIndex {
   /** The REVISION this text came out of. A new revision indexes itself. */
   readonly documentId: DocumentId;
   readonly state: DocumentIndexState;
   /**
-   * How the text was obtained. Set only when the state is `indexed`.
+   * How the text was obtained. Set whenever anything was indexed.
    *
    * Every row written before this existed is `text_layer`, which is true of
    * all of them: there was no other way to get text until OCR existed.
+   * `mixed` is LIB-TEXT-1's case — a manual whose typeset pages were read from
+   * the text layer and whose scanned diagram was later recognised. One document
+   * whose pages have two different provenances, and a result from either must
+   * say which, so the per-page rows carry it as well.
    */
   readonly source: DocumentTextSource | null;
   readonly extractedAt: IsoDateTime;
-  /** Characters indexed. Zero whenever the state is not `indexed`. */
+  /** Characters indexed. Zero whenever nothing was indexed. */
   readonly characters: number;
+  /** Pages in the document, as the extractor counted them. */
   readonly pages: number;
+  /**
+   * Pages whose text is in the index. LIB-TEXT-1.
+   *
+   * Equal to `pages` when the state is `indexed`, fewer when it is
+   * `partially_indexed`, zero otherwise — so "searchable" carries HOW MUCH of
+   * the document is searchable rather than leaving a technician to assume all
+   * of it. An engine that cannot attribute text to a page reports every page
+   * as indexed, which is what the built-in reader has always effectively
+   * claimed; it is now said rather than implied.
+   */
+  readonly pagesIndexed: number;
   /** True when the document was longer than one index entry may carry. */
   readonly truncated: boolean;
   /** Streams that could not be decompressed, so a partial read says so. */
   readonly unreadableStreams: number;
   readonly failureReason: string;
+}
+
+/**
+ * ONE PAGE'S SEARCHABLE TEXT. LIB-TEXT-1.
+ *
+ * WHY PER PAGE AT ALL, when the whole document is already indexed. Three
+ * things the mandate asks for are page facts and cannot be answered by a
+ * single blob:
+ *
+ *  1. A SEARCH RESULT THAT NAMES THE PAGE. "Alarm 414 is in the drive manual"
+ *     sends a technician to a 214-page PDF; "page 212 of the drive manual"
+ *     sends them to the answer.
+ *  2. PARTIALLY SEARCHABLE AS A FACT. Which pages are in the index, rather
+ *     than a hedge about the document as a whole.
+ *  3. RECOGNITION AIMED AT THE PAGES THAT NEED IT. A manual with one scanned
+ *     diagram is 25 seconds of work, not 83 minutes of it (BD-21's
+ *     measurement). The pages without text are the work list.
+ *
+ * ADDITIVE, NOT A REPLACEMENT. The whole-document text is still the index a
+ * phrase crossing a page break matches; these rows say where each part of it
+ * came from. An engine that cannot attribute pages produces none of them, and
+ * the library behaves exactly as it did before — so a deployment without
+ * poppler loses the page numbers and nothing else.
+ */
+export interface DocumentPageText {
+  readonly documentId: DocumentId;
+  /** One-based, as printed on the page. */
+  readonly pageNumber: number;
+  /** Where THIS page's text came from. A document may hold both. */
+  readonly source: DocumentTextSource;
+  readonly characters: number;
+}
+
+/** A page whose text matched a search, with the words around the match. */
+export interface DocumentPageMatch extends DocumentPageText {
+  readonly snippets: readonly string[];
 }
 
 /**

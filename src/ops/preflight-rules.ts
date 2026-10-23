@@ -2,6 +2,7 @@ import { classifyDatabaseUrl } from '@/db/connection-guard';
 import { DEPLOYMENT, deploymentMismatch, deploymentModeOf } from './deployment-mode';
 import { chooseEmailTransport, describeEmailConfiguration } from '@/services/production/email';
 import { readSmtpEmailConfiguration } from '@/services/development/email';
+import { buildPdfText } from '@/services/pdf-text';
 
 /**
  * IS THIS MACHINE CONFIGURED TO SERVE EJE? MASTER SCOPE ARCH-5, MANDATE-3.
@@ -422,6 +423,66 @@ export const checkTextRecognition = (env: PreflightEnvironment): readonly Check[
       'EJE_OCR=local. Run `npm run library:ocr -- --report` to confirm the binaries are ' +
         'actually installed — if they are not, every document settles as "no engine" and ' +
         'nothing says so on a screen. This is the demonstration posture BD-21 asked for.',
+    ),
+  ];
+};
+
+/**
+ * THE LIBRARY'S PRIMARY SEARCH ENGINE. LIB-TEXT-1.
+ *
+ * WHY THIS IS A DEPLOYMENT CHECK AND NOT A DETAIL. EJE's library will hold
+ * manufacturer manuals, and `pdftotext` is what reads them: the built-in byte
+ * reader cannot resolve a subset font's `/ToUnicode` map, which is how nearly
+ * every manual a machine builder ships is encoded. Without poppler installed,
+ * a deployment does not FAIL — it quietly reports EJE's own manuals as scans
+ * that need recognition, at about 25 seconds of CPU a page, and a 214-page
+ * manual is then stopped by the page bound at page 40.
+ *
+ * So the engine is named either way: a deployment that has it is told it has
+ * it, and one that does not is WARNED with the package to install. A warning
+ * rather than a failure because the application works and the fallback is
+ * honest about what it could not read — what is wrong is that the library
+ * would be far less useful than EJE expect, which is a thing to tell an
+ * operator rather than a thing to refuse to start over.
+ */
+export const checkPdfTextEngine = (env: PreflightEnvironment): readonly Check[] => {
+  const configured = value(env, 'EJE_PDF_TEXT').toLowerCase();
+  if (configured === 'builtin') {
+    return [
+      warn(
+        'Library text extraction',
+        'EJE_PDF_TEXT=builtin, so the built-in byte reader is being used. It cannot read a ' +
+          'manual whose fonts are subset — which is most manufacturer manuals — and will report ' +
+          'them as scans needing text recognition. Unset it unless that is deliberate.',
+      ),
+    ];
+  }
+  if (configured !== '' && configured !== 'auto' && configured !== 'poppler') {
+    return [
+      fail(
+        'Library text extraction',
+        `EJE_PDF_TEXT is "${configured}", which is not an engine this build knows — the values ` +
+          'are `auto` (the default), `poppler` and `builtin`. The byte reader is being used and ' +
+          'somebody believes a better one is.',
+      ),
+    ];
+  }
+
+  const engine = buildPdfText(env as Readonly<Record<string, string | undefined>>).describe();
+  if (!engine.perPage) {
+    return [
+      warn(
+        'Library text extraction',
+        `${engine.reason} Install poppler-utils: without it the library cannot read most ` +
+          'manufacturer manuals, and cannot name the page a search result is on.',
+      ),
+    ];
+  }
+  return [
+    ok(
+      'Library text extraction',
+      `${engine.engine}. Text is read from the PDF itself, page by page, and recognition is ` +
+        'the fallback for the pages that are pictures.',
     ),
   ];
 };

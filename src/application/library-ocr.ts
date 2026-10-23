@@ -177,9 +177,55 @@ export const runOcrAttempt = async (
     };
   }
 
+  /*
+   * WHICH PAGES STILL NEED READING. LIB-TEXT-1.
+   *
+   * A manual whose typeset pages came out of the text layer is
+   * `partially_indexed`, and the pages that are already in the index are the
+   * ones with page rows. Recognition is aimed at the REST — the scanned
+   * diagrams — which on a 214-page manual with one of them is 25 seconds of
+   * work instead of 83 minutes (BD-21's measurement), and leaves the good text
+   * where it is.
+   *
+   * EMPTY MEANS THE WHOLE DOCUMENT, which is the right answer for a scan and
+   * for a deployment whose extractor cannot attribute pages: there is nothing
+   * to keep, so there is nothing to aim around.
+   */
+  const existingIndex = await context.repos.documents.findTextIndex(job.documentId);
+  const existingPages = await context.repos.documents.listPageText(job.documentId);
+  const alreadyRead = new Set(existingPages.map((page) => page.pageNumber));
+  const totalPages = existingIndex?.pages ?? document.pageCount;
+  const pagesToRead =
+    alreadyRead.size === 0
+      ? []
+      : Array.from({ length: totalPages }, (_unused, offset) => offset + 1).filter(
+          (pageNumber) => !alreadyRead.has(pageNumber),
+        );
+
+  /*
+   * NOTHING LEFT TO READ IS NOT A FAILURE AND NOT WORK. It happens when a
+   * re-extraction with a better engine indexed every page while this job sat
+   * in the queue. The job is closed as done and the index is left alone.
+   */
+  if (alreadyRead.size > 0 && pagesToRead.length === 0) {
+    const settled = await settle('done', '', job.engine);
+    await audit(context, {
+      jobId: null,
+      type: 'document_indexed',
+      summary: `Text recognition not needed: ${document.name}`,
+      detail:
+        'Every page of this document was already in the index by the time recognition ran, so ' +
+        'nothing was recognised and nothing was changed.',
+    });
+    return { job: settled, index: existingIndex };
+  }
+
   let outcome;
   try {
-    outcome = await engine.read(bytes);
+    outcome = await engine.read(
+      bytes,
+      pagesToRead.length === 0 ? undefined : { pages: pagesToRead },
+    );
   } catch (cause) {
     /*
      * AN ENGINE THAT THROWS IS A BROKEN ENGINE. The port says it must not, and
@@ -221,18 +267,54 @@ export const runOcrAttempt = async (
   }
 
   /*
-   * TEXT. The ONLY path that touches the index, and it writes `source: 'ocr'`
-   * so every later reader knows this text is a reading rather than the
-   * document's own.
+   * TEXT, MERGED WITH WHAT WAS ALREADY THERE. LIB-TEXT-1.
+   *
+   * The ONLY path that touches the index, and it used to REPLACE it — which
+   * was correct while only a wholly-scanned document was ever queued, and
+   * would now throw away 210 good pages of a manual to keep the four that were
+   * recognised. The text-layer pages are kept, the recognised pages are added
+   * beside them with `source: 'ocr'`, and the document's own source becomes
+   * `mixed` when it holds both: a result from either has to be able to say
+   * which it came from, because one is what the document says and the other is
+   * a machine's reading of what it looks like.
    */
+  const recognisedPages = outcome.pageTexts.map((page) => ({
+    documentId: job.documentId,
+    pageNumber: page.pageNumber,
+    source: 'ocr' as const,
+    characters: page.text.length,
+    content: page.text,
+  }));
+
+  /*
+   * THE KEPT PAGES ARE HANDED BACK WITH THEIR TEXT, because `saveTextIndex`
+   * replaces the page rows wholesale — which is what stops a re-extraction
+   * leaving pages it did not mention still searchable.
+   */
+  const mergedPages = [
+    ...existingPages.filter((page) => page.content.length > 0),
+    ...recognisedPages,
+  ].sort((a, b) => a.pageNumber - b.pageNumber);
+
+  const mergedText =
+    mergedPages.length > 0
+      ? mergedPages.map((page) => page.content).join('\n\n')
+      : outcome.text;
+
+  const pagesIndexed = mergedPages.length;
+  const documentPages = Math.max(totalPages, outcome.pages, pagesIndexed);
+  const holdsTextLayer = existingPages.some((page) => page.source === 'text_layer');
+
   const index = await context.repos.documents.saveTextIndex(
     {
       documentId: job.documentId,
-      state: 'indexed',
-      source: 'ocr',
+      state:
+        pagesIndexed > 0 && pagesIndexed < documentPages ? 'partially_indexed' : 'indexed',
+      source: holdsTextLayer ? 'mixed' : 'ocr',
       extractedAt: context.services.clock.now(),
-      characters: outcome.text.length,
-      pages: outcome.pages,
+      characters: mergedText.length,
+      pages: documentPages,
+      pagesIndexed: pagesIndexed === 0 ? documentPages : pagesIndexed,
       /*
        * TRUNCATED IF THE ENGINE SAYS SO, OR IF IT READ FEWER PAGES THAN THE
        * DOCUMENT HAS.
@@ -258,7 +340,8 @@ export const runOcrAttempt = async (
        */
       failureReason: outcome.truncationReason,
     },
-    outcome.text,
+    mergedText,
+    mergedPages,
   );
 
   const settled = await settle('done', '', outcome.engine);
@@ -267,8 +350,10 @@ export const runOcrAttempt = async (
     type: 'document_indexed',
     summary: `Document indexed by text recognition: ${document.name}`,
     detail:
-      `${index.characters} characters recognised from ${index.pages} page(s) by ` +
-      `${outcome.engine}${index.truncated ? `, of ${document.pageCount} in the document` : ''}. ` +
+      `${outcome.pageTexts.length || outcome.pages} page(s) recognised by ${outcome.engine}` +
+      `${pagesToRead.length === 0 ? '' : ` (pages ${pagesToRead.slice(0, 10).join(', ')}${pagesToRead.length > 10 ? ' and others' : ''}, the pages that carried no text)`}. ` +
+      `${index.pagesIndexed} of ${index.pages} page(s) are now in the index` +
+      `${index.truncated ? ', and it was cut short' : ''}. ` +
       'Recognised text can contain mistakes and is labelled as recognised wherever it is shown.',
   });
 
@@ -290,6 +375,31 @@ export const describeSearchability = (
   index: DocumentTextIndex | null,
   job: OcrJob | null,
 ): { readonly searchable: boolean; readonly label: string; readonly detail: string } => {
+  /*
+   * PART OF THE DOCUMENT IS SEARCHABLE AND IT SAYS WHICH PART. LIB-TEXT-1.
+   *
+   * The ordinary shape of a real manual: typeset text with a scanned diagram
+   * in it. Calling that `Searchable` would tell a technician the whole book
+   * was read when four pages of it are pictures — and the four pages they most
+   * often want are the wiring diagrams. The page tally is said out loud, and
+   * `failureReason` carries which pages and why.
+   */
+  if (index !== null && index.state === 'partially_indexed') {
+    const waiting =
+      job !== null && (job.state === 'queued' || job.state === 'running')
+        ? ' The rest is waiting for text recognition.'
+        : job !== null && job.state === 'unavailable'
+          ? ' Nothing on this server can read the remaining pages.'
+          : '';
+    return {
+      searchable: true,
+      label: `Searchable — ${index.pagesIndexed} of ${index.pages} pages`,
+      detail:
+        `${index.pagesIndexed} of this document's ${index.pages} pages are in the index. ` +
+        `${index.failureReason}${waiting}`.trim(),
+    };
+  }
+
   if (index !== null && index.state === 'indexed') {
     /*
      * PART OF A DOCUMENT IS SEARCHABLE, AND IT SAYS WHICH PART.
