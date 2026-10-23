@@ -86,16 +86,31 @@ else await assistants.first().check();
 
 check((await body()).includes('when they accept it'), 'the form states the job will be created Open, not started');
 
-// An attachment, through the real file input.
+/*
+ * AN ATTACHMENT, THROUGH THE REAL FILE INPUT.
+ *
+ * A PHOTOGRAPH since Create New Job §3C: the owner asked that this control
+ * offer photographs and videos rather than arbitrary documents, so the server
+ * refuses a PDF here — and a refused attachment leaves the office on the form
+ * with an error instead of on the new job. This script attached a PDF and was
+ * what caught that, which is the gate doing its job.
+ *
+ * A real PNG header, because the server sniffs the BYTES and a file called
+ * `.png` with other content is refused on what it actually is.
+ */
 await page.locator('input[type="file"]').setInputFiles({
-  name: 'customer-order-99500.pdf',
-  mimeType: 'application/pdf',
-  buffer: Buffer.from('%PDF-1.4 browser check'),
+  name: 'fault-99500.png',
+  mimeType: 'image/png',
+  buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]),
 });
 await page.waitForTimeout(400);
 let formHtml = await body();
-check(formHtml.includes('customer-order-99500.pdf'), 'an attached document is listed on the form');
+check(formHtml.includes('fault-99500.png'), 'an attached photograph is listed on the form');
 check(formHtml.includes('up to 25 MB'), 'the form states the size and formats it accepts');
+check(
+  formHtml.includes('Photographs and videos'),
+  'the control says it takes photographs and videos, not documents',
+);
 
 await page.getByRole('button', { name: 'Create job' }).click();
 await page.waitForURL('**/jobs/EJE-**', { timeout: 20000 });
@@ -111,7 +126,7 @@ let t = await body();
 check(!t.includes('Something went wrong'), 'the new job screen loads');
 check(t.includes(FAULT), 'the fault description is on the job');
 check(t.includes('receives the job card'), 'the job names who receives the customer copy');
-check(t.includes('customer-order-99500.pdf'), 'the attachment is recorded on the job');
+check(t.includes('fault-99500.png'), 'the attachment is recorded on the job');
 
 // THE ROUND TRIP. The file went up; it comes back, byte for byte, through an
 // authorised route — no storage key, no public URL.
@@ -124,7 +139,13 @@ const attachment = await page.evaluate(async (number) => {
   const download = await fetch(`/api/jobs/${jobId}/attachments/${file.id}`, {
     credentials: 'same-origin',
   });
-  const text = await download.text();
+  /*
+   * THE BYTES AS BYTES, not as text. A PNG header begins 0x89, which is not
+   * valid UTF-8 — reading the response as text replaces it with U+FFFD, and
+   * then "the bytes that came back are the bytes that went up" compares two
+   * mangled strings and can pass on a file that is wrong.
+   */
+  const bytes = [...new Uint8Array(await download.arrayBuffer())];
   return {
     found: true,
     jobId,
@@ -132,15 +153,20 @@ const attachment = await page.evaluate(async (number) => {
     status: download.status,
     disposition: download.headers.get('content-disposition'),
     type: download.headers.get('content-type'),
-    body: text,
+    bytes,
     leaksKey: JSON.stringify(file).includes('uploads/'),
   };
 }, jobNumber);
 
 check(attachment.found, 'the uploaded document is on the job');
 check(attachment.status === 200, `the document downloads (got ${attachment.status})`);
-check(attachment.body.startsWith('%PDF'), 'the bytes that come back are the bytes that went up');
-check(attachment.type === 'application/pdf', 'the server decided the content type');
+check(
+  // The exact bytes that were uploaded above, compared as numbers.
+  JSON.stringify(attachment.bytes) ===
+    JSON.stringify([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]),
+  'the bytes that come back are the bytes that went up',
+);
+check(attachment.type === 'image/png', 'the server decided the content type');
 check((attachment.disposition ?? '').includes('attachment;'), 'it is served as a download');
 
 // The STATE, asked of the server rather than read off a progress rail that
