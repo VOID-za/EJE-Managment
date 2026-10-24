@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { runPostgresTool } from './pg-client';
 import { BackupRefused, backupStamp, redactSecrets } from './plan';
 
 /**
@@ -122,17 +122,8 @@ export const claimScratchDatabase = (
 /** The real thing, driving `psql` against the server in `url`. */
 export const postgresScratchServer = (url: string): ScratchServer => {
   const run = (sql: string): { ok: boolean; stdout: string; stderr: string } => {
-    const result = spawnSync('psql', [url, '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql], {
-      encoding: 'utf8',
-    });
-    if (result.error !== undefined) {
-      return { ok: false, stdout: '', stderr: `psql could not be run: ${result.error.message}` };
-    }
-    return {
-      ok: result.status === 0,
-      stdout: result.stdout ?? '',
-      stderr: (result.stderr ?? '').trim(),
-    };
+    // The URL is passed as PG* variables and a password file, never as an argument.
+    return runPostgresTool('psql', url, ['-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
   };
 
   return {

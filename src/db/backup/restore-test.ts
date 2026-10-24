@@ -1,10 +1,10 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEnvFiles } from '../seed/env';
 import { extractArchiveSafely } from './archive';
 import { recordVerification, verifyInto } from './integrity';
+import { runPostgresTool } from './pg-client';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
 import { skewDiagnosis } from './versions';
 import {
@@ -63,23 +63,9 @@ const CORE_TABLES = [
   'audit_events',
 ] as const;
 
-const run = (
-  command: string,
-  args: readonly string[],
-): { ok: boolean; stdout: string; stderr: string } => {
-  const result = spawnSync(command, [...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (result.error !== undefined) {
-    return { ok: false, stdout: '', stderr: `${command} could not be run: ${result.error.message}` };
-  }
-  return {
-    ok: result.status === 0,
-    stdout: result.stdout ?? '',
-    stderr: (result.stderr ?? '').trim(),
-  };
-};
-
+// The URL is passed as PG* variables and a password file, never as an argument.
 const psql = (url: string, sql: string): { ok: boolean; stdout: string; stderr: string } =>
-  run('psql', [url, '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
+  runPostgresTool('psql', url, ['-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
 
 const main = async (): Promise<void> => {
   loadEnvFiles();
@@ -194,9 +180,11 @@ const main = async (): Promise<void> => {
     const target = withDatabase(databaseUrl, scratch);
 
     // ---- 3. the restore itself -------------------------------------------
-    const restored = run('pg_restore', [
+    // `--dbname` is the scratch database's NAME; the server and the
+    // credentials come from the environment `runPostgresTool` builds.
+    const restored = runPostgresTool('pg_restore', target, [
       '--dbname',
-      target,
+      scratch,
       '--no-owner',
       '--no-privileges',
       '--exit-on-error',

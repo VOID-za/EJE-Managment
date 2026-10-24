@@ -620,6 +620,63 @@ describeDb('npm run backup:verify and backup:restore-test', () => {
   });
 
   /**
+   * NO CONNECTION STRING ON ANY COMMAND LINE. BACKUP-2, security audit of
+   * 24 October 2026.
+   *
+   * The tools used to receive `DATABASE_URL` as an argument, which every local
+   * account can read through `ps`. Wrappers named `pg_dump`, `psql` and
+   * `pg_restore` go first on PATH, write down the arguments they were given
+   * and then run the real tool — so this is the REAL backup and the REAL
+   * restore test, end to end, with every invocation's command line captured.
+   *
+   * The test database's password is `eje`, which is also in its name and in
+   * every temporary path, so the assertion is on the shapes a credential
+   * travels in — a URL, or `user:password@` — rather than on the bare word.
+   */
+  it('puts no connection string on any command line, backup or restore', () => {
+    const shims = mkdtempSync(join(tmpdir(), 'eje-pg-shims-'));
+    roots.push(shims);
+    const log = join(shims, 'argv.log');
+    for (const tool of ['pg_dump', 'psql', 'pg_restore']) {
+      const real = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+      expect(real, `${tool} on PATH`).not.toBe('');
+      writeFileSync(
+        join(shims, tool),
+        `#!/bin/sh\nprintf '%s\\n' "${tool} $*" >> '${log}'\nexec '${real}' "$@"\n`,
+        { mode: 0o755 },
+      );
+    }
+    const path = `${shims}:${process.env.PATH ?? ''}`;
+
+    documentsTheDatabaseRefersTo(storage);
+    const backup = runBackup({
+      DATABASE_URL: url ?? '',
+      EJE_STORAGE_DIR: storage,
+      EJE_BACKUP_DIR: into,
+      PATH: path,
+    });
+    expect(backup.status, backup.stderr).toBe(0);
+    const directory = join(into, backupDirectories(into)[0]!);
+    const restored = runRestoreTest(directory, { PATH: path });
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout).toMatch(/RESTORE-TESTED/u);
+
+    const lines = readFileSync(log, 'utf8').split('\n').filter((line) => line.length > 0);
+    // Every tool was really reached through the wrappers…
+    for (const tool of ['pg_dump', 'psql', 'pg_restore']) {
+      expect(lines.some((line) => line.startsWith(`${tool} `)), tool).toBe(true);
+    }
+    // …and not one of them was handed a credential.
+    const user = new URL(url ?? '').username;
+    const password = new URL(url ?? '').password;
+    for (const line of lines) {
+      expect(line).not.toMatch(/postgres(ql)?:\/\//iu);
+      expect(line).not.toMatch(/password\s*=/iu);
+      if (password.length > 0) expect(line).not.toContain(`${user}:${password}@`);
+    }
+  });
+
+  /**
    * A DOCUMENT THAT WAS ALREADY MISSING IS REPORTED, NOT FATAL. BACKUP-1.
    *
    * This is the case that used to make the restore test unusable. A reference

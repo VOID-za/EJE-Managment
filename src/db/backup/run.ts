@@ -23,6 +23,7 @@ import {
   type StorageReference,
 } from './references';
 import { planOffsite, rcloneCommands, sameMediaWarning } from './offsite';
+import { runPostgresTool } from './pg-client';
 import {
   compareMajors,
   majorFromServerVersion,
@@ -117,38 +118,27 @@ const seal = async (
 const referencedStorageKeys = (
   databaseUrl: string,
 ): { readonly keys: readonly StorageReference[]; readonly read: boolean } => {
-  const tables = spawnSync(
+  const tables = runPostgresTool(
     'psql',
-    [
-      databaseUrl,
+    databaseUrl,
+    ['-v', 'ON_ERROR_STOP=1', '-At', '-c', KEY_COLUMN_QUERY],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  if (!tables.ok) return { keys: [], read: false };
+
+  const keys: StorageReference[] = [];
+  for (const { table, column } of keyColumnsFrom(tables.stdout)) {
+    const rows = runPostgresTool('psql', databaseUrl, [
       '-v',
       'ON_ERROR_STOP=1',
       '-At',
       '-c',
-      KEY_COLUMN_QUERY,
-    ],
-    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
-  );
-  if (tables.status !== 0) return { keys: [], read: false };
-
-  const keys: StorageReference[] = [];
-  for (const { table, column } of keyColumnsFrom(tables.stdout ?? '')) {
-    const rows = spawnSync(
-      'psql',
-      [
-        databaseUrl,
-        '-v',
-        'ON_ERROR_STOP=1',
-        '-At',
-        '-c',
-        // NOT NULL filtered here rather than counted as a dangling reference:
-        // a nullable key column that is null names no file at all.
-        `SELECT ${column} FROM public.${table} WHERE ${column} IS NOT NULL`,
-      ],
-      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-    );
-    if (rows.status !== 0) return { keys: [], read: false };
-    for (const storageKey of (rows.stdout ?? '').split('\n').filter((line) => line.length > 0)) {
+      // NOT NULL filtered here rather than counted as a dangling reference:
+      // a nullable key column that is null names no file at all.
+      `SELECT ${column} FROM public.${table} WHERE ${column} IS NOT NULL`,
+    ]);
+    if (!rows.ok) return { keys: [], read: false };
+    for (const storageKey of rows.stdout.split('\n').filter((line) => line.length > 0)) {
       keys.push({ table, storageKey });
     }
   }
@@ -207,9 +197,7 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
     spawnSync('pg_dump', ['--version'], { encoding: 'utf8' }).stdout ?? '',
   );
   const serverMajor = majorFromServerVersion(
-    spawnSync('psql', [plan.databaseUrl, '-At', '-c', 'show server_version_num'], {
-      encoding: 'utf8',
-    }).stdout ?? '',
+    runPostgresTool('psql', plan.databaseUrl, ['-At', '-c', 'show server_version_num']).stdout,
   );
   const skew = compareMajors(clientMajor, serverMajor);
   const skewAllowed = (process.env.EJE_BACKUP_ALLOW_VERSION_SKEW ?? '').trim() === 'yes';
@@ -236,7 +224,8 @@ const backup = async (plan: BackupPlan, now: Date): Promise<void> => {
 
   // ---- the database -------------------------------------------------------
   const dump = join(plan.destination, 'database.dump');
-  const dumped = run('pg_dump', ['-Fc', '--no-password', '-f', dump, plan.databaseUrl]);
+  // The URL travels as PG* variables and a password file, never as an argument.
+  const dumped = runPostgresTool('pg_dump', plan.databaseUrl, ['-Fc', '-f', dump]);
   if (!dumped.ok) {
     abort(plan.destination, `pg_dump failed: ${redactSecrets(dumped.stderr, plan.databaseUrl)}`);
   }

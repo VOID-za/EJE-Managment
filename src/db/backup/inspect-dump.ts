@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeSync } from 'node:fs';
 import { loadEnvFiles } from '../seed/env';
+import { runPostgresTool } from './pg-client';
 import { BackupRefused, databaseNameFrom, redactSecrets } from './plan';
 import {
   assertSafeToDrop,
@@ -46,8 +47,9 @@ const run = (
   return { ok: result.status === 0, stdout: result.stdout ?? '', stderr: (result.stderr ?? '').trim() };
 };
 
+// The URL is passed as PG* variables and a password file, never as an argument.
 const psql = (url: string, sql: string): { ok: boolean; stdout: string; stderr: string } =>
-  run('psql', [url, '-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
+  runPostgresTool('psql', url, ['-v', 'ON_ERROR_STOP=1', '-At', '-c', sql]);
 
 /** The questions worth asking of an old register, in the order they are asked. */
 const QUESTIONS: readonly { readonly label: string; readonly sql: string }[] = [
@@ -136,7 +138,13 @@ const main = async (): Promise<void> => {
      * being asked is "what does the register say", not "is this dump a valid
      * restore point". Errors are reported and the inspection continues.
      */
-    const restored = run('pg_restore', ['--dbname', target, '--no-owner', '--no-privileges', file]);
+    const restored = runPostgresTool('pg_restore', target, [
+      '--dbname',
+      scratch,
+      '--no-owner',
+      '--no-privileges',
+      file,
+    ]);
     if (!restored.ok) {
       warn(
         `inspect  pg_restore reported problems (continuing): ` +

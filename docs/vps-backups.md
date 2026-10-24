@@ -91,7 +91,25 @@ end.
 2. **A sealed printed copy** in whatever EJE use for a safe. A password manager
    is an account, and an account can be lost with the person who held it.
 
-**Then run the drill, now and after every key change:**
+**Then run the drill, now and after every key change — WHERE THE ESCROWED COPY
+IS, not on the server.** Carrying the off-site copy to the VPS to test it puts
+it, for a while, on the one machine it exists to survive. So check it on the
+computer that already holds it, against the fingerprint every backup prints
+(`key 23dba6772da10057` on the live server, October 2026):
+
+```powershell
+# in a checkout of this repository, on the owner's own computer
+npm run backup:escrow-check -- --expect 23dba6772da10057
+#   paste the escrowed key at the hidden prompt, then Enter
+npm run backup:escrow-check -- --expect 23dba6772da10057 --key-file E:\eje-backup-key
+```
+
+`MATCH` exits 0, `NO MATCH` exits 1, something that is not a 64-hex key exits
+2. Nothing about the key is printed and nothing is sent anywhere — the
+fingerprint is a truncated SHA-256 computed locally.
+
+The server-side drill below remains for a copy that is already on the server
+(a USB disk attached to it, say):
 
 ```bash
 # Put the escrowed copy in a file, read it back, and delete the file.
