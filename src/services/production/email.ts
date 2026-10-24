@@ -360,7 +360,8 @@ const ADVICE: Readonly<Record<EmailFailureKind, string>> = {
     'same way. EMAIL_GRAPH_CLIENT_SECRET or the app registration needs attention.',
   permission_denied:
     ' Microsoft 365 authenticated this deployment and would not let it send. The app ' +
-    'registration needs Mail.Send for the sending mailbox; a retry cannot grant it.',
+    'registration needs Mail.ReadWrite (to create the draft), Mail.Send and ' +
+    'Mail.ReadBasic.All for the sending mailbox; a retry cannot grant them.',
   throttled: ' Microsoft 365 is asking for fewer requests.',
   provider_unavailable: ' Microsoft 365 is unavailable rather than refusing. Worth trying again.',
   invalid_recipient:

@@ -443,6 +443,10 @@ describe('telling the failures apart', () => {
     expect(failure.kind).toBe('permission_denied');
     expect(failure.retryable).toBe(false);
     expect(failure.message).toMatch(/Mail\.Send/u);
+    // The adapter CREATES a draft before sending it, and Graph's create-message
+    // call needs Mail.ReadWrite — naming only Mail.Send sent operators to grant
+    // the one permission that was already there.
+    expect(failure.message).toMatch(/Mail\.ReadWrite/u);
   });
 
   it('throttling carries the wait Microsoft asked for', async () => {

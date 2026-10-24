@@ -48,11 +48,30 @@ in-memory demonstration keeps its visible outbox. Two out
 of four is treated as none: guessing which half was meant is how a system ends up
 sending nothing quietly.
 
-**In Entra ID** the app registration needs the **application** permission
-`Mail.Send` with admin consent granted, and `EMAIL_SENDER` must be a real mailbox
-in the tenant. Scope it down with an [application access
-policy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access) so the
-registration can send as that one mailbox and no other.
+**In Entra ID** the app registration needs THREE **application** permissions
+on Microsoft Graph, each with admin consent granted, and `EMAIL_SENDER` must be
+a real licensed mailbox in the tenant:
+
+| Permission | Why — the Graph call that needs it |
+|---|---|
+| `Mail.ReadWrite` | `POST /users/{sender}/messages` — creating the draft (see "create-then-send" below) |
+| `Mail.Send` | `POST /users/{sender}/messages/{id}/send` |
+| `Mail.ReadBasic.All` | `GET /users/{sender}/messages/{id}` — reading back what became of a message |
+
+**An earlier version of this section named only `Mail.Send`.** A registration
+built from it is refused with 403 on the first job card, because creating the
+draft needs `Mail.ReadWrite` (Microsoft Graph reference, "Create message",
+checked 24 October 2026). The 403 advice in `email.ts` and
+`integrations:check` now names all three.
+
+**All three are tenant-wide until they are scoped**, which matters more for
+`Mail.ReadWrite` than it ever did for `Mail.Send`: unscoped, the registration
+could read and write every mailbox in the organisation. Limit it to the one
+sending mailbox with Exchange Online's [RBAC for
+Applications](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac)
+(or the older [application access
+policy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access)), and
+use a dedicated mailbox such as `service@…` rather than a person's.
 
 **Why create-then-send.** Graph's `sendMail` returns 202 with no body and no
 message id. This adapter instead creates a draft (`POST
@@ -139,7 +158,7 @@ that wording, because the office has one button and nine situations:
 | What happened | Retry? |
 |---|---|
 | 401 — the credential was refused | **No.** `EMAIL_GRAPH_CLIENT_SECRET` or the registration |
-| 403 — authenticated, not allowed | **No.** The registration needs `Mail.Send` |
+| 403 — authenticated, not allowed | **No.** The registration needs `Mail.ReadWrite`, `Mail.Send` and `Mail.ReadBasic.All` |
 | 429 / 503 — throttled | **Yes**, after the wait Microsoft names in `Retry-After` |
 | 5xx — Exchange is unavailable | **Yes** |
 | An address Graph will not accept | **No.** Correct the customer's record first |

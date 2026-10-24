@@ -123,7 +123,8 @@ export const checkEmailReadiness = (facts: EmailFacts): IntegrationCheck => {
       : `The configuration looks right and Microsoft could not be reached: ${facts.probe.detail} ` +
         'That is this moment’s network rather than a statement about the credential.',
     next: facts.probe.credentialRefused
-      ? 'Check the app registration: the secret may have expired, or Mail.Send may not be granted.'
+      ? 'Check the app registration: the secret may have expired, or Mail.ReadWrite, Mail.Send ' +
+        'and Mail.ReadBasic.All may not all be granted with admin consent.'
       : 'Try again; if it persists, check egress from the VPS to login.microsoftonline.com.',
   };
 };
