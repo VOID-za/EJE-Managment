@@ -120,7 +120,9 @@ say "backup: /root/ufw-backup-$STAMP.tar.gz"
 
 revert_pending && die "an auto-revert is already pending — run --confirm or --status first"
 systemctl reset-failed "$UNIT.service" "$UNIT.timer" 2>/dev/null
-systemd-run --quiet --unit="$UNIT" --on-active="$REVERT_SECONDS" /bin/sh -c \
+# AccuracySec=1s: a transient timer otherwise fires up to a MINUTE late (the
+# systemd default), which makes the printed deadline a guess.
+systemd-run --quiet --unit="$UNIT" --on-active="$REVERT_SECONDS" --timer-property=AccuracySec=1s /bin/sh -c \
   "logger -t $UNIT 'auto-revert firing: ufw disable'; /usr/sbin/ufw disable; logger -t $UNIT 'auto-revert done'" \
   || die "could not arm the revert timer — firewall NOT enabled"
 revert_pending || die "revert timer not active — firewall NOT enabled"

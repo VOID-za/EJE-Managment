@@ -74,6 +74,7 @@ expect "apply succeeds and reports the live daemon" 0 "$rc" 'live daemon now off
 arm=$(grep -n '^systemd-run' "$T/calls" | head -1 | cut -d: -f1); rel=$(grep -n '^systemctl reload' "$T/calls" | head -1 | cut -d: -f1)
 [ -n "$arm" ] && [ -n "$rel" ] && [ "$arm" -lt "$rel" ] && ok "auto-revert is armed before the reload" || no "auto-revert is armed before the reload"
 grep -q -- '--on-active=900' "$T/calls" && ok "window is 900s" || no "window is 900s"
+grep -q -- '--timer-property=AccuracySec=1s' "$T/calls" && ok "the revert fires on time (AccuracySec=1s)" || no "the revert fires on time (AccuracySec=1s)"
 grep -q 'logger -t eje-sshd-revert' "$T/calls" && ok "the revert logs to the journal" || no "the revert logs to the journal"
 grep -qiE 'before [0-9:]+ UTC|in 900s' "$T/out" && ok "apply prints the deadline" || no "apply prints the deadline"
 

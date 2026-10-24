@@ -130,7 +130,9 @@ if ! sshd -t; then rm -f "$DROPIN"; die "sshd -t rejected the configuration — 
 
 systemctl reset-failed "$UNIT.service" "$UNIT.timer" 2>/dev/null
 # ARMED BEFORE THE RELOAD, so there is never a moment with passwords off and no way back.
-systemd-run --quiet --unit="$UNIT" --on-active="$REVERT_SECONDS" /bin/sh -c \
+# AccuracySec=1s: a transient timer otherwise fires up to a MINUTE late (the
+# systemd default), which makes the printed deadline a guess.
+systemd-run --quiet --unit="$UNIT" --on-active="$REVERT_SECONDS" --timer-property=AccuracySec=1s /bin/sh -c \
   "logger -t $UNIT 'auto-revert firing: removing $DROPIN'; rm -f '$DROPIN'; if sshd -t; then systemctl reload ssh; logger -t $UNIT 'auto-revert done: passwords allowed again'; else logger -t $UNIT 'auto-revert: sshd -t failed after removal'; fi" \
   || { rm -f "$DROPIN"; die "could not arm the auto-revert — drop-in removed, nothing reloaded"; }
 revert_pending || { rm -f "$DROPIN"; die "auto-revert not pending after arming — drop-in removed, nothing reloaded"; }
