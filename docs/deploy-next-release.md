@@ -19,6 +19,36 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+### The order that works, as rehearsed on the live server on 24 October 2026
+
+The numbered sections below say what each step is for. **This is the order to
+run them in**, because three of them cannot run where the sections used to put
+them:
+
+| # | Step | Why here |
+|---|---|---|
+| 1 | **Build** the release beside the old one (§3) | The backup and the restore test must run with the NEW code — see §1. |
+| 2 | **Back up, verify, key-check, restore-test** from the release directory (§1, §1a) | Only a backup written by the new code records which references were already dangling; the new restore test fails an old-code backup. |
+| 3 | **Preflight** (§4) | Expect `Migrations` to FAIL here — it cannot pass until step 4. Every OTHER line is what this step is for. |
+| 4 | **Migrate** (§5) — 16 migrations, ledger 14 → 30 | The old release keeps serving throughout; it tolerates the new schema. |
+| 5 | **Preflight again**, then `documents:reconcile --report` (§2) | The reconcile reads `provenance_recording`, which 0018 creates, so it CANNOT run before the migration. |
+| 6 | **Switch** (§6), health, `check-routes` | |
+| 7 | `documents:reconcile --record`, timers (§7) | |
+
+Run every `npm` command as `eje` with the service's own environment file, the
+way the service sees it — not `--preserve-env` (which passes whatever the root
+shell happens to hold) and not `env $(cat … | xargs)` (which splits values on
+whitespace):
+
+```bash
+sudo systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
+  --working-directory=/opt/eje/releases/$COMMIT -p PrivateTmp=yes \
+  --property=EnvironmentFile=/etc/eje/eje.env --setenv=HOME=/opt/eje \
+  /usr/bin/npm run <script> -- <arguments>
+```
+
+That is the form every block below means by "**as eje**".
+
 ---
 
 ## 0. What is in this release, and what it changes at runtime
@@ -76,7 +106,8 @@ unconditionally. `src/db/migrations/redefinitions.test.ts` is the lint that
 holds this rule for every future migration.
 
 **No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`** anywhere in
-the thirteen. Every `NOT NULL` is on a column of a new table, or has a default
+the sixteen (`0014`–`0029`; the live ledger read 14 before this release, i.e.
+`0000`–`0013`). Every `NOT NULL` is on a column of a new table, or has a default
 and a backfill (`0029`'s `pages_indexed`).
 
 **MACH-HIST STARTS EMPTY, AND THAT IS DELIBERATE.** There is no record anywhere
@@ -129,11 +160,27 @@ on a table of millions, and nothing here is.
 
 ### And a new preflight line
 
-`EJE_DEPLOYMENT` must be set before step 4, to `production` or
+`EJE_DEPLOYMENT` should be set before step 4, to `production` or
 `demonstration`. The current live site is a **demonstration** deployment, and
-saying so is what makes its preflight pass honestly rather than being waved
-through — and what makes the demonstration switcher refuse to arm anywhere
-that says `production`. See `docs/demonstration-isolation.md`.
+saying so is what makes the demonstration switcher refuse to arm anywhere that
+says `production`. See `docs/demonstration-isolation.md`.
+
+**ON THIS SERVER THE PREFLIGHT STILL CANNOT PASS, whichever value is set** —
+an earlier version of this paragraph said it would, and it does not:
+
+| `EJE_DEPLOYMENT` | Remaining FAIL lines (after the migration) |
+|---|---|
+| unset | `Customer email` (refuse) and `EJE_DEMO_SWITCHER` (armed) |
+| `demonstration` | `Deployment target` — a demonstration deployment pointed at a database whose NAME says production (`deploymentMismatch`) |
+| `production` | `Customer email`, `EJE_DEMO_SWITCHER` (and the runtime disarms the switcher, which EJE do not want here) |
+
+The only configuration that passes cleanly is the one
+`docs/demonstration-isolation.md` §3 recommends: the demonstration on its own
+database (`eje_demo`). Until that is done, deploying means the owner accepting
+one named FAIL. **On 24 October 2026 the owner chose `demonstration`** and
+accepted `Deployment target` as a known FAIL; nothing the running application
+does depends on the declaration except `/api/health`'s `deployment` field and
+the switcher's production refusal.
 
 Two things this release deliberately does **not** do: it does not write document
 bytes anywhere, and — apart from 0018's provenance relabelling and 0022 marking already-indexed
@@ -194,27 +241,93 @@ again.
 ## 1. Back up first, and prove the backup
 
 The one step that must not be skipped, and the first time it can be proved.
+**Run it from the NEW release directory, after §3** — every command here "as
+eje" (see the top of this file), with `--working-directory=/opt/eje/releases/$COMMIT`:
 
 ```bash
-sudo systemd-run --unit=eje-backup-predeploy --uid=eje --gid=eje \
-  --working-directory=/opt/eje/app \
-  --property=EnvironmentFile=/etc/eje/eje.env \
-  /usr/bin/npm run backup
-
-journalctl -u eje-backup-predeploy          # the directory it wrote
-cd /opt/eje/app
-sudo -u eje --preserve-env npm run backup:verify       /var/backups/eje/eje-eje_production-<stamp>
-sudo -u eje --preserve-env npm run backup:restore-test /var/backups/eje/eje-eje_production-<stamp>
+npm run backup                     # prints the directory it wrote
+npm run backup:verify       -- /var/backups/eje/eje-eje_production-<stamp>
+npm run backup:key-check    -- /var/backups/eje/eje-eje_production-<stamp>
+# restore test: with the restore role's environment file as well — §1a
+npm run backup:restore-test -- /var/backups/eje/eje-eje_production-<stamp>
 ```
+
+**WHY THE NEW CODE, AND NOT THE INSTALLED RELEASE.** Only a backup written by
+this release records `danglingReferences` — the references that already had no
+file when it ran. The restore test in this release treats a missing file that
+the manifest does NOT list as LOST, so a backup taken by `4dede18` fails it on
+the seeded demonstration documents, and the only way past that is
+`EJE_RESTORE_ALLOW_ORPHANS`, which must not be used here. An earlier version of
+this section ran the backup from `/opt/eje/app`; it also failed three times on
+23 October with `EJE_BACKUP_DIR is not set`, which `/etc/eje/eje.env` now sets.
+
+### 1a. The restore test needs a role that may create databases — not the application's
+
+The restore test builds a scratch database (`eje_restore_test_<stamp>_<hex>`)
+and drops it. `eje_production` has no `CREATEDB`, and must not be given it: on
+23 October the test failed with `permission denied to create database`. The
+test reads only `DATABASE_URL` and connects only to `postgres` and its own
+scratch database — never to the database the URL names, whose name it uses
+only to refuse to drop it — so a separate role is enough:
+
+```sql
+-- as postgres; the password is set from a SCRAM verifier computed off the
+-- server, so the plaintext never reaches a log, an argv or a history file
+CREATE ROLE eje_restore_test WITH LOGIN CREATEDB NOSUPERUSER NOCREATEROLE
+  NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5 PASSWORD 'SCRAM-SHA-256$4096:…';
+```
+
+and `pg_hba.conf` (back it up first; insert ABOVE the first existing rule,
+check `select * from pg_hba_file_rules where error is not null` is empty,
+then `select pg_reload_conf()`):
+
+```
+host    postgres                        eje_restore_test  127.0.0.1/32  scram-sha-256
+host    postgres                        eje_restore_test  ::1/128       scram-sha-256
+host    /^eje_restore_test_[0-9a-z_]+$  eje_restore_test  127.0.0.1/32  scram-sha-256
+host    /^eje_restore_test_[0-9a-z_]+$  eje_restore_test  ::1/128       scram-sha-256
+host    all                             eje_restore_test  all           reject
+local   all                             eje_restore_test                reject
+```
+
+Its connection string goes in `/etc/eje/restore-test.env` (`0600 root:root`,
+one line, `DATABASE_URL=postgresql://eje_restore_test:<pw>@127.0.0.1:5432/eje_production`
+— the database name there is the SOURCE the test refuses to drop, and pg_hba
+refuses the role a connection to it). systemd reads that file as root and a
+later `EnvironmentFile=` overrides an earlier one, so the restore test runs as
+`eje`, keeps `EJE_BACKUP_KEY` and `EJE_BACKUP_DIR` from `eje.env`, and gets the
+restore role's `DATABASE_URL`:
+
+```bash
+sudo systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
+  --working-directory=/opt/eje/releases/$COMMIT -p PrivateTmp=yes \
+  --property=EnvironmentFile=/etc/eje/eje.env \
+  --property=EnvironmentFile=/etc/eje/restore-test.env --setenv=HOME=/opt/eje \
+  /usr/bin/npm run backup:restore-test -- /var/backups/eje/eje-eje_production-<stamp>
+```
+
+The weekly unit gets the same file through a drop-in — see
+`deploy/eje-backup-restore-test.service`. Rehearsed on the live server on
+24 October 2026: the role reached `postgres` and was refused `eje_production`,
+`template1` and `eje_tracker`; the restore test passed (`RESTORE-TESTED`, 9 of
+26 storage keys resolved, 17 already missing when taken, none lost) and left no
+scratch database behind.
 
 `EJE_BACKUP_KEY` must be set in `/etc/eje/eje.env` and **a copy of it must
 already be somewhere that is not this server**. A backup whose key is lost is a
 directory of noise.
 
 The restore test will report some references as "already missing when this
-backup was taken". On this deployment that is expected: the six seeded
-demonstration job cards are rendered on first download. It must **not** report
-anything as lost.
+backup was taken". It must **not** report anything as lost. On the live server
+on 24 October 2026 it was **17 of 26**, not the six this paragraph used to
+promise:
+
+| References | What they are |
+|---|---|
+| 6 `final_documents` (EJE-2015, 2016, 2017, 2019; parts notes 2020, 2021) | Seeded demonstration job cards, rendered on first download — `ABSENT_DEMONSTRATION` in the reconcile |
+| 7 `library_document_versions` (`library/*-demo-*.pdf`) | Seeded demonstration library entries; the seed ships no PDF bytes |
+| 2 `machine_photos` (`machines/mazak-qt250-front.jpg`, `machines/fanuc-robodrill-cabinet.jpg`) | Seeded by `src/db/seed/register.ts`, no bytes |
+| 2 `job_media` (`uploads/<uuid>`) | **NOT seeded.** Uploaded through the application before this release, and the bytes are not in the store. Every `job_media` row on the server is one of these two. Unexplained — an open finding, not something this deployment caused or can repair |
 
 ### THE RESTORE TEST ON THE INSTALLED RELEASE IS BROKEN, AND THAT IS THE "26"
 
@@ -277,31 +390,37 @@ partsnotes/final/EJE-2021.pdf  bytes_missing
 **It passed without `EJE_RESTORE_ALLOW_ORPHANS`**, which is the point: the flag
 is not needed and must not be used here.
 
-**So the sequencing is the other way round.** A pre-deploy restore test run with
-the INSTALLED release will fail however healthy the data is, because the check
-cannot resolve a key. Take and verify the backup as step 1 says — that part is
-sound, and `backup:verify` does not depend on the broken comparison — and then
-run `backup:restore-test` **again from the new release directory after step 3
-and before step 5**, where it is the fixed check doing the work:
-
-```bash
-cd /opt/eje/releases/<commit>
-sudo -u eje --preserve-env npm run backup:restore-test /var/backups/eje/eje-eje_production-<stamp>
-```
+**So the backup AND the restore test run from the new release directory.** A
+pre-deploy restore test run with the INSTALLED release fails however healthy
+the data is, because the check cannot resolve a key. And restore-testing an
+old-code backup with the NEW check is not the answer either — an earlier
+version of this paragraph said it was — because that backup's manifest has no
+`danglingReferences`, so every by-design absence counts as lost. Take the
+backup with the new code (§1) and restore-test it with the new code (§1a).
 
 That run is the one whose result decides whether to proceed. If **it** reports
 anything under `lostByThisBackup`, stop: that is a real loss, and no flag may be
 used to get past it.
 
-## 2. Look at the documents before changing the code
+## 2. Look at the documents before switching the code
+
+**After the migration (§5), before the switch (§6)** — as eje, from the new
+release directory:
 
 ```bash
-cd /opt/eje/app
-sudo -u eje --preserve-env npm run documents:reconcile -- --report /tmp/documents-before.json
+sudo install -d -o eje -g eje -m 750 /opt/eje/reports
+npm run documents:reconcile -- --report /opt/eje/reports/documents-before-switch.json
 ```
 
-This is read-only and it answers the question that decides whether step 4 is
-safe: **is any stored document already damaged?** If anything reports
+**IT CANNOT RUN BEFORE THE MIGRATION.** It reads `provenance_recording`, which
+`0018` creates; on the live server on 24 October it failed with `relation
+"provenance_recording" does not exist`. The installed release does not have the
+script at all (`Missing script: "documents:reconcile"`, 23 October). Write the
+report somewhere `eje` can write and that survives — not `/tmp`, which a
+`PrivateTmp` unit discards.
+
+This is read-only and it answers the question that decides whether the switch
+is safe: **is any stored document already damaged?** If anything reports
 `contradicted` or `damaged`, stop and restore that document from a backup
 first — after this release those documents will refuse to open, which is
 correct and is better found now than by the office.
@@ -314,16 +433,32 @@ Expected on the live server today: six `absent_demonstration`, several
 Never build in `/opt/eje/app`: a build replaces `.next` in place, so a failure
 leaves the live application unable to serve its own pages.
 
+Name the commit exactly — the full hash you reviewed, not a branch name — and
+clone from GitHub, not from `/opt/eje/app` (a clone of the live directory has
+the live directory as its `origin`, so "the latest commit on the branch" is
+whatever that copy last fetched):
+
 ```bash
-COMMIT=$(git -C /opt/eje/app rev-parse --short origin/claude/eje-job-card-demo-k2klb4)
-sudo install -d -o eje -g eje /opt/eje/releases
-sudo -u eje git clone --no-hardlinks /opt/eje/app /opt/eje/releases/$COMMIT
-cd /opt/eje/releases/$COMMIT
-sudo -u eje git fetch origin claude/eje-job-card-demo-k2klb4
-sudo -u eje git checkout $COMMIT
-sudo -u eje npm ci
-sudo -u eje env EJE_BUILD_COMMIT=$COMMIT npm run build   # detached, per docs/vps-backups.md §0, if the SSH session is fragile
+SHA=<full 40-character commit hash>; COMMIT=${SHA:0:7}
+sudo install -d -o eje -g eje /opt/eje/releases/$COMMIT      # refuses nothing: check it does not exist first
+sudo systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
+  --working-directory=/opt/eje/releases/$COMMIT \
+  -p MemoryMax=4G -p Nice=10 -p CPUWeight=20 -p PrivateTmp=yes \
+  --setenv=HOME=/opt/eje --setenv=EJE_BUILD_COMMIT=$COMMIT \
+  /bin/bash -c "set -eo pipefail
+    git clone --quiet --no-checkout https://github.com/VOID-za/EJE-Managment.git .
+    git checkout --quiet --detach $SHA
+    test \"\$(git rev-parse HEAD)\" = $SHA
+    npm ci --no-audit --no-fund
+    npm run build"
 ```
+
+The memory cap and low CPU weight are so a build that runs out of memory kills
+itself rather than the live `next-server` or PostgreSQL beside it; `systemd-run`
+keeps the build alive if the SSH session drops. `npm ci` installs the dev
+dependencies too, deliberately: `tsx`, which every `npm run` script in §1–§7
+uses, is one of them. (Rehearsed 24 October 2026: 429 packages, build exit 0,
+963 MB.)
 
 **THE COMMIT IS STAMPED AT BUILD TIME, AND STEP 6 DEPENDS ON IT.**
 `next.config.ts` puts it in the bundle; the service environment cannot supply it
@@ -347,30 +482,42 @@ settles it**: `/api/health` must come back with `$COMMIT`.
 
 ## 4. Preflight the new release against the live configuration
 
+As eje, from the new release directory:
+
 ```bash
-cd /opt/eje/releases/$COMMIT
-sudo -u eje env $(sudo cat /etc/eje/eje.env | xargs) NODE_ENV=production \
-  npm run preflight -- --expect-db eje_production
+npm run preflight -- --expect-db eje_production
 ```
 
-It must pass. It reads the database, the storage directory and the environment
-and writes nothing but one probe file it deletes again.
+It reads the database, the storage directory and the environment and writes
+nothing but one probe file it deletes again. Run it **twice**:
+
+- **Before the migration**, `Migrations` FAILS — "16 not applied" — and must:
+  that is the migration not having run yet. Read every OTHER line.
+- **After the migration**, `Migrations` must be `ok`. What remains must be
+  exactly the FAIL the owner has accepted for this server (§0, "And a new
+  preflight line"); anything else stops the deployment.
 
 ## 5. The migration
 
+As eje, from the new release directory, with the production-migration intent
+typed on the command line (never put it in the environment file):
+
 ```bash
-cd /opt/eje/releases/$COMMIT
-set -a; . /etc/eje/eje.env; set +a
-sudo -u eje --preserve-env=DATABASE_URL,NODE_ENV,EJE_STORAGE_DIR,EJE_PERSISTENCE \
-  EJE_PRODUCTION_MIGRATION=eje_production npm run db:migrate
+sudo systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
+  --working-directory=/opt/eje/releases/$COMMIT -p PrivateTmp=yes \
+  --property=EnvironmentFile=/etc/eje/eje.env --setenv=HOME=/opt/eje \
+  --setenv=EJE_PRODUCTION_MIGRATION=eje_production \
+  /usr/bin/npm run db:migrate
+sudo -u postgres psql -d eje_production -Atc "select count(*) from drizzle.__drizzle_migrations"   # 30
 ```
 
-**Migrations 0015–0025 all apply here, in one run.** Read §0 first: 0018 is the
-only data-modifying migration in the release, and an interrupted run between
-0015 and 0018 makes `documents:reconcile` report six demonstration job cards as
-LOST CUSTOMER DOCUMENTS until the run is finished.
+**Migrations 0014–0029 — sixteen — all apply here, in one run**; the ledger goes
+from 14 to 30. Read §0 first: 0018 is the only data-modifying migration in the
+release, and an interrupted run between 0015 and 0018 makes
+`documents:reconcile` report the demonstration job cards as LOST CUSTOMER
+DOCUMENTS until the run is finished.
 
-Every one of the thirteen is additive — no DROP TABLE, no DROP COLUMN, no
+Every one of the sixteen is additive — no DROP TABLE, no DROP COLUMN, no
 TRUNCATE, no DELETE, and every NOT NULL either on a column of a new table or
 with a default and a backfill (`0029`'s `pages_indexed`) — so **the old code
 runs against the new schema**, which is what makes step 8's rollback safe. That
@@ -389,15 +536,25 @@ step 8 says.
 
 ## 6. Switch, and prove what is serving
 
+`/opt/eje/app` is already a symbolic link to a release directory (since
+`4dede18`), so the previous release stays where it is and IS the rollback
+target. Replace the link in one step rather than moving the directory:
+
 ```bash
-sudo systemctl stop eje
-sudo mv /opt/eje/app /opt/eje/releases/previous-$(date -u +%Y%m%dT%H%M%SZ)
-sudo ln -sfn /opt/eje/releases/$COMMIT /opt/eje/app   # or mv the directory into place
-sudo systemctl start eje
+readlink -f /opt/eje/app                 # note it: this is the rollback target
+sudo ln -sfn /opt/eje/releases/$COMMIT /opt/eje/app.new
+sudo mv -T /opt/eje/app.new /opt/eje/app # atomic: there is never a moment with no link
+sudo systemctl restart eje
 
 curl -s localhost:3000/api/health        # commit must be $COMMIT; backend postgres; database reachable
-EJE_CHECK_URL=https://eje.syncza.co.za npm run check-routes
+# as eje, from the release directory:
+EJE_CHECK_URL=http://localhost:3000      npm run check-routes
+EJE_CHECK_URL=https://eje.syncza.co.za   npm run check-routes
 ```
+
+`eje.service` uses `WorkingDirectory=/opt/eje/app` and
+`ReadWritePaths=/opt/eje/app/.next`; systemd resolves both through the link at
+start, which is why a restart is needed and is enough.
 
 `/api/health` carries the commit it was BUILT from, so it is the one thing that
 proves what is serving. `demoSwitcher` must still read `true` — EJE want demo
@@ -406,9 +563,10 @@ Microsoft 365 tenant exists.
 
 ## 7. Record what the documents are, and schedule the backups
 
+As eje, from `/opt/eje/app`:
+
 ```bash
-cd /opt/eje/app
-sudo -u eje --preserve-env npm run documents:reconcile -- --record
+npm run documents:reconcile -- --record
 ```
 
 This appends one observation per document to `final_document_verifications` —
@@ -423,23 +581,36 @@ sudo cp /opt/eje/app/deploy/eje-backup.service /opt/eje/app/deploy/eje-backup.ti
         /opt/eje/app/deploy/eje-backup-alert.service \
         /opt/eje/app/deploy/eje-backup-restore-test.service \
         /opt/eje/app/deploy/eje-backup-restore-test.timer /etc/systemd/system/
+# the weekly restore test runs as the restore role (§1a), never as eje_production:
+sudo install -d /etc/systemd/system/eje-backup-restore-test.service.d
+printf '[Service]\nEnvironmentFile=/etc/eje/restore-test.env\n' \
+  | sudo tee /etc/systemd/system/eje-backup-restore-test.service.d/restore-role.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now eje-backup.timer eje-backup-restore-test.timer
 systemctl list-timers 'eje-backup*'
+# prove both units work now rather than at 02:12 on a night nobody is watching:
+sudo systemctl start eje-backup.service && sudo systemctl start eje-backup-restore-test.service
 ```
 
 The units reference `/opt/eje/app` and `/var/backups/eje`; check those two
-paths before enabling. Set `EJE_BACKUP_KEEP` and an off-site destination in
+paths before enabling. `eje-backup.service` from a release before this fix
+listed `/mnt/offsite` as a required writable path; on a server with no such
+directory systemd refuses to start the unit (226/NAMESPACE) and the nightly
+backup never runs. It is now `-/mnt/offsite` (optional). Set `EJE_BACKUP_KEEP` and an off-site destination in
 `/etc/eje/eje.env` — see `docs/vps-backups.md`.
 
 ## 8. Rollback
 
 ```bash
-sudo systemctl stop eje
-sudo ln -sfn /opt/eje/releases/previous-<stamp> /opt/eje/app
-sudo systemctl start eje
+sudo ln -sfn /opt/eje/releases/<previous commit> /opt/eje/app.new   # 4dede18 for this release
+sudo mv -T /opt/eje/app.new /opt/eje/app
+sudo systemctl restart eje
 curl -s localhost:3000/api/health         # the commit must be the OLD one
 ```
+
+The `EJE_DEPLOYMENT` line and the Caddy limit need not be reverted: the old
+release ignores the first and is only helped by the second. Each edited file
+has a `.bak-<stamp>` copy beside it if they are wanted back.
 
 What rollback does and does not need:
 

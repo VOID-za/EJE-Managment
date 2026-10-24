@@ -56,9 +56,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 # Everything it must be able to write. /var/backups/eje is the shelf;
-# /mnt/offsite is where an off-site volume is mounted, and is harmless when
-# nothing is mounted there.
-ReadWritePaths=/var/backups/eje /mnt/offsite
+# /mnt/offsite is where an off-site volume is mounted. The leading "-" makes it
+# optional: without it systemd refuses to start the unit at all (226/NAMESPACE)
+# on a server where that directory does not exist, which is every server with
+# no off-site volume — and the nightly backup would never run.
+ReadWritePaths=/var/backups/eje -/mnt/offsite
 
 [Install]
 WantedBy=multi-user.target

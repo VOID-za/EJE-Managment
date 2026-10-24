@@ -29,8 +29,14 @@ import {
  * Run it on the machine, as the service user, with the service's own
  * environment file, BEFORE `systemctl start`:
  *
- *   sudo -u eje --preserve-env=PATH env $(sudo cat /etc/eje/eje.env | xargs) \\
- *     npm run preflight -- --expect-db eje_staging
+ *   sudo systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \\
+ *     --working-directory=/opt/eje/releases/<commit> \\
+ *     --property=EnvironmentFile=/etc/eje/eje.env --setenv=HOME=/opt/eje \\
+ *     /usr/bin/npm run preflight -- --expect-db eje_staging
+ *
+ * — systemd reads the file exactly as the service does. `env $(cat … | xargs)`
+ * splits a value on whitespace and `--preserve-env` passes whatever the root
+ * shell happens to hold; neither is the service's environment.
  *
  * It reads the configuration, opens the database, looks at the disk, and prints
  * one line per check. It exits non-zero if anything FAILED, so a deployment

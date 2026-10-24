@@ -13,6 +13,19 @@
 # It never writes to the database named in DATABASE_URL. It creates its own
 # database, checks the name against a pattern AND against the source's name,
 # and drops only that.
+#
+# IT NEEDS A ROLE THAT MAY CREATE DATABASES, and the application's role must
+# not be given that. On the live server a dedicated role `eje_restore_test`
+# (LOGIN CREATEDB, nothing else) is allowed by pg_hba.conf to reach only
+# `postgres` and `eje_restore_test_*`, and its connection string lives in a
+# root-only file read AFTER eje.env, so it replaces DATABASE_URL for this unit
+# alone. Install as a drop-in rather than editing this file:
+#
+#   /etc/systemd/system/eje-backup-restore-test.service.d/restore-role.conf
+#     [Service]
+#     EnvironmentFile=/etc/eje/restore-test.env
+#
+# See docs/deploy-next-release.md §1a for the role and the pg_hba lines.
 [Unit]
 Description=EJE restore test of the newest backup
 Documentation=https://github.com/VOID-za/EJE-Managment/blob/main/docs/vps-backups.md
