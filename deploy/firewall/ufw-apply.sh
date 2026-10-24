@@ -13,24 +13,69 @@
 #   seen, not silently cut off or silently left open.
 #
 # THE DEAD-MAN'S SWITCH. Before UFW is enabled, a transient systemd timer is
-# armed to run `ufw disable` in REVERT_SECONDS (default 300). If this change
+# armed to run `ufw disable` in REVERT_SECONDS (default 900 — 300 proved too
+# short for a confirmation relayed by a person, on 24 October). If this change
 # cuts SSH, the server reopens itself without anybody needing a console. To
-# KEEP the firewall, open a NEW SSH session — which is the proof that new
-# connections still work — and run:
+# KEEP the firewall, open a NEW SSH session and run --confirm there. It refuses
+# unless the revert is still PENDING, UFW is active, and the session it runs in
+# logged in AFTER the firewall went up — an established session survives a
+# firewall change and proves nothing.
 #
-#   systemctl stop eje-ufw-revert.timer
+#   --confirm   from a NEW SSH login: verify, then cancel the auto-revert
+#   --status    read-only: firewall state and time left
 #
 # Configuration is backed up first to /root/ufw-backup-<stamp>.tar.gz.
 # Rollback at any time: `ufw disable` (the state before this script).
 set -u
 MODE=${1:-}
-REVERT_SECONDS=${REVERT_SECONDS:-300}
+REVERT_SECONDS=${REVERT_SECONDS:-900}
+ARMED_FILE=${ARMED_FILE:-/run/eje-ufw-armed}
+UNIT=eje-ufw-revert
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 say() { printf '%s\n' "$*"; }
 die() { say "REFUSED: $*"; exit 1; }
 
-[ "$MODE" = --check ] || [ "$MODE" = --apply ] || die "say --check or --apply"
+case "$MODE" in --check|--apply|--confirm|--status) ;; *) die "say --check, --apply, --confirm or --status";; esac
 [ "$(id -u)" -eq 0 ] || die "run as root"
+
+revert_pending() { systemctl is-active --quiet "$UNIT.timer"; }
+status() {
+  say "ufw:         $(ufw status | head -1)"
+  if revert_pending; then
+    say "auto-revert: PENDING — $(systemctl list-timers "$UNIT.timer" --no-pager 2>/dev/null | sed -n 2p | awk '{print $1,$2,$3,$4, "(" $5, $6 " left)"}')"
+  else
+    say "auto-revert: not pending"
+  fi
+}
+# When THIS session logged in (any method), as epoch seconds, matched on SSH_CONNECTION.
+session_login() {
+  local ip port line
+  ip=$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $1}')
+  port=$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $2}')
+  [ -n "$port" ] || return 2
+  line=$(journalctl -u ssh -u sshd --no-pager --since "-2h" -o short-unix 2>/dev/null \
+    | grep -E "Accepted [a-z-]+ for [a-z0-9_-]+ from $ip port $port " | tail -1)
+  [ -n "$line" ] || return 1
+  printf '%s' "$line" | awk '{print int($1)}'
+}
+
+if [ "$MODE" = --status ]; then status; exit 0; fi
+if [ "$MODE" = --confirm ]; then
+  status
+  revert_pending || die "the auto-revert is NOT pending — it has already run or was never armed (journalctl -t $UNIT). Nothing to confirm."
+  ufw status | grep -q '^Status: active' || die "UFW is not active — nothing to confirm."
+  LOGIN=$(session_login); rc=$?
+  [ "$rc" -ne 2 ] || die "not run over SSH — confirm from a NEW SSH login."
+  [ "$rc" -eq 0 ] || die "this session's login is not in the journal — open a NEW SSH login."
+  # An ESTABLISHED session survives a firewall change; only a login made after it proves anything.
+  [ "$LOGIN" -ge "$(cat "$ARMED_FILE" 2>/dev/null || echo 0)" ] \
+    || die "this session was opened before the firewall went up, so it proves nothing — open a NEW SSH login and run --confirm there."
+  systemctl stop "$UNIT.timer" || die "could not stop the auto-revert"
+  revert_pending && die "the auto-revert is still pending after stopping it"
+  logger -t "$UNIT" "confirmed from a new SSH login; auto-revert cancelled" 2>/dev/null
+  say ""; say "CONFIRMED. Firewall kept; a new SSH login got through it."; status
+  exit 0
+fi
 command -v ufw >/dev/null || die "ufw is not installed (apt-get install ufw)"
 command -v sshd >/dev/null || die "sshd not found; refusing to guess the SSH port"
 
@@ -73,11 +118,14 @@ tar -czf "/root/ufw-backup-$STAMP.tar.gz" /etc/ufw /etc/default/ufw 2>/dev/null 
 chmod 600 "/root/ufw-backup-$STAMP.tar.gz"
 say "backup: /root/ufw-backup-$STAMP.tar.gz"
 
-systemctl stop eje-ufw-revert.timer 2>/dev/null; systemctl reset-failed eje-ufw-revert.service 2>/dev/null
-systemd-run --quiet --unit=eje-ufw-revert --on-active="$REVERT_SECONDS" /usr/sbin/ufw disable \
+revert_pending && die "an auto-revert is already pending — run --confirm or --status first"
+systemctl reset-failed "$UNIT.service" "$UNIT.timer" 2>/dev/null
+systemd-run --quiet --unit="$UNIT" --on-active="$REVERT_SECONDS" /bin/sh -c \
+  "logger -t $UNIT 'auto-revert firing: ufw disable'; /usr/sbin/ufw disable; logger -t $UNIT 'auto-revert done'" \
   || die "could not arm the revert timer — firewall NOT enabled"
-systemctl is-active --quiet eje-ufw-revert.timer || die "revert timer not active — firewall NOT enabled"
-say "revert armed: ufw disable in ${REVERT_SECONDS}s unless 'systemctl stop eje-ufw-revert.timer' is run from a NEW SSH session"
+revert_pending || die "revert timer not active — firewall NOT enabled"
+DEADLINE=$(date -u -d "+${REVERT_SECONDS} seconds" '+%H:%M:%S UTC' 2>/dev/null || echo "in ${REVERT_SECONDS}s")
+say "revert armed: ufw disable at $DEADLINE unless --confirm is run from a NEW SSH session"
 
 sed -i 's/^IPV6=.*/IPV6=yes/' /etc/default/ufw
 ufw default deny incoming >/dev/null
@@ -88,11 +136,13 @@ for r in "${PLAN[@]}"; do
   ufw $r >/dev/null || { ufw disable; die "rule failed: $r — firewall disabled again"; }
 done
 ufw --force enable
+date -u +%s > "$ARMED_FILE"
 ufw status verbose
 
 say ""
 say "health through Caddy from here: $(curl -s -o /dev/null -w '%{http_code}' -m 15 https://eje.syncza.co.za/api/health)"
 say "app on loopback: $(curl -s -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:3000/api/health)"
 say ""
-say "NOW: open a NEW SSH session and run:  systemctl stop eje-ufw-revert.timer"
-say "If you cannot connect, wait ${REVERT_SECONDS}s: UFW disables itself."
+say "NOW, before $DEADLINE: open a NEW SSH session and run:  bash ufw-apply.sh --confirm"
+say "If you cannot connect, do nothing: UFW disables itself at $DEADLINE."
+exit 0

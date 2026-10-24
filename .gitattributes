@@ -1,0 +1,6 @@
+# Shell scripts and everything under deploy/ run on Linux — systemd units, the
+# Caddyfile, environment examples and the scripts piped to the server over SSH.
+# A CRLF in any of them is a `$'\r': command not found` or a unit systemd
+# misreads, and core.autocrlf=true on a Windows checkout produces exactly that.
+*.sh        text eol=lf
+deploy/**   text eol=lf
