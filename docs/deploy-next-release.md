@@ -327,7 +327,7 @@ promise:
 | 6 `final_documents` (EJE-2015, 2016, 2017, 2019; parts notes 2020, 2021) | Seeded demonstration job cards, rendered on first download — `ABSENT_DEMONSTRATION` in the reconcile |
 | 7 `library_document_versions` (`library/*-demo-*.pdf`) | Seeded demonstration library entries; the seed ships no PDF bytes |
 | 2 `machine_photos` (`machines/mazak-qt250-front.jpg`, `machines/fanuc-robodrill-cabinet.jpg`) | Seeded by `src/db/seed/register.ts`, no bytes |
-| 2 `job_media` (`uploads/<uuid>`) | **NOT seeded.** Uploaded through the application before this release, and the bytes are not in the store. Every `job_media` row on the server is one of these two. Unexplained — an open finding, not something this deployment caused or can repair |
+| 2 `job_media` (`uploads/<uuid>`: EJE-2013 on 25 Sep, EJE-2031 on 20 Oct 08:14) | **No photograph was ever stored — nothing was lost.** Both were "uploaded" before `a690dda` reached the server with `4dede18` (20 Oct 17:37). Until then the add-photo control sent a file name and a MADE-UP size (`2_140_000`, the figure both rows carry) and `addMedia` allocated a key with `storage.put(…, null)`, so the row and its `photo_uploaded` audit event were written with no bytes behind them. Searched for on 24 Oct: no file with either id exists anywhere on the server, in any release directory or in the store. The rows are left as they are — they are the honest record of what that release did — and there is nothing to recover |
 
 ### THE RESTORE TEST ON THE INSTALLED RELEASE IS BROKEN, AND THAT IS THE "26"
 

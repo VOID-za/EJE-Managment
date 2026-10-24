@@ -55,6 +55,8 @@ RestartSec=5
 TimeoutStartSec=90
 KillSignal=SIGTERM
 TimeoutStopSec=30
+# `next start` exits 143 on SIGTERM; a deliberate stop is not a failure. See eje.service.
+SuccessExitStatus=143
 
 StandardOutput=journal
 StandardError=journal

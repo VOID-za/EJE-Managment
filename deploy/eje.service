@@ -61,6 +61,12 @@ RestartSec=5
 TimeoutStartSec=90
 KillSignal=SIGTERM
 TimeoutStopSec=30
+# A deliberate stop is a success. `next start` exits 143 (128 + SIGTERM) when
+# systemd stops it, and without this every restart and every deployment logs
+# "eje.service: Failed with result 'exit-code'" — which is how the 20 and 24
+# October deployments came to be reported as a shutdown error. A crash still
+# fails: only the exit status of the signal systemd itself sent is accepted.
+SuccessExitStatus=143
 
 StandardOutput=journal
 StandardError=journal
