@@ -19,7 +19,93 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
-## RELEASE de0d9b6 — the runbook (prepared 25 October 2026, NOT YET RUN)
+## RELEASE e85f239 — two migrations, 0030 then 0031 (prepared 25 October 2026, NOT YET RUN)
+
+**From `4634d5d` (live) to `e85f239`** — everything in `de0d9b6` (JOB-EDIT-1
+#72, LIB-TEXT-1 #70), the job-forms work, and the release tool as fixed after
+the two live attempts. **Nothing below has been run against the server. A live
+release needs the owner's separate approval.**
+
+```
+RELEASE=e85f23935bb4c62357371a343fe9389acfeee6b2   # full hash, always
+LIVE=4634d5d061c02f3aa9af034be4363403a87f18cf
+```
+
+**Before it: confirm the database is still at 30 migrations.** The second live
+attempt of `de0d9b6` stopped at the migration step; the cause found in the code
+(the production-migration intent was not passed) means the database was not
+touched, but that is to be confirmed read-only — ledger count 30, and
+`library_document_text_pages_indexed_matches_state` still `pages_indexed > 0`.
+If it reads 31, stop and report: the expected list below would then be wrong,
+and the gate would stop the release anyway. The `de0d9b6` build directory left
+on the server is not used and not touched: this release builds in
+`/opt/eje/releases/e85f239`.
+
+### What this release adds to the de0d9b6 inventory below
+
+| Area | What changes at runtime | Action needed |
+|---|---|---|
+| **Database** | **Two migrations, in this order:** `0030_library_page_coverage_unknown` (relaxes one CHECK) and `0031_test_repair_date_received` (one nullable column, `jobs.date_received`; no backfill). Ledger **30 → 32** | Applied by step 4, in journal order, in one run. **Proven in CI**: the upgrade path through the real migrator, and both migrations against PostgreSQL |
+| **Rollback compatibility** | The live release reads, searches and writes a database at **0031**: the library states, and JOBS — one written WITH a date received, and one of its own | None. **Proven in CI** with the live release's own code (`scripts/release/rollback-compat.sh`) |
+| **Permissions** | New `settings.rates` and `settings.checklists` (Master and Coordinator); `settings.manage` and discounts stay a Master's | None — capabilities are code |
+| **Job forms** | Test & Repair "What is the Job?" (Date received new); Parts attachments photos only (server-enforced); review-page PDF button | None |
+| **Environment, dependencies, units, binaries** | **No change** beyond the de0d9b6 inventory — `package-lock.json` unchanged | None |
+
+### The steps — as for de0d9b6, with these differences
+
+The tool's default expected list is `0030_library_page_coverage_unknown,
+0031_test_repair_date_received`. It is checked against the release's own
+journal (they must be its newest two, in order), then against the preflight.
+
+**0. Read-only check**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha e85f23935bb4c62357371a343fe9389acfeee6b2 -CheckOnly
+```
+
+**1–2.** Build in `/opt/eje/releases/e85f239`; fresh backup, verify, key
+check, restore test — unchanged.
+
+**3. Preflight — exactly these two pending, in this order.** It must show
+
+    [FAIL] Migrations         2 not applied: 0030_library_page_coverage_unknown, 0031_test_repair_date_received. Run the migration …
+
+and no FAIL but `Deployment target`. One pending, three, none, or the two in
+the other order stops the release with nothing changed.
+
+**4. Apply both** — `npm run db:migrate` with the production-migration intent
+(§5); drizzle applies them in journal order in one transaction. Preflight
+again must read **`all 32 applied`** — the journal's own count, not any
+number. Fewer is a stop, with the live release still serving.
+
+**5–6.** Switch, restart, health on commit `e85f239` — unchanged, with the same
+automatic rollback.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha e85f23935bb4c62357371a343fe9389acfeee6b2
+```
+
+**If `de0d9b6` is released first**, only `0031` is pending for this one, and the
+operator says so — the gate never assumes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha e85f23935bb4c62357371a343fe9389acfeee6b2 -ExpectPending 0031_test_repair_date_received
+```
+
+### Rollback to 4634d5d — with BOTH migrations applied
+
+The same commands as the de0d9b6 rollback below. **Neither migration is rolled
+back, and neither needs to be:** 0030 only relaxes a CHECK, 0031 only adds a
+nullable column the live release never names, and the live release's own code
+has been run against a database at 0031 in CI — reading every library state,
+searching, writing an index, reading a job written with a date received and
+writing one of its own. Its preflight reads a ledger of 32 against its 30 as
+"all 30 applied". A date received recorded while `e85f239` ran stays in the
+column, unread, until the release is applied again.
+
+---
+
+## Reference: RELEASE de0d9b6 — one migration (prepared 25 October 2026; two live attempts stopped safely, superseded by e85f239)
 
 **From `4634d5d` (live since 24 October) to `de0d9b6`** — JOB-EDIT-1 (#72) and
 LIB-TEXT-1 (#70), merged with the owner's approval. **Nothing below has been run
@@ -339,11 +425,10 @@ existing job keeps NULL ("not recorded"); nothing is backfilled or guessed.
   now also has the live release's code read a job written WITH a date received
   and write one of its own on a database at 0031.
 - **A release that includes it has TWO pending migrations** if `de0d9b6` has
-  not been released first. `deploy/release/deploy-release.sh` expects exactly
-  one (`EXPECT_PENDING=0030_library_page_coverage_unknown`), so it will STOP at
-  the preflight gate — by design — until the release that carries 0031 says so.
-  The simplest order is to release `de0d9b6` first, then the next release with
-  `EXPECT_PENDING=0031_test_repair_date_received`.
+  not been released first. The release tool takes an ordered list and expects
+  `0030,0031` by default — see "RELEASE e85f239" at the top of this file. If
+  `de0d9b6` ships first, the next release passes
+  `-ExpectPending 0031_test_repair_date_received`.
 
 ### And a new preflight line
 
