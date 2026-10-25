@@ -19,6 +19,11 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
+  AwaitingPoList,
+  InvoicedList,
+  OfficeHandlingList,
+} from '@/components/notifications/OfficeQueueLists';
+import {
   notifications as notificationsApi,
   outbox as outboxApi,
   reads,
@@ -67,7 +72,12 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
   'signature_refused',
 ];
 
-type TabId = 'inbox' | 'handled' | 'outbox';
+/*
+ * FIVE TABS FOR THE OFFICE. Issue #73. Inbox (with the Office Handling queue at
+ * its head), Handled, Simulated Outbox, Awaiting PO and Invoiced. A role that is
+ * not the office has nothing to do in the last two and is not shown them.
+ */
+type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'invoiced';
 
 const NotificationsPageContent = () => {
   const user = useCurrentUser();
@@ -89,6 +99,8 @@ const NotificationsPageContent = () => {
   const unread = notifications.filter((notification) => notification.readAt === null);
 
   const visible = tab === 'inbox' ? inbox : handled;
+  const officeQueue = query.data?.officeQueue ?? null;
+  const handlingCount = officeQueue?.handling.length ?? 0;
 
   return (
     <>
@@ -133,17 +145,41 @@ const NotificationsPageContent = () => {
               </Badge>
             ),
           },
+          ...(officeQueue === null
+            ? []
+            : [
+                {
+                  id: 'awaiting_po',
+                  label: 'Awaiting PO',
+                  badge: (
+                    <Badge tone="amber" size="sm">
+                      {officeQueue.awaitingPo.length}
+                    </Badge>
+                  ),
+                },
+                { id: 'invoiced', label: 'Invoiced' },
+              ]),
         ]}
         activeId={tab}
         onChange={(id) => setTab(id as TabId)}
         className="mb-5"
       />
 
+      {tab === 'inbox' && officeQueue !== null && (
+        <OfficeHandlingList rows={officeQueue.handling} onChanged={query.refetch} />
+      )}
+
       {tab === 'outbox' ? (
         <OutboxPanel />
+      ) : tab === 'awaiting_po' ? (
+        officeQueue === null ? null : (
+          <AwaitingPoList rows={officeQueue.awaitingPo} onChanged={query.refetch} />
+        )
+      ) : tab === 'invoiced' ? (
+        officeQueue === null ? null : <InvoicedList rows={officeQueue.invoiced} />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Loading notifications" />
-      ) : visible.length === 0 ? (
+      ) : visible.length === 0 && !(tab === 'inbox' && handlingCount > 0) ? (
         <EmptyState
           title={tab === 'inbox' ? 'Nothing needs your attention' : 'Nothing handled yet'}
           description={

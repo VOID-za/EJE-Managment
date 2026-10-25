@@ -18,6 +18,8 @@ import {
   type FinalDocument,
   type Job,
   type JobCancellation,
+  type JobInvoice,
+  type JobOfficeHandling,
   type JobCorrection,
   type JobNote,
   type LabourEntry,
@@ -323,6 +325,18 @@ const cancellationFrom = (row: JobRow): JobCancellation | null =>
         cancelledAt: row.cancelledAt,
       };
 
+/** The office's handling of a submitted job card, when there has been one. */
+const officeHandlingFrom = (row: JobRow): JobOfficeHandling | null =>
+  row.officeHandledBy === null || row.officeHandledAt === null
+    ? null
+    : { handledBy: asUserId(row.officeHandledBy), handledAt: row.officeHandledAt };
+
+/** The recorded invoice number, when there is one. */
+const invoiceFrom = (row: JobRow): JobInvoice | null =>
+  row.invoiceNumber === null || row.invoicedBy === null || row.invoicedAt === null
+    ? null
+    : { number: row.invoiceNumber, recordedBy: asUserId(row.invoicedBy), recordedAt: row.invoicedAt };
+
 /** Assembles the domain `Job` from the root row and its children. */
 export const toDomainJob = (rows: JobRowSet): Job => {
   const media = rows.media.filter((row) => row.removedAt === null);
@@ -414,6 +428,8 @@ export const toDomainJob = (rows: JobRowSet): Job => {
       rows.job.updatedAt,
     ),
     cancellation: cancellationFrom(rows.job),
+    officeHandling: officeHandlingFrom(rows.job),
+    invoice: invoiceFrom(rows.job),
 
     createdAt: rows.job.createdAt,
     createdBy: asUserId(rows.job.createdBy ?? ''),
@@ -467,6 +483,11 @@ export const toJobRow = (
   cancellationDescription: job.cancellation?.description ?? '',
   cancelledBy: job.cancellation?.cancelledBy ?? null,
   cancelledAt: job.cancellation?.cancelledAt ?? null,
+  officeHandledBy: job.officeHandling?.handledBy ?? null,
+  officeHandledAt: job.officeHandling?.handledAt ?? null,
+  invoiceNumber: job.invoice?.number ?? null,
+  invoicedBy: job.invoice?.recordedBy ?? null,
+  invoicedAt: job.invoice?.recordedAt ?? null,
   createdAt: job.createdAt,
   createdBy: job.createdBy,
   acceptedAt: job.acceptedAt,

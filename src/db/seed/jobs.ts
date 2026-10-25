@@ -197,6 +197,10 @@ const base = (jobNumber: string): Job => ({
   finalDocument: null,
   delivery: null,
   cancellation: null,
+
+  officeHandling: null,
+
+  invoice: null,
   createdAt: timeAgo(6, 8),
   createdBy: MASTER,
   acceptedAt: null,

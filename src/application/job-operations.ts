@@ -1,5 +1,6 @@
 import {
   can,
+  isIssuedStatus,
   asAttachmentId,
   asLineItemId,
   canTransition,
@@ -125,17 +126,17 @@ export const assertEditable = (context: OperationContext, job: Job): void => {
 
   if (canEditJob(context.actor.role, job.status)) return;
 
+  const finished = job.status === 'closed' || isIssuedStatus(job.status);
   throw new WorkflowError(
-    job.status === 'closed'
-      ? `${job.jobNumber} is closed and can no longer be changed.`
+    finished
+      ? `${job.jobNumber} has been submitted and can no longer be changed.`
       : `${job.jobNumber} is with the office and can only be changed by a Master.`,
     [
       {
         code: 'job_locked',
-        message:
-          job.status === 'closed'
-            ? 'Closed jobs are read-only.'
-            : 'Only a Master can amend a job that is awaiting review.',
+        message: finished
+          ? 'A submitted job card is read-only. The office handles it and records the invoice; the job card itself does not change.'
+          : 'Only a Master can amend a job that is awaiting review.',
       },
     ],
   );
@@ -183,6 +184,43 @@ const assertCanCapture = (context: OperationContext, job: Job): void => {
  * client that had not been updated, would have put labour hours on a document
  * that has no labour section to print them in.
  */
+/**
+ * A PARTS COLLECTION HAS NO WRITE-UP. Issue #73, Batch 2.
+ *
+ * The goods are the record; findings, a diagnosis and work performed describe
+ * work on a machine, which a counter hand-over is not. Refused here, on the
+ * server, whatever a screen or an old client sends.
+ */
+const assertCapturesWriteUp = (job: Job): void => {
+  const definition = getJobTypeDefinition(job.jobType);
+  if (definition.capturesCompletionWriteUp) return;
+  throw new WorkflowError(`A completion write-up cannot be recorded on ${job.jobNumber}.`, [
+    {
+      code: 'not_applicable_to_job_type',
+      message: `A ${definition.label.toLowerCase()} job has no completion write-up. The part lines are the record of what was handed over.`,
+    },
+  ]);
+};
+
+/**
+ * NOR A SIGNATURE REFUSAL. Issue #73, Batch 2.
+ *
+ * The collector signs for the goods, or the goods do not leave the counter.
+ * There is no refusal-and-correction loop for a hand-over. A refusal recorded
+ * on a parts job before this rule is still RESOLVABLE (see
+ * `resolveSignatureRefusal`), so no historical job is stranded.
+ */
+const assertAllowsSignatureRefusal = (job: Job): void => {
+  const definition = getJobTypeDefinition(job.jobType);
+  if (definition.allowsSignatureRefusal) return;
+  throw new WorkflowError(`A refusal to sign cannot be recorded on ${job.jobNumber}.`, [
+    {
+      code: 'not_applicable_to_job_type',
+      message: `A ${definition.label.toLowerCase()} job has no signature-refusal workflow. The collector signs for the goods, or they stay at the counter.`,
+    },
+  ]);
+};
+
 const assertCapturesLabourAndTravel = (context: OperationContext, job: Job, what: string): void => {
   const definition = getJobTypeDefinition(job.jobType);
   if (definition.capturesLabourAndTravel) return;
@@ -1068,6 +1106,9 @@ export const updateLabour = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  // The edit path too, not only the add: a parts job's legacy line cannot be
+  // reworked into a charge the job type does not carry. Issue #73, Batch 2.
+  assertCapturesLabourAndTravel(context, job, 'Labour');
 
   const existing = job.labour.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -1129,6 +1170,7 @@ export const updateTravel = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertCapturesLabourAndTravel(context, job, 'Travel');
 
   const existing = job.travel.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -1908,6 +1950,7 @@ export const saveCompletionReport = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertCapturesWriteUp(job);
 
   const changed = (Object.keys(report) as (keyof JobCompletionReport)[]).filter(
     (field) => report[field] !== job.completionReport[field],
@@ -2377,6 +2420,7 @@ export const recordSignatureRefusal = async (
   input: RefusalInput,
 ): Promise<Job> => {
   assertCanCapture(context, job);
+  assertAllowsSignatureRefusal(job);
 
   // A signed job card cannot then be refused: that would discard a signature
   // the customer actually gave.
@@ -3231,7 +3275,15 @@ const performIssue = async (
     ]);
   }
 
-  transition(job, 'awaiting_delivery');
+  /*
+   * INTO THE OFFICE'S HANDS. Issue #73, Batch 1.
+   *
+   * A submission used to enter `awaiting_delivery`, and a confirmed delivery
+   * closed the job. Now it enters `office_handling` — the office handles it,
+   * then records the invoice — and the customer's copy is sent below with its
+   * delivery tracked on `Job.delivery`, which no longer moves the status.
+   */
+  transition(job, 'office_handling');
 
   const now = context.services.clock.now();
   const settings = await context.repos.settings.get();
@@ -3288,7 +3340,7 @@ const performIssue = async (
 
   const issued = await context.repos.jobs.save({
     ...finalJob,
-    status: 'awaiting_delivery',
+    status: 'office_handling',
     submittedAt: job.submittedAt ?? now,
     completedAt: job.completedAt ?? now,
     finalDocument: {
@@ -3332,7 +3384,7 @@ const performIssue = async (
     body:
       `${userFullName(context.actor)} submitted the signed job card for ${job.jobNumber}. ` +
       `The customer's copy was sent to ${customerEmail}. ` +
-      'The job closes once delivery is confirmed.',
+      'It is waiting for the office to handle it and raise the invoice.',
     jobId: job.id,
     link: `/jobs/${job.jobNumber}`,
   });
@@ -3436,11 +3488,14 @@ const sendFinalDocument = async (
         : `Attempt ${attempts}: the provider accepted ${document.fileName} for ${document.issuedTo}. Delivery is ${deliveryStateLabel(delivery.state).toLowerCase()}.`,
   });
 
-  // Delivered, and only delivered, closes the job.
-  const saved =
-    delivery.state === 'delivered'
-      ? await closeOnDelivery(context, { ...sending, delivery }, now)
-      : await context.repos.jobs.save({ ...sending, delivery });
+  /*
+   * THE DELIVERY RECORD, AND NOTHING ELSE. Issue #73, Batch 1.
+   *
+   * A delivered copy used to close the job here. Delivery is now tracked on its
+   * own: the job stays wherever the office lifecycle has it, whatever the
+   * provider reports.
+   */
+  const saved = await context.repos.jobs.save({ ...sending, delivery });
 
   return {
     job: saved,
@@ -3450,44 +3505,20 @@ const sendFinalDocument = async (
   };
 };
 
-/** Closes a job whose customer copy has been confirmed delivered. */
-const closeOnDelivery = async (
-  context: OperationContext,
-  job: Job,
-  now: string,
-): Promise<Job> => {
-  /*
-   * ONLY A CONFIRMED DELIVERY CLOSES A JOB, and now the table agrees. AUD-7.
-   *
-   * `awaiting_delivery -> closed` was written straight onto the record, so the
-   * one transition the whole delivery handshake exists to protect was the one
-   * the state machine had no say in. Both callers reach here from
-   * `awaiting_delivery` (and a historical `submitted`), which the table allows;
-   * anything else is refused here instead of being taken on trust.
-   */
-  transition(job, 'closed');
-
-  const closed = await context.repos.jobs.save({ ...job, status: 'closed', closedAt: now });
-  await audit(context, {
-    jobId: job.id,
-    type: 'job_closed',
-    summary: 'Job closed on confirmed delivery',
-    detail: `The customer's copy was confirmed delivered to ${job.delivery?.to ?? 'the customer'}, so ${job.jobNumber} is closed.`,
-  });
-  return closed;
-};
-
 /**
- * Asks the provider what became of the customer's copy, and closes on delivery.
+ * Asks the provider what became of the customer's copy, and RECORDS it.
  *
- * Called when a screen showing an awaiting-delivery job is opened or refreshed.
- * It reads the provider's state — it never assumes one.
+ * Called when a screen showing a submitted job is opened or refreshed. It reads
+ * the provider's state — it never assumes one — and since issue #73 it never
+ * moves the status: delivery is tracked on its own.
  */
 export const confirmJobCardDelivery = async (
   context: OperationContext,
   job: Job,
 ): Promise<Job> => {
-  if (job.status !== 'awaiting_delivery' || job.delivery === null) return job;
+  // Any issued job card — office handling, awaiting PO, invoiced, or the legacy
+  // awaiting delivery. Delivery is tracked on its own and moves no status.
+  if (!isIssuedStatus(job.status) || job.delivery === null) return job;
   if (job.delivery.messageId.length === 0) return job;
 
   const receipt = await context.services.email.deliveryState(job.delivery.messageId);
@@ -3528,8 +3559,19 @@ export const confirmJobCardDelivery = async (
     updatedAt: now,
   };
 
+  /*
+   * DELIVERED IS RECORDED, AND CHANGES NOTHING ELSE. Issue #73, Batch 1.
+   *
+   * This used to close the job. It cannot any more: a delivery confirmation
+   * must never close a job or take it past the office's handling.
+   */
   if (receipt.state === 'delivered') {
-    return closeOnDelivery(context, { ...job, delivery }, now);
+    await audit(context, {
+      jobId: job.id,
+      type: 'delivery_state_changed',
+      summary: 'Customer copy delivered',
+      detail: `The customer's copy was confirmed delivered to ${delivery.to}. The job stays with the office (${job.status === 'invoiced' ? 'invoiced' : 'not yet invoiced'}).`,
+    });
   }
 
   if (receipt.state === 'failed') {
@@ -3537,7 +3579,7 @@ export const confirmJobCardDelivery = async (
       jobId: job.id,
       type: 'delivery_state_changed',
       summary: 'Customer copy could not be delivered',
-      detail: `${delivery.to} rejected the job card: ${delivery.failureReason} The job stays open.`,
+      detail: `${delivery.to} rejected the job card: ${delivery.failureReason} The office can send it again.`,
     });
   }
   return context.repos.jobs.save({ ...job, delivery });
@@ -3581,8 +3623,8 @@ export const retryJobCardDelivery = async (
       },
     ]);
   }
-  if (job.status !== 'awaiting_delivery') {
-    throw new WorkflowError(`${job.jobNumber} is not awaiting delivery.`, []);
+  if (!isIssuedStatus(job.status)) {
+    throw new WorkflowError(`${job.jobNumber} has not been submitted, so there is no copy to send.`, []);
   }
 
   /*

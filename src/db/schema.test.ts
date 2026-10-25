@@ -40,7 +40,10 @@ describe('enums mirror the domain unions', () => {
       expect(enumValues(schema.jobStatus), status).toContain(status);
     }
     expect(enumValues(schema.jobStatus)).toContain('submitted');
-    expect(enumValues(schema.jobStatus)).toHaveLength(JOB_STATUS_ORDER.length + 1);
+    // And `awaiting_delivery`: the legacy name for a job waiting on the office,
+    // still in historical rows, no longer offered as a filter (issue #73).
+    expect(enumValues(schema.jobStatus)).toContain('awaiting_delivery');
+    expect(enumValues(schema.jobStatus)).toHaveLength(JOB_STATUS_ORDER.length + 2);
   });
 
   it('cancellation reasons match exactly', () => {

@@ -415,6 +415,32 @@ follows is sufficient; there is no window in which the new code is refused.
 before any are read; without it the reader finds the end by reading to it,
 and says so when a limit stopped it first.
 
+### And migration 0032 (the office lifecycle, issue #73) — NOT YET DEPLOYED, NOT IN e85f239
+
+On `claude/office-workflow-parts`. Three `job_status` values appended
+(`office_handling`, `awaiting_po`, `invoiced`), five nullable columns on `jobs`
+(who handled it and when; the invoice number, who recorded it and when), four
+checks written on `status::text` (an enum value cannot be USED in the
+transaction that adds it, and drizzle runs every pending migration in one), and
+a trigger that refuses rewriting a recorded invoice number.
+
+- **No row is rewritten.** Closed jobs stay `closed` — they were never invoiced
+  through this system. `awaiting_delivery` jobs (submitted under the old rule)
+  are left as they are; the application treats them as waiting on the office.
+- **Behaviour changes at release:** a technician's submission enters Office
+  Handling instead of waiting on delivery, and a confirmed delivery no longer
+  closes a job. The office finishes each job from Notifications (Mark handled,
+  then the Invoice No.).
+- **The release tool must be told what is pending.** With `e85f239` live, the
+  only pending migration is `0032_office_lifecycle`, so run the check and the
+  release with `-ExpectPending 0032_office_lifecycle`; the tool's default
+  (0030, 0031) would — correctly — stop at the journal check.
+- **Rolling back after jobs have entered the new statuses** is not covered by
+  the rollback-compatibility check: the earlier release does not know
+  `office_handling`, `awaiting_po` or `invoiced`, and such jobs would read with
+  no label and no action. Roll back only before the office has used the new
+  steps, or decide the data first.
+
 ### And migration 0031 (Test & Repair "Date received") — NOT YET DEPLOYED, NOT IN de0d9b6
 
 On `claude/job-forms-attachments`, after `de0d9b6`. One additive, nullable

@@ -213,6 +213,10 @@ export const jobFixture = (jobNumber: string, over: Partial<Job> = {}): Job => (
   finalDocument: null,
   delivery: null,
   cancellation: null,
+
+  officeHandling: null,
+
+  invoice: null,
   createdAt: '2026-09-20T08:00:00.000Z',
   createdBy: asUserId(IDS.master),
   acceptedAt: null,

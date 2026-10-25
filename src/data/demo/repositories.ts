@@ -29,6 +29,7 @@ import type {
   MachineMovement,
   MachineId,
   NotificationId,
+  NotificationType,
   OutboxMessage,
   Site,
   SiteId,
@@ -186,6 +187,8 @@ class DemoJobRepository implements JobRepository {
       quoteNumber: job.quoteNumber,
       dateReceived: job.dateReceived,
       repairItem: job.repairItem,
+      officeHandling: job.officeHandling,
+      invoice: job.invoice,
       customerId: job.customerId,
       siteId: job.siteId,
       machineId: job.machineId,
@@ -1069,6 +1072,22 @@ class DemoNotificationRepository implements NotificationRepository {
       draft.notifications = draft.notifications.map((notification) =>
         notification.id === id
           ? { ...notification, handledAt: now, readAt: notification.readAt ?? now }
+          : notification,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  markHandledForJob(jobId: JobId, type: NotificationType): Promise<void> {
+    const now = new Date().toISOString();
+    this.context.commit((draft) => {
+      draft.notifications = draft.notifications.map((notification) =>
+        notification.jobId === jobId && notification.type === type
+          ? {
+              ...notification,
+              handledAt: notification.handledAt ?? now,
+              readAt: notification.readAt ?? now,
+            }
           : notification,
       );
     });

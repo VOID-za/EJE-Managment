@@ -193,6 +193,15 @@ export type Capability =
    * System settings that are not rates or checklists — the demonstration
    * reset among them. A Master's alone.
    */
+  /**
+   * THE OFFICE LIFECYCLE AFTER SUBMISSION. Issue #73, Batch 1.
+   *
+   * Mark a submitted job card handled (Office Handling -> Awaiting PO) and
+   * record the invoice number that finishes it (Awaiting PO -> Invoiced). The
+   * office's — Master and Coordinator — and never a technician's: the
+   * technician's part ends at submission.
+   */
+  | 'jobs.officeHandling'
   | 'settings.manage'
   /**
    * Charge-out rates, travel, call-out and VAT. The Master AND the Coordinator.
@@ -368,6 +377,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'admin.access',
   'users.manageTechnicians',
   'users.manageMasters',
+  'jobs.officeHandling',
   'settings.manage',
   'settings.rates',
   'settings.checklists',
@@ -440,6 +450,8 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
    */
   'settings.rates',
   'settings.checklists',
+  // Handling submitted job cards and recording invoice numbers. Issue #73.
+  'jobs.officeHandling',
   'activity.viewAll',
   // The office deals with work a tablet could not get onto a job. BD-15.
   'captures.resolveReferral',

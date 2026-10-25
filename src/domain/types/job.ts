@@ -74,7 +74,15 @@ export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
  * The EJE job lifecycle.
  *
  * draft -> open -> in_progress -> (awaiting_spares <-> in_progress)*
- *       -> completion -> customer_signature -> review -> submitted -> closed
+ *       -> completion -> customer_signature -> review
+ *       -> office_handling -> awaiting_po -> invoiced
+ *
+ * The office lifecycle after submission (issue #73, Batch 1): the technician's
+ * submission hands the signed job card to the office (`office_handling`); the
+ * office marks it handled once the invoice is being prepared in Sage
+ * (`awaiting_po`); recording the invoice number finishes it (`invoiced`).
+ * Email delivery of the customer's copy is tracked SEPARATELY, on
+ * `Job.delivery`, and never moves the status.
  *
  * `awaiting_spares` may be entered and left any number of times.
  */
@@ -97,6 +105,22 @@ export type JobStatus =
    * keep matching it.
    */
   | 'awaiting_delivery'
+  /**
+   * Submitted by the technician: the signed job card, its signature, the final
+   * document and the audit trail are all in place, and the job is with the
+   * OFFICE. Read-only, like every issued state. The customer's copy is sent at
+   * submission and its delivery is tracked on `Job.delivery` — it no longer has
+   * anything to do with the status.
+   */
+  | 'office_handling'
+  /**
+   * The office has handled the job card — the invoice is being raised in Sage —
+   * and is waiting on the customer's purchase order. Leaves only when an
+   * invoice number is recorded.
+   */
+  | 'awaiting_po'
+  /** The invoice number is recorded. The end of the lifecycle for new work. */
+  | 'invoiced'
   /**
    * Historical: handed to the office for Master Review.
    *
@@ -220,6 +244,19 @@ export interface FinalDocument {
    * `genuine`.
    */
   readonly provenance: Provenance;
+}
+
+/** The office's handling of a submitted job card. See `Job.officeHandling`. */
+export interface JobOfficeHandling {
+  readonly handledBy: UserId;
+  readonly handledAt: IsoDateTime;
+}
+
+/** The invoice number the office recorded. See `Job.invoice`. */
+export interface JobInvoice {
+  readonly number: string;
+  readonly recordedBy: UserId;
+  readonly recordedAt: IsoDateTime;
 }
 
 export interface JobCancellation {
@@ -727,6 +764,25 @@ export interface Job {
 
   /** Set when the job was cancelled. Never cleared. */
   readonly cancellation: JobCancellation | null;
+
+  /**
+   * When, and by whom, the office handled the submitted job card. Issue #73.
+   *
+   * Set once, on the move from `office_handling` to `awaiting_po`, and never
+   * cleared. Null on every job that has not reached the office, and on every
+   * job closed under the earlier lifecycle — those were never handled through
+   * this step, and the record does not pretend otherwise.
+   */
+  readonly officeHandling: JobOfficeHandling | null;
+
+  /**
+   * The invoice EJE raised for this job, by its number. Issue #73.
+   *
+   * Recorded by the office once the invoice exists in Sage; this system keeps
+   * the NUMBER, it does not talk to Sage. Set once, on the move to `invoiced`,
+   * and never changed afterwards — a database trigger refuses a rewrite.
+   */
+  readonly invoice: JobInvoice | null;
 
   /*
    * There is no soft deletion.

@@ -5,10 +5,17 @@ export interface CardProps {
   readonly children: ReactNode;
   readonly className?: string;
   readonly padded?: boolean;
+  /**
+   * Passed through to the element, so a browser test can find this card. It
+   * used to be accepted by TypeScript (any `data-*` prop is) and silently
+   * dropped here, which is how a test id on a card never reached the page.
+   */
+  readonly 'data-testid'?: string;
 }
 
-export const Card = ({ children, className, padded = true }: CardProps) => (
+export const Card = ({ children, className, padded = true, 'data-testid': testId }: CardProps) => (
   <section
+    data-testid={testId}
     className={cn(
       'rounded-[var(--radius-card)] border border-steel-200 bg-surface shadow-[var(--shadow-card)]',
       padded && 'p-5',

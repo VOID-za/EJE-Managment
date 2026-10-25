@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { can, DELIVERY_FAILURE_KINDS, isDeliveryFailureKind } from '@/domain';
+import { can, DELIVERY_FAILURE_KINDS, ISSUED_STATUSES, isDeliveryFailureKind } from '@/domain';
 import { confirmJobCardDelivery } from '@/application/job-operations';
 import { forbidden } from '@/server/api/errors';
 import { writeRoute } from '@/server/api/handler';
@@ -62,19 +62,20 @@ export const POST = writeRoute({
     );
 
     /*
-     * Any job waiting on this message now hears about it.
+     * Any submitted job sent with this message now hears about it.
      *
-     * Done HERE rather than by the browser looping over jobs: learning what
-     * became of a customer's copy is a business consequence of the report, and
-     * `confirmJobCardDelivery` is what decides whether that closes the job.
+     * Done HERE rather than by the browser looping over jobs: what became of a
+     * customer's copy is a business consequence of the report. Since issue #73
+     * it is recorded on the job's delivery and moves NO status — the office
+     * lifecycle (handled, awaiting PO, invoiced) is the office's alone.
      */
-    const waiting = await context.repos.jobs.list({ statuses: ['awaiting_delivery'] });
-    let closed = 0;
+    const waiting = await context.repos.jobs.list({ statuses: [...ISSUED_STATUSES] });
+    let updated = 0;
     for (const job of waiting) {
       if (job.delivery?.messageId !== messageId) continue;
-      const settled = await confirmJobCardDelivery(context.operation, job);
-      if (settled.status === 'closed') closed += 1;
+      await confirmJobCardDelivery(context.operation, job);
+      updated += 1;
     }
-    return { reported: true, closed };
+    return { reported: true, updated };
   },
 });

@@ -66,6 +66,7 @@ interface MediaDescription {
 import type { ActivityFeed } from '@/application/activity-read';
 import type { CaptureReferralRow } from '@/application/capture-referral-view';
 import type { CalendarData } from '@/application/calendar';
+import type { OfficeQueue } from '@/application/office-lifecycle';
 import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs';
 import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
@@ -444,6 +445,8 @@ export const reads = {
     query<{
       notifications: readonly AppNotification[];
       jobNumbers: readonly (readonly [string, string])[];
+      /** The office lifecycle's tabs (issue #73). Null for a non-office role. */
+      officeQueue?: OfficeQueue | null;
       /** What this deployment really does with a message. MANDATE-3. */
       delivery?: DeliveryTransports;
     }>('/api/notifications'),
@@ -499,6 +502,11 @@ export const jobs = {
       captureTransport: true,
     }),
   accept: (jobId: string) => jobAction(jobId, 'accept'),
+  /** Issue #73: the office has the submitted job card. Office Handling -> Awaiting PO. */
+  handleOffice: (jobId: string) => jobAction(jobId, 'handle_office'),
+  /** Issue #73: the invoice number from Sage. Awaiting PO -> Invoiced. */
+  recordInvoice: (jobId: string, invoiceNumber: string) =>
+    jobAction(jobId, 'record_invoice', { invoiceNumber }),
   /**
    * Asks for the site location. NO DESTINATION — see the command.
    *

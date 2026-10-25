@@ -87,7 +87,7 @@ describe('exporting the closed-job archive', () => {
       const answer = await client.download('/api/jobs/closed/export');
       expect(answer.status).toBe(200);
       expect(answer.headers.get('content-disposition')).toMatch(/eje-closed-jobs-/);
-      expect(answer.text).toContain('Job number,Closed,Customer');
+      expect(answer.text).toContain('Job number,Closed,Status,Invoice number,Customer');
     }
   });
 

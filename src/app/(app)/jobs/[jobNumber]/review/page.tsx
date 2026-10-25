@@ -13,6 +13,8 @@ import {
   isDelivered,
   refusalAwaitingResolution,
   type DeliveryRecord,
+  isIssuedStatus,
+  jobStatusLabel,
 } from '@/domain';
 import { isNotFound } from '@/api/client';
 import { jobs as api, reads } from '@/api/endpoints';
@@ -173,8 +175,11 @@ const ReviewJobPage = ({
   const customerDisplayName = contact === null ? customer.name : contactFullName(contact);
 
   const inMasterReview = job.status === 'submitted';
-  const awaitingDelivery = job.status === 'awaiting_delivery';
-  const closed = job.status === 'closed';
+  // Submitted and with the office (issue #73): the customer's copy and its
+  // delivery are shown here, separately from the office lifecycle.
+  const awaitingDelivery = isIssuedStatus(job.status) && job.status !== 'invoiced';
+  // Finished: invoiced, or closed under the earlier lifecycle.
+  const closed = job.status === 'closed' || job.status === 'invoiced';
 
   /*
    * What a failed delivery MEANS for the office, decided in the domain so no
@@ -286,8 +291,8 @@ const ReviewJobPage = ({
         The result, reported from what the provider said.
 
         "Successfully delivered" appears for a confirmed delivery and for
-        nothing else. A pending send says pending, and a failure says the job is
-        not closed — because it is not.
+        nothing else. A pending send says pending, and a failure says so. None of
+        it moves the job: since issue #73 delivery is tracked on its own.
       */}
       {submitted !== null && (
         <Card
@@ -433,7 +438,7 @@ const ReviewJobPage = ({
             description={deliveryMessage(job.delivery, `Job card ${job.jobNumber}`)}
             action={
               <Badge tone={job.delivery?.state === 'failed' ? 'red' : 'amber'} size="sm" dot>
-                Not closed
+                {jobStatusLabel(job.status)}
               </Badge>
             }
           />
@@ -523,7 +528,7 @@ const ReviewJobPage = ({
                */
               description={
                 canIssue
-                  ? `Correct anything that needs it on the job, then issue it. The job card will be emailed to ${customerDisplayName} at ${customerEmail} and the job closed.`
+                  ? `Correct anything that needs it on the job, then issue it. The job card will be emailed to ${customerDisplayName} at ${customerEmail} and the job handed to the office.`
                   : `${job.jobNumber} stopped in the retired Master Review stage before that stage was removed. Only a Master can issue it from here. The customer has not been emailed yet.`
               }
             />
@@ -553,7 +558,7 @@ const ReviewJobPage = ({
       {closed && submitted === null && (
         <Card className="mb-5 border-steel-200 print:hidden">
           <CardHeader
-            title="Issued and closed"
+            title={job.status === 'invoiced' ? 'Issued and invoiced' : 'Issued and closed'}
             description="The job card the customer holds is the PDF on file below. Read-only, and unaffected by later rate, price or checklist changes."
             action={
               view.job.finalDocument === null ? undefined : (

@@ -30,6 +30,7 @@ import type {
   MachineMovement,
   MachineId,
   NotificationId,
+  NotificationType,
   Site,
   SiteId,
   SystemSettings,
@@ -465,6 +466,13 @@ export interface NotificationRepository {
   markRead(id: NotificationId): Promise<void>;
   markAllRead(recipientId: UserId): Promise<void>;
   markHandled(id: NotificationId): Promise<void>;
+  /**
+   * Every recipient's copy of one kind of notification about one job, handled
+   * at once. Issue #73: the office handling a submitted job card is one act,
+   * so the `job_submitted` notice leaves every office Inbox, not only the
+   * Inbox of the person who pressed the button.
+   */
+  markHandledForJob(jobId: JobId, type: NotificationType): Promise<void>;
 }
 
 export interface AvailabilityRepository {

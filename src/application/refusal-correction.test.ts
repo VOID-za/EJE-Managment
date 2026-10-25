@@ -209,9 +209,11 @@ describe('a refused job card is corrected and asked for again', () => {
       'accounts@example.com',
       'ABC Engineering',
     );
-    const closed = await confirmDelivery(harness, harness.as(technician), result.job);
-    expect(closed.status).toBe('closed');
-    expect(closed.finalDocument).not.toBeNull();
+    // Issue #73: issued into the office lifecycle; a confirmed delivery does
+    // not close it.
+    const delivered = await confirmDelivery(harness, harness.as(technician), result.job);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.finalDocument).not.toBeNull();
   });
 
   it('records a second refusal beside the first, never over it', async () => {
@@ -251,20 +253,25 @@ describe('a refused job card is corrected and asked for again', () => {
     expect(inbox.length).toBeGreaterThan(0);
   });
 
+  // "No stage" for the REFUSAL loop: the rail is the eight stages of the live
+  // workflow (issue #73 added the office lifecycle), and a refusal adds none.
   it('adds no status and no stage, however many times it goes round', async () => {
     const returned = await returnToCustomerSignature(harness.as(master), refused, '');
     const again = await recordSignatureRefusal(harness.as(technician), returned, {
       reason: SECOND_REASON,
     });
 
-    expect(JOB_PROGRESS_STAGES).toHaveLength(6);
+    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
     expect(JOB_PROGRESS_STAGES.map(jobStatusLabel)).toEqual([
       'Open',
       'In Progress',
       'Completion',
       'Customer Signature',
       'Review',
-      'Closed',
+      // The office lifecycle after submission (issue #73).
+      'Office Handling',
+      'Awaiting PO',
+      'Invoiced',
     ]);
     for (const job of [refused, returned, again]) {
       expect(job.status === 'review' || job.status === 'customer_signature').toBe(true);

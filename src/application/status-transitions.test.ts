@@ -152,9 +152,9 @@ describe('the state machine enforces every status write', () => {
     expect(refused.signatureRefusals).toHaveLength(1);
   });
 
-  /* -- closing on delivery, which the table now has a say in --------------- */
+  /* -- delivery no longer closes anything (issue #73) ----------------------- */
 
-  it('closes on a confirmed delivery, and only from awaiting delivery', async () => {
+  it('a confirmed delivery leaves the job with the office — it never closes it', async () => {
     const context = harness.as(technician);
     const signed = await captureSignature(
       context,
@@ -167,8 +167,10 @@ describe('the state machine enforces every status write', () => {
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
-    expect(issued.job.status).toBe('awaiting_delivery');
-    expect(canTransition('awaiting_delivery', 'closed')).toBe(true);
+    expect(issued.job.status).toBe('office_handling');
+    // Neither the new state nor its legacy name has an edge to Closed any more.
+    expect(canTransition('office_handling', 'closed')).toBe(false);
+    expect(canTransition('awaiting_delivery', 'closed')).toBe(false);
 
     /*
      * The simulator stands in for the provider's delivery report, which is the
@@ -179,12 +181,13 @@ describe('the state machine enforces every status write', () => {
     expect(messageId).not.toBe('');
     harness.outbox.setDelivery(messageId, 'delivered');
 
-    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
+    const delivered = await confirmJobCardDelivery(harness.as(master), issued.job);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.closedAt).toBeNull();
+    expect(delivered.delivery?.state).toBe('delivered');
   });
 
-  it('does not close a job twice', async () => {
+  it('a second delivery report moves nothing either', async () => {
     const context = harness.as(technician);
     const signed = await captureSignature(
       context,
@@ -198,16 +201,18 @@ describe('the state machine enforces every status write', () => {
       'Pieter Nel',
     );
     harness.outbox.setDelivery(issued.job.delivery?.messageId ?? '', 'delivered');
-    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
-    expect(closed.status).toBe('closed');
+    const delivered = await confirmJobCardDelivery(harness.as(master), issued.job);
+    expect(delivered.status).toBe('office_handling');
 
     /*
-     * `closed` is terminal: the table gives it no edges at all, so asking again
-     * cannot close it a second time and cannot stamp a second `closedAt`.
+     * `closed` and `invoiced` are terminal: the table gives them no edges.
+     * Asking the provider again changes nothing about the job's status.
      */
     expect(canTransition('closed', 'closed')).toBe(false);
-    const again = await confirmJobCardDelivery(harness.as(master), closed);
-    expect(again.closedAt).toBe(closed.closedAt);
+    expect(canTransition('invoiced', 'invoiced')).toBe(false);
+    const again = await confirmJobCardDelivery(harness.as(master), delivered);
+    expect(again.status).toBe('office_handling');
+    expect(again.closedAt).toBeNull();
   });
 
   /* -- the table itself, so the premises above cannot rot ------------------ */
@@ -216,8 +221,12 @@ describe('the state machine enforces every status write', () => {
     const legal: readonly (readonly [JobStatus, JobStatus])[] = [
       ['customer_signature', 'review'],
       ['review', 'closed'],
-      ['review', 'awaiting_delivery'],
-      ['awaiting_delivery', 'closed'],
+      // Issue #73: submission enters the office lifecycle.
+      ['review', 'office_handling'],
+      ['office_handling', 'awaiting_po'],
+      ['awaiting_delivery', 'awaiting_po'],
+      ['awaiting_po', 'invoiced'],
+      ['submitted', 'office_handling'],
       ['completion', 'customer_signature'],
     ];
     const illegal: readonly (readonly [JobStatus, JobStatus])[] = [
@@ -226,6 +235,14 @@ describe('the state machine enforces every status write', () => {
       ['closed', 'review'],
       ['closed', 'closed'],
       ['review', 'review'],
+      // Issue #73: delivery closes nothing, and no office step can be skipped.
+      ['review', 'awaiting_delivery'],
+      ['awaiting_delivery', 'closed'],
+      ['office_handling', 'closed'],
+      ['office_handling', 'invoiced'],
+      ['awaiting_po', 'closed'],
+      ['invoiced', 'closed'],
+      ['invoiced', 'awaiting_po'],
     ];
 
     for (const [from, to] of legal) expect(canTransition(from, to), `${from} -> ${to}`).toBe(true);

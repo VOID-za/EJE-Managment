@@ -7,6 +7,7 @@ import {
 } from '../types/availability';
 import type { Job } from '../types/job';
 import { jobScheduleWindow } from '../job/scheduling';
+import { isIssuedStatus } from '../job/workflow';
 
 /**
  * Availability conflicts.
@@ -146,7 +147,8 @@ export const jobsAffectedByAbsence = (
   absence: { readonly startDate: IsoDate; readonly endDate: IsoDate },
 ): readonly Job[] =>
   jobs.filter((job) => {
-    if (job.status === 'closed' || job.status === 'cancelled') {
+    // Finished, or with the office: neither needs the technician any more.
+    if (job.status === 'closed' || job.status === 'cancelled' || isIssuedStatus(job.status)) {
       return false;
     }
     const assigned =

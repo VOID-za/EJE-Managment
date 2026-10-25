@@ -492,15 +492,20 @@ describe('what the refusal does to the workflow', () => {
     expect(refused.status).toBe('review');
   });
 
-  it('adds no seventh stage — the rail is still six', () => {
-    expect(JOB_PROGRESS_STAGES).toHaveLength(6);
+  // The rail is the eight stages of the live workflow (issue #73 added the
+  // office lifecycle after Review); a refusal adds none of its own.
+  it('adds no stage of its own — the rail is the eight stages of the live workflow', () => {
+    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
     expect(JOB_PROGRESS_STAGES.map(jobStatusLabel)).toEqual([
       'Open',
       'In Progress',
       'Completion',
       'Customer Signature',
       'Review',
-      'Closed',
+      // The office lifecycle after submission (issue #73).
+      'Office Handling',
+      'Awaiting PO',
+      'Invoiced',
     ]);
   });
 
@@ -542,8 +547,9 @@ describe('what the refusal does to the workflow', () => {
     expect(resolved.status).toBe('closed');
     expect(resolved.closedAt).not.toBeNull();
     expect(jobProgressPosition(resolved.status).index).toBe(
-      JOB_PROGRESS_STAGES.indexOf('closed'),
+      JOB_PROGRESS_STAGES.indexOf('invoiced'),
     );
+    expect(jobProgressPosition(resolved.status).interruption).toBe('Closed');
     // And the customer's copy exists, recording that they declined.
     expect(resolved.finalDocument).not.toBeNull();
   });
@@ -681,7 +687,9 @@ describe('a normal signature is untouched by any of this', () => {
         return result.job;
       })(),
     );
-    expect(closed.status).toBe('closed');
+    // Issue #73: a signed job is issued into the office lifecycle, and the
+    // delivery report does not close it.
+    expect(closed.status).toBe('office_handling');
     expect(closed.signature).not.toBeNull();
   });
 });

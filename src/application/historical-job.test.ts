@@ -12,6 +12,7 @@ import {
   confirmJobCardDelivery,
 } from './job-operations';
 import type { OperationContext } from './context';
+import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
@@ -54,10 +55,16 @@ const handOverAndIssue = async (
    * are frozen by the SIGNATURE, whoever submits afterwards.
    */
   const issued = await submitJobCard(context, job, email, name);
-  // Issuing hands the mail to the provider; the job closes when delivery is
-  // confirmed, which in production is the provider's delivery report.
+  // Issuing hands the mail to the provider and the job to the office. A
+  // confirmed delivery is recorded and moves nothing (issue #73); the office
+  // finishes the job by handling it and recording the invoice.
   outbox.setDelivery(issued.delivery.messageId, 'delivered');
-  const closed = await confirmJobCardDelivery(context, issued.job);
+  const delivered = await confirmJobCardDelivery(context, issued.job);
+  const office: OperationContext = {
+    ...context,
+    actor: seedUsers.find((user) => user.id === 'user-master-elmarie')!,
+  };
+  const closed = await recordInvoiceNumber(office, await handleJobCard(office, delivered), 'INV-HIST-1');
   return { ...issued, job: closed };
 };
 
@@ -146,7 +153,7 @@ describe('a signed job keeps the rates it was signed at', () => {
 
     // Submit and close the job.
     const result = await handOverAndIssue(context, outbox, signed);
-    expect(result.job.status).toBe('closed');
+    expect(result.job.status).toBe('invoiced');
     expect(result.job.pricingSnapshot).toEqual(signed.pricingSnapshot);
 
     // The Master now raises every rate.

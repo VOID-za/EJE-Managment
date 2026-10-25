@@ -99,7 +99,8 @@ describe('the normal signed journey, driven entirely by the technician', () => {
     harness = buildHarness();
   });
 
-  it('runs end to end with one actor, and closes on confirmed delivery', async () => {
+  // Issue #73: one actor submits; a confirmed delivery leaves it with the office.
+  it('runs end to end with one actor, and lands with the office — not closed', async () => {
     const tech = harness.as(technician);
     const signed = await signedJob(harness);
 
@@ -107,10 +108,11 @@ describe('the normal signed journey, driven entirely by the technician', () => {
     expect(signed.signature).not.toBeNull();
 
     const issued = await issueJobCard(tech, signed, EMAIL, RECIPIENT);
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
 
-    const closed = await confirmDelivery(harness, tech, issued.job);
-    expect(closed.status).toBe('closed');
+    const delivered = await confirmDelivery(harness, tech, issued.job);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.closedAt).toBeNull();
   });
 
   it('is the submission that creates the customer’s copy and emails it', async () => {
@@ -137,7 +139,7 @@ describe('the normal signed journey, driven entirely by the technician', () => {
       RECIPIENT,
     );
     // The whole point of the handshake: an accepted send is not a delivery.
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
     expect(issued.job.closedAt).toBeNull();
   });
 
@@ -181,7 +183,7 @@ describe('who may submit an ordinary signed job card', () => {
   it('the technician CAN', async () => {
     expect(canSubmitJobCard(technician, signed)).toBe(true);
     expect((await issueJobCard(harness.as(technician), signed, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
   });
 
@@ -290,7 +292,7 @@ describe('the exceptions to "the technician submits it"', () => {
     expect(mine.primaryTechnicianId).toBe(master.id);
     expect(canSubmitJobCard(master, mine)).toBe(true);
     expect((await issueJobCard(context, mine, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
 
     // And it is still not a way in for the office generally: the Coordinator
@@ -324,7 +326,7 @@ describe('the exceptions to "the technician submits it"', () => {
     expect(canSubmitJobCard(technician, historical)).toBe(false);
 
     expect((await issueJobCard(harness.as(master), historical, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
   });
 });
@@ -348,7 +350,7 @@ describe('re-sending a customer’s copy is a wider question', () => {
 
     for (const person of [technician, master, coordinator]) {
       const again = await retryJobCardDelivery(harness.as(person), issued, RECIPIENT);
-      expect(again.job.status, person.id).toBe('awaiting_delivery');
+      expect(again.job.status, person.id).toBe('office_handling');
     }
   });
 
@@ -470,7 +472,7 @@ describe('the office review exists for a refusal and for nothing else', () => {
     expect(canSubmitJobCard(coordinator, signed)).toBe(false);
     const issued = await issueJobCard(harness.as(technician), signed, EMAIL, RECIPIENT);
     expect((await confirmDelivery(harness, harness.as(technician), issued.job)).status).toBe(
-      'closed',
+      'office_handling', // the normal journey since issue #73: with the office, not closed
     );
   });
 

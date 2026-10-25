@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { use } from 'react';
-import { machineDisplayName } from '@/domain';
+import { machineDisplayName, isFinishedStatus, isIssuedStatus } from '@/domain';
 import {
   Badge,
   Card,
@@ -59,7 +59,9 @@ const MachineDetailPage = ({
     (b.job.scheduledDate ?? b.job.createdAt).localeCompare(a.job.scheduledDate ?? a.job.createdAt),
   );
   const lastService = history.find(
-    (row) => row.job.jobType === 'service' && row.job.status === 'closed',
+    // A completed service: closed under the earlier lifecycle, invoiced under
+    // the office lifecycle (issue #73).
+    (row) => row.job.jobType === 'service' && isFinishedStatus(row.job.status),
   );
 
   return (
@@ -163,7 +165,10 @@ const MachineDetailPage = ({
                 <dd className="tabular font-semibold text-steel-900">
                   {
                     history.filter(
-                      (row) => row.job.status !== 'closed' && row.job.status !== 'submitted',
+                      (row) =>
+                        !isFinishedStatus(row.job.status) &&
+                        !isIssuedStatus(row.job.status) &&
+                        row.job.status !== 'submitted',
                     ).length
                   }
                 </dd>

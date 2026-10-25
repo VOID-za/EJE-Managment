@@ -22,7 +22,7 @@ import {
 } from './job-operations';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
-import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { buildHarness, confirmDelivery, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 
 /**
  * THE ROLE MATRIX, WALKED RATHER THAN ASSERTED.
@@ -128,16 +128,20 @@ describe('A — a normal job, accepted to closed', () => {
     // One act, by the person who did the work: the customer's copy is
     // rendered, stored and emailed, and the delivery handshake begins.
     const issued = await issueJobCard(tech, job, EMAIL, RECIPIENT);
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
     expect(issued.job.finalDocument).not.toBeNull();
 
     const sent = await harness.outbox.list();
     expect(sent.filter((entry) => entry.to.includes(EMAIL))).toHaveLength(1);
 
-    // And only a CONFIRMED delivery closes it.
-    const closed = await confirmDelivery(harness, tech, issued.job);
-    expect(closed.status).toBe('closed');
-    expect(closed.finalDocument).not.toBeNull();
+    // A CONFIRMED delivery no longer closes it (issue #73): it is recorded,
+    // and the job stays with the office until it is handled and invoiced.
+    const delivered = await confirmDelivery(harness, tech, issued.job);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.finalDocument).not.toBeNull();
+    const invoiced = await finishOfficeLifecycle(harness.as(master), delivered);
+    expect(invoiced.status).toBe('invoiced');
+    expect(invoiced.finalDocument).toEqual(delivered.finalDocument);
   });
 
   it('needed nobody in the office, at any point', async () => {
@@ -279,8 +283,8 @@ describe('B — customer refuses, the office corrects it, Customer Signature', (
     // And from there it is an ordinary signed job, which means the TECHNICIAN
     // submits it — CR-07. The office's part ended when it handed the card back.
     const issued = await issueJobCard(harness.as(technician), signed, EMAIL, RECIPIENT);
-    const closed = await confirmDelivery(harness, harness.as(technician), issued.job);
-    expect(closed.status).toBe('closed');
+    const delivered = await confirmDelivery(harness, harness.as(technician), issued.job);
+    expect(delivered.status).toBe('office_handling');
   });
 
   it('records a second refusal beside the first, never over it', async () => {

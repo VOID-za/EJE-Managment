@@ -454,16 +454,21 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
      * mid-capture and "Work performed:" with nothing after it would be the
      * same empty heading on a screen.
      *
-     * A write-up with nothing in any field carries no section at all: a parts
-     * collection has no work to describe.
+     * A write-up with nothing in any field carries no section at all.
+     *
+     * AND A JOB TYPE WITH NO WRITE-UP CARRIES NONE, whatever its fields hold.
+     * Issue #73, Batch 2: a parts collection has no completion write-up, so its
+     * note never prints "Work carried out" — not even from text typed before
+     * the server started refusing it. The text stays on the record; the
+     * document follows the job type's rule.
      */
-    workBlocks: [
+    workBlocks: (definition.capturesCompletionWriteUp ? [
       { label: 'Fault findings', value: job.completionReport.faultFindings },
       { label: 'Diagnosis', value: job.completionReport.diagnosis },
       { label: 'Work performed', value: job.completionReport.workPerformed },
       { label: 'Recommendations', value: job.completionReport.recommendations },
       { label: 'General notes', value: job.completionReport.generalNotes },
-    ].filter((block) => block.value.trim().length > 0),
+    ] : []).filter((block) => block.value.trim().length > 0),
     // Internal notes are EJE-only; the domain decides which reach a customer.
     notes: customerFacingNotes(job.notes).map((note) => ({
       body: note.body,

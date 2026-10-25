@@ -1096,7 +1096,7 @@ await step('the signed document is shown before anything is submitted', async ()
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByText('closes when the customer', { exact: false }).waitFor();
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 25000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
   await page.screenshot({ path: `${shots}/05-submitted.png`, fullPage: false });
 });
 
@@ -1243,7 +1243,7 @@ await step('an accepted send does NOT close the job, and does not claim delivery
   if (claimed !== 0) throw new Error('the screen claimed a delivery nothing has confirmed');
 
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 8000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 8000 });
   if (await page.getByText('Read-only — this job is closed').count() !== 0) {
     throw new Error('the job closed on an accepted send');
   }
@@ -1366,14 +1366,22 @@ await step('a failed delivery tells the office whether trying again can work', a
   await page.getByText('Delivery pending').first().waitFor({ timeout: 10000 });
 });
 
-await step('confirming the delivery is what closes the job', async () => {
+/*
+ * ISSUE #73: A CONFIRMED DELIVERY IS RECORDED, AND CLOSES NOTHING. The job is
+ * with the office, which handles it and records the invoice.
+ */
+await step('confirming the delivery records it, and the job stays with the office', async () => {
   await page.getByRole('button', { name: 'Confirm delivered' }).first().click();
   await page.getByText('Delivered').first().waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByText('Read-only — this job is closed', { exact: false })
+  await page.getByText('Read-only — submitted, with the office', { exact: false })
     .first().waitFor({ timeout: 10000 });
-  await page.screenshot({ path: `${shots}/05-closed-on-delivery.png`, fullPage: false });
+  if ((await page.getByText('this job is closed', { exact: false }).count()) !== 0) {
+    throw new Error('a confirmed delivery closed the job');
+  }
+  await page.getByTestId('mark-handled').waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${shots}/05-with-the-office-after-delivery.png`, fullPage: false });
 });
 
 /*
@@ -1926,7 +1934,7 @@ await step('the customer signs the corrected job card', async () => {
   await page.getByRole('button', { name: 'Submit job card' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 25000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
 
   // Back to the office for the rest: only they can see the outbox.
   await signOut();
@@ -1989,14 +1997,14 @@ await step('the issued card carries the signature the customer eventually gave',
   await page.screenshot({ path: `${shots}/22-corrected-job-card.png`, fullPage: false });
 });
 
-await step('confirming delivery closes the refused job too', async () => {
+await step('confirming delivery leaves the re-signed job with the office too', async () => {
   await page.goto(`${BASE}/notifications?tab=outbox`, { waitUntil: 'networkidle' });
   const entry = page.locator('main li').filter({ hasText: REFUSED_JOB }).first();
   await entry.waitFor({ timeout: 10000 });
   await entry.getByRole('button', { name: 'Confirm delivered' }).first().click();
 
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
-  await page.getByText('Read-only — this job is closed', { exact: false }).first().waitFor({
+  await page.getByText('Read-only — submitted, with the office', { exact: false }).first().waitFor({
     timeout: 15000,
   });
   // And the refusal history is still exactly what was recorded on site: the
@@ -2152,9 +2160,39 @@ await step('a technician sees the correction and cannot raise one', async () => 
   await signInAsMasterIfNeeded();
 });
 
-await step('closed job is read-only', async () => {
+/*
+ * THE OFFICE LIFECYCLE ON THE JOB PAGE. Issue #73, Batch 1. EJE-1048 was
+ * submitted and its delivery confirmed above; it is with the office, and the
+ * office finishes it here: Mark handled -> Awaiting PO -> Invoice No -> Invoiced.
+ */
+await step('the office handles a submitted job and invoices it, from the job page', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
-  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 8000 });
+  const panel = page.getByTestId('office-lifecycle');
+  await panel.waitFor({ timeout: 10000 });
+  await panel.getByTestId('mark-handled').click();
+  await panel.getByText('Awaiting PO').first().waitFor({ timeout: 10000 });
+
+  // Saving with no invoice number keeps it Awaiting PO, and says why.
+  await panel.getByTestId('save-invoice-number').click();
+  await panel.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 8000 });
+
+  await panel.getByTestId('invoice-number').fill('INV-SMOKE-1048');
+  await panel.getByTestId('save-invoice-number').click();
+  await panel.getByText('INV-SMOKE-1048').waitFor({ timeout: 10000 });
+
+  // Persisted: a fresh load reads it back from the server, read-only.
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByTestId('office-lifecycle').getByText('INV-SMOKE-1048').waitFor({ timeout: 10000 });
+  await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 8000 });
+  await page.screenshot({ path: `${shots}/05b-invoiced.png`, fullPage: false });
+});
+
+await step('an invoiced job is read-only', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
+  await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 8000 });
+  if ((await page.getByTestId('mark-handled').count()) !== 0) {
+    throw new Error('an invoiced job still offers Mark handled');
+  }
 });
 
 /*
@@ -2398,7 +2436,7 @@ await step('capturing the collector signature produces a collection note', async
   await page.getByRole('button', { name: 'Submit collection note' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Submit collection note' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 25000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
 
   await page.goto(`${BASE}/jobs/EJE-1064/review`, { waitUntil: 'networkidle' });
   await page.getByText('Parts Collection Note').first().waitFor({ timeout: 8000 });
@@ -2660,7 +2698,7 @@ await step('the courier signs, and the document carries no prices', async () => 
   await page.getByRole('button', { name: 'Submit job card' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 25000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
   await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
 
   const card = await page.locator('article').first().innerText();
@@ -2692,6 +2730,25 @@ await step('a customer collection note SHOWS prices', async () => {
   // R 485,00 x 2 plus R 1 320,00 = R 2 290,00
   await page.getByText('R\u00a02\u00a0290,00').first().waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/14-parts-customer.png`, fullPage: false });
+});
+
+/*
+ * A PARTS JOB HAS NO WRITE-UP AND NO REFUSAL, AND THE SCREEN SAYS SO. Issue #73,
+ * Batch 2. No Completion tab, and the requirements are what the server checks
+ * for a collection: parts lines and an order number — not labour, not a write-up.
+ */
+await step('a parts job offers no write-up, and requires parts — not labour or a write-up', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1062`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE-1062' }).waitFor({ timeout: 10000 });
+  if ((await page.getByRole('tab', { name: 'Completion' }).count()) !== 0) {
+    throw new Error('a parts job offers a Completion (write-up) tab');
+  }
+  await page.getByText('Parts listed').first().waitFor({ timeout: 8000 });
+  for (const wrong of ['Labour captured', 'Work performed recorded']) {
+    if ((await page.getByText(wrong).count()) !== 0) {
+      throw new Error(`a parts job lists "${wrong}" as a requirement`);
+    }
+  }
 });
 
 await step('a COURIER collection note carries no prices at all', async () => {
@@ -3816,7 +3873,7 @@ await step('the Jobs screen offers the lists the office asks for by name', async
   const labels = (await chips.allInnerTexts()).map((name) =>
     name.replace(/[\s\u00a0]*(\d+|—)\s*$/, '').replace(/\s+/g, ' ').trim(),
   );
-  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Awaiting delivery', 'Cancelled']) {
+  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Office handling', 'Awaiting PO', 'Cancelled']) {
     if (!labels.includes(label)) {
       throw new Error(`the Jobs screen has no "${label}" quick filter (found ${labels.join(', ')})`);
     }
@@ -4049,7 +4106,7 @@ await step('SEARCH-4: the archive downloads as a CSV, built by the server', asyn
    * Coordinator's permission are the next step.
    */
   const operational =
-    'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,' +
+    'Job number,Closed,Status,Invoice number,Customer,Site,Machine,Serial number,Job type,Technician,Order number,' +
     // TR-1: the Test & Repair unit, so the archive can be reconciled. Empty on
     // every other job type, exactly as Order number already is.
     'Reference number,Quote number,Date received,Part number,Part description,Quantity,Final job card';
@@ -4682,14 +4739,24 @@ await step('New Job lives on the Jobs screen, and still works', async () => {
   await page.getByRole('heading', { name: 'New job' }).waitFor({ timeout: 8000 });
 });
 
-await step('the progress rail is the six stages of the live workflow', async () => {
+await step('the progress rail is the eight stages of the live workflow', async () => {
   await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
   const rail = page.locator('ol').filter({ hasText: 'Customer Signature' }).first();
   await rail.waitFor({ timeout: 10000 });
   const stages = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').trim(),
   );
-  const expected = ['Open', 'In Progress', 'Completion', 'Customer Signature', 'Review', 'Closed'];
+  // Issue #73: the office lifecycle follows Review.
+  const expected = [
+    'Open',
+    'In Progress',
+    'Completion',
+    'Customer Signature',
+    'Review',
+    'Office Handling',
+    'Awaiting PO',
+    'Invoiced',
+  ];
   if (JSON.stringify(stages) !== JSON.stringify(expected)) {
     throw new Error(`rail is ${stages.join(' | ')}`);
   }
@@ -6063,7 +6130,10 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
   try {
     await findings.fill(typed);
     await findings.blur();
-    await page.getByRole('button', { name: 'Save now' }).click();
+    // No Save button any more: the autosave tries, fails offline, and says so.
+    if ((await page.getByRole('button', { name: 'Save now' }).count()) !== 0) {
+      throw new Error('the write-up still offers a Save now button');
+    }
 
     // Said honestly: not saved, and kept here.
     await page.getByText('kept on this tablet', { exact: false }).first().waitFor({
@@ -6133,8 +6203,8 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
     throw new Error(`the draft notice does not say it is unsaved: ${noticeText}`);
   }
 
+  // Loading it saves it — by itself, with no button to press.
   await page.getByTestId('writeup-use-draft').click();
-  await page.getByRole('button', { name: 'Save now' }).click();
   await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
 
   // On the server now, so the device's copy is gone and the notice with it.
@@ -6193,8 +6263,16 @@ await step('a write-up the server changed under a held draft is a CONFLICT, not 
   try {
     await findings.fill(mine);
     await findings.blur();
-    await page.getByRole('button', { name: 'Save now' }).click();
     await page.getByText('kept on this tablet', { exact: false }).first().waitFor({ timeout: 25000 });
+    /*
+     * THE TABLET IS CLOSED WHILE STILL OFFLINE. In the real order of things the
+     * office corrects the write-up while this tablet has no signal; here the
+     * correction is written once the browser is back online, so the open page
+     * is closed first — otherwise its own retry would save before the office
+     * did, and there would be nothing to conflict with. (A retry that DOES meet
+     * a changed server refuses to overwrite it: the panel checks first.)
+     */
+    await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
   } finally {
     await page.context().setOffline(false);
     offlineExpected = false;
@@ -6245,9 +6323,8 @@ await step('a write-up the server changed under a held draft is a CONFLICT, not 
   }
   await page.screenshot({ path: `${shots}/50-writeup-conflict.png`, fullPage: false });
 
-  // And the technician's decision is what applies it.
+  // And the technician's decision is what applies it — saved by itself.
   await page.getByTestId('writeup-use-draft').click();
-  await page.getByRole('button', { name: 'Save now' }).click();
   await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
   const after = await page.evaluate(async () => {
     const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });

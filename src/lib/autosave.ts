@@ -47,7 +47,19 @@ export interface AutosaveOptions<T> {
   equal?(a: T, b: T): boolean;
   /** The clock, for the "saved at" stamp. */
   now?(): string;
+  /**
+   * AFTER A FAILED SAVE, TRY AGAIN BY ITSELF. Issue #73, Batch 2.
+   *
+   * The waits between automatic retries, in order; the last one repeats until a
+   * save succeeds. A typed change, a flush, or the browser coming back online
+   * (the caller calls `flush`) tries sooner. An empty list turns retrying off.
+   * There is no Save button any more, so nothing else would ever try again.
+   */
+  readonly retryDelaysMs?: readonly number[];
 }
+
+/** The default retry ladder: soon, then less often, never giving up. */
+export const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000, 30_000, 60_000];
 
 export interface Autosaver<T> {
   /** A new value was typed. Schedules a save unless it is already saved. */
@@ -73,6 +85,7 @@ export const createAutosaver = <T,>(
   const maxWaitMs = options.maxWaitMs ?? 5_000;
   const same = options.equal ?? ((a: T, b: T) => Object.is(a, b));
   const now = options.now ?? (() => new Date().toISOString());
+  const retryDelays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
   let saved = initial;
   /** What is typed but not yet written. Null means nothing outstanding. */
@@ -81,6 +94,16 @@ export const createAutosaver = <T,>(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<void> | null = null;
   let current: AutosaveStatus = CLEAN;
+  // How many saves in a row have failed, and the timer for the next retry.
+  let failures = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearRetry = (): void => {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
 
   const announce = (next: AutosaveStatus): void => {
     current = next;
@@ -138,8 +161,21 @@ export const createAutosaver = <T,>(
             message:
               error instanceof Error ? error.message : 'The write-up could not be saved.',
           });
+          // Try again by itself, on the ladder. The held value is untouched;
+          // whatever is pending when the timer fires is what gets written.
+          if (retryDelays.length > 0) {
+            const wait = retryDelays[Math.min(failures, retryDelays.length - 1)] ?? 0;
+            failures += 1;
+            clearRetry();
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              void write();
+            }, wait);
+          }
           return;
         }
+        failures = 0;
+        clearRetry();
         saved = attempt;
         // Written while that save was in flight: same value, so nothing is
         // outstanding any more.
@@ -165,6 +201,8 @@ export const createAutosaver = <T,>(
         pending = null;
         firstPendingAt = null;
         clearTimer();
+        clearRetry();
+        failures = 0;
         if (current.kind === 'pending' || current.kind === 'failed') announce(CLEAN);
         return;
       }
@@ -175,6 +213,7 @@ export const createAutosaver = <T,>(
     },
     async flush(): Promise<void> {
       clearTimer();
+      clearRetry();
       await write();
       // A value typed during that write is written by the same loop; awaiting
       // the chain again is how a caller knows it has settled.
@@ -182,6 +221,8 @@ export const createAutosaver = <T,>(
     },
     cancel(): void {
       clearTimer();
+      clearRetry();
+      failures = 0;
       pending = null;
       firstPendingAt = null;
       announce(CLEAN);

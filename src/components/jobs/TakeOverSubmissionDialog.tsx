@@ -98,8 +98,8 @@ export const TakeOverSubmissionDialog = ({
 
             <p className="mt-3">
               It will be emailed to {recipient}
-              {email.length === 0 ? '' : ` at ${email}`}, and {job.jobNumber} closes once delivery
-              is confirmed. Your name is recorded against the takeover on the job&rsquo;s activity
+              {email.length === 0 ? '' : ` at ${email}`}, and {job.jobNumber} goes to the office for
+              handling and invoicing. Your name is recorded against the takeover on the job&rsquo;s activity
               trail.
             </p>
           </>

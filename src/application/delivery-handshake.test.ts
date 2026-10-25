@@ -90,7 +90,7 @@ describe('a send the provider has merely accepted', () => {
 
     expect(result.delivery.state).toBe('pending_delivery');
     expect(isDelivered(result.delivery)).toBe(false);
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
     expect(result.job.closedAt).toBeNull();
 
     // The words on the screen. Nothing here may read as a success.
@@ -109,7 +109,7 @@ describe('a send the provider has merely accepted', () => {
 
     // Asking again without a delivery report changes nothing.
     const rechecked = await confirmJobCardDelivery(harness.as(master), issued.job);
-    expect(rechecked.status).toBe('awaiting_delivery');
+    expect(rechecked.status).toBe('office_handling');
     expect(rechecked.delivery?.state).toBe('pending_delivery');
     expect(rechecked.delivery?.confirmedAt).toBeNull();
   });
@@ -136,27 +136,38 @@ describe('a confirmed delivery', () => {
     harness = buildHarness();
   });
 
-  it('is the only thing that closes the job', async () => {
+  /*
+   * INVERTED BY ISSUE #73. This read "is the only thing that closes the job".
+   * A confirmed delivery is now recorded and moves NOTHING: the job stays with
+   * the office, which handles it and records the invoice.
+   */
+  it('is recorded, and does NOT close the job or take it past the office', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
     const issued = await issueJobCard(harness.as(technician),
       signed,
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
 
     // The provider's delivery report arrives.
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
+    const delivered = await confirmJobCardDelivery(harness.as(master), issued.job);
 
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
-    expect(closed.delivery?.state).toBe('delivered');
-    expect(closed.delivery?.confirmedAt).not.toBeNull();
-    expect(isDelivered(closed.delivery!)).toBe(true);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.closedAt).toBeNull();
+    expect(delivered.officeHandling).toBeNull();
+    expect(delivered.delivery?.state).toBe('delivered');
+    expect(delivered.delivery?.confirmedAt).not.toBeNull();
+    expect(isDelivered(delivered.delivery!)).toBe(true);
 
-    const events = await harness.repos.activity.list(closed.id);
-    expect(events.some((event) => event.type === 'job_closed')).toBe(true);
+    const events = await harness.repos.activity.list(delivered.id);
+    expect(events.some((event) => event.type === 'job_closed')).toBe(false);
+    expect(events.some((event) => event.summary === 'Customer copy delivered')).toBe(true);
+
+    // And reported again, it still moves nothing.
+    const again = await confirmJobCardDelivery(harness.as(master), delivered);
+    expect(again.status).toBe('office_handling');
   });
 });
 
@@ -173,7 +184,7 @@ describe('a failed delivery', () => {
 
     expect(issued.delivery.state).toBe('failed');
     expect(issued.delivery.failureReason.length).toBeGreaterThan(0);
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
     expect(issued.job.closedAt).toBeNull();
 
     // The document that was issued is still there to be re-sent.
@@ -204,7 +215,7 @@ describe('a failed delivery', () => {
     expect(retried.job.finalDocument?.storageKey).toBe(issued.job.finalDocument?.storageKey);
     // Same bad address, so it fails the same way rather than silently passing.
     expect(retried.delivery.state).toBe('failed');
-    expect(retried.job.status).toBe('awaiting_delivery');
+    expect(retried.job.status).toBe('office_handling');
   });
 
   /**
@@ -308,7 +319,7 @@ describe('a failed delivery', () => {
 
     expect(issued.delivery.state).toBe('failed');
     expect(issued.delivery.failureKind).toBe('credentials_rejected');
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
 
     // And the trail says what has to change, rather than only what happened.
     const events = await harness.repos.activity.list(issued.job.id);
@@ -396,7 +407,7 @@ describe('a failed delivery', () => {
       'credentials_rejected',
     );
     expect(refused.delivery?.failureReason).toMatch(/refused the credentials/u);
-    expect(refused.status).toBe('awaiting_delivery');
+    expect(refused.status).toBe('office_handling');
   });
 
   /** And the same report twice still changes nothing, which is what makes a replayed callback safe. */
@@ -446,7 +457,7 @@ describe('a failed delivery', () => {
     const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
 
     const again = await retryJobCardDelivery(harness.as(coordinator), issued.job, 'Pieter Nel');
-    expect(again.job.status).toBe('awaiting_delivery');
+    expect(again.job.status).toBe('office_handling');
     expect(again.documentFileName).toBe(issued.documentFileName);
   });
 
@@ -456,7 +467,7 @@ describe('a failed delivery', () => {
 
     expect(
       (await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel')).job.status,
-    ).toBe('awaiting_delivery');
+    ).toBe('office_handling');
   });
 
   it('lets the technician who submitted it re-send it', async () => {
@@ -470,7 +481,7 @@ describe('a failed delivery', () => {
 
     expect(
       (await retryJobCardDelivery(harness.as(technician), issued.job, 'Pieter Nel')).job.status,
-    ).toBe('awaiting_delivery');
+    ).toBe('office_handling');
   });
 
   it('refuses a retry from an account whose role grants nothing', async () => {

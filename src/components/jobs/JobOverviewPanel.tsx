@@ -12,6 +12,8 @@ import {
   machineDisplayName,
   userFullName,
   type User,
+  isFinishedStatus,
+  isIssuedStatus,
 } from '@/domain';
 import type { JobView } from '@/application/job-view';
 import {
@@ -54,7 +56,7 @@ export const JobOverviewPanel = ({
    * labelled apart — see the note in the Machine card. MACH-HIST (#28).
    */
   const historicalJob =
-    job.status === 'closed' || job.status === 'awaiting_delivery' || job.submittedAt !== null;
+    job.status === 'closed' || isIssuedStatus(job.status) || job.submittedAt !== null;
   const currentUser = useCurrentUser();
   const operation = useOperation();
   const [assignOpen, setAssignOpen] = useState(false);
@@ -73,7 +75,8 @@ export const JobOverviewPanel = ({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const technicians = users.filter((user) => user.role === 'technician' && user.active);
 
-  const overdue = isOverdue(job.scheduledDate) && job.status !== 'closed';
+  const overdue =
+    isOverdue(job.scheduledDate) && !isFinishedStatus(job.status) && !isIssuedStatus(job.status);
   const scheduleWindow = jobScheduleWindow(job);
 
   return (
@@ -526,16 +529,33 @@ export const JobOverviewPanel = ({
               met={!definition.photosRequired || job.photos.length > 0}
               required={definition.photosRequired}
             />
-            <RequirementRow
-              label="Labour captured"
-              met={job.labour.length > 0}
-              required
-            />
-            <RequirementRow
-              label="Work performed recorded"
-              met={job.completionReport.workPerformed.trim().length > 0}
-              required
-            />
+            {/*
+              WHAT THIS JOB TYPE ACTUALLY REQUIRES. Issue #73, Batch 2. These
+              two were shown as required on every job — a parts collection
+              included, which needs neither. The rows now follow the same rule
+              `checkReadyForSignature` applies: a collection needs parts lines
+              and an order number, nothing else.
+            */}
+            {definition.capturesLabourAndTravel && (
+              <RequirementRow label="Labour captured" met={job.labour.length > 0} required />
+            )}
+            {definition.capturesCompletionWriteUp && (
+              <RequirementRow
+                label="Work performed recorded"
+                met={job.completionReport.workPerformed.trim().length > 0}
+                required
+              />
+            )}
+            {!definition.capturesLabourAndTravel && (
+              <RequirementRow label="Parts listed" met={job.parts.length > 0} required />
+            )}
+            {definition.requiresOrderNumber && (
+              <RequirementRow
+                label="Customer order number"
+                met={job.orderNumber.trim().length > 0}
+                required
+              />
+            )}
           </ul>
         </Card>
       </div>

@@ -253,6 +253,11 @@ export class PostgresJobRepository implements JobRepository {
         // columns on `jobs`, like the order number above.
         quoteNumber: schema.jobs.quoteNumber,
         dateReceived: schema.jobs.dateReceived,
+        officeHandledBy: schema.jobs.officeHandledBy,
+        officeHandledAt: schema.jobs.officeHandledAt,
+        invoiceNumber: schema.jobs.invoiceNumber,
+        invoicedBy: schema.jobs.invoicedBy,
+        invoicedAt: schema.jobs.invoicedAt,
         repairPartNumber: schema.jobs.repairPartNumber,
         repairDescription: schema.jobs.repairDescription,
         repairQuantity: schema.jobs.repairQuantity,
@@ -313,6 +318,18 @@ export class PostgresJobRepository implements JobRepository {
       faultDescription: row.faultDescription,
       quoteNumber: row.quoteNumber ?? '',
       dateReceived: row.dateReceived ?? null,
+      officeHandling:
+        row.officeHandledBy === null || row.officeHandledAt === null
+          ? null
+          : { handledBy: asUserId(row.officeHandledBy), handledAt: row.officeHandledAt },
+      invoice:
+        row.invoiceNumber === null || row.invoicedBy === null || row.invoicedAt === null
+          ? null
+          : {
+              number: row.invoiceNumber,
+              recordedBy: asUserId(row.invoicedBy),
+              recordedAt: row.invoicedAt,
+            },
       repairItem: {
         partNumber: row.repairPartNumber ?? '',
         description: row.repairDescription ?? '',

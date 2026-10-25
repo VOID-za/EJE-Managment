@@ -14,7 +14,7 @@ import {
 } from './job-operations';
 import { loadFinalDocumentFile } from './final-document';
 import { WorkflowError } from './errors';
-import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { buildHarness, confirmDelivery, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 import type { Job } from '@/domain';
 
 /**
@@ -72,7 +72,7 @@ describe('a job whose card has been issued', () => {
 
   it('is locked the moment it is issued, before delivery is even confirmed', async () => {
     const issued = await issue(harness);
-    expect(issued.status).toBe('awaiting_delivery');
+    expect(issued.status).toBe('office_handling');
 
     // Not a Master, not the Coordinator, not the technician who did the work.
     for (const actor of [technician, master, coordinator]) {
@@ -87,11 +87,14 @@ describe('a job whose card has been issued', () => {
     }
   });
 
-  it('stays locked once it is closed', async () => {
+  // Issue #73: the end of the lifecycle is Invoiced, reached through the office.
+  it('stays locked once it is invoiced', async () => {
     const issued = await issue(harness);
     harness.outbox.setDelivery(issued.delivery!.messageId, 'delivered');
-    const closed = await confirmDelivery(harness, harness.as(technician), issued);
-    expect(closed.status).toBe('closed');
+    const delivered = await confirmDelivery(harness, harness.as(technician), issued);
+    expect(delivered.status).toBe('office_handling');
+    const closed = await finishOfficeLifecycle(harness.as(master), delivered);
+    expect(closed.status).toBe('invoiced');
 
     await expect(
       addPart(harness.as(master), closed, {

@@ -10,7 +10,7 @@ import {
   startCompletion,
   startSignature,
 } from './job-operations';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 import {
   checkReadyForSignature,
   getJobTypeDefinition,
@@ -186,7 +186,7 @@ describe('the close-out the wizard drives, end to end', () => {
       'Pieter Nel',
     );
 
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
     expect(issued.delivery.state).toBe('pending_delivery');
     const stored = await harness.services.storage.getDocument(
       issued.job.finalDocument!.storageKey,
@@ -194,7 +194,9 @@ describe('the close-out the wizard drives, end to end', () => {
     expect(stored!.bytes.byteLength).toBeGreaterThan(0);
   });
 
-  it('closes on confirmed delivery, and never enters Master Review on the way', async () => {
+  // Issue #73: a confirmed delivery no longer closes the job; the office
+  // handles it and records the invoice, and THAT finishes it.
+  it('goes to the office, is invoiced there, and never enters Master Review on the way', async () => {
     const signed = await throughTheWizard();
     const issued = await issueJobCard(harness.as(technician),
       signed,
@@ -202,14 +204,18 @@ describe('the close-out the wizard drives, end to end', () => {
       'Pieter Nel',
     );
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
+    const delivered = await confirmJobCardDelivery(harness.as(master), issued.job);
+    expect(delivered.status).toBe('office_handling');
 
-    expect(closed.status).toBe('closed');
+    const closed = await finishOfficeLifecycle(harness.as(master), delivered);
+    expect(closed.status).toBe('invoiced');
 
     const events = await harness.repos.activity.list(closed.id);
     const statuses = events.map((event) => event.type);
     expect(statuses).toContain('customer_signed');
-    expect(statuses).toContain('job_closed');
+    expect(statuses).toContain('job_office_handled');
+    expect(statuses).toContain('job_invoiced');
+    expect(statuses).not.toContain('job_closed');
     // Nothing in the whole sequence mentions the retired stage.
     expect(
       events.filter((event) => /master review/i.test(event.summary + event.detail)),
@@ -228,6 +234,6 @@ describe('the close-out the wizard drives, end to end', () => {
     expect(retried.job.finalDocument?.storageKey).toBe(issued.job.finalDocument?.storageKey);
     expect(retried.job.signature).toEqual(signatureBefore);
     expect(retried.delivery.attempts).toBe(2);
-    expect(retried.job.status).toBe('awaiting_delivery');
+    expect(retried.job.status).toBe('office_handling');
   });
 });

@@ -22,7 +22,7 @@ import { CustomerNotesPanel } from '@/components/customers/CustomerNotesPanel';
 import { reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
-import { can } from '@/domain';
+import { can, isFinishedStatus, isIssuedStatus } from '@/domain';
 
 type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes';
 
@@ -80,7 +80,12 @@ const CustomerDetailPage = ({
    */
   const manages = currentUser !== null && can(currentUser.role, 'customers.manage');
   const openJobs = jobRows.filter(
-    (row) => row.job.status !== 'closed' && row.job.status !== 'submitted',
+    // Open work: not finished (closed or invoiced) and not already submitted to
+    // the office (issue #73).
+    (row) =>
+      !isFinishedStatus(row.job.status) &&
+      !isIssuedStatus(row.job.status) &&
+      row.job.status !== 'submitted',
   );
 
   return (

@@ -13,6 +13,7 @@ import type { IsoDate, IsoDateTime, Job, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { businessDateOf } from '@/lib/business-time';
 import { confirmJobCardDelivery } from './job-operations';
+import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
 import type { AppServices } from './context';
 
 /**
@@ -76,11 +77,12 @@ export const dayOffset = (days: number): IsoDate => {
 };
 
 /**
- * Confirms the provider delivered a customer's copy, then closes the job.
+ * Confirms the provider delivered a customer's copy.
  *
- * Stands in for the delivery report Microsoft 365 sends in production. Tests
- * need it because issuing a job card no longer closes the job: an accepted send
- * is not a delivered mail, so the job waits until something confirms delivery.
+ * Stands in for the delivery report Microsoft 365 sends in production. Since
+ * issue #73 it records the delivery and NOTHING ELSE: a confirmed delivery no
+ * longer closes the job, which stays with the office until it is handled and
+ * invoiced (`finishOfficeLifecycle`).
  */
 export const confirmDelivery = async (
   harness: Harness,
@@ -91,6 +93,22 @@ export const confirmDelivery = async (
   if (messageId.length === 0) throw new Error(`${job.jobNumber} has no message to confirm`);
   harness.outbox.setDelivery(messageId, 'delivered');
   return confirmJobCardDelivery(context, job);
+};
+
+/**
+ * Takes a submitted job through the office lifecycle to its end. Issue #73.
+ *
+ * Office Handling -> (handled) -> Awaiting PO -> (invoice number) -> Invoiced,
+ * through the real operations, as the given office user. For tests that need a
+ * FINISHED job — what used to be reached by a confirmed delivery closing it.
+ */
+export const finishOfficeLifecycle = async (
+  context: OperationContext,
+  job: Job,
+  invoiceNumber = 'INV-TEST-1',
+): Promise<Job> => {
+  const handled = await handleJobCard(context, job);
+  return recordInvoiceNumber(context, handled, invoiceNumber);
 };
 
 /**

@@ -14,7 +14,7 @@ import {
 } from './job-operations';
 import { createJob } from './job-creation';
 import { WorkflowError } from './errors';
-import { buildHarness, seedUser, type Harness } from './test-harness';
+import { buildHarness, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 import {
   canAcceptJob,
   canSubmitJobCard,
@@ -290,7 +290,7 @@ describe('the counter journey, start to finish', () => {
       'Thabo Dlamini',
     );
 
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
     expect(result.job.closedAt).toBeNull();
     expect(result.emailedTo).toBe('buyer@example.co.za');
     expect(result.documentFileName).toContain('Collection-Note');
@@ -308,14 +308,18 @@ describe('the counter journey, start to finish', () => {
       'buyer@example.co.za',
       'Thabo Dlamini',
     );
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
 
     // The provider's delivery report arrives, exactly as it does for a job card.
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.as(master), issued.job);
+    const delivered = await confirmJobCardDelivery(harness.as(master), issued.job);
 
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
+    // Issue #73: recorded, and NOT closed — the office finishes it.
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.closedAt).toBeNull();
+    const closed = await finishOfficeLifecycle(harness.as(master), delivered, 'INV-PARTS-2');
+    expect(closed.status).toBe('invoiced');
+    expect(closed.invoice?.number).toBe('INV-PARTS-2');
   });
 
   it('a technician cannot submit the collection note — the counter is the office', async () => {

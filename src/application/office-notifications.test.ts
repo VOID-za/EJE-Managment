@@ -230,7 +230,7 @@ describe('the final submission is the technician’s — CR-07', () => {
       'Pieter Nel',
     );
 
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
     expect(result.job.finalDocument).not.toBeNull();
     const sent = await harness.outbox.list();
     const toCustomer = sent.filter((entry) => entry.to.includes('pieter@example-demo.co.za'));

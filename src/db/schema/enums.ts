@@ -35,6 +35,11 @@ export const jobStatus = pgEnum('job_status', [
   'submitted',
   'closed',
   'cancelled',
+  // The office lifecycle after submission (issue #73). Appended, so the order
+  // of the earlier values — and every row that uses them — is untouched. 0032.
+  'office_handling',
+  'awaiting_po',
+  'invoiced',
 ]);
 
 export const jobPriority = pgEnum('job_priority', ['low', 'normal', 'high', 'urgent']);

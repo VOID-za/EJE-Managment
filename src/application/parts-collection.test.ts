@@ -9,6 +9,7 @@ import {
 } from './job-operations';
 import { loadJobView } from './job-view';
 import type { OperationContext } from './context';
+import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
@@ -243,14 +244,18 @@ describe('the courier collection document', () => {
       'buyer@kruger-demo.co.za',
       'Kruger Engineering',
     );
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
     expect(issued.emailedTo).toBe('buyer@kruger-demo.co.za');
     expect(issued.delivery.state).toBe('pending_delivery');
     expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(1);
 
     harness.outbox.setDelivery(issued.delivery.messageId, 'delivered');
-    const closed = await confirmJobCardDelivery(harness.master, issued.job);
-    expect(closed.status).toBe('closed');
+    // Issue #73: the delivery is recorded and the collection note goes to the
+    // office like any submission; handling and the invoice finish it.
+    const delivered = await confirmJobCardDelivery(harness.master, issued.job);
+    expect(delivered.status).toBe('office_handling');
+    const handled = await handleJobCard(harness.master, delivered);
+    expect((await recordInvoiceNumber(harness.master, handled, 'INV-PARTS-1')).status).toBe('invoiced');
   });
 });
 

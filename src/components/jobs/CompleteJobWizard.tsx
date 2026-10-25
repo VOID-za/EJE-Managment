@@ -828,7 +828,12 @@ export const CompleteJobWizard = ({
             A checkbox rather than a second button, because the two outcomes are
             one decision and the technician has to be able to change their mind
             before they commit to either.
+
+            NOT OFFERED ON A JOB TYPE WITH NO REFUSAL WORKFLOW. Issue #73, Batch 2:
+            a parts collection is signed for or the goods stay at the counter.
+            The server refuses a refusal there too.
           */}
+          {definition.allowsSignatureRefusal && (
           <label
             className={cn(
               'mt-6 flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border px-4 py-3 transition-colors',
@@ -854,6 +859,7 @@ export const CompleteJobWizard = ({
               </span>
             </span>
           </label>
+          )}
         </Card>
       )}
 

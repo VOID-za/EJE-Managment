@@ -69,9 +69,10 @@ const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: st
   { value: 'open-work', label: 'Open work' },
   { value: 'open', label: 'Open' },
   { value: 'awaiting_spares', label: 'Awaiting spares' },
-  // Issued and waiting on the customer's copy arriving — the live stage that
-  // actually holds jobs up, and the one the office chases.
-  { value: 'awaiting_delivery', label: 'Awaiting delivery' },
+  // The office lifecycle (issue #73): submitted job cards the office has to
+  // handle, then the ones waiting on a PO and an invoice number.
+  { value: 'office_handling', label: 'Office handling' },
+  { value: 'awaiting_po', label: 'Awaiting PO' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 

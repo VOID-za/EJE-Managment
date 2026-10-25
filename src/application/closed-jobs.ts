@@ -118,8 +118,13 @@ const matchesTerm = (row: JobListRow, needle: string): boolean => {
   return haystack.some((value) => value.toLowerCase().includes(needle));
 };
 
-const closedOn = (job: Pick<Job, 'closedAt'>): IsoDate | null =>
-  job.closedAt === null ? null : job.closedAt.slice(0, 10);
+/**
+ * The day a job FINISHED: closed, under the earlier lifecycle, or invoiced,
+ * under the office lifecycle (issue #73). Neither borrows the other's field —
+ * an invoiced job has no `closedAt`, because nobody closed it.
+ */
+const closedOn = (job: Pick<Job, 'closedAt' | 'invoice'>): IsoDate | null =>
+  (job.closedAt ?? job.invoice?.recordedAt ?? null)?.slice(0, 10) ?? null;
 
 /**
  * Whether a job belongs in the archive.
@@ -127,7 +132,8 @@ const closedOn = (job: Pick<Job, 'closedAt'>): IsoDate | null =>
  * Only genuinely closed work: a cancelled job never happened, and a job still
  * in the retired Master Review stage has not been issued.
  */
-export const isArchivedJob = (job: Pick<Job, 'status'>): boolean => job.status === 'closed';
+export const isArchivedJob = (job: Pick<Job, 'status'>): boolean =>
+  job.status === 'closed' || job.status === 'invoiced';
 
 export const loadClosedJobs = async (
   repos: RepositoryBundle,
@@ -146,7 +152,9 @@ export const loadClosedJobs = async (
   }
 
   const [jobs, customers, sites, users] = await Promise.all([
-    repos.jobs.listSummaries({ statuses: ['closed'] }),
+    // Finished work: closed under the earlier lifecycle, invoiced under the
+    // office lifecycle (issue #73). A job still with the office is not here yet.
+    repos.jobs.listSummaries({ statuses: ['closed', 'invoiced'] }),
     repos.customers.list(),
     // Closed jobs resolve their site even where it has since been withdrawn.
     repos.customers.listSites(undefined, { includeArchived: true }),

@@ -15,7 +15,7 @@ import {
 } from './job-operations';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
-import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { buildHarness, confirmDelivery, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 import { pdfPlainText } from '@/lib/pdf/inspect';
 import type { Job } from '@/domain';
 
@@ -75,7 +75,12 @@ const closeJob = async (harness: Harness): Promise<Job> => {
     'pieter.nel@abc-engineering-demo.co.za',
     'Pieter Nel',
   );
-  return confirmDelivery(harness, harness.as(master), result.job);
+  // Finished through the office lifecycle (issue #73): delivery no longer
+  // closes a job, the office handles it and records the invoice.
+  return finishOfficeLifecycle(
+    harness.as(master),
+    await confirmDelivery(harness, harness.as(master), result.job),
+  );
 };
 
 describe('a closed job has a downloadable final document', () => {
@@ -86,7 +91,7 @@ describe('a closed job has a downloadable final document', () => {
 
   it('has a final document recorded on it', async () => {
     const closed = await closeJob(harness);
-    expect(closed.status).toBe('closed');
+    expect(closed.status).toBe('invoiced');
     expect(closed.finalDocument).not.toBeNull();
     expect(closed.finalDocument?.fileName).toBe('EJE-1048-Final-Job-Card.pdf');
   });

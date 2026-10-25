@@ -4,7 +4,9 @@ import {
   asNotificationId,
   asUserId,
   type AppNotification,
+  type JobId,
   type NotificationId,
+  type NotificationType,
   type UserId,
 } from '@/domain';
 import type { NotificationRepository } from '@/data/repositories';
@@ -108,5 +110,15 @@ export class PostgresNotificationRepository implements NotificationRepository {
         readAt: sql`coalesce(${schema.notifications.readAt}, now())`,
       })
       .where(eq(schema.notifications.id, id));
+  }
+
+  async markHandledForJob(jobId: JobId, type: NotificationType): Promise<void> {
+    await this.db
+      .update(schema.notifications)
+      .set({
+        handledAt: sql`coalesce(${schema.notifications.handledAt}, now())`,
+        readAt: sql`coalesce(${schema.notifications.readAt}, now())`,
+      })
+      .where(and(eq(schema.notifications.jobId, jobId), eq(schema.notifications.type, type)));
   }
 }

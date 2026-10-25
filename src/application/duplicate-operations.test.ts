@@ -127,7 +127,7 @@ describe('a stale job cannot be accepted or issued a second time', () => {
     expect(stored?.finalDocument?.storageKey).toBe(issued.job.finalDocument?.storageKey);
     expect(stored?.finalDocument?.generatedAt).toBe(issued.job.finalDocument?.generatedAt);
     expect(stored?.delivery?.attempts).toBe(1);
-    expect(stored?.status).toBe('awaiting_delivery');
+    expect(stored?.status).toBe('office_handling');
   });
 
   it('accepts once, however stale the copy the caller is holding', async () => {

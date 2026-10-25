@@ -155,6 +155,26 @@ export interface JobTypeDefinition {
    */
   readonly acceptsVideoAttachments: boolean;
   /**
+   * THE TECHNICIAN'S COMPLETION WRITE-UP is part of this job card. Issue #73,
+   * Batch 2.
+   *
+   * False on a parts collection: goods handed over at the counter have no
+   * findings, diagnosis or work performed to write up — the part lines ARE the
+   * record. Enforced on the server (`saveCompletionReport` refuses it), on the
+   * screens (no Completion tab, no write-up step) and on the document.
+   */
+  readonly capturesCompletionWriteUp: boolean;
+  /**
+   * A SIGNATURE REFUSAL can be recorded on this job card. Issue #73, Batch 2.
+   *
+   * False on a parts collection: the collector signs for the goods or the goods
+   * do not leave — there is no refusal-and-correction loop for a counter
+   * hand-over. `recordSignatureRefusal` refuses it on the server. A refusal
+   * recorded on a parts job BEFORE this rule stays readable and can still be
+   * resolved, so no historical job is stranded at Review.
+   */
+  readonly allowsSignatureRefusal: boolean;
+  /**
    * The priority a screen OFFERS first where one is required.
    *
    * Not a value anything writes on the job's behalf: where `requiresPriority`
@@ -186,6 +206,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: true,
+    capturesCompletionWriteUp: true,
+    allowsSignatureRefusal: true,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -209,6 +231,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: true,
+    capturesCompletionWriteUp: true,
+    allowsSignatureRefusal: true,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -232,6 +256,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: true,
+    capturesCompletionWriteUp: true,
+    allowsSignatureRefusal: true,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -257,6 +283,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: false,
+    capturesCompletionWriteUp: false,
+    allowsSignatureRefusal: false,
     defaultPriority: 'normal',
     accent: 'amber',
   },
@@ -281,6 +309,8 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesRepairItem: true,
     capturesQuoteNumber: true,
     acceptsVideoAttachments: true,
+    capturesCompletionWriteUp: true,
+    allowsSignatureRefusal: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },

@@ -15,7 +15,7 @@ import { createJob } from './job-creation';
 import { updateMachine } from './machine-operations';
 import { updateCustomer, updateContact } from './customer-operations';
 import { loadFinalDocumentFile } from './final-document';
-import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { buildHarness, confirmDelivery, finishOfficeLifecycle, seedUser, type Harness } from './test-harness';
 import { asContactId, asCustomerId, asSiteId, asMachineId, type Job } from '@/domain';
 
 /**
@@ -283,8 +283,12 @@ describe('the issued document does not move, whatever the register does after', 
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
-    const closed = await confirmDelivery(harness, harness.as(master), issued.job);
-    expect(closed.status).toBe('closed');
+    // Finished through the office lifecycle (issue #73), as a real job is.
+    const closed = await finishOfficeLifecycle(
+      harness.as(master),
+      await confirmDelivery(harness, harness.as(master), issued.job),
+    );
+    expect(closed.status).toBe('invoiced');
 
     const before = await loadFinalDocumentFile(harness.as(master), closed.jobNumber);
 

@@ -14,6 +14,7 @@ import {
   type ActivityEvent,
   type SubmissionCover,
   type User,
+  isIssuedStatus,
 } from '@/domain';
 import { isNotFound } from '@/api/client';
 import { reads } from '@/api/endpoints';
@@ -33,6 +34,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { ChecklistRunner } from '@/components/jobs/ChecklistRunner';
 import { CompletionReportPanel } from '@/components/jobs/CompletionReportPanel';
+import { OfficeLifecyclePanel } from '@/components/jobs/OfficeLifecyclePanel';
 import { FinalDocumentCard } from '@/components/jobs/FinalDocumentCard';
 import { JobCorrectionsPanel } from '@/components/jobs/JobCorrectionsPanel';
 import { CustomerJobRequestsPanel } from '@/components/jobs/CustomerJobRequestsPanel';
@@ -227,7 +229,9 @@ const JobDetailPage = ({
           </Badge>
         ) : undefined,
     },
-    { id: 'completion', label: 'Completion' },
+    // No Completion tab on a job type with no write-up (a parts collection).
+    // Issue #73, Batch 2; the server refuses the write-up there regardless.
+    ...(definition.capturesCompletionWriteUp ? [{ id: 'completion', label: 'Completion' }] : []),
     ...(checklistTabVisible
       ? [
           {
@@ -292,18 +296,29 @@ const JobDetailPage = ({
                   ? 'Read-only — this job is closed'
                   : job.status === 'cancelled'
                     ? 'Read-only — this job was cancelled'
-                    : job.status === 'awaiting_delivery'
-                      ? 'Read-only — the job card has been issued'
-                      : 'Read-only — with the office'}
+                    : job.status === 'invoiced'
+                      ? 'Read-only — invoiced'
+                      : isIssuedStatus(job.status)
+                        ? 'Read-only — submitted, with the office'
+                        : 'Read-only — with the office'}
               </Badge>
             )}
           </div>
         }
       />
 
-      {/* A closed job's first business is its official job card, so the
-          document and its actions come before the record itself. */}
-      {job.status === 'closed' && <FinalDocumentCard job={job} users={users} />}
+      {/*
+        THE OFFICE LIFECYCLE. Issue #73. Handled, then the invoice number —
+        the office's actions, on the job the office is handling.
+      */}
+      {isIssuedStatus(job.status) && <OfficeLifecyclePanel job={job} users={users} onChanged={refresh} />}
+
+      {/* A submitted or finished job's first business is its official job card,
+          so the document and its actions come before the record itself. Since
+          issue #73 that is every issued state, not only Closed. */}
+      {(job.status === 'closed' || isIssuedStatus(job.status)) && job.finalDocument !== null && (
+        <FinalDocumentCard job={job} users={users} />
+      )}
 
       {/*
         AND THEN WHAT EJE HAVE SAID ABOUT IT SINCE. BD-06 before BD-02,
@@ -386,7 +401,7 @@ const JobDetailPage = ({
              * on, and a Master submitted from there. The submission now
              * happens inside the wizard, so there is nowhere to send anybody —
              * the technician lands back on their own job, which by then reads
-             * Awaiting Delivery.
+             * Office Handling (issue #73).
              *
              * A corrected job card goes back to Customer Signature and stays
              * here too, where whoever is with the customer picks it up.
@@ -452,7 +467,7 @@ const JobDetailPage = ({
         />
       )}
 
-      {tab === 'completion' && (
+      {tab === 'completion' && definition.capturesCompletionWriteUp && (
         <CompletionReportPanel job={job} editable={editable} onChanged={refresh} />
       )}
 

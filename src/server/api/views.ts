@@ -21,6 +21,7 @@ import { loadActivityFeed, loadJobActivity } from '@/application/activity-read';
 import { loadCalendar } from '@/application/calendar';
 import { listMachineDocuments } from '@/application/machine-documents';
 import { loadClosedJobs, type ClosedJobFilters } from '@/application/closed-jobs';
+import { loadOfficeQueue } from '@/application/office-lifecycle';
 import { loadConversations } from '@/application/chat-operations';
 import {
   loadActiveJobList,
@@ -99,7 +100,7 @@ export const jobsView = async ({ repos, actor }: ViewContext) => {
   const office = can(actor.role, 'jobs.viewAll');
   const [rows, closedCount] = await Promise.all([
     loadActiveJobList(repos, actor),
-    office ? repos.jobs.count({ statuses: ['closed'] }) : Promise.resolve(0),
+    office ? repos.jobs.count({ statuses: ['closed', 'invoiced'] }) : Promise.resolve(0),
   ]);
   return { rows, closedCount };
 };
@@ -596,12 +597,16 @@ export const calendarView = ({ repos, actor }: ViewContext, from: string, to: st
  * the notification happened to them, the job is not theirs.
  */
 export const notificationsView = async ({ repos, actor }: ViewContext) => {
-  const [notifications, rows] = await Promise.all([
+  const [notifications, rows, officeQueue] = await Promise.all([
     repos.notifications.list(actor.id),
     loadJobList(repos, actor),
+    // The office lifecycle's tabs (issue #73), from the jobs' persisted status.
+    // Null for anybody who is not the office.
+    loadOfficeQueue(repos, actor),
   ]);
   return {
     notifications,
+    officeQueue,
     jobNumbers: rows.map((row) => [row.job.id as string, row.job.jobNumber] as const),
     // So the channel badges can say what this deployment really does with a
     // message rather than the one word they were written with.

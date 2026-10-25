@@ -18,12 +18,23 @@ import type { JobStatus } from '../types/job';
  * longer has.
  */
 
-const EXPECTED = ['Open', 'In Progress', 'Completion', 'Customer Signature', 'Review', 'Closed'];
+// Issue #73: the office lifecycle follows Review — Office Handling, Awaiting
+// PO, Invoiced. Closed is historical and is no longer a stage.
+const EXPECTED = [
+  'Open',
+  'In Progress',
+  'Completion',
+  'Customer Signature',
+  'Review',
+  'Office Handling',
+  'Awaiting PO',
+  'Invoiced',
+];
 
 describe('the active progress rail', () => {
-  it('is exactly the six stages of the live workflow, in order', () => {
+  it('is exactly the eight stages of the live workflow, in order', () => {
     expect(JOB_PROGRESS_STAGES.map((stage) => jobStatusLabel(stage))).toEqual(EXPECTED);
-    expect(JOB_PROGRESS_STAGES).toHaveLength(6);
+    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
   });
 
   it('does not contain Master Review, by label or by status', () => {
@@ -61,12 +72,20 @@ describe('where each status sits on that rail', () => {
     });
   });
 
-  it('holds an issued job at Review while its copy is in transit', () => {
+  // Issue #73: the legacy `awaiting_delivery` is a job with the office.
+  it('shows a legacy awaiting-delivery job at Office Handling', () => {
     const position = jobProgressPosition('awaiting_delivery');
-    expect(position.index).toBe(indexOf('review'));
-    expect(position.interruption).toBe('Awaiting Delivery');
-    // Emphatically not shown as closed: the customer does not have it yet.
-    expect(position.index).toBeLessThan(indexOf('closed'));
+    expect(position.index).toBe(indexOf('office_handling'));
+    expect(position.interruption).toBeNull();
+    // Emphatically not shown as finished: nobody has invoiced it.
+    expect(position.index).toBeLessThan(indexOf('invoiced'));
+  });
+
+  it('shows a historical Closed job at the end, named Closed — not Invoiced', () => {
+    expect(jobProgressPosition('closed')).toEqual({
+      index: indexOf('invoiced'),
+      interruption: 'Closed',
+    });
   });
 
   it('shows a job left in the retired stage simply as Review', () => {
@@ -84,12 +103,16 @@ describe('where each status sits on that rail', () => {
 });
 
 describe('the state machine agrees with the rail', () => {
-  it('takes a signed job to Review, and Review to issue', () => {
+  it('takes a signed job to Review, and Review into the office lifecycle', () => {
     expect(canTransition('customer_signature', 'review')).toBe(true);
-    expect(canTransition('review', 'awaiting_delivery')).toBe(true);
+    expect(canTransition('review', 'office_handling')).toBe(true);
+    // Issue #73: no new job enters the legacy delivery wait.
+    expect(canTransition('review', 'awaiting_delivery')).toBe(false);
+    expect(canTransition('office_handling', 'awaiting_po')).toBe(true);
+    expect(canTransition('awaiting_po', 'invoiced')).toBe(true);
   });
 
-  it('closes from awaiting delivery, and from Review only for a refusal', () => {
+  it('closes from Review only for a refusal — never from delivery (issue #73)', () => {
     /*
      * MASTER SCOPE REF-8. `review -> closed` is the "Without Customer
      * Signature" outcome and is the ONLY reason that edge exists: nobody
@@ -99,7 +122,9 @@ describe('the state machine agrees with the rail', () => {
      * this edge, and it refuses a job with no outstanding refusal.
      */
     expect(canTransition('review', 'closed')).toBe(true);
-    expect(canTransition('awaiting_delivery', 'closed')).toBe(true);
+    expect(canTransition('awaiting_delivery', 'closed')).toBe(false);
+    expect(canTransition('office_handling', 'closed')).toBe(false);
+    expect(canTransition('awaiting_po', 'closed')).toBe(false);
   });
 
   it('never lets a closed job go back anywhere', () => {
@@ -129,8 +154,9 @@ describe('the state machine agrees with the rail', () => {
   it('keeps the historical Master Review edges so old jobs can still move on', () => {
     // Reachable only by a job already in `submitted`; nothing routes into it
     // from the live path except this retained edge, which issuing does not use.
-    expect(allowedTransitions('submitted')).toContain('awaiting_delivery');
-    expect(canTransition('submitted', 'awaiting_delivery')).toBe(true);
+    // Issued into the office lifecycle, like any submission (issue #73).
+    expect(allowedTransitions('submitted')).toContain('office_handling');
+    expect(canTransition('submitted', 'office_handling')).toBe(true);
   });
 });
 
@@ -151,6 +177,9 @@ describe('nothing can enter Master Review', () => {
     'customer_signature',
     'review',
     'awaiting_delivery',
+    'office_handling',
+    'awaiting_po',
+    'invoiced',
     'submitted',
     'closed',
     'cancelled',
@@ -165,15 +194,15 @@ describe('nothing can enter Master Review', () => {
     expect(entries).toEqual([]);
   });
 
-  it('still lets a job already in it be issued and closed', () => {
-    expect(allowedTransitions('submitted')).toEqual(['awaiting_delivery', 'closed']);
+  it('still lets a job already in it be issued (into the office lifecycle) and closed', () => {
+    expect(allowedTransitions('submitted')).toEqual(['office_handling', 'closed']);
   });
 
   it('routes a signed job to issue instead', () => {
     // And back to the customer's signature, which is the correction loop: a
     // refused job card is put right and asked for again. Still no `submitted`.
     expect(allowedTransitions('review')).toEqual([
-      'awaiting_delivery',
+      'office_handling',
       'customer_signature',
       'completion',
       // "Without Customer Signature" — see the state-machine block above.

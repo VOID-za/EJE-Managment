@@ -15,9 +15,14 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   completion: 'violet',
   customer_signature: 'violet',
   review: 'violet',
-  // Amber, not green: sent is not delivered, and the office should be able to
-  // see at a glance that something is still outstanding.
+  // Legacy name for a job waiting on the office: the same tone as Office
+  // Handling, which is what it is labelled.
   awaiting_delivery: 'amber',
+  // Amber: the office owes this job something — handling, then a PO.
+  office_handling: 'amber',
+  awaiting_po: 'amber',
+  // Done, and paid for on paper.
+  invoiced: 'green',
   submitted: 'green',
   closed: 'neutral',
   // Cancelled must never look like an active job, so it takes the danger tone.

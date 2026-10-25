@@ -1,10 +1,10 @@
 'use client';
 
-import { jobs } from '@/api/endpoints';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { jobs, reads } from '@/api/endpoints';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Job, JobCompletionReport } from '@/domain';
 import { Badge, Button, Card, CardHeader, ConfirmDialog, TextAreaField } from '@/components/ui';
-import { createAutosaver, type AutosaveStatus } from '@/lib/autosave';
+import { createAutosaver, type Autosaver, type AutosaveStatus } from '@/lib/autosave';
 import {
   conflictingFields,
   discardReportDraft,
@@ -145,15 +145,55 @@ export const CompletionReportPanel = ({
   const [localDraft, setLocalDraft] = useState<ReportDraft | null>(null);
   const [discarding, setDiscarding] = useState(false);
 
-  const saver = useMemo(
-    () =>
-      createAutosaver<JobCompletionReport>(job.completionReport, {
+  /*
+   * A RETRY MUST NOT OVERWRITE A CORRECTION. Issue #73, Batch 2, and CR-02.
+   *
+   * The saver now retries a failed save by itself — when the connection comes
+   * back, or on its ladder of waits. If the office corrected this write-up
+   * while the tablet could not save, a blind retry would replace that
+   * correction with the tablet's text and nobody would know. So a save that
+   * follows a FAILURE first reads what the job holds now: if it is not what
+   * this tablet last knew, nothing is written — the text is kept as a draft and
+   * the conflict notice below asks the technician which to keep.
+   */
+  const { saver, acceptServer } = useMemo(() => {
+    // Held in this closure, per job: what the server held when this tablet last
+    // knew, and whether the save before this one failed.
+    const retry: { knownServer: JobCompletionReport; failedBefore: boolean } = {
+      knownServer: job.completionReport,
+      failedBefore: false,
+    };
+    const autosaver: Autosaver<JobCompletionReport> = createAutosaver<JobCompletionReport>(
+      job.completionReport,
+      {
         equal: sameReport,
         onStatus: setStatus,
         save: async (report) => {
+          if (retry.failedBefore) {
+            const fresh = (await reads.job(job.jobNumber)).view?.job.completionReport ?? null;
+            if (fresh !== null && !sameReport(fresh, retry.knownServer)) {
+              const kept = await saveReportDraft({
+                userId,
+                jobId: job.id,
+                jobNumber: job.jobNumber,
+                report,
+                basedOn: retry.knownServer,
+              }).catch(() => null);
+              if (kept !== null) setLocalDraft(kept);
+              // Nothing is outstanding on the SAVER any more — the text is the
+              // draft now, and only the technician's choice applies it.
+              autosaver.cancel();
+              setDraft(fresh);
+              setSaves((count) => count + 1);
+              throw new Error(
+                'This write-up was changed on the server while it could not be saved here. Nothing was overwritten — choose which to keep below.',
+              );
+            }
+          }
           try {
             await jobs.saveReport(job.id, report);
           } catch (cause) {
+            retry.failedBefore = true;
             /*
              * Kept BEFORE the failure is reported, so the status the technician
              * reads and the bytes on the device cannot disagree. The error is
@@ -181,11 +221,26 @@ export const CompletionReportPanel = ({
             throw cause;
           }
           // The server has the text, so the device's copy has nothing to say.
+          retry.failedBefore = false;
+          retry.knownServer = report;
           await discardReportDraft(userId, job.id).catch(() => undefined);
           setLocalDraft(null);
           setSaves((count) => count + 1);
         },
-      }),
+      },
+    );
+    return {
+      saver: autosaver,
+      /**
+       * The technician chose their draft over what the job holds NOW: that is
+       * the new base, so the retry check does not refuse their own decision.
+       */
+      acceptServer: (current: JobCompletionReport) => {
+        retry.knownServer = current;
+        retry.failedBefore = false;
+      },
+    };
+  },
     // Per job, and only per job. `job.completionReport` deliberately does not
     // key this: the refetch that follows every successful save would otherwise
     // replace the saver mid-edit.
@@ -237,10 +292,56 @@ export const CompletionReportPanel = ({
    */
   useEffect(() => () => void saver.flush(), [saver]);
 
+  /*
+   * A LOCAL COPY OF EVERY PENDING EDIT, not only of a failed one. Issue #73,
+   * Batch 2.
+   *
+   * Before, the device kept the text only once a save had FAILED, so an edit
+   * still inside the autosave window — typed a second before a refresh, a tab
+   * closing, a battery dying — existed nowhere but this component. Now every
+   * pending edit is written to the device a moment after the typing, and
+   * deleted again once the server has it (the save above). It is not shown
+   * while typing; it is what a reload offers back.
+   */
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepOnDevice = (report: JobCompletionReport): void => {
+    if (userId.length === 0) return;
+    if (draftTimer.current !== null) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null;
+      // Already on the server by the time this fires: nothing to keep.
+      if (!saver.dirty()) return;
+      void saveReportDraft({
+        userId,
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        report,
+        basedOn: job.completionReport,
+      }).catch(() => undefined);
+    }, 300);
+  };
+  useEffect(
+    () => () => {
+      if (draftTimer.current !== null) clearTimeout(draftTimer.current);
+    },
+    [],
+  );
+
+  /*
+   * THE CONNECTION COMING BACK IS A REASON TO SAVE. Issue #73, Batch 2.
+   * The autosaver also retries on its own ladder; this is the faster path.
+   */
+  useEffect(() => {
+    const online = () => void saver.flush();
+    window.addEventListener('online', online);
+    return () => window.removeEventListener('online', online);
+  }, [saver]);
+
   const edit = (key: keyof JobCompletionReport, value: string): void => {
     setDraft((current) => {
       const next = { ...current, [key]: value };
       saver.change(next);
+      keepOnDevice(next);
       return next;
     });
   };
@@ -272,7 +373,8 @@ export const CompletionReportPanel = ({
       {status.kind === 'failed' && (
         <p role="alert" className="mt-3 text-sm text-signal-600">
           {status.message} Your text is still here and has not been lost — it is kept on this
-          tablet and will be saved on the next attempt.
+          tablet and is saved automatically as soon as the connection allows. There is nothing
+          to press.
         </p>
       )}
 
@@ -336,6 +438,9 @@ export const CompletionReportPanel = ({
                     size="sm"
                     data-testid="writeup-use-draft"
                     onClick={() => {
+                      // Chosen against what the job holds NOW, so the retry
+                      // check does not refuse the technician's own decision.
+                      acceptServer(job.completionReport);
                       setDraft(localDraft.report);
                       saver.change(localDraft.report);
                     }}
@@ -364,6 +469,9 @@ export const CompletionReportPanel = ({
                     size="sm"
                     data-testid="writeup-use-draft"
                     onClick={() => {
+                      // Chosen against what the job holds NOW, so the retry
+                      // check does not refuse the technician's own decision.
+                      acceptServer(job.completionReport);
                       setDraft(localDraft.report);
                       saver.change(localDraft.report);
                     }}
@@ -403,32 +511,23 @@ export const CompletionReportPanel = ({
         onCancel={() => setDiscarding(false)}
       />
 
+      {/*
+        NO SAVE BUTTON, AND NO DISCARD. Issue #73, Batch 2.
+
+        "Save now" is gone: the write-up saves itself, keeps a copy on the
+        tablet until the server has it, and retries by itself. "Discard
+        changes" is gone too: with autosave the edits it threw away were
+        seconds from being saved, and a button that silently deletes the
+        technician's newest text is the loss this panel exists to prevent. A
+        stale DRAFT can still be discarded from its notice above, behind a
+        confirmation, because the server's copy is untouched by that.
+      */}
       {editable && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-steel-100 pt-4">
-          <p className="text-xs text-steel-500">
-            This write-up saves itself as you type. There is nothing to press.
+        <div className="mt-5 border-t border-steel-100 pt-4">
+          <p className="text-xs text-steel-500" data-testid="writeup-autosave-note">
+            This write-up saves itself as you type and keeps a copy on this tablet until the
+            server has it. There is nothing to press.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                // A real operation, not a UI reset: the held edit is thrown
-                // away AND its pending write cancelled, so nothing lands after.
-                saver.cancel();
-                setDraft(saver.saved());
-              }}
-              disabled={!dirty}
-            >
-              Discard changes
-            </Button>
-            <Button
-              onClick={() => void saver.flush()}
-              loading={status.kind === 'saving'}
-              disabled={!dirty}
-            >
-              {status.kind === 'failed' ? 'Try saving again' : 'Save now'}
-            </Button>
-          </div>
         </div>
       )}
     </Card>

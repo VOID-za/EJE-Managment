@@ -33,7 +33,14 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   'completion',
   'customer_signature',
   'review',
-  'awaiting_delivery',
+  // The office lifecycle (issue #73). `awaiting_delivery` is no longer offered:
+  // it is the legacy name for a job waiting on the office, so it is shown — and
+  // filtered — as Office Handling; see `jobStatusLabel` and `statusMatches`.
+  'office_handling',
+  'awaiting_po',
+  'invoiced',
+  // Historical: a job finished under the earlier lifecycle, where a confirmed
+  // delivery closed it. Kept as a filter so those records stay findable.
   'closed',
   'cancelled',
 ];
@@ -58,7 +65,10 @@ export const JOB_PROGRESS_STAGES: readonly JobStatus[] = [
   'completion',
   'customer_signature',
   'review',
-  'closed',
+  // The office lifecycle after the technician submits (issue #73).
+  'office_handling',
+  'awaiting_po',
+  'invoiced',
 ];
 
 export interface JobProgressPosition {
@@ -90,10 +100,15 @@ export const jobProgressPosition = (status: JobStatus): JobProgressPosition => {
   switch (status) {
     case 'awaiting_spares':
       return at('in_progress', 'Awaiting Spares');
-    // Issued: the customer's copy is in transit, so the work is done but the
-    // job is not closed. It waits at Review rather than pretending to be shut.
+    // LEGACY: submitted under the earlier lifecycle and waiting on delivery.
+    // Under the office lifecycle that job is simply with the office.
     case 'awaiting_delivery':
-      return at('review', 'Awaiting Delivery');
+      return at('office_handling');
+    // HISTORICAL: finished under the earlier lifecycle, which ended at Closed.
+    // Shown at the end of the rail and named for what it is — not as Invoiced,
+    // which nobody recorded for it.
+    case 'closed':
+      return at('invoiced', 'Closed');
     /*
      * Historical only, and shown simply as Review.
      *
@@ -148,13 +163,32 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
    * through a delivery handshake that will never arrive would leave the job
    * stuck for ever.
    */
-  review: ['awaiting_delivery', 'customer_signature', 'completion', 'closed'],
-  // Only a confirmed delivery closes a job. The self-edge is a retry.
-  awaiting_delivery: ['closed', 'awaiting_delivery'],
+  /*
+   * A SUBMISSION HANDS THE JOB CARD TO THE OFFICE. Issue #73, Batch 1.
+   *
+   * `review` used to go to `awaiting_delivery`, and a confirmed delivery closed
+   * the job. Now the technician's submission enters `office_handling`, and
+   * delivery of the customer's copy is tracked on `Job.delivery` alone — no
+   * edge anywhere is taken because an email arrived.
+   */
+  review: ['office_handling', 'customer_signature', 'completion', 'closed'],
+  /*
+   * LEGACY. A job submitted before the office lifecycle waits here. It is the
+   * same thing as `office_handling` — a signed, issued job card with the office —
+   * so the office handles it straight to `awaiting_po`. The old edge to
+   * `closed` is gone: a confirmed delivery no longer closes anything.
+   */
+  awaiting_delivery: ['awaiting_po'],
+  // The office marks it handled; the invoice is being raised in Sage.
+  office_handling: ['awaiting_po'],
+  // Only a recorded invoice number moves it on.
+  awaiting_po: ['invoiced'],
+  // The end of the lifecycle. Terminal, like `closed` before it.
+  invoiced: [],
   // Historical only. Nothing transitions INTO this state any more; the edges
   // out of it exist so a job that entered Master Review before it was retired
-  // can still be issued and closed.
-  submitted: ['awaiting_delivery', 'closed'],
+  // can still be issued — into the office lifecycle, like any submission.
+  submitted: ['office_handling', 'closed'],
   closed: [],
   // Terminal. A cancelled job is history, not something to resurrect: raise a
   // new job instead, so the record of what was cancelled stays intact.
@@ -178,9 +212,19 @@ export const jobStatusLabel = (status: JobStatus): string => {
     case 'review':
       return 'Review';
     case 'awaiting_delivery':
-      // Issued and sent; waiting on the provider to confirm the customer
-      // received it. Not closed, because nobody has confirmed they have it.
-      return 'Awaiting Delivery';
+      /*
+       * LEGACY, shown as what it now is. A job submitted before the office
+       * lifecycle is a signed job card waiting on the office; delivery of the
+       * customer's copy is shown separately, from `Job.delivery`. The STATUS is
+       * untouched, so the record is intact; only its presentation is current.
+       */
+      return 'Office Handling';
+    case 'office_handling':
+      return 'Office Handling';
+    case 'awaiting_po':
+      return 'Awaiting PO';
+    case 'invoiced':
+      return 'Invoiced';
     case 'submitted':
       /*
        * The retired Master Review stage.
@@ -207,7 +251,35 @@ export const jobStatusLabel = (status: JobStatus): string => {
  * being unreachable: it is labelled Review, so it has to be listed there too.
  */
 export const statusMatches = (status: JobStatus, filter: JobStatus): boolean =>
-  status === filter || (filter === 'review' && status === 'submitted');
+  status === filter ||
+  (filter === 'review' && status === 'submitted') ||
+  (filter === 'office_handling' && status === 'awaiting_delivery');
+
+/**
+ * THE JOB CARD HAS BEEN ISSUED: signed (or the office took it over), submitted,
+ * its final document stored. The record is read-only from here, whichever
+ * office step it is at. `awaiting_delivery` is the legacy name for the first.
+ */
+export const ISSUED_STATUSES: readonly JobStatus[] = [
+  'awaiting_delivery',
+  'office_handling',
+  'awaiting_po',
+  'invoiced',
+];
+
+export const isIssuedStatus = (status: JobStatus): boolean => ISSUED_STATUSES.includes(status);
+
+/** Waiting for the office to handle it: `office_handling`, or its legacy name. */
+export const isAwaitingOfficeHandling = (status: JobStatus): boolean =>
+  status === 'office_handling' || status === 'awaiting_delivery';
+
+/**
+ * FINISHED, for good: invoiced under the office lifecycle, or closed under the
+ * earlier one. Neither is reclassified as the other — a historical Closed job
+ * was never invoiced through this system, and saying so would be invention.
+ */
+export const isFinishedStatus = (status: JobStatus): boolean =>
+  status === 'invoiced' || status === 'closed';
 
 export const canTransition = (from: JobStatus, to: JobStatus): boolean =>
   TRANSITIONS[from].includes(to);
@@ -224,7 +296,7 @@ export const allowedTransitions = (from: JobStatus): readonly JobStatus[] => TRA
  * `canEditJob`, which is the check screens should use.
  */
 export const isJobEditable = (status: JobStatus): boolean =>
-  status !== 'closed' && status !== 'cancelled' && status !== 'awaiting_delivery';
+  status !== 'closed' && status !== 'cancelled' && !isIssuedStatus(status);
 
 /**
  * Whether THIS ROLE may edit a job in this state.
@@ -237,7 +309,9 @@ export const canEditJob = (role: UserRole, status: JobStatus): boolean => {
   if (status === 'closed' || status === 'cancelled') return false;
   // Issued. The document is with the customer and the record must keep
   // matching it, whether or not delivery has been confirmed yet.
-  if (status === 'awaiting_delivery') return false;
+  // Every office step after submission, too: handling and invoicing move the
+  // job along, they never reopen the job card.
+  if (isIssuedStatus(status)) return false;
   if (status === 'submitted') return role === 'master';
   /*
    * THE JOB IS WITH THE OFFICE. THE TECHNICIAN IS READ-ONLY.
@@ -678,7 +752,7 @@ export const isJobWorkable = (role: UserRole, status: JobStatus): boolean => {
 
 /** The job has been signed, so the customer has committed to what it says. */
 export const isAfterSignature = (status: JobStatus): boolean =>
-  status === 'review' || status === 'submitted' || status === 'closed';
+  status === 'review' || status === 'submitted' || status === 'closed' || isIssuedStatus(status);
 
 /**
  * THE JOB IS FINAL. Nobody may change it. MASTER SCOPE CR-01 / IMMUT-1…7.
@@ -706,7 +780,7 @@ export const isAfterSignature = (status: JobStatus): boolean =>
  * null and must be every bit as immutable.
  */
 export const isFinalized = (job: Pick<Job, 'signature' | 'status'>): boolean =>
-  job.signature !== null || job.status === 'awaiting_delivery' || job.status === 'closed';
+  job.signature !== null || isIssuedStatus(job.status) || job.status === 'closed';
 
 /**
  * Whether this role may change this job's RECORD, signature included.
@@ -757,7 +831,8 @@ export const isJobAtOrPastCompletion = (status: JobStatus): boolean =>
   status === 'customer_signature' ||
   status === 'review' ||
   status === 'submitted' ||
-  status === 'closed';
+  status === 'closed' ||
+  isIssuedStatus(status);
 
 export const isJobOpenWork = (status: JobStatus): boolean =>
   status === 'open' ||

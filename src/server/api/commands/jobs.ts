@@ -23,6 +23,7 @@ import * as corrections from '@/application/job-corrections';
 import * as unsigned from '@/application/unsigned-delivery';
 import { WorkflowError } from '@/application/errors';
 import { createJob, releaseDraft } from '@/application/job-creation';
+import { handleJobCard, recordInvoiceNumber } from '@/application/office-lifecycle';
 import { editJobDetails } from '@/application/job-details';
 import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
@@ -752,6 +753,23 @@ export const JOB_COMMANDS: CommandRegistry = {
   }),
 
   confirm_delivery: simple((context, job) => jobs.confirmJobCardDelivery(context.operation, job)),
+
+  /*
+   * THE OFFICE LIFECYCLE AFTER SUBMISSION. Issue #73, Batch 1.
+   *
+   * `handle_office` takes no body: there is nothing to say but that the office
+   * has the job card. `record_invoice` takes exactly the number, bounded here
+   * and judged by the operation, which refuses a blank one and leaves the job
+   * Awaiting PO. Both are the office's (`jobs.officeHandling`).
+   */
+  handle_office: simple((context, job) => handleJobCard(context.operation, job)),
+  record_invoice: command({
+    schema: z.object({ invoiceNumber: z.string().max(500) }).strict(),
+    async run(context, input: { invoiceNumber: string }, target) {
+      const job = await loadVisibleJob(context, target);
+      return recordInvoiceNumber(context.operation, job, input.invoiceNumber);
+    },
+  }),
 
   /**
    * The CR-08 rescue: the office submits a signed job card whose technician

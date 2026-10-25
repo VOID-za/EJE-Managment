@@ -18,6 +18,7 @@ import { loadActivityFeed } from './activity-read';
 import { runSearch } from './search';
 import { WorkflowError } from './errors';
 import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
+import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
 import { asCustomerId, asSiteId, type Job } from '@/domain';
 
 /**
@@ -348,15 +349,23 @@ describe('issuing a job card', () => {
     expect(after?.finalDocument).toBeNull();
   });
 
-  it('is done by the technician, and closes only on confirmed delivery', async () => {
+  // Issue #73: the submission hands it to the office; a delivery report does
+  // not close it, and the technician cannot take the office steps.
+  it('is done by the technician, goes to the office, and only the office invoices it', async () => {
     const signed = await workAndSign('EJE-1048');
     const context = harness.as(sipho);
 
     const issued = await issueJobCard(context, signed, 'customer@example-demo.co.za', 'Pieter Nel');
-    expect(issued.job.status).toBe('awaiting_delivery');
+    expect(issued.job.status).toBe('office_handling');
 
-    const closed = await confirmDelivery(harness, context, issued.job);
-    expect(closed.status).toBe('closed');
+    const delivered = await confirmDelivery(harness, context, issued.job);
+    expect(delivered.status).toBe('office_handling');
+
+    await expect(handleJobCard(context, delivered)).rejects.toBeInstanceOf(WorkflowError);
+    const handled = await handleJobCard(harness.as(coordinator), delivered);
+    expect(handled.status).toBe('awaiting_po');
+    await expect(recordInvoiceNumber(context, handled, 'INV-9')).rejects.toBeInstanceOf(WorkflowError);
+    expect((await recordInvoiceNumber(harness.as(coordinator), handled, 'INV-9')).status).toBe('invoiced');
   });
 });
 

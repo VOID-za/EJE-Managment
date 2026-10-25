@@ -4,6 +4,7 @@ import { Avatar, Icon, JobStatusBadge, PriorityBadge } from '@/components/ui';
 import { formatDate, isOverdue, isToday } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { JobTypeChip } from './JobTypeChip';
+import { isFinishedStatus, isIssuedStatus } from '@/domain';
 
 /**
  * Touch-first job card used on the technician dashboard and mobile job lists.
@@ -12,7 +13,8 @@ import { JobTypeChip } from './JobTypeChip';
 export const JobCardTile = ({ row }: { readonly row: JobListRow }) => {
   const { job } = row;
   const urgent = job.priority === 'urgent';
-  const overdue = isOverdue(job.scheduledDate) && job.status !== 'closed';
+  const overdue =
+    isOverdue(job.scheduledDate) && !isFinishedStatus(job.status) && !isIssuedStatus(job.status);
 
   return (
     <Link

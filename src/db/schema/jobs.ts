@@ -202,6 +202,15 @@ export const jobs = pgTable(
     cancelledBy: uuid('cancelled_by').references(() => users.id),
     cancelledAt: instant('cancelled_at'),
 
+    /* ---- the office lifecycle after submission (issue #73). 0032 ---- */
+    /** Who handled the submitted job card, moving it to Awaiting PO. Set once. */
+    officeHandledBy: uuid('office_handled_by').references(() => users.id),
+    officeHandledAt: instant('office_handled_at'),
+    /** The invoice number the office recorded from Sage. Set once, never rewritten. */
+    invoiceNumber: text('invoice_number'),
+    invoicedBy: uuid('invoiced_by').references(() => users.id),
+    invoicedAt: instant('invoiced_at'),
+
     createdAt: createdAt(),
     createdBy: uuid('created_by').references(() => users.id),
     acceptedAt: instant('accepted_at'),
@@ -288,6 +297,31 @@ export const jobs = pgTable(
     check(
       'jobs_discount_is_positive',
       sql`${table.discountCents} is null or ${table.discountCents} > 0`,
+    ),
+    /*
+     * THE OFFICE LIFECYCLE, held to its own record. Issue #73. 0032.
+     *
+     * Written against `status::text` rather than the enum literals: the values
+     * are added by the same migration, and PostgreSQL refuses to USE an enum
+     * value in the transaction that adds it.
+     */
+    check(
+      'jobs_office_handling_is_whole_or_absent',
+      sql`(${table.officeHandledBy} is null) = (${table.officeHandledAt} is null)`,
+    ),
+    check(
+      'jobs_invoice_is_whole_or_absent',
+      sql`(${table.invoiceNumber} is null) = (${table.invoicedAt} is null)
+          and (${table.invoiceNumber} is null) = (${table.invoicedBy} is null)
+          and (${table.invoiceNumber} is null or ${table.invoiceNumber} ~ '[^[:space:]]')`,
+    ),
+    check(
+      'jobs_awaiting_po_was_handled',
+      sql`${table.status}::text not in ('awaiting_po', 'invoiced') or ${table.officeHandledAt} is not null`,
+    ),
+    check(
+      'jobs_invoiced_has_invoice_number',
+      sql`${table.status}::text <> 'invoiced' or ${table.invoiceNumber} is not null`,
     ),
   ],
 );

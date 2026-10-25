@@ -14,6 +14,7 @@ import {
   type Machine,
   type MachineType,
   type SiteId,
+  isIssuedStatus,
 } from '@/domain';
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
@@ -415,7 +416,8 @@ const jobAuthorisingPhoto = async (
   if (job === null) return null;
   if (job.machineId !== machine.id) return null;
   if (!isJobTechnician(context.actor, job)) return null;
-  if (job.status === 'closed' || job.status === 'cancelled') return null;
+  // Not once the job card is submitted (issue #73's office states included).
+  if (job.status === 'closed' || job.status === 'cancelled' || isIssuedStatus(job.status)) return null;
   return job;
 };
 

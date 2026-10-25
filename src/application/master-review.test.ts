@@ -285,7 +285,7 @@ describe('issuing a job left in Master Review', () => {
 
     // Issued but NOT closed: the provider has the mail, nobody has confirmed
     // the customer received it.
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
     expect(result.job.closedAt).toBeNull();
     expect(result.delivery.state).toBe('pending_delivery');
 
@@ -298,7 +298,9 @@ describe('issuing a job left in Master Review', () => {
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('closes only once delivery is confirmed', async () => {
+  // Issue #73: issued into the office lifecycle like any submission; a
+  // confirmed delivery is recorded and does not close it.
+  it('goes to the office, and a confirmed delivery does not close it', async () => {
     const signed = await workAndSign(harness);
     const handed = await historicalMasterReview(harness.repos, signed, '2026-09-17T15:00:00.000Z');
     const result = await submitJobCard(
@@ -307,13 +309,13 @@ describe('issuing a job left in Master Review', () => {
       'customer@example-demo.co.za',
       'Pieter Nel',
     );
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
 
-    const closed = await confirmDelivery(harness, result.job);
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
-    expect(closed.delivery?.state).toBe('delivered');
-    expect(closed.delivery?.confirmedAt).not.toBeNull();
+    const delivered = await confirmDelivery(harness, result.job);
+    expect(delivered.status).toBe('office_handling');
+    expect(delivered.closedAt).toBeNull();
+    expect(delivered.delivery?.state).toBe('delivered');
+    expect(delivered.delivery?.confirmedAt).not.toBeNull();
   });
 
   it('refuses to issue a job that has not reached its customer signature', async () => {

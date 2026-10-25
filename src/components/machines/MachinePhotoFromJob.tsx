@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { can, isJobTechnician, machineDisplayName, type Job, type Machine } from '@/domain';
+import { can, isJobTechnician, machineDisplayName, type Job, type Machine, isIssuedStatus } from '@/domain';
 import { Button, Icon } from '@/components/ui';
 import { PhotoCaptureButtons } from '@/components/media/PhotoCaptureButtons';
 import { UploadFailureNotice } from '@/components/media/UploadFailureNotice';
@@ -76,7 +76,8 @@ export const MachinePhotoFromJob = ({
     },
   );
 
-  const live = job.status !== 'closed' && job.status !== 'cancelled';
+  const live =
+    job.status !== 'closed' && job.status !== 'cancelled' && !isIssuedStatus(job.status);
   const mayPhotograph =
     live && (can(currentUser.role, 'machines.manage') || isJobTechnician(currentUser, job));
   if (!mayPhotograph) return null;

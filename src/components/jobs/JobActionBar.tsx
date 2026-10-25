@@ -13,6 +13,7 @@ import {
   checkReadyForSignature,
   checkReadyForSubmission,
   refusalAwaitingResolution,
+  isIssuedStatus,
 } from '@/domain';
 import type { SubmissionCover, User } from '@/domain';
 import type { JobView } from '@/application/job-view';
@@ -318,7 +319,9 @@ export const JobActionBar = ({
    * opens it needs somewhere to go — the review screen carries the delivery
    * state and the re-send.
    */
-  if (job.status === 'awaiting_delivery') {
+  // Submitted (issue #73): the customer's copy and its delivery live on the
+  // review screen. The office lifecycle itself is on the job's office panel.
+  if (isIssuedStatus(job.status)) {
     actions.push(
       <Button
         key="delivery"
@@ -327,9 +330,7 @@ export const JobActionBar = ({
         onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
         leadingIcon={<Icon name="mail" className="size-5" />}
       >
-        {job.delivery?.state === 'failed'
-          ? 'Delivery failed — re-send'
-          : 'Awaiting delivery confirmation'}
+        {job.delivery?.state === 'failed' ? 'Delivery failed — re-send' : 'Customer copy'}
       </Button>,
     );
   }

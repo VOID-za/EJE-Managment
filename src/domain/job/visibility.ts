@@ -50,7 +50,7 @@ export const technicianHistoryFrom = (
 
 /** A job that has finished, one way or the other. */
 const isHistorical = (job: Pick<Job, 'status'>): boolean =>
-  job.status === 'closed' || job.status === 'cancelled';
+  job.status === 'closed' || job.status === 'invoiced' || job.status === 'cancelled';
 
 /**
  * Why this viewer may see this job. Null when they may not.
@@ -241,6 +241,10 @@ export type JobSummary = Pick<
   | 'quoteNumber'
   | 'dateReceived'
   | 'repairItem'
+  // The office lifecycle (issue #73): the Notifications tabs and the archive
+  // list jobs by these, and neither is a price.
+  | 'officeHandling'
+  | 'invoice'
   | 'customerId'
   | 'siteId'
   | 'machineId'
@@ -300,6 +304,8 @@ export const toJobSummary = (job: JobSummary): JobSummary => ({
   quoteNumber: job.quoteNumber,
   dateReceived: job.dateReceived,
   repairItem: job.repairItem,
+  officeHandling: job.officeHandling,
+  invoice: job.invoice,
   customerId: job.customerId,
   siteId: job.siteId,
   machineId: job.machineId,

@@ -130,7 +130,12 @@ const JOB_LIST_COLUMNS: readonly CsvColumn<JobListRow>[] = [
 
 const CLOSED_JOB_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
   { header: 'Job number', value: (row) => row.job.jobNumber },
-  { header: 'Closed', value: (row) => isoDay(row.job.closedAt) },
+  // The day it finished: closed (earlier lifecycle) or invoiced (issue #73).
+  { header: 'Closed', value: (row) => isoDay(row.job.closedAt ?? row.job.invoice?.recordedAt ?? null) },
+  // Which of the two it is, and the invoice number where there is one. A
+  // historical Closed job has none, and the cell says so by being empty.
+  { header: 'Status', value: (row) => jobStatusLabel(row.job.status) },
+  { header: 'Invoice number', value: (row) => row.job.invoice?.number ?? '' },
   { header: 'Customer', value: (row) => row.customerName },
   { header: 'Site', value: (row) => row.siteName },
   { header: 'Machine', value: (row) => row.machineLabel },

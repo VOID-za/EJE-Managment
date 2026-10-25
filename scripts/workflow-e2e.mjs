@@ -365,8 +365,8 @@ await step('the customer signs, and the signature is captured', async () => {
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
 
-  // Back on the job, which is now awaiting the customer's delivery.
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+  // Back on the job, which is now with the office (issue #73).
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 30000 });
   await assertNot404('submitting the signed job card');
 });
 
@@ -421,7 +421,7 @@ await step('the signature persists on the job across a reload', async () => {
  *
  * The submission itself already happened, in the wizard, in the step above.
  */
-await step('EJE-1065 is submitted and awaiting delivery, with no office step', async () => {
+await step('EJE-1065 is submitted and with the office, with no office submission step', async () => {
   await visit('/jobs/EJE-1065');
   const body = await page.locator('main').innerText();
 
@@ -438,7 +438,7 @@ await step('EJE-1065 is submitted and awaiting delivery, with no office step', a
     }
   }
 
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 20000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 20000 });
 });
 
 await step('the customer copy exists and names the technician as its submitter', async () => {
@@ -496,7 +496,7 @@ await step('the job did NOT close on a send the provider merely accepted', async
   }
   await visit('/jobs/EJE-1065');
   await assertNot404('the issued job');
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 15000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 15000 });
 });
 
 await step('the customer copy was recorded exactly once, and is pending', async () => {
@@ -506,14 +506,65 @@ await step('the customer copy was recorded exactly once, and is pending', async 
   await page.getByText('Delivery pending').first().waitFor({ timeout: 15000 });
 });
 
-// ── PART 20: delivery confirmation closes the job ────────────────────────────
-await step('confirming the delivery is what closes EJE-1065', async () => {
+// ── PART 20: delivery is recorded; the OFFICE finishes the job (issue #73) ──
+await step('confirming the delivery records it, and does NOT close EJE-1065', async () => {
   const row = page.locator('li').filter({ hasText: 'EJE-1065' }).first();
   await row.getByRole('button', { name: 'Confirm delivered' }).click();
   await page.getByText('Delivered').first().waitFor({ timeout: 20000 });
 
   await visit('/jobs/EJE-1065');
-  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 20000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 20000 });
+  if ((await page.getByText('this job is closed', { exact: false }).count()) !== 0) {
+    throw new Error('a confirmed delivery closed the job');
+  }
+});
+
+await step('the Inbox holds EJE-1065 for office handling, and Mark handled moves it to Awaiting PO', async () => {
+  await visit('/notifications');
+  // The five tabs, for the office.
+  for (const name of ['Inbox', 'Handled', 'Simulated Outbox', 'Awaiting PO', 'Invoiced']) {
+    await page.getByRole('tab', { name: new RegExp(`^${name}`) }).waitFor({ timeout: 10000 });
+  }
+  const card = page.getByTestId('office-handling-EJE-1065');
+  await card.waitFor({ timeout: 15000 });
+  await card.getByRole('button', { name: 'Mark handled' }).click();
+  await card.waitFor({ state: 'detached', timeout: 15000 });
+
+  await page.getByRole('tab', { name: /^Awaiting PO/ }).click();
+  await page.getByTestId('awaiting-po-EJE-1065').waitFor({ timeout: 15000 });
+});
+
+await step('saving with no Invoice No keeps EJE-1065 Awaiting PO, and says why', async () => {
+  const card = page.getByTestId('awaiting-po-EJE-1065');
+  await card.getByRole('button', { name: 'Save' }).click();
+  await card.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 10000 });
+  await visit('/jobs/EJE-1065');
+  await page.getByText('Awaiting PO', { exact: false }).first().waitFor({ timeout: 15000 });
+});
+
+await step('a valid Invoice No moves EJE-1065 to Invoiced, and it is persisted', async () => {
+  await visit('/notifications?tab=awaiting_po');
+  const card = page.getByTestId('awaiting-po-EJE-1065');
+  await card.waitFor({ timeout: 15000 });
+  await card.getByTestId('invoice-number-EJE-1065').fill('INV-E2E-1065');
+  await card.getByRole('button', { name: 'Save' }).click();
+  await card.waitFor({ state: 'detached', timeout: 15000 });
+
+  await page.getByRole('tab', { name: /^Invoiced/ }).click();
+  await page
+    .getByTestId('invoiced-EJE-1065')
+    .getByText('INV-E2E-1065', { exact: false })
+    .waitFor({ timeout: 15000 });
+
+  // On the job itself, after a fresh load: the number came from the server.
+  await visit('/jobs/EJE-1065');
+  await page.getByTestId('office-lifecycle').getByText('INV-E2E-1065').waitFor({ timeout: 15000 });
+  await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 15000 });
+});
+
+await step('the Handled tab holds the job_submitted notice the office filed', async () => {
+  await visit('/notifications?tab=handled');
+  await page.getByText('EJE-1065', { exact: false }).first().waitFor({ timeout: 15000 });
 });
 
 await step('closing did not send the customer a second copy', async () => {
@@ -545,7 +596,7 @@ await step('View Final PDF loads the stored document, not a 404', async () => {
   await page.waitForURL('**/jobs/EJE-1065/review', { timeout: 20000 });
   await assertNot404('View Final PDF');
   await page.getByText('EJE-1065-Final-Job-Card.pdf').first().waitFor({ timeout: 15000 });
-  await page.getByText('Issued and closed').waitFor({ timeout: 10000 });
+  await page.getByText('Issued and invoiced').waitFor({ timeout: 10000 });
 });
 
 await step('Download Final PDF downloads a real PDF, and never opens a print dialog', async () => {
@@ -666,9 +717,9 @@ await step('downloading did not email the customer again', async () => {
 
 await step('the closed job is read-only, and its signature survived', async () => {
   await visit('/jobs/EJE-1065');
-  await page.getByText('this job is closed', { exact: false }).first().waitFor({ timeout: 15000 });
+  await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 15000 });
   const body = await page.locator('main').innerText();
-  if (!body.includes('Gerhard')) throw new Error('the signature was lost on closure');
+  if (!body.includes('Gerhard')) throw new Error('the signature was lost on invoicing');
 });
 
 await step('viewing the closed job card twice does not duplicate the document event', async () => {
@@ -678,7 +729,7 @@ await step('viewing the closed job card twice does not duplicate the document ev
   const before = await page.getByText('document generated', { exact: false }).count();
 
   await visit('/jobs/EJE-1065/review');
-  await page.getByText('Issued and closed').waitFor({ timeout: 15000 });
+  await page.getByText('Issued and invoiced').waitFor({ timeout: 15000 });
   await visit('/jobs/EJE-1065');
   await page.getByRole('tab', { name: /Activity/ }).click();
   await page.getByText('Activity', { exact: false }).first().waitFor({ timeout: 10000 });
@@ -851,7 +902,7 @@ await step('and the technician takes the signature again, then submits it', asyn
   await page.getByRole('button', { name: 'Submit job card' }).click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 30000 });
 });
 
 await step('OUTCOME B — Without Customer Signature CLOSES EJE-1066', async () => {
@@ -1050,7 +1101,7 @@ await step('NOW the office may take over — and it says the card cannot be edit
   }
 
   await dialog.getByRole('button', { name: 'Take over submission' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 30000 });
 });
 
 await step('the takeover is on the trail, distinct from an ordinary submission', async () => {
@@ -1224,14 +1275,14 @@ await step('STEP 5 — Signed, then Submit collection note', async () => {
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 10000 });
   await dialog.getByRole('button', { name: 'Submit collection note' }).click();
-  await page.getByText('Awaiting Delivery', { exact: false }).first().waitFor({ timeout: 30000 });
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 30000 });
 });
 
-await step('the submission does NOT close it — the confirmed delivery does', async () => {
+await step('neither the submission NOR the confirmed delivery closes it — the office has it', async () => {
   await visit(`/jobs/${collectionNumber}`);
   const body = await page.locator('main').innerText();
-  if (/Closed/.test(body) && !/Awaiting Delivery/.test(body)) {
-    throw new Error('the collection closed on submission rather than on delivery');
+  if (/this job is closed/i.test(body)) {
+    throw new Error('the collection closed on submission');
   }
 
   // The office confirms the delivery from the outbox, exactly as it does for a
@@ -1244,10 +1295,12 @@ await step('the submission does NOT close it — the confirmed delivery does', a
   await page.getByText('Delivered').first().waitFor({ timeout: 15000 });
 
   await visit(`/jobs/${collectionNumber}`);
-  await page
-    .getByText('Read-only — this job is closed', { exact: false })
-    .first()
-    .waitFor({ timeout: 25000 });
+  // Issue #73: the delivery is recorded and the collection note stays with
+  // the office until it is handled and invoiced.
+  await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
+  if ((await page.getByText('this job is closed', { exact: false }).count()) !== 0) {
+    throw new Error('a confirmed delivery closed the collection');
+  }
 });
 
 await step('the whole collection journey works at tablet size', async () => {

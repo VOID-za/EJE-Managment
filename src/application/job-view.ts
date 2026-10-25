@@ -489,7 +489,10 @@ export const ACTIVE_JOB_STATUSES = [
   'completion',
   'customer_signature',
   'review',
+  // With the office (issue #73): current work for the office until invoiced.
   'awaiting_delivery',
+  'office_handling',
+  'awaiting_po',
   'submitted',
 ] as const satisfies readonly Job['status'][];
 

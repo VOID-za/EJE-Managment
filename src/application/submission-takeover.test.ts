@@ -174,7 +174,7 @@ describe('the seeded register, as a demonstrator opens it', () => {
       'Highveld Precision',
     );
 
-    expect(taken.job.status).toBe('awaiting_delivery');
+    expect(taken.job.status).toBe('office_handling');
     expect(taken.job.finalDocument).not.toBeNull();
     // Rendered here, really written, and NOT a claim about delivery. AUD-8.
     expect(taken.job.finalDocument?.renderedLocally).toBe(true);
@@ -198,7 +198,7 @@ describe('an ordinary signed job, whose technician is at work', () => {
   it('is submitted by the technician', async () => {
     expect(canSubmitJobCard(technician, signed)).toBe(true);
     expect((await issueJobCard(harness.as(technician), signed, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
   });
 
@@ -303,12 +303,12 @@ describe('a signed job whose technician is away', () => {
     expect(canTakeOverSubmission('coordinator', signed, cover)).toBe(true);
 
     const result = await takeOverSubmission(harness.as(coordinator), signed, EMAIL, RECIPIENT);
-    expect(result.job.status).toBe('awaiting_delivery');
+    expect(result.job.status).toBe('office_handling');
   });
 
   it('lets the MASTER take it over', async () => {
     expect((await takeOverSubmission(harness.as(master), signed, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
   });
 
@@ -331,8 +331,11 @@ describe('a signed job whose technician is away', () => {
     expect(toCustomer[0]?.attachments.length).toBeGreaterThan(0);
 
     // And the handshake is the same one: an accepted send is not a delivery.
-    expect(result.job.status).toBe('awaiting_delivery');
-    expect((await confirmDelivery(harness, harness.as(master), result.job)).status).toBe('closed');
+    expect(result.job.status).toBe('office_handling');
+    // Issue #73: the delivery is recorded and the job stays with the office.
+    expect((await confirmDelivery(harness, harness.as(master), result.job)).status).toBe(
+      'office_handling',
+    );
   });
 
   it('produces the IDENTICAL document the technician would have sent', async () => {
@@ -495,7 +498,7 @@ describe('a second technician on the job who IS available', () => {
     // And the colleague can indeed finish it.
     expect(
       (await issueJobCard(harness.as(otherTechnician), signed, EMAIL, RECIPIENT)).job.status,
-    ).toBe('awaiting_delivery');
+    ).toBe('office_handling');
   });
 });
 
@@ -571,7 +574,7 @@ describe('the refusal workflow does not use the takeover', () => {
     const cover = await loadSubmissionCover(harness.as(master), signed);
     expect(canTakeOverSubmission('master', signed, cover)).toBe(true);
     expect((await takeOverSubmission(harness.as(master), signed, EMAIL, RECIPIENT)).job.status).toBe(
-      'awaiting_delivery',
+      'office_handling',
     );
   });
 });

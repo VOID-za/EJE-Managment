@@ -220,3 +220,116 @@ describe('autosave', () => {
     expect(writes).toEqual([{ workPerformed: 'Done, and tested.' }]);
   });
 });
+
+/**
+ * RETRYING BY ITSELF. Issue #73, Batch 2.
+ *
+ * There is no Save button any more, so a failed save has to be tried again by
+ * the saver itself — on a ladder of waits — or the technician's text would sit
+ * unsaved until they happened to type again.
+ */
+describe('autosave retries a failed save by itself', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const build = (retryDelaysMs: readonly number[] = [1_000, 3_000]) => {
+    const writes: string[] = [];
+    const statuses: AutosaveStatus[] = [];
+    let failing = true;
+    let attempts = 0;
+    const saver = createAutosaver('', {
+      delayMs: 500,
+      maxWaitMs: 2_000,
+      retryDelaysMs,
+      onStatus: (status) => statuses.push(status),
+      save: async (value) => {
+        attempts += 1;
+        if (failing) throw new Error('No connection.');
+        writes.push(value);
+      },
+    });
+    return {
+      saver,
+      writes,
+      statuses,
+      attempts: () => attempts,
+      reconnect: () => {
+        failing = false;
+      },
+    };
+  };
+
+  it('says Not saved, keeps the text, and tries again on the ladder', async () => {
+    const { saver, writes, statuses, attempts, reconnect } = build();
+    saver.change('Replaced the seal.');
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    expect(attempts()).toBe(1);
+    expect(statuses.at(-1)?.kind).toBe('failed');
+    expect(saver.dirty()).toBe(true);
+
+    // First rung: 1 s later it tries again, still failing.
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(attempts()).toBe(2);
+
+    // The connection returns; the next rung (3 s) writes it — nothing pressed.
+    reconnect();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await settle();
+    expect(writes).toEqual(['Replaced the seal.']);
+    expect(statuses.at(-1)?.kind).toBe('saved');
+    expect(saver.dirty()).toBe(false);
+  });
+
+  it('keeps retrying on the last rung until it succeeds', async () => {
+    const { saver, attempts, reconnect, writes } = build([1_000]);
+    saver.change('x');
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    for (let rung = 0; rung < 3; rung += 1) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+    }
+    expect(attempts()).toBe(4);
+    reconnect();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(writes).toEqual(['x']);
+  });
+
+  it('a flush (the connection coming back) tries at once, without waiting for the rung', async () => {
+    const { saver, writes, reconnect } = build([60_000]);
+    saver.change('Online again.');
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    reconnect();
+    await saver.flush();
+    expect(writes).toEqual(['Online again.']);
+  });
+
+  it('stops retrying once there is nothing to save', async () => {
+    const { saver, attempts } = build([1_000]);
+    saver.change('typed');
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    saver.change(''); // typed back to what the server holds
+    await vi.advanceTimersByTimeAsync(5_000);
+    await settle();
+    expect(attempts()).toBe(1);
+  });
+
+  it('does not retry at all with an empty ladder', async () => {
+    const { saver, attempts } = build([]);
+    saver.change('typed');
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(attempts()).toBe(1);
+  });
+});

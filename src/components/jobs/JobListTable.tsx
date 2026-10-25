@@ -17,6 +17,8 @@ import {
   currentRefusal,
   jobScheduleWindow,
   refusalAwaitingResolution,
+  isFinishedStatus,
+  isIssuedStatus,
 } from '@/domain';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, isOverdue } from '@/lib/format';
@@ -141,7 +143,8 @@ export const JobListTable = ({
       render: (row) => {
         const overdue =
           isOverdue(row.job.scheduledDate) &&
-          row.job.status !== 'closed' &&
+          !isFinishedStatus(row.job.status) &&
+          !isIssuedStatus(row.job.status) &&
           row.job.status !== 'submitted';
         const window = jobScheduleWindow(row.job);
         return (

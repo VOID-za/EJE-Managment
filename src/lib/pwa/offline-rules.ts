@@ -193,6 +193,10 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   confirm_delivery:
     'Whether the customer received their copy is something only the mail provider can answer.',
   retry_delivery: 'Sending the customer their copy again needs a connection to the mail provider.',
+  // The office lifecycle (issue #73): office steps on the server, never held.
+  handle_office: 'Marking a job card handled is an office step the server decides.',
+  record_invoice:
+    'An invoice number is recorded once, against the job as the server has it, so it needs a connection.',
   /*
    * CORRECTING AN ISSUED JOB CARD, AND SENDING AN UNSIGNED ONE. BD-02, BD-06.
    *

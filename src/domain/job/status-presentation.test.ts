@@ -62,8 +62,13 @@ describe('the status filter offers only statuses that exist for users', () => {
     expect(labels.filter((label) => label.toLowerCase().includes('master'))).toEqual([]);
   });
 
-  it('offers the live stages a job can actually be in, including awaiting delivery', () => {
-    expect(JOB_STATUS_ORDER).toContain('awaiting_delivery');
+  // Issue #73: the office lifecycle's three states are offered; the legacy
+  // `awaiting_delivery` is not — it is filtered and labelled as Office Handling.
+  it('offers the live stages a job can actually be in, including the office lifecycle', () => {
+    expect(JOB_STATUS_ORDER).toContain('office_handling');
+    expect(JOB_STATUS_ORDER).toContain('awaiting_po');
+    expect(JOB_STATUS_ORDER).toContain('invoiced');
+    expect(JOB_STATUS_ORDER).not.toContain('awaiting_delivery');
     for (const stage of JOB_PROGRESS_STAGES) {
       expect(JOB_STATUS_ORDER, `${stage} is missing from the filter`).toContain(stage);
     }

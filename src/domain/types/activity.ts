@@ -176,6 +176,10 @@ export type ActivityEventType =
   | 'delivery_state_changed'
   | 'master_amended_after_signature'
   | 'job_closed'
+  /** The office handled a submitted job card: Office Handling -> Awaiting PO. Issue #73. */
+  | 'job_office_handled'
+  /** The office recorded the invoice number: Awaiting PO -> Invoiced. Issue #73. */
+  | 'job_invoiced'
   | 'document_viewed'
   // Record administration. These carry no job id: they describe changes to the
   // customer, machine, user, library and checklist registers.
