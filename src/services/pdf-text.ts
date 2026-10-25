@@ -469,8 +469,23 @@ export const popplerPdfText = (config: PopplerPdfTextConfig = {}): PdfTextServic
             /*
              * A RANGE THAT STARTS PAST THE END is poppler's way of saying the
              * previous batch was the last, when no page count was available.
+             *
+             * BY EXIT STATUS AS WELL AS BY MESSAGE: poppler's `pdftotext` exits
+             * 99 for "Wrong page range given", and `-q` — which this passes —
+             * SUPPRESSES the message, so matching the text alone read the end
+             * of a 400-page book (in batches of 200) as a read error. CI's
+             * poppler caught it; the xpdf build answers that range with nothing
+             * and exit 0 instead, which the "fewer pages than asked" rule below
+             * already reads as the end.
+             *
+             * WHY 99 CANNOT HIDE A DAMAGED SECTION: `pdftotext` exits 1 when it
+             * cannot open the file, 2 for its output and 3 for a permission
+             * refusal; with the file already opened by the first batch, 99 is
+             * left for the page range. And this branch is only reached after a
+             * batch that returned EVERY page it asked for — a short batch has
+             * already ended the loop — which is exactly the exact-multiple case.
              */
-            if (first > 1 && counted === null && /wrong page range/iu.test(said)) {
+            if (first > 1 && counted === null && (run.status === 99 || /wrong page range/iu.test(said))) {
               reachedEnd = true;
               break;
             }
