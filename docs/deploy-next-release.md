@@ -19,7 +19,158 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
-### The order that works, as rehearsed on the live server on 24 October 2026
+## RELEASE de0d9b6 — the runbook (prepared 25 October 2026, NOT YET RUN)
+
+**From `4634d5d` (live since 24 October) to `de0d9b6`** — JOB-EDIT-1 (#72) and
+LIB-TEXT-1 (#70), merged with the owner's approval. **Nothing below has been run
+against the server. A live release needs the owner's separate approval.**
+
+```
+RELEASE=de0d9b62532c3399ea6b49f687d56e07abe44160   # full hash, always
+LIVE=4634d5d061c02f3aa9af034be4363403a87f18cf
+```
+
+### Runtime release inventory, 4634d5d → de0d9b6
+
+Verified against the diff (14 commits, 65 files), the code and the deploy files.
+
+| Area | What changes at runtime | Action needed |
+|---|---|---|
+| **Database** | **One migration: `0030_library_page_coverage_unknown`** — replaces one CHECK so a partial index may record "page coverage unknown" (0 of M). Relaxes only; every existing row passes. Ledger 30 → 31 | Apply it (step 4). **Proven in CI**: upgrade path 0029 → 0030 with rows in every state, through the real migrator (`src/db/migrations/upgrade-0030.db.test.ts`) |
+| **Rollback compatibility** | The live release reads, searches and writes a database at 0030, "coverage unknown" row included; its preflight does not refuse a ledger one ahead | None. **Proven in CI** with the live release's own code (`scripts/release/rollback-compat.sh`) |
+| **Environment variables** | **None added, none removed, none renamed.** The LIB-TEXT-1 limits are constants (`PDF_TEXT_LIMITS`), not settings | None |
+| **npm dependencies** | **None** — `package-lock.json` is byte-identical between the two commits | None (`npm ci` as usual) |
+| **npm scripts** | `backup:escrow-check` added — a manual tool for the owner's PC, run by nothing | None |
+| **System binaries** | LIB-TEXT-1 now also runs **`pdfinfo`** (poppler-utils, the same package as `pdftotext`) and reads PDFs 200 pages at a time with `pdftotext -f/-l` | `--check` reports both binaries. Without poppler the library falls back to the built-in reader (still truthful), so it is a warning, not a stop |
+| **systemd units** | Repository copies gained `SuccessExitStatus=143` (already on the server as the drop-in `eje.service.d/exit-status.conf`) and `-/mnt/offsite` (optional path) in `eje-backup.service` | **None for this release.** A release does not replace installed units, and the installed ones are working: the nightly backup and the weekly restore test both finished on 25 October (read-only investigation, `investigate.log`). Bringing the installed copies level with the repository is a separate, optional change |
+| **Backup tooling** | `pg_dump`/`psql`/`pg_restore` no longer take a password on the command line (`a14fba8`) | None: the backup units already run this code from `/opt/eje/tools/b190faa` (drop-in `tools.conf`); the release changes nothing there |
+| **Library behaviour** | Every page is indexed (limits: 40 MB, 5 000 pages, 100 000 characters a page, 25 000 000 a document, 120 s); search runs over the page vectors; truthful N of M; OCR only after a complete reading. Upload response gains `pagesIndexed` and `source` | See "after the release" below — existing documents keep their stored index until re-indexed |
+| **Jobs** | `jobs.editDetails` (Master, Coordinator); `edit_details` command; `job_details_edited` activity type (stored as text — no migration) | None |
+| **API surface** | New command `POST /api/jobs/:id/edit_details`; upload response fields added (additive) | None |
+| **Ops scripts** | `deploy/ssh`, `deploy/firewall` (SSH hardening, UFW) | **Not part of a release** and not run by it |
+
+### The steps
+
+The scripted path does every step below in this order and stops at the first
+gate that does not pass (`deploy/release/deploy-release.sh`, driven from a PC by
+`deploy/release/stage-release.ps1`). The manual commands are given beside each
+step, so the release can be followed — or done — by hand.
+
+**0. Read-only check** — host, the live release and its health, the release
+directory, free disk, poppler, the environment files, the service.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha de0d9b62532c3399ea6b49f687d56e07abe44160 -CheckOnly
+```
+
+It uploads the reviewed script, has the SERVER recompute its SHA-256, checks the
+host is `srv2000625`, and runs `deploy-release.sh --check`. It changes nothing.
+
+**1. Build** `de0d9b6` under **`/opt/eje/releases/de0d9b6`**, beside the live
+release — §3's command with `SHA=$RELEASE`. The live release keeps serving. A
+directory that already exists is reused only if it is a verified build of the
+same commit; anything else stops the release untouched.
+
+**2. Fresh backup, proven** — from the NEW release directory, as eje (§1):
+`npm run backup`, then `backup:verify`, `backup:key-check` and
+`backup:restore-test` on that backup, the restore test with the restore role's
+environment (`/etc/eje/restore-test.env`, §1a). **Any failure stops here,
+before the migration.**
+
+**3. Preflight — exactly one pending migration.** As eje, from the new release:
+`npm run preflight -- --expect-db eje_production`. It must show
+
+    [FAIL] Migrations         1 not applied: 0030_library_page_coverage_unknown.
+
+and no FAIL other than the one accepted for this server (`Deployment target` —
+the `eje_production` name on a demonstration deployment). Two pending, none
+pending, or any other FAIL stops the release.
+
+**4. Apply migration 0030** — as eje, from the new release: `npm run db:migrate`
+(§5). Preflight again: `Migrations` must read `all 31 applied`. **This is the
+one step a switch back does not undo — and it does not need undoing**; see
+rollback below. The live release is still serving throughout.
+
+**5. Switch and restart** — atomically (§6):
+
+```bash
+sudo ln -sfn /opt/eje/releases/de0d9b6 /opt/eje/app.new
+sudo mv -T /opt/eje/app.new /opt/eje/app
+sudo systemctl restart eje
+```
+
+**6. Health** — `curl -s localhost:3000/api/health` must report
+`"commit":"de0d9b6"`, `"status":"ok"` and `"database":"reachable"` (the script
+waits up to a minute for all three). `stage-release.ps1` then confirms the same
+from outside, through `https://eje.syncza.co.za/api/health`. **If the new
+release is not healthy, the script switches back to `4634d5d` automatically and
+health-checks that too**; if even that cannot be proven it stops, exit 2, and a
+person decides — nothing is retried.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha de0d9b62532c3399ea6b49f687d56e07abe44160
+```
+
+The server side runs as a detached unit (`eje-release-de0d9b6`), so a dropped
+SSH connection cannot stop it half-way; `deploy-release.sh --status` reads what
+it recorded (`/var/lib/eje-release/release-de0d9b6.state`, with the backup used
+and the rollback target).
+
+### Rollback to 4634d5d — with migration 0030 already applied
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Rollback          # to the recorded previous release
+```
+
+or by hand:
+
+```bash
+sudo ln -sfn /opt/eje/releases/4634d5d /opt/eje/app.new
+sudo mv -T /opt/eje/app.new /opt/eje/app
+sudo systemctl restart eje
+curl -s localhost:3000/api/health      # "commit":"4634d5d", status ok, database reachable
+```
+
+**Migration 0030 is NOT rolled back, and must not be.** It cannot be undone by
+switching the code, and it does not need to be:
+
+- it only RELAXES one CHECK; no row was rewritten, and the old rule's rows all
+  satisfy the new one;
+- **the live release's own code has been run against a database at 0030** —
+  reading every indexing state, searching (the "coverage unknown" document
+  included), writing a new partial index and re-indexing — in CI, from a
+  checkout of `4634d5d` (`scripts/release/rollback-compat.sh`);
+- the live release's preflight reads a ledger of 31 against its 30 shipped
+  migrations as "all 30 applied" — nothing pending, nothing refused. (That
+  sentence understates by one; it is harmless and expected after a rollback.)
+- re-applying the old CHECK would REFUSE any "coverage unknown" row written
+  while `de0d9b6` ran — which is the reason not to try.
+
+The one visible difference after a rollback: a document the new release
+recorded as "coverage unknown" (only possible on a server WITHOUT poppler — this
+one has it) would read "Searchable — 0 of N pages" in the old wording. Cosmetic,
+and searchable all the same.
+
+**Only if the application will not start at all**: the backup from step 2,
+restored per `docs/vps-backups.md` §6 into a NEW database — never over the live
+one.
+
+### After the release
+
+- **Existing library documents keep the index they have** until they are
+  re-indexed. One cut by the old 400 000-character budget is still recorded as
+  `indexed` with only its first ~96 pages in page rows (the defect LIB-TEXT-1
+  fixed in the WRITER). To find them, read-only:
+  `select document_id, pages from library_document_text where truncated;` —
+  then re-index each from the library screen (Re-index), which runs the new
+  reader. **This is the owner's decision** (the live deployment holds
+  demonstration data); the release does not do it.
+- Post the evidence on #72 and #70; both issues stay open for the owner's
+  acceptance.
+
+---
+
+### Reference: the 24 October 2026 release (4dede18 → 4634d5d), in the order that worked
 
 The numbered sections below say what each step is for. **This is the order to
 run them in**, because three of them cannot run where the sections used to put
