@@ -1,6 +1,7 @@
 #!/bin/bash
 # EJE GUARDED RELEASE — build, back up, migrate, switch, prove; roll back where
-# that is safe. Release readiness for de0d9b6, 25 October 2026.
+# that is safe. Release readiness for de0d9b6, 25 October 2026; a release may
+# carry several migrations (EXPECT_PENDING, in order) since the job-forms work.
 #
 #   bash deploy-release.sh --check   <full-sha>   read-only: is this server ready for that release?
 #   bash deploy-release.sh --release <full-sha>   the whole release, every step gated
@@ -13,9 +14,10 @@
 # THE IRREVERSIBLE POINT, NAMED. Everything before the migration leaves the live
 # release exactly as it was: the build goes into a NEW directory, the backup and
 # the restore test only add files. The MIGRATION cannot be un-run by switching
-# the code back — and does not need to be: `0030` only relaxes one CHECK, and the
-# live release's own code has been run against a database at 0030 in CI
-# (`scripts/release/rollback-compat.sh`). So:
+# the code back — and does not need to be: `0030` only relaxes one CHECK and
+# `0031` only adds a nullable column, and the live release's own code has been
+# run against a database at both in CI (`scripts/release/rollback-compat.sh`).
+# So:
 #
 #   build / backup / preflight fail  → STOP, nothing changed for anybody
 #   migration fails                  → STOP, the old release is still serving
@@ -46,7 +48,15 @@ REPO_URL=${REPO_URL:-https://github.com/VOID-za/EJE-Managment.git}
 HEALTH_URL=${HEALTH_URL:-http://127.0.0.1:3000/api/health}
 SERVICE=${SERVICE:-eje}
 EXPECT_DB=${EXPECT_DB:-eje_production}
-EXPECT_PENDING=${EXPECT_PENDING:-0030_library_page_coverage_unknown}
+# THE MIGRATIONS THIS RELEASE IS EXPECTED TO APPLY, IN ORDER, comma-separated.
+# Not "one": a release may carry several (this one carries 0030 and 0031), and
+# the gate below demands the preflight's pending list be EXACTLY this list —
+# same names, same count, same order — and that it be the newest entries of the
+# release's own journal. Anything else stops the release before the migration.
+# `-`, not `:-`: UNSET takes the default, but a value set to EMPTY is refused
+# below rather than quietly replaced — an empty list typed by an operator is a
+# mistake to stop on, not a request for the default.
+EXPECT_PENDING=${EXPECT_PENDING-0030_library_page_coverage_unknown,0031_test_repair_date_received}
 # The preflight FAILs the owner has accepted on this server, and nothing else.
 ACCEPTED_FAILS=${ACCEPTED_FAILS:-Deployment target}
 MIN_FREE_MB=${MIN_FREE_MB:-3000}
@@ -58,6 +68,24 @@ say() { printf '%s\n' "$*"; logger -t "$TAG" -- "$*" 2>/dev/null || true; }
 stop() { say "STOPPED: $*"; exit 1; }
 
 case "$MODE" in --check|--release|--rollback|--status) ;; *) stop "say --check <sha>, --release <sha>, --rollback [<release>] or --status";; esac
+
+# The expected list must be well-formed before anything is looked at: migration
+# tags, no duplicates, strictly ascending. A malformed list is a typo in the
+# operator's command, and acting on it would compare against the wrong thing.
+expected_pending_problem() {
+  local previous='' tag
+  [ -n "$EXPECT_PENDING" ] || { echo 'EXPECT_PENDING is empty'; return; }
+  case "$EXPECT_PENDING" in *' '*|,*|*,|*,,*) echo "EXPECT_PENDING must be tags separated by single commas: $EXPECT_PENDING"; return;; esac
+  for tag in ${EXPECT_PENDING//,/ }; do
+    printf '%s' "$tag" | grep -qE '^[0-9]{4}_[a-z0-9_]+$' || { echo "not a migration tag: $tag"; return; }
+    if [ -n "$previous" ] && ! [[ "$tag" > "$previous" ]]; then echo "out of order or repeated: $previous then $tag"; return; fi
+    previous=$tag
+  done
+}
+if [ "$MODE" = --check ] || [ "$MODE" = --release ]; then
+  problem=$(expected_pending_problem)
+  [ -z "$problem" ] || stop "$problem. Nothing was changed."
+fi
 [ "$(id -u)" -eq 0 ] || stop "run as root"
 
 # ---- facts ---------------------------------------------------------------------
@@ -218,7 +246,7 @@ systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
 record "$SHORT" backup "$backup"
 say "    backup proven: $backup"
 
-# 3. PREFLIGHT: exactly the one expected migration pending, and no FAIL but the accepted ones.
+# 3. PREFLIGHT: exactly the expected migrations pending, in order, and no FAIL but the accepted ones.
 preflight() { as_eje "$RELEASE" /usr/bin/npm run preflight -- --expect-db "$EXPECT_DB" 2>&1; }
 unexpected_fails() {
   # preflight prints `[FAIL] <name padded>  <detail>`: the name is everything up
@@ -227,16 +255,38 @@ unexpected_fails() {
     case ",$ACCEPTED_FAILS,$2," in *",$name,"*) ;; *) printf '%s\n' "$name";; esac
   done
 }
-say "3/6 preflight before the migration"
+# THE RELEASE'S OWN JOURNAL is the reference for order and count: the tags it
+# ships, oldest first. Read from the file, not from anything the operator typed.
+journal_tags() {
+  grep -oE '"tag": *"[0-9]{4}_[a-z0-9_]+"' "$RELEASE/src/db/migrations/meta/_journal.json" 2>/dev/null \
+    | sed -E 's/.*"([^"]+)"$/\1/'
+}
+shipped_tags=$(journal_tags)
+shipped=$(printf '%s\n' "$shipped_tags" | grep -c .)
+[ "$shipped" -gt 0 ] || stop "the release's migration journal could not be read ($RELEASE/src/db/migrations/meta/_journal.json). Nothing was changed."
+expected_count=$(printf '%s\n' "${EXPECT_PENDING//,/ }" | wc -w | tr -d ' ')
+newest=$(printf '%s\n' "$shipped_tags" | tail -n "$expected_count" | paste -sd, -)
+[ "$newest" = "$EXPECT_PENDING" ] \
+  || stop "the expected migrations ($EXPECT_PENDING) are not the newest $expected_count this release ships ($newest). Nothing was changed."
+
+say "3/6 preflight before the migration: expecting $expected_count pending, in order: $EXPECT_PENDING"
 before=$(preflight)
 printf '%s\n' "$before" > "$STATE_DIR/preflight-before-$SHORT.log"
-printf '%s\n' "$before" | grep -qE "^\[FAIL\] Migrations +1 not applied: $EXPECT_PENDING\." \
-  || stop "preflight does not show exactly one pending migration ($EXPECT_PENDING) — see $STATE_DIR/preflight-before-$SHORT.log. Nothing was changed."
+# `[FAIL] Migrations   <n> not applied: <a>, <b>. Run the migration ...` — the
+# count and the list, both compared exactly: two pending when one was expected,
+# the right two in the wrong order, or none at all, is a STOP.
+pending=$(printf '%s\n' "$before" | grep -E '^\[FAIL\] Migrations ' | head -1 \
+  | sed -nE 's/^\[FAIL\] Migrations +([0-9]+) not applied: (.*)\. Run the migration.*$/\1|\2/p')
+pending_count=${pending%%|*}
+pending_list=${pending#*|}
+pending_list=${pending_list//, /,}
+[ -n "$pending" ] && [ "$pending_count" = "$expected_count" ] && [ "$pending_list" = "$EXPECT_PENDING" ] \
+  || stop "preflight does not show exactly the expected pending migrations, in order ($EXPECT_PENDING) — see $STATE_DIR/preflight-before-$SHORT.log. Nothing was changed."
 extra=$(unexpected_fails "$before" Migrations)
 [ -z "$extra" ] || stop "preflight FAILs not accepted for this server: $(printf '%s' "$extra" | paste -sd,). Nothing was changed."
 
 # 4. MIGRATE. The one step that is not reversed — and need not be (see the header).
-say "4/6 migrate: applying $EXPECT_PENDING (the live release keeps serving; it reads a database at 0030)"
+say "4/6 migrate: applying $EXPECT_PENDING in order (the live release keeps serving; it reads a database at these migrations)"
 # WITH THE PRODUCTION-MIGRATION INTENT, as runbook §5 types it. `npm run
 # db:migrate` refuses a database that names itself production unless
 # EJE_PRODUCTION_MIGRATION names it too (src/db/connection-guard.ts) — before it
@@ -249,8 +299,11 @@ as_eje "$RELEASE" --setenv=EJE_PRODUCTION_MIGRATION="$EXPECT_DB" /usr/bin/npm ru
 record "$SHORT" migrated yes
 after=$(preflight)
 printf '%s\n' "$after" > "$STATE_DIR/preflight-after-$SHORT.log"
-printf '%s\n' "$after" | grep -qE '^\[ ok \] Migrations +all [0-9]+ applied\.' \
-  || stop "after the migration, preflight's Migrations line is not ok ($STATE_DIR/preflight-after-$SHORT.log). The live release is still serving. Do not switch."
+# ALL of them, counted against the journal: `all <shipped> applied`, not merely
+# "some number applied" — a migrator that stopped part-way through a
+# multi-migration release would still read "all N" for a smaller N.
+printf '%s\n' "$after" | grep -qE "^\[ ok \] Migrations +all $shipped applied\." \
+  || stop "after the migration, preflight does not show all $shipped migrations applied ($STATE_DIR/preflight-after-$SHORT.log). The live release is still serving. Do not switch."
 extra=$(unexpected_fails "$after" '')
 [ -z "$extra" ] || stop "after the migration, preflight FAILs not accepted: $(printf '%s' "$extra" | paste -sd,). The live release is still serving."
 

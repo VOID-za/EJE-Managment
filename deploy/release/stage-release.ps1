@@ -35,6 +35,11 @@ param(
   [string]$ExpectHost = 'srv2000625',
   [string]$HealthUrl = 'https://eje.syncza.co.za/api/health',
   [string]$LogDir = '',
+  # The migrations this release is expected to apply, in order, comma-separated.
+  # Empty: the server script's own default (0030 then 0031). Given: checked here
+  # first, then passed to the server, which checks it again against the
+  # preflight and the release's own journal.
+  [string]$ExpectPending = '',
   # Test seams.
   [string]$Repo = '',
   [string]$ProbeScript = ''
@@ -60,6 +65,21 @@ $KeyOnly = @(
 Set-Content -Path $log -Value "EJE release stage $(Get-Date -Format o)  mode=$mode sha=$Sha" -Encoding utf8
 function Log($text) { Add-Content -Path $log -Value $text -Encoding utf8; Write-Host $text }
 function Stop-Stage($why, [int]$code = 1) { Log "`n######## STOPPED ########`n$why"; exit $code }
+
+# The expected list, if one was given: migration tags, single commas, strictly
+# ascending, no repeats. A typo here would have the server compare against the
+# wrong thing, so it is refused before anything is contacted.
+$pendingEnv = ''
+if ($ExpectPending -ne '') {
+  $tags = $ExpectPending.Split(',')
+  $previous = ''
+  foreach ($tag in $tags) {
+    if ($tag -cnotmatch '^[0-9]{4}_[a-z0-9_]+$') { Stop-Stage "-ExpectPending: '$tag' is not a migration tag. Nothing was contacted." }
+    if ($previous -ne '' -and [string]::CompareOrdinal($tag, $previous) -le 0) { Stop-Stage "-ExpectPending: out of order or repeated ($previous then $tag). Nothing was contacted." }
+    $previous = $tag
+  }
+  $pendingEnv = "EXPECT_PENDING=$ExpectPending"
+}
 function Sha256Hex([byte[]]$bytes) {
   -join ([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })
 }
@@ -101,12 +121,12 @@ $b64 = [Convert]::ToBase64String($ms.ToArray())
 
 $short = if ($Sha) { $Sha.Substring(0, 7) } else { '' }
 $action = switch ($mode) {
-  'check' { "bash /root/eje-ops/deploy-release.sh --check $Sha" }
+  'check' { if ($pendingEnv) { "$pendingEnv bash /root/eje-ops/deploy-release.sh --check $Sha" } else { "bash /root/eje-ops/deploy-release.sh --check $Sha" } }
   'rollback' { "bash /root/eje-ops/deploy-release.sh --rollback $To" }
   'release' {
     # Detached, so a dropped connection cannot kill it mid-switch; then follow it.
     # The start is checked on its own: `a && b & c` would background `a && b`.
-    "systemd-run --quiet --unit=eje-release-$short --collect --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash /root/eje-ops/deploy-release.sh --release $Sha || { echo START_FAILED; exit 5; }; " +
+    "systemd-run --quiet --unit=eje-release-$short --collect --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $(if ($pendingEnv) { "--setenv=$pendingEnv " })/bin/bash /root/eje-ops/deploy-release.sh --release $Sha || { echo START_FAILED; exit 5; }; " +
     "journalctl -u eje-release-$short -f -o cat --no-pager & follower=`$!; " +
     "while systemctl is-active --quiet eje-release-$short 2>/dev/null; do sleep 3; done; sleep 2; kill `$follower 2>/dev/null; " +
     'echo; bash /root/eje-ops/deploy-release.sh --status'
@@ -153,7 +173,7 @@ switch ($mode) {
       Stop-Stage "The server reports $short released, but the public health endpoint does not confirm it (above). Read before acting." 2
     }
     if ($out -match 'ROLLBACK NOT VERIFIED') { Stop-Stage 'THE ROLLBACK COULD NOT BE VERIFIED. Do not retry; read the server output and decide by hand.' 2 }
-    if ($out -match 'ROLLED BACK: serving') { Stop-Stage 'The new release was unhealthy and was ROLLED BACK automatically (above). Migration 0030 stays applied, which the live release reads.' }
+    if ($out -match 'ROLLED BACK: serving') { Stop-Stage 'The new release was unhealthy and was ROLLED BACK automatically (above). The migrations it applied stay applied, which the live release reads.' }
     Stop-Stage 'The release stopped at a gate (above) - see the server output for which one and what it says was changed.'
   }
 }

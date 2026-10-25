@@ -70,11 +70,23 @@ Check 'release: the server says released but the public endpoint disagrees -> ex
 $r = Run @{ Sha = $sha } 'stopped'
 Check 'release stopped at a gate: exit 1, reported' ($r.Code -eq 1 -and $r.Log -match 'stopped at a gate')
 $r = Run @{ Sha = $sha } 'autorollback'
-Check 'release rolled back automatically: exit 1, and says 0030 stays' ($r.Code -eq 1 -and $r.Log -match 'ROLLED BACK automatically' -and $r.Log -match '0030 stays applied')
+Check 'release rolled back automatically: exit 1, and says the migrations stay' ($r.Code -eq 1 -and $r.Log -match 'ROLLED BACK automatically' -and $r.Log -match 'migrations it applied stay applied')
 $r = Run @{ Sha = $sha } 'notverified'
 Check 'rollback NOT verified: exit 2, and "do not retry"' ($r.Code -eq 2 -and $r.Log -match 'Do not retry')
 $r = Run @{ Sha = $sha } 'startfail'
 Check 'the unit failing to start is not mistaken for success' ($r.Code -eq 1 -and $r.Log -notmatch 'RELEASED')
+
+# ---- the expected migrations -----------------------------------------------------------
+$r = Run @{ Sha = $sha } 'ok' $short
+Check 'by default no EXPECT_PENDING is sent: the server script''s own list (0030, 0031) applies' ($r.Calls[0].cmd -notmatch 'EXPECT_PENDING')
+$r = Run @{ Sha = $sha; ExpectPending = '0031_test_repair_date_received' } 'ok' $short
+Check '-ExpectPending reaches the detached release unit as its environment' ($r.Code -eq 0 -and $r.Calls[0].cmd -match '--setenv=EXPECT_PENDING=0031_test_repair_date_received /bin/bash /root/eje-ops/deploy-release.sh --release')
+$r = Run @{ Sha = $sha; CheckOnly = $true; ExpectPending = '0030_library_page_coverage_unknown,0031_test_repair_date_received' }
+Check '-ExpectPending reaches the read-only check too' ($r.Code -eq 0 -and $r.Calls[0].cmd -match 'EXPECT_PENDING=0030_library_page_coverage_unknown,0031_test_repair_date_received bash /root/eje-ops/deploy-release.sh --check')
+foreach ($bad in @('0031_test_repair_date_received,0030_library_page_coverage_unknown', '0030_a,0030_a', 'library_page_coverage_unknown', '0030_a, 0031_b', '0030_A')) {
+  $r = Run @{ Sha = $sha; ExpectPending = $bad }
+  Check "a malformed -ExpectPending ('$bad') is refused, nothing contacted" ($r.Code -eq 1 -and $r.Calls.Count -eq 0 -and $r.Log -match '-ExpectPending')
+}
 
 # ---- rollback -------------------------------------------------------------------------
 $r = Run @{ Rollback = $true } 'ok' '4634d5d'

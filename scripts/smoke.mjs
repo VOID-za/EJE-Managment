@@ -2570,6 +2570,31 @@ await step('a Test & Repair is worked and taken to its collection step', async (
   await page.getByText('Step 1 of 5', { exact: false }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Step 2 of 5', { exact: false }).waitFor({ timeout: 15000 });
+
+  /*
+   * THE REVIEW STEP'S PDF BUTTON, in a real browser. The close-out's Review is
+   * the "job close review page": its button must produce THIS job's card, from
+   * what has just been saved — a download where the browser has no PDF viewer
+   * (headless Chrome), a new tab where it has one.
+   */
+  await page.getByText('Ready for the customer').waitFor({ timeout: 10000 });
+  const pdfButton = page.getByTestId('job-card-pdf-button');
+  await pdfButton.waitFor({ timeout: 10000 });
+  const delivered = await Promise.race([
+    page.waitForEvent('download', { timeout: 20000 }).then((download) => download.suggestedFilename()),
+    page.context().waitForEvent('page', { timeout: 20000 }).then(async (tab) => {
+      await tab.close();
+      return 'opened in a new tab';
+    }),
+    pdfButton.click().then(() => new Promise(() => {})),
+  ]);
+  if (!/EJE-1059.*\.pdf$|opened in a new tab/.test(delivered)) {
+    throw new Error(`the Review step's PDF button produced ${delivered}`);
+  }
+  if ((await page.getByRole('alert').filter({ hasText: /could not be produced/ }).count()) !== 0) {
+    throw new Error('the Review step reported that the job card PDF could not be produced');
+  }
+
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Step 3 of 5', { exact: false }).waitFor({ timeout: 15000 });
 });

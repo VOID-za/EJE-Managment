@@ -17,6 +17,18 @@ sandbox() {
   T=$(mktemp -d); mkdir -p "$T/bin" "$T/releases/$LIVE/.next" "$T/state"; : > "$T/calls"
   echo "4634d5d061c02f3aa9af034be4363403a87f18cf" > "$T/releases/$LIVE/.sha"
   touch "$T/eje.env" "$T/restore.env"
+  # THE RELEASE'S MIGRATION JOURNAL: 32 entries, oldest first, 0030 and 0031 the
+  # newest, as the de0d9b6 + job-forms release ships. The build stub copies it
+  # into the release directory, as a clone would bring it.
+  {
+    echo '{'
+    echo '  "entries": ['
+    for n in $(seq 0 29); do printf '    { "idx": %d, "tag": "%04d_migration" },\n' "$n" "$n"; done
+    echo '    { "idx": 30, "tag": "0030_library_page_coverage_unknown" },'
+    echo '    { "idx": 31, "tag": "0031_test_repair_date_received" }'
+    echo '  ]'
+    echo '}'
+  } > "$T/journal.json"
   stub() { printf '#!/bin/bash\n%s\n' "$2" > "$T/bin/$1"; chmod +x "$T/bin/$1"; }
   # REAL SYMLINKS WHERE THE PLATFORM HAS THEM — CI's Linux, and the server —
   # which is where the atomic `ln -sfn` + `mv -T` switch is proven. Git Bash on
@@ -64,7 +76,8 @@ case "$1" in restart) [ ! -e "$T/fail-restart" ];; is-active) [ ! -e "$T/inactiv
 case "$all" in
   *"git clone"*)
     echo "systemd-run build" >> "$T/calls"; [ -e "$T/fail-build" ] && exit 1
-    mkdir -p "$dir/.next"; printf "%s\n" "$all" | grep -oE "detach [0-9a-f]{40}" | cut -d" " -f2 > "$dir/.sha";;
+    mkdir -p "$dir/.next"; printf "%s\n" "$all" | grep -oE "detach [0-9a-f]{40}" | cut -d" " -f2 > "$dir/.sha"
+    [ -e "$T/no-journal" ] || { mkdir -p "$dir/src/db/migrations/meta"; cp "$T/journal.json" "$dir/src/db/migrations/meta/_journal.json"; };;
   *"npm run backup:verify"*) echo "systemd-run verify" >> "$T/calls"; [ ! -e "$T/fail-verify" ];;
   *"npm run backup:key-check"*) echo "systemd-run key-check" >> "$T/calls"; [ ! -e "$T/fail-keycheck" ];;
   *"npm run backup:restore-test"*)
@@ -76,9 +89,16 @@ case "$all" in
     echo "backup   written /var/backups/eje/eje-eje_production-2026-10-25T10-00-00Z";;
   *"npm run preflight"*)
     echo "systemd-run preflight" >> "$T/calls"
-    if [ -e "$T/migrated" ]; then echo "[ ok ] Migrations         all 31 applied."
+    A=0030_library_page_coverage_unknown; B=0031_test_repair_date_received
+    if [ -e "$T/migrated" ]; then
+      if [ -e "$T/partial-after" ]; then echo "[ ok ] Migrations         all 31 applied."; else echo "[ ok ] Migrations         all 32 applied."; fi
+    elif [ -e "$T/nothing-pending" ]; then echo "[ ok ] Migrations         all 32 applied."
     elif [ -e "$T/two-pending" ]; then echo "[FAIL] Migrations         2 not applied: 0030_x, 0031_y. Run the migration before starting the application."
-    else echo "[FAIL] Migrations         1 not applied: 0030_library_page_coverage_unknown. Run the migration before starting the application."; fi
+    elif [ -e "$T/one-pending" ]; then echo "[FAIL] Migrations         1 not applied: $A. Run the migration before starting the application."
+    elif [ -e "$T/only-0031" ]; then echo "[FAIL] Migrations         1 not applied: $B. Run the migration before starting the application."
+    elif [ -e "$T/wrong-order" ]; then echo "[FAIL] Migrations         2 not applied: $B, $A. Run the migration before starting the application."
+    elif [ -e "$T/three-pending" ]; then echo "[FAIL] Migrations         3 not applied: 0029_migration, $A, $B. Run the migration before starting the application."
+    else echo "[FAIL] Migrations         2 not applied: $A, $B. Run the migration before starting the application."; fi
     echo "[FAIL] Deployment target  the database is named eje_production; a demonstration deployment.  Accepted."
     [ -e "$T/extra-fail" ] && echo "[FAIL] Storage            /var/lib/eje/storage is not writable."
     echo "[ ok ] Database           reachable."; exit 1;;
@@ -93,6 +113,7 @@ case "$all" in
 esac'
   export T
 }
+with_journal() { mkdir -p "$1/src/db/migrations/meta"; cp "$T/journal.json" "$1/src/db/migrations/meta/_journal.json"; }
 run() {
   PATH="$T/bin:$PATH" APP_LINK="$T/app" RELEASES="$T/releases" STATE_DIR="$T/state" \
     ENV_FILE="$T/eje.env" RESTORE_ENV="$T/restore.env" HEALTH_ATTEMPTS=3 \
@@ -138,7 +159,7 @@ that "...records the rollback target and the proven backup" \
   "grep -q '^previous=$T/releases/$LIVE' '$T/state/release-$SHORT.state' && grep -q '^backup=/var/backups/eje/' '$T/state/release-$SHORT.state'"
 that "...the restore test ran with the restore role's environment" "[ \$(called 'systemd-run restore-test') = 1 ]"
 
-sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
+sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"; with_journal "$T/releases/$SHORT"
 expect "--release reuses a verified build of the same commit" 0 "$(run --release "$SHA")" 'reusing the verified build'
 that "...without cloning again" "[ \$(called 'systemd-run build') = 0 ]"
 
@@ -150,10 +171,10 @@ run --release "$SHA" > /dev/null
 that "after a fresh build, the HEAD check runs as eje and passes" \
   "grep -q 'RELEASED: serving $SHORT' '$T/out' && grep -q '^git eje -C $T/releases/$SHORT rev-parse HEAD' '$T/calls'"
 that "...and git is never asked for HEAD as root" "[ \$(called 'git ROOT') = 0 ]"
-sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
+sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"; with_journal "$T/releases/$SHORT"
 expect "--check recognises an eje-owned build of the commit (it will be reused)" 0 "$(run --check "$SHA")" 'holds a build of'
 that "...without asking git as root" "[ \$(called 'git ROOT') = 0 ]"
-sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
+sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"; with_journal "$T/releases/$SHORT"
 run --release "$SHA" > /dev/null
 that "the reuse decision asks git as eje, never as root" \
   "grep -q 'reusing the verified build' '$T/out' && [ \$(called 'git ROOT') = 0 ] && [ \$(called 'git eje') -ge 1 ]"
@@ -171,8 +192,51 @@ that "the migration is given EJE_PRODUCTION_MIGRATION=eje_production, and applie
 that "...and the intent is given to that one command only (static)" \
   "[ \$(grep -v '^ *#' '$SCRIPT' | grep -c 'EJE_PRODUCTION_MIGRATION=') = 1 ] && grep -v '^ *#' '$SCRIPT' | grep 'EJE_PRODUCTION_MIGRATION=' | grep -q 'npm run db:migrate'"
 
+# ---- a release that carries TWO migrations: 0030 and 0031, in that order --------
+# The tool used to assume exactly one pending migration. It now takes an ordered
+# list (EXPECT_PENDING), demands the preflight show exactly that list, demands it
+# be the newest entries of the release's own journal, and demands afterwards
+# that EVERY shipped migration is applied — never weaker than before.
+sandbox
+expect "--release applies BOTH pending migrations, in order, and releases" 0 "$(run --release "$SHA")" "RELEASED: serving $SHORT"
+that "...it said what it expected: 2 pending, 0030 then 0031" \
+  "grep -q 'expecting 2 pending, in order: 0030_library_page_coverage_unknown,0031_test_repair_date_received' '$T/out'"
+that "...and migrated once, between the two preflights" \
+  "[ \"\$(grep -oE '^systemd-run (preflight|migrate)' '$T/calls' | paste -sd, -)\" = 'systemd-run preflight,systemd-run migrate,systemd-run preflight' ]"
+
+sandbox; touch "$T/partial-after"
+expect "after the migration, fewer than ALL shipped migrations applied is a STOP" 1 "$(run --release "$SHA")" 'does not show all 32 migrations applied'
+that "...no switch, no restart: the live release keeps serving" "[ \$(serving) = $LIVE ] && [ \$(called 'systemctl restart') = 0 ]"
+
+# de0d9b6 released first: only 0031 is then pending, and the operator says so.
+sandbox; touch "$T/only-0031"
+EXPECT_PENDING=0031_test_repair_date_received run --release "$SHA" > /dev/null
+that "a release with ONLY 0031 pending, when the operator expects exactly that, releases" \
+  "grep -q 'RELEASED: serving $SHORT' '$T/out' && grep -q 'expecting 1 pending, in order: 0031_test_repair_date_received' '$T/out'"
+
+sandbox
+EXPECT_PENDING=0030_library_page_coverage_unknown run --release "$SHA" > /dev/null
+that "expecting a list that is not the NEWEST the release ships stops before the preflight" \
+  "grep -q 'are not the newest 1 this release ships (0031_test_repair_date_received)' '$T/out' && [ \$(called 'systemd-run preflight') = 0 ] && untouched"
+
+for bad in '0031_test_repair_date_received,0030_library_page_coverage_unknown' \
+           '0030_library_page_coverage_unknown,0030_library_page_coverage_unknown' \
+           '0030_library_page_coverage_unknown, 0031_test_repair_date_received' \
+           'library_page_coverage_unknown' ',0030_library_page_coverage_unknown' ''; do
+  sandbox
+  EXPECT_PENDING="$bad" run --release "$SHA" > /dev/null
+  that "a malformed EXPECT_PENDING ('$bad') is refused before anything — no build, nothing changed" \
+    "grep -q 'STOPPED' '$T/out' && [ \$(called systemd-run) = 0 ] && [ ! -e '$T/releases/$SHORT' ] && untouched"
+done
+sandbox
+EXPECT_PENDING='0031_test_repair_date_received,0030_library_page_coverage_unknown' run --check "$SHA" > /dev/null
+that "...and --check refuses it too, read only" "grep -q 'out of order or repeated' '$T/out' && [ \$(called systemd-run) = 0 ]"
+
+that "no single-migration assumption is left in the gate (static)" \
+  "! grep -nE '\\+1 not applied|exactly one pending' '$SCRIPT'"
+
 # ---- every gate before the migration stops with NOTHING changed -----------------
-for case in fail-build fail-backup fail-verify fail-keycheck fail-restore two-pending extra-fail; do
+for case in fail-build fail-backup fail-verify fail-keycheck fail-restore two-pending extra-fail one-pending only-0031 wrong-order three-pending nothing-pending no-journal; do
   sandbox; touch "$T/$case"
   expect "$case: stops before the migration" 1 "$(run --release "$SHA")" 'STOPPED'
   that "...$case: live release still serving, no migration, no restart" "untouched"
