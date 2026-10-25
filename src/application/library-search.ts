@@ -209,7 +209,7 @@ export const searchLibraryText = async (
     const document = byId.get(documentId);
     const index = stateById.get(documentId);
     if (document === undefined || index === undefined) continue;
-    const [content, pageMatches] = await Promise.all([
+    const [content, allTermPages] = await Promise.all([
       repos.documents.findTextContent(documentId),
       /*
        * THE PAGES, read only for the rows on THIS result page — the same rule
@@ -218,6 +218,29 @@ export const searchLibraryText = async (
        */
       repos.documents.findPageMatches(documentId, terms, MAX_PAGE_MATCHES),
     ]);
+    /*
+     * TERMS ON DIFFERENT PAGES. LIB-TEXT-1 (#70).
+     *
+     * A document matches when every term is on SOME page, so a search for an
+     * alarm code and a parameter number can match a manual where the two are
+     * a hundred pages apart — and no single page then holds both. Rather than
+     * a hit with nowhere to send the technician (the document-level summary is
+     * bounded and may not reach page 180), each term's best page is shown.
+     */
+    const pageMatches =
+      allTermPages.length > 0 || terms.length < 2
+        ? allTermPages
+        : (
+            await Promise.all(
+              terms.map((term) => repos.documents.findPageMatches(documentId, [term], 1)),
+            )
+          )
+            .flat()
+            .filter(
+              (match, position, every) =>
+                every.findIndex((other) => other.pageNumber === match.pageNumber) === position,
+            )
+            .slice(0, MAX_PAGE_MATCHES);
     hits.push({
       document,
       index,

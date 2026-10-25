@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { can, type TechnicalDocumentType } from '@/domain';
+import { asDocumentId, can, type TechnicalDocumentType } from '@/domain';
 import { Button, Modal, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { library, type LibraryUploadResult } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
+import { describeSearchability } from '@/application/library-ocr';
+import { formatNumber } from '@/lib/format';
 
 const DOCUMENT_TYPES: readonly { value: TechnicalDocumentType; label: string }[] = [
   { value: 'machine_manual', label: 'Machine manual' },
@@ -128,16 +130,44 @@ export const UploadDocumentDialog = ({
               {outcome.document.name} — {outcome.document.pageCount}{' '}
               {outcome.document.pageCount === 1 ? 'page' : 'pages'} stored
             </p>
-            {outcome.index.state === 'indexed' ? (
-              <p>
-                Searchable: {outcome.index.characters.toLocaleString('en-ZA')} characters were read
-                out of it{outcome.index.truncated ? ', cut at the index limit' : ''}.
-              </p>
-            ) : (
-              <p data-testid="library-upload-not-searchable">
-                <span className="font-semibold">Not searchable.</span> {outcome.index.failureReason}
-              </p>
-            )}
+            {/*
+              THE SAME WORDS THE LIBRARY LIST USES. LIB-TEXT-1 (#70).
+
+              This used to test `state === 'indexed'` and call everything else
+              "Not searchable" — so a manual indexed on 1 498 of its 1 500
+              pages, with two scanned diagrams, was reported to the person who
+              had just uploaded it as unsearchable. `describeSearchability` is
+              the one place that turns an index into a sentence, N of M
+              included, and the list already reads it.
+            */}
+            {(() => {
+              const said = describeSearchability(
+                {
+                  documentId: asDocumentId(outcome.document.id),
+                  state: outcome.index.state,
+                  source: outcome.index.source,
+                  extractedAt: '',
+                  characters: outcome.index.characters,
+                  pages: outcome.index.pages,
+                  pagesIndexed: outcome.index.pagesIndexed,
+                  truncated: outcome.index.truncated,
+                  unreadableStreams: 0,
+                  failureReason: outcome.index.failureReason,
+                },
+                null,
+              );
+              return said.searchable ? (
+                <p data-testid="library-upload-searchable">
+                  <span className="font-semibold">{said.label}.</span>{' '}
+                  {formatNumber(outcome.index.characters, 0)} characters were read out of it.{' '}
+                  {outcome.index.state === 'indexed' ? '' : outcome.index.failureReason}
+                </p>
+              ) : (
+                <p data-testid="library-upload-not-searchable">
+                  <span className="font-semibold">{said.label}.</span> {said.detail}
+                </p>
+              );
+            })()}
           </div>
         )}
 

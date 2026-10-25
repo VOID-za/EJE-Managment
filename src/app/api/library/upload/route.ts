@@ -124,8 +124,12 @@ export const POST = uploadRoute({
       },
       index: {
         state: index.state,
+        source: index.source,
         characters: index.characters,
         pages: index.pages,
+        // N of M, LIB-TEXT-1 (#70): the screen that just indexed a document
+        // says how much of it is searchable, not only whether.
+        pagesIndexed: index.pagesIndexed,
         truncated: index.truncated,
         failureReason: index.failureReason,
       },

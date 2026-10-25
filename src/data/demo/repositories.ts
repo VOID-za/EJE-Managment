@@ -740,10 +740,23 @@ class DemoDocumentRepository implements DocumentRepository {
           // A partially indexed manual is searchable in the pages that ARE
           // indexed. LIB-TEXT-1.
           isSearchableState(entry.index.state) &&
-          matchesAllTerms(entry.content, terms),
+          /*
+           * THE PAGES ARE THE INDEX WHERE THERE ARE PAGES (#70), exactly as the
+           * PostgreSQL repository applies it: every term must be on SOME page,
+           * not all on the same one. A document with no page rows is searched
+           * through its document text, as before.
+           */
+          ((entry.pages ?? []).length > 0
+            ? terms.every((term) =>
+                (entry.pages ?? []).some((page) => matchesAllTerms(page.content, [term])),
+              )
+            : matchesAllTerms(entry.content, terms)),
       )
       .map((entry) => {
-        const words = tokenize(entry.content);
+        const words =
+          (entry.pages ?? []).length > 0
+            ? (entry.pages ?? []).flatMap((page) => tokenize(page.content))
+            : tokenize(entry.content);
         const hits = words.filter((word) => terms.includes(word)).length;
         return { documentId: entry.index.documentId, hits };
       })

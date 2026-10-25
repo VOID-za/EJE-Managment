@@ -391,6 +391,19 @@ export const describeSearchability = (
         : job !== null && job.state === 'unavailable'
           ? ' Nothing on this server can read the remaining pages.'
           : '';
+    /*
+     * ZERO OF M IS "WHICH PAGES IS NOT KNOWN", NOT "NONE". LIB-TEXT-1 (#70).
+     * The built-in reader, cut at its summary budget, cannot attribute its
+     * text to pages (migration `0030`). Some of the document IS searchable,
+     * and saying "0 of 214 pages" would tell a technician the opposite.
+     */
+    if (index.pagesIndexed === 0) {
+      return {
+        searchable: true,
+        label: `Searchable in part — of ${index.pages} pages, which ones is not known`,
+        detail: `Part of this document is in the index. ${index.failureReason}${waiting}`.trim(),
+      };
+    }
     return {
       searchable: true,
       label: `Searchable — ${index.pagesIndexed} of ${index.pages} pages`,

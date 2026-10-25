@@ -9,6 +9,7 @@ import {
   type TechnicalDocumentType,
 } from '@/domain';
 import type { UploadedFile } from '@/services/ports';
+import type { PdfTextLimitHit } from '@/services/pdf-text';
 import type { OperationContext } from './context';
 import { audit, notifyMasters } from './audit';
 import { enqueueOcr } from './library-ocr';
@@ -267,12 +268,16 @@ export const addDocumentVersion = async (
  * of a manual out of the index, and they send somebody to three different
  * places: pages that are pictures (upload a text copy, or wait for
  * recognition), streams that would not decompress (the file is damaged), and
- * the index budget (the document is longer than one entry may carry).
+ * a LIMIT — each of which now says, in its own sentence, which bound it was
+ * and what to do (`PdfTextLimitHit`). The old "longer than one index entry may
+ * carry" is gone with the whole-document budget it described (#70).
  */
 const describePartialRead = (reading: {
   readonly pagesWithoutText: readonly number[];
   readonly unreadableStreams: number;
   readonly truncated: boolean;
+  readonly complete: boolean;
+  readonly limits: readonly PdfTextLimitHit[];
 }): string => {
   const said: string[] = [];
   if (reading.pagesWithoutText.length > 0) {
@@ -285,8 +290,13 @@ const describePartialRead = (reading: {
         ? `page${pages.length === 1 ? '' : 's'} ${pages.join(', ')}`
         : `${pages.length} pages`;
     said.push(
-      `No text could be read from ${named}: those pages are pictures, so they are not ` +
-        'searchable until the text on them is recognised.',
+      reading.complete
+        ? `No text could be read from ${named}: those pages are pictures, so they are not ` +
+            'searchable until the text on them is recognised.'
+        : // Recognition is NOT queued for an incomplete reading (see below), so
+          // this must not promise it.
+          `No text could be read from ${named}: those pages are pictures. They are not queued ` +
+            'for text recognition, because the reading stopped before the end of the document.',
     );
   }
   if (reading.unreadableStreams > 0) {
@@ -295,9 +305,7 @@ const describePartialRead = (reading: {
         'part of its text may be missing from the index.',
     );
   }
-  if (reading.truncated) {
-    said.push('The document is longer than one index entry may carry and was cut.');
-  }
+  for (const hit of reading.limits) said.push(hit.message);
   return said.join(' ');
 };
 
@@ -337,13 +345,6 @@ export const indexDocumentText = async (
   const reading = context.services.pdfText.read(bytes);
   const extractedAt = context.services.clock.now();
 
-  /*
-   * PARTIALLY INDEXED IS A COUNT, NOT A JUDGEMENT. A page either contributed
-   * text to the index or it did not, and the state follows from the two
-   * numbers. An engine that cannot attribute text to a page reports no
-   * candidates, so every page counts as indexed — which is what the built-in
-   * reader has always effectively claimed, now said rather than implied.
-   */
   const pageRows =
     reading.kind === 'text'
       ? reading.pages.map((page) => ({
@@ -355,21 +356,55 @@ export const indexDocumentText = async (
         }))
       : [];
 
+  /*
+   * N OF M IS COUNTED FROM WHAT WAS STORED, NEVER INFERRED. LIB-TEXT-1 (#70).
+   *
+   * It used to be `totalPages - pagesWithoutText` — and a page dropped by the
+   * old whole-document budget was in neither list, so a 214-page manual cut at
+   * page 96 was recorded as `indexed`, 214 of 214. That is the overstatement
+   * this state exists to prevent. Now:
+   *
+   *   - an engine that reads per page counts the pages whose WHOLE text is in
+   *     the index — a page cut at `maxPageCharacters` is searchable in part and
+   *     is not counted as indexed;
+   *   - the document is `indexed` only when every page was read, every page
+   *     contributed text and nothing was cut — anything less is
+   *     `partially_indexed`, with every reason in `failureReason`;
+   *   - the built-in reader, which cannot attribute text to pages, counts every
+   *     page when it read the whole document, and — when it was cut — records
+   *     `partially_indexed` with the page coverage UNKNOWN (0 of M, migration
+   *     `0030`), rather than guessing a number or claiming all of them.
+   */
+  const perPage = reading.kind === 'text' && reading.pages.length > 0;
+  const fullyIndexedPages =
+    reading.kind !== 'text'
+      ? 0
+      : perPage
+        ? reading.pages.filter((page) => page.truncated !== true).length
+        : reading.complete
+          ? reading.totalPages
+          : 0;
+  const wholeDocument =
+    reading.kind === 'text' &&
+    reading.complete &&
+    !reading.truncated &&
+    reading.pagesWithoutText.length === 0 &&
+    fullyIndexedPages === reading.totalPages;
+
   const index: DocumentTextIndex =
     reading.kind === 'text'
       ? {
           documentId: document.id,
-          state: reading.pagesWithoutText.length === 0 ? 'indexed' : 'partially_indexed',
+          state: wholeDocument ? 'indexed' : 'partially_indexed',
           // Out of the PDF's own text layer: what the document SAYS, rather
           // than a machine's reading of what it looks like. See LIB-5.
           source: 'text_layer',
           extractedAt,
-          characters: reading.text.length,
+          characters: perPage
+            ? pageRows.reduce((sum, page) => sum + page.characters, 0)
+            : reading.text.length,
           pages: reading.totalPages,
-          pagesIndexed:
-            reading.pagesWithoutText.length === 0
-              ? reading.totalPages
-              : reading.totalPages - reading.pagesWithoutText.length,
+          pagesIndexed: wholeDocument ? reading.totalPages : fullyIndexedPages,
           truncated: reading.truncated,
           unreadableStreams: reading.unreadableStreams,
           failureReason: describePartialRead(reading),
@@ -424,7 +459,7 @@ export const indexDocumentText = async (
           : `Document NOT searchable: ${document.name}`,
     detail: isSearchableState(saved.state)
       ? `${saved.characters} characters extracted from ${saved.pagesIndexed} of ${saved.pages} ` +
-        `page(s) by ${reading.engine}${saved.truncated ? ', cut at the index limit' : ''}.` +
+        `page(s) by ${reading.engine}${saved.truncated ? ', stopped or cut at a limit' : ''}.` +
         `${saved.failureReason === '' ? '' : ` ${saved.failureReason}`}`
       : `${saved.state === 'needs_ocr' ? 'No searchable text' : 'The file could not be read'}: ${saved.failureReason}`,
   });
@@ -454,7 +489,23 @@ export const indexDocumentText = async (
    * reading is answered by the page rows, so recognition reads those pages and
    * not the whole book.
    */
-  if (saved.state === 'needs_ocr' || saved.state === 'partially_indexed') {
+  /*
+   * RECOGNITION ONLY FOR PAGES KNOWN TO HAVE NO TEXT. LIB-TEXT-1 (#70).
+   *
+   * Recognition reads every page that has no page row. That is the same set
+   * as "pages without text" ONLY when the reading looked at every page — a
+   * reading stopped by a limit leaves pages that were never examined, which
+   * may be full of perfectly good text, and recognising those would be 23–25
+   * seconds a page spent re-reading what extraction could have read. So an
+   * incomplete reading queues nothing, and its caveat says so; the same goes
+   * for a partial index whose only gap is a limit rather than a picture.
+   */
+  const recognisable =
+    reading.kind !== 'failed' &&
+    reading.complete &&
+    (saved.state === 'needs_ocr' ||
+      (saved.state === 'partially_indexed' && reading.pagesWithoutText.length > 0));
+  if (recognisable) {
     await enqueueOcr(context, document.id);
   }
 

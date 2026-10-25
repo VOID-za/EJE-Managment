@@ -21,6 +21,8 @@ import type {
   Site,
   SystemSettings,
   DocumentTextIndex,
+  DocumentIndexState,
+  DocumentTextSource,
   TechnicalDocument,
   SubmissionCover,
   TemplateUsage,
@@ -83,9 +85,13 @@ export interface LibraryUploadResult {
     readonly pageCount: number;
   };
   readonly index: {
-    readonly state: 'indexed' | 'needs_ocr' | 'failed';
+    // `partially_indexed` was missing, so the upload dialog called a partially
+    // searchable manual "Not searchable". LIB-TEXT-1 (#70).
+    readonly state: DocumentIndexState;
+    readonly source: DocumentTextSource | null;
     readonly characters: number;
     readonly pages: number;
+    readonly pagesIndexed: number;
     readonly truncated: boolean;
     readonly failureReason: string;
   };

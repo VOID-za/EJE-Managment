@@ -69,7 +69,7 @@ stops at page 40 anyway. **The library would have reported EJE's own manuals as
 dependency that is not really optional.** It is also already required by
 recognition, so a server set up for OCR has it.
 
-### Measured: a 214-page manual, and the one limit that now bites
+### Measured: a 214-page manual
 
 A representative manual built for the purpose — 214 pages, 45 lines of alarm
 text per page, Flate-compressed content streams, a cross-reference table, text
@@ -81,36 +81,68 @@ on every page — read through the real service on this container
 | Wall clock | **0.21 s** (0.13–0.20 s for `pdftotext` alone, three runs) |
 | Pages with text | 214 of 214 |
 | Text produced | **896 kB** — about 4 kB a page |
-| Pages actually indexed | **96 of 214** |
-| State recorded | `partially_indexed`, truncated, with the reason |
+| Pages indexed **then** | 96 of 214 — the 400 000-character whole-document budget |
+| Pages indexed **now** (LIB-TEXT-1, #70) | **214 of 214**, state `indexed` |
 
 **The time is the point of comparison.** The same document through recognition
 is 83 to 89 minutes (§5) and stops at page 40. Extraction is **about 25 000
 times faster**, which is why it happens inside the upload request and
 recognition cannot.
 
-**THE LIMIT THAT NOW BITES IS `MAX_INDEXED_CHARACTERS = 400 000`**, in
-`src/lib/pdf/extract-text.ts`. It was sized when the byte reader was the only
-engine and most real manuals came out unreadable; now that they come out whole,
-an ordinary 214-page manual exceeds it at **page 96** and the remaining 118
-pages are not searchable. The library says so — *"Searchable — 96 of 214
-pages"*, with *"the document is longer than one index entry may carry and was
-cut"* — so nobody is misled, and somebody searching for an alarm on page 150
-still finds nothing.
+### The whole-document budget is gone (#70), and what replaced it
 
-**This is reported rather than changed.** Raising it is a decision about how
-much of EJE's database one document may occupy, which is the same class of
-decision as BD-21's page cap, and the mandate's own instruction is to keep the
-current limits unless measured evidence **and an approved decision** justify a
-change. The evidence is above; the decision is EJE's.
+**What used to happen.** `MAX_INDEXED_CHARACTERS = 400 000` was ONE budget for
+the whole document, so an ordinary 214-page manual stopped at **page 96** and a
+search for an alarm on page 150 found nothing. It existed for a real reason: the
+document's text went into ONE `tsvector`, and PostgreSQL refuses a tsvector
+over a megabyte. **And it was recorded wrongly:** a page dropped by the budget
+was in neither the pages-with-text list nor the pages-without, so the cut
+manual was stored as `indexed`, 214 of 214 — the overstatement the
+`partially_indexed` state exists to prevent.
 
-**Recommended default:** raise it to **2 000 000 characters** (about 500 pages
-of this manual's density, 2 MB of text per revision). On a library of 200 such
-manuals that is roughly 400 MB of text plus its full-text vectors — well
-within what the VPS's PostgreSQL holds, and it makes the common case whole. The
-per-page rows carry the same text again, so the real figure is about double;
-2 MB a revision is still the right order of magnitude for a machine that
-already stores the PDFs themselves.
+**What happens now.**
+
+- **The pages are the index.** A document read per page is searched through its
+  per-page vectors (`library_document_pages`), so no single value has to hold
+  the book. The rule is unchanged — every term must be in the DOCUMENT — so each
+  term is asked of the pages separately: a term on page 3 and another on page
+  180 still match. A result whose terms are on different pages points to each.
+- **`library_document_text.content` is a bounded SUMMARY** (still 400 000
+  characters, still one tsvector) and decides nothing for a document with pages.
+  The built-in reader, which cannot attribute text to pages, still searches it,
+  and when it is cut records **`partially_indexed` with the page coverage
+  unknown** (0 of M — migration `0030`) rather than claiming every page.
+- **N of M is counted from what was stored.** `indexed` only when every page was
+  read, every page had text and nothing was cut. A page cut at the per-page bound
+  is searchable in part and not counted as indexed.
+- **Recognition is queued only for pages known to have no text**: a reading
+  stopped by a limit leaves pages nobody examined, and they are not sent to OCR.
+
+**The limits that remain** (`PDF_TEXT_LIMITS` in `src/services/pdf-text.ts`).
+Each stops the reading at a page boundary, keeps everything read before it, and
+writes its own sentence into the document's caveat:
+
+| Limit | Value | Why | What the library says |
+|---|---|---|---|
+| File size | 40 MB | Bytes a person chose, on the server | *"The file is N MB, and this server reads up to 40 MB of PDF at a time. Split the document…"* |
+| Pages read | 5 000 | Bounds one upload's work | *"Only the first 5 000 pages are read from one document… Split the document to index the rest."* |
+| Text per page | 100 000 characters | A dense A4 page is 5–15 000; keeps one page's vector far below PostgreSQL's limit | *"Page N held more than 100 000 characters, and only that much of each is searchable."* |
+| Text per document | 25 000 000 characters | Memory while reading (~6 000 ordinary pages) — not an index budget | *"…more than one document may contribute, so reading stopped at page N…"* |
+| Time | 120 s for the whole reading | The upload request is open | *"Reading stopped after 120 seconds, at page N… Upload the document again to retry, or split it."* |
+
+`pdftotext` is run **200 pages at a time** (`-f`/`-l`), which bounds the memory
+of each run and is what makes the deadline a point at which the reading STOPS
+rather than fails. The page count comes from `pdfinfo` (same package); without
+it the end is found by reading to it, and a stopped reading says the total is
+not known rather than guessing.
+
+**Measured on generated manuals** (`src/test/pdf-manual.ts`, one marker word per
+page): a **1 200-page** manual (4.9 MB, ~4.8 million characters of page text) is
+indexed on every page and page 1 100 is found by a search; a **1 500-page**
+manual with two blank pages is 1 498 of 1 500 and queues recognition for those
+two alone. The tests are `src/application/library-large-documents.test.ts`,
+`src/services/pdf-text.test.ts`, `src/data/postgres/library-page-search.db.test.ts`
+and a browser step in `scripts/tablet-pdf-check.mjs`.
 
 
 ## 1. What is actually unsearchable
