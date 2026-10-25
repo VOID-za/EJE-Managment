@@ -237,7 +237,14 @@ extra=$(unexpected_fails "$before" Migrations)
 
 # 4. MIGRATE. The one step that is not reversed — and need not be (see the header).
 say "4/6 migrate: applying $EXPECT_PENDING (the live release keeps serving; it reads a database at 0030)"
-as_eje "$RELEASE" /usr/bin/npm run db:migrate > "$STATE_DIR/migrate-$SHORT.log" 2>&1 \
+# WITH THE PRODUCTION-MIGRATION INTENT, as runbook §5 types it. `npm run
+# db:migrate` refuses a database that names itself production unless
+# EJE_PRODUCTION_MIGRATION names it too (src/db/connection-guard.ts) — before it
+# connects — and the intent must never sit in eje.env, so it is given to this one
+# command and nothing else. Without it the first live run stopped here, with the
+# database untouched (25 October 2026).
+as_eje "$RELEASE" --setenv=EJE_PRODUCTION_MIGRATION="$EXPECT_DB" /usr/bin/npm run db:migrate \
+  > "$STATE_DIR/migrate-$SHORT.log" 2>&1 \
   || stop "the migration failed ($STATE_DIR/migrate-$SHORT.log). The live release $LIVE is still serving. Do not switch."
 record "$SHORT" migrated yes
 after=$(preflight)

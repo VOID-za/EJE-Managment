@@ -82,7 +82,13 @@ case "$all" in
     echo "[FAIL] Deployment target  the database is named eje_production; a demonstration deployment.  Accepted."
     [ -e "$T/extra-fail" ] && echo "[FAIL] Storage            /var/lib/eje/storage is not writable."
     echo "[ ok ] Database           reachable."; exit 1;;
-  *"npm run db:migrate"*) echo "systemd-run migrate" >> "$T/calls"; [ -e "$T/fail-migrate" ] && exit 1; touch "$T/migrated";;
+  *"npm run db:migrate"*)
+    # AS src/db/connection-guard.ts BEHAVES: a production database is refused,
+    # before any connection, unless the intent names it.
+    case "$all" in *"--setenv=EJE_PRODUCTION_MIGRATION=eje_production"*) ;;
+      *) echo "systemd-run migrate REFUSED-NO-INTENT" >> "$T/calls"
+         echo "This will change the schema of eje_production, which is the live database."; exit 1;; esac
+    echo "systemd-run migrate" >> "$T/calls"; [ -e "$T/fail-migrate" ] && exit 1; touch "$T/migrated";;
   *) echo "systemd-run OTHER $all" >> "$T/calls";;
 esac'
   export T
@@ -153,6 +159,17 @@ that "the reuse decision asks git as eje, never as root" \
   "grep -q 'reusing the verified build' '$T/out' && [ \$(called 'git ROOT') = 0 ] && [ \$(called 'git eje') -ge 1 ]"
 that "every HEAD check in the script goes through release_head (static)" \
   "[ \$(grep -c 'git -C' '$SCRIPT') = 1 ] && grep -q '^release_head() { runuser -u eje -- git -C' '$SCRIPT'"
+
+# ---- the migration carries the production intent, and nothing else does ---------
+# The first live run (25 October 2026) stopped at 4/6: db:migrate refuses a
+# production database unless EJE_PRODUCTION_MIGRATION names it, and the release
+# did not pass it. The intent belongs to that ONE command, never to eje.env.
+sandbox
+run --release "$SHA" > /dev/null
+that "the migration is given EJE_PRODUCTION_MIGRATION=eje_production, and applies" \
+  "grep -q 'RELEASED: serving $SHORT' '$T/out' && [ \$(called 'systemd-run migrate REFUSED') = 0 ] && [ -e '$T/migrated' ]"
+that "...and the intent is given to that one command only (static)" \
+  "[ \$(grep -v '^ *#' '$SCRIPT' | grep -c 'EJE_PRODUCTION_MIGRATION=') = 1 ] && grep -v '^ *#' '$SCRIPT' | grep 'EJE_PRODUCTION_MIGRATION=' | grep -q 'npm run db:migrate'"
 
 # ---- every gate before the migration stops with NOTHING changed -----------------
 for case in fail-build fail-backup fail-verify fail-keycheck fail-restore two-pending extra-fail; do
