@@ -158,6 +158,26 @@ checksum, not a date — and no row is deleted.
 every row. On this database (tens of rows) it is instantaneous; it would not be
 on a table of millions, and nothing here is.
 
+### Since the 24 October deployment: migration 0030 (LIB-TEXT-1, #70) — NOT YET DEPLOYED
+
+The live ledger read **30** after 24 October (`0000`–`0029`). The next release
+that carries LIB-TEXT-1's per-page indexing adds one:
+
+| Migration | What it does | Risk |
+|---|---|---|
+| `0030_library_page_coverage_unknown` | LIB-TEXT-1. **Replaces one CHECK** (`library_document_text_pages_indexed_matches_state`) so a `partially_indexed` row may carry `pages_indexed = 0` — "some of this document is searchable; which pages is not known", which is what the built-in reader can truthfully say when it is cut | **Relaxes a constraint and rewrites nothing.** The new rule accepts every row the old one did, so no existing row can fail it. Written as a quiet drop and an unconditional add, per `redefinitions.test.ts` |
+
+**The code needs `0030` before it writes a "coverage unknown" row**, and only
+the built-in reader writes one — i.e. only a server WITHOUT poppler-utils. A
+server with poppler (the VPS has it) never writes `pages_indexed = 0` for a
+partial index, so the order of migrate-then-restart that the procedure already
+follows is sufficient; there is no window in which the new code is refused.
+
+**`pdfinfo` is now used**, from the same poppler-utils package as `pdftotext`
+— nothing new to install. It tells the reader how many pages a document has
+before any are read; without it the reader finds the end by reading to it,
+and says so when a limit stopped it first.
+
 ### And a new preflight line
 
 `EJE_DEPLOYMENT` should be set before step 4, to `production` or

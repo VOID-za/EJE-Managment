@@ -299,8 +299,50 @@ const libraryPdf = (text) => {
   return body;
 };
 
+/**
+ * A LONG MANUAL, ONE MARKER WORD PER PAGE. LIB-TEXT-1 (#70).
+ *
+ * The same shape as `src/test/pdf-manual.ts` (which the unit and application
+ * suites use), written out here because this script is plain JavaScript run
+ * by node against a built server. Page `n` carries the word `pagemark<n>x` and
+ * no other page does, so a search for it can only be answered by page `n`.
+ */
+const longManualPdf = (pages) => {
+  const objects = [];
+  const kids = [];
+  for (let page = 1; page <= pages; page += 1) {
+    const pageId = 4 + (page - 1) * 2;
+    kids.push(`${pageId} 0 R`);
+    const lines = [`BT /F1 9 Tf 11 TL 40 800 Td (Section ${page} pagemark${page}x) Tj`];
+    for (let line = 1; line < 45; line += 1) {
+      lines.push(`T* (Alarm ${page}-${line}: check the spindle drive parameter P${line} before restart.) Tj`);
+    }
+    lines.push('ET');
+    const stream = lines.join('\n');
+    objects[pageId] =
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] ' +
+      `/Resources << /Font << /F1 3 0 R >> >> /Contents ${pageId + 1} 0 R >>`;
+    objects[pageId + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  }
+  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages} >>`;
+  objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+
+  let body = '%PDF-1.4\n';
+  const offsets = [];
+  for (let id = 1; id < objects.length; id += 1) {
+    offsets[id] = Buffer.byteLength(body, 'latin1');
+    body += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
+  const startxref = Buffer.byteLength(body, 'latin1');
+  body += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let id = 1; id < objects.length; id += 1) body += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+  body += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
+  return body;
+};
+
 /** Uploads a document through the real route, from inside the page. */
-const uploadDocument = async (page, { name, text }) =>
+const uploadDocument = async (page, { name, text, source }) =>
   page.evaluate(
     async ([base, documentName, source]) => {
       const file = new File([source], 'library-preview.pdf', { type: 'application/pdf' });
@@ -322,7 +364,7 @@ const uploadDocument = async (page, { name, text }) =>
         bytes: source.length,
       };
     },
-    [BASE, name, libraryPdf(text)],
+    [BASE, name, source ?? libraryPdf(text)],
   );
 
 const openLibraryDocument = async (page, name) => {
@@ -427,6 +469,34 @@ await step('DESKTOP: a technician cannot fetch a pending revision through the br
     throw new Error(`another technician got HTTP ${refused.status} for a pending revision`);
   }
   if (refused.isPdf) throw new Error('the refusal handed over the document anyway');
+});
+
+await step('DESKTOP: a 1 200-page manual is indexed on EVERY page, and a search names page 1 100 (#70)', async () => {
+  /*
+   * The old whole-document budget stopped an ordinary 214-page manual at page
+   * 96. This uploads one five times as long through the real route, with the
+   * real `pdftotext`, and then asks the library screen — as a person would —
+   * for a word that exists only on page 1 100.
+   *
+   * As the office: the step before ends signed in as a technician, and a
+   * technician's upload is a pending revision, which no search returns.
+   */
+  await desktopPage.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await signOut(desktopPage);
+  await signInAs(desktopPage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+  const longUpload = await uploadDocument(desktopPage, {
+    name: 'Long manual proof',
+    source: longManualPdf(1_200),
+  });
+  if (longUpload.status !== 200) throw new Error(`the upload answered HTTP ${longUpload.status}`);
+  if (longUpload.indexState !== 'indexed') {
+    throw new Error(`the 1 200-page manual indexed as "${longUpload.indexState}", not "indexed"`);
+  }
+
+  await desktopPage.goto(`${BASE}/library`, { waitUntil: 'networkidle' });
+  await desktopPage.locator('#library-search').fill('pagemark1100x');
+  const match = desktopPage.getByTestId('library-page-match').filter({ hasText: 'Page 1100' });
+  await match.first().waitFor({ timeout: 25000 });
 });
 
 await desktop.close();

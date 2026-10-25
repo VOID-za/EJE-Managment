@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { extractPdfText, MAX_INDEXED_CHARACTERS } from '@/lib/pdf/extract-text';
 import { buildPdfText, builtinPdfText, popplerPdfText } from './pdf-text';
+import { buildManual } from '@/test/pdf-manual';
 
 /**
  * ORDINARY PDF TEXT EXTRACTION, WHICH IS THE LIBRARY'S PRIMARY PATH.
@@ -116,29 +117,82 @@ describe('PDF text extraction', () => {
       expect(elapsed).toBeLessThan(5_000);
     });
 
-    it('is CUT at the index budget, and says so rather than hiding it', () => {
+    it('is read ALL THE WAY THROUGH — every page, not the first 96 (#70)', () => {
       const reading = popplerPdfText().read(bytesOf(LONG));
       expect(reading.kind).toBe('text');
       if (reading.kind !== 'text') throw new Error('unreachable');
 
       /*
-       * THE LIMIT THAT NOW BITES. `MAX_INDEXED_CHARACTERS` was sized when the
-       * byte reader was the only engine and most real manuals came out
-       * unreadable. Now that they come out whole, an ordinary 214-page manual
-       * exceeds it at about page 96 — so 118 pages are not searchable, the
-       * index says `truncated`, and the library says "Searchable — 96 of 214
-       * pages". Nobody is misled, and somebody searching for an alarm on page
-       * 150 still finds nothing: see docs/library-ocr.md §0 for the
-       * measurement and the recommendation.
+       * THE LIMIT THAT USED TO BITE. `MAX_INDEXED_CHARACTERS` — 400 000 for the
+       * whole document — stopped this ordinary 214-page manual at page 96, so a
+       * search for an alarm on page 150 found nothing. The pages are now the
+       * index, so every one of them is read and kept.
        */
-      expect(reading.truncated).toBe(true);
-      expect(reading.pages.length).toBeLessThan(reading.totalPages);
-      expect(reading.pages.length).toBeGreaterThan(50);
-      expect(reading.text.length).toBeLessThanOrEqual(MAX_INDEXED_CHARACTERS + 1_000);
-      // The pages that ARE indexed are the first ones, in order, so a
-      // technician reading the caveat knows which part of the book it covers.
-      expect(reading.pages[0]?.pageNumber).toBe(1);
-      expect(reading.pages[reading.pages.length - 1]?.pageNumber).toBe(reading.pages.length);
+      expect(reading.complete).toBe(true);
+      expect(reading.truncated).toBe(false);
+      expect(reading.limits).toEqual([]);
+      expect(reading.pages).toHaveLength(214);
+      expect(reading.pages.map((page) => page.pageNumber)).toEqual(
+        Array.from({ length: 214 }, (_unused, offset) => offset + 1),
+      );
+      expect(reading.pages[149]?.text.length).toBeGreaterThan(1_000);
+      // The document-level summary is still bounded — it is one tsvector — and
+      // is no longer what decides whether page 150 can be found.
+      expect(reading.text.length).toBeLessThanOrEqual(MAX_INDEXED_CHARACTERS);
+    });
+  });
+
+  describe('documents far longer than the fixture, read in batches (#70)', () => {
+    beforeAll(requirePoppler);
+    const NO_PDFINFO = '/nonexistent/pdfinfo';
+
+    it('reads a document whose length is an EXACT multiple of the batch, with no page count', () => {
+      /*
+       * The hard boundary: 400 pages in batches of 200, and `pdfinfo` absent, so
+       * the end is only found by asking for page 401. Poppler refuses that
+       * range ("Wrong page range"); xpdf answers with nothing. Both must read as
+       * the end of the book — not as a damaged file, and not as a partial one.
+       */
+      const reading = popplerPdfText({
+        pdfinfoBinary: NO_PDFINFO,
+        limits: { batchPages: 200 },
+      }).read(buildManual({ pages: 400 }));
+      expect(reading.kind).toBe('text');
+      if (reading.kind !== 'text') throw new Error('unreachable');
+      expect(reading.complete).toBe(true);
+      expect(reading.totalPages).toBe(400);
+      expect(reading.totalPagesKnown).toBe(true);
+      expect(reading.pages).toHaveLength(400);
+      expect(reading.limits).toEqual([]);
+    });
+
+    it('says the total is UNKNOWN, rather than guessing, when it stops early with no page count', () => {
+      const reading = popplerPdfText({
+        pdfinfoBinary: NO_PDFINFO,
+        limits: { maxPages: 250, batchPages: 100 },
+      }).read(buildManual({ pages: 600 }));
+      expect(reading.kind).toBe('text');
+      if (reading.kind !== 'text') throw new Error('unreachable');
+      expect(reading.complete).toBe(false);
+      expect(reading.pages).toHaveLength(250);
+      // At least one more page exists — the one it stopped before — and no more
+      // is claimed than that.
+      expect(reading.totalPagesKnown).toBe(false);
+      expect(reading.totalPages).toBe(251);
+      expect(reading.limits.map((hit) => hit.kind)).toEqual(['pages', 'pages']);
+      expect(reading.limits[1]?.message).toMatch(/pdfinfo/u);
+    });
+
+    it('a stopped reading keeps text pages it read, and names only the blank ones it read', () => {
+      const reading = popplerPdfText({ limits: { maxPages: 100, batchPages: 50 } }).read(
+        buildManual({ pages: 300, blankPages: [10, 250] }),
+      );
+      expect(reading.kind).toBe('text');
+      if (reading.kind !== 'text') throw new Error('unreachable');
+      // Page 250 was never examined, so it is NOT reported as a picture.
+      expect(reading.pagesWithoutText).toEqual([10]);
+      expect(reading.pages).toHaveLength(99);
+      expect(reading.complete).toBe(false);
     });
   });
 
@@ -164,18 +218,24 @@ describe('PDF text extraction', () => {
     });
 
     it('refuses a file beyond the input bound before reading it', () => {
-      const reading = popplerPdfText({ maxInputBytes: 16 }).read(bytesOf(CID_MANUAL));
+      const reading = popplerPdfText({ limits: { maxInputBytes: 16 } }).read(bytesOf(CID_MANUAL));
       expect(reading.kind).toBe('failed');
       if (reading.kind !== 'failed') throw new Error('unreachable');
       expect(reading.reason).toMatch(/MB of PDF at a time/u);
     });
 
-    it('says it was CUT rather than quietly indexing part of a manual', () => {
-      const reading = popplerPdfText({ maxCharacters: 30 }).read(bytesOf(CID_MANUAL));
+    it('says a PAGE was cut rather than quietly indexing part of it', () => {
+      const reading = popplerPdfText({ limits: { maxPageCharacters: 30 } }).read(
+        bytesOf(CID_MANUAL),
+      );
       expect(reading.kind).toBe('text');
       if (reading.kind !== 'text') throw new Error('unreachable');
       expect(reading.truncated).toBe(true);
-      expect(reading.text.length).toBeLessThanOrEqual(30);
+      // The reading still went through every page; only the long ones were cut.
+      expect(reading.complete).toBe(true);
+      expect(reading.pages.every((page) => page.text.length <= 30)).toBe(true);
+      expect(reading.pages.some((page) => page.truncated === true)).toBe(true);
+      expect(reading.limits.map((hit) => hit.kind)).toEqual(['page_characters']);
     });
 
     it('falls back to the byte reader when the binary is not there, and says why', () => {

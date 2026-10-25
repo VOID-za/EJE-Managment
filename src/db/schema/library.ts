@@ -266,12 +266,17 @@ export const libraryDocumentText = pgTable(
      * understating itself; `indexed` with four pages of two hundred would be
      * one overstating itself, which is the failure this state exists to
      * prevent. Both are refused here rather than trusted to the writer.
+     *
+     * `partially_indexed` WITH ZERO is "page coverage unknown" — migration
+     * `0030`, LIB-TEXT-1 (#70): the built-in reader, cut at its summary budget,
+     * cannot tell which pages its text came from, and zero is the truthful
+     * number to write. `indexed` still means every page.
      */
     check(
       'library_document_text_pages_indexed_matches_state',
       sql`(${table.state} = 'indexed' and ${table.pagesIndexed} = ${table.pages})
           or (${table.state} = 'partially_indexed'
-              and ${table.pagesIndexed} > 0
+              and ${table.pagesIndexed} >= 0
               and ${table.pagesIndexed} < ${table.pages})
           or (${table.state} not in ('indexed', 'partially_indexed') and ${table.pagesIndexed} = 0)`,
     ),

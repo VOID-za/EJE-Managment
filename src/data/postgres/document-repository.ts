@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import {
   asProvenance,
   asDocumentId,
@@ -398,20 +398,53 @@ export class PostgresDocumentRepository implements DocumentRepository {
     if (terms.length === 0 || allowed.length === 0) return [];
 
     const query = terms.join(' ');
+    const documentId = schema.libraryDocumentText.documentId;
+    const pages = schema.libraryDocumentPages;
+
+    /*
+     * THE PAGES ARE THE INDEX, WHEREVER THERE ARE PAGES. LIB-TEXT-1 (#70).
+     *
+     * A document read per page is searched through its PAGE vectors, so no
+     * single value has to hold the whole book — the reason the old
+     * whole-document vector was capped at 400 000 characters, and the reason
+     * pages 97–214 of an ordinary manual could not be found. The rule is
+     * unchanged: every term must be in the DOCUMENT, so each term is asked of
+     * the pages separately — a term on page 3 and another on page 180 still
+     * match, exactly as they did when both had to be in the one vector.
+     *
+     * A document with no page rows (the built-in reader) is searched through
+     * the document vector, as before.
+     */
+    const hasPages = sql`exists (select 1 from ${pages} where ${pages.documentId} = ${documentId})`;
+    const everyTermOnSomePage = and(
+      ...terms.map(
+        (term) =>
+          sql`exists (select 1 from ${pages} where ${pages.documentId} = ${documentId}
+                and ${pages.search} @@ plainto_tsquery('simple', ${term}))`,
+      ),
+    );
+    const rank = sql<number>`coalesce(
+      (select max(ts_rank(${pages.search}, plainto_tsquery('simple', ${query})))
+         from ${pages} where ${pages.documentId} = ${documentId}),
+      ts_rank(${schema.libraryDocumentText.search}, plainto_tsquery('simple', ${query})))`;
+
     const rows = await this.db
-      .select({
-        documentId: schema.libraryDocumentText.documentId,
-        rank: sql<number>`ts_rank(${schema.libraryDocumentText.search}, plainto_tsquery('simple', ${query}))`,
-      })
+      .select({ documentId, rank })
       .from(schema.libraryDocumentText)
       .where(
         and(
-          inArray(schema.libraryDocumentText.documentId, allowed as string[]),
+          inArray(documentId, allowed as string[]),
           inArray(schema.libraryDocumentText.state, ['indexed', 'partially_indexed']),
-          sql`${schema.libraryDocumentText.search} @@ plainto_tsquery('simple', ${query})`,
+          or(
+            and(hasPages, everyTermOnSomePage),
+            and(
+              sql`not ${hasPages}`,
+              sql`${schema.libraryDocumentText.search} @@ plainto_tsquery('simple', ${query})`,
+            ),
+          ),
         ),
       )
-      .orderBy(desc(sql`ts_rank(${schema.libraryDocumentText.search}, plainto_tsquery('simple', ${query}))`))
+      .orderBy(desc(rank))
       .limit(limit);
 
     return rows.map((row) => asDocumentId(row.documentId));
