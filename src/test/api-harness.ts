@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { NextRequest, type NextResponse } from 'next/server';
 import { SESSION_COOKIE } from '@/server/auth/cookies';
 import { resetRateLimits } from '@/server/api/rate-limit';
@@ -23,7 +23,13 @@ import { resetSharedDatabase } from '@/db/client';
  * it did not receive from `/api/auth/me` — which is precisely the property the
  * tests are here to prove.
  */
-const ROOT = new URL('../app/api', import.meta.url).pathname;
+/*
+ * `fileURLToPath`, not `.pathname`. On Windows `.pathname` is
+ * `/C:/Users/.../EJE%20System/...` — a leading slash and URL-encoding — which
+ * `readdirSync` resolves to `C:\C:\...\EJE%20System`, so every route test failed
+ * on a Windows checkout before it ran. On Linux the two agree.
+ */
+const ROOT = fileURLToPath(new URL('../app/api', import.meta.url));
 const ORIGIN = 'https://eje.test';
 
 interface RouteEntry {
