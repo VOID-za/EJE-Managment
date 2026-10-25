@@ -8,6 +8,7 @@ import { SystemClock } from '@/services/simulated/system';
 import { downloadBytes } from '@/lib/download';
 import { canDisplayPdfInline } from '@/lib/pdf-support';
 import { JobCardDocument } from './JobCardDocument';
+import { renderJobCardPdf } from './job-card-pdf';
 import { PartsCollectionNote } from './PartsCollectionNote';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
@@ -120,27 +121,9 @@ export const JobCardPdfPreview = ({
       // settled, which is a cascade the linter is right to object to.
       if (!cancelled) setState({ kind: 'loading' });
       try {
-        // The descriptor names the file; the renderer produces the bytes. Both
-        // come from the same service the final document is issued through, so a
-        // courier's copy previews as a Delivery Note and a customer's does not.
-        const descriptor =
-          view.job.jobType === 'parts'
-            ? await pdf.generatePartsNote(view.job, 'preview')
-            : await pdf.generateJobCard(view.job, 'preview');
-        const rendered = await pdf.render(
-          {
-            job: view.job,
-            customer: view.customer,
-            site: view.site,
-            contact: view.contact,
-            machine: view.machine,
-            settings: view.settings,
-            checklistTemplate: view.checklistTemplate,
-            users: view.users,
-          },
-          'preview',
-          clock.now(),
-        );
+        // The shared renderer (`renderJobCardPdf`): the same document the PDF
+        // button on the review screens produces, and the one that is issued.
+        const rendered = await renderJobCardPdf(view, pdf, clock);
         if (cancelled) return;
 
         const blob = new Blob([new Uint8Array(rendered.bytes)], { type: 'application/pdf' });
@@ -148,7 +131,7 @@ export const JobCardPdfPreview = ({
         setState({
           kind: 'ready',
           url: objectUrl,
-          fileName: descriptor.fileName,
+          fileName: rendered.fileName,
           bytes: rendered.bytes,
           pages: rendered.pageCount,
         });

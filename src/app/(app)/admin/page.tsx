@@ -80,20 +80,19 @@ const AdminPage = () => {
   /*
    * Which sections this role administers.
    *
-   * The commercial terms and the standard of work are a Master's; the office
-   * administers people and the library. Every operation behind these tabs
+   * The office — Master and Coordinator — administers the rates, the checklists,
+   * people and the library; the remaining system settings are a Master's. Every
+   * operation behind these tabs
    * enforces the same capability itself — this only decides what is worth
    * showing, because a tab that would refuse every action is just a trap.
    */
   const tabs = [
     { id: 'users', label: 'Users' },
     { id: 'jobTypes', label: 'Job Types & Priorities' },
-    ...(can(user.role, 'settings.manage')
-      ? [
-          { id: 'rates', label: 'Rates & VAT' },
-          { id: 'checklists', label: 'Checklists' },
-        ]
-      : []),
+    // The office's, Master and Coordinator — each tab on its own capability, so
+    // a tab is only offered to somebody its operations will not refuse.
+    ...(can(user.role, 'settings.rates') ? [{ id: 'rates', label: 'Rates & VAT' }] : []),
+    ...(can(user.role, 'settings.checklists') ? [{ id: 'checklists', label: 'Checklists' }] : []),
     ...(can(user.role, 'library.manage') ? [{ id: 'library', label: 'Technical Library' }] : []),
     { id: 'system', label: 'System' },
   ];
@@ -119,10 +118,10 @@ const AdminPage = () => {
         <>
           {tab === 'users' && <UsersPanel users={data.users} onChanged={query.refetch} />}
           {tab === 'jobTypes' && <JobTypesPanel />}
-          {tab === 'rates' && can(user.role, 'settings.manage') && (
+          {tab === 'rates' && can(user.role, 'settings.rates') && (
             <RatesPanel settings={data.settings} onSaved={query.refetch} />
           )}
-          {tab === 'checklists' && can(user.role, 'settings.manage') && (
+          {tab === 'checklists' && can(user.role, 'settings.checklists') && (
             <ChecklistAdminPanel
               templates={data.templates}
               usage={data.usage}
@@ -247,7 +246,7 @@ const RatesPanel = ({
 
   const save = async () => {
     setSaving(true);
-    // Through the operation, which is where the Master-only rule is enforced
+    // Through the operation, which is where the office-only rule is enforced
     // and where the change is recorded on the audit trail.
     const ok = await operation.run(() =>
       /*

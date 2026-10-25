@@ -189,8 +189,29 @@ export type Capability =
   | 'users.manageTechnicians'
   /** Create, edit, disable or promote a Master. Masters only, always. */
   | 'users.manageMasters'
-  /** Charge-out rates, VAT, checklist templates, system settings. */
+  /**
+   * System settings that are not rates or checklists — the demonstration
+   * reset among them. A Master's alone.
+   */
   | 'settings.manage'
+  /**
+   * Charge-out rates, travel, call-out and VAT. The Master AND the Coordinator.
+   *
+   * Split out of `settings.manage` because the owner asked for the office to
+   * maintain the rates and the checklists, and for nothing else of the system
+   * settings to move with them. Changing a rate still never re-prices a job
+   * the customer has signed: the pricing snapshot is frozen at signature.
+   */
+  | 'settings.rates'
+  /**
+   * Checklist templates: draft, publish, retire. The Master AND the Coordinator.
+   *
+   * The immutability of a version a job has completed against is unchanged —
+   * it is enforced in `checklist-admin.ts` for every role, so the office
+   * publishes a new version exactly as a Master does and cannot rewrite one a
+   * customer has seen.
+   */
+  | 'settings.checklists'
   | 'activity.viewAll'
   /**
    * Resolve a capture a tablet held that the server refused. BD-15.
@@ -348,6 +369,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'users.manageTechnicians',
   'users.manageMasters',
   'settings.manage',
+  'settings.rates',
+  'settings.checklists',
   'activity.viewAll',
   'captures.resolveReferral',
   // A document EJE have issued says the wrong thing: BD-02. Master's alone.
@@ -369,7 +392,9 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
  * Everything an office runs on, and nothing that belongs on a customer's site.
  * Note what is absent: `jobs.acceptField`, so she cannot take a breakdown as
  * though she attended it; `users.manageMasters`, so she cannot make herself
- * one; and `settings.manage`, so the charge-out rates stay with a Master.
+ * one; and `settings.manage`, the system settings that are not rates or
+ * checklists. The rates and the checklists ARE hers (`settings.rates`,
+ * `settings.checklists`): the owner asked for the office to maintain both.
  *
  * `jobs.issueFinal` IS ALSO ABSENT, and it is now absent from the MASTER too.
  * She is the office: she reviews, she edits, she resolves a customer's refusal
@@ -407,6 +432,14 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'availability.manage',
   'admin.access',
   'users.manageTechnicians',
+  /*
+   * RATES AND CHECKLISTS, and no other system setting. The owner asked for the
+   * Coordinator to maintain both from Administration. What does NOT come with
+   * them: `settings.manage` (everything else), and `jobs.applyDiscount`, which
+   * is a decision about one customer's bill rather than the price list.
+   */
+  'settings.rates',
+  'settings.checklists',
   'activity.viewAll',
   // The office deals with work a tablet could not get onto a job. BD-15.
   'captures.resolveReferral',

@@ -1,5 +1,6 @@
 import {
   buildPartsDocument,
+  jobDetailLabel,
   calculateJobTotals,
   contactFullName,
   currentRefusal,
@@ -379,7 +380,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       { label: 'Reference', value: job.referenceNumber.length > 0 ? job.referenceNumber : '—' },
       // Only where the customer works by one, and only when they gave us one.
       ...(definition.capturesDeliveryNote && job.deliveryNote.length > 0
-        ? [{ label: 'Delivery note', value: job.deliveryNote }]
+        ? [{ label: jobDetailLabel('deliveryNote', job.jobType), value: job.deliveryNote }]
         : []),
       /*
        * THE TEST & REPAIR FIELDS ON THE CUSTOMER'S DOCUMENT. Test & Repair §4.
@@ -393,6 +394,9 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
        */
       ...(definition.capturesQuoteNumber && job.quoteNumber.length > 0
         ? [{ label: 'Quote number', value: job.quoteNumber }]
+        : []),
+      ...(definition.capturesRepairItem && job.dateReceived !== null
+        ? [{ label: 'Date received', value: job.dateReceived }]
         : []),
       ...(definition.capturesRepairItem && job.repairItem.partNumber.length > 0
         ? [{ label: 'Part number', value: job.repairItem.partNumber }]

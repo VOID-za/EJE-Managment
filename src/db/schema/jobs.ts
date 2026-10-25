@@ -116,6 +116,8 @@ export const jobs = pgTable(
     repairDescription: text('repair_description').notNull().default(''),
     repairQuantity: integer('repair_quantity'),
     quoteNumber: text('quote_number').notNull().default(''),
+    /** When the unit arrived on the counter. Test & Repair; optional. 0031. */
+    dateReceived: date('date_received'),
     /**
      * DECISION 2: an Installation or Service job may proceed without an order
      * number only through an explicit acknowledgement, which is recorded.

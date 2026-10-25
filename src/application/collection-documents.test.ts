@@ -246,9 +246,13 @@ describe('a test and repair collected from the counter', () => {
       users: view!.users,
       generatedAt: '2026-09-20T10:00:00.000Z',
     });
+    // On a Test & Repair the field is the delivery note OR the courier's
+    // waybill that came in with the unit, and is printed under that name.
     const rows = model.jobDetails.map((row) => row.label);
-    expect(rows).toContain('Delivery note');
-    expect(model.jobDetails.find((row) => row.label === 'Delivery note')?.value).toBe('DN-12345');
+    expect(rows).toContain('Delivery note / waybill number');
+    expect(
+      model.jobDetails.find((row) => row.label === 'Delivery note / waybill number')?.value,
+    ).toBe('DN-12345');
   });
 
   it('records a courier collection with its waybill', async () => {

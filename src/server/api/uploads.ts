@@ -297,9 +297,33 @@ export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile =>
  * file is still reported as empty, and a 60 MB PDF is still refused for its
  * TYPE rather than for its size, because converting it would not have helped.
  */
-export const validateJobMediaUpload = (candidate: UploadCandidate): UploadedFile => {
+export const validateJobMediaUpload = (
+  candidate: UploadCandidate,
+  /*
+   * WHETHER THIS JOB TYPE TAKES A VIDEO AT ALL. `acceptsVideoAttachments`.
+   *
+   * A parts collection takes photographs only. A video there is refused for
+   * its TYPE — the video size budget still applies to it, so a 40 MB clip is
+   * told it is not a photograph rather than that it is too big, which is the
+   * answer that would actually help.
+   */
+  options: { readonly videos: boolean } = { videos: true },
+): UploadedFile => {
   const sniffed = sniffContentType(candidate.bytes);
   const isVideo = sniffed !== null && VIDEO_CONTENT_TYPES.includes(sniffed.contentType);
+  if (!options.videos) {
+    return validateAgainst(candidate, {
+      maxBytes: isVideo ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES,
+      allowed: PHOTO_CONTENT_TYPES,
+      tooLarge: `Photographs are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
+      wrongType: {
+        message: 'Only photographs can be attached to a parts job.',
+        detail:
+          'Attach an image (PNG, JPEG, TIFF or WebP). A parts collection takes no video, and ' +
+          'a PDF belongs in the Technical Library, or against the customer or the machine.',
+      },
+    });
+  }
   return validateAgainst(candidate, {
     maxBytes: isVideo ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES,
     allowed: [...PHOTO_CONTENT_TYPES, ...VIDEO_CONTENT_TYPES],

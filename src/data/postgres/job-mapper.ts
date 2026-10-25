@@ -349,6 +349,7 @@ export const toDomainJob = (rows: JobRowSet): Job => {
       quantity: rows.job.repairQuantity,
     },
     quoteNumber: rows.job.quoteNumber,
+    dateReceived: rows.job.dateReceived,
     faultDescription: rows.job.faultDescription,
 
     attachments: media.filter((row) => row.kind === 'document').map(attachmentFrom),
@@ -446,6 +447,7 @@ export const toJobRow = (
   repairDescription: job.repairItem.description,
   repairQuantity: job.repairItem.quantity,
   quoteNumber: job.quoteNumber,
+  dateReceived: job.dateReceived,
   faultDescription: job.faultDescription,
   primaryTechnicianId: job.primaryTechnicianId,
   calloutApplied: job.calloutApplied,

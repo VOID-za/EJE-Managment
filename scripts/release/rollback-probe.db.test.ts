@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { createDatabase, type Database } from '@/db/client';
 import { testDatabaseUrl } from '@/data/postgres/test-database';
-import { IDS } from '@/data/postgres/test-fixtures';
+import { IDS, jobFixture } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
+import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { describeSearchability } from '@/application/library-ocr';
 import { checkMigrations } from '@/ops/preflight-rules';
 import { asDocumentId, asUserId, type DocumentId, type TechnicalDocument } from '@/domain';
@@ -66,7 +67,7 @@ describePhase('rollback compatibility — phase 2: the live release against a da
     await db.$client.end({ timeout: 5 });
   });
 
-  it("the live release's preflight does not refuse a database one migration ahead of it", async () => {
+  it("the live release's preflight does not refuse a database migrations ahead of it", async () => {
     const journal = JSON.parse(
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
@@ -76,7 +77,8 @@ describePhase('rollback compatibility — phase 2: the live release against a da
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    expect(applied).toBe(31);
+    // 31 with 0030 alone; more once later migrations (0031 onwards) ship too.
+    expect(applied).toBeGreaterThan(30);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -180,5 +182,23 @@ describePhase('rollback compatibility — phase 2: the live release against a da
       content,
     );
     expect(reindexed.state).toBe('indexed');
+  });
+
+  /*
+   * 0031 ADDED `jobs.date_received`. The live release knows nothing of the
+   * column: it must still read a job this release wrote WITH one, and still
+   * write a job of its own — leaving the column NULL, which is "not recorded".
+   */
+  it('still reads and writes JOBS on a database with 0031 applied', async () => {
+    const jobs = new PostgresJobRepository(db);
+    const written = await jobs.findByJobNumber('EJE-RB-0031');
+    expect(written?.jobType).toBe('test_and_repair');
+
+    await jobs.save(jobFixture('EJE-RB-LIVE'));
+    expect((await jobs.findByJobNumber('EJE-RB-LIVE'))?.jobNumber).toBe('EJE-RB-LIVE');
+    const [row] = await db.execute<{ date_received: string | null }>(
+      sql`select date_received from jobs where job_number = 'EJE-RB-LIVE'`,
+    );
+    expect(row?.date_received ?? null).toBeNull();
   });
 });

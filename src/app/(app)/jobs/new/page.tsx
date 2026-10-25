@@ -1,12 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   checkSchedule,
   daysBetween,
   can,
   contactFullName,
+  dateReceivedProblem,
   getJobTypeDefinition,
   JOB_TYPE_CODES,
   jobTypeLabel,
@@ -40,6 +41,9 @@ import { useOperation } from '@/hooks/useOperation';
 import {
   JOB_MEDIA_ACCEPT_ATTRIBUTE,
   JOB_MEDIA_TYPES_SENTENCE,
+  JOB_PHOTO_TYPES_SENTENCE,
+  PHOTO_ACCEPT_ATTRIBUTE,
+  jobMediaProblem,
 } from '@/lib/upload-limits';
 
 /**
@@ -49,6 +53,32 @@ import {
  * Service immediately shows the checklist and photo requirements the job will
  * carry, so the office knows what the technician will be held to.
  */
+/**
+ * A preview of a chosen file before the job exists: the photograph itself, or a
+ * plain "Video" tile. The object URL is the browser's own copy of the bytes
+ * and is released when the file is removed, so a long list does not leak.
+ */
+const AttachmentThumb = ({ file }: { readonly file: File }) => {
+  const isImage = file.type.startsWith('image/') && file.type !== 'image/tiff';
+  // Only ever rendered in the browser: the list is empty until a file is chosen.
+  const url = useMemo(() => (isImage ? URL.createObjectURL(file) : null), [file, isImage]);
+  useEffect(
+    () => () => {
+      if (url !== null) URL.revokeObjectURL(url);
+    },
+    [url],
+  );
+  if (isImage && url !== null) {
+    // eslint-disable-next-line @next/next/no-img-element -- a local object URL, not an optimisable asset
+    return <img src={url} alt="" className="size-10 shrink-0 rounded object-cover" />;
+  }
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded bg-steel-100 text-[10px] font-semibold text-steel-600 uppercase">
+      {file.type.startsWith('video/') ? 'Video' : 'Photo'}
+    </span>
+  );
+};
+
 const NewJobPage = () => {
   const router = useRouter();
   const user = useCurrentUser();
@@ -79,6 +109,8 @@ const NewJobPage = () => {
   /** The real files, held until the job exists to attach them to. */
   const [attachments, setAttachments] = useState<readonly File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  /** Which file is uploading now, once the job exists. Null when nothing is. */
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState('');
   /*
    * THE TEST & REPAIR FIELDS. Test & Repair §4.
@@ -91,6 +123,8 @@ const NewJobPage = () => {
   const [repairDescription, setRepairDescription] = useState('');
   const [repairQuantity, setRepairQuantity] = useState('');
   const [quoteNumber, setQuoteNumber] = useState('');
+  /** The day the unit arrived; '' means nobody recorded it. Never defaulted. */
+  const [dateReceived, setDateReceived] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -192,6 +226,13 @@ const NewJobPage = () => {
       }
     }
 
+    // A date received is optional, and when given must be a real day that has
+    // happened — the same rule the server applies (`dateReceivedProblem`).
+    if (definition.capturesRepairItem && dateReceived.length > 0) {
+      const problem = dateReceivedProblem(dateReceived, new Date().toISOString());
+      if (problem !== null) next.dateReceived = problem;
+    }
+
     // On a parts collection the order number is what ties the goods to what the
     // customer ordered, so it is not optional the way it is on a site visit.
     if (definition.requiresOrderNumber && orderNumber.trim().length === 0) {
@@ -251,6 +292,8 @@ const NewJobPage = () => {
         repairDescription,
         repairQuantity: repairQuantity.trim() === '' ? null : Number(repairQuantity),
         quoteNumber,
+        // Null when blank or when the job type books in no unit: never a guess.
+        dateReceived: definition.capturesRepairItem && dateReceived.length > 0 ? dateReceived : null,
         asDraft,
       });
     });
@@ -270,13 +313,21 @@ const NewJobPage = () => {
      */
     const job = created as Job;
     const failed: string[] = [];
-    for (const file of attachments) {
+    for (const [position, file] of attachments.entries()) {
+      setUploadProgress(`Uploading ${position + 1} of ${attachments.length}: ${file.name}`);
       try {
         await api.attach(job.id, file);
-      } catch {
-        failed.push(file.name);
+      } catch (error) {
+        // The server's own reason, where it gave one — "not a photograph" is
+        // more use to the office than a file name on its own.
+        failed.push(
+          error instanceof Error && error.message.length > 0
+            ? `${file.name} (${error.message})`
+            : file.name,
+        );
       }
     }
+    setUploadProgress(null);
 
     setSaving(false);
     if (failed.length > 0) {
@@ -303,6 +354,76 @@ const NewJobPage = () => {
         : `/jobs/${job.jobNumber}`,
     );
   };
+
+  /*
+   * THE REFERENCES, IN THE ORDER THE JOB TYPE ASKS FOR THEM.
+   *
+   * A Test & Repair lists them as the owner's "What is the Job?" does — the
+   * delivery note or waybill that came in with the unit, then the reference,
+   * then the quote — with the customer's order number (optional there) after
+   * them. Every other job type keeps the order it always had. The same four
+   * fields either way; only their order differs.
+   */
+  const orderNumberField = (
+      <TextField
+        label="Customer order number"
+        required={definition.requiresOrderNumber}
+        value={orderNumber}
+        onChange={(event) => setOrderNumber(event.target.value)}
+        error={errors.orderNumber}
+        placeholder="e.g. PO-88123"
+        hint={
+          definition.requiresOrderNumber
+            ? 'Printed on the collection note and used to reconcile against the customer’s order.'
+            : undefined
+        }
+      />
+  );
+  const referenceNumberField = (
+      <TextField
+        label="Reference number"
+        value={referenceNumber}
+        onChange={(event) => setReferenceNumber(event.target.value)}
+        placeholder="Internal or customer reference"
+      />
+  );
+  const deliveryNoteField = (
+    <>
+      {/* Optional, always. Some customers reconcile parts and
+          workshop repairs against a delivery note rather than an
+          order number, and a document that cannot quote it back is
+          one their accounts department cannot match. */}
+      {definition.capturesDeliveryNote && (
+        <TextField
+          label="Delivery note / waybill number"
+          value={deliveryNote}
+          onChange={(event) => setDeliveryNote(event.target.value)}
+          placeholder="e.g. DN-12345"
+          hint="Optional. The customer’s own delivery note number, printed on the collection document."
+        />
+      )}
+    </>
+  );
+  const quoteNumberField = (
+    <>
+      {/*
+        THE CUSTOMER'S QUOTE NUMBER. Test & Repair §4.
+
+        Test & Repair only. The owner struck it out on a parts
+        collection, which is reconciled by its order number — and
+        that one is already required there.
+      */}
+      {definition.capturesQuoteNumber && (
+        <TextField
+          label="Quote number"
+          value={quoteNumber}
+          onChange={(event) => setQuoteNumber(event.target.value)}
+          placeholder="e.g. Q-20451"
+          hint="Optional. The quote this repair was accepted against."
+        />
+      )}
+    </>
+  );
 
   return (
     <>
@@ -446,8 +567,26 @@ const NewJobPage = () => {
                       setRepairPartNumber('');
                       setRepairDescription('');
                       setRepairQuantity('');
+                      setDateReceived('');
                     }
                     if (!chosen.capturesQuoteNumber) setQuoteNumber('');
+                    /*
+                     * A parts job takes photographs only, so a video chosen for
+                     * a field job does not ride along into one — it is dropped,
+                     * and the office is told, rather than refused by the server
+                     * after the job has been raised.
+                     */
+                    if (!chosen.acceptsVideoAttachments) {
+                      const videos = attachments.filter((file) => file.type.startsWith('video/'));
+                      if (videos.length > 0) {
+                        setAttachments((current) =>
+                          current.filter((file) => !file.type.startsWith('video/')),
+                        );
+                        setAttachmentError(
+                          `${videos.map((file) => file.name).join(', ')} removed: a parts job takes photographs only.`,
+                        );
+                      }
+                    }
                     if (getJobTypeDefinition(code).officeProcessed) {
                       setScheduledDate('');
                       setTechnicianId('');
@@ -562,78 +701,6 @@ const NewJobPage = () => {
                 document omits the section entirely rather than printing a
                 heading over nothing.
               */}
-              {!definition.officeProcessed && (
-                <TextAreaField
-                  label={
-                    definition.requiresFaultDescription
-                      ? 'Fault description / work requested'
-                      : 'Fault description / work requested (optional)'
-                  }
-                  required={definition.requiresFaultDescription}
-                  rows={4}
-                  value={faultDescription}
-                  error={errors.faultDescription}
-                  onChange={(event) => setFaultDescription(event.target.value)}
-                  placeholder="e.g. Machine stopped during operation. Spindle fault reported."
-                  hint={
-                    definition.requiresFaultDescription
-                      ? 'Record what the customer reported, in their words where possible.'
-                      : 'Optional on a workshop repair — the unit is booked in before it is diagnosed. Record what the customer reported if they said.'
-                  }
-                />
-              )}
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <TextField
-                  label="Customer order number"
-                  required={definition.requiresOrderNumber}
-                  value={orderNumber}
-                  onChange={(event) => setOrderNumber(event.target.value)}
-                  error={errors.orderNumber}
-                  placeholder="e.g. PO-88123"
-                  hint={
-                    definition.requiresOrderNumber
-                      ? 'Printed on the collection note and used to reconcile against the customer’s order.'
-                      : undefined
-                  }
-                />
-                <TextField
-                  label="Reference number"
-                  value={referenceNumber}
-                  onChange={(event) => setReferenceNumber(event.target.value)}
-                  placeholder="Internal or customer reference"
-                />
-                {/* Optional, always. Some customers reconcile parts and
-                    workshop repairs against a delivery note rather than an
-                    order number, and a document that cannot quote it back is
-                    one their accounts department cannot match. */}
-                {definition.capturesDeliveryNote && (
-                  <TextField
-                    label="Delivery note / waybill number"
-                    value={deliveryNote}
-                    onChange={(event) => setDeliveryNote(event.target.value)}
-                    placeholder="e.g. DN-12345"
-                    hint="Optional. The customer’s own delivery note number, printed on the collection document."
-                  />
-                )}
-                {/*
-                  THE CUSTOMER'S QUOTE NUMBER. Test & Repair §4.
-
-                  Test & Repair only. The owner struck it out on a parts
-                  collection, which is reconciled by its order number — and
-                  that one is already required there.
-                */}
-                {definition.capturesQuoteNumber && (
-                  <TextField
-                    label="Quote number"
-                    value={quoteNumber}
-                    onChange={(event) => setQuoteNumber(event.target.value)}
-                    placeholder="e.g. Q-20451"
-                    hint="Optional. The quote this repair was accepted against."
-                  />
-                )}
-              </div>
-
               {/*
                 WHAT WAS BOOKED IN. Test & Repair §4.
 
@@ -654,7 +721,16 @@ const NewJobPage = () => {
                   <p className="mt-1 text-sm text-steel-700">
                     What arrived on the counter. Optional — fill in what is known now.
                   </p>
-                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <TextField
+                      label="Date received"
+                      type="date"
+                      value={dateReceived}
+                      error={errors.dateReceived}
+                      onChange={(event) => setDateReceived(event.target.value)}
+                      hint="The day the unit arrived. Optional — leave blank if not known."
+                      data-testid="date-received"
+                    />
                     <TextField
                       label="Part number"
                       value={repairPartNumber}
@@ -681,6 +757,45 @@ const NewJobPage = () => {
                   </div>
                 </div>
               )}
+
+              {!definition.officeProcessed && (
+                <TextAreaField
+                  label={
+                    definition.requiresFaultDescription
+                      ? 'Fault description / work requested'
+                      : 'Fault description / work requested (optional)'
+                  }
+                  required={definition.requiresFaultDescription}
+                  rows={4}
+                  value={faultDescription}
+                  error={errors.faultDescription}
+                  onChange={(event) => setFaultDescription(event.target.value)}
+                  placeholder="e.g. Machine stopped during operation. Spindle fault reported."
+                  hint={
+                    definition.requiresFaultDescription
+                      ? 'Record what the customer reported, in their words where possible.'
+                      : 'Optional on a workshop repair — the unit is booked in before it is diagnosed. Record what the customer reported if they said.'
+                  }
+                />
+              )}
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {definition.capturesRepairItem ? (
+                  <>
+                    {deliveryNoteField}
+                    {referenceNumberField}
+                    {quoteNumberField}
+                    {orderNumberField}
+                  </>
+                ) : (
+                  <>
+                    {orderNumberField}
+                    {referenceNumberField}
+                    {deliveryNoteField}
+                    {quoteNumberField}
+                  </>
+                )}
+              </div>
             </div>
           </Card>
 
@@ -787,14 +902,21 @@ const NewJobPage = () => {
               refused on what it is.
             */}
             <CardHeader
-              title="Photographs and videos"
-              description={`What the caller sent in, or what the fault looks like. ${JOB_MEDIA_TYPES_SENTENCE}`}
+              title={definition.acceptsVideoAttachments ? 'Photographs and videos' : 'Photographs'}
+              description={
+                definition.acceptsVideoAttachments
+                  ? `What the caller sent in, or what the fault looks like. ${JOB_MEDIA_TYPES_SENTENCE}`
+                  : `What the goods looked like when they left the counter. ${JOB_PHOTO_TYPES_SENTENCE}`
+              }
             />
             <input
               type="file"
               multiple
               className="mt-4 block w-full text-sm text-steel-700 file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-steel-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-steel-700 hover:file:bg-steel-200"
-              accept={JOB_MEDIA_ACCEPT_ATTRIBUTE}
+              accept={
+                definition.acceptsVideoAttachments ? JOB_MEDIA_ACCEPT_ATTRIBUTE : PHOTO_ACCEPT_ATTRIBUTE
+              }
+              data-testid="job-attachments-input"
               onChange={(event) => {
                 /*
                  * READ THE FILES FIRST.
@@ -805,7 +927,19 @@ const NewJobPage = () => {
                  * and the file silently never appears.
                  */
                 const chosen = Array.from(event.target.files ?? []);
-                setAttachments((current) => [...current, ...chosen]);
+                /*
+                 * The browser's early answer (`jobMediaProblem`): a PDF, an
+                 * executable or an oversized clip is turned away here, by name.
+                 * The server sniffs the bytes of whatever is kept, and that is
+                 * the check that decides.
+                 */
+                const videos = definition.acceptsVideoAttachments;
+                const problems = chosen
+                  .map((file) => jobMediaProblem(file, { videos }))
+                  .filter((problem): problem is string => problem !== null);
+                const accepted = chosen.filter((file) => jobMediaProblem(file, { videos }) === null);
+                setAttachmentError(problems.length > 0 ? problems.join(' ') : null);
+                setAttachments((current) => [...current, ...accepted]);
                 // Lets the same file be chosen again after being removed.
                 event.target.value = '';
               }}
@@ -818,6 +952,7 @@ const NewJobPage = () => {
                     key={`${file.name}-${index}`}
                     className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-steel-200 px-3 py-2 text-sm"
                   >
+                    <AttachmentThumb file={file} />
                     <span className="min-w-0 flex-1 truncate text-steel-800">{file.name}</span>
                     <span className="shrink-0 text-xs text-steel-500">
                       {Math.max(1, Math.round(file.size / 1024))} KB
@@ -836,6 +971,15 @@ const NewJobPage = () => {
                   </li>
                 ))}
               </ul>
+            )}
+
+            {uploadProgress !== null && (
+              <p
+                role="status"
+                className="mt-3 rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-700"
+              >
+                {uploadProgress}
+              </p>
             )}
 
             {attachmentError !== null && (

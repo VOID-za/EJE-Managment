@@ -79,3 +79,42 @@ export const JOB_MEDIA_ACCEPT_ATTRIBUTE = `${PHOTO_ACCEPT_ATTRIBUTE},${VIDEO_ACC
 export const JOB_MEDIA_TYPES_SENTENCE =
   `Photographs (PNG, JPEG, TIFF, WebP) up to ${UPLOAD_LIMIT_MB} MB, ` +
   `or a video (MP4, MOV, WebM, 3GP) up to ${VIDEO_LIMIT_MB} MB.`;
+
+/** What a parts job takes: photographs only. See `acceptsVideoAttachments`. */
+export const JOB_PHOTO_TYPES_SENTENCE = `Photographs (PNG, JPEG, TIFF, WebP) up to ${UPLOAD_LIMIT_MB} MB.`;
+
+const PHOTO_TYPES = PHOTO_ACCEPT_ATTRIBUTE.split(',');
+const VIDEO_TYPES = VIDEO_ACCEPT_ATTRIBUTE.split(',');
+
+/**
+ * THE BROWSER'S EARLY ANSWER about a file chosen for a job. Not the check.
+ *
+ * It reads what the browser says the file is — its declared type and size —
+ * so somebody who picks a PDF or a 200 MB clip is told at once, rather than
+ * after the job is raised and the upload refused. A file can lie about its
+ * type, which is exactly why the SERVER sniffs the bytes
+ * (`validateJobMediaUpload`) and that is what decides; this only saves a trip.
+ *
+ * Null when the file looks acceptable.
+ */
+export const jobMediaProblem = (
+  file: { readonly name: string; readonly type: string; readonly size: number },
+  options: { readonly videos: boolean },
+): string | null => {
+  const type = file.type.toLowerCase();
+  if (file.size === 0) return `${file.name} is empty.`;
+  if (PHOTO_TYPES.includes(type)) {
+    return file.size > MAX_UPLOAD_BYTES
+      ? `${file.name} is larger than ${UPLOAD_LIMIT_MB} MB, the limit for a photograph.`
+      : null;
+  }
+  if (VIDEO_TYPES.includes(type)) {
+    if (!options.videos) return `${file.name} is a video. A parts job takes photographs only.`;
+    return file.size > MAX_VIDEO_BYTES
+      ? `${file.name} is larger than ${VIDEO_LIMIT_MB} MB, the limit for a video.`
+      : null;
+  }
+  return options.videos
+    ? `${file.name} is not a photograph or a video, so it cannot be attached to a job.`
+    : `${file.name} is not a photograph, so it cannot be attached to a parts job.`;
+};

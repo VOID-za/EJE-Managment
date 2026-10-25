@@ -2450,6 +2450,90 @@ await step('a Test & Repair offers a delivery note when the job is raised', asyn
   await page.screenshot({ path: `${shots}/27-new-job-delivery-note.png`, fullPage: false });
 });
 
+/*
+ * TEST & REPAIR "WHAT IS THE JOB?", AND WHAT EACH JOB TYPE MAY ATTACH.
+ *
+ * The fields in the owner's order, Date Received first and new; and the
+ * attachment picker narrowed per job type — photographs and videos on a field
+ * job, photographs alone on a parts job — with a document turned away in the
+ * browser by name (the server refuses it again on its bytes; the API tests
+ * prove that half).
+ */
+await step('a Test & Repair asks "What is the Job?" in order, and each type attaches only media', async () => {
+  await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'New Job' }).first().waitFor({ timeout: 15000 });
+  await page.getByLabel('Job type').selectOption('test_and_repair');
+  await page.getByLabel('Date received').waitFor({ timeout: 8000 });
+
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('label')].map((label) => (label.textContent ?? '').trim()),
+  );
+  const at = (prefix) => labels.findIndex((text) => text.startsWith(prefix));
+  const order = [
+    'Date received', 'Part number', 'Quantity', 'Fault description',
+    'Delivery note / waybill number', 'Reference number', 'Quote number',
+  ].map((prefix) => [prefix, at(prefix)]);
+  for (const [prefix, index] of order) {
+    if (index < 0) throw new Error(`the Test & Repair form has no "${prefix}" field`);
+  }
+  for (let i = 1; i < order.length; i += 1) {
+    if (order[i][1] < order[i - 1][1]) {
+      throw new Error(`"${order[i][0]}" comes before "${order[i - 1][0]}"`);
+    }
+  }
+  // Machine, priority and the fault description are all optional here.
+  await page.getByText('Fault description / work requested (optional)').waitFor({ timeout: 5000 });
+  await page.getByText('Who is doing the work?').waitFor({ timeout: 5000 });
+
+  const input = page.getByTestId('job-attachments-input');
+  if (!(await input.getAttribute('accept')).includes('video/mp4')) {
+    throw new Error('a Test & Repair was not offered video');
+  }
+  await input.setInputFiles({
+    name: 'order.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 not media'),
+  });
+  await page.getByText('order.pdf is not a photograph or a video').waitFor({ timeout: 5000 });
+  await input.setInputFiles({
+    name: 'fault.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+  });
+  await page.getByText('fault.png').waitFor({ timeout: 5000 });
+
+  await page.getByLabel('Job type').selectOption('parts');
+  await page.getByRole('heading', { name: 'Photographs', exact: true }).waitFor({ timeout: 8000 });
+  if ((await page.getByTestId('job-attachments-input').getAttribute('accept')).includes('video')) {
+    throw new Error('a parts job was offered video');
+  }
+  await page.getByTestId('job-attachments-input').setInputFiles({
+    name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]),
+  });
+  await page.getByText('clip.mp4 is a video. A parts job takes photographs only.').waitFor({ timeout: 5000 });
+  if ((await page.getByLabel('Date received').count()) !== 0) {
+    throw new Error('a parts job was offered a date received');
+  }
+  await page.screenshot({ path: `${shots}/27b-test-and-repair-what-is-the-job.png`, fullPage: true });
+});
+
+await step('the job review page offers the job card as a PDF, for this job', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
+  const button = page.getByTestId('job-card-pdf-button');
+  await button.waitFor({ timeout: 10000 });
+  // A download where the browser has no PDF viewer (headless Chrome), a new tab
+  // where it has one. Either way it must be THIS job's card.
+  const delivered = await Promise.race([
+    page.waitForEvent('download', { timeout: 15000 }).then((download) => download.suggestedFilename()),
+    page.context().waitForEvent('page', { timeout: 15000 }).then(async (tab) => {
+      await tab.close();
+      return 'opened in a new tab';
+    }),
+    button.click().then(() => new Promise(() => {})),
+  ]);
+  if (!/EJE-1059.*\.pdf$|opened in a new tab/.test(delivered)) {
+    throw new Error(`the PDF button produced ${delivered}`);
+  }
+});
+
 await step('a Test & Repair is worked and taken to its collection step', async () => {
   await page.goto(`${BASE}/jobs/EJE-1059`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'EJE-1059' }).waitFor({ timeout: 10000 });
@@ -3520,15 +3604,21 @@ await step('the Coordinator reaches Closed Jobs, which is what she invoices from
   await page.getByText('EJE-1044').first().waitFor({ timeout: 10000 });
 });
 
-await step('the Coordinator is offered no Rates & VAT tab, and cannot reach one', async () => {
+/*
+ * THE RATES AND THE CHECKLISTS ARE THE OFFICE'S. The owner asked for the
+ * Coordinator to maintain both. This step used to assert she was offered
+ * neither; it now asserts she is offered both and that each opens on a working
+ * panel rather than a refusal.
+ */
+await step('the Coordinator is offered Rates & VAT and Checklists, and both open', async () => {
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Users', exact: true }).waitFor({ timeout: 10000 });
-  if ((await page.getByRole('tab', { name: 'Rates & VAT' }).count()) !== 0) {
-    throw new Error('the Coordinator was offered the charge-out rates');
-  }
-  if ((await page.getByRole('tab', { name: 'Checklists' }).count()) !== 0) {
-    throw new Error('the Coordinator was offered checklist administration');
-  }
+  await page.getByRole('tab', { name: 'Rates & VAT' }).click();
+  await page.getByLabel('Normal Time').waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Save rates' }).waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: 'Checklists' }).click();
+  await page.getByRole('button', { name: 'New checklist' }).waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: 'Users', exact: true }).click();
 });
 
 await step('the Coordinator cannot create anything but a technician', async () => {
@@ -3937,7 +4027,7 @@ await step('SEARCH-4: the archive downloads as a CSV, built by the server', asyn
     'Job number,Closed,Customer,Site,Machine,Serial number,Job type,Technician,Order number,' +
     // TR-1: the Test & Repair unit, so the archive can be reconciled. Empty on
     // every other job type, exactly as Order number already is.
-    'Reference number,Quote number,Part number,Part description,Quantity,Final job card';
+    'Reference number,Quote number,Date received,Part number,Part description,Quantity,Final job card';
   const prices = 'Subtotal (excl. VAT),VAT,Total (incl. VAT),Priced at';
   if (header !== `${operational},${prices}`) {
     throw new Error(`unexpected export columns: ${header}`);

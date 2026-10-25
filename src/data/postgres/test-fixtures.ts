@@ -181,6 +181,7 @@ export const jobFixture = (jobNumber: string, over: Partial<Job> = {}): Job => (
   referenceNumber: '',
   repairItem: emptyRepairItem(),
   quoteNumber: '',
+  dateReceived: null,
   faultDescription: 'Spindle drive alarm 750.',
   attachments: [],
   primaryTechnicianId: null,

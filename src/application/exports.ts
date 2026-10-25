@@ -152,6 +152,8 @@ const CLOSED_JOB_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
    * So a technician's own export carries these and still carries no prices.
    */
   { header: 'Quote number', value: (row) => row.job.quoteNumber },
+  // Empty when nobody recorded it, like the quantity below.
+  { header: 'Date received', value: (row) => row.job.dateReceived ?? '' },
   { header: 'Part number', value: (row) => row.job.repairItem.partNumber },
   { header: 'Part description', value: (row) => row.job.repairItem.description },
   {

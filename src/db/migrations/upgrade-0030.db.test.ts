@@ -39,6 +39,17 @@ const url = testDatabaseUrl();
 const describeDb = url === null ? describe.skip : describe;
 
 const MIGRATIONS = join(import.meta.dirname, '.');
+/*
+ * HOW MANY MIGRATIONS THIS CHECKOUT SHIPS, read from the journal rather than
+ * written down: the ledger after a full migration is that number, and a later
+ * migration (0031 onwards) must not turn this upgrade test red merely by
+ * existing.
+ */
+const SHIPPED = (
+  JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as {
+    entries: readonly unknown[];
+  }
+).entries.length;
 const LAST_LIVE = '0029_library_page_text';
 
 const doc = (suffix: string): string => `00000000-0000-4000-8000-0000000003${suffix}`;
@@ -191,7 +202,7 @@ describeDb('the upgrade path 0029 → 0030, on PostgreSQL 16, through the real m
 
   it('applies 0030 through the real migrator — the journal timestamp is newer, so it is not skipped', async () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect(await ledger(db)).toBe(31);
+    expect(await ledger(db)).toBe(SHIPPED);
   });
 
   it('leaves every existing library row exactly as it was', async () => {
@@ -216,14 +227,15 @@ describeDb('the upgrade path 0029 → 0030, on PostgreSQL 16, through the real m
 
   it('a second run applies nothing — re-running the migration is safe', async () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect(await ledger(db)).toBe(31);
+    expect(await ledger(db)).toBe(SHIPPED);
   });
 
-  it('cuts the folder where it says: 0030 is the only migration the live server lacks', () => {
+  it('cuts the folder where it says: the live server lacks 0030 and everything after it', () => {
     const shipped = readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql')).sort();
     const atLive = readdirSync(live).filter((name) => name.endsWith('.sql')).sort();
-    expect(shipped.filter((name) => !atLive.includes(name))).toEqual([
-      '0030_library_page_coverage_unknown.sql',
-    ]);
+    const missing = shipped.filter((name) => !atLive.includes(name));
+    expect(missing[0]).toBe('0030_library_page_coverage_unknown.sql');
+    expect(missing.every((name) => name >= '0030')).toBe(true);
+    expect(atLive).toHaveLength(30);
   });
 });

@@ -83,8 +83,21 @@ describe('the Coordinator', () => {
     expect(can('coordinator', 'users.manageMasters')).toBe(false);
   });
 
-  it('cannot change the commercial terms', () => {
+  /*
+   * THE RATES AND THE CHECKLISTS ARE HERS; NOTHING ELSE OF THE SETTINGS IS.
+   * The owner asked for the Coordinator to maintain both from Administration.
+   * `settings.manage` (the rest of the system settings) and the discount stay a
+   * Master's.
+   */
+  it('maintains the rates and the checklists', () => {
+    expect(can('coordinator', 'settings.rates')).toBe(true);
+    expect(can('coordinator', 'settings.checklists')).toBe(true);
+  });
+
+  it('does not gain the other system settings, or the discount, with them', () => {
     expect(can('coordinator', 'settings.manage')).toBe(false);
+    expect(can('coordinator', 'jobs.applyDiscount')).toBe(false);
+    expect(can('coordinator', 'users.manageMasters')).toBe(false);
   });
 });
 
@@ -132,6 +145,8 @@ describe('the technician', () => {
     'users.manageTechnicians',
     'users.manageMasters',
     'settings.manage',
+    'settings.rates',
+    'settings.checklists',
     'activity.viewAll',
   ];
 

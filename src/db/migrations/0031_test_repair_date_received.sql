@@ -1,0 +1,11 @@
+-- Test & Repair "What is the Job?": the day the unit arrived on the counter.
+--
+-- WHY. A unit is often left at reception and booked in later, and the customer
+-- asks how long EJE have had it from the day they handed it over — which is
+-- not the day the job was raised (`created_at`).
+--
+-- ADDITIVE AND OPTIONAL. One nullable column with no default: every existing
+-- job keeps NULL, which reads as "not recorded", and nothing invents a date
+-- for it. The release before this one neither reads nor writes the column, so
+-- a rollback runs unchanged against a database that has it.
+ALTER TABLE "jobs" ADD COLUMN IF NOT EXISTS "date_received" date;

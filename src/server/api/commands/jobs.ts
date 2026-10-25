@@ -129,6 +129,7 @@ const detailChanges = z
     repairPartNumber: text(120),
     repairDescription: text(500),
     repairQuantity: z.number().int().positive().max(100_000).nullable(),
+    dateReceived: isoDate.nullable(),
   })
   .partial()
   .strict();
@@ -143,6 +144,7 @@ const detailExpected = z
     repairPartNumber: text(8000),
     repairDescription: text(8000),
     repairQuantity: z.number().int().nullable(),
+    dateReceived: isoDate.nullable(),
   })
   .partial()
   .strict();
@@ -980,6 +982,8 @@ export const createJobSchema = z
     repairDescription: text(500).optional(),
     repairQuantity: z.number().int().positive().max(100_000).nullable().optional(),
     quoteNumber: text(120).optional(),
+    /** When the unit arrived. A calendar date or null; the rules are `createJob`'s. */
+    dateReceived: isoDate.nullable().optional(),
     /*
      * PRESENT, BUT NOT NECESSARILY FILLED IN. CR-13.
      *

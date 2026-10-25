@@ -2,6 +2,7 @@ import {
   asJobId,
   can,
   contactFullName,
+  dateReceivedProblem,
   emptyCompletionReport,
   getJobTypeDefinition,
   machineDisplayName,
@@ -73,6 +74,11 @@ export interface NewJobInput {
   readonly repairItem?: RepairItem;
   /** The customer's quote reference, where the job type takes one. */
   readonly quoteNumber?: string;
+  /**
+   * The day the unit arrived on the counter, where the job type books one in.
+   * Optional, and cleared on a type that does not capture a repair item.
+   */
+  readonly dateReceived?: string | null;
   readonly faultDescription: string;
   /**
    * Who the customer's copy of the job card goes to.
@@ -478,6 +484,19 @@ export const createJob = async (
     });
   }
 
+  /*
+   * DATE RECEIVED: a real day, not in the future — when it is given at all.
+   * Before the job number is allocated, for the same reason as the register
+   * check above: a refusal must not burn a number off the sequence.
+   */
+  const dateReceived = definition.capturesRepairItem ? (input.dateReceived ?? null) : null;
+  const dateProblem = dateReceivedProblem(dateReceived, context.services.clock.now());
+  if (dateProblem !== null) {
+    throw new WorkflowError('The date received is not a date that can be recorded.', [
+      { code: 'date_received_invalid', message: dateProblem },
+    ]);
+  }
+
   const settings = await context.repos.settings.get();
   const allocated = await allocateJobNumber(context, settings);
   const now = context.services.clock.now();
@@ -561,6 +580,7 @@ export const createJob = async (
           }
         : emptyRepairItem(),
     quoteNumber: definition.capturesQuoteNumber ? (input.quoteNumber ?? '').trim() : '',
+    dateReceived,
     faultDescription,
     /*
      * A NEW JOB HAS NO ATTACHMENTS, and cannot be given one here.

@@ -691,6 +691,17 @@ export interface Job {
   readonly quoteNumber: string;
 
   /**
+   * THE DAY THE UNIT ARRIVED ON THE COUNTER. Test & Repair "What is the Job?".
+   *
+   * Not `createdAt`: a unit is often left at reception and booked in the next
+   * morning, and the customer asks how long EJE have had it from the day they
+   * handed it over. Optional, like the rest of the repair item — offered where
+   * `JobTypeDefinition.capturesRepairItem` is true — and never defaulted to
+   * today, because a guessed date reads exactly like a recorded one.
+   */
+  readonly dateReceived: IsoDate | null;
+
+  /**
    * The rates this job is priced at, frozen when the customer signed.
    *
    * Null while the job is still being worked, in which case current system

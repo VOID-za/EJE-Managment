@@ -1,5 +1,6 @@
 import {
   can,
+  dateReceivedProblem,
   editableDetailFields,
   getJobTypeDefinition,
   JOB_DETAIL_LABELS,
@@ -135,6 +136,11 @@ export const editJobDetails = async (
     );
   }
 
+  const dateProblem = dateReceivedProblem(next.dateReceived, context.services.clock.now());
+  if (dateProblem !== null) {
+    throw refuse('The date received is not a date that can be recorded.', 'date_received_invalid', dateProblem);
+  }
+
   // A draft may still say nothing about the work — DRAFT-1 defers exactly this
   // check, and `releaseDraft` asks it again before anybody is sent.
   if (job.status !== 'draft') assertFaultDescribed(definition, next.faultDescription);
@@ -161,6 +167,7 @@ export const editJobDetails = async (
       description: next.repairDescription,
       quantity: next.repairQuantity,
     },
+    dateReceived: next.dateReceived,
   });
 
   await audit(context, {

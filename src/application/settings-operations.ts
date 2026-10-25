@@ -6,8 +6,8 @@ import { WorkflowError } from './errors';
 /**
  * System settings: charge-out rates, travel, call-out and VAT.
  *
- * These are the commercial terms EJE trades on, so they belong to a Master and
- * to nobody else — a Coordinator runs the office but does not set the prices.
+ * These are the commercial terms EJE trades on. The office maintains them — a
+ * Master or a Coordinator, `settings.rates` — and a technician does not.
  * The check lives here, in the operation, rather than in the screen that calls
  * it: a hidden tab is not authorisation, and the repository has no opinion
  * about who is writing to it.
@@ -16,12 +16,12 @@ export const updateSettings = async (
   context: OperationContext,
   settings: SystemSettings,
 ): Promise<SystemSettings> => {
-  if (!can(context.actor.role, 'settings.manage')) {
-    throw new WorkflowError('Only a Master can change the charge-out rates.', [
+  if (!can(context.actor.role, 'settings.rates')) {
+    throw new WorkflowError('Only the office can change the charge-out rates.', [
       {
         code: 'not_permitted',
         message:
-          'Rates, travel, call-out and VAT are commercial terms and are set by a Master.',
+          'Rates, travel, call-out and VAT are commercial terms and are set by a Master or a Coordinator.',
       },
     ]);
   }

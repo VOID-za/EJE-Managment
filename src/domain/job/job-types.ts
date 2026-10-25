@@ -142,6 +142,19 @@ export interface JobTypeDefinition {
   /** A customer's quote number may be recorded. Test & Repair §4. */
   readonly capturesQuoteNumber: boolean;
   /**
+   * WHAT MAY BE ATTACHED TO THE JOB: PHOTOGRAPHS, AND VIDEOS WHERE THIS IS TRUE.
+   *
+   * Every job type takes photographs. A field job also takes a video — a clip
+   * of the noise the machine is making is evidence a photograph cannot carry.
+   * A parts collection takes photographs ONLY: what is worth recording at the
+   * counter is what the goods looked like when they left, and nothing about a
+   * counter transaction needs a recording. No job type takes a document — a
+   * PDF belongs in the Technical Library or the customer's or machine's own
+   * register. The SERVER enforces this (`validateJobMediaUpload`), on the
+   * bytes; the screen only narrows the picker.
+   */
+  readonly acceptsVideoAttachments: boolean;
+  /**
    * The priority a screen OFFERS first where one is required.
    *
    * Not a value anything writes on the job's behalf: where `requiresPriority`
@@ -172,6 +185,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
+    acceptsVideoAttachments: true,
     defaultPriority: 'urgent',
     accent: 'red',
   },
@@ -194,6 +208,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     requiresPriority: true,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
+    acceptsVideoAttachments: true,
     defaultPriority: 'normal',
     accent: 'blue',
   },
@@ -216,6 +231,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     requiresPriority: true,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
+    acceptsVideoAttachments: true,
     defaultPriority: 'normal',
     accent: 'green',
   },
@@ -240,6 +256,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
+    acceptsVideoAttachments: false,
     defaultPriority: 'normal',
     accent: 'amber',
   },
@@ -263,6 +280,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     requiresPriority: false,
     capturesRepairItem: true,
     capturesQuoteNumber: true,
+    acceptsVideoAttachments: true,
     defaultPriority: 'normal',
     accent: 'violet',
   },

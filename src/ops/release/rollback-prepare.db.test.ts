@@ -1,11 +1,13 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { createDatabase, type Database } from '@/db/client';
 import { testDatabaseUrl } from '@/data/postgres/test-database';
-import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
+import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
+import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
 import { ROLLBACK_DOCUMENTS } from './rollback-fixture';
 
@@ -97,7 +99,13 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     await db.execute(sql`create schema public`);
     await migrate(db, { migrationsFolder: join(process.cwd(), 'src/db/migrations') });
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
-    expect(Number(rows[0]?.n)).toBe(31);
+    // Every migration this checkout ships — 0030, and 0031 onwards when present.
+    const shipped = (
+      JSON.parse(readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8')) as {
+        entries: readonly unknown[];
+      }
+    ).entries.length;
+    expect(Number(rows[0]?.n)).toBe(shipped);
   }, 120_000);
 
   it('writes a library document in every indexing state, "coverage unknown" included', async () => {
@@ -150,4 +158,20 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     expect(saved.pagesIndexed).toBe(0);
     expect(saved.state).toBe('partially_indexed');
   });
+
+  /*
+   * 0031: `jobs.date_received`. A Test & Repair job carrying a date received
+   * is the one job shape only this release writes; phase 2 has the live code
+   * read it and write a job of its own beside it.
+   */
+  it('writes a Test & Repair job carrying a date received (0031)', async () => {
+    const jobs = new PostgresJobRepository(db);
+    const saved = await jobs.save(
+      jobFixture(ROLLBACK_JOB_NUMBER, { jobType: 'test_and_repair', dateReceived: '2026-10-20' }),
+    );
+    expect(saved.dateReceived).toBe('2026-10-20');
+  });
 });
+
+/** Read by phase 2 (`scripts/release/rollback-probe.db.test.ts`). */
+const ROLLBACK_JOB_NUMBER = 'EJE-RB-0031';

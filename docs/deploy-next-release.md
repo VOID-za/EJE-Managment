@@ -329,6 +329,22 @@ follows is sufficient; there is no window in which the new code is refused.
 before any are read; without it the reader finds the end by reading to it,
 and says so when a limit stopped it first.
 
+### And migration 0031 (Test & Repair "Date received") — NOT YET DEPLOYED, NOT IN de0d9b6
+
+On `claude/job-forms-attachments`, after `de0d9b6`. One additive, nullable
+column: `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS date_received date`. Every
+existing job keeps NULL ("not recorded"); nothing is backfilled or guessed.
+
+- **Rollback-compatible**, proven in CI: `scripts/release/rollback-compat.sh`
+  now also has the live release's code read a job written WITH a date received
+  and write one of its own on a database at 0031.
+- **A release that includes it has TWO pending migrations** if `de0d9b6` has
+  not been released first. `deploy/release/deploy-release.sh` expects exactly
+  one (`EXPECT_PENDING=0030_library_page_coverage_unknown`), so it will STOP at
+  the preflight gate — by design — until the release that carries 0031 says so.
+  The simplest order is to release `de0d9b6` first, then the next release with
+  `EXPECT_PENDING=0031_test_repair_date_received`.
+
 ### And a new preflight line
 
 `EJE_DEPLOYMENT` should be set before step 4, to `production` or

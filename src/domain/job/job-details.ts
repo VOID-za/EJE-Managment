@@ -27,6 +27,8 @@ export interface JobDetailValues {
   readonly repairPartNumber: string;
   readonly repairDescription: string;
   readonly repairQuantity: number | null;
+  /** When the unit arrived on the counter (Test & Repair). */
+  readonly dateReceived: string | null;
 }
 
 export type JobDetailField = keyof JobDetailValues;
@@ -37,6 +39,7 @@ export const JOB_DETAIL_FIELDS: readonly JobDetailField[] = [
   'referenceNumber',
   'quoteNumber',
   'deliveryNote',
+  'dateReceived',
   'repairPartNumber',
   'repairDescription',
   'repairQuantity',
@@ -53,7 +56,23 @@ export const JOB_DETAIL_LABELS: Readonly<Record<JobDetailField, string>> = {
   repairPartNumber: 'Part number (unit booked in)',
   repairDescription: 'Description (unit booked in)',
   repairQuantity: 'Quantity (unit booked in)',
+  dateReceived: 'Date received',
 };
+
+/**
+ * The label a screen shows for a field on THIS job type.
+ *
+ * One exception to `JOB_DETAIL_LABELS`: on a Test & Repair the delivery note
+ * field is where the office records whichever reference came in with the unit
+ * — the customer's delivery note or the courier's waybill — and the owner named
+ * it "Delivery Note / Waybill Number". On a parts collection it stays a
+ * delivery note, because there the courier's waybill is a separate field
+ * (`Job.waybillNumber`) asked at the collection.
+ */
+export const jobDetailLabel = (field: JobDetailField, jobType: JobTypeCode): string =>
+  field === 'deliveryNote' && jobType === 'test_and_repair'
+    ? 'Delivery note / waybill number'
+    : JOB_DETAIL_LABELS[field];
 
 /** The details as the job records them now. */
 export const jobDetailValues = (job: Job): JobDetailValues => ({
@@ -65,6 +84,7 @@ export const jobDetailValues = (job: Job): JobDetailValues => ({
   repairPartNumber: job.repairItem.partNumber,
   repairDescription: job.repairItem.description,
   repairQuantity: job.repairItem.quantity,
+  dateReceived: job.dateReceived,
 });
 
 /**
@@ -94,6 +114,7 @@ export const editableDetailFields = (jobType: JobTypeCode): readonly JobDetailFi
       case 'repairPartNumber':
       case 'repairDescription':
       case 'repairQuantity':
+      case 'dateReceived':
         return definition.capturesRepairItem;
       case 'faultDescription':
         return !definition.officeProcessed;

@@ -32,6 +32,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/cn';
 import { downloadBytes } from '@/lib/download';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
+import { JobCardPdfButton } from '@/components/jobs/JobCardPdfButton';
 import { PartsCollectionNote } from '@/components/jobs/PartsCollectionNote';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
@@ -260,13 +261,22 @@ const ReviewJobPage = ({
           ) : undefined
         }
         actions={
-          <Button
-            variant="secondary"
-            leadingIcon={<Icon name="arrowLeft" className="size-4" />}
-            onClick={() => router.push(`/jobs/${job.jobNumber}`)}
-          >
-            Back to job
-          </Button>
+          <div className="flex flex-wrap items-start gap-2">
+            {/*
+              THE JOB CARD AS A PDF, before it is issued. Once it is issued the
+              stored final PDF is the document (Download Final PDF, below) and a
+              fresh rendering beside it would invite the question of which one
+              the customer holds — so this is offered only until then.
+            */}
+            {job.finalDocument === null && <JobCardPdfButton view={view} />}
+            <Button
+              variant="secondary"
+              leadingIcon={<Icon name="arrowLeft" className="size-4" />}
+              onClick={() => router.push(`/jobs/${job.jobNumber}`)}
+            >
+              Back to job
+            </Button>
+          </div>
         }
       />
 

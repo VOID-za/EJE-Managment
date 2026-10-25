@@ -128,6 +128,55 @@ describeDb('job creation and assignment on PostgreSQL', () => {
     expect(participants).toHaveLength(0);
   });
 
+  /*
+   * TEST & REPAIR "What is the Job?", AGAINST THE REAL SCHEMA. Migration 0031.
+   *
+   * Every field persists through PostgreSQL and is read back on reopening —
+   * the new `date_received` column and the fields it sits beside — and a job
+   * raised with none of them stores NULL, never a guessed date.
+   */
+  it('persists a Test & Repair with every "What is the Job?" field, and reads it back', async () => {
+    const master = await signIn(EMAILS.master);
+    const created = await raise(master, {
+      jobType: 'test_and_repair',
+      machineId: null,
+      priority: null,
+      faultDescription: '',
+      orderNumber: '',
+      dateReceived: '2026-10-20',
+      repairPartNumber: 'A06B-6117-H209',
+      repairDescription: 'Spindle amplifier module',
+      repairQuantity: 2,
+      deliveryNote: 'WB-778812',
+      referenceNumber: 'REF-55',
+      quoteNumber: 'Q-20451',
+    });
+    expect(created.status, JSON.stringify(created.error)).toBe(200);
+
+    const [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, created.data.id));
+    expect(row?.dateReceived).toBe('2026-10-20');
+    expect(row?.machineId).toBeNull();
+    expect(row?.priority).toBeNull();
+    expect(row?.repairPartNumber).toBe('A06B-6117-H209');
+    expect(row?.repairQuantity).toBe(2);
+    expect(row?.deliveryNote).toBe('WB-778812');
+    expect(row?.quoteNumber).toBe('Q-20451');
+
+    const reopened = await master.get<{ view: { job: Job } }>(`/api/jobs/${created.data.jobNumber}`);
+    expect(reopened.data.view.job.dateReceived).toBe('2026-10-20');
+    expect(reopened.data.view.job.repairItem.description).toBe('Spindle amplifier module');
+
+    const blank = await raise(master, {
+      jobType: 'test_and_repair',
+      machineId: null,
+      priority: null,
+      faultDescription: '',
+      orderNumber: '',
+    });
+    const [blankRow] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, blank.data.id));
+    expect(blankRow?.dateReceived).toBeNull();
+  });
+
   it('refuses acceptance of a parts collection over the real API', async () => {
     const master = await signIn(EMAILS.master);
     const created = await raise(master, {

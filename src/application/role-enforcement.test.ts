@@ -187,14 +187,23 @@ describe('the Coordinator is an office role, not a field one', () => {
     );
   });
 
-  it('cannot change the charge-out rates', async () => {
+  /*
+   * THE RATES ARE THE OFFICE'S NOW. The owner asked for the Coordinator to
+   * maintain the rates and the checklists from Administration — and for no
+   * other system setting to move with them (`settings.manage` stays a
+   * Master's). This test used to assert the refusal; it now asserts the write,
+   * and that a technician is still refused with nothing written.
+   */
+  it('changes the charge-out rates, and a technician still cannot', async () => {
     const settings = await harness.repos.settings.get();
-    await expect(
-      updateSettings(harness.as(coordinator), { ...settings, vatPercentage: 20 }),
-    ).rejects.toThrow(/Master/i);
+    const saved = await updateSettings(harness.as(coordinator), { ...settings, vatPercentage: 20 });
+    expect(saved.vatPercentage).toBe(20);
+    expect((await harness.repos.settings.get()).vatPercentage).toBe(20);
 
-    // And nothing was written on the way to refusing.
-    expect((await harness.repos.settings.get()).vatPercentage).toBe(settings.vatPercentage);
+    await expect(
+      updateSettings(harness.as(sipho), { ...settings, vatPercentage: 30 }),
+    ).rejects.toBeInstanceOf(WorkflowError);
+    expect((await harness.repos.settings.get()).vatPercentage).toBe(20);
   });
 
   it('reads closed jobs, which is what she invoices from', async () => {

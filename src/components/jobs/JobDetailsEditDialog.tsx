@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
   editableDetailFields,
-  JOB_DETAIL_LABELS,
+  jobDetailLabel,
   jobDetailValues,
   type Job,
   type JobDetailField,
@@ -40,11 +40,14 @@ const toForm = (values: JobDetailValues): FormValues => ({
   repairPartNumber: values.repairPartNumber,
   repairDescription: values.repairDescription,
   repairQuantity: values.repairQuantity === null ? '' : String(values.repairQuantity),
+  dateReceived: values.dateReceived ?? '',
 });
 
 /** The form's value as the job would hold it: trimmed text, a quantity or null. */
 const fromForm = (field: JobDetailField, value: string): string | number | null => {
   const text = value.trim();
+  // A cleared date is NO date, not an empty string the server would refuse.
+  if (field === 'dateReceived') return text.length === 0 ? null : text;
   if (field !== 'repairQuantity') return text;
   return text.length === 0 ? null : Number(text);
 };
@@ -58,6 +61,7 @@ const MAX_LENGTH: Readonly<Record<JobDetailField, number | undefined>> = {
   repairPartNumber: 120,
   repairDescription: 500,
   repairQuantity: undefined,
+  dateReceived: undefined,
 };
 
 export const JobDetailsEditDialog = ({
@@ -161,7 +165,7 @@ export const JobDetailsEditDialog = ({
           field === 'faultDescription' ? (
             <TextAreaField
               key={field}
-              label={JOB_DETAIL_LABELS[field]}
+              label={jobDetailLabel(field, job.jobType)}
               value={form[field]}
               maxLength={MAX_LENGTH[field]}
               rows={5}
@@ -171,7 +175,8 @@ export const JobDetailsEditDialog = ({
           ) : (
             <TextField
               key={field}
-              label={JOB_DETAIL_LABELS[field]}
+              label={jobDetailLabel(field, job.jobType)}
+              type={field === 'dateReceived' ? 'date' : undefined}
               value={form[field]}
               maxLength={MAX_LENGTH[field]}
               inputMode={field === 'repairQuantity' ? 'numeric' : undefined}

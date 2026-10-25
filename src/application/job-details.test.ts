@@ -252,6 +252,7 @@ describe('what: the fields this job type carries, validated as creation validate
       'referenceNumber',
       'quoteNumber',
       'deliveryNote',
+      'dateReceived',
       'repairPartNumber',
       'repairDescription',
       'repairQuantity',

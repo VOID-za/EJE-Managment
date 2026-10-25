@@ -24,6 +24,7 @@ import {
 import { ChecklistRunner } from './ChecklistRunner';
 import { CompletionReportPanel } from './CompletionReportPanel';
 import { JobCardPdfPreview } from './JobCardPdfPreview';
+import { JobCardPdfButton } from './JobCardPdfButton';
 import { JobMediaPanel } from './JobMediaPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { SignaturePad } from './SignaturePad';
@@ -566,6 +567,9 @@ export const CompleteJobWizard = ({
           <CardHeader
             title="Ready for the customer"
             description="Everything captured on this job, in summary."
+            // The job card itself, as a PDF, from what is saved now — the same
+            // renderer as the document the customer will be sent.
+            action={<JobCardPdfButton view={view} />}
           />
           <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
             {[

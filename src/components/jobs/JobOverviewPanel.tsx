@@ -7,6 +7,7 @@ import {
   contactFullName,
   getJobTypeDefinition,
   hasRepairItem,
+  jobDetailLabel,
   jobScheduleWindow,
   machineDisplayName,
   userFullName,
@@ -191,13 +192,17 @@ export const JobOverviewPanel = ({
               ...(definition.capturesDeliveryNote
                 ? [
                     {
-                      label: 'Delivery note',
+                      label: jobDetailLabel('deliveryNote', job.jobType),
                       value: job.deliveryNote.length > 0 ? job.deliveryNote : '—',
                     },
                   ]
                 : []),
               ...(definition.capturesRepairItem
                 ? [
+                    {
+                      label: 'Date received',
+                      value: job.dateReceived ?? '—',
+                    },
                     {
                       label: 'Unit booked in',
                       value: hasRepairItem(job.repairItem)
@@ -294,7 +299,7 @@ export const JobOverviewPanel = ({
             <Card>
               <CardHeader
                 title="Attachments"
-                description="Documents the office attached when the job was raised."
+                description="Photographs and videos attached when the job was raised."
               />
               <ul className="mt-4 space-y-2">
                 {job.attachments.map((file) => (

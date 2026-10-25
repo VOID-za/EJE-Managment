@@ -19,13 +19,18 @@ import { WorkflowError } from './errors';
  * customer saw, so a Master publishes a NEW version rather than editing a used
  * one, and retiring a version archives it rather than destroying it.
  */
-const assertMaster = (context: OperationContext): void => {
-  // `settings.manage`, not `admin.access`: a Coordinator reaches Administration
-  // to manage users and the library, and a checklist is part of the standard of
-  // work rather than day-to-day office administration.
-  if (can(context.actor.role, 'settings.manage')) return;
-  throw new WorkflowError('Only a Master can administer checklists.', [
-    { code: 'not_permitted', message: 'Checklist administration is a Master function.' },
+const assertOffice = (context: OperationContext): void => {
+  // `settings.checklists`, not `admin.access`: the owner asked for the office —
+  // Master and Coordinator — to maintain the checklists, and for nothing else
+  // of the system settings to come with it. A technician completes a checklist
+  // and never edits one. The rule that a USED version is immutable is below,
+  // and applies to every role alike.
+  if (can(context.actor.role, 'settings.checklists')) return;
+  throw new WorkflowError('Only the office can administer checklists.', [
+    {
+      code: 'not_permitted',
+      message: 'Checklist administration is done by a Master or a Coordinator.',
+    },
   ]);
 };
 
@@ -54,7 +59,7 @@ export const createTemplate = async (
   context: OperationContext,
   input: NewTemplateInput,
 ): Promise<ChecklistTemplate> => {
-  assertMaster(context);
+  assertOffice(context);
   const name = input.name.trim();
   if (name.length === 0) {
     throw new WorkflowError('A checklist name is required.', [
@@ -95,7 +100,7 @@ export const saveTemplateDraft = async (
   context: OperationContext,
   template: ChecklistTemplate,
 ): Promise<ChecklistTemplate> => {
-  assertMaster(context);
+  assertOffice(context);
   const usage = await loadTemplateUsage(context);
   const refusal = editInPlaceRefusal(template, usage);
   if (refusal !== null) {
@@ -130,7 +135,7 @@ export const publishTemplate = async (
   context: OperationContext,
   template: ChecklistTemplate,
 ): Promise<ChecklistTemplate> => {
-  assertMaster(context);
+  assertOffice(context);
   if (template.sections.length === 0) {
     throw new WorkflowError('A checklist with no items cannot be issued.', [
       { code: 'no_items', message: 'Add at least one section with one item first.' },
@@ -178,7 +183,7 @@ export const startNewVersion = async (
   context: OperationContext,
   template: ChecklistTemplate,
 ): Promise<ChecklistTemplate> => {
-  assertMaster(context);
+  assertOffice(context);
 
   const all = await context.repos.checklistTemplates.list();
   const family = all.filter((candidate) => candidate.id === template.id);
@@ -215,7 +220,7 @@ export const archiveTemplate = async (
   context: OperationContext,
   template: ChecklistTemplate,
 ): Promise<ChecklistTemplate> => {
-  assertMaster(context);
+  assertOffice(context);
 
   const saved = await context.repos.checklistTemplates.save({
     ...template,

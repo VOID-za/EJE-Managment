@@ -263,6 +263,7 @@ const summary = (over: Partial<JobSummary> = {}): JobSummary => ({
   jobType: 'breakdown',
   priority: 'normal',
   quoteNumber: '',
+  dateReceived: null,
   repairItem: { partNumber: '', description: '', quantity: null },
   scheduledDate: null,
   closedAt: null,
