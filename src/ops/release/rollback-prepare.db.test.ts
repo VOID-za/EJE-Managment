@@ -24,7 +24,17 @@ import { ROLLBACK_DOCUMENTS } from './rollback-fixture';
  * code meets it.
  */
 const url = testDatabaseUrl();
-const enabled = url !== null && process.env.RELEASE_ROLLBACK_PHASE === 'prepare';
+const requested = process.env.RELEASE_ROLLBACK_PHASE === 'prepare';
+/*
+ * ASKED FOR AND UNABLE TO RUN IS A FAILURE, NOT A SKIP. A skipped test exits 0,
+ * so a CI step that ran nothing would look exactly like one that proved
+ * rollback compatibility. rollback-compat.sh also refuses any run that reports
+ * a skipped or zero passed test.
+ */
+if (requested && url === null) {
+  throw new Error('RELEASE_ROLLBACK_PHASE=prepare needs TEST_DATABASE_URL naming a disposable test database.');
+}
+const enabled = requested;
 const describePhase = enabled ? describe : describe.skip;
 
 const technicalDocument = (id: string, name: string): TechnicalDocument => ({

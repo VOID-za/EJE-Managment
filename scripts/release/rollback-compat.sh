@@ -56,17 +56,34 @@ git worktree add --detach "$live" "$LIVE" >/dev/null 2>&1
 ln -s "$root/node_modules" "$live/node_modules"
 echo "live release checked out at $live ($(git -C "$live" rev-parse --short HEAD))"
 
+# A phase PROVES something only if its tests RAN. A skipped test exits 0, so the
+# exit code alone cannot tell "rollback compatible" from "ran nothing": each
+# phase writes vitest's JSON report, and this refuses unless at least one test
+# passed and none was skipped or failed.
+run_phase() {
+  local dir=$1 phase=$2 file=$3 report="$work/report-$2.json"
+  (cd "$dir" && RELEASE_ROLLBACK_PHASE=$phase npx vitest run --config vitest.db.config.mts \
+    --reporter=default --reporter=json --outputFile="$report" "$file") || {
+    echo "REFUSED: phase '$phase' failed"; exit 1; }
+  node -e '
+    const r = require(process.argv[1]);
+    const ran = r.numPassedTests, skipped = r.numPendingTests + r.numTodoTests, failed = r.numFailedTests;
+    console.log(`phase ${process.argv[2]}: ${ran} passed, ${skipped} skipped, ${failed} failed`);
+    if (ran === 0 || skipped > 0 || failed > 0) {
+      console.log(`REFUSED: phase ${process.argv[2]} did not prove anything (every test must run and pass)`);
+      process.exit(1);
+    }' "$report" "$phase" || exit 1
+}
+
 echo
 echo "=== phase 1 — THIS release migrates a disposable database to 0030 and writes every state"
-RELEASE_ROLLBACK_PHASE=prepare npx vitest run --config vitest.db.config.mts \
-  src/ops/release/rollback-prepare.db.test.ts
+run_phase "$root" prepare src/ops/release/rollback-prepare.db.test.ts
 
 echo
 echo "=== phase 2 — the LIVE release's own code reads, searches and writes it"
 mkdir -p "$live/src/release-probe"
 cp scripts/release/rollback-probe.db.test.ts "$live/src/release-probe/"
-(cd "$live" && RELEASE_ROLLBACK_PHASE=probe npx vitest run --config vitest.db.config.mts \
-  src/release-probe/rollback-probe.db.test.ts)
+run_phase "$live" probe src/release-probe/rollback-probe.db.test.ts
 
 echo
 echo "ROLLBACK COMPATIBLE: the live release ($LIVE) works against a database at 0030."
