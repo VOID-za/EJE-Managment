@@ -43,7 +43,16 @@ sandbox() {
   stub pdftotext 'echo pdftotext'
   stub pdfinfo 'echo pdfinfo'
   stub install 'echo "install $*" >> "$T/calls"; for a; do last=$a; done; mkdir -p "$last"'
-  stub git 'if [ "$1" = -C ] && [ "$3" = rev-parse ]; then cat "$2/.sha" 2>/dev/null; else echo "git $*" >> "$T/calls"; fi'
+  # git AS THE SERVER'S git BEHAVES: a release directory is owned by eje, and git
+  # refuses any other caller — root included — with "dubious ownership". The
+  # stub refuses unless it was reached through `runuser -u eje`, and records a
+  # root attempt, so a HEAD check run as root fails here exactly as it did on
+  # the server on 25 October 2026.
+  stub git 'if [ "$1" = -C ] && [ "$3" = rev-parse ]; then
+  if [ "${AS_USER:-root}" != eje ]; then echo "git ROOT $*" >> "$T/calls"; echo "fatal: detected dubious ownership in repository at $2" >&2; exit 128; fi
+  echo "git eje $*" >> "$T/calls"; cat "$2/.sha" 2>/dev/null
+else echo "git $*" >> "$T/calls"; fi'
+  stub runuser '[ "$1" = -u ] && [ "$3" = -- ] || { echo "runuser: bad usage $*" >&2; exit 2; }; user=$2; shift 3; AS_USER=$user exec "$@"'
   # Health of whatever /opt/eje/app points at, unless that release is marked unhealthy.
   stub curl 'name=$(basename "$(readlink -f "$T/app")"); echo "curl $name" >> "$T/calls"
 if [ -e "$T/unhealthy-$name" ]; then echo "{\"status\":\"degraded\",\"database\":\"unreachable\",\"build\":{\"commit\":\"$name\"}}"
@@ -126,6 +135,24 @@ that "...the restore test ran with the restore role's environment" "[ \$(called 
 sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
 expect "--release reuses a verified build of the same commit" 0 "$(run --release "$SHA")" 'reusing the verified build'
 that "...without cloning again" "[ \$(called 'systemd-run build') = 0 ]"
+
+# ---- the HEAD checks run as eje, never as root (the 25 October 2026 stop) --------
+# A build the eje user made must be READ as eje: git refuses root in a repository
+# it does not own, and that refusal read as "not a build of" the commit.
+sandbox
+run --release "$SHA" > /dev/null
+that "after a fresh build, the HEAD check runs as eje and passes" \
+  "grep -q 'RELEASED: serving $SHORT' '$T/out' && grep -q '^git eje -C $T/releases/$SHORT rev-parse HEAD' '$T/calls'"
+that "...and git is never asked for HEAD as root" "[ \$(called 'git ROOT') = 0 ]"
+sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
+expect "--check recognises an eje-owned build of the commit (it will be reused)" 0 "$(run --check "$SHA")" 'holds a build of'
+that "...without asking git as root" "[ \$(called 'git ROOT') = 0 ]"
+sandbox; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"
+run --release "$SHA" > /dev/null
+that "the reuse decision asks git as eje, never as root" \
+  "grep -q 'reusing the verified build' '$T/out' && [ \$(called 'git ROOT') = 0 ] && [ \$(called 'git eje') -ge 1 ]"
+that "every HEAD check in the script goes through release_head (static)" \
+  "[ \$(grep -c 'git -C' '$SCRIPT') = 1 ] && grep -q '^release_head() { runuser -u eje -- git -C' '$SCRIPT'"
 
 # ---- every gate before the migration stops with NOTHING changed -----------------
 for case in fail-build fail-backup fail-verify fail-keycheck fail-restore two-pending extra-fail; do

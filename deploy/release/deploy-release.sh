@@ -87,6 +87,12 @@ as_eje() {
     --working-directory="$dir" -p PrivateTmp=yes \
     --property=EnvironmentFile="$ENV_FILE" --setenv=HOME=/opt/eje "$@"
 }
+# THE RELEASE DIRECTORY BELONGS TO eje, which cloned and built it. Since git
+# 2.35.2 git refuses to work in a repository another user owns ("detected
+# dubious ownership") — root included — and the refusal went to /dev/null, so a
+# good build read as "not a build of" the commit. Every HEAD check therefore
+# runs as the directory's owner.
+release_head() { runuser -u eje -- git -C "$1" rev-parse HEAD 2>/dev/null; }
 state_file() { printf '%s/release-%s.state' "$STATE_DIR" "$1"; }
 record() { printf '%s=%s\n' "$2" "$3" >> "$(state_file "$1")"; }
 recorded() { sed -n "s/^$2=//p" "$(state_file "$1")" 2>/dev/null | tail -1; }
@@ -144,7 +150,7 @@ check() {
   if healthy_as "$(basename "$LIVE")"; then say "health:        ok, $(basename "$LIVE"), database reachable"
   else say "PROBLEM: the live release is not healthy now — a release would start from an unknown state"; problems=1; fi
   if [ -e "$RELEASE" ]; then
-    if [ -d "$RELEASE/.next" ] && [ "$(git -C "$RELEASE" rev-parse HEAD 2>/dev/null)" = "$SHA" ]; then
+    if [ -d "$RELEASE/.next" ] && [ "$(release_head "$RELEASE")" = "$SHA" ]; then
       say "release dir:   $RELEASE exists and holds a build of $SHORT (it will be reused)"
     else say "PROBLEM: $RELEASE exists and is not a verified build of $SHA — inspect it; it is not touched"; problems=1; fi
   else say "release dir:   $RELEASE (new)"; fi
@@ -174,7 +180,7 @@ record "$SHORT" started "$(date -u +%FT%TZ)"
 say "release $SHA; the rollback target is $LIVE"
 
 # 1. BUILD, beside the live release. Never in /opt/eje/app.
-if [ -d "$RELEASE/.next" ] && [ "$(git -C "$RELEASE" rev-parse HEAD 2>/dev/null)" = "$SHA" ]; then
+if [ -d "$RELEASE/.next" ] && [ "$(release_head "$RELEASE")" = "$SHA" ]; then
   say "1/6 build: reusing the verified build in $RELEASE"
 else
   install -d -o eje -g eje "$RELEASE" || stop "could not create $RELEASE. Nothing else was changed."
@@ -189,7 +195,7 @@ else
       npm ci --no-audit --no-fund
       npm run build" \
     || stop "the build failed in $RELEASE (left there to inspect). The live release was not touched."
-  [ "$(git -C "$RELEASE" rev-parse HEAD 2>/dev/null)" = "$SHA" ] && [ -d "$RELEASE/.next" ] \
+  [ "$(release_head "$RELEASE")" = "$SHA" ] && [ -d "$RELEASE/.next" ] \
     || stop "the build finished but $RELEASE is not a build of $SHA. The live release was not touched."
 fi
 record "$SHORT" built yes
