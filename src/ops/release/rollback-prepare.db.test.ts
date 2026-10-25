@@ -1,0 +1,143 @@
+import { afterAll, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
+import { sql } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import { createDatabase, type Database } from '@/db/client';
+import { testDatabaseUrl } from '@/data/postgres/test-database';
+import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
+import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
+import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
+import { ROLLBACK_DOCUMENTS } from './rollback-fixture';
+
+/**
+ * ROLLBACK COMPATIBILITY, PHASE 1 OF 2: THIS RELEASE PREPARES THE DATABASE.
+ *
+ * Run only by `scripts/release/rollback-compat.sh` (RELEASE_ROLLBACK_PHASE=
+ * prepare), never by `npm run db:test` — it leaves the database in place for
+ * phase 2, which is the LIVE release's own code reading and writing it.
+ *
+ * It migrates a disposable test database to `0030` through the real migrator,
+ * exactly as the release will, and writes a library document in every indexing
+ * state this release can produce — including the one only it can produce:
+ * `partially_indexed` with the page coverage UNKNOWN (0 of M). That row is the
+ * whole question: if the release is rolled back after `0030` has run, the old
+ * code meets it.
+ */
+const url = testDatabaseUrl();
+const enabled = url !== null && process.env.RELEASE_ROLLBACK_PHASE === 'prepare';
+const describePhase = enabled ? describe : describe.skip;
+
+const technicalDocument = (id: string, name: string): TechnicalDocument => ({
+  id: asDocumentId(id),
+  name,
+  description: 'Written by the rollback-compatibility preparation.',
+  documentType: 'service_manual',
+  manufacturer: 'Leadwell',
+  machineModel: 'V40',
+  version: '1.0',
+  status: 'current',
+  fileName: `${id}.pdf`,
+  fileSizeBytes: 1024,
+  checksumSha256: null,
+  pageCount: 10,
+  storageKey: `uploads/${id}`,
+  provenance: 'genuine',
+  uploadedAt: '2026-10-01T08:00:00.000Z',
+  uploadedBy: asUserId(IDS.master),
+  tags: [],
+});
+
+const index = (documentId: string, over: Partial<DocumentTextIndex>): DocumentTextIndex => ({
+  documentId: asDocumentId(documentId),
+  state: 'indexed',
+  source: 'text_layer',
+  extractedAt: '2026-10-25T08:00:00.000Z',
+  characters: 0,
+  pages: 10,
+  pagesIndexed: 10,
+  truncated: false,
+  unreadableStreams: 0,
+  failureReason: '',
+  ...over,
+});
+
+const pageRows = (documentId: string, numbers: readonly number[]) =>
+  numbers.map((pageNumber) => {
+    const content = `Page ${pageNumber}: check the spindle drive parameter before restart.`;
+    return {
+      documentId: asDocumentId(documentId),
+      pageNumber,
+      source: 'text_layer' as const,
+      characters: content.length,
+      content,
+    };
+  });
+
+describePhase('rollback compatibility — phase 1: this release migrates to 0030 and writes every state', () => {
+  let db: Database;
+
+  afterAll(async () => {
+    await db?.$client.end({ timeout: 5 });
+  });
+
+  it('migrates a disposable database to 0030 through the real migrator', async () => {
+    db = createDatabase({ connectionString: url ?? '', maxConnections: 2 });
+    await db.execute(sql`drop schema if exists public cascade`);
+    await db.execute(sql`drop schema if exists drizzle cascade`);
+    await db.execute(sql`create schema public`);
+    await migrate(db, { migrationsFolder: join(process.cwd(), 'src/db/migrations') });
+    const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
+    expect(Number(rows[0]?.n)).toBe(31);
+  }, 120_000);
+
+  it('writes a library document in every indexing state, "coverage unknown" included', async () => {
+    await seedBaseline(db);
+    const repository = new PostgresDocumentRepository(db);
+    const { indexed, partial, needsOcr, failed, coverageUnknown } = ROLLBACK_DOCUMENTS;
+    for (const [name, id] of Object.entries(ROLLBACK_DOCUMENTS)) {
+      await repository.save(technicalDocument(id, `Rollback ${name}`));
+    }
+
+    const full = pageRows(indexed, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    await repository.saveTextIndex(
+      index(indexed, { characters: full.reduce((sum, page) => sum + page.characters, 0) }),
+      full.map((page) => page.content).join('\n\n'),
+      full,
+    );
+    const seven = pageRows(partial, [1, 2, 3, 5, 6, 8, 9]);
+    await repository.saveTextIndex(
+      index(partial, {
+        state: 'partially_indexed',
+        pagesIndexed: 7,
+        characters: seven.reduce((sum, page) => sum + page.characters, 0),
+        failureReason: 'No text could be read from pages 4, 7, 10.',
+      }),
+      seven.map((page) => page.content).join('\n\n'),
+      seven,
+    );
+    await repository.saveTextIndex(
+      index(needsOcr, { state: 'needs_ocr', source: null, pagesIndexed: 0, failureReason: 'A scan.' }),
+      '',
+    );
+    await repository.saveTextIndex(
+      index(failed, { state: 'failed', source: null, pagesIndexed: 0, failureReason: 'Damaged.' }),
+      '',
+    );
+    // ONLY THIS RELEASE CAN WRITE THIS ROW (migration 0030): the built-in reader,
+    // cut at its summary budget, with no page rows and coverage unknown.
+    const summary = 'Coolant pressure alarm 2071 means the filter is blocked. The rest was cut.';
+    const saved = await repository.saveTextIndex(
+      index(coverageUnknown, {
+        state: 'partially_indexed',
+        pages: 214,
+        pagesIndexed: 0,
+        characters: summary.length,
+        truncated: true,
+        failureReason: 'This server has no pdftotext; the rest is not searchable.',
+      }),
+      summary,
+    );
+    expect(saved.pagesIndexed).toBe(0);
+    expect(saved.state).toBe('partially_indexed');
+  });
+});

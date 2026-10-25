@@ -176,6 +176,19 @@ jobs:
       - name: Database-backed tests
         run: npm run db:test
 
+      # ROLLBACK COMPATIBILITY OF THE NEXT RELEASE. Release readiness, de0d9b6.
+      #
+      # Migration 0030 cannot be un-run by switching the code back, so a
+      # rollback means the LIVE release's code meeting a database at 0030. This
+      # migrates the throwaway database above to 0030 with THIS release, then
+      # runs the live release's own repository, searchability wording and
+      # preflight rule against it, from a temporary worktree of the live commit.
+      # It refuses outright if the two releases' lockfiles differ. The live
+      # commit is pinned in the script; when the server moves to a new release,
+      # that pin moves with it.
+      - name: Rollback compatibility — the live release against a database at 0030
+        run: bash scripts/release/rollback-compat.sh
+
   browser:
     name: Routes, workflow and smoke
     runs-on: ubuntu-latest
