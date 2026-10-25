@@ -191,13 +191,17 @@ describePhase('rollback compatibility — phase 2: the live release against a da
    */
   it('still reads and writes JOBS on a database with 0031 applied', async () => {
     const jobs = new PostgresJobRepository(db);
-    const written = await jobs.findByJobNumber('EJE-RB-0031');
-    expect(written?.jobType).toBe('test_and_repair');
+    // Phase 1's job: the only Test & Repair, written WITH a date received.
+    const written = (await jobs.list()).filter((job) => job.jobType === 'test_and_repair');
+    expect(written).toHaveLength(1);
+    expect((await jobs.findByJobNumber(written[0]!.jobNumber))?.jobType).toBe('test_and_repair');
 
-    await jobs.save(jobFixture('EJE-RB-LIVE'));
-    expect((await jobs.findByJobNumber('EJE-RB-LIVE'))?.jobNumber).toBe('EJE-RB-LIVE');
+    // And one of its own, numbered from the sequence as the live code numbers jobs.
+    const allocated = await jobs.allocateJobNumber();
+    await jobs.save(jobFixture(allocated.jobNumber));
+    expect((await jobs.findByJobNumber(allocated.jobNumber))?.jobNumber).toBe(allocated.jobNumber);
     const [row] = await db.execute<{ date_received: string | null }>(
-      sql`select date_received from jobs where job_number = 'EJE-RB-LIVE'`,
+      sql`select date_received from jobs where job_number = ${allocated.jobNumber}`,
     );
     expect(row?.date_received ?? null).toBeNull();
   });

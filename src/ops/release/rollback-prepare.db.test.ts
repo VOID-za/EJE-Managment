@@ -166,12 +166,14 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
    */
   it('writes a Test & Repair job carrying a date received (0031)', async () => {
     const jobs = new PostgresJobRepository(db);
+    // A number from the sequence, as every saved job has: the repository keeps
+    // the sequence value beside it, so an invented number cannot be stored.
+    // Phase 2 finds this job as the only Test & Repair on the database.
+    const allocated = await jobs.allocateJobNumber();
     const saved = await jobs.save(
-      jobFixture(ROLLBACK_JOB_NUMBER, { jobType: 'test_and_repair', dateReceived: '2026-10-20' }),
+      jobFixture(allocated.jobNumber, { jobType: 'test_and_repair', dateReceived: '2026-10-20' }),
     );
     expect(saved.dateReceived).toBe('2026-10-20');
+    expect((await jobs.list()).filter((job) => job.jobType === 'test_and_repair')).toHaveLength(1);
   });
 });
-
-/** Read by phase 2 (`scripts/release/rollback-probe.db.test.ts`). */
-const ROLLBACK_JOB_NUMBER = 'EJE-RB-0031';
