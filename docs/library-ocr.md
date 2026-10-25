@@ -137,7 +137,7 @@ it the end is found by reading to it, and a stopped reading says the total is
 not known rather than guessing.
 
 **Measured on generated manuals** (`src/test/pdf-manual.ts`, one marker word per
-page): a **1 200-page** manual (4.9 MB, ~4.8 million characters of page text) is
+page): a **1 200-page** manual (4.9 MB; about 4.2 million characters as `pdftotext -layout` extracts it) is
 indexed on every page and page 1 100 is found by a search; a **1 500-page**
 manual with two blank pages is 1 498 of 1 500 and queues recognition for those
 two alone. The tests are `src/application/library-large-documents.test.ts`,

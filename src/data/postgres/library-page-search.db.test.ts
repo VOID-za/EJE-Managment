@@ -38,7 +38,7 @@ const SUMMARY_CHARACTERS = 400_000;
 
 const marker = (page: number): string => `pagemark${page}x`;
 
-/** About 4 kB of text, like an ordinary manual page, with its own marker. */
+/** About 3 kB of text — 45 lines of alarm text — with its own marker. */
 const pageText = (page: number): string =>
   [
     `Section ${page} ${marker(page)}`,
@@ -154,7 +154,12 @@ describeDb('the library searched page by page, on PostgreSQL', () => {
     expect(rows).toHaveLength(PAGES);
 
     const saved = await repository.findTextIndex(BIG);
-    expect(saved?.characters).toBeGreaterThan(4_000_000);
+    // Exactly the page text written — about 3.6 million characters, roughly nine times
+    // the old 400 000-character whole-document budget.
+    const written = Array.from({ length: PAGES }, (_unused, offset) => pageText(offset + 1).length)
+      .reduce((sum, length) => sum + length, 0);
+    expect(saved?.characters).toBe(written);
+    expect(written).toBeGreaterThan(8 * SUMMARY_CHARACTERS);
     expect((await repository.findTextContent(BIG))?.length).toBeLessThanOrEqual(SUMMARY_CHARACTERS);
   });
 
