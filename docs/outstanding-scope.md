@@ -108,6 +108,14 @@ PostgreSQL-backed tests, and the browser suites, all green on this tree.
 
 ## Found on 23 October 2026, and recorded rather than guessed
 
+> **BUILT on 25 October 2026, `0d9fa5f` — TESTED, awaiting approval.** The
+> owner adopted the recommended default below on #72 (23 October), and it was
+> built exactly to it: `jobs.editDetails` for Master and Coordinator, only
+> while `assertEditable` allows, only the fields the job type carries, every
+> change a from/to pair, and a stale edit refused. See the JOB-EDIT-1 row in
+> `docs/SCOPE.md` for the evidence. The text below is kept because it is the
+> reasoning the implementation had to respect.
+
 **JOB-EDIT-1 — a job's recorded details cannot be changed after creation, by
 anybody.** Not the order number, not the customer reference, not the fault
 description, not the delivery note, and not the Test & Repair fields added as
