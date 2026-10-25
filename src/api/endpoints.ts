@@ -10,6 +10,7 @@ import type {
   Contact,
   Customer,
   Job,
+  JobDetailValues,
   CaptureReferral,
   CorrectedArea,
   DeliveryRecord,
@@ -521,6 +522,16 @@ export const jobs = {
   updatePart: (jobId: string, input: unknown) => jobAction(jobId, 'update_part', input),
   // DRAFT-1. A Master releases a draft; the server refuses anybody else.
   releaseDraft: (jobId: string) => jobAction(jobId, 'release_draft'),
+  /**
+   * JOB-EDIT-1. The office corrects a job's recorded details before signature.
+   * `expected` is what the panel read for each changed field; the server
+   * refuses the edit if the job no longer says that.
+   */
+  editDetails: (
+    jobId: string,
+    changes: Partial<JobDetailValues>,
+    expected: Partial<JobDetailValues>,
+  ) => jobAction(jobId, 'edit_details', { changes, expected }),
   // COST-5. A charge that is neither labour, travel nor a part.
   addAdditionalCharge: (jobId: string, input: unknown) =>
     jobAction(jobId, 'add_additional_charge', input),

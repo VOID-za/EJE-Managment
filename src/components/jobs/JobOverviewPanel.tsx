@@ -27,6 +27,7 @@ import {
 } from '@/components/ui';
 import { MachinePhotoFromJob } from '@/components/machines/MachinePhotoFromJob';
 import { JobCostSummary } from './JobCostSummary';
+import { JobDetailsEditDialog } from './JobDetailsEditDialog';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
@@ -61,6 +62,14 @@ export const JobOverviewPanel = ({
 
   const definition = getJobTypeDefinition(job.jobType);
   const canAssign = can(currentUser.role, 'jobs.assign') && editable;
+  /*
+   * JOB-EDIT-1. The office, on a job still open to changes — `editable` is
+   * `canEditJobRecord`, the screen's copy of the server's `assertEditable`, so
+   * the button disappears at signature exactly where the server starts
+   * refusing.
+   */
+  const canEditDetails = can(currentUser.role, 'jobs.editDetails') && editable;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const technicians = users.filter((user) => user.role === 'technician' && user.active);
 
   const overdue = isOverdue(job.scheduledDate) && job.status !== 'closed';
@@ -105,7 +114,22 @@ export const JobOverviewPanel = ({
         </Card>
 
         <Card>
-          <CardHeader title="Job details" />
+          <CardHeader
+            title="Job details"
+            action={
+              canEditDetails ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leadingIcon={<Icon name="edit" className="size-4" />}
+                  onClick={() => setDetailsOpen(true)}
+                  data-testid="edit-job-details"
+                >
+                  Edit details
+                </Button>
+              ) : undefined
+            }
+          />
           <DefinitionGrid
             className="mt-4"
             columns={3}
@@ -155,6 +179,20 @@ export const JobOverviewPanel = ({
                     {
                       label: 'Quote number',
                       value: job.quoteNumber.length > 0 ? job.quoteNumber : '—',
+                    },
+                  ]
+                : []),
+              /*
+               * THE DELIVERY NOTE, where the type captures one. It was recorded
+               * at creation and shown nowhere on the job screen — which JOB-EDIT-1
+               * makes untenable, since a field that can be corrected has to be
+               * visible to be found wrong.
+               */
+              ...(definition.capturesDeliveryNote
+                ? [
+                    {
+                      label: 'Delivery note',
+                      value: job.deliveryNote.length > 0 ? job.deliveryNote : '—',
                     },
                   ]
                 : []),
@@ -496,6 +534,15 @@ export const JobOverviewPanel = ({
           </ul>
         </Card>
       </div>
+
+      {detailsOpen && (
+        <JobDetailsEditDialog
+          job={job}
+          open
+          onClose={() => setDetailsOpen(false)}
+          onSaved={onChanged}
+        />
+      )}
 
       <Modal
         open={assignOpen}

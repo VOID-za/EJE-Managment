@@ -23,6 +23,7 @@ import * as corrections from '@/application/job-corrections';
 import * as unsigned from '@/application/unsigned-delivery';
 import { WorkflowError } from '@/application/errors';
 import { createJob, releaseDraft } from '@/application/job-creation';
+import { editJobDetails } from '@/application/job-details';
 import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
 
@@ -111,6 +112,52 @@ const withInput = <T>(
 const userId = z.string().uuid().or(z.string().min(1).max(100));
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a calendar date.');
 const text = (max: number) => z.string().max(max);
+
+/*
+ * JOB-EDIT-1. The new values, bounded as `createJobSchema` bounds the same
+ * fields. The EXPECTED values are what the job already holds, so they are only
+ * held to what the column can contain — a record raised before a limit was
+ * tightened must still be correctable.
+ */
+const detailChanges = z
+  .object({
+    orderNumber: text(120),
+    referenceNumber: text(120),
+    deliveryNote: text(120),
+    quoteNumber: text(120),
+    faultDescription: z.string().max(8000),
+    repairPartNumber: text(120),
+    repairDescription: text(500),
+    repairQuantity: z.number().int().positive().max(100_000).nullable(),
+  })
+  .partial()
+  .strict();
+
+const detailExpected = z
+  .object({
+    orderNumber: text(8000),
+    referenceNumber: text(8000),
+    deliveryNote: text(8000),
+    quoteNumber: text(8000),
+    faultDescription: text(8000),
+    repairPartNumber: text(8000),
+    repairDescription: text(8000),
+    repairQuantity: z.number().int().nullable(),
+  })
+  .partial()
+  .strict();
+
+const editDetailsSchema = z
+  .object({ changes: detailChanges, expected: detailExpected })
+  .strict()
+  .refine(
+    ({ changes, expected }) =>
+      Object.keys(changes).every((field) => field in expected),
+    {
+      message: 'Every changed field must say what it is replacing.',
+      path: ['expected'],
+    },
+  );
 
 /** Resolves the technician a command names, so the operation gets their name too. */
 const technician = async (context: CommandContext, id: string) => {
@@ -406,6 +453,24 @@ export const JOB_COMMANDS: CommandRegistry = {
       return releaseDraft(context.operation, job);
     },
   }),
+
+  /**
+   * CORRECTING A JOB'S RECORDED DETAILS. JOB-EDIT-1 (#72).
+   *
+   * `changes` carries only the fields being changed, bounded EXACTLY as the
+   * creation request bounds them, so nothing can be edited in that could not
+   * have been raised. `expected` carries what the editor read for each of
+   * them, and the schema insists on it: a stale-edit check that a client could
+   * skip by leaving the field out would be the OFF-CHK-1 hole over again.
+   *
+   * WHO, WHEN AND WHICH FIELDS are the operation's rules (`editJobDetails`) —
+   * the capability, `assertEditable` and the job type — so a technician is a
+   * 403, a signed job a 422, and a draft somebody may not see a 404 from
+   * `loadVisibleJob` before any of them is asked.
+   */
+  edit_details: withInput(editDetailsSchema, (context, job, input) =>
+    editJobDetails(context.operation, job, input),
+  ),
 
   remove_line: withInput(
     z

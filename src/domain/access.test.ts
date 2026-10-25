@@ -54,6 +54,8 @@ describe('the Coordinator', () => {
     'jobs.takeOverSubmission',
     'jobs.processParts',
     'jobs.captureAdministratively',
+    // JOB-EDIT-1 (#72): the office corrects a job's recorded details.
+    'jobs.editDetails',
     'customers.view',
     'customers.manage',
     'machines.manage',
@@ -119,6 +121,9 @@ describe('the technician', () => {
     // amount of seniority in the field makes it a technician's.
     'jobs.takeOverSubmission',
     'jobs.captureAdministratively',
+    // JOB-EDIT-1 (#72): a technician who finds a detail wrong raises a change
+    // request; correcting the record is the office's.
+    'jobs.editDetails',
     'customers.manage',
     'machines.manage',
     'library.manage',

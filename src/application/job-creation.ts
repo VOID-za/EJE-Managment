@@ -276,6 +276,34 @@ const resolveTechnicians = async (
 };
 
 /**
+ * WHAT THE WORK IS, WHERE THE JOB TYPE NEEDS IT SAID. Test & Repair §4.
+ *
+ * `requiresFaultDescription` rather than `!officeProcessed`: a TEST & REPAIR
+ * unit is booked in at the counter before anybody has diagnosed it, and what
+ * is recorded at that moment is the unit (`capturesRepairItem`). A breakdown,
+ * an installation and a service each send a technician somewhere, and still
+ * have to say what for.
+ *
+ * Exported so a details edit (JOB-EDIT-1) is held to THIS rule rather than a
+ * copy of it: emptying a breakdown's description after it was raised is the
+ * same refusal as raising it empty.
+ */
+export const assertFaultDescribed = (
+  definition: ReturnType<typeof getJobTypeDefinition>,
+  faultDescription: string,
+): void => {
+  if (definition.requiresFaultDescription && faultDescription.trim().length === 0) {
+    throw new WorkflowError('A job needs to say what the work is.', [
+      {
+        code: 'fault_description_required',
+        message:
+          'Describe the fault or the work required. It is what the technician is sent out on, and it is printed on the customer’s job card.',
+      },
+    ]);
+  }
+};
+
+/**
  * The two facts a job must carry before anybody can be sent to do it. DRAFT-1.
  *
  * Extracted so `createJob` and `releaseDraft` are held to the SAME rule rather
@@ -291,24 +319,7 @@ const assertReadyForWork = (
     readonly priority: JobPriority | null;
   },
 ): void => {
-  /*
-   * WHAT THE WORK IS, WHERE THE JOB TYPE NEEDS IT SAID. Test & Repair §4.
-   *
-   * `requiresFaultDescription` rather than `!officeProcessed`: a TEST & REPAIR
-   * unit is booked in at the counter before anybody has diagnosed it, and what
-   * is recorded at that moment is the unit (`capturesRepairItem`). A breakdown,
-   * an installation and a service each send a technician somewhere, and still
-   * have to say what for.
-   */
-  if (definition.requiresFaultDescription && job.faultDescription.trim().length === 0) {
-    throw new WorkflowError('A job needs to say what the work is.', [
-      {
-        code: 'fault_description_required',
-        message:
-          'Describe the fault or the work required. It is what the technician is sent out on, and it is printed on the customer’s job card.',
-      },
-    ]);
-  }
+  assertFaultDescribed(definition, job.faultDescription);
 
   /*
    * A MACHINE, WHERE THE JOB TYPE NEEDS ONE. Create New Job §3A / §4.

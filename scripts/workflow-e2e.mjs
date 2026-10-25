@@ -1260,6 +1260,88 @@ await step('the whole collection journey works at tablet size', async () => {
   await page.setViewportSize({ width: 1440, height: 1000 });
 });
 
+/* -------------------------------------------------------------------------- */
+/* JOB-EDIT-1 (#72): the office corrects a job's recorded details.            */
+/*                                                                            */
+/* EJE-1049 is an open service job no other step in this file touches. The    */
+/* rules are proved by the application, route and PostgreSQL suites; what     */
+/* only a browser shows is that the control is there for the office, absent   */
+/* for a technician and after signature, and that a correction made on the    */
+/* screen reaches the record and the activity trail.                          */
+/* -------------------------------------------------------------------------- */
+
+await step('JOB-EDIT-1: a Master corrects EJE-1049’s order number from the job screen', async () => {
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
+  await visit('/jobs/EJE-1049');
+  await page.getByTestId('edit-job-details').click();
+  const orderNumber = page.getByTestId('job-detail-orderNumber');
+  await orderNumber.waitFor({ timeout: 15000 });
+  await orderNumber.fill('PO-E2E-JOB-EDIT-1');
+  await page.getByTestId('save-job-details').click();
+  await page.getByTestId('job-details-form').waitFor({ state: 'detached', timeout: 15000 });
+  await page.getByText('PO-E2E-JOB-EDIT-1', { exact: true }).first().waitFor({ timeout: 15000 });
+});
+
+await step('JOB-EDIT-1: the correction survives a reload, and is on the activity trail as from/to', async () => {
+  await visit('/jobs/EJE-1049');
+  await page.getByText('PO-E2E-JOB-EDIT-1', { exact: true }).first().waitFor({ timeout: 15000 });
+  const screen = await page.evaluate(async () => {
+    const response = await fetch('/api/jobs/EJE-1049', { credentials: 'same-origin' });
+    return response.json();
+  });
+  // The route answers `{ data: { view, users, activity } }`.
+  const edits = (screen.data?.activity ?? []).filter((event) => event.type === 'job_details_edited');
+  if (edits.length !== 1) throw new Error(`expected one job_details_edited event, found ${edits.length}`);
+  const change = edits[0].changes.find((entry) => entry.field === 'details.orderNumber');
+  if (change === undefined || change.to !== 'PO-E2E-JOB-EDIT-1') {
+    throw new Error(`the order-number change was not recorded: ${JSON.stringify(edits[0].changes)}`);
+  }
+});
+
+await step('JOB-EDIT-1: the edit panel fits a tablet without sideways scrolling', async () => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await visit('/jobs/EJE-1049');
+  await page.getByTestId('edit-job-details').click();
+  await page.getByTestId('job-details-form').waitFor({ timeout: 15000 });
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 1,
+  );
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  if (overflow) throw new Error('the edit panel overflows horizontally at 820px');
+});
+
+await step('JOB-EDIT-1: a quantity that is not a whole number cannot be sent as a silent “clear”', async () => {
+  // EJE-1067 is a Test & Repair job, so the unit booked in is editable on it.
+  await visit('/jobs/EJE-1067');
+  await page.getByTestId('edit-job-details').click();
+  const quantity = page.getByTestId('job-detail-repairQuantity');
+  await quantity.waitFor({ timeout: 15000 });
+  await quantity.fill('abc');
+  await page.getByText('Enter a whole number of units, or leave it blank.').waitFor({ timeout: 15000 });
+  if (!(await page.getByTestId('save-job-details').isDisabled())) {
+    throw new Error('Save stayed enabled with a quantity of “abc”, which would be sent as null');
+  }
+  await page.getByRole('button', { name: 'Cancel' }).click();
+});
+
+await step('JOB-EDIT-1: no edit control on a SIGNED job — the correction mechanism is the remedy', async () => {
+  await visit('/jobs/EJE-1046');
+  await page.getByText('Job details', { exact: true }).first().waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('edit-job-details').count()) !== 0) {
+    throw new Error('EJE-1046 is signed, and still offers Edit details');
+  }
+});
+
+await step('JOB-EDIT-1: a technician is never offered the edit, even on their own job', async () => {
+  await signInAs('Technician', 'Sipho Mahlangu', /Hello, Sipho/);
+  await visit('/jobs/EJE-1048');
+  await page.getByText('Job details', { exact: true }).first().waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('edit-job-details').count()) !== 0) {
+    throw new Error('a technician was offered Edit details');
+  }
+});
+
 await browser.close();
 
 console.log('\n=== WORKFLOW E2E SUMMARY ===');

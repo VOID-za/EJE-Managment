@@ -119,6 +119,17 @@ export type ActivityEventType =
   /** The office corrected a job card the technician had already submitted. */
   | 'job_card_corrected'
   /**
+   * The office corrected a job's RECORDED DETAILS before signature. JOB-EDIT-1.
+   *
+   * The order number, reference, delivery note, quote number, fault
+   * description or the unit booked in — each moved field carried as a
+   * `details.<field>` from/to pair (AUDIT-2). Its own type, not
+   * `job_card_corrected`: that one is the refusal workflow's edit of submitted
+   * work, and this one can happen on any editable job, so a reader filtering
+   * for either must not get both.
+   */
+  | 'job_details_edited'
+  /**
    * A correction was raised against a job card EJE HAVE ALREADY ISSUED. BD-02.
    *
    * Its own type, and not `job_card_corrected`, because the two are opposite

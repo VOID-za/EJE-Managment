@@ -275,6 +275,25 @@ export type Capability =
    */
   | 'jobs.manageDrafts'
   /**
+   * CORRECTING A JOB'S RECORDED DETAILS. JOB-EDIT-1 (#72).
+   *
+   * THE OFFICE: A MASTER AND A COORDINATOR — the owner's mandate on #72,
+   * 23 October 2026, adopting the documented default. The order number, the
+   * reference number, the delivery note, the quote number, the fault
+   * description and the Test & Repair unit booked in were written once by
+   * `createJob` and never again, by anybody.
+   *
+   * WHAT IT DOES NOT LOOSEN: the edit runs through `assertEditable`, so it
+   * stops exactly where every other change stops — at the customer's
+   * signature, and wherever `canEditJob` already closes the job to this role.
+   * After signature the remedy is a correction with its own addendum (IMMUT-9),
+   * never an edit.
+   *
+   * A TECHNICIAN DOES NOT HOLD IT. One who finds a detail wrong raises a change
+   * request, exactly as they do for a serial number on the register.
+   */
+  | 'jobs.editDetails'
+  /**
    * EXPORTING WHAT EVERY CLOSED JOB WAS CHARGED AT. BD-17, ANSWERED.
    *
    * **THE OFFICE: A MASTER AND A COORDINATOR.** The owner answered BD-17 (#56)
@@ -340,6 +359,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.applyDiscount',
   // Draft job cards: DRAFT-1. "Master-only" is the requirement's own wording.
   'jobs.manageDrafts',
+  // Correcting a job's recorded details before signature: JOB-EDIT-1 (#72).
+  'jobs.editDetails',
 ];
 
 /**
@@ -397,6 +418,13 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
    * mean the acknowledgement simply does not get recorded.
    */
   'jobs.recordCorrectionAcknowledgement',
+  /*
+   * JOB-EDIT-1 (#72). The office corrects a job's recorded details — the owner
+   * named both office roles. A Coordinator is the person at the counter when a
+   * unit is booked in without its part number, so she is the one who fills it
+   * in once somebody finds it.
+   */
+  'jobs.editDetails',
 ];
 
 /**

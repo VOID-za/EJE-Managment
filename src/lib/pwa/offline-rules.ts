@@ -156,6 +156,13 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
    */
   release_draft:
     'Releasing a draft is a Master’s act in the office, and it re-checks the register on the server.',
+  /*
+   * JOB-EDIT-1. Office work, never held: the edit carries the values it
+   * replaces and is refused if the job moved underneath it — a held edit
+   * replayed hours later is exactly the overwrite that check exists to stop.
+   */
+  edit_details:
+    'Correcting a job’s details replaces values on the job, and is checked against the job as the server has it, so it needs a connection.',
   add_additional_charge:
     'A charge is added by the office against what it is being charged for, so it needs a connection.',
   update_additional_charge:

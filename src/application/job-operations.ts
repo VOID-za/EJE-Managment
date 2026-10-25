@@ -96,7 +96,11 @@ import { WorkflowError } from './errors';
  * The UI never performs steps 1-4 itself.
  */
 
-const assertEditable = (context: OperationContext, job: Job): void => {
+/**
+ * Exported for JOB-EDIT-1 (`job-details.ts`), so a details edit stops exactly
+ * where every change in this module stops rather than at a copy of the rule.
+ */
+export const assertEditable = (context: OperationContext, job: Job): void => {
   /*
    * THE SIGNED RECORD IS FINAL. MASTER SCOPE CR-01 / IMMUT-1…7.
    *

@@ -67,6 +67,9 @@ const TYPE_GROUPS: readonly { value: string; label: string; types: readonly Acti
       types: [
         'customer_updated',
         'machine_updated',
+        // JOB-EDIT-1: an order number or a fault description corrected by the
+        // office is a change to a record, like a customer's address.
+        'job_details_edited',
         'document_viewed',
         'checklist_completed',
       ],
