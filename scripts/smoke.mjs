@@ -1250,7 +1250,8 @@ await step('an accepted send does NOT close the job, and does not claim delivery
 });
 
 await step('the issued job is already read-only, before delivery is confirmed', async () => {
-  await page.getByText('Read-only — the job card has been issued', { exact: false })
+  // Issue #73: submitted, and with the office — read-only from here on.
+  await page.getByText('Read-only — submitted, with the office', { exact: false })
     .first().waitFor({ timeout: 8000 });
 });
 

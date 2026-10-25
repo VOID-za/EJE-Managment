@@ -279,7 +279,7 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     const issued = await issue(tech, id);
 
     expect(issued.status).toBe(200);
-    expect(issued.data.job.status).toBe('awaiting_delivery');
+    expect(issued.data.job.status).toBe('office_handling');
     /*
      * FAILED, AND THAT IS THE RIGHT ANSWER HERE. CR-09 Phase 1.
      *
@@ -501,11 +501,13 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
 
   /* -- QA-1: delivery, and the audit rows it writes ------------------------ */
 
-  it('closes the job when the delivery is confirmed, and writes the trail', async () => {
+  // Issue #73: the submission hands the job to the office, a delivery report
+  // closes nothing, and the office finishes it — all against PostgreSQL.
+  it('goes to the office on submission, is not closed by delivery, and is invoiced by the office', async () => {
     const { tech, master, id, jobNumber } = await signedJob({ labour: true });
     const issued = await issue(tech, id);
     expect(issued.status).toBe(200);
-    expect(issued.data.job.status).toBe('awaiting_delivery');
+    expect(issued.data.job.status).toBe('office_handling');
 
     /*
      * THE SUBMISSION DID NOT CLOSE IT. SUBMIT-5.
@@ -515,7 +517,7 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
      * SIGNED job, and therefore another journey down the path AUD-10 broke.
      */
     const rows = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
-    expect(rows[0]?.status).toBe('awaiting_delivery');
+    expect(rows[0]?.status).toBe('office_handling');
     expect(rows[0]?.closedAt).toBeNull();
 
     const confirmed = await master.post(`/api/jobs/${id}/confirm_delivery`, {});
@@ -532,8 +534,24 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
      * thing the whole delivery handshake exists to prevent.
      */
     const closed = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
-    expect(closed[0]?.status).toBe('awaiting_delivery');
+    expect(closed[0]?.status).toBe('office_handling');
     expect(closed[0]?.closedAt).toBeNull();
+
+    // The office lifecycle, through the routes, on the real schema.
+    expect((await master.post(`/api/jobs/${id}/handle_office`, {})).status).toBe(200);
+    const blank = await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: '' });
+    expect(blank.status).toBe(422);
+    const po = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
+    expect(po[0]?.status).toBe('awaiting_po');
+    expect(po[0]?.officeHandledAt).not.toBeNull();
+    expect(po[0]?.invoiceNumber).toBeNull();
+    expect(
+      (await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: 'INV-PG-73' })).status,
+    ).toBe(200);
+    const invoiced = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
+    expect(invoiced[0]?.status).toBe('invoiced');
+    expect(invoiced[0]?.invoiceNumber).toBe('INV-PG-73');
+    expect(invoiced[0]?.closedAt).toBeNull();
 
     // The labour the customer signed for is still exactly one row, untouched.
     expect(
@@ -637,7 +655,7 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     // And the job is still awaiting delivery: nothing closed it on a send that
     // nothing confirmed.
     const rows = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
-    expect(rows[0]?.status).toBe('awaiting_delivery');
+    expect(rows[0]?.status).toBe('office_handling');
   });
 
   it('re-sends the STORED document rather than rendering a new one', async () => {
@@ -700,7 +718,7 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
 
     const takenOver = await master.post<{ job: Job }>(`/api/jobs/${id}/take_over_submission`, {});
     expect(takenOver.status).toBe(200);
-    expect(takenOver.data.job.status).toBe('awaiting_delivery');
+    expect(takenOver.data.job.status).toBe('office_handling');
 
     /*
      * The same issue path the technician would have run, so the job card is
