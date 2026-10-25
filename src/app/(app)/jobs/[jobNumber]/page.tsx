@@ -325,7 +325,10 @@ const JobDetailPage = ({
         deliberately: "nothing has been sent to the customer" is the more
         urgent fact, and a correction is read against a document somebody has.
       */}
-      {job.status === 'closed' && job.signature === null && job.finalDocument !== null && (
+      {/* Closed for a refusal resolved before BD-22; with the office since. */}
+      {(job.status === 'closed' || isIssuedStatus(job.status)) &&
+        job.signature === null &&
+        job.finalDocument !== null && (
         <UnsignedDeliveryPanel
           job={job}
           authorisation={view.unsignedDeliveryAuthorisation}

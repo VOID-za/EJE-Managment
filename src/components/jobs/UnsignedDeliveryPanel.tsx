@@ -14,7 +14,7 @@ import { userFullName } from '@/domain';
  * SENDING A JOB CARD THE CUSTOMER DID NOT SIGN. BD-06, DELIV-7, AUD-4.
  *
  * WHAT THIS PANEL SAYS FIRST, and it is the whole point: nothing has been
- * sent. A job closed without a signature produces a document and delivers
+ * sent. A job card issued without a signature produces a document and delivers
  * nothing, deliberately — a customer who declined to sign must not be e-mailed
  * a copy because a workflow finished.
  *
@@ -85,7 +85,7 @@ export const UnsignedDeliveryPanel = ({
       {authorisation === null ? (
         <>
           <p className="mt-4 text-sm leading-relaxed text-steel-700" data-testid="unsigned-not-sent">
-            <strong>Nothing has been sent to the customer.</strong> The job was closed without a
+            <strong>Nothing has been sent to the customer.</strong> The job card was issued without a
             signature, so no copy was e-mailed — that is deliberate, and it stays that way unless a
             Master decides otherwise. The document itself is on file and records the refusal and its
             reason.

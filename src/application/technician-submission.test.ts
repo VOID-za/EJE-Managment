@@ -476,9 +476,9 @@ describe('the office review exists for a refusal and for nothing else', () => {
     );
   });
 
-  it('OUTCOME B closes it, with no signature or submission left to anyone', async () => {
+  it('OUTCOME B hands it to the office, with no signature or submission left to anyone', async () => {
     const closed = await resolveSignatureRefusal(harness.as(coordinator), refused, '');
-    expect(closed.status).toBe('closed');
+    expect(closed.status).toBe('office_handling');
     expect(closed.signature).toBeNull();
 
     for (const person of [technician, master, coordinator]) {

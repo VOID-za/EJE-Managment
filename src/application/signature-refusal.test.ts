@@ -423,7 +423,7 @@ describe('a Master resolving the refusal', () => {
     expect(event?.actorId).toBe(master.id);
     expect(event?.summary).toBe('Signature refusal resolved');
     expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee');
-    expect(event?.detail).toContain('to close without a signature');
+    expect(event?.detail).toContain('to issue without a signature');
     // The office's own decision and note, never the customer's reason: see
     // "keeps the customer's reason OFF the audit trail" above.
     expect(event?.detail).not.toContain(REASON);
@@ -436,7 +436,7 @@ describe('a Master resolving the refusal', () => {
     const events = await harness.repos.activity.list(refused.id);
     const event = events.find((entry) => entry.type === 'signature_refusal_resolved');
     expect(event?.detail).toContain('Signature refusal resolved by Elmarie Coetzee');
-    expect(event?.detail).toContain('to close without a signature');
+    expect(event?.detail).toContain('to issue without a signature');
     expect(event?.detail).not.toContain('Note:');
   });
 
@@ -530,7 +530,7 @@ describe('what the refusal does to the workflow', () => {
     }
   });
 
-  it('CLOSES the job — "Without Customer Signature" is an ending, not a flag', async () => {
+  it('MOVES the job — "Without Customer Signature" hands it to the office, not a flag', async () => {
     /*
      * MASTER SCOPE REF-8. This asserted that resolving "clears a condition. It
      * does not move the job" — and that is the defect acceptance testing
@@ -538,18 +538,19 @@ describe('what the refusal does to the workflow', () => {
      * carried on showing steps 5 Review and 6 Closed with a Capture Signature
      * button, because nothing had moved.
      *
-     * "The job is CLOSED immediately. There must be NO subsequent Customer
-     * Signature step. There must be NO Review step after this."
+     * "There must be NO subsequent Customer Signature step. There must be NO
+     * Review step after this." And, since BD-22 (owner, 25 October 2026), it
+     * is NOT closed: it enters Office Handling like a signed submission.
      */
     expect(refused.status).toBe('review');
     const resolved = await resolveSignatureRefusal(harness.as(master), refused, 'Proceed.');
 
-    expect(resolved.status).toBe('closed');
-    expect(resolved.closedAt).not.toBeNull();
+    expect(resolved.status).toBe('office_handling');
+    expect(resolved.closedAt).toBeNull();
     expect(jobProgressPosition(resolved.status).index).toBe(
-      JOB_PROGRESS_STAGES.indexOf('invoiced'),
+      JOB_PROGRESS_STAGES.indexOf('office_handling'),
     );
-    expect(jobProgressPosition(resolved.status).interruption).toBe('Closed');
+    expect(jobProgressPosition(resolved.status).interruption).toBeNull();
     // And the customer's copy exists, recording that they declined.
     expect(resolved.finalDocument).not.toBeNull();
   });
@@ -603,19 +604,17 @@ describe('what the refusal does to the workflow', () => {
     ).toContain('refusal_unresolved');
   });
 
-  it('produces the customer copy and closes, in one act', async () => {
+  it('produces the customer copy and hands the job to the office, in one act', async () => {
     /*
-     * MASTER SCOPE REF-8. This resolved the refusal and then issued the job
-     * card separately, closing on a confirmed delivery — three steps. Resolving
-     * "Without Customer Signature" is now the ending: it renders and stores the
-     * unsigned copy through the same pipeline the signed route uses, and
-     * closes.
+     * MASTER SCOPE REF-8, as amended by BD-22. Resolving "Without Customer
+     * Signature" renders and stores the unsigned copy through the same pipeline
+     * the signed route uses, and puts the job in Office Handling.
      *
      * Issuing afterwards is refused, because there is nothing left to issue.
      */
     const closed = await resolveSignatureRefusal(harness.as(master), refused, '');
 
-    expect(closed.status).toBe('closed');
+    expect(closed.status).toBe('office_handling');
     expect(closed.finalDocument).not.toBeNull();
     expect(closed.finalDocument?.pageCount).toBeGreaterThan(0);
 
@@ -631,10 +630,10 @@ describe('what the refusal does to the workflow', () => {
   it('never asks the technician for a second signature', async () => {
     const reviewed = await resolveSignatureRefusal(harness.as(master), refused, '');
     // The customer said no, the document says so, and a signature captured now
-    // would contradict it. The job is CLOSED, so there is no signature step to
-    // return to at all.
+    // would contradict it. The job card is issued and with the office, so
+    // there is no signature step to return to at all.
     expect(checkSignatureOutcome(reviewed, 'signed').allowed).toBe(false);
-    expect(reviewed.status).toBe('closed');
+    expect(reviewed.status).toBe('office_handling');
   });
 });
 

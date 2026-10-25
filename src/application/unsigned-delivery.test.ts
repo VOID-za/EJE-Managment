@@ -71,7 +71,7 @@ const closedUnsigned = async (harness: Harness): Promise<Job> => {
   return resolveSignatureRefusal(harness.as(master), refused, 'Issued without a signature.');
 };
 
-describe('closing without a signature, and what is NOT sent', () => {
+describe('issuing without a signature, and what is NOT sent', () => {
   let harness: Harness;
   let closed: Job;
 
@@ -81,8 +81,9 @@ describe('closing without a signature, and what is NOT sent', () => {
   });
 
   /** The clause the whole feature rests on. */
-  it('sends the customer NOTHING when the job closes unsigned', async () => {
-    expect(closed.status).toBe('closed');
+  it('sends the customer NOTHING when the job card is issued unsigned', async () => {
+    // BD-22: with the office, not closed — and still nothing is sent.
+    expect(closed.status).toBe('office_handling');
     expect(closed.signature).toBeNull();
     expect(closed.finalDocument).not.toBeNull();
     // No attempt, no authorisation, nothing in flight.
@@ -174,13 +175,13 @@ describe('a Master authorising the send', () => {
     expect(JSON.stringify(sent)).toMatch(/without a customer signature/iu);
   });
 
-  /** The job was closed and stays closed: the resolution ended it. */
+  /** Sending is not office handling: the job stays exactly where it was. */
   it('does not change the job’s status', async () => {
     const result = await authoriseUnsignedDelivery(harness.as(master), closed, { reason: REASON });
-    expect(result.job.status).toBe('closed');
+    expect(result.job.status).toBe('office_handling');
 
     const reread = await harness.repos.jobs.findByJobNumber('EJE-1048');
-    expect(reread?.status).toBe('closed');
+    expect(reread?.status).toBe('office_handling');
   });
 
   it('REFUSES a second authorisation, and says to retry instead', async () => {

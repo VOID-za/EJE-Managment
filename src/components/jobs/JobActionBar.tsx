@@ -217,7 +217,7 @@ export const JobActionBar = ({
        * work, the checklist, the photos — because correcting a job card is
        * editing the job, not operating a separate editor. The refusal panel at
        * the top of that screen is where it is then sent back for signature or
-       * closed without one.
+       * issued without one.
        */
       if (office) {
         actions.push(

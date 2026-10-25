@@ -190,15 +190,16 @@ describe('OUTCOME B — Without Customer Signature', () => {
     refused = await refusedJob(harness);
   });
 
-  it('closes the job immediately', async () => {
+  // BD-22 (owner, 25 October 2026): it goes to the office, never closed.
+  it('hands the job to Office Handling, and does not close it', async () => {
     const closed = await resolveSignatureRefusal(harness.as(master), refused, 'Invoice to proceed.');
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
+    expect(closed.status).toBe('office_handling');
+    expect(closed.closedAt).toBeNull();
   });
 
   it('is open to the COORDINATOR as well as the Master', async () => {
     const closed = await resolveSignatureRefusal(harness.as(coordinator), refused, '');
-    expect(closed.status).toBe('closed');
+    expect(closed.status).toBe('office_handling');
   });
 
   it('leaves NO signature step, NO review step and nothing editable', async () => {
@@ -236,13 +237,15 @@ describe('OUTCOME B — Without Customer Signature', () => {
     }
   });
 
-  it('records the refusal, the resolution and the closure on the trail', async () => {
+  it('records the refusal, the resolution and the hand-over to the office on the trail', async () => {
     const closed = await resolveSignatureRefusal(harness.as(master), refused, 'Invoice to proceed.');
     const trail = await harness.repos.activity.list(closed.id);
     const types = trail.map((entry) => entry.type);
 
     expect(types).toContain('customer_refused_to_sign');
     expect(types).toContain('signature_refusal_resolved');
-    expect(types).toContain('job_closed');
+    expect(types).toContain('job_submitted');
+    // BD-22: nothing on the trail says it closed, because it did not.
+    expect(types).not.toContain('job_closed');
   });
 });

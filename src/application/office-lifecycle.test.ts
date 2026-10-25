@@ -6,6 +6,8 @@ import {
   captureSignature,
   confirmJobCardDelivery,
   issueJobCard,
+  recordSignatureRefusal,
+  resolveSignatureRefusal,
   saveCompletionReport,
   startCompletion,
   startSignature,
@@ -13,7 +15,7 @@ import {
 import { handleJobCard, loadOfficeQueue, recordInvoiceNumber } from './office-lifecycle';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
-import type { Job } from '@/domain';
+import { canTransition, currentRefusal, type Job } from '@/domain';
 
 /**
  * THE OFFICE LIFECYCLE AFTER A TECHNICIAN SUBMITS. Issue #73, Batch 1.
@@ -299,5 +301,130 @@ describe('the office queue behind the Notifications tabs', () => {
     expect(row?.invoice?.number).toBe('INV-55');
 
     expect(await loadOfficeQueue(harness.repos, technician)).toBeNull();
+  });
+});
+
+/*
+ * BD-22, DECIDED BY THE OWNER ON 25 OCTOBER 2026 (issue #73).
+ *
+ * A refusal resolved "Without Customer Signature" used to CLOSE the job, so an
+ * unsigned job card never reached the office and was never invoiced. It must
+ * now enter Office Handling and go Handled -> Awaiting PO -> Invoiced like any
+ * submission — with the refusal, its resolution and the trail all kept.
+ */
+describe('BD-22: a refusal resolved Without Customer Signature goes to the office', () => {
+  const REASON = 'The planner disputes the hours and will not sign.';
+
+  const refused = async (harness: Harness): Promise<Job> => {
+    const opened = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    const context = harness.as(technician);
+    let job = await acceptJob(context, opened!);
+    job = await addLabour(context, job, { date: '2026-10-20', rateType: 'normal', hours: 2, description: '' });
+    job = await saveCompletionReport(context, job, {
+      ...job.completionReport,
+      workPerformed: 'Replaced the coolant pump seal.',
+    });
+    job = await startCompletion(context, job);
+    job = await startSignature(context, job);
+    return recordSignatureRefusal(context, job, { reason: REASON });
+  };
+
+  let harness: Harness;
+  let resolved: Job;
+
+  beforeEach(async () => {
+    harness = buildHarness();
+    resolved = await resolveSignatureRefusal(harness.as(coordinator), await refused(harness), 'Invoice to proceed.');
+  });
+
+  it('enters Office Handling and is NOT closed', async () => {
+    expect(resolved.status).toBe('office_handling');
+    expect(resolved.closedAt).toBeNull();
+    const stored = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    expect(stored?.status).toBe('office_handling');
+    expect(stored?.closedAt).toBeNull();
+    // And nothing in the state machine lets Review close a job directly.
+    expect(canTransition('review', 'closed')).toBe(false);
+  });
+
+  it('keeps the exception: unsigned, the refusal and its resolution intact', () => {
+    expect(resolved.signature).toBeNull();
+    expect(resolved.finalDocument).not.toBeNull();
+    const refusal = currentRefusal(resolved);
+    expect(refusal?.reason).toBe(REASON);
+    expect(refusal?.recordedBy).toBe(technician.id);
+    expect(refusal?.resolution).toBe('issued_unsigned');
+    expect(refusal?.resolvedBy).toBe(coordinator.id);
+    expect(refusal?.resolutionNote).toBe('Invoice to proceed.');
+  });
+
+  it('keeps the audit history, and records a hand-over to the office, not a closure', async () => {
+    const trail = await harness.repos.activity.list(resolved.id);
+    const types = trail.map((entry) => entry.type);
+    expect(types).toContain('customer_refused_to_sign');
+    expect(types).toContain('signature_refusal_resolved');
+    expect(types).toContain('job_submitted');
+    expect(types).not.toContain('job_closed');
+    // The hand-over is not recorded before the resolution that caused it.
+    const at = (type: string) => trail.find((entry) => entry.type === type)!.occurredAt;
+    expect(at('signature_refusal_resolved') <= at('job_submitted')).toBe(true);
+  });
+
+  it('is in the office queue, and goes Handled -> Awaiting PO -> Invoiced', async () => {
+    const queue = await loadOfficeQueue(harness.repos, master);
+    expect(queue?.handling.map((row) => row.jobNumber)).toContain('EJE-1048');
+
+    // An invoice number before handling is refused: no office step is skipped.
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), resolved, 'INV-BD22'))).toContain(
+      'not_awaiting_po',
+    );
+
+    const awaitingPo = await handleJobCard(harness.as(master), resolved);
+    expect(awaitingPo.status).toBe('awaiting_po');
+    expect(awaitingPo.officeHandling?.handledBy).toBe(master.id);
+
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, '  '))).toContain(
+      'invoice_number_required',
+    );
+    expect((await harness.repos.jobs.findByJobNumber('EJE-1048'))?.status).toBe('awaiting_po');
+
+    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-BD22');
+    expect(invoiced.status).toBe('invoiced');
+    expect(invoiced.invoice?.number).toBe('INV-BD22');
+    expect(invoiced.closedAt).toBeNull();
+    // Still the unsigned job card, with its refusal, at the end.
+    expect(invoiced.signature).toBeNull();
+    expect(currentRefusal(invoiced)?.resolution).toBe('issued_unsigned');
+  });
+
+  it('records no delivery for a customer copy that was never sent', async () => {
+    const after = await confirmJobCardDelivery(harness.as(master), resolved);
+    expect(after).toEqual(resolved);
+  });
+});
+
+/*
+ * OWNER DECISION, 25 OCTOBER 2026: invoice numbers need not be unique — one
+ * Sage invoice may cover several job cards.
+ */
+describe('the same invoice number on more than one job card', () => {
+  it('is accepted, and each job keeps its own record of it', async () => {
+    const harness = buildHarness();
+    const first = await handleJobCard(harness.as(master), await submitted(harness, 'EJE-1048'));
+    // The second job only has to be Awaiting PO: put a seeded one there directly.
+    const seeded = await harness.repos.jobs.findByJobNumber('EJE-1061');
+    const second = await harness.repos.jobs.save({
+      ...seeded!,
+      status: 'awaiting_po',
+      officeHandling: { handledBy: master.id, handledAt: '2026-10-25T08:00:00.000Z' },
+    });
+
+    const a = await recordInvoiceNumber(harness.as(master), first, 'INV-SHARED-7');
+    const b = await recordInvoiceNumber(harness.as(coordinator), second, 'INV-SHARED-7');
+    expect(a.status).toBe('invoiced');
+    expect(b.status).toBe('invoiced');
+    expect(a.invoice?.number).toBe('INV-SHARED-7');
+    expect(b.invoice?.number).toBe('INV-SHARED-7');
+    expect(b.invoice?.recordedBy).toBe(coordinator.id);
   });
 });

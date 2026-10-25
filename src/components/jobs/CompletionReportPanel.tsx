@@ -443,6 +443,9 @@ export const CompletionReportPanel = ({
                       acceptServer(job.completionReport);
                       setDraft(localDraft.report);
                       saver.change(localDraft.report);
+                      // A decision, not typing: written now, not after the
+                      // typing debounce, and the badge reports Saving → Saved.
+                      void saver.flush();
                     }}
                   >
                     Use my draft instead
@@ -474,6 +477,9 @@ export const CompletionReportPanel = ({
                       acceptServer(job.completionReport);
                       setDraft(localDraft.report);
                       saver.change(localDraft.report);
+                      // A decision, not typing: written now, not after the
+                      // typing debounce, and the badge reports Saving → Saved.
+                      void saver.flush();
                     }}
                   >
                     Load the draft into the form

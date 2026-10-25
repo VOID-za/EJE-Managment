@@ -3,6 +3,7 @@ import {
   deliveryStateLabel,
   deliveryRetryAdvice,
   emptyDelivery,
+  isIssuedStatus,
   signatureOutcomeOf,
   userFullName,
   type DeliveryRecord,
@@ -77,13 +78,21 @@ const unsignedDocumentMail = (job: Job) => ({
 });
 
 /**
- * Is this a job the owner's rule is about: closed, unsigned, with a document?
+ * Is this a job the owner's rule is about: issued unsigned, with a document?
+ *
+ * Issued means CLOSED for a refusal resolved before BD-22 (25 October 2026),
+ * and Office Handling, Awaiting PO or Invoiced for one resolved since — the
+ * resolution now hands the job to the office instead of closing it.
  *
  * Exported because two screens ask it and the answer must not be worked out
  * twice. It is not an authorisation — see `requireMaster`.
  */
+/** Closed (historical) or in the office lifecycle: the job card has been issued. */
+const isIssuedOrClosed = (job: Job): boolean =>
+  job.status === 'closed' || isIssuedStatus(job.status);
+
 export const isUnsignedIssuedJob = (job: Job): boolean =>
-  job.status === 'closed' && job.signature === null && job.finalDocument !== null;
+  isIssuedOrClosed(job) && job.signature === null && job.finalDocument !== null;
 
 const requireMaster = (context: OperationContext, what: string): void => {
   if (can(context.actor.role, 'jobs.authoriseUnsignedDelivery')) return;
@@ -140,13 +149,13 @@ export const authoriseUnsignedDelivery = async (
       },
     ]);
   }
-  if (job.status !== 'closed') {
-    throw new WorkflowError(`${job.jobNumber} is not closed.`, [
+  if (!isIssuedOrClosed(job)) {
+    throw new WorkflowError(`${job.jobNumber} has not been issued.`, [
       {
         code: 'not_closed',
         message:
-          'This is for a job the office closed WITHOUT a customer signature. A job still in ' +
-          'the workflow follows the ordinary delivery path.',
+          'This is for a job card the office issued WITHOUT a customer signature. A job ' +
+          'still being worked on follows the ordinary delivery path.',
       },
     ]);
   }

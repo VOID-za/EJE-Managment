@@ -83,7 +83,8 @@ export const FinalDocumentCard = ({
   /*
    * A CLOSED JOB CARD IS NOT ALWAYS A SIGNED ONE. MASTER SCOPE REF-15.
    *
-   * "Without Customer Signature" closes the job and produces a document that
+   * "Without Customer Signature" issues the job card (to the office since BD-22;
+   * closed before it) and produces a document that
    * records the refusal instead of carrying a signature. Calling that "Final
    * signed job card" would be the system asserting a signature that was never
    * given, on the one screen somebody goes to in order to find out what

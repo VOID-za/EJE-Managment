@@ -2721,22 +2721,19 @@ export const resolveSignatureRefusal = async (
   assertCanResolveRefusal(context, job);
 
   /*
-   * OUTCOME B CLOSES THE JOB. MASTER SCOPE REF-8.
+   * OUTCOME B ISSUES THE JOB CARD UNSIGNED AND HANDS IT TO THE OFFICE.
+   * MASTER SCOPE REF-8, AS AMENDED BY BD-22 (owner, 25 October 2026, issue #73).
    *
-   * "The refusal is resolved. The job is CLOSED immediately. There must be NO
-   * subsequent Customer Signature step. There must be NO Review step after
-   * this. There must be NO Capture Signature button. The final state must be
-   * CLOSED."
+   * REF-8 still holds for the signature: the refusal is resolved, there is NO
+   * subsequent Customer Signature step, NO Review step after this and NO
+   * Capture Signature button. What changed is where the job goes. It used to
+   * be CLOSED here, which meant an unsigned job card never reached the office
+   * lifecycle and was never invoiced through it. The owner decided it must
+   * enter Office Handling exactly like a signed submission and continue
+   * Handled → Awaiting PO → Invoiced; it must not close or bypass the office.
    *
-   * This recorded the outcome and moved nothing, so acceptance testing saw the
-   * job card correctly say "Issued without a signature" while still showing
-   * steps 5 Review and 6 Closed and offering Capture Signature. Recording a
-   * decision is not making it: the office has decided this job ends here, and
-   * the state has to agree.
-   *
-   * Straight to `closed`, not through `awaiting_delivery` — see the transition
-   * table. Nobody signed, so there is no customer copy in transit and no
-   * delivery to confirm.
+   * Nobody signed, so no customer copy is sent from here (BD-06, below) and
+   * there is no delivery to confirm.
    */
   if (job.status !== 'review') {
     throw new WorkflowError(
@@ -2751,14 +2748,15 @@ export const resolveSignatureRefusal = async (
     );
   }
 
-  transition(job, 'closed');
+  // `review -> office_handling` is the edge, and the table is what says so.
+  transition(job, 'office_handling');
 
   const now = context.services.clock.now();
 
   /*
    * THE CUSTOMER STILL GETS A JOB CARD — one that records that they declined.
    *
-   * Closing the job is not the same as producing nothing. The unsigned
+   * Issuing without a signature is not the same as producing nothing. The unsigned
    * document is an existing, tested artefact: it names the refusal, prints the
    * reason and who recorded it, and carries no signature mark of any kind. It
    * is rendered through the SAME pipeline the signed copy uses, so the two
@@ -2770,15 +2768,13 @@ export const resolveSignatureRefusal = async (
    * asked for on this path, so the document is stored and downloadable and the
    * send is left as an explicit business decision — BD-06 in docs/SCOPE.md.
    */
-  // `review -> closed` is the edge, and the table is what says so. AUD-7, QA-3.
-  transition(job, 'closed');
-
   const { job: priced, finalDocument } = await renderAndStoreFinalDocument(context, job, now);
 
   const saved = await context.repos.jobs.save({
     ...priced,
-    status: 'closed',
-    closedAt: now,
+    status: 'office_handling',
+    // Not closed: the office lifecycle is what finishes this job now (BD-22).
+    closedAt: null,
     completedAt: job.completedAt ?? now,
     submittedAt: job.submittedAt ?? now,
     finalDocument,
@@ -2791,17 +2787,20 @@ export const resolveSignatureRefusal = async (
     summary: 'Signature refusal resolved',
     // As above: the fact and the office's decision, not the customer's reason.
     detail:
-      `Signature refusal resolved by ${userFullName(context.actor)}, to close without a signature.` +
+      `Signature refusal resolved by ${userFullName(context.actor)}, to issue without a signature.` +
       (note.trim().length === 0 ? '' : ` Note: ${note.trim()}`),
   });
 
+  // The same entry a signed submission writes: the job card is issued and is
+  // now with the office, to be handled and invoiced (BD-22).
   await audit(context, {
     jobId: job.id,
-    type: 'job_closed',
-    summary: 'Job closed without a customer signature',
+    type: 'job_submitted',
+    summary: 'Job card issued without a customer signature',
     detail:
-      `${job.jobNumber} was closed by ${userFullName(context.actor)} without a customer signature, ` +
-      'because the customer refused to sign and the office resolved it that way.',
+      `${job.jobNumber} was issued by ${userFullName(context.actor)} without a customer signature, ` +
+      'because the customer refused to sign and the office resolved it that way. ' +
+      'It is waiting for the office to handle it and raise the invoice.',
   });
 
   await fileRefusalNotifications(context, job);

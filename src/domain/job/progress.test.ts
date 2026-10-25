@@ -112,16 +112,15 @@ describe('the state machine agrees with the rail', () => {
     expect(canTransition('awaiting_po', 'invoiced')).toBe(true);
   });
 
-  it('closes from Review only for a refusal — never from delivery (issue #73)', () => {
+  it('never closes from Review — not for a refusal, not on delivery (issue #73, BD-22)', () => {
     /*
-     * MASTER SCOPE REF-8. `review -> closed` is the "Without Customer
-     * Signature" outcome and is the ONLY reason that edge exists: nobody
-     * signed, so there is no customer copy in transit and no delivery to wait
-     * for. The SIGNED route is unchanged and still closes only on a confirmed
-     * delivery — `resolveSignatureRefusal` is the one operation that takes
-     * this edge, and it refuses a job with no outstanding refusal.
+     * `review -> closed` was the "Without Customer Signature" outcome. The
+     * owner decided on 25 October 2026 (BD-22) that it must enter Office
+     * Handling instead, so the edge is gone: nothing reaches a finished state
+     * except through the office lifecycle.
      */
-    expect(canTransition('review', 'closed')).toBe(true);
+    expect(canTransition('review', 'closed')).toBe(false);
+    expect(canTransition('review', 'office_handling')).toBe(true);
     expect(canTransition('awaiting_delivery', 'closed')).toBe(false);
     expect(canTransition('office_handling', 'closed')).toBe(false);
     expect(canTransition('awaiting_po', 'closed')).toBe(false);
@@ -205,8 +204,6 @@ describe('nothing can enter Master Review', () => {
       'office_handling',
       'customer_signature',
       'completion',
-      // "Without Customer Signature" — see the state-machine block above.
-      'closed',
     ]);
     expect(allowedTransitions('review')).not.toContain('submitted');
   });

@@ -162,6 +162,26 @@ describe('autosave', () => {
     expect(saver.dirty()).toBe(false);
   });
 
+  /*
+   * CHOOSING A DRAFT IS A DECISION, NOT TYPING. Issue #73, WRITEUP-4.
+   * The panel's "use my draft" buttons call change() then flush(): the chosen
+   * text is written at once — not after the typing debounce, which a page
+   * left straight away would never reach — and the status ends on Saved.
+   */
+  it('a chosen draft (change, then flush) is written at once and reported Saved', async () => {
+    const { saver, writes, statuses } = build('Office correction');
+
+    saver.change('Technician draft kept offline');
+    await saver.flush();
+
+    expect(writes).toEqual(['Technician draft kept offline']);
+    expect(saver.dirty()).toBe(false);
+    expect(statuses.map((status) => status.kind)).toEqual(['pending', 'saving', 'saved']);
+    // Nothing is left on a timer to write it a second time.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(writes).toHaveLength(1);
+  });
+
   it('flush on a clean saver writes nothing', async () => {
     const { saver, writes } = build('Already saved');
     await saver.flush();

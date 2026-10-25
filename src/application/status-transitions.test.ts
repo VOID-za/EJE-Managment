@@ -220,7 +220,6 @@ describe('the state machine enforces every status write', () => {
   it('holds the edges these rules are written against', () => {
     const legal: readonly (readonly [JobStatus, JobStatus])[] = [
       ['customer_signature', 'review'],
-      ['review', 'closed'],
       // Issue #73: submission enters the office lifecycle.
       ['review', 'office_handling'],
       ['office_handling', 'awaiting_po'],
@@ -235,6 +234,8 @@ describe('the state machine enforces every status write', () => {
       ['closed', 'review'],
       ['closed', 'closed'],
       ['review', 'review'],
+      // BD-22: not even a resolved refusal closes straight from Review.
+      ['review', 'closed'],
       // Issue #73: delivery closes nothing, and no office step can be skipped.
       ['review', 'awaiting_delivery'],
       ['awaiting_delivery', 'closed'],

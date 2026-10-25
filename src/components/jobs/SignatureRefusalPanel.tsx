@@ -201,9 +201,9 @@ export const SignatureRefusalPanel = ({
       */}
       <ConfirmDialog
         open={confirmIssue}
-        title="Close without a customer signature?"
-        message={`${job.jobNumber} will be issued as it stands and CLOSED. The job card records that the customer refused to sign rather than carrying a signature, there is no further signature step, and nothing on the job can be changed afterwards. Choose Customer Signature instead if anything on it can still be put right.`}
-        confirmLabel="Close without a signature"
+        title="Issue without a customer signature?"
+        message={`${job.jobNumber} will be issued as it stands and handed to the office, to be handled and invoiced like any submitted job card. The job card records that the customer refused to sign rather than carrying a signature, there is no further signature step, and nothing on the job can be changed afterwards. Choose Customer Signature instead if anything on it can still be put right.`}
+        confirmLabel="Issue without a signature"
         onCancel={() => setConfirmIssue(false)}
         onConfirm={async () => {
           const ok = await operation.run(() => jobs.resolveRefusal(job.id, note));

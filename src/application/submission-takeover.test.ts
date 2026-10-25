@@ -545,9 +545,9 @@ describe('the refusal workflow does not use the takeover', () => {
     ).toContain('takeover_not_available');
   });
 
-  it('OUTCOME B still closes the job immediately', async () => {
+  it('OUTCOME B hands the job to the office, and offers no takeover there either', async () => {
     const closed = await resolveSignatureRefusal(harness.as(coordinator), refused, '');
-    expect(closed.status).toBe('closed');
+    expect(closed.status).toBe('office_handling');
     expect(closed.signature).toBeNull();
 
     const cover = await loadSubmissionCover(harness.as(master), closed);

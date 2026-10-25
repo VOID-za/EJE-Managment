@@ -905,16 +905,20 @@ await step('and the technician takes the signature again, then submits it', asyn
   await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 30000 });
 });
 
-await step('OUTCOME B — Without Customer Signature CLOSES EJE-1066', async () => {
+/*
+ * BD-22, decided by the owner on 25 October 2026: Without Customer Signature
+ * issues the job card unsigned and hands it to the OFFICE — it is not closed.
+ */
+await step('OUTCOME B — Without Customer Signature hands EJE-1066 to the office', async () => {
   await refuseOnSite('EJE-1066', 'The customer will not sign anything without head office.');
 
   await signInAs('Coordinator', 'Christene van Niekerk', /Christene/);
   await visit('/jobs/EJE-1066');
   await page.getByRole('button', { name: 'Without Customer Signature', exact: true }).click();
   await page.getByRole('dialog').waitFor({ timeout: 10000 });
-  await page.getByRole('button', { name: 'Close without a signature' }).click();
+  await page.getByRole('button', { name: 'Issue without a signature' }).click();
 
-  // Closed, said on the job screen itself — the document card names the
+  // Issued, said on the job screen itself — the document card names the
   // outcome rather than calling an unsigned job card "signed".
   await page
     .getByText('Issued without a customer signature', { exact: false })
@@ -926,8 +930,11 @@ await step('and nothing about EJE-1066 offers a signature step afterwards', asyn
   await visit('/jobs/EJE-1066');
   const body = await page.locator('main').innerText();
 
-  if (!/Read-only — this job is closed/i.test(body)) {
-    throw new Error(`EJE-1066 is not closed after Without Customer Signature: ${body.slice(0, 400)}`);
+  if (!/Read-only — submitted, with the office/i.test(body)) {
+    throw new Error(`EJE-1066 is not with the office after Without Customer Signature: ${body.slice(0, 400)}`);
+  }
+  if (/this job is closed/i.test(body)) {
+    throw new Error('Without Customer Signature closed EJE-1066 instead of handing it to the office');
   }
   if (!body.includes('Issued without a signature')) {
     throw new Error('the refusal does not record the outcome that was chosen');
@@ -942,17 +949,32 @@ await step('and nothing about EJE-1066 offers a signature step afterwards', asyn
     'Review & submit job card',
   ]) {
     if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
-      throw new Error(`a closed, unsigned job card still offers "${name}"`);
+      throw new Error(`an issued, unsigned job card still offers "${name}"`);
     }
   }
 
-  // And not for a Master either — closed is closed for the whole office.
+  // And not for a Master either — issued is issued for the whole office.
   await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
   await visit('/jobs/EJE-1066');
   for (const name of ['Capture signature', 'Submit job card', 'Review & submit job card']) {
     if ((await page.getByRole('button', { name, exact: true }).count()) !== 0) {
-      throw new Error(`a Master is still offered "${name}" on a closed job`);
+      throw new Error(`a Master is still offered "${name}" on an issued job`);
     }
+  }
+});
+
+await step('the office handles and invoices the unsigned EJE-1066 like any submission (BD-22)', async () => {
+  // Still signed in as the Master, on EJE-1066.
+  await page.getByTestId('mark-handled').click();
+  await page.getByTestId('invoice-number').waitFor({ timeout: 15000 });
+  await page.getByTestId('invoice-number').fill('INV-E2E-1066');
+  await page.getByTestId('save-invoice-number').click();
+  await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 15000 });
+  const body = await page.locator('main').innerText();
+  if (!body.includes('INV-E2E-1066')) throw new Error('the invoice number is not on the job');
+  // The exception is still recorded at the end of the lifecycle.
+  if (!body.includes('Issued without a signature')) {
+    throw new Error('the refusal outcome was lost when the job was invoiced');
   }
 });
 

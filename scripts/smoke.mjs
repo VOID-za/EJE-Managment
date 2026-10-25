@@ -1581,7 +1581,25 @@ await step('the job card is held until the office resolves the refusal', async (
   }
 });
 
-await step('the refusal shows on the job as an exception, not a seventh stage', async () => {
+/*
+ * THE LIVE RAIL: the eight stages since issue #73 added the office lifecycle
+ * after Review. A refusal is a flag ON a stage, never a stage of its own, so the
+ * count stays eight whatever happens to the job.
+ */
+const LIVE_RAIL = [
+  'Open',
+  'In Progress',
+  'Completion',
+  'Customer Signature',
+  'Review',
+  'Office Handling',
+  'Awaiting PO',
+  'Invoiced',
+];
+/** The rail's stage names with any exception flag (" — …") taken off. */
+const railStages = (names) => names.map((name) => name.split(' — ')[0].trim());
+
+await step('the refusal shows on the job as an exception, not a ninth stage', async () => {
   await page.goto(`${BASE}/jobs/${REFUSED_JOB}`, { waitUntil: 'networkidle' });
   await page.getByText('Customer refused to sign').first().waitFor({ timeout: 10000 });
   await page.getByText(REFUSAL_REASON).first().waitFor({ timeout: 8000 });
@@ -1590,13 +1608,22 @@ await step('the refusal shows on the job as an exception, not a seventh stage', 
   const names = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
   );
-  if (names.length !== 6) throw new Error(`the rail has ${names.length} stages: ${names.join(' | ')}`);
+  if (names.length !== LIVE_RAIL.length) {
+    throw new Error(`the rail has ${names.length} stages: ${names.join(' | ')}`);
+  }
+  // The same eight stages, in order — the refusal added none.
+  if (JSON.stringify(railStages(names)) !== JSON.stringify(LIVE_RAIL)) {
+    throw new Error(`the rail is not the live workflow: ${names.join(' | ')}`);
+  }
   if (names.some((name) => /master review/i.test(name))) {
     throw new Error('Master Review came back on the rail');
   }
-  // The exception is a flag ON the signature stage.
+  // The exception is a flag ON the signature stage, and on no other.
   if (!names.some((name) => /Customer Signature — Customer refused to sign/i.test(name))) {
     throw new Error(`the refusal is not marked on the signature stage: ${names.join(' | ')}`);
+  }
+  if (names.filter((name) => / — /.test(name)).length !== 1) {
+    throw new Error(`the refusal is flagged on more than one stage: ${names.join(' | ')}`);
   }
   await page.screenshot({ path: `${shots}/20-refusal-rail.png`, fullPage: false });
 });
@@ -1862,13 +1889,21 @@ await step('the corrected job is back at Customer Signature, with the history ke
     throw new Error('the outcome of the refusal is not recorded on the job');
   }
 
-  // Back at the signature stage, and the rail is still six.
+  // Back at the signature stage, and the rail is still the eight live stages.
   const rail = page.locator('ol').filter({ hasText: 'Completion' }).last();
   const names = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').replace(/\s+/g, ' ').trim(),
   );
-  if (names.length !== 6) throw new Error(`the rail has ${names.length} stages`);
+  if (names.length !== LIVE_RAIL.length) throw new Error(`the rail has ${names.length} stages`);
+  if (JSON.stringify(railStages(names)) !== JSON.stringify(LIVE_RAIL)) {
+    throw new Error(`the rail is not the live workflow: ${names.join(' | ')}`);
+  }
   if (/master review/i.test(names.join(' '))) throw new Error('Master Review came back');
+  // The refusal is RESOLVED, so the signature stage carries no flag any more —
+  // the history is on the job and its trail, not on the rail.
+  if (names.some((name) => / — /.test(name))) {
+    throw new Error(`a resolved refusal is still flagged on the rail: ${names.join(' | ')}`);
+  }
 
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByText('Corrected job card returned for customer signature').first().waitFor({
@@ -4770,7 +4805,10 @@ await step('a job left in the retired stage is still readable, shown at Review',
   const stages = (await rail.locator('li').allInnerTexts()).map((line) =>
     line.replace(/^\d+\s*/, '').trim(),
   );
-  if (stages.length !== 6) throw new Error(`${stages.length} stages on a historical job`);
+  if (stages.length !== LIVE_RAIL.length) throw new Error(`${stages.length} stages on a historical job`);
+  if (JSON.stringify(railStages(stages)) !== JSON.stringify(LIVE_RAIL)) {
+    throw new Error(`a historical job draws a different rail: ${stages.join(' | ')}`);
+  }
   // Shown at the stage it actually reached, with no retired stage named.
   if (stages[4] !== 'Review') throw new Error(`historical job sits at: ${stages[4]}`);
   if (stages.some((stage) => /master/i.test(stage))) {
@@ -6206,7 +6244,8 @@ await step('a write-up typed with no signal is kept on the tablet, as a draft', 
 
   // Loading it saves it — by itself, with no button to press.
   await page.getByTestId('writeup-use-draft').click();
-  await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
+  // The badge itself ("Saved 14:02"): a loose 'Saved' also matches "Unsaved changes".
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 25000 });
 
   // On the server now, so the device's copy is gone and the notice with it.
   await page.waitForFunction(
@@ -6326,7 +6365,8 @@ await step('a write-up the server changed under a held draft is a CONFLICT, not 
 
   // And the technician's decision is what applies it — saved by itself.
   await page.getByTestId('writeup-use-draft').click();
-  await page.getByText('Saved', { exact: false }).first().waitFor({ timeout: 25000 });
+  // The badge itself ("Saved 14:02"): a loose 'Saved' also matches "Unsaved changes".
+  await page.getByText(/^Saved /).first().waitFor({ timeout: 25000 });
   const after = await page.evaluate(async () => {
     const response = await fetch('/api/jobs/EJE-1050', { headers: { accept: 'application/json' } });
     const body = await response.json();

@@ -327,7 +327,7 @@ describe('B — customer refuses, the office corrects it, Customer Signature', (
  * C. Refusal, resolved without a signature. The job ends.
  * ------------------------------------------------------------------ */
 
-describe('C — customer refuses, the office closes it Without Customer Signature', () => {
+describe('C — customer refuses, the office issues it Without Customer Signature', () => {
   let harness: Harness;
   let closed: Job;
 
@@ -344,9 +344,10 @@ describe('C — customer refuses, the office closes it Without Customer Signatur
     );
   });
 
-  it('CLOSES the job there and then', () => {
-    expect(closed.status).toBe('closed');
-    expect(closed.closedAt).not.toBeNull();
+  // BD-22 (owner, 25 October 2026): into the office lifecycle, never closed.
+  it('hands the job to Office Handling there and then, and does not close it', () => {
+    expect(closed.status).toBe('office_handling');
+    expect(closed.closedAt).toBeNull();
     expect(closed.signature).toBeNull();
   });
 
@@ -411,11 +412,11 @@ describe('C — customer refuses, the office closes it Without Customer Signatur
     /*
      * The delivery poll is idempotent by design — it is how a provider's
      * report is applied, and reports arrive late, twice, or for jobs that have
-     * moved on. What matters is that it cannot walk a CLOSED job backwards
-     * into the delivery handshake it never entered.
+     * moved on. What matters is that it cannot walk an issued job backwards,
+     * or record a delivery for a customer copy that was never sent.
      */
     const after = await confirmJobCardDelivery(harness.as(master), closed);
-    expect(after.status).toBe('closed');
+    expect(after.status).toBe('office_handling');
     expect(after).toEqual(closed);
   });
 
@@ -425,7 +426,9 @@ describe('C — customer refuses, the office closes it Without Customer Signatur
     const refused = await recordSignatureRefusal(second.as(technician), job, {
       reason: 'Refused again, on a different job.',
     });
-    expect((await resolveSignatureRefusal(second.as(master), refused, '')).status).toBe('closed');
+    expect((await resolveSignatureRefusal(second.as(master), refused, '')).status).toBe(
+      'office_handling',
+    );
   });
 });
 

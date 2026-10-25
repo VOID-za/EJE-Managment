@@ -57,16 +57,15 @@ describe('the issued document for a refused job card', () => {
     job = await recordSignatureRefusal(context, job, { reason: REASON });
 
     /*
-     * "WITHOUT CUSTOMER SIGNATURE" NOW CLOSES THE JOB ITSELF.
+     * "WITHOUT CUSTOMER SIGNATURE" ISSUES THE JOB CARD IN ONE ACT.
      *
-     * This used to resolve the refusal, then issue, then wait for a delivery
-     * confirmation — three steps for an outcome the office has already
-     * decided. The confirmed rule is that resolving this way closes the job
-     * immediately, and the unsigned document is produced as part of it. The
-     * document itself is unchanged, which is what every case below checks.
+     * Resolving this way produces the unsigned document there and then. Since
+     * BD-22 (owner, 25 October 2026) the job goes to Office Handling instead of
+     * closing; the document itself is unchanged, which is what every case
+     * below checks.
      */
     issued = await resolveSignatureRefusal(harness.as(master), job, 'Invoice to proceed.');
-    expect(issued.status).toBe('closed');
+    expect(issued.status).toBe('office_handling');
   });
 
   const storedText = async (): Promise<string> =>
@@ -156,8 +155,9 @@ describe('the issued document for a refused job card', () => {
     expect(pdfPlainText(after.bytes)).not.toContain('written afterwards');
   });
 
-  it('closed on confirmed delivery, exactly as a signed job does', () => {
-    expect(issued.status).toBe('closed');
+  it('goes to Office Handling, exactly as a signed job does (BD-22)', () => {
+    expect(issued.status).toBe('office_handling');
+    expect(issued.closedAt).toBeNull();
     expect(issued.finalDocument).not.toBeNull();
     expect(issued.signature).toBeNull();
     expect(currentRefusal(issued)?.reason).toBe(REASON);
@@ -167,7 +167,7 @@ describe('the issued document for a refused job card', () => {
     /*
      * This asserted one email, because the old route reached the customer
      * through `issueJobCard`, which sends. Closing on resolution takes that
-     * route away, and whether the unsigned copy should be EMAILED is a
+     * route away (it now hands the job to the office, BD-22), and whether the unsigned copy should be EMAILED is a
      * question nobody has answered:
      *
      *   §15 puts customer delivery after the final MASTER submission, and this
