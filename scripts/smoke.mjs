@@ -3676,7 +3676,22 @@ await step('a legacy multi-site customer is shown as such, offered no further si
     .first().waitFor({ timeout: 10000 });
 });
 
+await step('a site with machines on it cannot simply be removed', async () => {
+  const johannesburg = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Johannesburg', exact: true }) })
+    .first();
+  await johannesburg.getByRole('button', { name: 'Remove' }).first().click();
+  await page.getByRole('dialog').waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Remove' }).last().click();
+  await page.getByText('still has machines on it', { exact: false })
+    .first().waitFor({ timeout: 10000 });
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+});
+
 await step('changing a contact’s site is saved and shown under the new site (CONTACT-SITE-1)', async () => {
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
   // It used to be dropped without a word: the dialog never sent the site.
   const pretoria = page
     .locator('section')
@@ -3741,19 +3756,6 @@ await step('choosing a customer on a new job fills in its one site and shows the
   // The contact picker is live at once, because the site is already chosen.
   const recipient = page.getByLabel(/^Customer email recipient/);
   if (await recipient.isDisabled()) throw new Error('the contact picker waited for a site the customer already has');
-});
-
-await step('a site with machines on it cannot simply be removed', async () => {
-  const johannesburg = page
-    .locator('section')
-    .filter({ has: page.getByRole('heading', { name: 'Johannesburg', exact: true }) })
-    .first();
-  await johannesburg.getByRole('button', { name: 'Remove' }).first().click();
-  await page.getByRole('dialog').waitFor({ timeout: 5000 });
-  await page.getByRole('button', { name: 'Remove' }).last().click();
-  await page.getByText('still has machines on it', { exact: false })
-    .first().waitFor({ timeout: 10000 });
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
 });
 
 await step('a machine carries the customer’s own machine number', async () => {
@@ -4494,8 +4496,30 @@ await step('calendar shows jobs, multi-day service and leave', async () => {
   await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Calendar' }).waitFor({ timeout: 10000 });
 
-  // Month view by default, with the seeded multi-day service visible.
+  // Month view by default.
   await page.getByRole('tab', { name: 'Month' }).waitFor({ timeout: 8000 });
+
+  /*
+   * THE MONTH COMES FROM THE DATA, NOT FROM TODAY. QA-5, again.
+   *
+   * EJE-1049 is seeded "next Monday", which in the last days of a month is in
+   * the NEXT month — so on 26 October 2026 it was on 2 November and this step
+   * failed in CI on code that had not touched the calendar. The job's own
+   * scheduled date is read and the calendar moved to that month; the
+   * assertion is unchanged.
+   */
+  const scheduled = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/EJE-1049`);
+    const body = await response.json();
+    return body?.data?.view?.job?.scheduledDate ?? '';
+  }, BASE);
+  const today = new Date();
+  const monthsAhead =
+    (Number(scheduled.slice(0, 4)) - today.getFullYear()) * 12 +
+    (Number(scheduled.slice(5, 7)) - (today.getMonth() + 1));
+  for (let step = 0; step < monthsAhead; step += 1) {
+    await page.getByRole('button', { name: 'Next period' }).click();
+  }
   await page.getByText('EJE-1049').first().waitFor({ timeout: 8000 });
 
   // A multi-day bar must be visibly wider than a single-day one.
@@ -4511,21 +4535,49 @@ await step('calendar shows jobs, multi-day service and leave', async () => {
     return max;
   };
 
+  /*
+   * Measured against ONE DAY'S COLUMN rather than against EJE-1048, which is
+   * seeded today and is not in the same month as EJE-1049 at a month's end. A
+   * bar booked over three days must be wider than one day — the same claim,
+   * without depending on a second job sharing the month.
+   */
   const multiDay = await widest('a[href="/jobs/EJE-1049"]');
-  const single = await widest('a[href="/jobs/EJE-1048"]');
+  // The weekday header reads 'Mon' (CSS puts it in capitals).
+  const header = await page.getByText(/^mon$/i).first().boundingBox({ timeout: 8000 });
+  const single = header === null ? 0 : header.width;
   if (multiDay === 0 || single === 0) throw new Error('calendar bars not rendered');
   if (multiDay <= single) {
     throw new Error(
-      `multi-day service (${multiDay}px) does not span more than a single-day job (${single}px)`,
+      `multi-day service (${multiDay}px) does not span more than one day's column (${single}px)`,
     );
   }
+  // Back to this month, where the remaining steps read today's work.
+  await page.getByRole('button', { name: 'Today' }).click();
 
   await page.screenshot({ path: `${shots}/15-calendar-month.png`, fullPage: false });
 });
 
+/*
+ * AVAILABILITY IS READ WITH THE JOBS HIDDEN. The month grid caps each week's
+ * lanes and folds the rest behind "+N more" — correctly — so on a busy week
+ * (Thabo's sick leave runs yesterday to tomorrow, alongside the most work) the
+ * sick-leave bar can be folded away by jobs. The "Availability" filter is the
+ * planner's own way to ask who is away; the chips must render there.
+ */
+const showAvailabilityOnly = async () => {
+  await page.getByRole('button', { name: 'Availability', exact: true }).click();
+  await page.waitForTimeout(400);
+};
+const showEverything = async () => {
+  await page.getByRole('button', { name: 'All', exact: true }).click();
+  await page.waitForTimeout(400);
+};
+
 await step('calendar shows technician leave and sick leave', async () => {
+  await showAvailabilityOnly();
   const leaveChips = await page.getByText('Leave', { exact: true }).count();
   const sickChips = await page.getByText('Sick', { exact: true }).count();
+  await showEverything();
   if (leaveChips === 0) throw new Error('no annual leave on the calendar');
   if (sickChips === 0) throw new Error('no sick leave on the calendar');
 });
@@ -4547,10 +4599,14 @@ await step('the month grid is compact — job numbers, not job details', async (
 
 await step('availability bars are slimmer than job bars', async () => {
   const jobBar = await page.locator('a[href^="/jobs/EJE-"] > span').first().boundingBox();
+  // A bar's height is its style, not its lane; read with the jobs hidden so
+  // one is always drawn (see `showAvailabilityOnly`).
+  await showAvailabilityOnly();
   const absenceBar = await page
     .locator('button[aria-label*="Leave"] > span, button[aria-label*="Sick"] > span')
     .first()
     .boundingBox();
+  await showEverything();
 
   if (jobBar === null || absenceBar === null) throw new Error('bars not rendered');
   if (absenceBar.height >= jobBar.height) {
@@ -4594,6 +4650,14 @@ await step('"+N more" reveals the whole day, losing nothing', async () => {
   const more = page.getByText(/^\+ \d+ more$/).first();
   const label = (await more.innerText()).trim();
   const hidden = Number(label.replace(/[^0-9]/g, ''));
+  /*
+   * THE DAY'S OWN COUNT, not "more than were hidden". The button says how many
+   * entries the day has in total; the dialog must list exactly that many. The
+   * old check assumed at least one bar was DRAWN on the first busy day, which
+   * a day whose lanes are taken by other bars in its week does not satisfy —
+   * and it then reported entries lost when none were.
+   */
+  const total = Number(((await more.getAttribute('aria-label')) ?? '').replace(/[^0-9]/g, ' ').trim().split(/\s+/)[0]);
   await more.click();
 
   const dialog = page.getByRole('dialog');
@@ -4602,8 +4666,8 @@ await step('"+N more" reveals the whole day, losing nothing', async () => {
   // The dialog lists the day in full — the bars that were drawn AND the ones
   // deferred, so nothing was removed to tidy the grid.
   const listed = await dialog.getByRole('listitem').count();
-  if (listed <= hidden) {
-    throw new Error(`"${label}" opened a list of only ${listed} — entries were lost`);
+  if (!(total >= hidden) || listed !== total) {
+    throw new Error(`"${label}" (of ${total} that day) opened a list of ${listed} — entries were lost`);
   }
   await page.screenshot({ path: `${shots}/18-calendar-day-more.png`, fullPage: false });
 });
@@ -4630,6 +4694,7 @@ await step('selecting an entry there opens its details', async () => {
 
 await step('an availability bar opens its own detail, which a job page cannot show', async () => {
   await page.goto(`${BASE}/calendar`, { waitUntil: 'networkidle' });
+  await showAvailabilityOnly();
   await page
     .locator('button[aria-label*="Leave"], button[aria-label*="Sick"], button[aria-label*="Appointment"]')
     .first()
@@ -4640,6 +4705,7 @@ await step('an availability bar opens its own detail, which a job page cannot sh
   await dialog.getByText('Unavailable').first().waitFor({ timeout: 5000 });
   await dialog.getByRole('button', { name: 'Open technician' }).waitFor({ timeout: 5000 });
   await page.keyboard.press('Escape');
+  await showEverything();
 });
 
 await step('a job bar still goes straight to its job card', async () => {
@@ -4675,9 +4741,25 @@ await step('the calendar filters answer a planner\'s three questions', async () 
   if ((await page.locator('a[href="/jobs/EJE-1048"]').count()) !== 0) {
     throw new Error('a breakdown survived the Service job-type filter');
   }
-  if ((await page.locator('a[href="/jobs/EJE-1049"]').count()) === 0) {
-    throw new Error('the Service filter hid a service job');
-  }
+  /*
+   * Every bar left is a SERVICE job, and at least one is — checked against
+   * each job's own type from the API, rather than against EJE-1049, which at a
+   * month's end is seeded into the next month.
+   */
+  const shown = await page.locator('a[href^="/jobs/EJE-"]').evaluateAll((links) =>
+    [...new Set(links.map((link) => link.getAttribute('href').split('/').pop()))],
+  );
+  if (shown.length === 0) throw new Error('the Service filter hid every service job');
+  const types = await page.evaluate(async ({ base, numbers }) => {
+    const out = {};
+    for (const number of numbers) {
+      const response = await fetch(`${base}/api/jobs/${number}`);
+      out[number] = (await response.json())?.data?.view?.job?.jobType ?? '';
+    }
+    return out;
+  }, { base: BASE, numbers: shown });
+  const wrong = shown.filter((number) => types[number] !== 'service');
+  if (wrong.length > 0) throw new Error(`the Service filter showed ${wrong.join(', ')}`);
 
   await page.getByRole('button', { name: 'All', exact: true }).click();
   await page.getByLabel('Job type').selectOption('all');
