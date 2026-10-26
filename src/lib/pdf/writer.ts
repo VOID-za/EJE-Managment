@@ -3,8 +3,9 @@
  *
  * First-party for the same reason the design system, icon set and formatting
  * helpers are: the alternative is a dependency to carry for one job, and the
- * subset of PDF needed to issue a job card — pages, Helvetica text, rules and
- * the signature's own path geometry — is small and stable.
+ * subset of PDF needed to issue a job card — pages, Helvetica text, rules, the
+ * signature's own path geometry and the job's photographs (prepared by
+ * `image.ts`) — is small and stable.
  *
  * Pure: no DOM, no Node APIs, no I/O. It takes drawing instructions and returns
  * bytes, so it is equally usable from the browser today and from the Phase 2
@@ -17,6 +18,7 @@
 
 /** A4 in PostScript points, the page size every EJE document uses. */
 import { charWidth, SUBSTITUTION_ALLOWANCE } from './metrics';
+import type { PdfImage } from './image';
 
 export const A4_WIDTH = 595.28;
 export const A4_HEIGHT = 841.89;
@@ -163,12 +165,57 @@ const colourOperands = (colour: string | undefined): string => {
 
 class PdfPage {
   readonly operations: string[] = [];
+  /** Image resource names this page draws, so its dictionary lists only those. */
+  readonly images = new Set<number>();
 }
+
+/**
+ * The matrix that maps an image's unit square into a box, honouring its EXIF
+ * orientation — so a photograph a tablet stored sideways is upright on the
+ * page, exactly as the browser shows it on screen.
+ */
+const orientationMatrix = (
+  orientation: PdfImage['orientation'],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): readonly number[] => {
+  switch (orientation) {
+    case 2:
+      return [-w, 0, 0, h, x + w, y];
+    case 3:
+      return [-w, 0, 0, -h, x + w, y + h];
+    case 4:
+      return [w, 0, 0, -h, x, y + h];
+    case 5:
+      return [0, -h, -w, 0, x + w, y + h];
+    case 6:
+      return [0, -h, w, 0, x, y + h];
+    case 7:
+      return [0, h, w, 0, x, y];
+    case 8:
+      return [0, h, -w, 0, x + w, y];
+    default:
+      return [w, 0, 0, h, x, y];
+  }
+};
+
+/** Binary stream bytes as a Latin-1 string: one character per byte. */
+const latin1 = (bytes: Uint8Array): string => {
+  let out = '';
+  const CHUNK = 0x8000;
+  for (let index = 0; index < bytes.length; index += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(index, index + CHUNK));
+  }
+  return out;
+};
 
 export class PdfBuilder {
   private readonly pages: PdfPage[] = [];
   private current: PdfPage | null = null;
   private readonly usedFonts = new Set<PdfFont>();
+  private readonly images: PdfImage[] = [];
 
   addPage(): void {
     const page = new PdfPage();
@@ -261,6 +308,25 @@ export class PdfBuilder {
     );
   }
 
+  /**
+   * Draws a photograph into the box (x, y bottom-left, width × height).
+   *
+   * The caller decides the box, and is expected to have given it the image's
+   * own proportions (see `displaySize`): this draws into exactly the box it is
+   * handed and never crops. The same image drawn twice is embedded once.
+   */
+  image(image: PdfImage, x: number, y: number, width: number, height: number): void {
+    let index = this.images.indexOf(image);
+    if (index === -1) {
+      this.images.push(image);
+      index = this.images.length - 1;
+    }
+    const page = this.page();
+    page.images.add(index);
+    const matrix = orientationMatrix(image.orientation, x, y, width, height).map(round).join(' ');
+    page.operations.push(`q ${matrix} cm /Im${index + 1} Do Q`);
+  }
+
   /** Greedy word wrap at `maxWidth`, returning the lines to draw. */
   static wrap(text: string, maxWidth: number, size: number, font: PdfFont = 'regular'): string[] {
     const lines: string[] = [];
@@ -312,7 +378,15 @@ export class PdfBuilder {
     const firstPageObject = 3;
     const contentBase = firstPageObject + this.pages.length;
     const fontBase = contentBase + this.pages.length;
-    const totalObjects = fontBase + fonts.length - 1;
+    // Each image is one object, plus one for its soft mask when it has one.
+    const imageBase = fontBase + fonts.length;
+    const imageObjects: number[] = [];
+    let nextObject = imageBase;
+    for (const image of this.images) {
+      imageObjects.push(nextObject);
+      nextObject += image.softMask === undefined ? 1 : 2;
+    }
+    const totalObjects = nextObject - 1;
 
     const fontResources = fonts
       .map((font, index) => `/${FONT_RESOURCE[font]} ${fontBase + index} 0 R`)
@@ -325,10 +399,16 @@ export class PdfBuilder {
         .map((_, index) => `${firstPageObject + index} 0 R`)
         .join(' ')}] /Count ${this.pages.length} >>`,
     );
-    this.pages.forEach((_, index) => {
+    this.pages.forEach((page, index) => {
+      const xObjects =
+        page.images.size === 0
+          ? ''
+          : ` /XObject << ${[...page.images]
+              .map((image) => `/Im${image + 1} ${imageObjects[image]} 0 R`)
+              .join(' ')} >>`;
       objects.push(
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${round(A4_WIDTH)} ${round(A4_HEIGHT)}] ` +
-          `/Resources << /Font << ${fontResources} >> >> /Contents ${contentBase + index} 0 R >>`,
+          `/Resources << /Font << ${fontResources} >>${xObjects} >> /Contents ${contentBase + index} 0 R >>`,
       );
     });
     this.pages.forEach((page) => {
@@ -340,8 +420,37 @@ export class PdfBuilder {
         `<< /Type /Font /Subtype /Type1 /BaseFont /${FONT_BASE[font]} /Encoding /WinAnsiEncoding >>`,
       );
     });
+    this.images.forEach((image, index) => {
+      const decodeParms =
+        image.predictorColors === undefined
+          ? ''
+          : ` /DecodeParms << /Predictor 15 /Colors ${image.predictorColors} /BitsPerComponent 8 /Columns ${image.width} >>`;
+      const decode = image.invertedCmyk === true ? ' /Decode [1 0 1 0 1 0 1 0]' : '';
+      const mask = image.softMask === undefined ? '' : ` /SMask ${imageObjects[index]! + 1} 0 R`;
+      objects.push(
+        `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+          `/ColorSpace /${image.colorSpace} /BitsPerComponent 8 /Filter /${image.filter}` +
+          `${decodeParms}${decode}${mask} /Length ${image.data.length} >>
+stream
+` +
+          `${latin1(image.data)}
+endstream`,
+      );
+      if (image.softMask !== undefined) {
+        objects.push(
+          `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+            `/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode ` +
+            `/Length ${image.softMask.length} >>
+stream
+${latin1(image.softMask)}
+endstream`,
+        );
+      }
+    });
 
-    let body = '%PDF-1.4\n';
+    // The second line marks the file as binary, as the specification advises
+    // once it carries image streams.
+    let body = this.images.length === 0 ? '%PDF-1.4\n' : '%PDF-1.4\n%\xe2\xe3\xcf\xd3\n';
     const offsets: number[] = [];
     objects.forEach((object, index) => {
       offsets.push(body.length);

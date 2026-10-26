@@ -1,6 +1,7 @@
 import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
 import { buildJobCardModel, type ChargeRow, type JobCardModel, type LabelValue } from '@/lib/job-card/model';
 import { PdfBuilder, textWidth } from '@/lib/pdf/writer';
+import { displaySize, type PreparedPhoto } from '@/lib/pdf/image';
 import { SIMULATED_NOTICE_PRINT } from '@/domain';
 import type { FinalDocumentSource, RenderedPdf } from '../ports';
 
@@ -504,11 +505,107 @@ const checklist = (sheet: Sheet, model: JobCardModel): void => {
   sheet.move(GAP.section - 6);
 };
 
-const photographs = (sheet: Sheet, model: JobCardModel): void => {
+/**
+ * THE PHOTOGRAPHS THEMSELVES, NOT THEIR CAPTIONS.
+ *
+ * This printed a bullet list of captions — and the on-screen card a grey box
+ * labelled "Photograph" — because the writer could not draw an image and the
+ * model carried no pixels. Now each customer-facing photograph is drawn in the
+ * on-screen card's own grid: three across, each in a 4:3 cell, the photograph
+ * fitted inside it at its own proportions (never stretched, never cropped) and
+ * centred, with its caption beneath.
+ *
+ * A photograph whose file cannot be drawn — not loaded, not in storage, a
+ * format the writer cannot embed — gets the same cell with a plain statement
+ * of why, so the document never shows an empty frame that reads as a picture.
+ */
+const PHOTO_COLUMNS = 3;
+const PHOTO_GAP = 8.4; // gap-3
+const PHOTO_CELL_WIDTH = (CONTENT_WIDTH - PHOTO_GAP * (PHOTO_COLUMNS - 1)) / PHOTO_COLUMNS;
+const PHOTO_CELL_HEIGHT = (PHOTO_CELL_WIDTH * 3) / 4; // aspect-4/3
+const PHOTO_CAPTION_LEADING = 9;
+
+const photoCell = (
+  sheet: Sheet,
+  photo: JobCardModel['photos'][number],
+  prepared: PreparedPhoto | undefined,
+  x: number,
+  top: number,
+): void => {
+  const bottom = top - PHOTO_CELL_HEIGHT;
+  sheet.pdf.rect(x, bottom, PHOTO_CELL_WIDTH, PHOTO_CELL_HEIGHT, BAND);
+
+  if (prepared?.kind === 'image') {
+    const natural = displaySize(prepared.image);
+    const scale = Math.min(PHOTO_CELL_WIDTH / natural.width, PHOTO_CELL_HEIGHT / natural.height);
+    const width = natural.width * scale;
+    const height = natural.height * scale;
+    sheet.pdf.image(
+      prepared.image,
+      x + (PHOTO_CELL_WIDTH - width) / 2,
+      bottom + (PHOTO_CELL_HEIGHT - height) / 2,
+      width,
+      height,
+    );
+  } else {
+    const reason =
+      prepared?.reason ?? 'The image file was not available when this document was produced.';
+    const inset = 8;
+    let y = top - inset - SIZE.tiny;
+    sheet.pdf.text(x + inset, y, 'Photograph not shown', {
+      font: 'bold',
+      size: SIZE.tiny,
+      colour: MUTED,
+    });
+    for (const line of [
+      ...PdfBuilder.wrap(reason, PHOTO_CELL_WIDTH - inset * 2, SIZE.tiny),
+      ...PdfBuilder.wrap(photo.fileName, PHOTO_CELL_WIDTH - inset * 2, SIZE.tiny),
+    ]) {
+      y -= PHOTO_CAPTION_LEADING;
+      if (y < bottom + inset) break;
+      sheet.pdf.text(x + inset, y, line, { size: SIZE.tiny, colour: FAINT });
+    }
+  }
+  // The cell's hairline, drawn last so the photograph sits inside it.
+  sheet.pdf.line(x, top, x + PHOTO_CELL_WIDTH, top, 0.5, RULE);
+  sheet.pdf.line(x, bottom, x + PHOTO_CELL_WIDTH, bottom, 0.5, RULE);
+  sheet.pdf.line(x, bottom, x, top, 0.5, RULE);
+  sheet.pdf.line(x + PHOTO_CELL_WIDTH, bottom, x + PHOTO_CELL_WIDTH, top, 0.5, RULE);
+};
+
+const photographs = (
+  sheet: Sheet,
+  model: JobCardModel,
+  images: ReadonlyMap<string, PreparedPhoto> | undefined,
+): void => {
   if (model.photos.length === 0) return;
   sheet.sectionTitle('Photographs');
-  for (const photo of model.photos) {
-    sheet.paragraph(`· ${photo.caption}`, { size: SIZE.small, colour: MUTED, leading: GAP.line });
+  for (let start = 0; start < model.photos.length; start += PHOTO_COLUMNS) {
+    const row = model.photos.slice(start, start + PHOTO_COLUMNS);
+    const captions = row.map((photo) =>
+      photo.caption.trim().length === 0
+        ? []
+        : PdfBuilder.wrap(photo.caption, PHOTO_CELL_WIDTH, SIZE.tiny),
+    );
+    const captionLines = Math.max(0, ...captions.map((lines) => lines.length));
+    const rowHeight = PHOTO_CELL_HEIGHT + (captionLines === 0 ? 0 : 4 + captionLines * PHOTO_CAPTION_LEADING);
+    // A row is never split across a page: a photograph cut in half is worse
+    // than white space at the foot of a page.
+    sheet.need(rowHeight + SIZE.small);
+    const top = sheet.cursor + SIZE.small;
+    row.forEach((photo, column) => {
+      const x = MARGIN + column * (PHOTO_CELL_WIDTH + PHOTO_GAP);
+      photoCell(sheet, photo, images?.get(photo.id), x, top);
+      captions[column]!.forEach((line, index) => {
+        sheet.pdf.text(
+          x,
+          top - PHOTO_CELL_HEIGHT - 4 - SIZE.tiny - index * PHOTO_CAPTION_LEADING,
+          line,
+          { size: SIZE.tiny, colour: MUTED },
+        );
+      });
+    });
+    sheet.move(rowHeight + PHOTO_GAP);
   }
   sheet.move(GAP.section);
 };
@@ -703,7 +800,7 @@ export const renderJobCardPdf = (
   charges(sheet, model);
   collection(sheet, model);
   checklist(sheet, model);
-  photographs(sheet, model);
+  photographs(sheet, model, source.photoImages);
   acceptance(sheet, model);
   /*
    * WHETHER THIS IS A DEMONSTRATION DOCUMENT, taken from the JOB'S OWN RECORD.

@@ -5,6 +5,7 @@ import {
   type LabelValue,
 } from "@/lib/job-card/model";
 import { SignatureDisplay } from "./SignaturePad";
+import { DocumentPhoto } from "./DocumentPhoto";
 
 /**
  * The EJE job card document, on screen.
@@ -285,10 +286,15 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
           <SectionTitle>Photographs</SectionTitle>
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {model.photos.map((photo) => (
-              <li key={photo.caption}>
-                <div className="flex aspect-4/3 items-center justify-center rounded border border-steel-200 bg-steel-100 text-[10px] text-steel-400">
-                  Photograph
-                </div>
+              <li key={photo.id}>
+                <DocumentPhoto
+                  jobId={view.job.id}
+                  photo={photo}
+                  simulated={
+                    view.job.photos.find((candidate) => candidate.id === photo.id)
+                      ?.provenance === "simulated"
+                  }
+                />
                 <p className="mt-1 text-[11px] text-steel-600">
                   {photo.caption}
                 </p>

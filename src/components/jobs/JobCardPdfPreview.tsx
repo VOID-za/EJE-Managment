@@ -97,6 +97,8 @@ export const JobCardPdfPreview = ({
     job.travel.length,
     job.parts.length,
     job.photos.length,
+    // A photograph reclassified as internal leaves the document.
+    job.photos.map((photo) => `${photo.id}:${photo.visibility}`).join(','),
     job.notes.length,
     job.signature === null ? 'unsigned' : job.signature.signedAt,
     job.signatureRefusals.length,

@@ -2,6 +2,7 @@ import { can, type IsoDateTime, type Job } from '@/domain';
 import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { loadJobView } from './job-view';
+import { loadDocumentPhotos } from './document-photos';
 import { StorageIntegrityFailed, type FinalDocumentSource, type StoredDocument } from '@/services/ports';
 
 /**
@@ -32,8 +33,11 @@ export const FINAL_DOCUMENT_CONTENT_TYPE = 'application/pdf';
  * v3: dates and times are read in EJE's business zone rather than the local
  * zone of whatever machine rendered them, and a courier's collection document
  * now lists the goods it is a note for.
+ *
+ * v4: the customer-facing photographs are drawn — the photograph itself, in a
+ * grid — where v3 printed only a list of their captions.
  */
-export const RENDERER_VERSION = 3;
+export const RENDERER_VERSION = 4;
 
 /**
  * Builds the renderer's input from the job's own stored record.
@@ -98,8 +102,13 @@ export const storeFinalDocument = async (
   source: FinalDocumentSource,
 ): Promise<number> => {
   // Stamped with the descriptor's own timestamp, so the file and the record
-  // recorded on the job agree to the millisecond.
-  const rendered = await context.services.pdf.render(source, 'final', descriptor.generatedAt);
+  // recorded on the job agree to the millisecond. The photographs are read
+  // from storage here, on the server, because the job holds only their keys.
+  const rendered = await context.services.pdf.render(
+    { ...source, photoImages: await loadDocumentPhotos(context.services.storage, source.job) },
+    'final',
+    descriptor.generatedAt,
+  );
   await context.services.storage.putDocument({
     storageKey: descriptor.storageKey,
     fileName: descriptor.fileName,
@@ -190,7 +199,11 @@ export const loadFinalDocumentFile = async (
    */
   // Stamped with the timestamp already recorded on the job, so this renders
   // byte-identically however many times it is called.
-  const rendered = await context.services.pdf.render(source, 'final', descriptor.generatedAt);
+  const rendered = await context.services.pdf.render(
+    { ...source, photoImages: await loadDocumentPhotos(context.services.storage, source.job) },
+    'final',
+    descriptor.generatedAt,
+  );
   const document: StoredDocument = {
     storageKey: descriptor.storageKey,
     fileName: descriptor.fileName,

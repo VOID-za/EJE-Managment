@@ -14,6 +14,7 @@ import type {
 } from '@/domain';
 export type { DeliveryFailureKind, DeliveryState } from '@/domain';
 import { isDeliveryFailureKind } from '@/domain';
+import type { PreparedPhoto } from '@/lib/pdf/image';
 
 /**
  * Integration ports.
@@ -209,6 +210,16 @@ export interface FinalDocumentSource {
   readonly checklistTemplate: ChecklistTemplate | null;
   /** Everyone who could be named on the document, for resolving note authors. */
   readonly users: readonly User[];
+  /**
+   * The customer-facing photographs' own pixels, by attachment id.
+   *
+   * Loaded from storage by whoever renders — the server for the issued copy,
+   * the browser (through the authorised media route) for the preview — because
+   * the job record holds only a storage key, and a key is not an image. A
+   * photograph missing from this map is drawn as a labelled box saying it could
+   * not be shown, never as a blank that looks like a photograph.
+   */
+  readonly photoImages?: ReadonlyMap<string, PreparedPhoto>;
 }
 
 /** A rendered document: the bytes, and how many pages they actually are. */

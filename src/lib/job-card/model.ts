@@ -163,7 +163,12 @@ export interface JobCardModel {
     readonly priceNote: string;
   } | null;
 
-  readonly photos: readonly { readonly caption: string }[];
+  /** The id is the attachment's, so a renderer can find the photograph's pixels. */
+  readonly photos: readonly {
+    readonly id: string;
+    readonly caption: string;
+    readonly fileName: string;
+  }[];
 
   readonly acceptance: {
     readonly declaration: string;
@@ -225,6 +230,15 @@ const answerFor = (item: ChecklistItem, response: ChecklistResponse | undefined)
       return response.text.length > 0 ? response.text : '—';
   }
 };
+
+/**
+ * The photographs a customer document carries: the customer-facing ones, in
+ * the job's order. One definition, used by the model below and by both loaders
+ * of their pixels (the server's for the issued copy, the browser's for the
+ * preview), so nothing loads a photograph the document will not print.
+ */
+export const documentPhotos = (job: Job): Job['photos'] =>
+  job.photos.filter((photo) => photo.visibility === 'customer_facing');
 
 export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
   const { job, customer, site, contact, machine, settings, checklistTemplate, users } = input;
@@ -565,9 +579,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
      * document — so filtering once is what makes them agree. A renderer that
      * filtered for itself would leave the others printing the internal ones.
      */
-    photos: job.photos
-      .filter((photo) => photo.visibility === 'customer_facing')
-      .map((photo) => ({ caption: photo.caption })),
+    photos: documentPhotos(job).map((photo) => ({ id: photo.id, caption: photo.caption, fileName: photo.fileName })),
 
     acceptance:
       job.signature === null

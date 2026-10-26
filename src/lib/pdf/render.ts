@@ -74,7 +74,14 @@ const DARK = 140;
 export const renderPdfRegionInk = async (
   bytes: Uint8Array,
   box: SignatureBox,
-  options: { readonly label?: string } = {},
+  options: {
+    readonly label?: string;
+    /**
+     * Count pixels close to this colour instead of dark ones — how a test
+     * proves a PHOTOGRAPH is drawn: its known colours, where it was placed.
+     */
+    readonly colour?: { readonly r: number; readonly g: number; readonly b: number; readonly tolerance: number };
+  } = {},
 ): Promise<InkReport> => {
   // Imported here so the application bundle never reaches for a browser.
   const { chromium } = await import('playwright');
@@ -114,7 +121,7 @@ export const renderPdfRegionInk = async (
      */
     const analyser = await browser.newPage();
     const report = await analyser.evaluate(
-      async ([dataUrl, region, pageWidth, pageHeight, darkThreshold]) => {
+      async ([dataUrl, region, pageWidth, pageHeight, darkThreshold, target]) => {
         const image = new Image();
         await new Promise((resolve, reject) => {
           image.onload = resolve;
@@ -215,7 +222,16 @@ export const renderPdfRegionInk = async (
           for (let x = Math.max(0, x0); x <= Math.min(width - 1, x1); x += 1) {
             const [red, green, blue] = at(x, y);
             examined += 1;
-            if (
+            const wanted = target as { r: number; g: number; b: number; tolerance: number } | null;
+            if (wanted !== null) {
+              if (
+                Math.abs(red - wanted.r) <= wanted.tolerance &&
+                Math.abs(green - wanted.g) <= wanted.tolerance &&
+                Math.abs(blue - wanted.b) <= wanted.tolerance
+              ) {
+                ink += 1;
+              }
+            } else if (
               red < (darkThreshold as number) &&
               green < (darkThreshold as number) &&
               blue < (darkThreshold as number)
@@ -237,6 +253,7 @@ export const renderPdfRegionInk = async (
         A4_WIDTH,
         A4_HEIGHT,
         DARK,
+        options.colour ?? null,
       ] as const,
     );
     await analyser.close();
