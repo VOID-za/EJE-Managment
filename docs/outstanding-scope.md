@@ -1,5 +1,69 @@
 # What is actually left, 20 October 2026
 
+> **COMPLETE INVENTORY, 26 October 2026** — made from `docs/SCOPE.md` at
+> `87276d3` (CI green, run 40362376094) after the photograph, customer/site and
+> attendance/timesheet work. **Nothing below is approved:** 172 register rows
+> are *TESTED — awaiting approval*, which is the owner's act (PROC-4). The
+> register is the source of truth; this is the map of who has to act.
+>
+> **1. Safe code changes — being done now, on `claude/office-workflow-parts`**
+>
+> | Item | What |
+> |---|---|
+> | MEDIA-7 | Real-browser proof that the PREVIEW carries the photograph — **done 26 Oct** |
+> | SITE-2 | Office workflow for legacy multi-site customers: register filter, site-by-site preview — **done 26 Oct** |
+> | WA-TRANSFER-1 | A transfer notifies the receiving technician on WhatsApp with the approved assignment template (provisional, BD-25) |
+> | Register hygiene | AUD-3, AUD-4, AUD-8, DELIV-7, BD-02, BD-06 rows were overtaken and never marked — **amended 26 Oct** |
+> | OFF-10, OFF-11 | Already met by existing behaviour; specified with evidence — **amended 26 Oct** |
+> | SITE-1 follow-up | A preflight report of legacy multi-site customers, so the database constraint can be planned |
+>
+> **2. Owner decisions that change business behaviour** (each OPEN in *Open business decisions*)
+>
+> | ID | Question | Behaviour until answered |
+> |---|---|---|
+> | **BD-23** | Offline signature / refusal (OFF-5) | Needs a connection; recommended default written down |
+> | **BD-24** | How a call-out is counted on a timesheet | Once per job per technician, first day — provisional |
+> | **BD-25** | Does a transfer need its own WhatsApp wording? | Approved assignment template reused |
+> | BD-26 | Does a customer ever receive a video? | Never; videos are internal |
+> | BD-27 | When is a correction's acknowledgement required? | The Master states it per correction |
+> | BD-28 | May an approved change request move a machine? | No; the office moves it |
+> | BD-29 | Resume an interrupted upload byte by byte? | Re-sent whole, never duplicated |
+> | BD-04 | Is the order number mandatory? | Three-valued waiver (DECISION 2) |
+> | BD-05 | Redis queues or the PostgreSQL outbox? | Outbox |
+> | BD-11 | An explicit "cannot submit" state? | An all-day absence opens the takeover |
+> | BD-03, BD-08, BD-10 | Naming and visibility | Cosmetic |
+>
+> **3. EJE-supplied credentials and external dependencies** — code ready, live verification impossible without them
+>
+> | Needed | For | EJE's action |
+> |---|---|---|
+> | Microsoft 365 app registration (`EMAIL_GRAPH_TENANT_ID`, `_CLIENT_ID`, `_CLIENT_SECRET`, `EMAIL_SENDER`) with **Mail.Send** application permission and admin consent | MANDATE-3, EMAIL-2, DELIV-* | Create it in EJE's tenant; give the values to the operator for the server's environment file only (`docs/integrations.md`) |
+> | Meta WhatsApp Business: permanent System User token, phone number id, templates `eje_job_assigned` and `eje_site_location` **approved** | NOTIF-1, WHATSAPP-1, WA-TRANSFER-1 | Submit and get the templates approved under EJE's WhatsApp Business account |
+> | An off-site backup destination and its credentials | BACKUP-1 | Choose it (bucket or remote disk) and give the operator write-only credentials (`docs/vps-backups.md`) |
+> | A holder for the backup key's escrow copy | BACKUP-2 | Name the person or safe; run `npm run backup:key-check` against them |
+> | Permission to install OCR on the production server, with limits | LIB-5, BD-21 | Decide after the demonstration measurement (`docs/library-ocr.md` §5) |
+> | GitHub access for this tooling (`gh auth login`) | PROC-6 issues | Allow the requirement issues to be filed from here, or file them by hand |
+>
+> **4. Physical acceptance — the rugged tablet** (code complete as far as automation can reach)
+>
+> MANDATE-2, PWA-8, OFF-13, UX-1, ACC-PWA-1…6, ACC-OFF-1…12: install from the
+> launcher, the icon, a standalone launch, the real rear camera, gloved use in
+> daylight, and a full job captured with the network off — on the Samsung Tab
+> Active (or EJE's chosen device), against the deployed HTTPS origin, using
+> `docs/tablet-installation.md`. MANDATE-1 also needs BD-23 before it can be met.
+>
+> **5. Deployment and operator work** (never done from this repository)
+>
+> | Task | Reference |
+> |---|---|
+> | Release with **two** pending migrations: `-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets` | `docs/deploy-next-release.md` |
+> | Declare `EJE_DEPLOYMENT`, pass preflight | `docs/demonstration-isolation.md` |
+> | Configure email and WhatsApp, then `npm run integrations:check -- --probe` | `docs/integrations.md` |
+> | Schedule the backup, copy it off site, run the restore test and the key check | `docs/vps-backups.md` |
+> | Consolidate any legacy multi-site customers in production, then add the one-site constraint | SITE-1, SITE-2 |
+> | Run the VPS smoke test after release; keep the rollback plan | `docs/vps-smoke-test.md` |
+> | Owner approval of the TESTED rows, recorded on their issues | `docs/project-tracking.md` |
+
 > **Updated later the same day** by the October implementation mandate. Two
 > items moved off this list — demonstration labelling (§1) and customer
 > attachments (§4) — and the library gained the five categories EJE asked for.
