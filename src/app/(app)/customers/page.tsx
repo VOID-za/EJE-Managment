@@ -35,6 +35,8 @@ const CustomersPage = () => {
   const currentUser = useCurrentUser();
   const [term, setTerm] = useState('');
   const [adding, setAdding] = useState(false);
+  /** SITE-2: the customers recorded with several sites before SITE-1. */
+  const [legacyOnly, setLegacyOnly] = useState(false);
   // The official customer record belongs to the office, so only a Master adds one.
   const canManage = can(currentUser.role, 'customers.manage');
 
@@ -44,12 +46,14 @@ const CustomersPage = () => {
     const needle = term.trim().toLowerCase();
     return (query.data ?? []).filter(
       (row) =>
-        needle.length === 0 ||
+        (!legacyOnly || row.siteCount > 1) &&
+        (needle.length === 0 ||
         row.name.toLowerCase().includes(needle) ||
         row.accountNumber.toLowerCase().includes(needle) ||
-        row.industry.toLowerCase().includes(needle),
+        row.industry.toLowerCase().includes(needle)),
     );
-  }, [query.data, term]);
+  }, [query.data, term, legacyOnly]);
+  const legacyCount = (query.data ?? []).filter((row) => row.siteCount > 1).length;
 
   const columns: Column<CustomerRow>[] = [
     {
@@ -67,7 +71,14 @@ const CustomersPage = () => {
       key: 'sites',
       header: 'Sites',
       align: 'right',
-      render: (row) => <span className="tabular">{row.siteCount}</span>,
+      render: (row) =>
+        row.siteCount > 1 ? (
+          <Badge tone="amber" size="sm">
+            {row.siteCount} · legacy
+          </Badge>
+        ) : (
+          <span className="tabular">{row.siteCount}</span>
+        ),
     },
     {
       key: 'machines',
@@ -146,6 +157,19 @@ const CustomersPage = () => {
             className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
           />
         </div>
+        {canManage && legacyCount > 0 && (
+          <label className="mt-3 flex min-h-9 items-center gap-2 text-sm text-steel-700">
+            <input
+              type="checkbox"
+              checked={legacyOnly}
+              onChange={(event) => setLegacyOnly(event.target.checked)}
+              className="size-5"
+              data-testid="legacy-sites-filter"
+            />
+            Only the {legacyCount} {legacyCount === 1 ? 'customer' : 'customers'} recorded with several
+            sites before the one-site rule, to consolidate
+          </label>
+        )}
       </Card>
 
       {query.loading ? (

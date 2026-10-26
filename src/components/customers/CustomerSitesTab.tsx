@@ -46,12 +46,15 @@ export const CustomerSitesTab = ({
   sites,
   contacts,
   machines,
+  jobSiteIds = [],
   onChanged,
 }: {
   readonly customer: Customer;
   readonly sites: readonly Site[];
   readonly contacts: readonly Contact[];
   readonly machines: readonly Machine[];
+  /** The site each of the customer's jobs was recorded at, for the consolidation preview. */
+  readonly jobSiteIds?: readonly string[];
   readonly onChanged: () => void;
 }) => {
   const currentUser = useCurrentUser();
@@ -388,6 +391,25 @@ export const CustomerSitesTab = ({
                     {sites.length - 1 === 1 ? 'site is' : 'sites are'} archived, not deleted: jobs
                     done there keep their address and their history.
                   </p>
+                  {/* Exactly what moves, site by site, before anybody confirms. */}
+                  <ul className="mt-2 space-y-1 text-sm" data-testid="consolidation-preview">
+                    {sites
+                      .filter((site) => site.id !== pending.site.id)
+                      .map((site) => {
+                        const machineCount = machines.filter((machine) => machine.siteId === site.id).length;
+                        const contactCount = contacts.filter((contact) => contact.siteId === site.id).length;
+                        const jobCount = jobSiteIds.filter((siteId) => siteId === site.id).length;
+                        return (
+                          <li key={site.id}>
+                            <strong>{site.name}</strong>: {machineCount}{' '}
+                            {machineCount === 1 ? 'machine' : 'machines'} and {contactCount}{' '}
+                            {contactCount === 1 ? 'contact' : 'contacts'} move; {jobCount}{' '}
+                            {jobCount === 1 ? 'job stays' : 'jobs stay'} recorded at {site.name}; the
+                            site is archived.
+                          </li>
+                        );
+                      })}
+                  </ul>
                   <p className="mt-2">No job is changed. This cannot be undone from this screen.</p>
                 </>
               ) : pending.kind === 'site' ? (

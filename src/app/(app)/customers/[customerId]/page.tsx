@@ -175,6 +175,7 @@ const CustomerDetailPage = ({
           sites={sites}
           contacts={contacts}
           machines={machines}
+          jobSiteIds={jobRows.map((row) => row.job.siteId)}
           onChanged={query.refetch}
         />
       )}

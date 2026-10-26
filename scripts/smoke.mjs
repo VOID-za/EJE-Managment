@@ -16,6 +16,7 @@
  *   PLAYWRIGHT_CHROMIUM  explicit Chromium binary, when not managed by Playwright
  */
 import { mkdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut as signOutOf } from './sign-in.mjs';
@@ -1085,6 +1086,41 @@ await step('the signed document is shown before anything is submitted', async ()
   await page.screenshot({ path: `${shots}/24-signed-preview.png`, fullPage: false });
 
   /*
+   * THE PHOTOGRAPH IS IN THE PREVIEW THE CUSTOMER IS SHOWN. MEDIA-7.
+   *
+   * The preview is rendered IN THIS BROWSER from photographs fetched through
+   * the authorised media route, so it is checked here and not only in a unit
+   * test with a stand-in fetch. Two halves: the document drawn on the page (the
+   * branch a tablet with no PDF viewer gets) shows the decoded photograph, and
+   * the PDF bytes this browser produced — "Download preview" — embed an image
+   * and contain no "Photograph not shown" placeholder.
+   */
+  const drawnKind = await page.getByTestId('job-card-preview').getAttribute('data-preview-kind');
+  if (drawnKind === 'document') {
+    await page.waitForFunction(
+      () => {
+        const images = [...document.querySelectorAll('[data-testid="document-photo"] img')];
+        return images.length > 0 && images.every((image) => image.complete && image.naturalWidth > 0);
+      },
+      undefined,
+      { timeout: 15000 },
+    );
+    if ((await page.locator('[data-testid="document-photo"][data-photo-state="unavailable"]').count()) !== 0) {
+      throw new Error('the on-screen job card shows a photograph as not shown');
+    }
+  }
+  const previewDownload = page.waitForEvent('download', { timeout: 20000 });
+  await page.getByRole('button', { name: 'Download preview' }).click();
+  const previewBytes = await readFile(await (await previewDownload).path());
+  const previewText = previewBytes.toString('latin1');
+  if (!previewText.includes('/Subtype /Image')) {
+    throw new Error('the PDF preview rendered in the browser embeds no photograph');
+  }
+  if (previewText.includes('(Photograph not shown)')) {
+    throw new Error('the PDF preview shows the photograph as not shown');
+  }
+
+  /*
    * THE TECHNICIAN SUBMITS IT, HERE. MASTER SCOPE CR-07.
    *
    * This read "Continue to submission" and navigated to the office review
@@ -1098,6 +1134,19 @@ await step('the signed document is shown before anything is submitted', async ()
   await page.getByRole('dialog').getByRole('button', { name: 'Submit job card' }).click();
   await page.getByText('Office Handling', { exact: false }).first().waitFor({ timeout: 25000 });
   await page.screenshot({ path: `${shots}/05-submitted.png`, fullPage: false });
+
+  // And the ISSUED copy — rendered on the server from the stored photograph,
+  // the file the customer is sent — embeds it too. MEDIA-7.
+  const issued = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/documents/EJE-1048`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let text = '';
+    for (const byte of bytes) text += String.fromCharCode(byte);
+    return { status: response.status, image: text.includes('/Subtype /Image'), placeholder: text.includes('(Photograph not shown)') };
+  }, BASE);
+  if (issued.status !== 200) throw new Error(`the issued job card answered ${issued.status}`);
+  if (!issued.image) throw new Error('the issued job card embeds no photograph');
+  if (issued.placeholder) throw new Error('the issued job card shows the photograph as not shown');
 });
 
 await step('job card preview renders real data', async () => {
@@ -3812,6 +3861,55 @@ await step('a timesheet shows the day, takes a comment and offers the export (TI
     .first().waitFor({ timeout: 10000 });
   await page.getByTestId('timesheet-table').getByText('Absent', { exact: true }).first()
     .waitFor({ timeout: 5000 });
+});
+
+/*
+ * SITE-2: THE OFFICE CONSOLIDATES A LEGACY CUSTOMER — by choosing, never by
+ * default. Found from the register's own filter, previewed site by site before
+ * confirming, and afterwards the jobs done at the archived sites still say so.
+ */
+await step('the office finds a legacy multi-site customer and consolidates it to the site it chooses (SITE-2)', async () => {
+  await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
+  await page.getByTestId('legacy-sites-filter').check();
+  await page.getByText('ABC Engineering (Pty) Ltd').first().waitFor({ timeout: 8000 });
+  if ((await page.getByText('Kruger Engineering', { exact: false }).count()) !== 0) {
+    throw new Error('the legacy filter listed a customer with one site');
+  }
+
+  // A job done at Pretoria before the consolidation, to read back afterwards.
+  const atPretoria = await page.evaluate(async (base) => {
+    const body = await (await fetch(`${base}/api/customers/cust-abc`)).json();
+    const row = (body?.data?.jobRows ?? []).find((entry) => entry.job.siteId === 'site-abc-pta');
+    return row?.job?.jobNumber ?? null;
+  }, BASE);
+
+  await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
+  const johannesburg = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Johannesburg', exact: true }) })
+    .first();
+  await johannesburg.getByTestId('keep-site').click();
+  const preview = page.getByTestId('consolidation-preview');
+  await preview.waitFor({ timeout: 5000 });
+  for (const name of ['Pretoria', 'Germiston']) {
+    await preview.getByText(name, { exact: false }).first().waitFor({ timeout: 3000 });
+  }
+  await page.getByRole('button', { name: 'Keep this site' }).click();
+  await page.getByText('is now ABC Engineering (Pty) Ltd', { exact: false }).first().waitFor({ timeout: 15000 });
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
+  if ((await page.getByTestId('legacy-sites-notice').count()) !== 0) {
+    throw new Error('the customer is still shown as legacy after consolidation');
+  }
+  if ((await page.getByRole('heading', { name: 'Pretoria', exact: true }).count()) !== 0) {
+    throw new Error('an archived site is still offered on the customer');
+  }
+  if (atPretoria !== null) {
+    await page.goto(`${BASE}/jobs/${atPretoria}`, { waitUntil: 'networkidle' });
+    await page.getByText('Pretoria', { exact: false }).first().waitFor({ timeout: 10000 });
+  }
 });
 
 await step('a machine carries the customer’s own machine number', async () => {
