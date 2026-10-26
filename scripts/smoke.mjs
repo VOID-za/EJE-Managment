@@ -3583,8 +3583,8 @@ await step('the office address is edited on the customer, not on a site', async 
   await page.getByText('400 Corporate Park', { exact: false }).first().waitFor({ timeout: 10000 });
 });
 
-await step('contacts are added, edited and removed on Sites & Contacts', async () => {
-  await page.getByRole('tab', { name: 'Sites & Contacts' }).click();
+await step('contacts are added, edited and removed on Site & Contacts', async () => {
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
   await page.getByRole('heading', { name: 'Head office contacts' }).waitFor({ timeout: 8000 });
 
   await page.getByRole('button', { name: 'Add contact' }).first().click();
@@ -3643,23 +3643,30 @@ await step('a contact a job has named is kept, not destroyed', async () => {
   await page.getByText('Pieter Nel').first().waitFor({ timeout: 10000 });
 });
 
-await step('a site is added and edited', async () => {
+/*
+ * ONE SITE PER CUSTOMER. SITE-1, owner decision 26 October 2026.
+ *
+ * This step used to ADD a fourth site to ABC, which the rule now forbids. ABC
+ * was recorded with three sites before the rule, so it is the legacy case: the
+ * screen must say so, must not offer another site, and must still let each of
+ * its sites be edited. The server's refusal is proved in `customer-sites.test.ts`.
+ */
+await step('a legacy multi-site customer is shown as such, offered no further site, and its site is edited', async () => {
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
-  await page.getByRole('tab', { name: 'Sites & Contacts' }).click();
-  await page.getByRole('button', { name: 'Add site' }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.waitFor({ timeout: 5000 });
-  await dialog.getByLabel('Site name').fill('Boksburg');
-  await dialog.getByLabel('Street address').fill('14 Anvil Road');
-  await dialog.getByLabel('City or town').fill('Boksburg');
-  await dialog.getByRole('button', { name: 'Add site' }).click();
-  await page.getByRole('heading', { name: 'Boksburg' }).first().waitFor({ timeout: 10000 });
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
+  await page.getByTestId('legacy-sites-notice').waitFor({ timeout: 8000 });
+  if ((await page.getByRole('button', { name: 'Add site' }).count()) !== 0) {
+    throw new Error('a customer that already has sites was offered another one');
+  }
+  if ((await page.getByTestId('keep-site').count()) !== 3) {
+    throw new Error('each legacy site should offer “Keep as the customer’s site”');
+  }
 
   // A Card renders as a <section>, so a site card is located by the heading it
   // contains rather than by guessing at a wrapper div.
   const card = page
     .locator('section')
-    .filter({ has: page.getByRole('heading', { name: 'Boksburg', exact: true }) })
+    .filter({ has: page.getByRole('heading', { name: 'Germiston', exact: true }) })
     .first();
   await card.getByRole('button', { name: 'Edit' }).first().click();
   await page.getByRole('dialog').waitFor({ timeout: 5000 });
@@ -3667,6 +3674,73 @@ await step('a site is added and edited', async () => {
   await page.getByRole('dialog').getByRole('button', { name: 'Save changes' }).click();
   await page.getByText('Report to the weighbridge.', { exact: false })
     .first().waitFor({ timeout: 10000 });
+});
+
+await step('changing a contact’s site is saved and shown under the new site (CONTACT-SITE-1)', async () => {
+  // It used to be dropped without a word: the dialog never sent the site.
+  const pretoria = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Pretoria', exact: true }) })
+    .first();
+  const row = pretoria.locator('li').filter({ hasText: 'Edit' }).first();
+  const name = (await row.locator('p').first().innerText()).replace(/Primary$/, '').trim();
+  await row.getByRole('button', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Site').selectOption({ label: 'Germiston' });
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 10000 });
+
+  // Read back after a full reload, so it is the server's record and not the form.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Site & Contacts' }).click();
+  const germiston = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Germiston', exact: true }) })
+    .first();
+  await germiston.getByText(name, { exact: false }).first().waitFor({ timeout: 10000 });
+  const stillAtPretoria = await page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'Pretoria', exact: true }) })
+    .first()
+    .getByText(name, { exact: false })
+    .count();
+  if (stillAtPretoria !== 0) throw new Error(`${name} is still listed at Pretoria after the move`);
+});
+
+await step('the customer profile shows its site, location and a working Google Maps link (SITE-3)', async () => {
+  await page.goto(`${BASE}/customers/cust-midrand`, { waitUntil: 'networkidle' });
+  const card = page.getByTestId('customer-location');
+  await card.waitFor({ timeout: 8000 });
+  await card.getByText('5 Gemini Road', { exact: false }).first().waitFor({ timeout: 5000 });
+  const href = await card.getByTestId('customer-map-link').getAttribute('href');
+  if (href === null || !href.startsWith('https://www.google.com/maps/search/?api=1&query=')) {
+    throw new Error(`the map link is not a Google Maps search link: ${href}`);
+  }
+
+  // The office pins a location; the link then carries exactly that point.
+  await card.getByTestId('edit-site-location').click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  await dialog.getByLabel('Latitude').fill('-25.997123, 28.1265');
+  await dialog.getByTestId('save-site-location').click();
+  await dialog.waitFor({ state: 'detached', timeout: 10000 });
+  await page.reload({ waitUntil: 'networkidle' });
+  const pinned = await page.getByTestId('customer-map-link').getAttribute('href');
+  if (pinned !== 'https://www.google.com/maps/search/?api=1&query=-25.997123%2C28.1265') {
+    throw new Error(`the pinned location did not reach the map link: ${pinned}`);
+  }
+});
+
+await step('choosing a customer on a new job fills in its one site and shows the address (SITE-1)', async () => {
+  await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
+  await page.getByLabel(/^Customer\s*\*/).selectOption('cust-midrand');
+  await page.getByTestId('job-site').getByText('Midrand Line 2').waitFor({ timeout: 8000 });
+  await page.getByTestId('job-site-address').getByText('5 Gemini Road', { exact: false })
+    .waitFor({ timeout: 5000 });
+  // The contact picker is live at once, because the site is already chosen.
+  const recipient = page.getByLabel(/^Customer email recipient/);
+  if (await recipient.isDisabled()) throw new Error('the contact picker waited for a site the customer already has');
 });
 
 await step('a site with machines on it cannot simply be removed', async () => {

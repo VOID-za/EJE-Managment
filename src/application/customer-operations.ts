@@ -1,8 +1,10 @@
 import {
+  activeSitesOf,
   asContactId,
   asCustomerId,
   asSiteId,
   can,
+  checkCoordinates,
   contactFullName,
   emptyAddress,
   machineDisplayName,
@@ -18,6 +20,7 @@ import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
 import type { RemovalResult } from './removal';
+import { updateMachine } from './machine-operations';
 
 /**
  * Customer register operations.
@@ -349,6 +352,30 @@ export const createSite = async (
 ): Promise<Site> => {
   assertManages(context);
 
+  /*
+   * ONE SITE PER CUSTOMER. SITE-1, owner decision 26 October 2026.
+   *
+   * Refused here, on the server, for every caller — the screen hides the
+   * button, but a screen is not the rule. A customer that already has a site
+   * edits it; a legacy customer with several is consolidated deliberately
+   * (`consolidateCustomerSites`), never added to.
+   *
+   * NOT YET A DATABASE CONSTRAINT, deliberately. Customers recorded with
+   * several sites before the rule exist — in the demonstration, in the
+   * development seed and possibly in production — and a partial unique index
+   * cannot be created while they do. It belongs after the office has
+   * consolidated them; until then this check is the rule.
+   */
+  const existing = activeSitesOf(await context.repos.customers.listSites(customerId), customerId);
+  if (existing.length > 0) {
+    throw new WorkflowError('This customer already has a site.', [
+      {
+        code: 'customer_has_site',
+        message: `A customer has one site. Edit ${existing[0]!.name} instead of adding another.`,
+      },
+    ]);
+  }
+
   const site: Site = {
     id: asSiteId(context.services.ids.next('site')),
     customerId,
@@ -381,6 +408,38 @@ export const createSite = async (
   return saved;
 };
 
+/**
+ * A contact's site must be one of ITS customer's live sites — or null, for a
+ * head-office contact. The add command never checked this, so a contact could
+ * be attached to another customer's site; the edit command never sent the site
+ * at all, so changing it was silently dropped. Both now come through here.
+ *
+ * `unchanged` lets a contact that already sits at an archived site be edited
+ * without being forced off it: withdrawing a site must not lock its people.
+ */
+const assertContactSite = async (
+  context: OperationContext,
+  customerId: CustomerId,
+  siteId: SiteId | null,
+  unchanged = false,
+): Promise<void> => {
+  if (siteId === null) return;
+  const site = await context.repos.customers.findSiteById(siteId);
+  if (site === null || (site.archivedAt !== null && !unchanged)) {
+    throw new WorkflowError('That site is not on the register.', [
+      { code: 'unknown_site', message: 'Choose the customer’s site, or Head office.' },
+    ]);
+  }
+  if (site.customerId !== customerId) {
+    throw new WorkflowError(`${site.name} is not this customer’s site.`, [
+      {
+        code: 'site_not_of_customer',
+        message: 'A contact can only be placed at a site of the customer they belong to.',
+      },
+    ]);
+  }
+};
+
 export const createContact = async (
   context: OperationContext,
   customerId: CustomerId,
@@ -389,6 +448,7 @@ export const createContact = async (
   options: { readonly silent?: boolean } = {},
 ): Promise<Contact> => {
   assertManages(context);
+  await assertContactSite(context, customerId, siteId);
 
   const contact: Contact = {
     id: asContactId(context.services.ids.next('contact')),
@@ -420,26 +480,208 @@ export const updateContact = async (
   contact: Contact,
 ): Promise<Contact> => {
   assertManages(context);
-  const saved = await context.repos.customers.saveContact(contact);
+  const previous = await context.repos.customers.findContactById(contact.id);
+  if (previous === null) {
+    throw new WorkflowError('That contact does not exist.', [
+      { code: 'unknown_contact', message: 'It may have been removed. Reload the customer.' },
+    ]);
+  }
+  // A contact stays with the customer it belongs to: an edit moves them between
+  // that customer's site and head office, never to another account.
+  const next: Contact = { ...contact, customerId: previous.customerId };
+  await assertContactSite(context, next.customerId, next.siteId, next.siteId === previous.siteId);
+  const saved = await context.repos.customers.saveContact(next);
+
+  const siteName = async (siteId: SiteId | null): Promise<string> =>
+    siteId === null
+      ? 'Head office'
+      : ((await context.repos.customers.findSiteById(siteId))?.name ?? 'an unknown site');
   await audit(context, {
     jobId: null,
     type: 'contact_updated',
     summary: `Contact updated: ${saved.firstName} ${saved.lastName}`,
     detail: `${saved.position || 'Contact'} details amended.`,
+    ...(previous.siteId === saved.siteId
+      ? {}
+      : {
+          changes: [
+            { field: 'Site', from: await siteName(previous.siteId), to: await siteName(saved.siteId) },
+          ],
+        }),
   });
   return saved;
 };
 
 export const updateSite = async (context: OperationContext, site: Site): Promise<Site> => {
   assertManages(context);
-  const saved = await context.repos.customers.saveSite(site);
+  const previous = await context.repos.customers.findSiteById(site.id);
+  if (previous === null) {
+    throw new WorkflowError('That site does not exist.', [
+      { code: 'unknown_site', message: 'It may have been removed. Reload the customer.' },
+    ]);
+  }
+
+  /*
+   * THE LOCATION, VALIDATED. SITE-3. Both or neither, on the globe, rounded to
+   * what the column keeps. A coordinate is only ever one somebody entered:
+   * nothing here geocodes or guesses.
+   */
+  const location = checkCoordinates(site.latitude, site.longitude);
+  if (!location.ok) {
+    throw new WorkflowError('That location is not valid.', [
+      { code: location.code, message: location.message },
+    ]);
+  }
+
+  const next: Site = {
+    ...site,
+    // Not moved to another customer, and not un-archived, by an edit.
+    customerId: previous.customerId,
+    archivedAt: previous.archivedAt,
+    name: required(site.name, 'site_name_required', 'A site name is required.'),
+    addressLine1: required(
+      site.addressLine1,
+      'site_address_required',
+      'A street address is required so the technician can be sent there.',
+    ),
+    addressLine2: site.addressLine2.trim(),
+    city: required(site.city, 'site_city_required', 'A city or town is required.'),
+    province: site.province.trim(),
+    postalCode: site.postalCode.trim(),
+    accessNotes: site.accessNotes.trim(),
+    latitude: location.latitude,
+    longitude: location.longitude,
+  };
+  const saved = await context.repos.customers.saveSite(next);
+
+  const pin = (value: Site): string =>
+    value.latitude === null || value.longitude === null
+      ? 'Not pinned'
+      : `${value.latitude}, ${value.longitude}`;
   await audit(context, {
     jobId: null,
     type: 'site_updated',
     summary: `Site updated: ${saved.name}`,
     detail: `${saved.addressLine1}, ${saved.city}.`,
+    ...(pin(previous) === pin(saved)
+      ? {}
+      : { changes: [{ field: 'Location', from: pin(previous), to: pin(saved) }] }),
   });
   return saved;
+};
+
+export interface ConsolidationResult {
+  readonly site: Site;
+  readonly archivedSites: number;
+  readonly movedMachines: number;
+  readonly movedContacts: number;
+  readonly message: string;
+}
+
+const plural = (count: number, one: string, many: string): string =>
+  `${count} ${count === 1 ? one : many}`;
+
+/**
+ * MAKES ONE OF A LEGACY CUSTOMER'S SITES THE CUSTOMER'S SITE. SITE-2.
+ *
+ * Only for customers recorded with several sites before SITE-1, and only as a
+ * deliberate choice by the office — nothing consolidates on its own, and the
+ * migration rewrites no row. Nothing is deleted and nothing is lost:
+ *
+ *   - every machine standing at another site is MOVED to the kept site through
+ *     `updateMachine`, so each move is recorded in the machine's history with
+ *     where it came from (MACH-HIST);
+ *   - every contact at another site is moved to the kept site, audited;
+ *   - each other site is ARCHIVED, never deleted, so every job done there still
+ *     names the place it was done;
+ *   - JOBS ARE NOT TOUCHED. A job records where the work happened; rewriting
+ *     that would falsify history, and a signed job card cannot change anyway.
+ */
+export const consolidateCustomerSites = async (
+  context: OperationContext,
+  customerId: CustomerId,
+  keepSiteId: SiteId,
+): Promise<ConsolidationResult> => {
+  assertManages(context);
+  const customer = await context.repos.customers.findById(customerId);
+  if (customer === null) {
+    throw new WorkflowError('That customer does not exist.', [
+      { code: 'unknown_customer', message: 'Reload the customer register.' },
+    ]);
+  }
+  const active = activeSitesOf(await context.repos.customers.listSites(customerId), customerId);
+  const keep = active.find((site) => site.id === keepSiteId);
+  if (keep === undefined) {
+    throw new WorkflowError('That site is not one of this customer’s sites.', [
+      { code: 'site_not_of_customer', message: 'Choose one of the sites listed on the customer.' },
+    ]);
+  }
+  const others = active.filter((site) => site.id !== keepSiteId);
+  if (others.length === 0) {
+    throw new WorkflowError(`${customer.name} already has a single site.`, [
+      { code: 'already_single_site', message: 'There is nothing to consolidate.' },
+    ]);
+  }
+  const otherIds = new Set<string>(others.map((site) => site.id));
+  const nameOf = (siteId: string): string =>
+    others.find((site) => site.id === siteId)?.name ?? 'another site';
+
+  let movedMachines = 0;
+  for (const machine of await context.repos.machines.list()) {
+    if (machine.customerId !== customerId || !otherIds.has(machine.siteId)) continue;
+    await updateMachine(
+      context,
+      { ...machine, siteId: keep.id },
+      undefined,
+      `Customer consolidated to one site: moved from ${nameOf(machine.siteId)} to ${keep.name}.`,
+    );
+    movedMachines += 1;
+  }
+
+  let movedContacts = 0;
+  for (const contact of await context.repos.customers.listContacts(customerId)) {
+    if (contact.siteId === null || !otherIds.has(contact.siteId)) continue;
+    await context.repos.customers.saveContact({ ...contact, siteId: keep.id });
+    await audit(context, {
+      jobId: null,
+      type: 'contact_updated',
+      summary: `Contact moved: ${contactFullName(contact)}`,
+      detail: `${customer.name} was consolidated to one site.`,
+      changes: [{ field: 'Site', from: nameOf(contact.siteId), to: keep.name }],
+    });
+    movedContacts += 1;
+  }
+
+  const now = context.services.clock.now();
+  for (const site of others) {
+    await context.repos.customers.saveSite({ ...site, archivedAt: now });
+    await audit(context, {
+      jobId: null,
+      type: 'site_archived',
+      summary: `Site archived: ${site.name}`,
+      detail:
+        `${customer.name} was consolidated to one site, ${keep.name}. ${site.name} is kept and ` +
+        'withdrawn from the register, so the jobs done there still read correctly.',
+    });
+  }
+
+  const moved =
+    `${plural(movedMachines, 'machine', 'machines')} and ` +
+    `${plural(movedContacts, 'contact', 'contacts')} moved to it`;
+  await audit(context, {
+    jobId: null,
+    type: 'customer_updated',
+    summary: `Customer consolidated to one site: ${customer.name}`,
+    detail: `${keep.name} is now the customer's site. ${plural(others.length, 'other site', 'other sites')} archived; ${moved}. No job was changed.`,
+  });
+
+  return {
+    site: keep,
+    archivedSites: others.length,
+    movedMachines,
+    movedContacts,
+    message: `${keep.name} is now ${customer.name}'s site. ${plural(others.length, 'other site was', 'other sites were')} archived and kept for job history; ${moved}.`,
+  };
 };
 
 /**

@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { CustomerMachinesTab } from '@/components/customers/CustomerMachinesTab';
 import { CustomerOverviewTab } from '@/components/customers/CustomerOverviewTab';
+import { CustomerLocationCard } from '@/components/customers/CustomerLocationCard';
 import { CustomerSitesTab } from '@/components/customers/CustomerSitesTab';
 import { ChangeRequestDialog } from '@/components/customers/ChangeRequestDialog';
 import { ChangeRequestsPanel } from '@/components/customers/ChangeRequestsPanel';
@@ -99,7 +100,14 @@ const CustomerDetailPage = ({
             <Badge tone={customer.active ? 'green' : 'neutral'} dot>
               {customer.active ? 'Active account' : 'Inactive account'}
             </Badge>
-            <Badge tone="outline">{sites.length} sites</Badge>
+            {/* SITE-1: one site per customer; more is a legacy record, said so. */}
+            <Badge tone={sites.length > 1 ? 'amber' : 'outline'}>
+              {sites.length === 0
+                ? 'No site'
+                : sites.length === 1
+                  ? '1 site'
+                  : `${sites.length} sites (legacy)`}
+            </Badge>
             <Badge tone="outline">{machines.length} machines</Badge>
             {openJobs.length > 0 && <Badge tone="blue">{openJobs.length} open jobs</Badge>}
             {/*
@@ -131,7 +139,7 @@ const CustomerDetailPage = ({
       <Tabs
         tabs={[
           { id: 'overview', label: 'Overview' },
-          { id: 'sites', label: 'Sites & Contacts' },
+          { id: 'sites', label: 'Site & Contacts' },
           { id: 'machines', label: 'Machines' },
           { id: 'jobs', label: 'Job History' },
           { id: 'notes', label: 'Notes & Documents' },
@@ -148,6 +156,7 @@ const CustomerDetailPage = ({
             openJobs={openJobs}
             onChanged={query.refetch}
           />
+          <CustomerLocationCard customer={customer} sites={sites} onChanged={query.refetch} />
 
           {manages && (
             <ChangeRequestsPanel

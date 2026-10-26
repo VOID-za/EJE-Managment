@@ -32,3 +32,17 @@ export const siteNavigationUrl = (site: Site): string => {
 
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
 };
+
+/**
+ * The site on a map, for the customer profile. SITE-3.
+ *
+ * Google's documented search URL: no API key, no billing, no SDK. The pinned
+ * coordinate when there is one — never an invented one — and otherwise the
+ * address, which Google geocodes itself.
+ */
+export const siteMapUrl = (site: Site): string => {
+  const query = siteHasPinnedLocation(site)
+    ? `${site.latitude},${site.longitude}`
+    : siteAddressLine(site);
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+};

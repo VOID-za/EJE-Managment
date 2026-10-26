@@ -212,6 +212,23 @@ export const CUSTOMER_COMMANDS: CommandRegistry = {
     },
   }),
 
+  /*
+   * ONE OF A LEGACY CUSTOMER'S SITES BECOMES THE CUSTOMER'S SITE. SITE-2.
+   * The office's deliberate choice; see `consolidateCustomerSites` for what
+   * moves, what is archived and what is never touched.
+   */
+  consolidate_sites: command({
+    schema: z.object({ keepSiteId: id }).strict(),
+    async run(context, input, target) {
+      const stored = await loadCustomer(context, target);
+      return customers.consolidateCustomerSites(
+        context.operation,
+        stored.id,
+        asSiteId(input.keepSiteId),
+      );
+    },
+  }),
+
   add_contact: command({
     schema: contactFields.extend({ siteId: id.nullable() }),
     async run(context, input, target) {
@@ -225,11 +242,23 @@ export const CUSTOMER_COMMANDS: CommandRegistry = {
 
 /** Actions on one site. `target` is the site id. */
 export const SITE_COMMANDS: CommandRegistry = {
+  /*
+   * The location is optional on the wire: omitted keeps what is pinned, null
+   * clears it, numbers pin it. `updateSite` validates the pair (SITE-3).
+   */
   update: command({
-    schema: siteFields,
+    schema: siteFields.extend({
+      latitude: z.number().nullable().optional(),
+      longitude: z.number().nullable().optional(),
+    }),
     async run(context, input, target) {
       const stored = await loadSite(context, target);
-      return customers.updateSite(context.operation, { ...stored, ...input });
+      return customers.updateSite(context.operation, {
+        ...stored,
+        ...input,
+        latitude: input.latitude === undefined ? stored.latitude : input.latitude,
+        longitude: input.longitude === undefined ? stored.longitude : input.longitude,
+      });
     },
   }),
 
@@ -251,11 +280,22 @@ export const SITE_COMMANDS: CommandRegistry = {
 
 /** Actions on one contact. `target` is the contact id. */
 export const CONTACT_COMMANDS: CommandRegistry = {
+  /*
+   * THE SITE WAS NOT PART OF THIS SCHEMA, and the edit dialog did not send it,
+   * so changing a contact's site saved everything else and dropped the site
+   * without a word. It is accepted now — omitted keeps it, null is head office
+   * — and `updateContact` checks it belongs to the contact's own customer.
+   */
   update: command({
-    schema: contactFields,
+    schema: contactFields.extend({ siteId: id.nullable().optional() }),
     async run(context, input, target) {
       const stored = await loadContact(context, target);
-      return customers.updateContact(context.operation, { ...stored, ...input });
+      const { siteId, ...fields } = input;
+      return customers.updateContact(context.operation, {
+        ...stored,
+        ...fields,
+        siteId: siteId === undefined ? stored.siteId : siteId === null ? null : asSiteId(siteId),
+      });
     },
   }),
 

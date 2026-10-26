@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   can,
   contactFullName,
+  siteMapUrl,
   type Contact,
   type Customer,
   type Machine,
@@ -28,7 +29,9 @@ import { useCurrentUser } from '@/providers/AppProvider';
 
 type Pending =
   | { readonly kind: 'site'; readonly site: Site }
-  | { readonly kind: 'contact'; readonly contact: Contact };
+  | { readonly kind: 'contact'; readonly contact: Contact }
+  /** SITE-2: keep this one as the customer's site; archive the others. */
+  | { readonly kind: 'keep'; readonly site: Site };
 
 /**
  * Sites and the people at them.
@@ -68,13 +71,21 @@ export const CustomerSitesTab = ({
   const [outcome, setOutcome] = useState<string | null>(null);
 
   const headOffice = contacts.filter((contact) => contact.siteId === null);
+  /*
+   * ONE SITE PER CUSTOMER. SITE-1. A second site is never offered; the server
+   * refuses one regardless. A customer recorded with several BEFORE the rule is
+   * shown exactly as it is, and the office chooses which site is the customer's.
+   */
+  const legacy = sites.length > 1;
 
   const confirmRemoval = async (): Promise<void> => {
     if (pending === null) return;
     const result = await operation.runFor(() =>
       pending.kind === 'site'
         ? customers.removeSite(pending.site.id)
-        : customers.removeContact(pending.contact.id),
+        : pending.kind === 'keep'
+          ? customers.consolidateSites(customer.id, pending.site.id)
+          : customers.removeContact(pending.contact.id),
     );
     if (result === null) return;
     setPending(null);
@@ -168,11 +179,32 @@ export const CustomerSitesTab = ({
         )}
       </Card>
 
+      {legacy && (
+        <div
+          role="note"
+          data-testid="legacy-sites-notice"
+          className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-3 text-sm text-amber-eje-700"
+        >
+          <p className="font-semibold">
+            This customer has {sites.length} sites, recorded before the one-site rule.
+          </p>
+          <p className="mt-1">
+            A customer now has one site. {canManage
+              ? 'Choose which site is the customer’s with “Keep as the customer’s site”: its machines and contacts stay, the others’ move to it, and the other sites are archived — kept so the jobs done there still read correctly. No job is changed.'
+              : 'The office will choose which one is the customer’s.'}
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-steel-500">
-          {sites.length} {sites.length === 1 ? 'site' : 'sites'} on this account.
+          {sites.length === 0
+            ? 'No site on this account yet.'
+            : legacy
+              ? `${sites.length} sites on this account (recorded before the one-site rule).`
+              : 'The customer’s site.'}
         </p>
-        {canManage && (
+        {canManage && sites.length === 0 && (
           <Button
             variant="secondary"
             leadingIcon={<Icon name="plus" className="size-4" />}
@@ -206,6 +238,16 @@ export const CustomerSitesTab = ({
                     </Badge>
                     {canManage && (
                       <>
+                        {legacy && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setPending({ kind: 'keep', site })}
+                            data-testid="keep-site"
+                          >
+                            Keep as the customer’s site
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -242,6 +284,15 @@ export const CustomerSitesTab = ({
                     <br />
                     {site.city}, {site.province} {site.postalCode}
                   </p>
+                  <a
+                    href={siteMapUrl(site)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
+                  >
+                    <Icon name="pin" className="size-3.5" />
+                    Open in Google Maps
+                  </a>
                   {site.accessNotes.length > 0 && (
                     <p className="mt-3 rounded-[var(--radius-control)] bg-eje-50 px-3 py-2 text-xs text-eje-800">
                       <span className="font-semibold">Site access: </span>
@@ -309,9 +360,15 @@ export const CustomerSitesTab = ({
           />
           <ConfirmDialog
             open={pending !== null}
-            title={pending?.kind === 'site' ? 'Remove this site?' : 'Remove this contact?'}
-            confirmLabel="Remove"
-            confirmVariant="danger"
+            title={
+              pending?.kind === 'keep'
+                ? 'Make this the customer’s site?'
+                : pending?.kind === 'site'
+                  ? 'Remove this site?'
+                  : 'Remove this contact?'
+            }
+            confirmLabel={pending?.kind === 'keep' ? 'Keep this site' : 'Remove'}
+            confirmVariant={pending?.kind === 'keep' ? 'primary' : 'danger'}
             busy={operation.running}
             onCancel={() => {
               operation.clearError();
@@ -319,7 +376,21 @@ export const CustomerSitesTab = ({
             }}
             onConfirm={confirmRemoval}
             message={
-              pending === null ? null : pending.kind === 'site' ? (
+              pending === null ? null : pending.kind === 'keep' ? (
+                <>
+                  <p>
+                    <strong>{pending.site.name}</strong> becomes {customer.name}’s one site.
+                  </p>
+                  <p className="mt-2">
+                    Every machine and contact at the other{' '}
+                    {sites.length - 1 === 1 ? 'site moves' : `${sites.length - 1} sites move`} to it,
+                    and each move is recorded. The other{' '}
+                    {sites.length - 1 === 1 ? 'site is' : 'sites are'} archived, not deleted: jobs
+                    done there keep their address and their history.
+                  </p>
+                  <p className="mt-2">No job is changed. This cannot be undone from this screen.</p>
+                </>
+              ) : pending.kind === 'site' ? (
                 <>
                   <p>
                     <strong>{pending.site.name}</strong> will be taken off this customer, together

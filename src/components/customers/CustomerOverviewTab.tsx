@@ -14,7 +14,7 @@ import { formatDate } from '@/lib/format';
  *
  * What is here is what the office needs when the customer telephones: who they
  * are, how they are billed, and what is running. Contacts are deliberately NOT
- * here — a contact belongs to a site and is managed on the Sites & Contacts
+ * here — a contact belongs to a site and is managed on the Site & Contacts
  * tab, so there is one place to change one rather than two.
  */
 export const CustomerOverviewTab = ({

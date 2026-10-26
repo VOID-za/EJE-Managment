@@ -111,6 +111,8 @@ export const ContactDialog = ({
     const ok = await operation.run(async () => {
       if (contact !== null) {
         await customers.updateContact(contact.id, {
+          // Sent: leaving it out is how a changed site used to be dropped.
+          siteId,
           firstName: draft.firstName.trim(),
           lastName: draft.lastName.trim(),
           position: draft.position.trim(),

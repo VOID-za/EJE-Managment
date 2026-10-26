@@ -137,8 +137,26 @@ describe('sites', () => {
     harness = buildHarness();
   });
 
+  /*
+   * A customer with NO site yet. SITE-1 (26 October 2026): a customer has one
+   * site, so adding one is tested on a customer that has none. These tests
+   * used to add a fourth site to ABC, which the rule now refuses — see
+   * `one-site.test.ts` for that refusal.
+   */
+  const siteless = async () => {
+    const abc = (await harness.repos.customers.findById(ABC))!;
+    return harness.repos.customers.save({
+      ...abc,
+      id: asCustomerId('cust-siteless'),
+      name: 'Siteless Supplies',
+      accountNumber: 'SIT001',
+      notes: [],
+      documents: [],
+    });
+  };
+
   it('is added and edited by the office', async () => {
-    const site = await createSite(harness.as(coordinator), ABC, {
+    const site = await createSite(harness.as(coordinator), (await siteless()).id, {
       name: 'Boksburg',
       addressLine1: '14 Anvil Road',
       addressLine2: '',
@@ -167,7 +185,8 @@ describe('sites', () => {
   });
 
   it('deletes an empty site nothing refers to, and its contacts with it', async () => {
-    const site = await createSite(harness.as(master), ABC, {
+    const customer = await siteless();
+    const site = await createSite(harness.as(master), customer.id, {
       name: 'Temporary',
       addressLine1: '1 Nowhere Street',
       addressLine2: '',
@@ -176,7 +195,7 @@ describe('sites', () => {
       postalCode: '1559',
       accessNotes: '',
     });
-    const contact = await createContact(harness.as(master), ABC, site.id, {
+    const contact = await createContact(harness.as(master), customer.id, site.id, {
       firstName: 'Site',
       lastName: 'Contact',
       position: 'Operations',

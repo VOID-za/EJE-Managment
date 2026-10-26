@@ -14,6 +14,8 @@ import {
   machineLabel,
   PRIORITY_ORDER,
   priorityLabel,
+  siteAddressLine,
+  siteMapUrl,
   userFullName,
   type Job,
   type JobPriority,
@@ -148,6 +150,7 @@ const NewJobPage = () => {
     () => (data?.machines ?? []).filter((machine) => machine.siteId === siteId),
     [data?.machines, siteId],
   );
+  const selectedSite = sites.find((site) => site.id === siteId) ?? null;
   /** Who may be given field work. The same rule the server enforces. */
   const fieldTechnicians = useMemo(
     () => (data?.users ?? []).filter((user) => user.role === 'technician' && user.active),
@@ -445,8 +448,16 @@ const NewJobPage = () => {
                 error={errors.customerId}
                 placeholder="Select a customer"
                 onChange={(event) => {
-                  setCustomerId(event.target.value);
-                  setSiteId('');
+                  const chosen = event.target.value;
+                  setCustomerId(chosen);
+                  /*
+                   * THE CUSTOMER'S SITE COMES WITH THE CUSTOMER. SITE-1.
+                   * A customer has one site, so choosing the customer chooses
+                   * where the work is. Only a legacy customer recorded with
+                   * several sites still asks which one.
+                   */
+                  const own = (data.sites ?? []).filter((site) => site.customerId === chosen);
+                  setSiteId(own.length === 1 ? own[0]!.id : '');
                   setContactId('');
                   setMachineId('');
                 }}
@@ -455,23 +466,64 @@ const NewJobPage = () => {
                   label: customer.name,
                 }))}
               />
-              <SelectField
-                label="Site"
-                required
-                value={siteId}
-                error={errors.siteId}
-                placeholder={customerId.length === 0 ? 'Select a customer first' : 'Select a site'}
-                disabled={customerId.length === 0}
-                onChange={(event) => {
-                  setSiteId(event.target.value);
-                  setContactId('');
-                  setMachineId('');
-                }}
-                options={sites.map((site) => ({
-                  value: site.id,
-                  label: `${site.name} — ${site.city}`,
-                }))}
-              />
+              {customerId.length > 0 && sites.length === 1 ? (
+                // The one site, filled in from the customer. Not a choice.
+                <div data-testid="job-site" className="text-sm">
+                  <p className="mb-1.5 font-medium text-steel-700">Site</p>
+                  <p className="font-semibold text-steel-900">{sites[0]!.name}</p>
+                </div>
+              ) : customerId.length > 0 && sites.length === 0 ? (
+                <p
+                  role="alert"
+                  data-testid="job-site-missing"
+                  className="text-sm font-medium text-signal-600"
+                >
+                  This customer has no site recorded. Add it on the customer before raising a job.
+                </p>
+              ) : (
+                <SelectField
+                  label="Site"
+                  required
+                  value={siteId}
+                  error={errors.siteId}
+                  placeholder={customerId.length === 0 ? 'Select a customer first' : 'Select a site'}
+                  hint={
+                    sites.length > 1
+                      ? 'This customer was recorded with several sites before the one-site rule.'
+                      : undefined
+                  }
+                  disabled={customerId.length === 0}
+                  onChange={(event) => {
+                    setSiteId(event.target.value);
+                    setContactId('');
+                    setMachineId('');
+                  }}
+                  options={sites.map((site) => ({
+                    value: site.id,
+                    label: `${site.name} — ${site.city}`,
+                  }))}
+                />
+              )}
+              {selectedSite !== null && (
+                <div
+                  data-testid="job-site-address"
+                  className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2.5 text-sm sm:col-span-2"
+                >
+                  <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                    Address
+                  </p>
+                  <p className="mt-0.5 text-steel-800">{siteAddressLine(selectedSite)}</p>
+                  <a
+                    href={siteMapUrl(selectedSite)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
+                  >
+                    <Icon name="pin" className="size-3.5" />
+                    Open in Google Maps
+                  </a>
+                </div>
+              )}
               {/* The customer's copy goes HERE, and the office chooses it.
                   Named for what it does rather than "Site contact": the address
                   is shown because that is the fact being decided. */}

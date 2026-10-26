@@ -762,6 +762,12 @@ export const customers = {
     command<Customer>(`/api/customers/${segment(customerId)}/update`, input),
   addSite: (customerId: string, input: unknown) =>
     command<Site>(`/api/customers/${segment(customerId)}/add_site`, input),
+  /** SITE-2: one of a legacy customer's sites becomes the customer's site. */
+  consolidateSites: (customerId: string, keepSiteId: string) =>
+    command<{ readonly message: string }>(
+      `/api/customers/${segment(customerId)}/consolidate_sites`,
+      { keepSiteId },
+    ),
   addContact: (customerId: string, input: unknown) =>
     command<Contact>(`/api/customers/${segment(customerId)}/add_contact`, input),
   /** An account note, written by the office. Customers §2. */
