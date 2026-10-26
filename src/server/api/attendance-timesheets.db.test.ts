@@ -1,0 +1,156 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { and, eq } from 'drizzle-orm';
+import type { Database } from '@/db/client';
+import * as schema from '@/db/schema';
+import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
+import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
+import { businessToday } from '@/lib/business-time';
+import { hashPassword } from '@/server/auth/passwords';
+import { ApiTestClient, startPostgresTestServer } from '@/test/api-harness';
+
+/**
+ * ATTEND-1 AND TIMESHEET-1, ON REAL POSTGRESQL (migration 0033).
+ *
+ * The rows, and what the database itself refuses: a second attendance row for
+ * the same person and day (the unique key — the application corrects instead),
+ * a status that is neither present nor absent, and a blank comment. The
+ * timesheet's hours are read from `job_labour`, and the labour row is the same
+ * row afterwards.
+ */
+const url = testDatabaseUrl();
+const describeDb = url === null ? describe.skip : describe;
+
+const PASSWORD = 'a-real-test-password';
+
+const postgresMessage = async (work: Promise<unknown>): Promise<string> => {
+  try {
+    await work;
+  } catch (error) {
+    const cause = (error as { cause?: unknown }).cause;
+    if (cause instanceof Error) return cause.message;
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('the statement was expected to be refused, and was not');
+};
+
+describeDb('attendance and timesheets on PostgreSQL', () => {
+  let db: Database;
+
+  const signIn = async (email: string): Promise<ApiTestClient> => {
+    const client = new ApiTestClient();
+    const response = await client.signIn(email, PASSWORD);
+    if (response.status !== 200) throw new Error(`sign-in failed for ${email}`);
+    return client;
+  };
+
+  beforeAll(async () => {
+    db = await openTestDatabase(url ?? '');
+    startPostgresTestServer(url ?? '');
+  });
+
+  afterAll(async () => {
+    await db.$client.end({ timeout: 5 });
+  });
+
+  beforeEach(async () => {
+    await truncateAll(db);
+    await seedBaseline(db);
+    await db.update(schema.users).set({ passwordHash: await hashPassword(PASSWORD) });
+    startPostgresTestServer(url ?? '');
+  });
+
+  it('a recorded day is corrected in place: one row, the later answer, a higher version', async () => {
+    const today = businessToday();
+    const office = await signIn('christene@example-test.co.za');
+    for (const status of ['present', 'absent']) {
+      const response = await office.post('/api/attendance', {
+        userId: IDS.technician, date: today, status, note: status === 'absent' ? 'Phoned in' : '',
+      });
+      expect(response.status).toBe(200);
+    }
+    const rows = await db
+      .select()
+      .from(schema.attendance)
+      .where(and(eq(schema.attendance.userId, IDS.technician), eq(schema.attendance.workDate, today)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'absent', note: 'Phoned in', recordedBy: IDS.coordinator, version: 2 });
+  });
+
+  it('the database refuses a second row for a day, an unknown status and a blank comment', async () => {
+    const values = {
+      userId: IDS.technician,
+      workDate: '2026-10-01',
+      status: 'present',
+      recordedBy: IDS.master,
+      recordedAt: '2026-10-01T08:00:00.000Z',
+    };
+    await db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values });
+    expect(await postgresMessage(db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values })))
+      .toContain('attendance_user_date_key');
+    expect(
+      await postgresMessage(
+        db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values, workDate: '2026-10-02', status: 'late' }),
+      ),
+    ).toContain('attendance_status_known');
+    expect(
+      await postgresMessage(
+        db.insert(schema.timesheetComments).values({
+          id: crypto.randomUUID(),
+          userId: IDS.technician,
+          workDate: '2026-10-01',
+          comment: '   ',
+          updatedBy: IDS.technician,
+          commentedAt: '2026-10-01T08:00:00.000Z',
+        }),
+      ),
+    ).toContain('timesheet_comments_not_blank');
+  });
+
+  it('the timesheet reads job_labour, leaves it untouched, and stores the day’s comment', async () => {
+    const today = businessToday();
+    const master = await signIn('elmarie@example-test.co.za');
+    const created = await master.post<{ id: string }>('/api/jobs', {
+      customerId: IDS.customer,
+      siteId: IDS.site,
+      contactId: IDS.contact,
+      machineId: IDS.machine,
+      jobType: 'breakdown',
+      priority: 'urgent',
+      scheduledDate: null,
+      scheduledEndDate: null,
+      orderNumber: '',
+      referenceNumber: '',
+      faultDescription: 'Drive tripping under load.',
+      primaryTechnicianId: IDS.technician,
+      courierCollection: false,
+      deliveryNote: '',
+    });
+    expect(created.status).toBe(200);
+    const tech = await signIn('sipho@example-test.co.za');
+    expect((await tech.post(`/api/jobs/${created.data.id}/accept`)).status).toBe(200);
+    expect(
+      (await tech.post(`/api/jobs/${created.data.id}/add_labour`, {
+        date: today, rateType: 'overtime', hours: 3, description: 'After hours',
+      })).status,
+    ).toBe(200);
+    const labourBefore = await db.select().from(schema.jobLabour).where(eq(schema.jobLabour.jobId, created.data.id));
+
+    const sheet = await tech.get<{ totals: { overtimeHours: number } }>(
+      `/api/timesheets/${IDS.technician}?from=${today}&to=${today}`,
+    );
+    expect(sheet.status).toBe(200);
+    expect(sheet.data.totals.overtimeHours).toBe(3);
+
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/comment`, { date: today, comment: 'Crane late' })).status).toBe(200);
+    const comments = await db.select().from(schema.timesheetComments).where(eq(schema.timesheetComments.userId, IDS.technician));
+    expect(comments.map((row) => row.comment)).toEqual(['Crane late']);
+
+    expect(await db.select().from(schema.jobLabour).where(eq(schema.jobLabour.jobId, created.data.id)))
+      .toEqual(labourBefore);
+
+    // Cleared: the row goes, and the clearing is on the trail.
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/comment`, { date: today, comment: '' })).status).toBe(200);
+    expect(await db.select().from(schema.timesheetComments).where(eq(schema.timesheetComments.userId, IDS.technician)))
+      .toHaveLength(0);
+  });
+});

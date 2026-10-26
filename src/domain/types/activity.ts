@@ -272,6 +272,15 @@ export type ActivityEventType =
   | 'availability_created'
   | 'availability_updated'
   | 'availability_cancelled'
+  /**
+   * The attendance register (ATTEND-1): a day recorded for somebody for the
+   * first time, and a recorded day corrected — the second carries what it said
+   * before, which is the register's history.
+   */
+  | 'attendance_recorded'
+  | 'attendance_corrected'
+  /** A technician's daily timesheet comment written, changed or cleared. TIMESHEET-1. */
+  | 'timesheet_comment_saved'
   | 'message_sent'
   | 'message_actioned'
   | 'job_transferred_to_open'

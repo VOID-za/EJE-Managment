@@ -71,6 +71,19 @@ export const NAVIGATION: readonly NavigationItem[] = [
     capability: 'captures.resolveReferral',
     group: 'work',
   },
+  /*
+   * ATTEND-1 and TIMESHEET-1. The register is the office's; the timesheet is
+   * everybody's, because a technician opens their own (the server shows them
+   * nobody else's).
+   */
+  {
+    href: '/attendance',
+    label: 'Attendance',
+    icon: 'user',
+    capability: 'attendance.manage',
+    group: 'work',
+  },
+  { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work' },
   {
     href: '/customers',
     label: 'Customers',

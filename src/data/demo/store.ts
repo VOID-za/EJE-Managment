@@ -13,7 +13,9 @@ import type {
   MachineDocument,
   MachineMovement,
   Site,
+  AttendanceRecord,
   AvailabilityRecord,
+  TimesheetComment,
   SystemSettings,
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
@@ -106,6 +108,10 @@ export interface DemoDatabase {
    */
   jobParticipation: { jobId: string; userId: string }[];
   availability: AvailabilityRecord[];
+  /** The attendance register: one row per person per day. ATTEND-1. */
+  attendance: AttendanceRecord[];
+  /** Technicians' daily timesheet comments: one per person per day. TIMESHEET-1. */
+  timesheetComments: TimesheetComment[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
   settings: SystemSettings;
@@ -191,11 +197,14 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  *
  * v15 added `documentText`: the technical library's full-text index (LIB-5).
  *
+ * v29 added the attendance register and the timesheet's daily comments
+ * (ATTEND-1, TIMESHEET-1), both empty: nothing was recorded before they existed.
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 28;
+export const SCHEMA_VERSION = 29;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -240,6 +249,10 @@ export const createSeededDatabase = (): DemoDatabase => ({
     ...job.additionalTechnicianIds.map((userId) => ({ jobId: job.id as string, userId: userId as string })),
   ]),
   availability: seedAvailability.map((record) => ({ ...record })),
+  // Empty, and honestly so: nobody's attendance or day was recorded before
+  // the register existed, and a fixture inventing it would be fiction.
+  attendance: [],
+  timesheetComments: [],
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at
   // the moment the Master issues them.

@@ -2,6 +2,7 @@ import type { RepositoryBundle } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import { PostgresActivityRepository } from './activity-repository';
 import { PostgresAvailabilityRepository } from './availability-repository';
+import { PostgresAttendanceRepository } from './attendance-repository';
 import { PostgresChatRepository } from './chat-repository';
 import { PostgresChecklistTemplateRepository } from './checklist-template-repository';
 import { PostgresCustomerRepository } from './customer-repository';
@@ -41,6 +42,7 @@ export const createPostgresRepositories = (db: DatabaseExecutor): RepositoryBund
   notifications: new PostgresNotificationRepository(db),
   settings: new PostgresSettingsRepository(db),
   availability: new PostgresAvailabilityRepository(db),
+  attendance: new PostgresAttendanceRepository(db),
   chat: new PostgresChatRepository(db),
   outbox: new PostgresOutboxRepository(db),
   captureReferrals: new PostgresCaptureReferralRepository(db),

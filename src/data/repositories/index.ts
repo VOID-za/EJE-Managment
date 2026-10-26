@@ -24,7 +24,9 @@ import type {
   JobCorrection,
   IssuedTotals,
   JobId,
+  AttendanceRecord,
   AvailabilityRecord,
+  TimesheetComment,
   Machine,
   MachineDocument,
   MachineMovement,
@@ -489,6 +491,27 @@ export interface AvailabilityRepository {
   save(record: AvailabilityRecord): Promise<AvailabilityRecord>;
 }
 
+/**
+ * The attendance register and the timesheet's daily comments. ATTEND-1,
+ * TIMESHEET-1.
+ *
+ * BOTH ARE ONE ROW PER PERSON PER DAY. `saveRecord` and `saveComment` insert
+ * the day or replace it — never a second row for the same day; PostgreSQL's
+ * unique keys (`attendance_user_date_key`, `timesheet_comments_user_date_key`)
+ * refuse one regardless. Nothing here is ever deleted except a comment that was
+ * cleared, and the clearing is on the audit trail.
+ */
+export interface AttendanceRepository {
+  /** Every record in the inclusive date range, optionally for one person. */
+  listRecords(from: string, to: string, userId?: UserId): Promise<readonly AttendanceRecord[]>;
+  findRecord(userId: UserId, date: string): Promise<AttendanceRecord | null>;
+  saveRecord(record: AttendanceRecord): Promise<AttendanceRecord>;
+  listComments(userId: UserId, from: string, to: string): Promise<readonly TimesheetComment[]>;
+  findComment(userId: UserId, date: string): Promise<TimesheetComment | null>;
+  saveComment(comment: TimesheetComment): Promise<TimesheetComment>;
+  deleteComment(userId: UserId, date: string): Promise<void>;
+}
+
 export interface ChatRepository {
   /** Conversations this user participates in, most recent activity first. */
   listConversations(userId: UserId): Promise<readonly Conversation[]>;
@@ -626,6 +649,8 @@ export interface RepositoryBundle {
   readonly notifications: NotificationRepository;
   readonly settings: SettingsRepository;
   readonly availability: AvailabilityRepository;
+  /** Who was at work, and the timesheet's daily comments. ATTEND-1, TIMESHEET-1. */
+  readonly attendance: AttendanceRepository;
   readonly chat: ChatRepository;
   readonly outbox: OutboxRepository;
   /** Work a tablet held that the server refused. BD-15. */

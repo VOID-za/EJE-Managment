@@ -288,9 +288,12 @@ const OFFICE_SCREENS = [
   '/messages',
   '/notifications',
   '/captures',
+  // ATTEND-1 and TIMESHEET-1.
+  '/attendance',
+  '/timesheets',
 ];
 
-const FIELD_SCREENS = ['/dashboard', '/jobs', '/jobs/EJE-1052', '/library', '/calendar', '/messages'];
+const FIELD_SCREENS = ['/dashboard', '/jobs', '/jobs/EJE-1052', '/library', '/calendar', '/messages', '/timesheets'];
 
 await resetDemonstration(page, BASE);
 await signInAs(page, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });

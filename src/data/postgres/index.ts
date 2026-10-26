@@ -13,6 +13,7 @@
 export { createPostgresRepositories } from './repositories';
 export { PostgresActivityRepository } from './activity-repository';
 export { PostgresAvailabilityRepository } from './availability-repository';
+export { PostgresAttendanceRepository } from './attendance-repository';
 export { PostgresChatRepository } from './chat-repository';
 export { PostgresChecklistTemplateRepository } from './checklist-template-repository';
 export { PostgresCustomerRepository } from './customer-repository';

@@ -25,6 +25,7 @@ export * from './pricing';
 export * from './checklists';
 export * from './documents';
 export * from './availability';
+export * from './attendance';
 export * from './collaboration';
 export * from './library';
 export * from './audit';

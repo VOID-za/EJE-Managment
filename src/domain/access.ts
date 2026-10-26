@@ -184,6 +184,18 @@ export type Capability =
   | 'calendar.view'
   /** WRITE the calendar: record, change or cancel an absence. The office. */
   | 'availability.manage'
+  /**
+   * RECORD AND CORRECT THE ATTENDANCE REGISTER. ATTEND-1. The office — Master
+   * and Coordinator. A technician does not mark themselves present: the
+   * register is the office's record of who was at work, not a self-report.
+   */
+  | 'attendance.manage'
+  /**
+   * READ EVERY TECHNICIAN'S TIMESHEET, export it, and write its daily
+   * comments. TIMESHEET-1. The office. A technician reads — and comments on —
+   * their OWN timesheet, which needs no capability because it is their own.
+   */
+  | 'timesheets.viewAll'
   // Administration
   | 'admin.access'
   | 'users.manageTechnicians'
@@ -374,6 +386,9 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'library.manage',
   'calendar.view',
   'availability.manage',
+  // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
+  'attendance.manage',
+  'timesheets.viewAll',
   'admin.access',
   'users.manageTechnicians',
   'users.manageMasters',
@@ -440,6 +455,9 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'library.manage',
   'calendar.view',
   'availability.manage',
+  // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
+  'attendance.manage',
+  'timesheets.viewAll',
   'admin.access',
   'users.manageTechnicians',
   /*

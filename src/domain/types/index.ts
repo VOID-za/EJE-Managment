@@ -2,6 +2,7 @@ export * from './common';
 export * from './provenance';
 export * from './user';
 export * from './availability';
+export * from './attendance';
 export * from './message';
 export * from './customer';
 export * from './machine';

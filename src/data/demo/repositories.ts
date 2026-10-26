@@ -5,7 +5,9 @@ import type {
   CaptureReferralState,
   ActivityEvent,
   AppNotification,
+  AttendanceRecord,
   AvailabilityRecord,
+  TimesheetComment,
   ChatMessage,
   ChecklistTemplate,
   ChecklistTemplateId,
@@ -59,6 +61,7 @@ import type {
   JobFilter,
   JobRepository,
   RegisterFilter,
+  AttendanceRepository,
   AvailabilityRepository,
   ChatRepository,
   MachineRepository,
@@ -1142,6 +1145,88 @@ class DemoAvailabilityRepository implements AvailabilityRepository {
   }
 }
 
+/**
+ * The attendance register and the timesheet's daily comments. ATTEND-1,
+ * TIMESHEET-1. One row per person per day, so a save REPLACES the day's row
+ * when there is one — matched on (person, date), not on id, which is how the
+ * database's unique key behaves and how a second row for a day is made
+ * impossible here too.
+ */
+class DemoAttendanceRepository implements AttendanceRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  listRecords(from: string, to: string, userId?: UserId): Promise<readonly AttendanceRecord[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .attendance.filter(
+          (record) =>
+            record.date >= from &&
+            record.date <= to &&
+            (userId === undefined || record.userId === userId),
+        )
+        .sort((a, b) => a.date.localeCompare(b.date) || a.userId.localeCompare(b.userId)),
+    );
+  }
+
+  findRecord(userId: UserId, date: string): Promise<AttendanceRecord | null> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .attendance.find((record) => record.userId === userId && record.date === date) ?? null,
+    );
+  }
+
+  saveRecord(record: AttendanceRecord): Promise<AttendanceRecord> {
+    this.context.commit((draft) => {
+      const others = draft.attendance.filter(
+        (candidate) => !(candidate.userId === record.userId && candidate.date === record.date),
+      );
+      draft.attendance = [...others, record];
+    });
+    return Promise.resolve(record);
+  }
+
+  listComments(userId: UserId, from: string, to: string): Promise<readonly TimesheetComment[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetComments.filter(
+          (comment) => comment.userId === userId && comment.date >= from && comment.date <= to,
+        )
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    );
+  }
+
+  findComment(userId: UserId, date: string): Promise<TimesheetComment | null> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetComments.find((comment) => comment.userId === userId && comment.date === date) ??
+        null,
+    );
+  }
+
+  saveComment(comment: TimesheetComment): Promise<TimesheetComment> {
+    this.context.commit((draft) => {
+      const others = draft.timesheetComments.filter(
+        (candidate) => !(candidate.userId === comment.userId && candidate.date === comment.date),
+      );
+      draft.timesheetComments = [...others, comment];
+    });
+    return Promise.resolve(comment);
+  }
+
+  deleteComment(userId: UserId, date: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.timesheetComments = draft.timesheetComments.filter(
+        (candidate) => !(candidate.userId === userId && candidate.date === date),
+      );
+    });
+    return Promise.resolve();
+  }
+}
+
 class DemoChatRepository implements ChatRepository {
   constructor(private readonly context: DemoContext) {}
 
@@ -1445,5 +1530,6 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),
+  attendance: new DemoAttendanceRepository(context),
   chat: new DemoChatRepository(context),
 });

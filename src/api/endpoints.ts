@@ -1,6 +1,8 @@
 'use client';
 
 import type {
+  AttendanceRecord,
+  TimesheetComment,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -71,6 +73,8 @@ import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs
 import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
+import type { AttendanceRegister } from '@/application/attendance-operations';
+import type { Timesheet, TimesheetPerson } from '@/application/timesheets';
 import type { LibrarySearchPage } from '@/application/library-search';
 import type { SearchResult } from '@/application/search';
 import type { GeneratedPdf, OutboxEntry } from '@/services/ports';
@@ -1084,4 +1088,25 @@ export const outbox = {
       state,
       ...(failureReason === undefined ? {} : { failureReason }),
     }),
+};
+
+/** The attendance register. ATTEND-1. The office's. */
+export const attendance = {
+  register: (date: string) => query<AttendanceRegister>(`/api/attendance${search({ date })}`),
+  record: (input: { userId: string; date: string; status: 'present' | 'absent'; note: string }) =>
+    command<AttendanceRecord>('/api/attendance', input),
+};
+
+/** Technician timesheets. TIMESHEET-1. */
+export const timesheets = {
+  people: () => query<readonly TimesheetPerson[]>('/api/timesheets'),
+  sheet: (userId: string, from: string, to: string) =>
+    query<Timesheet>(`/api/timesheets/${segment(userId)}${search({ from, to })}`),
+  saveComment: (userId: string, date: string, comment: string) =>
+    command<{ comment: TimesheetComment | null }>(`/api/timesheets/${segment(userId)}/comment`, {
+      date,
+      comment,
+    }),
+  exportUrl: (userId: string, from: string, to: string) =>
+    `/api/timesheets/${segment(userId)}/export${search({ from, to })}`,
 };

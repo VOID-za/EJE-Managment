@@ -586,6 +586,17 @@ const v27ToV28 = (data: Loose): Loose => ({
     : data.customers,
 });
 
+/**
+ * ATTEND-1 and TIMESHEET-1. Two new collections, empty on every existing
+ * snapshot — nothing was recorded before the register existed, so empty is
+ * the truth rather than a default.
+ */
+const v28ToV29 = (data: Loose): Loose => ({
+  ...data,
+  attendance: Array.isArray(data.attendance) ? data.attendance : [],
+  timesheetComments: Array.isArray(data.timesheetComments) ? data.timesheetComments : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -607,6 +618,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   25: v25ToV26,
   26: v26ToV27,
   27: v27ToV28,
+  28: v28ToV29,
 };
 
 /**

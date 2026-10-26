@@ -3758,6 +3758,62 @@ await step('choosing a customer on a new job fills in its one site and shows the
   if (await recipient.isDisabled()) throw new Error('the contact picker waited for a site the customer already has');
 });
 
+/* ---- ATTEND-1 and TIMESHEET-1 ------------------------------------------ */
+
+await step('the office records attendance, and a correction keeps one record (ATTEND-1)', async () => {
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const row = page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"]');
+  await row.waitFor({ timeout: 10000 });
+  await row.getByRole('button', { name: 'Present', exact: true }).click();
+  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="present"]')
+    .waitFor({ timeout: 10000 });
+
+  // Corrected the same day: the record changes, it does not multiply.
+  await row.getByLabel('Note').fill('Phoned in sick at 07:10');
+  await row.getByRole('button', { name: 'Absent', exact: true }).click();
+  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"]')
+    .waitFor({ timeout: 10000 });
+
+  // Read back after a reload: the server's record, not the screen's.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"]')
+    .waitFor({ timeout: 10000 });
+  const records = await page.evaluate(async (base) => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const response = await fetch(`${base}/api/attendance?date=${today}`);
+    const body = await response.json();
+    return (body?.data?.rows ?? []).filter((r) => r.user.id === 'user-tech-sipho' && r.record !== null).length;
+  }, BASE);
+  if (records !== 1) throw new Error(`${records} attendance records for one person and day`);
+
+  // Planned leave is shown beside the person, never applied: Thabo is booked sick.
+  await page.locator('[data-testid="attendance-row"][data-user="user-tech-thabo"]')
+    .getByText('Planned: Sick leave').waitFor({ timeout: 5000 });
+});
+
+await step('a timesheet shows the day, takes a comment and offers the export (TIMESHEET-1)', async () => {
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByLabel('Technician').selectOption('user-tech-sipho');
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-totals').waitFor({ timeout: 5000 });
+  if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) {
+    throw new Error('the office was not offered the timesheet export');
+  }
+
+  await page.getByLabel('Comment', { exact: true }).fill('Waited two hours for the crane');
+  await page.getByRole('button', { name: 'Add comment' }).click();
+  await page.getByTestId('timesheet-comment').filter({ hasText: 'Waited two hours for the crane' })
+    .first().waitFor({ timeout: 10000 });
+
+  // And the attendance recorded above is on the same day of the same sheet.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByLabel('Technician').selectOption('user-tech-sipho');
+  await page.getByTestId('timesheet-comment').filter({ hasText: 'Waited two hours for the crane' })
+    .first().waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-table').getByText('Absent', { exact: true }).first()
+    .waitFor({ timeout: 5000 });
+});
+
 await step('a machine carries the customer’s own machine number', async () => {
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Machines' }).click();

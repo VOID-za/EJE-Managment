@@ -415,6 +415,15 @@ follows is sufficient; there is no window in which the new code is refused.
 before any are read; without it the reader finds the end by reading to it,
 and says so when a limit stopped it first.
 
+### And migration 0033 (attendance and timesheet comments) — NOT YET DEPLOYED
+
+On `claude/office-workflow-parts`, after 0032. Two NEW tables, `attendance` and
+`timesheet_comments`, each unique per person per day; no existing table, column
+or row is touched and nothing is backfilled. With `e85f239` live there are then
+TWO pending migrations: run the check and the release with
+`-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets`. A rollback of
+the code leaves two tables the earlier release never reads.
+
 ### And migration 0032 (the office lifecycle, issue #73) — NOT YET DEPLOYED, NOT IN e85f239
 
 On `claude/office-workflow-parts`. Three `job_status` values appended

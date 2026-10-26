@@ -48,6 +48,8 @@ const MATRIX = [
   { url: '/library', role: 'Master / Technician', status: 'any', purpose: 'Technical Library' },
   { url: '/search?q=LW-V40-70214', role: 'Master / Technician', status: 'any', purpose: 'Global search' },
   { url: '/admin', role: 'Master', status: 'any', purpose: 'Administration' },
+  { url: '/attendance', role: 'Master / Coordinator', status: 'any', purpose: 'Attendance register (ATTEND-1)' },
+  { url: '/timesheets', role: 'Office / self', status: 'any', purpose: 'Technician timesheets (TIMESHEET-1)' },
   { url: '/schedule', role: 'any', status: 'any', purpose: 'Superseded — redirects to Calendar' },
 ];
 
