@@ -90,7 +90,7 @@ export const CustomerLocationCard = ({
                   href={siteMapUrl(site)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-steel-200 px-2.5 py-1 text-xs font-medium text-eje-700 hover:bg-eje-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-control)] border border-steel-200 px-3 text-xs font-medium text-eje-700 hover:bg-eje-50"
                   data-testid="customer-map-link"
                 >
                   <Icon name="pin" className="size-3.5" />
@@ -100,7 +100,7 @@ export const CustomerLocationCard = ({
                   href={siteNavigationUrl(site)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-steel-200 px-2.5 py-1 text-xs font-medium text-steel-700 hover:bg-steel-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-control)] border border-steel-200 px-3 text-xs font-medium text-steel-700 hover:bg-steel-50"
                 >
                   Directions
                 </a>

@@ -517,7 +517,7 @@ const NewJobPage = () => {
                     href={siteMapUrl(selectedSite)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
+                    className="inline-flex min-h-9 items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
                   >
                     <Icon name="pin" className="size-3.5" />
                     Open in Google Maps
