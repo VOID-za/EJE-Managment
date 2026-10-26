@@ -31,11 +31,33 @@ import { audit, notify } from './audit';
  * delivery report this deployment does not receive. Three different words for
  * three different facts, and none of them borrowed for another.
  */
-export type AssignmentOccasion = 'primary' | 'additional';
+/**
+ * `transfer` — WA-TRANSFER-1, 26 October 2026. A transfer hands the job to a
+ * technician exactly as an assignment does, so they are told the same way, on
+ * the same APPROVED template. Whether a transfer deserves wording of its own is
+ * BD-25 and would need a new template approved by Meta first; until then the
+ * message reads "transferred to you" only in the preview this system keeps,
+ * while the template's four placeholders are filled exactly as for an
+ * assignment.
+ */
+export type AssignmentOccasion = 'primary' | 'additional' | 'transfer';
 
 const HEADLINE: Record<AssignmentOccasion, string> = {
   primary: 'You have been assigned a job',
   additional: 'You have been added to a job',
+  transfer: 'A job has been transferred to you',
+};
+
+const LINE: Record<AssignmentOccasion, string> = {
+  primary: 'assigned to you',
+  additional: 'you have been added',
+  transfer: 'transferred to you',
+};
+
+const NOUN: Record<AssignmentOccasion, string> = {
+  primary: 'assignment',
+  additional: 'assignment',
+  transfer: 'transfer',
 };
 
 /**
@@ -62,7 +84,7 @@ export const buildAssignmentMessage = (
   occasion: AssignmentOccasion,
 ): string =>
   [
-    `${job.jobNumber} — ${occasion === 'primary' ? 'assigned to you' : 'you have been added'}`,
+    `${job.jobNumber} — ${LINE[occasion]}`,
     `${context.customerName}, ${context.siteName}`,
     context.subject,
     job.faultDescription.length > 160
@@ -107,6 +129,20 @@ export const notifyAssignment = async (
     channels: technician.mobile.trim().length > 0 ? ['in_app', 'whatsapp'] : ['in_app'],
   });
 
+  return queueAssignmentWhatsApp(context, job, technician, occasion, details);
+};
+
+/**
+ * The WhatsApp half on its own, for a caller that raises its own in-app
+ * notification — a transfer, whose notice carries the transfer's reason.
+ */
+export const queueAssignmentWhatsApp = async (
+  context: OperationContext,
+  job: Job,
+  technician: User,
+  occasion: AssignmentOccasion,
+  details: AssignmentContext,
+): Promise<AssignmentNoticeResult> => {
   if (technician.mobile.trim().length === 0) {
     /*
      * No mobile number on the account.
@@ -119,7 +155,7 @@ export const notifyAssignment = async (
       type: 'assignment_notification_failed',
       summary: `${userFullName(technician)} could not be messaged`,
       detail:
-        'No mobile number on their account, so only the in-app notification was raised. The assignment stands.',
+        `No mobile number on their account, so only the in-app notification was raised. The ${NOUN[occasion]} stands.`,
     });
     return { queued: false, failureReason: 'No mobile number on the account.' };
   }
@@ -155,7 +191,7 @@ export const notifyAssignment = async (
   await audit(context, {
     jobId: job.id,
     type: 'assignment_notified',
-    summary: `${userFullName(technician)} notified of the assignment`,
+    summary: `${userFullName(technician)} notified of the ${NOUN[occasion]}`,
     detail:
       'In-app notification raised and a WhatsApp message queued for delivery. Queued is not sent, and sent is not delivered — the outbox records what the provider actually says.',
   });

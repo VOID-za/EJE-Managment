@@ -78,7 +78,7 @@ import { formatCurrency, formatHours, formatKilometres } from '@/lib/format';
 import { deliveryFailureKindOf } from '@/services/ports';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
-import { assignmentDetails, notifyAssignment } from './assignment-notice';
+import { assignmentDetails, notifyAssignment, queueAssignmentWhatsApp } from './assignment-notice';
 import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { storeAndMeasure } from './stored-file';
@@ -4002,7 +4002,23 @@ export const transferJobToTechnician = async (
     title: `${job.jobNumber} transferred to you`,
     body: `${previousName} has handed you ${job.jobNumber}. Reason: ${transferReasonLabel(input.reason)}.`,
     jobId: job.id,
+    channels: receiving.mobile.trim().length > 0 ? ['in_app', 'whatsapp'] : ['in_app'],
   });
+
+  /*
+   * AND ON WHATSAPP, as an assignment is. WA-TRANSFER-1. The receiving
+   * technician may be on the road and not in the application; a transfer that
+   * reaches nobody until they next open it is how a breakdown waits. Queued on
+   * the outbox inside this transaction and sent after the commit, with the
+   * approved assignment template (BD-25 records the provisional wording).
+   */
+  await queueAssignmentWhatsApp(
+    context,
+    saved,
+    receiving,
+    'transfer',
+    await assignmentDetails(context, saved),
+  );
 
   return saved;
 };
