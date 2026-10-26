@@ -1130,8 +1130,8 @@ const NewJobPage = () => {
               </li>
             </ul>
             <p className="mt-4 text-xs text-steel-500">
-              Job types and their requirements will be configurable by Masters in the production
-              system.
+              Each job type’s requirements are part of the system’s reference data; changing them is
+              a release reviewed with EJE, not a setting.
             </p>
           </Card>
 

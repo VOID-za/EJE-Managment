@@ -211,8 +211,8 @@ const JobTypesPanel = () => (
         ))}
       </ul>
       <p className="mt-4 text-xs text-steel-500">
-        {JOB_TYPE_CODES.length} job types and {PRIORITY_ORDER.length} priorities are defined. Both
-        become database-backed and Master-editable in the production system.
+        {JOB_TYPE_CODES.length} job types and {PRIORITY_ORDER.length} priorities are defined, as part
+        of the system’s reference data. Changing one is a release reviewed with EJE, not a setting.
       </p>
     </Card>
   </div>
@@ -469,7 +469,7 @@ const SystemPanel = ({
       <Card>
         <CardHeader
           title="Integrations"
-          description="Every integration sits behind a service interface. Connecting the real service in Phase 2 replaces the adapter only."
+          description="Every integration sits behind a service interface. The real adapters are built; a deployment uses them once configured, and this list says what the demonstration does instead."
         />
         <ul className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
           {SIMULATED_CAPABILITIES.map((capability) => (

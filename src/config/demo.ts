@@ -30,51 +30,39 @@ export const SIMULATED_CAPABILITIES: readonly SimulatedCapability[] = [
     id: 'whatsapp',
     name: 'WhatsApp notifications',
     explanation:
-      'A technician who accepts a job is OFFERED the site location; choosing to send it records the exact message in the Simulated Outbox. Nothing is transmitted, and nothing is sent automatically.',
+      'Assignment and transfer notices, and the site location a technician chooses to send, are recorded in the Simulated Outbox. Nothing is transmitted.',
     productionPlan:
-      'Official WhatsApp Business Platform with approved templates, behind the WhatsAppService interface.',
+      'The WhatsApp Cloud API adapter is built. It sends only the templates eje_job_assigned and eje_site_location, which must first be approved on EJE’s WhatsApp Business account; a deployment without the token queues nothing and says so.',
   },
   {
     id: 'pdf',
     /*
-     * What is simulated here is WHERE the document is produced and kept, not
-     * whether it is produced.
-     *
-     * This entry used to say the job card was "rendered live from the job
-     * record rather than a generated PDF file", which stopped being true: the
-     * system writes real PDF bytes with its own writer, stores them against the
-     * job at the moment it is issued, and hands back those same bytes on every
-     * later download — a job card cannot be regenerated once the customer has
-     * it. Claiming otherwise understated the system, which is as misleading as
-     * overstating it and undermines every other entry in this list.
+     * What is simulated here is WHERE the document is kept, not whether it is
+     * produced or how. Amended 26 October 2026: it read "rendered in the
+     * browser and kept inside the demonstration snapshot", which stopped being
+     * true when the issued copy moved to the server with its photographs.
      */
     name: 'Job card PDF storage',
     explanation:
-      'The PDF itself is real: the document is rendered to genuine PDF bytes, written once when the job card is issued, and every later view or download returns those exact bytes — it is never re-rendered. What is simulated is where the file lives. It is rendered in the browser and kept inside the demonstration snapshot rather than on a server.',
+      'The PDF is real: rendered once, on the server, when the job card is issued — photographs included — and every later download returns those exact bytes. What is simulated is where the file lives: this demonstration keeps it in the server’s memory, so it is gone when the server restarts.',
     productionPlan:
-      'The same renderer running server-side, writing to VPS storage and then to S3-compatible object storage, behind the PdfService and StorageService interfaces. The document, its immutability and its bytes do not change.',
+      'The same renderer writing to the server’s document storage (EJE_STORAGE_DIR), which the nightly backup includes. The document, its immutability and its bytes do not change.',
   },
   {
     id: 'storage',
     name: 'Photo and video storage',
     explanation:
-      'Attachments are recorded against the job with placeholder tiles. No files are uploaded.',
+      'Photographs and videos are real files, checked and stored when they are uploaded — but this demonstration keeps them in the server’s memory, so they are gone when it restarts.',
     productionPlan:
-      'VPS storage initially, then S3-compatible object storage, behind the StorageService interface.',
+      'Written to EJE_STORAGE_DIR on the server, checked against their checksum on every read, and included in the nightly backup.',
   },
-  {
-    id: 'auth',
-    name: 'Sign-in',
-    explanation:
-      'Users are chosen from a list so both roles can be demonstrated. There is no password check.',
-    productionPlan: 'Session-based authentication against the users table with hashed credentials.',
-  },
-  {
-    id: 'offline',
-    name: 'Offline capture',
-    explanation:
-      'The demo persists to browser storage so a demonstration survives a refresh. There is no sync engine.',
-    productionPlan:
-      'IndexedDB, a service worker, an offline mutation queue and a synchronisation engine.',
-  },
+  /*
+   * SIGN-IN AND OFFLINE CAPTURE ARE NOT LISTED, because neither is simulated
+   * any more and this list is the answer to "what here is not real". They
+   * read "chosen from a list … no password check" and "there is no sync
+   * engine", both untrue: sign-in is session-based with a password (the
+   * demonstration accounts share one published password), and work captured
+   * offline is held on the tablet and sent when the connection returns. What
+   * offline does NOT yet do — a signature or refusal — is open decision BD-23.
+   */
 ];

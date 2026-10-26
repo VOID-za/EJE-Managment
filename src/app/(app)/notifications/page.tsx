@@ -418,10 +418,10 @@ const OutboxPanel = () => {
               Nothing in this list was sent
             </p>
             <p className="mt-1 text-sm text-steel-700">
-              Email and WhatsApp are represented by service interfaces in this demonstration. When a
-              job card is submitted, the message that production would transmit is recorded here
-              instead. Connecting Microsoft 365 and the WhatsApp Business Platform in Phase 2
-              replaces the adapter behind these interfaces — no business logic changes.
+              This demonstration sends nothing: when a job card is submitted or a technician is
+              assigned, the message a configured deployment would transmit is recorded here instead.
+              The Microsoft 365 and WhatsApp adapters are built; a deployment uses them once EJE’s
+              credentials are configured, and no business logic changes.
             </p>
             <p className="mt-2 text-sm text-steel-700">
               Because nothing is really sent, nothing here can really be delivered either. An
