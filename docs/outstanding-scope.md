@@ -15,7 +15,9 @@
 > | WA-TRANSFER-1 | A transfer notifies the receiving technician on WhatsApp with the approved assignment template (provisional, BD-25) |
 > | Register hygiene | AUD-3, AUD-4, AUD-8, DELIV-7, BD-02, BD-06 rows were overtaken and never marked — **amended 26 Oct** |
 > | OFF-10, OFF-11 | Already met by existing behaviour; specified with evidence — **amended 26 Oct** |
-> | SITE-1 follow-up | A preflight report of legacy multi-site customers, so the database constraint can be planned |
+> | SITE-1 follow-up | A preflight report of legacy multi-site customers, so the database constraint can be planned — **done 26 Oct** |
+> | WA-TRANSFER-1 | **done 26 Oct** (provisional wording, BD-25) |
+> | ATTEND-1 reporting | The register exported for a date range, audited — **done 26 Oct** |
 >
 > **2. Owner decisions that change business behaviour** (each OPEN in *Open business decisions*)
 >
@@ -28,6 +30,7 @@
 > | BD-27 | When is a correction's acknowledgement required? | The Master states it per correction |
 > | BD-28 | May an approved change request move a machine? | No; the office moves it |
 > | BD-29 | Resume an interrupted upload byte by byte? | Re-sent whole, never duplicated |
+> | BD-30 | May a video be held offline (storage budget)? | Refused offline, with the reason |
 > | BD-04 | Is the order number mandatory? | Three-valued waiver (DECISION 2) |
 > | BD-05 | Redis queues or the PostgreSQL outbox? | Outbox |
 > | BD-11 | An explicit "cannot submit" state? | An all-day absence opens the takeover |

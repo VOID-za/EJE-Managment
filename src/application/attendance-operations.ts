@@ -239,3 +239,76 @@ export const loadAttendanceRegister = async (
     unrecorded: rows.filter((row) => row.record === null).length,
   };
 };
+
+/** The longest range one attendance export covers: a quarter, as a timesheet. */
+export const ATTENDANCE_EXPORT_MAX_DAYS = 92;
+
+export interface AttendanceExportRow {
+  readonly date: IsoDate;
+  readonly person: string;
+  readonly role: string;
+  readonly status: AttendanceStatus;
+  readonly note: string;
+  readonly recordedBy: string;
+  readonly recordedAt: string;
+  readonly plannedLeave: string;
+}
+
+/**
+ * THE REGISTER AS A SPREADSHEET, for a date range. ATTEND-1, reporting.
+ *
+ * One row per RECORDED person-day — what was recorded, by whom and when, and
+ * any planned leave booked over that day beside it for reference. A day nobody
+ * recorded is not invented as "absent": it is simply not in the file, which is
+ * the truth about it. The office's, like the register itself.
+ */
+export const loadAttendanceExport = async (
+  context: OperationContext,
+  from: string,
+  to: string,
+): Promise<readonly AttendanceExportRow[]> => {
+  assertManages(context);
+  if (!isCalendarDate(from) || !isCalendarDate(to)) {
+    throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
+  }
+  if (from > to) {
+    throw refuse('The range ends before it starts.', 'invalid_range', 'Choose a start on or before the end.');
+  }
+  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+  if (days > ATTENDANCE_EXPORT_MAX_DAYS) {
+    throw refuse(
+      'That range is too long for one export.',
+      'range_too_long',
+      `An attendance export covers at most ${ATTENDANCE_EXPORT_MAX_DAYS} days.`,
+    );
+  }
+  const [users, records, availability] = await Promise.all([
+    context.repos.users.list(),
+    context.repos.attendance.listRecords(from, to),
+    context.repos.availability.list(from, to),
+  ]);
+  const byId = new Map<UserId, User>(users.map((user) => [user.id, user]));
+  return records.map((record) => {
+    const person = byId.get(record.userId);
+    const recorder = byId.get(record.recordedBy);
+    return {
+      date: record.date,
+      person: person === undefined ? 'Unknown person' : userFullName(person),
+      role: person === undefined ? '' : person.jobTitle || person.role,
+      status: record.status,
+      note: record.note,
+      recordedBy: recorder === undefined ? '' : userFullName(recorder),
+      recordedAt: record.recordedAt,
+      plannedLeave: availability
+        .filter(
+          (entry) =>
+            entry.userId === record.userId &&
+            entry.status === 'active' &&
+            entry.startDate <= record.date &&
+            entry.endDate >= record.date,
+        )
+        .map((entry) => availabilityTypeLabel(entry.type))
+        .join('; '),
+    };
+  });
+};

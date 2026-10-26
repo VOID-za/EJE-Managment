@@ -13,6 +13,7 @@ import {
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { attendance } from '@/api/endpoints';
 import type { RegisterRow } from '@/application/attendance-operations';
 import { useQuery } from '@/hooks/useQuery';
@@ -107,6 +108,8 @@ const AttendancePage = () => {
         )}
       </Card>
 
+      <AttendanceExport today={data?.today ?? date} />
+
       {query.error !== null ? (
         <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />
       ) : query.loading || data === null || data === undefined ? (
@@ -181,6 +184,40 @@ const AttendancePage = () => {
         </Card>
       )}
     </>
+  );
+};
+
+/** The register for a range, as a spreadsheet. Recorded days only — nothing is assumed. */
+const AttendanceExport = ({ today }: { readonly today: string }) => {
+  const [from, setFrom] = useState(`${today.slice(0, 8)}01`);
+  const [to, setTo] = useState(today);
+  return (
+    <Card className="mb-5">
+      <div className="flex flex-wrap items-end gap-4">
+        <TextField
+          label="Export from"
+          type="date"
+          value={from}
+          onChange={(event) => event.target.value.length > 0 && setFrom(event.target.value)}
+          containerClassName="w-44"
+        />
+        <TextField
+          label="To"
+          type="date"
+          value={to}
+          onChange={(event) => event.target.value.length > 0 && setTo(event.target.value)}
+          containerClassName="w-44"
+        />
+        <DownloadFileButton
+          href={attendance.exportUrl(from, to)}
+          fallbackName={`attendance-${from}-${to}.csv`}
+          label="Export CSV"
+        />
+      </div>
+      <p className="mt-2 text-xs text-steel-500">
+        One row per recorded day. A day nobody recorded is left out, not counted as absent.
+      </p>
+    </Card>
   );
 };
 

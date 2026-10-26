@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { asUserId } from '@/domain';
 import { businessToday } from '@/lib/business-time';
-import { loadAttendanceRegister, recordAttendance } from './attendance-operations';
+import { loadAttendanceExport, loadAttendanceRegister, recordAttendance } from './attendance-operations';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
@@ -128,5 +128,33 @@ describe('the register, and what it keeps apart', () => {
   it('is refused to a technician', async () => {
     const harness = buildHarness();
     expect(await refusal(loadAttendanceRegister(harness.as(technician), businessToday()))).toEqual(['not_permitted']);
+  });
+});
+
+describe('the register as a spreadsheet', () => {
+  it('exports recorded days only, with who recorded them and any planned leave', async () => {
+    const harness = buildHarness();
+    const today = businessToday();
+    await recordAttendance(harness.as(master), { userId: THABO, date: today, status: 'present', note: 'Came in' });
+    await recordAttendance(harness.as(coordinator), { userId: 'user-tech-sipho', date: today, status: 'absent', note: '' });
+
+    const rows = await loadAttendanceExport(harness.as(coordinator), shiftDays(today, -2), today);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.person === 'Thabo Nkosi')).toMatchObject({
+      status: 'present',
+      note: 'Came in',
+      recordedBy: 'Elmarie Coetzee',
+      plannedLeave: 'Sick leave',
+    });
+    // Nobody else was recorded, so nobody else is in the file — not as absent.
+    expect(rows.every((row) => ['Thabo Nkosi', 'Sipho Mahlangu'].includes(row.person))).toBe(true);
+  });
+
+  it('is refused to a technician, and refuses a backwards or over-long range', async () => {
+    const harness = buildHarness();
+    const today = businessToday();
+    expect(await refusal(loadAttendanceExport(harness.as(technician), today, today))).toEqual(['not_permitted']);
+    expect(await refusal(loadAttendanceExport(harness.as(master), today, shiftDays(today, -1)))).toEqual(['invalid_range']);
+    expect(await refusal(loadAttendanceExport(harness.as(master), shiftDays(today, -100), today))).toEqual(['range_too_long']);
   });
 });

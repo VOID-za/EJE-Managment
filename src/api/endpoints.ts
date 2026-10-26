@@ -1095,6 +1095,7 @@ export const attendance = {
   register: (date: string) => query<AttendanceRegister>(`/api/attendance${search({ date })}`),
   record: (input: { userId: string; date: string; status: 'present' | 'absent'; note: string }) =>
     command<AttendanceRecord>('/api/attendance', input),
+  exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
 };
 
 /** Technician timesheets. TIMESHEET-1. */

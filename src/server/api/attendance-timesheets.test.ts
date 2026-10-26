@@ -41,6 +41,22 @@ describe('the attendance register over HTTP', () => {
     expect(refused.status).toBe(403);
   });
 
+  it('the office exports a range as a CSV, audited; a technician is refused', async () => {
+    const today = businessToday();
+    const office = await signedInAs(DEMO_USERS.master);
+    await office.post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
+    const file = await office.download(`/api/attendance/export?from=${today}&to=${today}`);
+    expect(file.status).toBe(200);
+    const lines = file.text.replace(/^﻿/u, '').trim().split('\r\n');
+    expect(lines[0]).toBe('Date,Person,Role,Attendance,Note,Recorded by,Recorded at,Planned leave');
+    expect(lines.some((line) => line.includes('Sipho Mahlangu') && line.includes('Present'))).toBe(true);
+    const activity = await office.get<{ events: readonly { type: string; summary: string }[] }>('/api/activity');
+    expect(activity.data.events.some((event) => event.type === 'data_exported' && event.summary.startsWith('The attendance register exported'))).toBe(true);
+
+    const technician = await signedInAs(DEMO_USERS.technician);
+    expect((await technician.download(`/api/attendance/export?from=${today}&to=${today}`)).status).toBe(403);
+  });
+
   it('a status that is not present or absent never reaches the operation', async () => {
     const office = await signedInAs(DEMO_USERS.master);
     const response = await office.post('/api/attendance', {

@@ -37,7 +37,7 @@ import { audit } from './audit';
  * record says which COLUMNS were taken, not what was in them.
  */
 /** Which export was taken. Not a capability and not a route — a name. */
-export type ExportKind = 'jobs' | 'closed-jobs' | 'timesheet';
+export type ExportKind = 'jobs' | 'closed-jobs' | 'timesheet' | 'attendance';
 
 /**
  * WHAT WOULD BE RECORDED, and as importantly what would not.
@@ -145,6 +145,7 @@ const EXPORT_LABEL: Readonly<Record<ExportKind, string>> = {
   jobs: 'The Jobs list',
   'closed-jobs': 'The closed-job archive',
   timesheet: 'A technician timesheet',
+  attendance: 'The attendance register',
 };
 
 /** The filters in one readable clause, or nothing when none were applied. */
