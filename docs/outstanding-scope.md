@@ -47,6 +47,21 @@
 > | Permission to install OCR on the production server, with limits | LIB-5, BD-21 | Decide after the demonstration measurement (`docs/library-ocr.md` §5) |
 > | GitHub access for this tooling (`gh auth login`) | PROC-6 issues | Allow the requirement issues to be filed from here, or file them by hand |
 >
+> **3a. Each external dependency in full** — *added 26 October 2026*. Nothing
+> here may be faked, and no value below is ever written to the repository, a
+> log, a report or an issue: they go in `/etc/eje/eje.env` on the server only.
+>
+> | Dependency | Configuration names | Who | Verify with | Evidence that closes it |
+> |---|---|---|---|---|
+> | Microsoft 365 email | `EMAIL_GRAPH_TENANT_ID`, `EMAIL_GRAPH_CLIENT_ID`, `EMAIL_GRAPH_CLIENT_SECRET`, `EMAIL_SENDER` (optional `EMAIL_REPLY_TO`) | EJE's Microsoft 365 administrator: an app registration with the **Mail.Send** application permission and **admin consent**; a real sender mailbox | `npm run integrations:check`, then `-- --probe` (token + mailbox, sends nothing); then one job card issued to an EJE-owned address | The probe output, and the test message received with its delivery recorded as `accepted` on the job — MANDATE-3 |
+> | WhatsApp Business | `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` (permanent System User token), and `WHATSAPP_BUSINESS_ACCOUNT_ID` so the probe can read the templates' approval | EJE with Meta: templates `eje_job_assigned` and `eje_site_location` submitted and **approved** | `npm run integrations:check -- --probe` (reports each template's status, sends nothing); then one assignment to an EJE technician's own number | Probe shows both templates APPROVED; the technician receives the message — NOTIF-1, WHATSAPP-1, WA-TRANSFER-1 |
+> | Off-site backup | `EJE_BACKUP_OFFSITE_DIR` (a mounted volume) **or** `EJE_BACKUP_OFFSITE_RCLONE` (an rclone remote) | EJE chooses the destination; the operator configures write-only credentials | `npm run preflight` (*Off-site backup* OK); the backup unit's log shows the copy | A dated copy present at the destination, and a restore test run from it |
+> | Backup key escrow | `EJE_BACKUP_KEY` on the server; a second copy held by a named person or safe | EJE names the holder | `npm run backup:key-check` against the escrowed copy (decrypts nothing) | The key-check output naming the matching fingerprint — BACKUP-2 |
+> | Scheduled backups | `deploy/eje-backup.timer`, `deploy/eje-backup-restore-test.timer` | Operator | `systemctl list-timers 'eje-backup*'` | A night's backup and a Sunday restore test both passed — BACKUP-1 |
+> | Production OCR | `EJE_OCR=local` plus the limits in `docs/library-ocr.md` §5 | EJE decides; operator installs `tesseract` and `pdftoppm` | `npm run preflight` (*Text recognition*) | **Stays off** until EJE approve it with limits — BD-21 |
+> | Legacy multi-site customers | none — application data | The office, in the application | `npm run preflight` (*Customer sites*) | The count reads zero; then the one-site constraint can be added in a later release — SITE-1, SITE-2 |
+> | GitHub issue tracking (PROC-6) | `gh auth login` in the environment that files them | Owner / whoever runs the tooling | `gh issue list --repo VOID-za/EJE-Managment` | The issues listed under *GitHub tracking* exist, titled with their IDs |
+
 > **4. Physical acceptance — the rugged tablet** (code complete as far as automation can reach)
 >
 > MANDATE-2, PWA-8, OFF-13, UX-1, ACC-PWA-1…6, ACC-OFF-1…12: install from the
@@ -55,11 +70,13 @@
 > Active (or EJE's chosen device), against the deployed HTTPS origin, using
 > `docs/tablet-installation.md`. MANDATE-1 also needs BD-23 before it can be met.
 >
+> **GitHub tracking (PROC-6), checked 26 October 2026.** 73 issues exist (#1–#73). The register's range IDs are tracked by umbrella issues: OFF-1…13 on #15 (MANDATE-1), PWA-1…8 on #16 (MANDATE-2), QA-4 and AUD-5 on #22 (ARCH-6). **Missing, and NOT created** because this environment has no GitHub authentication: OFFICE-1, OFFICE-2, PARTS-JC-1, WRITEUP-4, MEDIA-7, SITE-1, SITE-2, SITE-3, CONTACT-SITE-1, ATTEND-1, TIMESHEET-1, WA-TRANSFER-1, DEMO-TRUTH-1, OFF-QUEUE (1…10), CAP-REF (1…5), OFF-SEC-1, OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1, OFF-DETAIL-1, MEDIA-6, TAB-UPLOAD-1, TAB-STATE-1, PARTS-PHOTO-1, and decisions BD-23…BD-30. **Stale labels** to correct by comment: #29 (AUD-3) and #30 (AUD-4) answered 21 Oct; #61–#63 (BD-19…21) answered 23 Oct; #72 (JOB-EDIT-1) built 25 Oct. A repeat-safe `gh` script that creates only what does not exist and comments on the stale ones, including #73, was prepared alongside this pass and is described in the final report; it is deliberately not committed (no tracker tooling in this repository — docs/project-tracking.md).
+
 > **5. Deployment and operator work** (never done from this repository)
 >
 > | Task | Reference |
 > |---|---|
-> | Release with **two** pending migrations: `-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets` | `docs/deploy-next-release.md` |
+> | Release with the pending migrations **verified at step 0**: four (`0030`…`0033`) if `4634d5d` is still live — the last recorded state — or two (`0032`, `0033`) if `e85f239` was released. *Corrected 26 October 2026; earlier reports said two.* | `docs/deploy-next-release.md`, *NEXT RELEASE* |
 > | Declare `EJE_DEPLOYMENT`, pass preflight | `docs/demonstration-isolation.md` |
 > | Configure email and WhatsApp, then `npm run integrations:check -- --probe` | `docs/integrations.md` |
 > | Schedule the backup, copy it off site, run the restore test and the key check | `docs/vps-backups.md` |

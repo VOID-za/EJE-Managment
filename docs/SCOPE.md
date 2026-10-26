@@ -1414,7 +1414,7 @@ and **nothing here is deployed**: no production database was migrated.*
 
 ### Migration 0033 — attendance and timesheet comments (NOT DEPLOYED)
 
-Additive and forward-only: two NEW tables (`attendance`, `timesheet_comments`) with their unique keys and checks; no existing table, column or row is touched and nothing is backfilled. A release containing it after `0032_office_lifecycle` has **two** pending migrations: `-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets`. Rolling back the code leaves two tables the earlier release never reads, which is harmless; the attendance and comments recorded meanwhile stay in them.
+Additive and forward-only: two NEW tables (`attendance`, `timesheet_comments`) with their unique keys and checks; no existing table, column or row is touched and nothing is backfilled. A release containing it after `0032_office_lifecycle` has **two** pending migrations (`-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets`) **only if `e85f239` was released first**. *Corrected 26 October 2026:* the last release this repository records as live is `4634d5d` (at `0029`), so from there **four** are pending — `0030`…`0033`. Step 0 of the release checklist in `docs/deploy-next-release.md` establishes which. Rolling back the code leaves two tables the earlier release never reads, which is harmless; the attendance and comments recorded meanwhile stay in them.
 
 ### The remaining features, the OCR engine and deployment preparation (22 October 2026, tenth batch)
 
@@ -1675,6 +1675,17 @@ criteria themselves are unchanged.
 | ACC-PWA-5 | **PARTIALLY MET — needs the device** | The waiting worker and the prompt are tested, including that there is no unconditional `skipWaiting()`. A real update delivered to an installed tablet has not been performed |
 | ACC-PWA-6 | **NOT MET** | UX-1 is still PARTIAL: no touch-gesture testing and no rugged device. Unchanged by Phase 3 |
 
+> **Amended 26 October 2026 — the status column above had fallen behind the code** (kept as written, PROC-2). On the code at `987dce2`, from headless-browser evidence only — **no row is MET until it is done on the rugged tablet** (see the acceptance record in `docs/tablet-installation.md`, checks 19–23):
+>
+> - **ACC-OFF-3** — PARTIALLY MET in code: every checklist answer is captured offline with the template's own validation (OFF-CHK-1); **completing** the checklist is the server's gate and needs a connection (OFF-4).
+> - **ACC-OFF-4** — PARTIALLY MET in code: the write-up is kept as a local draft for every pending edit and survives a reload (OFF-WRITEUP-1, WRITEUP-4); lock / close / flat battery are device checks 5 and 20.
+> - **ACC-OFF-5** — NOT MET: **BLOCKED on BD-23**. A signature and a refusal need a connection by design until EJE decide otherwise.
+> - **ACC-OFF-10** — PARTIALLY MET in code: an interrupted upload is re-sent whole under its idempotency key and never leaves a half-written attachment (OFF-7, OFF-MEDIA-1); byte-range resume is BD-29.
+> - **ACC-OFF-11** — MET IN CODE, structurally: offline captures are append-only or carry what they replace, so a signed or refused card cannot be changed through them, and a submission is online-only and idempotent (OFF-9, IDEM-2). Device check 22.
+> - **ACC-OFF-12** — NOT MET: needs BD-23 and the device.
+> - **ACC-PWA-4** — PARTIALLY MET: reopening returns to the job, and captures, photographs and the write-up draft are now kept (it said nothing unsent was kept). Device checks 5 and 20.
+> - **ACC-PWA-1, -2, -3, -5, -6** — unchanged: they need the device.
+
 ### Offline and tablet (CR-02, CR-03) — none implemented
 
 | ID | Requirement | Status |
@@ -1870,6 +1881,30 @@ change: a capability no role holds, and an environment variable nothing sets.
 | **BD-28** | **MAY AN APPROVED CHANGE REQUEST MOVE A MACHINE BY ITSELF? OPEN** — carried inside MACH-HIST/BD-20 with no ID. **Current behaviour:** no; a change request changes nothing by itself and the office moves the machine on the register (MACH-HIST records the move). | MACH-HIST, CUST-CR |
 | **BD-29** | **IS AN INTERRUPTED UPLOAD RESUMED FROM WHERE IT STOPPED? OPEN** — the technical half of OFF-7. **Current behaviour:** a failed upload is re-sent whole and never duplicated; byte-range resume would need a chunked protocol on both sides and a decision that the tablets' data plans make it worth it. | OFF-7 |
 | **BD-30** | **MAY A VIDEO BE HELD ON THE TABLET WITH NO SIGNAL? OPEN** — carried inside OFF-3 with no ID. **Current behaviour:** no; video capture is refused offline with the reason, because the held-work ceiling is 40 MB for all of a technician's unsent captures and one clip may be 60 MB. **EJE must say** whether tablets get a larger storage budget for video, and how much. | OFF-3 |
+
+### Recommended defaults for the decisions still OPEN — 26 October 2026
+
+*Prepared so that each decision can be answered in one line. **A recommendation
+is not a decision** (PROC-4): every row above stays OPEN, and the behaviour in
+force is the "until answered" column, unchanged by this table. Each was checked
+against the code on `987dce2`: all eleven are genuine business questions — none
+is an implementation gap with an established rule waiting to be built.*
+
+| ID | Behaviour until answered (verified) | Recommended default | Consequence if adopted | Implementation if adopted |
+|---|---|---|---|---|
+| **BD-23** offline signature / refusal | Needs a connection; the tablet says so (`ONLINE_ONLY`, OFF-QUEUE-10) | **Allow it**, as the default already written: a fourth append-only capture carrying the signature, the signatory and a checksum of the job-card PDF shown; accepted on arrival only if the server re-renders an identical document, otherwise refused and referred to the office | MANDATE-1 can then be met. A customer may sign a card that is later refused on arrival (the job changed meanwhile) and must be visited or phoned again — rare, visible, never silent | Large: the capture, the tablet-side render and checksum, the server comparison, the referral path, offline refusal likewise; browser and PostgreSQL tests; then tablet acceptance |
+| **BD-24** timesheet call-out | Once per job per technician who worked on it, on their first day of labour on the job; a count, never money; no invented dates | **Keep it**, if a call-out is paid per attendance. If only the person called out is paid, choose "primary technician only" | Pay can be read straight off the sheet | None for "keep"; small (one filter) for "primary only"; a per-visit dated call-out would need a new field and capture step |
+| **BD-25** WhatsApp wording on transfer | The approved `eje_job_assigned` template is sent to the receiving technician (WA-TRANSFER-1) | **Keep the shared template** | No new Meta approval needed; the message says "assigned", which is what a transfer is to the receiver | None. A dedicated template would need EJE to submit and get it approved first, then one constant |
+| **BD-26** videos to customers | Never; videos are forced to `internal` by the server | **Keep: never by default**; if ever needed, the office sends a link separately | The job card (a PDF) stays the customer's whole record | None |
+| **BD-27** correction acknowledgement | The Master states per correction whether it is required | **Require it when the correction changes a price, a quantity or the work described; not for a typo** | A rule the office can apply without judgement calls on every correction | Small: a classification on the correction and the default derived from it |
+| **BD-28** change request moves a machine | No; a change request changes nothing; the office moves the machine (recorded by MACH-HIST) | **Keep: no** | One path changes the register, and it is audited | None |
+| **BD-29** resume an interrupted upload | Re-sent whole, never duplicated (idempotency keys); 25 MB photo cap | **Keep whole-file retry** | At 25 MB a re-send is seconds on 4G; resume adds protocol risk for little gain | None. Resume would need a chunked protocol on both sides |
+| **BD-30** video held offline | Refused offline with the reason (40 MB held-work ceiling, 60 MB per clip) | **Keep refusing**; photograph the fault offline and film it once in signal | Photographs, which the job card uses, are never crowded out | None. Otherwise a device storage budget per tablet must be chosen and tested on the device |
+| **BD-04** order number | Three-valued per job type (`required` / `expected` / `optional` — DECISION 2) | **Keep the waiver**: breakdowns often start before a purchase order exists | Office Handling → Awaiting PO already chases the PO before invoicing | None |
+| **BD-05** Redis vs outbox | Durable PostgreSQL outbox, sent after commit | **Accept the outbox** | One fewer service to run, back up and secure; messages survive a restart | None |
+| **BD-11** explicit "cannot submit" | An all-day absence on the availability register opens the CR-08 takeover | **Keep the absence mechanism**; revisit only if takeovers become common | Audited, already demonstrable from the seed (AUD-8) | None; an explicit state would be a new status, permission and audit event |
+| BD-03, BD-08, BD-10 | Names and visibility as built | **Accept as built** | Cosmetic only | None |
+
 ---
 
 ## Retired behaviour, kept readable

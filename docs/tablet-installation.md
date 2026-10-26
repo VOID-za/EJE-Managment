@@ -67,13 +67,13 @@ easiest to run them. Record the result against the criterion in
 | 2 | Launch from the home screen | No address bar, no tabs, no browser menu. The status bar matches the application's navy rather than flashing white | ACC-PWA-2 |
 | 3 | Open a job → **Photos** → **Take photo** | The rear camera opens. The photograph appears as a thumbnail — the photograph itself, not a grey placeholder — and is on the job after a refresh | ACC-PWA-3 |
 | 4 | **Choose photo** instead | The gallery opens and the chosen image uploads the same way | ACC-PWA-3 |
-| 5 | Open a job, then kill the application from the task switcher and relaunch | The job list offers **Resume EJE-…** for the job that was open. It also says that anything not sent was not kept — which is true, and is Phase 3's boundary | ACC-PWA-4 |
+| 5 | Open a job, type into the write-up, then kill the application from the task switcher and relaunch | The job list offers **Resume EJE-…** for the job that was open, and the write-up text is still there (kept as a local draft, WRITEUP-4) — *amended 26 October 2026: this row said nothing unsent was kept, which stopped being true* | ACC-PWA-4 |
 | 6 | Turn flight mode on and relaunch | The job list appears with an amber notice naming the time the copy arrived. No empty list, no spinner that never ends | PWA-6 |
-| 7 | Still offline, open a job from the list | It does **not** open. The list is cached; a job's own record is not. Expected, and still Phase 4's work | — |
+| 7 | Still offline, open a job that was open earlier | Its detail opens from this tablet's copy, saying how old the copy is and that it cannot be changed from there (OFF-DETAIL-1). A job never opened on this tablet does not open — expected — *amended 26 October 2026* | OFF-DETAIL-1 |
 | 7a | With a job already open, turn flight mode on and add labour, travel, a part and a note | Each is accepted and marked *held on this tablet… not on the server yet*. The job keeps showing the record it already had rather than an error page | OFF-QUEUE-1…3 |
 | 7b | Still offline, kill the application and relaunch it | The offline page says how many captures are waiting and that they are not on the job | OFF-QUEUE-8 |
 | 7c | Turn flight mode off and open the job | The captures send themselves, leave the queue, and appear on the job — each exactly once | OFF-QUEUE-4…5 |
-| 7d | Offline, try the checklist, the write-up, a photograph or the signature | Each says it needs a connection, and says which thing it is. Nothing is accepted and dropped | OFF-QUEUE-10 |
+| 7d | Offline, answer a checklist item, type the write-up, take a photograph, then try to take the signature | The answer, the write-up draft and the photograph are each held and marked *on this tablet*; **the signature and a refusal say they need a connection** (open decision BD-23). Nothing is accepted and dropped — *amended 26 October 2026* | OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1, OFF-QUEUE-10 |
 | 8 | Deploy a new build, then reopen the application twice | A bar offers the new version and nothing reloads until it is tapped — including while a capture is open | ACC-PWA-5 |
 | 9 | Sign out, then reopen the application and check with DevTools → Application → IndexedDB | `eje-job-cache` is empty: no jobs, no meta, no device pointer, no last place | PWA-6 |
 | 10 | Use it one-handed, with work gloves, outside in daylight | Every control is reachable and hittable; nothing is a 20px target; the screen is legible | ACC-PWA-6 |
@@ -95,6 +95,43 @@ headless browser cannot see**, which is the test for whether it belongs here.
 | 16 | **A long form in portrait.** Complete a checklist of 20+ items, plus labour, travel and three parts, in portrait | Every control stays reachable, the save buttons do not end up under the keyboard, and nothing already entered scrolls out of reach | Portrait on a 10" rugged tablet is not 390×844 |
 | 17 | **Session expiry.** Leave the application open and untouched overnight, then tap something that writes | It says the session ended and asks for a sign-in; **anything unsent is still there afterwards**. It does not fail silently or discard the capture | Only real elapsed time expires a real session |
 | 18 | **Unsent work and a sign-out.** With captures held offline, sign out deliberately | It says what is unsent and whose it is, and does not discard it. After signing back in as the SAME technician it is still there; as a different one it is not offered | The warning and the per-owner store are only interesting on a shared device |
+
+### A full job, and recovery — 26 October 2026
+
+*Added for the completion mandate.* These are the checks that close the offline
+mandate on the device. **19–22 can be run now. 23 depends on open decision BD-23**
+(offline signature and refusal): until EJE decide it, a signature needs signal by
+design, and check 23 is recorded as BLOCKED rather than failed.
+
+| # | Do this | Pass looks like | Criterion |
+|---|---|---|---|
+| 19 | **A full job with the network off, up to the signature.** Accept a job in signal, open it, then flight mode on: add labour, travel, a part and a note; answer the whole checklist including a failed item with its note; take two photographs; write the completion report | Every capture is held and marked *on this tablet*; nothing is refused that the job allows; the write-up survives scrolling and the keyboard | ACC-OFF-2, ACC-OFF-3, ACC-OFF-4 |
+| 20 | **Lock it, close it, flatten it.** Mid-way through 19: lock the screen for ten minutes; kill the application; then let the battery run to shutdown, charge and power on | After each, everything captured so far is still held, named and counted on the offline page; the write-up draft is word for word | ACC-OFF-6, ACC-PWA-4 |
+| 21 | **Reconnect.** Flight mode off with everything from 19 held | Captures send oldest first, each row says *Sending…* and leaves when the server has it; photographs upload; the write-up saves; nothing appears twice on the job (check the Activity trail) | ACC-OFF-7, ACC-OFF-8, ACC-OFF-10 |
+| 22 | **A conflict.** Hold a capture offline; meanwhile have the office cancel or reassign the job; reconnect | The capture is not applied, the technician is told in the server's words, and it appears on the office's *Field Captures* to decide — never silently dropped or overwritten | ACC-OFF-9, ACC-OFF-11 |
+| 23 | **The signature and the refusal, offline.** Continue 19 to the signature step with the network still off | **BLOCKED on BD-23.** Today: it says it needs a connection. Once BD-23 is decided and built: re-run 19–22 through to signature, reconnect, and confirm the job submits exactly once | ACC-OFF-5, ACC-OFF-12 |
+
+### The acceptance record
+
+Fill one row per check, on the device EJE will issue to technicians. **Every row
+reads UNVERIFIED until somebody has done it on that device**; nothing here may be
+filled from a headless browser, an emulator or a desktop.
+
+| Field | Value |
+|---|---|
+| Device make and model | *e.g. Samsung Galaxy Tab Active5 — EJE to confirm the model* |
+| Android version, Chrome version | |
+| Deployment URL and release SHA under test | |
+| Tester, date, time of day, weather (daylight checks) | |
+
+| Check | Result (PASS / FAIL / BLOCKED / UNVERIFIED) | Evidence (photo, screen recording, or what was seen) | Notes |
+|---|---|---|---|
+| 1–4 install, icon, standalone, camera | UNVERIFIED | | |
+| 5–9 resume, offline list and detail, held captures, update | UNVERIFIED | | |
+| 10 gloved, one-handed, daylight | UNVERIFIED | | |
+| 11–18 camera permission, bad signal, signing, keyboard, long form, expiry, shared tablet | UNVERIFIED | | |
+| 19–22 full offline job, recovery, reconnect, conflict | UNVERIFIED | | |
+| 23 offline signature / refusal | BLOCKED — BD-23 | | |
 
 **Record a result against every one.** A row with no result is not a pass, and
 checks 11, 13, 15 and 17 are the four most likely to find something: each

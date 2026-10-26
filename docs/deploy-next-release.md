@@ -19,6 +19,65 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## NEXT RELEASE — from `claude/office-workflow-parts` (checklist prepared 26 October 2026, NOT RUN)
+
+**Nothing below has been run.** It needs the owner's approval of the work and a
+separate approval to deploy. It is written so that whoever runs it can tell, at
+each step, whether to continue.
+
+### Which migrations are pending — VERIFY, do not assume
+
+The last release this repository records as LIVE is `4634d5d` (migrations up to
+`0029`). The `e85f239` release below (0030, 0031) is recorded as prepared and
+**not run**. So:
+
+| What is live | Pending for this release | `-ExpectPending` |
+|---|---|---|
+| `4634d5d` (the last recorded state) | 0030, 0031, 0032, 0033 | `0030_library_page_coverage_unknown,0031_test_repair_date_received,0032_office_lifecycle,0033_attendance_timesheets` |
+| `e85f239` (if it was released after this was written) | 0032, 0033 | `0032_office_lifecycle,0033_attendance_timesheets` |
+
+**Step 0 decides which.** The read-only check prints the live commit and the
+migration ledger; the release tool then refuses anything but the exact ordered
+list it is given, so passing the wrong row stops the release before anything
+changes. All four migrations are forward-only (0030 replaces one check
+constraint on the library index; 0031 adds one nullable column; three statuses, five columns, four checks and a
+trigger in 0032; two new tables in 0033). None rewrites a row.
+
+### The checklist
+
+| # | Step | Command / where | Pass looks like | Evidence to keep |
+|---|---|---|---|---|
+| 0 | Read-only check | `stage-release.ps1 -Sha <full SHA> -CheckOnly` | Host `srv2000625`, the live commit and its health, the ledger count, free disk | The printed output |
+| 1 | Environment declared | `/etc/eje/eje.env`: `EJE_DEPLOYMENT=production` or `demonstration` | Preflight's *Deployment* line agrees with the database | Preflight output |
+| 2 | Fresh backup, PROVEN | `npm run backup`, then `backup:verify`, `backup:key-check`, `backup:restore-test` (§1, §1a) | All four pass; restore test reads `RESTORE-TESTED` | The backup's directory name and the four outputs |
+| 3 | Preflight | `npm run preflight -- --expect-db eje_production` | Only the expected *Migrations* FAIL naming exactly the pending list above, plus the one accepted FAIL for this server; **Customer sites** reported (a WARN with a count is not a stop — see step 9) | Preflight output |
+| 4 | Migrate | `npm run db:migrate` | Preflight: `all 34 applied` | Preflight output |
+| 5 | Switch, restart | §6 | — | — |
+| 6 | Health | `curl -s localhost:3000/api/health` and from outside | `commit` = the release, `status: ok`, `database: reachable`, `email` and `deployment` as expected | The JSON |
+| 7 | Integrations, configuration only | `npm run integrations:check` | Says exactly which of Microsoft 365 / WhatsApp are configured; **sends nothing** | Output |
+| 8 | Integrations, live probe — only once EJE's credentials are installed | `npm run integrations:check -- --probe` | Graph token acquired and the sender mailbox readable; WhatsApp token and phone number accepted and both templates APPROVED. **Still sends nothing to a customer** | Output |
+| 9 | Legacy multi-site customers | Preflight *Customer sites* | A count. **Do not consolidate from the server.** The office consolidates each one in the application (Customers → legacy filter → *Keep as the customer's site*); the one-site database constraint is a later release, once this reads zero | The count |
+| 10 | VPS smoke test | `docs/vps-smoke-test.md` | Every step passes | The run |
+| 11 | Backups scheduled | `systemctl list-timers 'eje-backup*'` (`docs/vps-backups.md` §4) and an off-site destination set (§5) | Both timers listed with a next run; preflight's *Off-site backup* is OK | Output |
+
+### Rollback, and its one hard limit
+
+Switching back to the previous release directory is §6 in reverse and is safe
+**until the office uses the new workflow**:
+
+- **0032 (office lifecycle).** Once any job has entered *Office Handling*,
+  *Awaiting PO* or *Invoiced*, an earlier release cannot label or act on it — the
+  statuses do not exist in its code. **Roll back only before the office has
+  handled a job, or decide what to do with those jobs first.** The migration
+  itself is not undone; the columns are nullable and the earlier code never
+  names them.
+- **0033 (attendance, timesheet comments).** Two tables the earlier release
+  never reads. Harmless to roll back over; anything recorded stays.
+- **0030, 0031.** Proven rollback-compatible by `scripts/release/rollback-compat.sh`
+  in CI.
+- **Never** restore a backup over the live database to "roll back": §6 of
+  `docs/vps-backups.md` restores into a NEW database and swaps.
+
 ## RELEASE e85f239 — two migrations, 0030 then 0031 (prepared 25 October 2026, NOT YET RUN)
 
 **From `4634d5d` (live) to `e85f239`** — everything in `de0d9b6` (JOB-EDIT-1
@@ -421,8 +480,9 @@ On `claude/office-workflow-parts`, after 0032. Two NEW tables, `attendance` and
 `timesheet_comments`, each unique per person per day; no existing table, column
 or row is touched and nothing is backfilled. With `e85f239` live there are then
 TWO pending migrations: run the check and the release with
-`-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets`. A rollback of
-the code leaves two tables the earlier release never reads.
+`-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets` — **only if `e85f239`
+was released first**; from `4634d5d` all four are pending (see *NEXT RELEASE* above).
+A rollback of the code leaves two tables the earlier release never reads.
 
 ### And migration 0032 (the office lifecycle, issue #73) — NOT YET DEPLOYED, NOT IN e85f239
 
