@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import postgres from 'postgres';
+import { countLegacyMultiSiteCustomers } from './customer-sites';
 import { loadEnvFiles } from '@/db/seed/env';
 import {
   checkBackend,
@@ -13,6 +14,7 @@ import {
   checkDemoSwitcher,
   checkDeployment,
   checkEmail,
+  checkCustomerSites,
   checkMigrations,
   checkRuntime,
   checkStorage,
@@ -191,6 +193,8 @@ const main = async (): Promise<void> => {
             ? warn('Accounts', 'The database holds no user accounts, so nobody can sign in yet.')
             : ok('Accounts', `${count} account(s) on the register.`),
         );
+        const legacy = await countLegacyMultiSiteCustomers(sql).catch(() => null);
+        checks.push(...checkCustomerSites(legacy));
       }
     } catch (cause) {
       /*

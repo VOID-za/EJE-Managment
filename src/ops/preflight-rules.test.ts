@@ -12,6 +12,7 @@ import {
   checkTextRecognition,
   checkRuntime,
   checkStorage,
+  checkCustomerSites,
   passed,
   type Check,
 } from './preflight-rules';
@@ -135,6 +136,24 @@ describe('whether the schema is up to date', () => {
     const checks = checkMigrations(SHIPPED, { applied: null, schemaPresent: true });
     expect(passed(checks)).toBe(false);
     expect(printed(checks)).toMatch(/impossible to say/u);
+  });
+});
+
+describe('customers still recorded with several sites (SITE-1)', () => {
+  it('reports legacy customers as a warning, never a failure', () => {
+    const checks = checkCustomerSites(4);
+    expect(checks[0]?.verdict).toBe('warn');
+    expect(checks[0]?.detail).toContain('4 customer(s)');
+    expect(passed(checks)).toBe(true);
+  });
+
+  it('says when the one-site constraint can be added', () => {
+    expect(checkCustomerSites(0)[0]).toMatchObject({ verdict: 'ok' });
+    expect(checkCustomerSites(0)[0]?.detail).toContain('constraint can be added');
+  });
+
+  it('says plainly when it could not count', () => {
+    expect(checkCustomerSites(null)[0]?.verdict).toBe('warn');
   });
 });
 

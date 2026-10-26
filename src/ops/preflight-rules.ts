@@ -247,6 +247,39 @@ export const checkMigrations = (
 };
 
 /**
+ * ONE SITE PER CUSTOMER, AND WHAT IS STILL IN THE WAY OF ENFORCING IT. SITE-1.
+ *
+ * The application refuses a second site, but the database cannot until no
+ * customer has two: a partial unique index fails to build over legacy rows. So
+ * this reports how many customers were recorded with several active sites
+ * before the rule. A WARNING, never a failure — the application handles legacy
+ * customers correctly, and the office consolidates them (SITE-2) when it
+ * chooses. Zero is the operator's signal that the constraint can be added.
+ */
+export const checkCustomerSites = (legacyCustomers: number | null): readonly Check[] => {
+  if (legacyCustomers === null) {
+    return [warn('Customer sites', 'Could not count customers with more than one active site.')];
+  }
+  if (legacyCustomers === 0) {
+    return [
+      ok(
+        'Customer sites',
+        'every customer has at most one active site, so the one-site database constraint can be added.',
+      ),
+    ];
+  }
+  return [
+    warn(
+      'Customer sites',
+      `${legacyCustomers} customer(s) still have more than one active site, recorded before the ` +
+        'one-site rule. The office consolidates each one on the customer register (the legacy ' +
+        'filter, then "Keep as the customer’s site"); the database constraint can be added only ' +
+        'once this reads zero.',
+    ),
+  ];
+};
+
+/**
  * WHERE THE DOCUMENTS GO. Three different failures, and the third is the one
  * nobody expects: a storage directory inside the application directory is
  * deleted by the next deployment, taking every signed job card with it.
