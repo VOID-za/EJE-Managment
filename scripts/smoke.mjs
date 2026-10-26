@@ -1137,11 +1137,12 @@ await step('the signed document is shown before anything is submitted', async ()
 
   // And the ISSUED copy — rendered on the server from the stored photograph,
   // the file the customer is sent — embeds it too. MEDIA-7.
+  // Opening the issued document is audited, so it is a POST that answers the
+  // bytes as base64 — exactly what the screen's own download does.
   const issued = await page.evaluate(async (base) => {
-    const response = await fetch(`${base}/api/documents/EJE-1048`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    let text = '';
-    for (const byte of bytes) text += String.fromCharCode(byte);
+    const response = await fetch(`${base}/api/documents/EJE-1048`, { method: 'POST' });
+    if (!response.ok) return { status: response.status, image: false, placeholder: false };
+    const text = atob((await response.json()).data.base64);
     return { status: response.status, image: text.includes('/Subtype /Image'), placeholder: text.includes('(Photograph not shown)') };
   }, BASE);
   if (issued.status !== 200) throw new Error(`the issued job card answered ${issued.status}`);
