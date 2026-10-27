@@ -912,6 +912,8 @@ await step('Add part opens EMPTY and takes several parts at once, an unsaved lin
 });
 
 await step('the test bench fee is a checkbox beside the call-out, off by default, charged once (BENCH-1)', async () => {
+  // Beside the call-out, on the job's Labour & Parts tab.
+  await page.getByRole('tab', { name: /Labour & Parts/ }).click();
   const box = page.getByTestId('test-bench-checkbox');
   await box.waitFor({ timeout: 10000 });
   if (await box.isChecked()) throw new Error('the test bench fee was ticked by default');
@@ -3283,11 +3285,12 @@ await step('another technician accepts the returned job and sees the previous wo
   await page.getByRole('button', { name: 'Accept job' }).click();
   await page.getByRole('button', { name: 'Accept and start' }).click();
 
-  // The location prompt appears after acceptance, once.
-  await page.getByText('Send Site Location?').waitFor({ timeout: 10000 });
-  await page.getByRole('button', { name: 'No, Thanks' }).click();
-
+  // PIN-1 (27 October 2026): EJE-1067 is a Test & Repair job, so accepting it
+  // offers NO site pin location — the work is at EJE's workshop.
   await page.getByText('In Progress').first().waitFor({ timeout: 10000 });
+  if ((await page.getByText('Send Site Location?').count()) !== 0) {
+    throw new Error('a Test & Repair acceptance offered a site pin location');
+  }
   await page.getByRole('tab', { name: /Labour & Parts/ }).click();
   await page.getByText('FUS-HRC-32').first().waitFor({ timeout: 8000 });
 });

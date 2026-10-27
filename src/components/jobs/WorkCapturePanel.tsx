@@ -30,8 +30,6 @@ import {
   TextField,
 } from '@/components/ui';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { can } from '@/domain';
-import { useCurrentUser } from '@/providers/AppProvider';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useOfflineCapture } from '@/hooks/useOfflineCapture';

@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   emptyRepairItem,
   asContactId,
@@ -152,16 +153,19 @@ export const seedBaseline = async (db: Database): Promise<void> => {
    * Representative figures for a test, not EJE's charge-out rates — those are
    * business data and are captured by the business, never invented here.
    */
-  await db.insert(schema.systemSettings).values({
-    id: 1,
-    companyName: 'EJE Industrial Electronics',
-    labourNormalCents: 95_000,
-    labourOvertimeCents: 142_500,
-    labourDoubleCents: 190_000,
-    calloutRateCents: 85_000,
-    kilometreRateCents: 1_850,
-    vatPercentBasisPoints: 1_500,
-  });
+  /*
+   * RAW SQL NAMING ONLY THE COLUMNS EVERY SCHEMA VERSION HAS. The upgrade
+   * tests seed a database migrated to an OLDER version (0029), and drizzle's
+   * insert names every column it knows — including ones added since, like
+   * `test_bench_fee_cents` (0035) — which an old database refuses. Columns
+   * added later take their defaults.
+   */
+  await db.execute(sql`
+    insert into system_settings
+      (id, company_name, labour_normal_cents, labour_overtime_cents, labour_double_cents,
+       callout_rate_cents, kilometre_rate_cents, vat_percent_basis_points)
+    values (1, 'EJE Industrial Electronics', 95000, 142500, 190000, 85000, 1850, 1500)
+  `);
 };
 
 /** A minimal, valid job. Its number must already have been allocated. */
