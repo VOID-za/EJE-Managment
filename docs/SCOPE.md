@@ -1398,7 +1398,7 @@ invoice numbers need not be unique).*
 
 *Three workstreams requested by the owner on 26 October 2026, each in its own
 commit on `claude/office-workflow-parts`. **Nothing here is approved** (PROC-4)
-and **nothing here is deployed**: no production database was migrated.*
+and **nothing here is deployed**: no production database was migrated.* *Amended 27 October 2026: DEPLOYED for staff testing to the demonstration site `eje.syncza.co.za` as part of release `51fb112` (migrations 0032 and 0033 applied) and verified there — see `docs/deploy-next-release.md` and the end of `docs/staff-testing.md`. Deployed is still not approved: every row stays TESTED — awaiting approval until the owner says otherwise.*
 
 | ID | Requirement | Status and evidence |
 |---|---|---|
@@ -1418,7 +1418,7 @@ and **nothing here is deployed**: no production database was migrated.*
 decisions*). Built on `claude/office-workflow-parts`; **nothing here is
 approved (PROC-4) and nothing is deployed.** No schema change: the evidence is
 kept on the append-only audit trail and on the capture referral, so the next
-release's pending migrations are unchanged.*
+release's pending migrations are unchanged.* *Amended 27 October 2026: DEPLOYED for staff testing to the demonstration site `eje.syncza.co.za` as part of release `51fb112` (migrations 0032 and 0033 applied) and verified there — see `docs/deploy-next-release.md` and the end of `docs/staff-testing.md`. Deployed is still not approved: every row stays TESTED — awaiting approval until the owner says otherwise.*
 
 | ID | Requirement | Status and evidence |
 |---|---|---|
@@ -1430,13 +1430,13 @@ release's pending migrations are unchanged.*
 
 *Approved by the owner on 27 October 2026 with BD-23. **Approving a decision
 is not approving its implementation** (PROC-4): nothing here is DONE or
-deployed.*
+deployed.* *Amended 27 October 2026: DEPLOYED for staff testing to the demonstration site `eje.syncza.co.za` as part of release `51fb112` (migrations 0032 and 0033 applied) and verified there — see `docs/deploy-next-release.md` and the end of `docs/staff-testing.md`. Deployed is still not approved: every row stays TESTED — awaiting approval until the owner says otherwise.*
 
 | ID | Requirement | Status and evidence |
 |---|---|---|
 | DEC-27OCT | **Every approved decision is either built or proved by a test to be the behaviour already in force; none is recorded as met on assertion alone.** | **TESTED — awaiting approval.** BD-23: OFF-SIG-1…3 above. **BD-27 — built:** `ACKNOWLEDGEMENT_REQUIRED_AREAS` (labour, travel, parts, charges, work performed); `raiseJobCorrection` refuses such a correction raised as not requiring acknowledgement; the correction form locks the answer; a required acknowledgement stays `required` until somebody records it. **BD-26 — hardened:** `addMedia` files every video internal; `setMediaVisibility` refuses a video as customer-facing; a video is on neither the document nor the customer's email. **BD-30 — hardened:** `holdMedia` refuses a video with `OFFLINE_VIDEO_REFUSAL`, the sentence the screen shows. **BD-24, BD-25, BD-28, BD-29, BD-04, BD-05, BD-11 — already as approved,** each proved by the tests named on its row (one new: a job photograph re-sent whole under its key is one attachment). **BD-03, BD-08, BD-10** — cosmetic, unchanged. Evidence: `approved-decisions.test.ts` (7), `job-corrections.test.ts` (4 new), `corrections-api.test.ts` (1 new), `media-api.test.ts` (1 new) |
 
-### Migration 0033 — attendance and timesheet comments (NOT DEPLOYED)
+### Migration 0033 — attendance and timesheet comments (NOT DEPLOYED — *amended 27 October 2026: applied on the demonstration site by release `51fb112`*)
 
 Additive and forward-only: two NEW tables (`attendance`, `timesheet_comments`) with their unique keys and checks; no existing table, column or row is touched and nothing is backfilled. A release containing it after `0032_office_lifecycle` has **two** pending migrations (`-ExpectPending 0032_office_lifecycle,0033_attendance_timesheets`) **only if `e85f239` was released first**. *Corrected 26 October 2026:* the last release this repository records as live is `4634d5d` (at `0029`), so from there **four** are pending — `0030`…`0033`. Step 0 of the release checklist in `docs/deploy-next-release.md` establishes which. Rolling back the code leaves two tables the earlier release never reads, which is harmless; the attendance and comments recorded meanwhile stay in them.
 

@@ -32,6 +32,26 @@ the release, both read-only: the office's **Field Captures** screen opens (held
 signatures that cannot be verified land there), and a correction to labour,
 parts or the work performed cannot be raised as needing no acknowledgement.
 
+### DEPLOYED — 27 October 2026: `51fb112` is live
+
+Run by the owner with the guarded release tool. From the release output:
+running commit `51fb112`; migrations `0032_office_lifecycle` and
+`0033_attendance_timesheets` applied (the live release was `e85f239`, so two
+were pending, not four); backup, verification, key check and restore test
+completed; health reports PostgreSQL reachable; previous release `e85f239`
+retained for rollback (`stage-release.ps1 -Rollback`). **The rollback limit
+applies from now on:** once the office moves a job into Office Handling,
+Awaiting PO or Invoiced, the previous release cannot show it.
+
+Verified afterwards from outside the server (`docs/staff-testing.md`, end):
+health, roles, the full job lifecycle through Invoiced, refusal, corrections,
+held signatures (accepted and referred), parts restrictions, media, PDFs,
+attendance, timesheets, exports, and offline capture and signature in a real
+browser. `deployment: "demonstration"` and `demoSwitcher: true` are this
+site's intended settings (`docs/demonstration-isolation.md`): its database
+holds fictional data only, and nothing real may be entered while the switcher
+is on.
+
 ### Running it — the commands, in order (27 October 2026)
 
 The owner authorised deploying this branch to the existing VPS for staff
