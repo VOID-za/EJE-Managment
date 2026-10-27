@@ -422,20 +422,6 @@ await step('"No, Thanks" sends nothing and leaves the job in progress', async ()
   if (whatsappEntries !== 0) throw new Error('declining still queued a WhatsApp message');
 });
 
-await step('marking a notification read drops the bell count at once, no reload (NOTIF-AUDIT-1)', async () => {
-  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  const bell = page.locator('a[aria-label^="Notifications"]').first();
-  const countOf = async () => Number(((await bell.getAttribute('aria-label')) ?? '').match(/(\d+) unread/)?.[1] ?? 0);
-  const before = await countOf();
-  if (before === 0) throw new Error('the technician has no unread notification to test the bell with');
-  await page.getByRole('button', { name: 'Mark as read' }).first().click();
-  const deadline = Date.now() + 8000;
-  while ((await countOf()) !== before - 1) {
-    if (Date.now() > deadline) throw new Error(`the bell still says ${await countOf()}, expected ${before - 1}`);
-    await page.waitForTimeout(200);
-  }
-});
-
 await step('declining is recorded on the job activity trail', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Activity' }).click();
@@ -931,12 +917,14 @@ await step('the test bench fee is a checkbox beside the call-out, off by default
   const box = page.getByTestId('test-bench-checkbox');
   await box.waitFor({ timeout: 10000 });
   if (await box.isChecked()) throw new Error('the test bench fee was ticked by default');
-  await box.check();
+  // The box reflects the job, so it turns on once the server has saved it.
+  await box.click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="test-bench-checkbox"]')?.checked === true, null, { timeout: 10000 });
   await page.getByText('Test bench fee').first().waitFor({ timeout: 10000 });
   const job = await page.evaluate(async (base) => (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job, BASE);
   if (job.testBenchApplied !== true) throw new Error('ticking the box did not reach the job');
   // Untick, so the rest of the journey prices exactly as before.
-  await box.uncheck();
+  await box.click();
   await page.waitForFunction(async (base) => {
     const view = (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job;
     return view.testBenchApplied === false;
@@ -1948,6 +1936,21 @@ await step('the Master is notified that the customer refused to sign', async () 
     if (!body.includes(expected)) throw new Error(`the notification omits "${expected}"`);
   }
   await page.screenshot({ path: `${shots}/21-refusal-notification.png`, fullPage: false });
+});
+
+await step('marking a notification read drops the bell count at once, no reload (NOTIF-AUDIT-1)', async () => {
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  // The Master has just been told of the refusal, so at least one is unread.
+  const bell = page.locator('a[aria-label^="Notifications"]').first();
+  const countOf = async () => Number(((await bell.getAttribute('aria-label')) ?? '').match(/(\d+) unread/)?.[1] ?? 0);
+  const before = await countOf();
+  if (before === 0) throw new Error('the Master has no unread notification to test the bell with');
+  await page.getByRole('button', { name: 'Mark as read' }).first().click();
+  const deadline = Date.now() + 8000;
+  while ((await countOf()) !== before - 1) {
+    if (Date.now() > deadline) throw new Error(`the bell still says ${await countOf()}, expected ${before - 1}`);
+    await page.waitForTimeout(200);
+  }
 });
 
 await step('the notification opens the job it is about', async () => {

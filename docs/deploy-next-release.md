@@ -52,6 +52,37 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### NEXT — the real-world testing fixes (27 October 2026), on top of `51fb112`
+
+**Not yet run.** The owner's instruction of 27 October 2026 authorises
+deploying these fixes for staff testing. Live is `51fb112`, so **three
+migrations are pending**, all forward-only and additive (new table, new
+columns with defaults, a replaced trigger function; no row is rewritten):
+
+- `0034_manual_timesheets` — the `timesheet_entries` table (manual timesheets).
+- `0035_test_bench_fee` — `system_settings.test_bench_fee_cents` (default 0),
+  `jobs.test_bench_applied` (default false), `pricing_snapshots.test_bench_fee_cents`
+  (default 0), and `refuse_signed_jobcard_rewrite` extended to protect the new
+  job column after signature.
+- `0036_chat_deleted_for` — `chat_participants.deleted_at` (nullable).
+
+```powershell
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for
+```
+
+**Rollback.** `51fb112` ignores the new table and columns, so
+`stage-release.ps1 -Rollback` stays possible; what it cannot show are the
+manual timesheet lines, the test bench fee and chat deletions recorded after
+the release (they stay in the database and return when this release does).
+Signed totals that include a test bench fee are frozen in their pricing
+snapshots, but `51fb112` does not print that line.
+
+**After the release** (read-only checks, then `docs/staff-testing.md` section G):
+`/api/health` names the new commit and PostgreSQL reachable; Administration →
+Settings shows *Test bench fee*; a technician sees *Timesheets*, *Attendance*
+and *Field Captures*; Messages offers *Delete chat*.
+
 ### Running it — the commands, in order (27 October 2026)
 
 The owner authorised deploying this branch to the existing VPS for staff

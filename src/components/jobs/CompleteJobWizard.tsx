@@ -623,6 +623,7 @@ export const CompleteJobWizard = ({
               !isIssuedStep &&
               (job.status === 'completion' || job.status === 'customer_signature') &&
               job.signature === null &&
+              job.pricingSnapshot === null &&
               !definition.officeProcessed && (
                 <Button variant="secondary" onClick={() => setCancelling(true)} data-testid="wizard-cancel-completion">
                   Cancel completion

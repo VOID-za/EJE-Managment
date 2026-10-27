@@ -10,6 +10,7 @@ import {
   cancelCompletion,
   captureSignature,
   recordSignatureRefusal,
+  returnToCustomerSignature,
   saveCompletionReport,
   startCompletion,
   startSignature,
@@ -23,6 +24,7 @@ import { buildHarness, jpegFixture, seedUser, type Harness } from './test-harnes
  * has signed or refused; and the job can be completed again afterwards.
  */
 const technician = seedUser('user-tech-sipho');
+const master = seedUser('user-master-elmarie');
 
 let harness: Harness;
 beforeEach(() => {
@@ -101,6 +103,18 @@ describe('cancelling completion before the customer signs', () => {
     job = await recordSignatureRefusal(tech, job, { reason: 'Disputes the hours.' });
     await expect(cancelCompletion(tech, job)).rejects.toBeDefined();
     expect((await reload()).status).toBe('review');
+  });
+
+  it('is refused after a refusal was returned for signature: its prices are frozen', async () => {
+    const tech = harness.as(technician);
+    let job = await startCompletion(tech, await workedJob());
+    job = await startSignature(tech, job);
+    job = await recordSignatureRefusal(tech, job, { reason: 'Disputes the hours.' });
+    job = await returnToCustomerSignature(harness.as(master), job, 'Hours checked.');
+    expect(job.status).toBe('customer_signature');
+    expect(job.pricingSnapshot).not.toBeNull();
+    await expect(cancelCompletion(tech, job)).rejects.toMatchObject({ violations: [{ code: 'pricing_frozen' }] });
+    expect((await reload()).status).toBe('customer_signature');
   });
 
   it('is refused from In Progress (nothing to cancel) and on a parts collection', async () => {

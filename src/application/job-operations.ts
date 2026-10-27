@@ -1905,6 +1905,18 @@ export const cancelCompletion = async (context: OperationContext, job: Job): Pro
       { code: 'refusal_outstanding', message: 'The office deals with a refused job card; completion cannot be cancelled from here.' },
     ]);
   }
+  /*
+   * A JOB WHOSE PRICES ARE ALREADY FROZEN IS NOT REOPENED. A refusal freezes the
+   * pricing snapshot (the customer refused THOSE figures, and the record keeps
+   * them write-once); the office may send it back for signature, but sending it
+   * further back to In Progress would let new work be priced at the frozen
+   * rates. The office corrects such a job through the refusal path.
+   */
+  if (job.pricingSnapshot !== null) {
+    throw new WorkflowError(`${job.jobNumber} has frozen prices from an earlier refusal.`, [
+      { code: 'pricing_frozen', message: 'This job card was refused and returned for signature, so completion cannot be cancelled. Ask the office to correct it.' },
+    ]);
+  }
   // From Customer Signature, back through Completion: both edges the state machine allows.
   let atCompletion: Job = job;
   if (job.status === 'customer_signature') {

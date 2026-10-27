@@ -53,7 +53,7 @@ saw and a screenshot), or **NOT RUN**. A blank is not a pass.
 | B2 | Technician: open it, *Accept job* | Status In Progress |
 | B3 | Add labour, travel, a part, a note; add a photograph from the camera | Each appears on the job; the photograph shows as a picture, not a placeholder |
 | B4 | Type the completion write-up | It says *Saving… / Saved* by itself — there is no Save button |
-| B5 | *Complete job* → through the steps → Review | The review lists what was captured |
+| B5 | Scroll to the **bottom** of the In Progress job: *Complete job* is there (not at the top), with a summary of labour, km, parts and notes. Press it → through the steps → Review | One *Complete job* button only; the review lists what was captured |
 | B6 | Signature: customer name, surname, sign, *Confirm signature* | The signed job card PDF is shown, **with the photograph in it** |
 | B7 | *Submit job card* | Job goes to the office (**Office Handling**); the customer copy's delivery shows **failed — customer email is not configured**. That is the honest answer until EJE's Microsoft 365 is connected: nothing was emailed |
 | B8 | Office: Notifications → Inbox → *Mark handled* | Moves to **Awaiting PO** |
@@ -82,17 +82,54 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
 | D5 | Offline signature: take a job to the **signature step with signal**, then flight mode on; the job card appears on the screen; show it, take the signature | *Held on this tablet — not on the job yet* |
 | D6 | Flight mode off | The job moves to Review; the Activity trail's *Customer signed* line names the document identity |
 | D7 | Repeat D5, but have the office **apply the call-out fee** to that job while the tablet is offline; then reconnect | Nothing is signed; the row says *With the office*; the office's **Field Captures** shows the held signature with reason *document changed* |
-| D8 | Try to record a video offline | Refused, with the reason |
+| D8 | Look for a video button anywhere | None: video is no longer accepted (photos and documents only). Videos recorded before stay visible as *Videos (historical)* |
 
 ## E. Office records
 
 | # | Do this | Pass looks like |
 |---|---|---|
 | E1 | Customers: open a customer | One site with address and a Google Maps link; contacts listed; a legacy multi-site customer can be consolidated with a preview |
-| E2 | Attendance: mark present/absent for today; change one | Saved once per person per day; the change is on the audit trail; future days refused; export CSV |
-| E3 | Timesheets: open a technician's sheet for this week | Hours by day and customer from their labour; call-out once per job, on their first day on it; add a daily comment; export CSV |
-| E4 | Field Captures (office) | Lists work a tablet could not apply, with the reason; *Apply* works for labour, not for a held signature |
+| E2 | Technician: **Attendance** (own) — mark yourself Present for today and Absent for an earlier day | Both saved; days you did not mark say *Not recorded* (nothing is assumed); future days refused. Office: Attendance shows them; export CSV |
+| E3 | Technician: **Timesheets** — for a past date, *Add line*: customer, NT, OT, DBL T, call-outs, comment; edit it; remove a line | Saved exactly as typed — nothing is worked out from labour; a day with no lines says *Not recorded*, a day with a 0-hour line says *Recorded*; over 24 h in a day or hours without a customer is refused. Another technician cannot edit your sheet. Office: view and export — unrecorded days export as `NOT RECORDED` |
+| E4 | Field Captures (office) | Lists work a tablet could not apply, with the reason; *Apply* works for labour; a held signature offers only *No action — record why* |
+| E4a | Field Captures (technician) | The menu item is there; it shows only **your own** referred captures with *With the office / Applied to the job / No action* and the office's note |
 | E5 | Closed Jobs, search and exports | Results load; an export is recorded on the audit trail |
+
+## G. Real-world testing fixes (27 October 2026)
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| G1 | Technician: *Complete job*, then on the first step press **Cancel completion** → *Back to In Progress* | Job is In Progress again; labour, travel, parts, notes, photos, documents, checklist answers and write-up all still there. Repeat from the signature step (step back from the signature): same result |
+| G2 | Leave the wizard part-way (or close the browser), reopen the job | *Continue completing* and **Cancel completion** are both offered on the job |
+| G3 | After the customer has signed, look for *Cancel completion* | Not offered; the server refuses it too |
+| G4 | Labour & Parts → *Add part* → **Add another part** twice → save; then *Add part* again | Three parts saved in one go; the next dialog starts empty |
+| G5 | Accept a **Parts** job and a **Test & Repair** job | No *Send Site Location?* prompt. A breakdown still asks |
+| G6 | Master: Administration → Settings → **Test bench fee** (e.g. R450). Technician: on a job tick **Test bench** beside call-out | Unticked by default; ticking adds the fee once to the totals, review and PDF; after signature it can no longer be changed, and changing the setting later does not alter the signed total |
+| G7 | Look for a discount control anywhere (job, wizard, office) | None. A job discounted before this release still shows *Discount (historical)* with its original total |
+| G8 | Job → Photos & documents: **Add Photo** and **Add Documents** (a PDF) | Both appear; video is not offered; a video file is refused |
+| G9 | Messages: open a chat → **Delete chat** → confirm | Gone from your list only; the other person still has it; if they write again it comes back with only the new message |
+| G10 | Notifications: *Mark as read* on one | The bell count drops immediately. A *Job card submitted* notification has a green edge, icon and label |
+| G11 | Office: a job card already issued → **Corrections** panel | The help text explains when to use it (a wrong issued job card), that the signed card is never edited, who raises it (Master) and who records the customer's acknowledgement |
+| G12 | Job → **What the customer has asked for** → *Record a request* | Recorded against the job, waiting for the office; the office accepts or declines with a reason; nothing on the job changes by itself |
+
+### What these screens are for (plain words)
+
+- **Corrections** — the only way to fix a job card the customer has already
+  received. The signed card is never changed. A Master writes a numbered
+  correction (a separate addendum PDF linked to the original) saying what was
+  wrong and what is right. If it changes a price, a quantity or the work
+  described, the customer must acknowledge it, and the office records that.
+- **Field Captures** — when a technician captured something offline (hours,
+  travel, a part, a note, a checklist answer, a signature or refusal) and by the
+  time it reached the server the job would not take it (signed, closed,
+  reassigned, or the job card changed). Nothing is lost: it waits here. The
+  office decides *Apply* or *No action*; the technician sees the outcome. A held
+  signature is never applied — the customer signs the current job card again.
+- **What the customer has asked for** — requests the customer makes after the
+  job was raised: more work, a different date, a change to what was agreed.
+  Anybody on the job records it; the office accepts or declines it with a
+  reason. It is not the original fault description and not the technician's
+  write-up, and nothing on the job changes by itself.
 
 ## F. Documents
 
@@ -118,6 +155,7 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
 | D1–D8 | | | |
 | E1–E5 | | | |
 | F1–F2 | | | |
+| G1–G12 | | | |
 
 Faults go to the owner with the check number, what was done, what was expected,
 what happened, and a screenshot.

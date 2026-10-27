@@ -13,6 +13,7 @@ import {
   checkReadyForSignature,
   checkReadyForSubmission,
   getJobTypeDefinition,
+  isJobTechnician,
   refusalAwaitingResolution,
   isIssuedStatus,
 } from '@/domain';
@@ -169,8 +170,11 @@ export const JobActionBar = ({
   if (
     (job.status === 'completion' || job.status === 'customer_signature') &&
     job.signature === null &&
+    job.pricingSnapshot === null &&
     refusalAwaitingResolution(job) === false &&
-    !getJobTypeDefinition(job.jobType).officeProcessed
+    !getJobTypeDefinition(job.jobType).officeProcessed &&
+    can(currentUser.role, 'jobs.captureWork') &&
+    (isJobTechnician(currentUser, job) || can(currentUser.role, 'jobs.captureAdministratively'))
   ) {
     actions.push(
       <Button

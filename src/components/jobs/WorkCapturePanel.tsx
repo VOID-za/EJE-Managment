@@ -95,6 +95,8 @@ export const WorkCapturePanel = ({
    */
   const [dialogNonce, setDialogNonce] = useState(0);
   const closeDialog = () => {
+    // A refusal belongs to the dialog it happened in, not the next one.
+    capture.clear();
     setDialog(null);
     setEditingId(null);
     setDialogNonce((value) => value + 1);
@@ -1075,7 +1077,10 @@ const PartDialog = ({
   const change = (key: number, field: keyof Omit<PartRow, 'key'>, value: string) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, [field]: value } : row)));
 
+  // Held across the per-line saves, so a second click cannot resubmit saved rows.
+  const [submitting, setSubmitting] = useState(false);
   const submit = async () => {
+    if (submitting) return;
     const found: Record<number, Record<string, string>> = {};
     for (const row of rows) {
       const problems = rowErrors(row);
@@ -1087,9 +1092,14 @@ const PartDialog = ({
       onSubmitEdit(valuesOf(rows[0]!));
       return;
     }
-    const saved = await onSubmitNew(rows.map(valuesOf));
-    // The lines that were saved leave the form; anything refused stays to be fixed.
-    setRows((current) => current.slice(saved));
+    setSubmitting(true);
+    try {
+      const saved = await onSubmitNew(rows.map(valuesOf));
+      // The lines that were saved leave the form; anything refused stays to be fixed.
+      setRows((current) => current.slice(saved));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const grandTotal = rows.reduce((sum, row) => {
@@ -1109,7 +1119,7 @@ const PartDialog = ({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void submit()} loading={busy} data-testid="save-parts">
+          <Button onClick={() => void submit()} loading={busy || submitting} data-testid="save-parts">
             {existing === null ? (rows.length === 1 ? 'Add part' : `Add ${rows.length} parts`) : 'Save changes'}
           </Button>
         </>

@@ -1,3 +1,4 @@
+import { isUuid } from './identifiers';
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import {
   asCustomerId,
@@ -180,6 +181,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
   }
 
   async findEntry(id: string): Promise<TimesheetEntry | null> {
+    if (!isUuid(id)) return null;
     const rows = await this.db
       .select()
       .from(schema.timesheetEntries)
