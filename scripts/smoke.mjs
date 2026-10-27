@@ -5720,10 +5720,12 @@ await step('with the network off, the tablet still shows the cached jobs', async
       throw new Error(`cached jobs not shown offline: ${missing.join(', ')}`);
     }
 
-    // And it is honest about what cannot be done.
+    // And it is honest about what can and cannot be done. OFF-2 (27 October
+    // 2026) made labour, travel, parts and notes holdable from here, so the page
+    // now says exactly that — and that what is held is not on the job.
     const body = await page.locator('main').innerText();
-    if (!/cannot be captured/i.test(body)) {
-      throw new Error('the offline page does not say that work cannot be captured');
+    if (!/can be held against your own job/i.test(body)) {
+      throw new Error('the offline page does not say what can be held while offline');
     }
     await page.screenshot({ path: `${shots}/40-offline-jobs.png`, fullPage: false });
   } finally {

@@ -32,6 +32,29 @@ the release, both read-only: the office's **Field Captures** screen opens (held
 signatures that cannot be verified land there), and a correction to labour,
 parts or the work performed cannot be raised as needing no acknowledgement.
 
+### Running it — the commands, in order (27 October 2026)
+
+The owner authorised deploying this branch to the existing VPS for staff
+testing on 27 October 2026. The tooling connects with the passphrase-protected
+key `%USERPROFILE%\.ssh\eje_vps`, so **a person types the passphrase**: run
+these in your own PowerShell window, in the worktree, with `<SHA>` the full
+commit hash given in the release report (CI green on it).
+
+```powershell
+# 0. Read-only. Prints the host, the live commit and health, the migration ledger.
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly
+
+# 1. The release, with the pending list step 0 printed — one of:
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0030_library_page_coverage_unknown,0031_test_repair_date_received,0032_office_lifecycle,0033_attendance_timesheets
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0032_office_lifecycle,0033_attendance_timesheets
+```
+
+The release script builds beside the live release, takes a backup and proves
+it restores, refuses anything but the exact pending list, migrates, switches,
+and health-checks — rolling back automatically if the new release is
+unhealthy. Then run `docs/vps-smoke-test.md` and hand staff
+`docs/staff-testing.md`.
+
 ### Which migrations are pending — VERIFY, do not assume
 
 The last release this repository records as LIVE is `4634d5d` (migrations up to
