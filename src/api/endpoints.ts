@@ -626,6 +626,8 @@ export const jobs = {
     request: { description: string; notes?: string; photoId?: string | null },
   ) => jobAction(jobId, 'awaiting_spares', request),
   returnToProgress: (jobId: string) => jobAction(jobId, 'return_to_progress'),
+  /** COMPLETE-CANCEL-1. */
+  cancelCompletion: (jobId: string) => jobAction(jobId, 'cancel_completion'),
   startCompletion: (jobId: string) => jobAction(jobId, 'start_completion'),
   saveReport: (jobId: string, report: unknown) => jobAction(jobId, 'save_report', report),
   startChecklist: (jobId: string) => jobAction(jobId, 'start_checklist'),

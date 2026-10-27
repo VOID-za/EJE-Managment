@@ -18,6 +18,7 @@ import {
   Button,
   Card,
   CardHeader,
+  ConfirmDialog,
   Icon,
   TextAreaField,
   TextField,
@@ -209,6 +210,7 @@ export const CompleteJobWizard = ({
    */
   const [signedJob, setSignedJob] = useState<Job | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
@@ -562,6 +564,23 @@ export const CompleteJobWizard = ({
       {/* The final submission, in the one component every screen that offers
           it uses. It is the last act of the close-out, so it happens here
           rather than by sending the technician to an office review page. */}
+      <ConfirmDialog
+        open={cancelling}
+        title="Cancel completion?"
+        message={`${job.jobNumber} goes back to In Progress. Everything already captured — labour, travel, parts, notes, checklist answers, photos, documents and the write-up — is kept, and you can complete it again later.`}
+        confirmLabel="Back to In Progress"
+        busy={operation.running}
+        onConfirm={async () => {
+          const ok = await operation.run(() => api.cancelCompletion(job.id));
+          setCancelling(false);
+          if (ok) {
+            onChanged();
+            onClose();
+          }
+        }}
+        onCancel={() => setCancelling(false)}
+      />
+
       <SubmitJobCardDialog
         view={signedJob === null ? view : { ...view, job: signedJob }}
         open={submitting}
@@ -593,9 +612,26 @@ export const CompleteJobWizard = ({
                 .join(' · ')}
             </p>
           </div>
-          <Button variant="ghost" onClick={onClose}>
-            Leave the wizard
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/*
+              CANCEL COMPLETION, on every step before the customer's signature.
+              COMPLETE-CANCEL-1. Back to In Progress, keeping everything; the
+              server refuses it once anybody has signed or refused.
+            */}
+            {!correcting &&
+              !isSignatureStep &&
+              !isIssuedStep &&
+              (job.status === 'completion' || job.status === 'customer_signature') &&
+              job.signature === null &&
+              !definition.officeProcessed && (
+                <Button variant="secondary" onClick={() => setCancelling(true)} data-testid="wizard-cancel-completion">
+                  Cancel completion
+                </Button>
+              )}
+            <Button variant="ghost" onClick={onClose}>
+              Leave the wizard
+            </Button>
+          </div>
         </div>
 
         <ol className="eje-scrollbar mt-5 flex min-w-max items-center gap-1 overflow-x-auto pb-1">

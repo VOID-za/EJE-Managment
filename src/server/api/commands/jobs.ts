@@ -689,6 +689,9 @@ export const JOB_COMMANDS: CommandRegistry = {
 
   start_signature: simple((context, job) => jobs.startSignature(context.operation, job)),
 
+  /** COMPLETE-CANCEL-1: back to In Progress before the customer signs, keeping everything. */
+  cancel_completion: simple((context, job) => jobs.cancelCompletion(context.operation, job)),
+
   capture_signature: withInput(
     z
       .object({

@@ -109,6 +109,8 @@ export type ActivityEventType =
   | 'moved_to_awaiting_spares'
   | 'returned_to_in_progress'
   | 'completion_started'
+  /** Completion cancelled before the customer signed; the job is In Progress again. */
+  | 'completion_cancelled'
   /** The write-up the customer signs for: fault findings, work performed. */
   | 'completion_report_saved'
   | 'customer_signed'

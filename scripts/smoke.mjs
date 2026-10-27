@@ -944,6 +944,35 @@ await step('write completion report', async () => {
   await page.getByText(/^Saved /).first().waitFor({ timeout: 20000 });
 });
 
+await step('Complete job sits at the BOTTOM of the In Progress page, after the captures (COMPLETE-POS-1)', async () => {
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  const footer = page.getByTestId('complete-job-footer');
+  await footer.waitFor({ timeout: 10000 });
+  // Not up in the action bar any more, and only one of it.
+  if ((await page.getByRole('button', { name: 'Complete job' }).count()) !== 1) {
+    throw new Error('Complete job is offered more than once');
+  }
+  const summary = await page.getByTestId('complete-job-summary').innerText();
+  if (!/labour/.test(summary) || !/part/.test(summary)) throw new Error(`the footer does not summarise the captures: ${summary}`);
+  // It is below the tab content: the footer's top is under the tab panel's.
+  const footerTop = (await footer.boundingBox())?.y ?? 0;
+  const tabsTop = (await page.getByRole('tablist').first().boundingBox())?.y ?? 0;
+  if (footerTop <= tabsTop) throw new Error('the Complete job footer is not below the job content');
+});
+
+await step('completion can be CANCELLED before the signature, keeping everything (COMPLETE-CANCEL-1)', async () => {
+  const before = await page.evaluate(async (base) => (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job, BASE);
+  await page.getByRole('button', { name: 'Complete job' }).click();
+  await page.getByText('Step 1 of', { exact: false }).waitFor({ timeout: 15000 });
+  await page.getByTestId('wizard-cancel-completion').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Back to In Progress' }).click();
+  await page.getByTestId('complete-job-footer').waitFor({ timeout: 15000 });
+  const after = await page.evaluate(async (base) => (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job, BASE);
+  if (after.status !== 'in_progress') throw new Error(`after cancelling, the job is ${after.status}`);
+  const ids = (job) => JSON.stringify([job.labour.map((l) => l.id), job.travel.map((t) => t.id), job.parts.map((p) => p.id), job.notes.map((n) => n.id), job.photos.map((p) => p.id), job.completionReport]);
+  if (ids(after) !== ids(before)) throw new Error('cancelling completion changed what was captured');
+});
+
 await step('Complete job opens the guided close-out, not just a status change', async () => {
   await page.getByRole('tab', { name: 'Overview' }).click();
   await page.getByRole('button', { name: 'Complete job' }).click();

@@ -1863,6 +1863,67 @@ export const returnToInProgress = async (context: OperationContext, job: Job): P
   return saved;
 };
 
+/**
+ * CANCELS COMPLETION, BEFORE THE CUSTOMER SIGNS. COMPLETE-CANCEL-1, the
+ * owner's instruction of 27 October 2026.
+ *
+ * A technician who started *Complete job* and realises something is missing
+ * goes back to In Progress, keeps everything, and completes again later. ONLY
+ * THE STATUS CHANGES: labour, travel, parts, notes, checklist answers,
+ * photographs, documents and the write-up are untouched (the write-up's local
+ * draft is the tablet's and is not touched either).
+ *
+ * A DELIBERATE, VALIDATED TRANSITION, never a back door:
+ *   - only from Completion or Customer Signature — the stages before a
+ *     customer has put their name to anything;
+ *   - refused once there is a signature, or a refusal the office has not
+ *     dealt with: a legally committed job is not reopened this way;
+ *   - from Customer Signature it goes back through Completion, both edges the
+ *     state machine already allows, so no new shortcut exists;
+ *   - not on a parts collection, which is office work with no In Progress;
+ *   - only by somebody who may capture on the job; audited.
+ */
+export const cancelCompletion = async (context: OperationContext, job: Job): Promise<Job> => {
+  assertCanCapture(context, job);
+  if (getJobTypeDefinition(job.jobType).officeProcessed) {
+    throw new WorkflowError(`${job.jobNumber} has no In Progress stage to return to.`, [
+      { code: 'not_applicable_to_job_type', message: 'A parts collection is processed by the office; there is no completion to cancel.' },
+    ]);
+  }
+  if (job.signature !== null) {
+    throw new WorkflowError(`${job.jobNumber} has been signed.`, [
+      { code: 'already_signed', message: 'The customer has signed this job card, so completion cannot be cancelled.' },
+    ]);
+  }
+  if (job.status !== 'completion' && job.status !== 'customer_signature') {
+    throw new WorkflowError(`${job.jobNumber} is not being completed.`, [
+      { code: 'not_in_completion', message: 'Completion can only be cancelled before the customer signs.' },
+    ]);
+  }
+  if (outstandingRefusal(job) !== null) {
+    throw new WorkflowError(`${job.jobNumber} has a refusal waiting for the office.`, [
+      { code: 'refusal_outstanding', message: 'The office deals with a refused job card; completion cannot be cancelled from here.' },
+    ]);
+  }
+  // From Customer Signature, back through Completion: both edges the state machine allows.
+  let atCompletion: Job = job;
+  if (job.status === 'customer_signature') {
+    transition(job, 'completion');
+    atCompletion = { ...job, status: 'completion' };
+  }
+  transition(atCompletion, 'in_progress');
+
+  const saved = await context.repos.jobs.save({ ...job, status: 'in_progress' });
+  await audit(context, {
+    jobId: job.id,
+    type: 'completion_cancelled',
+    summary: 'Completion cancelled — back to In Progress',
+    detail: `${userFullName(context.actor)} cancelled completion before the customer signed. Everything captured on the job is kept.`,
+    changes: changesBetween('status', { status: job.status }, { status: 'in_progress' }),
+  });
+  return saved;
+};
+
 export const startCompletion = async (context: OperationContext, job: Job): Promise<Job> => {
   assertCanCapture(context, job);
   transition(job, 'completion');

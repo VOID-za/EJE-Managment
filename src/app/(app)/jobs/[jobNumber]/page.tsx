@@ -48,6 +48,7 @@ import { JobProgressRail } from '@/components/jobs/JobProgressRail';
 import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
 import { JobTypeChip } from '@/components/jobs/JobTypeChip';
 import { WorkCapturePanel } from '@/components/jobs/WorkCapturePanel';
+import { CompleteJobFooter } from '@/components/jobs/CompleteJobFooter';
 import { useQuery } from '@/hooks/useQuery';
 import { useRememberJob } from '@/hooks/useRememberJob';
 import { useCacheJobDetail } from '@/hooks/useCacheJobDetail';
@@ -505,6 +506,11 @@ const JobDetailPage = ({
             emptyMessage="Actions taken against this job will be recorded here."
           />
         </Card>
+      )}
+
+      {/* COMPLETE-POS-1: at the bottom of the In Progress page, after the captures. */}
+      {job.status === 'in_progress' && workable && (
+        <CompleteJobFooter job={job} onChanged={refresh} onCompleteJob={() => setCompleting(true)} />
       )}
         </>
       )}

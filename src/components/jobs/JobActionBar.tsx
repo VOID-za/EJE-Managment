@@ -12,6 +12,7 @@ import {
   canTransferJob,
   checkReadyForSignature,
   checkReadyForSubmission,
+  getJobTypeDefinition,
   refusalAwaitingResolution,
   isIssuedStatus,
 } from '@/domain';
@@ -64,6 +65,7 @@ export const JobActionBar = ({
   const [sparesNotes, setSparesNotes] = useState('');
   const [sparesPhotoId, setSparesPhotoId] = useState('');
   const [confirmResume, setConfirmResume] = useState(false);
+  const [confirmCancelCompletion, setConfirmCancelCompletion] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [takingOver, setTakingOver] = useState(false);
@@ -121,30 +123,13 @@ export const JobActionBar = ({
       >
         Awaiting spares
       </Button>,
-      <Button
-        key="complete"
-        size="lg"
-        onClick={async () => {
-          /*
-           * Move the job into Completion, THEN open the wizard.
-           *
-           * The status change is the same operation as before — the wizard is
-           * not a second workflow — but it is no longer the whole of what the
-           * button does. Closing a job is a sequence, and this is where it
-           * starts.
-           */
-          const ok = await operation.run(() => jobs.startCompletion(job.id));
-          if (ok) {
-            onChanged();
-            onCompleteJob();
-          }
-        }}
-        loading={operation.running}
-        leadingIcon={<Icon name="wrench" className="size-5" />}
-      >
-        Complete job
-      </Button>,
     );
+    /*
+     * COMPLETE JOB IS NOT HERE ANY MORE. COMPLETE-POS-1 (27 October 2026): it
+     * sits at the BOTTOM of the In Progress page (`CompleteJobFooter`), after
+     * the labour, kilometres, parts and notes, so a technician reviews what
+     * they captured before starting completion.
+     */
   }
 
   if (job.status === 'awaiting_spares') {
@@ -171,6 +156,32 @@ export const JobActionBar = ({
         leadingIcon={<Icon name="wrench" className="size-5" />}
       >
         Continue completing
+      </Button>,
+    );
+  }
+
+  /*
+   * CANCEL COMPLETION — back to In Progress, keeping everything. COMPLETE-
+   * CANCEL-1. Offered here as well as in the wizard, for a technician who
+   * left the wizard (or lost the session) part-way and wants to go back to
+   * work rather than finish. Never once the customer has signed or refused.
+   */
+  if (
+    (job.status === 'completion' || job.status === 'customer_signature') &&
+    job.signature === null &&
+    refusalAwaitingResolution(job) === false &&
+    !getJobTypeDefinition(job.jobType).officeProcessed
+  ) {
+    actions.push(
+      <Button
+        key="cancel-completion"
+        size="lg"
+        variant="secondary"
+        onClick={() => setConfirmCancelCompletion(true)}
+        leadingIcon={<Icon name="refresh" className="size-5" />}
+        data-testid="cancel-completion"
+      >
+        Cancel completion
       </Button>,
     );
   }
@@ -494,6 +505,20 @@ export const JobActionBar = ({
           if (ok) onChanged();
         }}
         onCancel={() => setReleasing(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmCancelCompletion}
+        title="Cancel completion?"
+        message={`${job.jobNumber} goes back to In Progress. Everything already captured — labour, travel, parts, notes, checklist answers, photos, documents and the write-up — is kept, and you can complete it again later.`}
+        confirmLabel="Back to In Progress"
+        busy={operation.running}
+        onConfirm={async () => {
+          const ok = await operation.run(() => jobs.cancelCompletion(job.id));
+          setConfirmCancelCompletion(false);
+          if (ok) onChanged();
+        }}
+        onCancel={() => setConfirmCancelCompletion(false)}
       />
 
       <ConfirmDialog
