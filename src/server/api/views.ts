@@ -705,13 +705,23 @@ const deliveryTransports = () => {
 };
 
 export const shellView = async ({ repos, actor }: ViewContext) => {
-  const [notifications, messages] = await Promise.all([
+  const [notifications, messages, conversations] = await Promise.all([
     repos.notifications.list(actor.id),
     repos.chat.listMessagesFor(actor.id),
+    repos.chat.listConversations(actor.id),
   ]);
+  // NOTIF-AUDIT-1: the same count the Messages screen shows. A chat this
+  // person deleted contributes only what was written after the deletion.
+  const visible = conversations.flatMap((conversation) =>
+    messagesVisibleTo(
+      conversation,
+      actor.id,
+      messages.filter((message) => message.conversationId === conversation.id),
+    ),
+  );
   return {
     unreadNotifications: notifications.filter((entry) => entry.readAt === null).length,
-    unreadMessages: messages.filter(
+    unreadMessages: visible.filter(
       (message) => message.senderId !== actor.id && !message.readBy.includes(actor.id),
     ).length,
     delivery: deliveryTransports(),

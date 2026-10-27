@@ -30,7 +30,7 @@ import {
   type DeliveryTransports,
 } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { useCurrentUser } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -51,7 +51,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   customer_change_request: 'Customer change request',
   machine_approval_request: 'Machine approval request',
   document_approval_request: 'Document approval request',
-  job_submitted: 'Job submitted',
+  job_submitted: 'Job card submitted',
   signature_refused: 'Customer refused to sign',
   chat_message: 'New message',
 };
@@ -83,6 +83,24 @@ const NotificationsPageContent = () => {
   const user = useCurrentUser();
   const params = useSearchParams();
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId | null) ?? 'inbox');
+  /*
+   * NOTIF-AUDIT-1: EVERY READ/HANDLED CHANGE INVALIDATES THE WHOLE APP, not just
+   * this list, so the bell in the shell re-counts at the same moment. These
+   * called the API and refreshed only this page before, leaving the bell
+   * showing the old number until the next write elsewhere.
+   */
+  const { invalidate } = useApp();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const act = async (call: () => Promise<unknown>) => {
+    setActionError(null);
+    try {
+      await call();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'That did not go through. Try again.');
+    } finally {
+      invalidate();
+    }
+  };
 
   const query = useQuery(`notifications:${user.id}`, () => reads.notifications());
   const outboxQuery = useQuery('outbox:count', () => reads.outbox());
@@ -112,10 +130,7 @@ const NotificationsPageContent = () => {
           unread.length > 0 && (
             <Button
               variant="secondary"
-              onClick={async () => {
-                await notificationsApi.readAll();
-                query.refetch();
-              }}
+              onClick={() => act(() => notificationsApi.readAll())}
             >
               Mark all as read
             </Button>
@@ -165,6 +180,12 @@ const NotificationsPageContent = () => {
         className="mb-5"
       />
 
+      {actionError !== null && (
+        <p role="alert" className="mb-4 text-sm font-medium text-signal-600">
+          {actionError}
+        </p>
+      )}
+
       {tab === 'inbox' && officeQueue !== null && (
         <OfficeHandlingList rows={officeQueue.handling} onChanged={query.refetch} />
       )}
@@ -201,14 +222,8 @@ const NotificationsPageContent = () => {
                     ? null
                     : (jobNumbers.get(notification.jobId) ?? null)
                 }
-                onRead={async () => {
-                  await notificationsApi.read(notification.id);
-                  query.refetch();
-                }}
-                onHandled={async () => {
-                  await notificationsApi.handled(notification.id);
-                  query.refetch();
-                }}
+                onRead={() => act(() => notificationsApi.read(notification.id))}
+                onHandled={() => act(() => notificationsApi.handled(notification.id))}
               />
             </li>
           ))}
@@ -280,15 +295,31 @@ const NotificationRow = ({
         ? { href: `/jobs/${jobNumber}`, label: `Open ${jobNumber}` }
         : null;
   const actionable = REQUIRES_ACTION.includes(notification.type);
+  /*
+   * NOTIF-AUDIT-1: A SUBMITTED JOB CARD STANDS OUT: a green edge and icon and
+   * its own *Job card submitted* label, not colour alone, so the office spots
+   * the cards waiting to be checked in a long inbox.
+   */
+  const submitted = notification.type === 'job_submitted';
 
   return (
-    <Card className={cn(unread && 'border-eje-200 bg-eje-50/40')}>
+    <Card
+      className={cn(
+        unread && 'border-eje-200 bg-eje-50/40',
+        submitted && 'border-l-4 border-l-verdant-600',
+      )}
+    >
       <div className="flex items-start gap-3">
         <span
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)]',
-            unread ? 'bg-eje-100 text-eje-700' : 'bg-steel-100 text-steel-500',
+            submitted
+              ? 'bg-verdant-100 text-verdant-700'
+              : unread
+                ? 'bg-eje-100 text-eje-700'
+                : 'bg-steel-100 text-steel-500',
           )}
+          data-testid={submitted ? 'notification-submitted-icon' : undefined}
         >
           <Icon name={TYPE_ICONS[notification.type]} className="size-5" />
         </span>
@@ -296,6 +327,11 @@ const NotificationRow = ({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-steel-900">{notification.title}</p>
+            {submitted && (
+              <Badge tone="green" size="sm">
+                <span data-testid="notification-submitted-badge">Job card submitted</span>
+              </Badge>
+            )}
             {unread && (
               <Badge tone="blue" size="sm" dot>
                 Unread
@@ -348,8 +384,9 @@ const NotificationRow = ({
             {/* Each notification goes where it belongs: a job event to the job,
                 a message to its conversation. Sending everything to the job
                 screen would strand the ones that are not about a job. */}
+            {/* Opening a notification reads it (NOTIF-AUDIT-1). */}
             {destination !== null && (
-              <Link href={destination.href}>
+              <Link href={destination.href} onClick={unread ? onRead : undefined}>
                 <Button size="sm" variant="secondary">
                   {destination.label}
                 </Button>

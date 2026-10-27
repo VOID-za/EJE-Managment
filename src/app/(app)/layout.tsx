@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { SignInGate } from '@/components/layout/SignInGate';
@@ -30,6 +30,28 @@ const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
       ? Promise.resolve({ unreadNotifications: 0, unreadMessages: 0 })
       : reads.shell(),
   );
+
+  /*
+   * NOTIF-AUDIT-1: THE BADGES RE-COUNT BY THEMSELVES. They used to re-count
+   * only after a write made on this tablet, so a job assigned from the office
+   * never showed on the bell until the technician did something. Every 30
+   * seconds while the tab is visible, and the moment it is looked at again.
+   */
+  const refetchBadges = badges.refetch;
+  useEffect(() => {
+    if (currentUser === null) return;
+    const recount = () => {
+      if (document.visibilityState === 'visible') refetchBadges();
+    };
+    const timer = window.setInterval(recount, 30_000);
+    document.addEventListener('visibilitychange', recount);
+    window.addEventListener('focus', recount);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', recount);
+      window.removeEventListener('focus', recount);
+    };
+  }, [currentUser, refetchBadges]);
 
   const unreadCount = badges.data?.unreadNotifications ?? 0;
   const unreadMessages = badges.data?.unreadMessages ?? 0;

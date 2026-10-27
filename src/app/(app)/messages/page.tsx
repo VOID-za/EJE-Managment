@@ -18,7 +18,7 @@ import { ConversationThread } from '@/components/messages/ConversationThread';
 import { NewConversationDialog } from '@/components/messages/NewConversationDialog';
 import { conversations as conversationsApi, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
-import { useCurrentUser } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
 
 /**
  * Messages.
@@ -36,6 +36,8 @@ const MessagesPageContent = () => {
 
   const [selected, setSelected] = useState<string | null>(params.get('conversation'));
   const [composing, setComposing] = useState(false);
+  // NOTIF-AUDIT-1: invalidating re-counts the shell's Messages badge as well.
+  const { invalidate } = useApp();
   const [deleting, setDeleting] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -86,7 +88,7 @@ const MessagesPageContent = () => {
     void (async () => {
       try {
         await conversationsApi.markRead(conversation.id);
-        if (!cancelled) refresh();
+        if (!cancelled) invalidate();
       } catch {
         // Marking read is a convenience; failing it must never break the thread.
         markedRef.current = null;
@@ -96,7 +98,7 @@ const MessagesPageContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [active, unreadHere, refresh]);
+  }, [active, unreadHere, invalidate]);
 
   if (query.error !== null) {
     return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
@@ -205,7 +207,7 @@ const MessagesPageContent = () => {
             setDeleting(false);
             markedRef.current = null;
             setSelected(null);
-            refresh();
+            invalidate();
           } catch (error) {
             setDeleting(false);
             setDeleteError(error instanceof Error ? error.message : 'The chat was not deleted.');

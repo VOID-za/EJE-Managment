@@ -422,6 +422,20 @@ await step('"No, Thanks" sends nothing and leaves the job in progress', async ()
   if (whatsappEntries !== 0) throw new Error('declining still queued a WhatsApp message');
 });
 
+await step('marking a notification read drops the bell count at once, no reload (NOTIF-AUDIT-1)', async () => {
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  const bell = page.locator('a[aria-label^="Notifications"]').first();
+  const countOf = async () => Number(((await bell.getAttribute('aria-label')) ?? '').match(/(\d+) unread/)?.[1] ?? 0);
+  const before = await countOf();
+  if (before === 0) throw new Error('the technician has no unread notification to test the bell with');
+  await page.getByRole('button', { name: 'Mark as read' }).first().click();
+  const deadline = Date.now() + 8000;
+  while ((await countOf()) !== before - 1) {
+    if (Date.now() > deadline) throw new Error(`the bell still says ${await countOf()}, expected ${before - 1}`);
+    await page.waitForTimeout(200);
+  }
+});
+
 await step('declining is recorded on the job activity trail', async () => {
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Activity' }).click();
