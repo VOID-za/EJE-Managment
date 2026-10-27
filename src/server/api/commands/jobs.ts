@@ -405,11 +405,7 @@ export const JOB_COMMANDS: CommandRegistry = {
     (context, job, { lineId, ...input }) => jobs.updatePart(context.operation, job, lineId, input),
   ),
 
-  /*
-   * COST-5. Charges ride on `jobs.captureWork` like a part; a DISCOUNT needs
-   * `jobs.applyDiscount`, which the operation checks — not here, because a
-   * refusal belongs with the rule rather than at the boundary.
-   */
+  /* COST-5. Charges ride on `jobs.captureWork` like a part. */
   add_additional_charge: withInput(
     z
       .object({
@@ -434,25 +430,12 @@ export const JOB_COMMANDS: CommandRegistry = {
       jobs.updateAdditionalCharge(context.operation, job, lineId, input),
   ),
 
-  apply_discount: withInput(
-    z
-      .object({
-        amount: z.number().int().positive().max(1_000_000_000),
-        // Required, and the operation trims and refuses blank: a discount with
-        // no reason is a figure nobody can defend a month later.
-        reason: text(500),
-      })
-      .strict(),
-    (context, job, input) => jobs.applyDiscount(context.operation, job, input),
-  ),
-
-  clear_discount: command({
-    schema: z.object({}).strict(),
-    async run(context, _input: Record<string, never>, target) {
-      const job = await loadVisibleJob(context, target);
-      return jobs.clearDiscount(context.operation, job);
-    },
-  }),
+  /*
+   * apply_discount and clear_discount WERE HERE. DISCOUNT-OFF-1: the owner
+   * withdrew discounts on 27 October 2026, so there is no API path that can
+   * apply or remove one — not hidden, gone. A job that already carries a
+   * discount keeps it in its totals and on its documents.
+   */
 
   /**
    * A DRAFT BECOMES A JOB. DRAFT-1.
@@ -501,6 +484,12 @@ export const JOB_COMMANDS: CommandRegistry = {
   set_callout: withInput(
     z.object({ applied: z.boolean() }).strict(),
     (context, job, input) => jobs.setCalloutApplied(context.operation, job, input.applied),
+  ),
+
+  /** BENCH-1: the test bench fee, ticked or unticked. */
+  set_test_bench: withInput(
+    z.object({ applied: z.boolean() }).strict(),
+    (context, job, input) => jobs.setTestBenchApplied(context.operation, job, input.applied),
   ),
 
   add_note: withInput(

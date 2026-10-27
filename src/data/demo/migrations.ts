@@ -603,6 +603,18 @@ const v29ToV30 = (data: Loose): Loose => ({
   timesheetEntries: Array.isArray(data.timesheetEntries) ? data.timesheetEntries : [],
 });
 
+/** BENCH-1. No fee until the office sets one; no existing job carries it. */
+const v30ToV31 = (data: Loose): Loose => ({
+  ...data,
+  settings:
+    typeof data.settings === 'object' && data.settings !== null
+      ? { testBenchFee: 0, ...(data.settings as Record<string, unknown>) }
+      : data.settings,
+  jobs: Array.isArray(data.jobs)
+    ? (data.jobs as Record<string, unknown>[]).map((job) => ({ testBenchApplied: false, ...job }))
+    : data.jobs,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -626,6 +638,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   27: v27ToV28,
   28: v28ToV29,
   29: v29ToV30,
+  30: v30ToV31,
 };
 
 /**

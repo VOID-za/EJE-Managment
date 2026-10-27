@@ -12,6 +12,7 @@ const settings: SystemSettings = {
   companyAddress: '14 Anvil Road, Isando, Kempton Park, 1600',
   labourRates: { normal: 95000, overtime: 142500, double: 190000 },
   calloutRate: 85000,
+  testBenchFee: 0,
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',

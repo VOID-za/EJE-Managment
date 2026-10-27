@@ -3,8 +3,6 @@ import {
   acceptJob,
   addAdditionalCharge,
   addLabour,
-  applyDiscount,
-  clearDiscount,
   removeLineItem,
   updateAdditionalCharge,
 } from './job-operations';
@@ -47,7 +45,6 @@ import type { RepositoryBundle } from '@/data/repositories';
  */
 const technician = seedUsers.find((user) => user.id === 'user-tech-sipho')!;
 const master = seedUsers.find((user) => user.role === 'master')!;
-const coordinator = seedUsers.find((user) => user.role === 'coordinator')!;
 
 interface Harness {
   readonly context: OperationContext;
@@ -191,172 +188,39 @@ describe('an additional charge', () => {
   });
 });
 
-describe('a discount', () => {
-  it('is REFUSED to a Coordinator, because the rates are a Master’s', async () => {
-    /*
-     * EJE's own reasoning, applied: `settings.manage` is Master-only so that
-     * the charge-out rates stay with a Master, and a discount is that decision
-     * made for one customer instead of all of them. A Coordinator captures the
-     * work and prices the parts; what the customer is let off is not clerical.
-     */
-    const harness = build(coordinator);
-    const job = await workedJob(harness);
-
-    await expect(
-      applyDiscount(harness.context, job, { amount: 10_000, reason: 'Goodwill' }),
-    ).rejects.toThrow(WorkflowError);
+/**
+ * DISCOUNTS WERE WITHDRAWN on 27 October 2026 (DISCOUNT-OFF-1). There is no
+ * operation to apply or clear one. A job that ALREADY carries a discount — set
+ * before the withdrawal — must keep exactly the totals it had, because those
+ * totals may be on a document a customer signed.
+ */
+const withHistoricalDiscount = async (harness: Harness, job: Job, amount: number, reason: string): Promise<Job> =>
+  harness.repos.jobs.save({
+    ...job,
+    discount: { amount, reason, authorisedBy: master.id, authorisedAt: '2026-10-20T09:00:00.000Z' } as Job['discount'],
   });
 
-  it('is refused to a technician too', async () => {
-    const harness = build(technician);
-    const job = await workedJob(harness);
-
-    await expect(
-      applyDiscount(harness.context, job, { amount: 10_000, reason: 'Goodwill' }),
-    ).rejects.toThrow(WorkflowError);
-  });
-
-  it('comes off the subtotal BEFORE VAT', async () => {
-    /*
-     * THE ARITHMETIC THAT MATTERS. Taking a discount off after VAT would charge
-     * the customer tax on money they were never asked for — a real
-     * over-declaration, and the sort of thing an accounts department notices
-     * once and never forgets.
-     */
+describe('a discount recorded before discounts were withdrawn', () => {
+  it('still comes off the subtotal BEFORE VAT, exactly as it did', async () => {
     const harness = build(master);
-    let job = await workedJob(harness);
-    const before = await totalsOf(harness, job);
-
-    job = await applyDiscount(harness.context, job, {
-      amount: 10_000,
-      reason: 'Goodwill on a repeat call-out for the same fault',
-    });
-    const after = await totalsOf(harness, job);
-
-    expect(after.grossSubtotal).toBe(before.grossSubtotal);
-    expect(after.discountTotal).toBe(10_000);
-    expect(after.subtotal).toBe(before.grossSubtotal - 10_000);
-    expect(after.vat).toBe(Math.round((after.subtotal * after.pricing.vatPercentage) / 100));
-    // And the customer pays less VAT than they would have, by exactly the tax
-    // on the discount — which is the point.
-    expect(before.vat - after.vat).toBe(
-      Math.round((10_000 * after.pricing.vatPercentage) / 100),
-    );
-  });
-
-  it('requires a reason, and refuses one made of spaces', async () => {
-    const harness = build(master);
-    const job = await workedJob(harness);
-
-    await expect(
-      applyDiscount(harness.context, job, { amount: 5_000, reason: '   ' }),
-    ).rejects.toThrow(WorkflowError);
-  });
-
-  it('is refused above what the job comes to', async () => {
-    // EJE cannot issue an invoice for a negative amount.
-    const harness = build(master);
-    const job = await workedJob(harness);
+    const job = await withHistoricalDiscount(harness, await workedJob(harness), 10_000, 'Agreed before 27 October');
     const totals = await totalsOf(harness, job);
-
-    await expect(
-      applyDiscount(harness.context, job, {
-        amount: totals.grossSubtotal + 1,
-        reason: 'More than the whole job',
-      }),
-    ).rejects.toThrow(WorkflowError);
-
-    // The whole job exactly IS allowed: a job done for nothing is a decision
-    // EJE may legitimately take, and it is not the same as a negative one.
-    await expect(
-      applyDiscount(harness.context, job, {
-        amount: totals.grossSubtotal,
-        reason: 'Written off entirely — our own error',
-      }),
-    ).resolves.toBeDefined();
+    expect(totals.discountTotal).toBe(10_000);
+    expect(totals.subtotal).toBe(totals.grossSubtotal - 10_000);
+    expect(totals.vat).toBe(Math.round((totals.subtotal * totals.pricing.vatPercentage) / 100));
   });
 
-  it('is CAPPED, not left stranded, when a line is removed afterwards', async () => {
-    /*
-     * The discount is agreed against the job as it stood. Remove a line and
-     * the recorded figure can exceed what is left — so the effective discount
-     * is capped at the work, the RECORDED figure is left alone because the job
-     * still says what was agreed, and the capping is reported so a screen can
-     * say so rather than quietly showing a smaller number.
-     */
+  it('is still capped at the work when a line is removed afterwards', async () => {
     const harness = build(master);
-    let job = await workedJob(harness);
-    const full = await totalsOf(harness, job);
-
-    job = await applyDiscount(harness.context, job, {
-      amount: full.grossSubtotal,
-      reason: 'Written off entirely',
-    });
-    job = await removeLineItem(harness.context, job, 'labour', job.labour[0]!.id);
-    const after = await totalsOf(harness, job);
-
-    expect(after.grossSubtotal).toBeLessThan(full.grossSubtotal);
-    expect(after.discountRecorded).toBe(full.grossSubtotal);
-    expect(after.discountTotal).toBe(after.grossSubtotal);
-    expect(after.discountCapped).toBe(true);
-    // AND NOTHING GOES NEGATIVE, which is the failure this prevents.
-    expect(after.subtotal).toBe(0);
-    expect(after.vat).toBe(0);
-    expect(after.total).toBe(0);
-    // The record still says what was authorised.
-    expect(job.discount?.amount).toBe(full.grossSubtotal);
-  });
-
-  it('is replaced rather than added to, and both figures reach the trail', async () => {
-    const harness = build(master);
-    let job = await workedJob(harness);
-
-    job = await applyDiscount(harness.context, job, { amount: 5_000, reason: 'Goodwill' });
-    job = await applyDiscount(harness.context, job, {
-      amount: 8_000,
-      reason: 'Goodwill — agreed with Mr Pretorius',
-    });
-
-    expect(job.discount?.amount).toBe(8_000);
-    const events = await harness.repos.activity.list(job.id);
-    expect(events.filter((event) => event.type === 'discount_applied')).toHaveLength(1);
-    const amended = events.find((event) => event.type === 'discount_amended');
-    expect(amended).toBeDefined();
-    expect(amended?.summary).toContain('80,00');
-  });
-
-  it('records WHO authorised it, which is the whole point', async () => {
-    const harness = build(master);
-    let job = await workedJob(harness);
-    job = await applyDiscount(harness.context, job, { amount: 5_000, reason: 'Goodwill' });
-
-    expect(job.discount?.authorisedBy).toBe(master.id);
-    expect(job.discount?.authorisedAt.length).toBeGreaterThan(0);
-  });
-
-  it('can be taken off again, and the job prices at full value', async () => {
-    const harness = build(master);
-    let job = await workedJob(harness);
-    const full = await totalsOf(harness, job);
-
-    job = await applyDiscount(harness.context, job, { amount: 5_000, reason: 'Goodwill' });
-    job = await clearDiscount(harness.context, job);
-
-    expect(job.discount).toBeNull();
-    expect((await totalsOf(harness, job)).total).toBe(full.total);
-    const events = await harness.repos.activity.list(job.id);
-    expect(events.some((event) => event.type === 'discount_removed')).toBe(true);
-  });
-
-  it('refuses to clear one that is not there', async () => {
-    const harness = build(master);
-    const job = await workedJob(harness);
-    await expect(clearDiscount(harness.context, job)).rejects.toThrow(WorkflowError);
+    const job = await withHistoricalDiscount(harness, await workedJob(harness), 999_999_00, 'Legacy');
+    const totals = await totalsOf(harness, job);
+    expect(totals.discountTotal).toBe(totals.grossSubtotal);
+    expect(totals.discountCapped).toBe(true);
   });
 });
 
 describe('what the customer signed for, written down', () => {
-  it('carries the charge and the discount into the pricing snapshot', async () => {
+  it('carries the charge and a historical discount into the pricing snapshot', async () => {
     /*
      * The snapshot is the write-once answer to "what did the customer actually
      * sign for?", and a discount is the single figure most likely to be
@@ -369,10 +233,8 @@ describe('what the customer signed for, written down', () => {
       description: 'Workshop consumables',
       amount: 30_000,
     });
-    job = await applyDiscount(harness.context, job, {
-      amount: 20_000,
-      reason: 'Goodwill on a repeat visit',
-    });
+    // A discount recorded before the withdrawal: history the snapshot must keep.
+    job = await withHistoricalDiscount(harness, job, 20_000, 'Goodwill on a repeat visit');
 
     const settings = await settingsOf(harness);
     const totals = calculateJobTotals(job, settings);

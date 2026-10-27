@@ -25,6 +25,12 @@ export interface PricingInputs {
   readonly labourRates: LabourRateConfig;
   /** Fixed call-out fee, in cents, charged once on jobs where it applies. */
   readonly calloutRate: Cents;
+  /**
+   * Fixed test bench fee, in cents, charged once on jobs where it is ticked.
+   * BENCH-1 (27 October 2026). A snapshot taken before the fee existed has
+   * none, and reads as 0 — no historical job ever carried it.
+   */
+  readonly testBenchFee?: Cents;
   /** Rate per kilometre, in cents. */
   readonly kilometreRate: Cents;
   /** VAT as a percentage, e.g. 15 for 15%. */
@@ -42,6 +48,8 @@ export interface SystemSettings {
   readonly labourRates: LabourRateConfig;
   /** Fixed call-out fee, in cents. Applied per job, at the office's discretion. */
   readonly calloutRate: Cents;
+  /** Fixed test bench fee, in cents. Ticked per job. BENCH-1. */
+  readonly testBenchFee: Cents;
   /** Rate per kilometre, in cents. */
   readonly kilometreRate: Cents;
   /** VAT as a percentage, e.g. 15 for 15%. */

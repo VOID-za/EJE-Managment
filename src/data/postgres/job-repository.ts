@@ -1029,6 +1029,7 @@ export class PostgresJobRepository implements JobRepository {
           labourOvertimeCents: job.pricingSnapshot.labourRates.overtime,
           labourDoubleCents: job.pricingSnapshot.labourRates.double,
           calloutRateCents: job.pricingSnapshot.calloutRate,
+          testBenchFeeCents: job.pricingSnapshot.testBenchFee ?? 0,
           kilometreRateCents: job.pricingSnapshot.kilometreRate,
           vatPercentBasisPoints: vatBasisPointsFromPercent(job.pricingSnapshot.vatPercentage),
           ...totalsOf(materialisePricingSnapshot(job, job.pricingSnapshot).totals),

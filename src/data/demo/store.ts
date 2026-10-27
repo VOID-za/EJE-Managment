@@ -205,11 +205,14 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  *
  * v30 added the technician's own timesheet lines (TIMESHEET-2), empty.
  *
+ * v31 added the test bench fee (BENCH-1): 0 in settings until set, and unticked
+ * on every existing job.
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 30;
+export const SCHEMA_VERSION = 31;
 
 interface PersistedEnvelope {
   readonly version: number;

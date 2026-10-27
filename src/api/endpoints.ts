@@ -569,15 +569,14 @@ export const jobs = {
   updateAdditionalCharge: (jobId: string, input: unknown) =>
     jobAction(jobId, 'update_additional_charge', input),
   // COST-5. Money off the whole job. The server refuses anybody but a Master.
-  applyDiscount: (jobId: string, amount: number, reason: string) =>
-    jobAction(jobId, 'apply_discount', { amount, reason }),
-  clearDiscount: (jobId: string) => jobAction(jobId, 'clear_discount'),
   removeLine: (
     jobId: string,
     kind: 'labour' | 'travel' | 'part' | 'additional_charge',
     lineId: string,
   ) => jobAction(jobId, 'remove_line', { kind, lineId }),
   setCallout: (jobId: string, applied: boolean) => jobAction(jobId, 'set_callout', { applied }),
+  /** BENCH-1. */
+  setTestBench: (jobId: string, applied: boolean) => jobAction(jobId, 'set_test_bench', { applied }),
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),
   /**

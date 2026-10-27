@@ -39,6 +39,7 @@ export const seedSettings: SystemSettings = {
   companyAddress: '14 Anvil Road, Isando, Kempton Park, 1600',
   labourRates: { normal: 95_000, overtime: 142_500, double: 190_000 },
   calloutRate: 85_000,
+  testBenchFee: 45_000,
   kilometreRate: 1_850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',

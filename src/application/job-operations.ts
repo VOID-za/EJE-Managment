@@ -37,7 +37,6 @@ import {
   submissionCover,
   finalizedRefusal,
   isJobAtOrPastCompletion,
-  calculateJobTotals,
   labourRateLabel,
   siteAddressLine,
   siteNavigationUrl,
@@ -971,139 +970,12 @@ export const updateAdditionalCharge = async (
   return saved;
 };
 
-/**
- * MONEY OFF THE WHOLE JOB, AND ON WHOSE AUTHORITY. COST-5.
- *
- * A Master's alone — `jobs.applyDiscount` — for EJE's own stated reason: the
- * charge-out rates stay with a Master, and a discount is that decision made for
- * one customer instead of all of them.
- *
- * ONE PER JOB, REPLACED RATHER THAN ADDED TO. A second discount would be an
- * edit to the same commercial decision, and the audit trail is where edits
- * belong — so applying one over an existing one records the before and the
- * after, and the job carries a single figure the office can quote.
- *
- * REFUSED ABOVE THE GROSS SUBTOTAL, because an invoice for a negative sum is
- * not something EJE can issue. The figure is checked against the job as it
- * stands; a line removed afterwards can still strand it, which is why
- * `calculateJobTotals` caps it as well and says it has.
- *
- * **THE SHAPE IS NOW SETTLED. BD-19, answered by the owner on 23 October
- * 2026:** a FIXED AMOUNT rather than a percentage, applied to the subtotal
- * BEFORE VAT, at MASTER authority, with **no Coordinator discount authority**.
- * That is what was already shipped as the recommendation, so the decision cost
- * no code — which is the point of having built it up to the decision rather
- * than past it. Four rules carry it, and each is refused in its own place: the
- * amount is a whole positive number of cents (schema, 400), the reason is
- * required and may not be spaces (here, 422), the figure may not exceed the
- * gross subtotal (here, 422) and the authority is a Master's (here, 403).
+/*
+ * applyDiscount and clearDiscount WERE HERE (COST-5, BD-19). DISCOUNT-OFF-1:
+ * the owner withdrew discounts on 27 October 2026. No operation applies or
+ * removes one. `Job.discount` is kept, read-only, so a job that already
+ * carries a discount keeps exactly the totals and documents it had.
  */
-export interface DiscountInput {
-  /** Cents off, as a positive integer. */
-  readonly amount: number;
-  readonly reason: string;
-}
-
-export const applyDiscount = async (
-  context: OperationContext,
-  job: Job,
-  input: DiscountInput,
-): Promise<Job> => {
-  assertEditable(context, job);
-  if (!can(context.actor.role, 'jobs.applyDiscount')) {
-    throw new WorkflowError('A discount is a Master’s decision.', [
-      {
-        code: 'not_permitted',
-        message:
-          'Ask a Master to apply it. What a customer is let off is priced like a rate, and the rates are theirs.',
-      },
-    ]);
-  }
-
-  const reason = input.reason.trim();
-  if (reason.length === 0) {
-    throw new WorkflowError('A discount has to say why.', [
-      {
-        code: 'discount_reason_required',
-        message:
-          'Record what was agreed and with whom. A figure with no reason beside it cannot be defended when the invoice is queried.',
-      },
-    ]);
-  }
-
-  const settings = await context.repos.settings.get();
-  const { grossSubtotal } = calculateJobTotals(job, settings);
-  if (input.amount > grossSubtotal) {
-    throw new WorkflowError('That is more than the job comes to.', [
-      {
-        code: 'discount_exceeds_job',
-        message:
-          `The work on this job totals ${formatCurrency(grossSubtotal)} before VAT. ` +
-          'A discount cannot be larger than that — EJE cannot issue an invoice for a negative amount.',
-      },
-    ]);
-  }
-
-  const previous = job.discount;
-  const discount = {
-    amount: input.amount,
-    reason,
-    authorisedBy: context.actor.id,
-    authorisedAt: context.services.clock.now(),
-  };
-  const saved = await context.repos.jobs.save({ ...job, discount });
-
-  await audit(context, {
-    jobId: job.id,
-    type: previous === null ? 'discount_applied' : 'discount_amended',
-    summary:
-      previous === null
-        ? `Discount applied: ${formatCurrency(input.amount)}`
-        : `Discount changed to ${formatCurrency(input.amount)}`,
-    detail: `${reason}.` + administrativeNote(context, job),
-    changes: changesBetween(
-      'discount',
-      { amount: previous?.amount ?? null, reason: previous?.reason ?? null },
-      { amount: input.amount, reason },
-    ),
-  });
-  await recordPostSignatureChange(context, saved, 'A discount was applied.');
-  return saved;
-};
-
-/** Takes the discount off again. Master's, like applying one. */
-export const clearDiscount = async (context: OperationContext, job: Job): Promise<Job> => {
-  assertEditable(context, job);
-  if (!can(context.actor.role, 'jobs.applyDiscount')) {
-    throw new WorkflowError('A discount is a Master’s decision.', [
-      { code: 'not_permitted', message: 'Ask a Master to remove it.' },
-    ]);
-  }
-  const previous = job.discount;
-  if (previous === null) {
-    throw new WorkflowError('There is no discount on this job.', [
-      {
-        code: 'no_discount',
-        message: 'It may already have been removed. Reload the job and look again.',
-      },
-    ]);
-  }
-
-  const saved = await context.repos.jobs.save({ ...job, discount: null });
-  await audit(context, {
-    jobId: job.id,
-    type: 'discount_removed',
-    summary: `Discount removed: ${formatCurrency(previous.amount)}`,
-    detail: `It was applied for: ${previous.reason}. The job prices at full value again.`,
-    changes: changesBetween(
-      'discount',
-      { amount: previous.amount, reason: previous.reason },
-      { amount: null, reason: null },
-    ),
-  });
-  await recordPostSignatureChange(context, saved, 'A discount was removed.');
-  return saved;
-};
 
 /**
  * Amends an existing labour line.
@@ -1483,6 +1355,40 @@ export const setCalloutApplied = async (
     changes: changesBetween('callout', { applied: job.calloutApplied }, { applied }),
   });
 
+  return saved;
+};
+
+/**
+ * Ticks or unticks the test bench fee on a job. BENCH-1 (27 October 2026).
+ *
+ * The same rules as the call-out fee beside it: optional, off unless ticked,
+ * charged ONCE (a flag, not a line, so a retry or a reopening cannot add it
+ * twice), refused once the customer has signed (`assertEditable`, and the
+ * database guard since 0035), offered where a call-out is, and audited with
+ * from → to. The amount comes from the settings until signature, then from the
+ * job's snapshot — a later change to the fee never reprices a signed job.
+ */
+export const setTestBenchApplied = async (
+  context: OperationContext,
+  job: Job,
+  applied: boolean,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+  // Unticking is always allowed: it takes money off.
+  if (applied) assertCapturesLabourAndTravel(context, job, 'A test bench fee');
+  if (job.testBenchApplied === applied) return job;
+
+  const saved = await context.repos.jobs.save({ ...job, testBenchApplied: applied });
+  await audit(context, {
+    jobId: job.id,
+    type: 'test_bench_changed',
+    summary: applied ? 'Test bench fee applied' : 'Test bench fee removed',
+    detail: applied
+      ? 'The job card now carries the test bench fee from the current charge-out rates.'
+      : 'The test bench fee no longer appears on the job card or in its totals.',
+    changes: changesBetween('test bench', { applied: job.testBenchApplied }, { applied }),
+  });
   return saved;
 };
 

@@ -94,9 +94,8 @@ describe('the Coordinator', () => {
     expect(can('coordinator', 'settings.checklists')).toBe(true);
   });
 
-  it('does not gain the other system settings, or the discount, with them', () => {
+  it('does not gain the other system settings with them', () => {
     expect(can('coordinator', 'settings.manage')).toBe(false);
-    expect(can('coordinator', 'jobs.applyDiscount')).toBe(false);
     expect(can('coordinator', 'users.manageMasters')).toBe(false);
   });
 });

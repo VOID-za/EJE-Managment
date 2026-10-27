@@ -28,12 +28,15 @@ export interface JobTotals {
   readonly priceFrozen: boolean;
   readonly labourLines: readonly CostLine[];
   readonly calloutLines: readonly CostLine[];
+  /** The test bench fee, once, where it is ticked. BENCH-1. */
+  readonly testBenchLines: readonly CostLine[];
   readonly travelLines: readonly CostLine[];
   readonly partLines: readonly CostLine[];
   /** COST-5. One line per charge that is not labour, travel or a part. */
   readonly additionalChargeLines: readonly CostLine[];
   readonly labourTotal: Cents;
   readonly calloutTotal: Cents;
+  readonly testBenchTotal: Cents;
   readonly travelTotal: Cents;
   readonly partsTotal: Cents;
   readonly additionalChargesTotal: Cents;
@@ -70,6 +73,7 @@ export interface JobTotals {
 export const pricingInputsFrom = (settings: SystemSettings): PricingInputs => ({
   labourRates: { ...settings.labourRates },
   calloutRate: settings.calloutRate,
+  testBenchFee: settings.testBenchFee,
   kilometreRate: settings.kilometreRate,
   vatPercentage: settings.vatPercentage,
 });
@@ -123,7 +127,8 @@ export type CostedJob = Pick<
   | 'discount'
   | 'calloutApplied'
   | 'pricingSnapshot'
->;
+> &
+  Partial<Pick<Job, 'testBenchApplied'>>;
 
 export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): JobTotals => {
   // A signed job prices at its snapshot; everything else prices at current rates.
@@ -150,6 +155,25 @@ export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): Jo
           unit: 'ea',
           unitPrice: pricing.calloutRate,
           total: pricing.calloutRate,
+        },
+      ]
+    : [];
+
+  /*
+   * BENCH-1. Once per job, from the rates in force — or, on a signed job, from
+   * its snapshot. A snapshot taken before the fee existed has no figure, and
+   * no job signed then carried the fee, so it reads as nothing.
+   */
+  const benchFee = pricing.testBenchFee ?? 0;
+  const testBenchLines: CostLine[] = job.testBenchApplied === true
+    ? [
+        {
+          label: 'Test bench fee',
+          detail: 'Fixed test bench fee',
+          quantity: 1,
+          unit: 'ea',
+          unitPrice: benchFee,
+          total: benchFee,
         },
       ]
     : [];
@@ -194,11 +218,12 @@ export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): Jo
 
   const labourTotal = sum(labourLines);
   const calloutTotal = sum(calloutLines);
+  const testBenchTotal = sum(testBenchLines);
   const travelTotal = sum(travelLines);
   const partsTotal = sum(partLines);
   const additionalChargesTotal = sum(additionalChargeLines);
   const grossSubtotal =
-    labourTotal + calloutTotal + travelTotal + partsTotal + additionalChargesTotal;
+    labourTotal + calloutTotal + testBenchTotal + travelTotal + partsTotal + additionalChargesTotal;
 
   /*
    * THE DISCOUNT, CAPPED AT THE WORK. COST-5.
@@ -220,11 +245,13 @@ export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): Jo
     priceFrozen: job.pricingSnapshot !== null,
     labourLines,
     calloutLines,
+    testBenchLines,
     travelLines,
     partLines,
     additionalChargeLines,
     labourTotal,
     calloutTotal,
+    testBenchTotal,
     travelTotal,
     partsTotal,
     additionalChargesTotal,

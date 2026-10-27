@@ -278,6 +278,18 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
           },
         ]
       : []),
+    // BENCH-1: once, priced from the rates in force or the job's snapshot.
+    ...(job.testBenchApplied
+      ? [
+          {
+            description: 'Test bench fee',
+            detail: 'fixed test bench fee',
+            quantity: '1',
+            rate: formatCurrency(totals.pricing.testBenchFee ?? 0),
+            amount: formatCurrency(totals.testBenchTotal),
+          },
+        ]
+      : []),
     ...job.travel.map((entry, index) => ({
       description: 'Travel',
       detail: entry.description,

@@ -10,7 +10,6 @@ import {
   type LabourEntry,
   type LabourRateType,
   type AdditionalChargeEntry,
-  type JobDiscount,
   type PartEntry,
   type TravelEntry,
   type PricingInputs,
@@ -66,7 +65,7 @@ export const WorkCapturePanel = ({
   // do not apply. Driven by the job type definition rather than a code check.
   const capturesLabourAndTravel = getJobTypeDefinition(job.jobType).capturesLabourAndTravel;
   const [dialog, setDialog] = useState<
-    'labour' | 'travel' | 'part' | 'additional_charge' | 'discount' | null
+    'labour' | 'travel' | 'part' | 'additional_charge' | null
   >(null);
   // When set, the dialog is amending this line rather than adding a new one.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -85,14 +84,6 @@ export const WorkCapturePanel = ({
    */
   const capture = useOfflineCapture(job);
   const [held, setHeld] = useState<string | null>(null);
-  /*
-   * COST-5. A DISCOUNT IS A MASTER'S, and the server is what enforces it —
-   * `jobs.applyDiscount`. This only decides whether to DRAW the control, so a
-   * Coordinator is not offered a button that would be refused.
-   */
-  const currentUser = useCurrentUser();
-  const mayDiscount = can(currentUser.role, 'jobs.applyDiscount');
-  const [clearingDiscount, setClearingDiscount] = useState(false);
 
   /*
    * EVERY DIALOG OPENS FRESH. PARTS-MULTI-1, 27 October 2026.
@@ -471,54 +462,24 @@ export const WorkCapturePanel = ({
       </Card>
 
       {/*
-        THE DISCOUNT. COST-5.
-
-        One per job, with the reason and the person who authorised it, applied
-        to the subtotal BEFORE VAT — because VAT is charged on what the customer
-        actually pays. A MASTER'S decision, for EJE's own reason: the charge-out
-        rates stay with a Master, and this is that decision made for one
-        customer.
-
-        A Coordinator sees the figure and is not offered the button, rather than
-        being offered one that the server refuses.
+        DISCOUNTS WERE WITHDRAWN on 27 October 2026 (DISCOUNT-OFF-1, the owner's
+        instruction). Nothing here applies or removes one any more, and the
+        server has no command for it. A job that already carries a discount
+        keeps it — its totals and its signed document are history — so it is
+        SHOWN, read-only, and said to be historical.
       */}
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      {job.discount !== null && (
+        <Card>
           <CardHeader
-            title="Discount"
-            description={
-              job.discount === null
-                ? 'No discount on this job'
-                : `${formatCurrency(job.discount.amount)} off — ${job.discount.reason}`
-            }
+            title="Discount (historical)"
+            description={`${formatCurrency(job.discount.amount)} off — ${job.discount.reason}`}
           />
-          {editable && mayDiscount && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setDialog('discount')}
-              >
-                {job.discount === null ? 'Apply a discount' : 'Change the discount'}
-              </Button>
-              {job.discount !== null && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setClearingDiscount(true)}
-                >
-                  Remove it
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-        <p className="mt-2 text-xs text-steel-500">
-          {editable && !mayDiscount
-            ? 'A discount is a Master’s decision — the rates are theirs, and this is the same decision for one customer.'
-            : 'Taken off the subtotal before VAT, so the customer is not charged tax on money they were not asked for. The reason is printed on their job card.'}
-        </p>
-      </Card>
+          <p className="mt-2 text-xs text-steel-500">
+            Recorded before discounts were withdrawn. It stays on this job and its job card; a new
+            discount cannot be applied.
+          </p>
+        </Card>
+      )}
 
       {/*
         THE CALL-OUT FEE SITS UNDER PARTS, not up beside Labour.
@@ -563,6 +524,32 @@ export const WorkCapturePanel = ({
             Whether a call-out is charged is a commercial decision per job, so it is set here
             rather than assumed from the job type.
           </p>
+          {/* BENCH-1: beside the call-out, optional, off unless ticked, charged once. */}
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-4 border-t border-steel-100 pt-4">
+            <CardHeader
+              title="Test bench fee"
+              description={
+                job.testBenchApplied
+                  ? `Applied — ${formatCurrency(totals.pricing.testBenchFee ?? 0)}`
+                  : 'Not applied to this job'
+              }
+            />
+            <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
+              <input
+                type="checkbox"
+                checked={job.testBenchApplied}
+                disabled={!editable || operation.running}
+                onChange={async (event) => {
+                  const applied = event.target.checked;
+                  const ok = await operation.run(() => jobs.setTestBench(job.id, applied));
+                  if (ok) onChanged();
+                }}
+                className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+                data-testid="test-bench-checkbox"
+              />
+              Charge the test bench fee
+            </label>
+          </div>
         </Card>
       )}
 
@@ -705,50 +692,6 @@ export const WorkCapturePanel = ({
           }
         }}
         busy={operation.running}
-      />
-
-      <DiscountDialog
-        key={`discount-${job.discount?.authorisedAt ?? 'new'}`}
-        open={dialog === 'discount'}
-        existing={job.discount}
-        grossSubtotal={totals.grossSubtotal}
-        onClose={closeDialog}
-        onSubmit={async (values) => {
-          const ok = await operation.run(() =>
-            jobs.applyDiscount(job.id, values.amount, values.reason),
-          );
-          if (ok) {
-            closeDialog();
-            onChanged();
-          }
-        }}
-        busy={operation.running}
-      />
-
-      <ConfirmDialog
-        open={clearingDiscount}
-        title="Remove the discount?"
-        message={
-          <>
-            <p>
-              The job will price at full value again —{' '}
-              <span className="font-semibold">{formatCurrency(totals.grossSubtotal)}</span> before
-              VAT.
-            </p>
-            <p className="mt-2 text-steel-500">
-              The removal is recorded against the job, with who did it.
-            </p>
-          </>
-        }
-        confirmLabel="Remove the discount"
-        confirmVariant="danger"
-        busy={operation.running}
-        onConfirm={async () => {
-          const ok = await operation.run(() => jobs.clearDiscount(job.id));
-          setClearingDiscount(false);
-          if (ok) onChanged();
-        }}
-        onCancel={() => setClearingDiscount(false)}
       />
 
       <ConfirmDialog
@@ -1366,112 +1309,6 @@ const AdditionalChargeDialog = ({
           placeholder="0.00"
           required
         />
-      </div>
-    </Modal>
-  );
-};
-
-/**
- * Money off the whole job, with the reason. COST-5.
- *
- * The amount is checked against the job HERE as well as on the server, so the
- * office is told before they press the button rather than after: a discount
- * larger than the work would make an invoice for a negative sum.
- */
-const DiscountDialog = ({
-  open,
-  onClose,
-  onSubmit,
-  busy,
-  existing,
-  grossSubtotal,
-}: {
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly onSubmit: (values: { amount: number; reason: string }) => void;
-  readonly busy: boolean;
-  readonly existing: JobDiscount | null;
-  readonly grossSubtotal: number;
-}) => {
-  const [amount, setAmount] = useState(
-    existing === null ? '' : (existing.amount / 100).toFixed(2),
-  );
-  const [reason, setReason] = useState(existing?.reason ?? '');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const parsedAmount = Number.parseFloat(amount);
-  const cents = Number.isFinite(parsedAmount) ? Math.round(parsedAmount * 100) : Number.NaN;
-
-  const submit = () => {
-    const next: Record<string, string> = {};
-    if (!Number.isFinite(cents) || cents <= 0) {
-      next.amount = 'Enter the amount to take off.';
-    } else if (cents > grossSubtotal) {
-      next.amount = `The job comes to ${formatCurrency(grossSubtotal)} before VAT. A discount cannot be larger than that.`;
-    }
-    if (reason.trim().length === 0) {
-      next.reason = 'Record what was agreed and with whom. It is printed on the job card.';
-    }
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
-
-    onSubmit({ amount: cents, reason: reason.trim() });
-  };
-
-  return (
-    <Modal
-      open={open}
-      title={existing === null ? 'Apply a discount' : 'Change the discount'}
-      description="Taken off the subtotal before VAT. Recorded against you, with the reason."
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={submit} loading={busy}>
-            {existing === null ? 'Apply discount' : 'Save changes'}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-600">
-          The work on this job comes to{' '}
-          <span className="tabular font-semibold text-steel-900">
-            {formatCurrency(grossSubtotal)}
-          </span>{' '}
-          before VAT.
-        </p>
-        <TextField
-          label="Amount off (excl. VAT)"
-          type="number"
-          min="0"
-          step="0.01"
-          inputMode="decimal"
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-          error={errors.amount}
-          placeholder="0.00"
-          required
-        />
-        <TextAreaField
-          label="Why"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          error={errors.reason}
-          rows={3}
-          placeholder="e.g. Agreed with Mr Pretorius: goodwill on the repeat callout for the same fault."
-          required
-        />
-        {Number.isFinite(cents) && cents > 0 && cents <= grossSubtotal && (
-          <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-600">
-            Subtotal after the discount:{' '}
-            <span className="tabular font-semibold text-steel-900">
-              {formatCurrency(grossSubtotal - cents)}
-            </span>
-          </p>
-        )}
       </div>
     </Modal>
   );

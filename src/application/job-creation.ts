@@ -610,6 +610,8 @@ export const createJob = async (
     sparesRequest: null,
     // A call-out fee is a per-job commercial decision, applied on the job card.
     calloutApplied: false,
+    // BENCH-1: optional and unticked until somebody ticks it.
+    testBenchApplied: false,
     // Offered on the job types whose work is collected from the counter; false
     // everywhere else, where nobody collects anything.
     /*

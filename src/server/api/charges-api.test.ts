@@ -85,116 +85,15 @@ describe('additional charges over the API', () => {
   });
 });
 
-describe('a discount over the API', () => {
-  let master: ApiTestClient;
-  let coordinator: ApiTestClient;
-
-  beforeEach(async () => {
+describe('DISCOUNT-OFF-1: there is no discount over the API (27 October 2026)', () => {
+  it('apply_discount and clear_discount do not exist, for anybody, and the job is unchanged', async () => {
     startTestServer();
-    master = await signedInAs(DEMO_USERS.master);
-    coordinator = await signedInAs(DEMO_USERS.coordinator);
-  });
-
-  it('is applied by a Master, with the reason recorded', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
     const job = await jobOf(master, 'EJE-1061');
-    const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 5_000,
-      reason: 'Goodwill on a repeat call-out',
-    });
-
-    expect(response.status, JSON.stringify(response.error)).toBe(200);
-    const after = await jobOf(master, 'EJE-1061');
-    expect(after.discount?.amount).toBe(5_000);
-    expect(after.discount?.reason).toBe('Goodwill on a repeat call-out');
-  });
-
-  it('REFUSES A COORDINATOR, and says it is a Master’s decision', async () => {
-    const job = await jobOf(coordinator, 'EJE-1061');
-    const response = await coordinator.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 5_000,
-      reason: 'Goodwill',
-    });
-
-    /*
-     * 403, which is this API's own convention for `not_permitted`: a refusal
-     * that is PERMANENT FOR THIS ACTOR, as against a 422 for something that
-     * cannot be done YET. A Coordinator will never be able to discount under
-     * the shipped rule, so 403 is the honest code — see `PERMISSION_CODES`.
-     */
-    expect(response.status).toBe(403);
-    const said = JSON.stringify(response.error);
-    expect(said).toMatch(/Master/u);
-
-    // AND NOTHING CHANGED, which is what makes the refusal worth anything.
-    expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
-  });
-
-  it('refuses a blank reason', async () => {
-    const job = await jobOf(master, 'EJE-1061');
-    const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 5_000,
-      reason: '   ',
-    });
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
-  });
-
-  it('refuses a zero, a negative and a fractional amount by SCHEMA, with a 400', async () => {
-    /*
-     * BD-19 is a FIXED AMOUNT OFF, so the only amounts that mean anything are
-     * whole positive cents. A zero is a discount nobody took, a negative one is
-     * a surcharge wearing a discount's name — and it would ADD to the subtotal
-     * while the audit trail recorded "discount applied", which is the one way
-     * this figure could misstate an invoice. Refused at the schema (400), not
-     * by the operation, so no refusal depends on reaching the money code.
-     */
-    const job = await jobOf(master, 'EJE-1061');
-    for (const amount of [0, -5_000, 12.5]) {
-      const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
-        amount,
-        reason: 'Not a discount at all',
-      });
-      expect(response.status, `amount ${amount}`).toBe(400);
+    for (const action of ['apply_discount', 'clear_discount']) {
+      const response = await master.post(`/api/jobs/${job.id}/${action}`, { amount: 5_000, reason: 'Goodwill' });
+      expect(response.status, action).toBe(404);
     }
     expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
-  });
-
-  it('refuses more than the job comes to, naming the figure', async () => {
-    const job = await jobOf(master, 'EJE-1061');
-    const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 999_999_999,
-      reason: 'More than the whole job',
-    });
-
-    expect(response.status).toBe(422);
-    expect(JSON.stringify(response.error)).toMatch(/before VAT/u);
-  });
-
-  it('is cleared by a Master and refused to a Coordinator', async () => {
-    const job = await jobOf(master, 'EJE-1061');
-    await master.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 5_000,
-      reason: 'Goodwill',
-    });
-
-    const refused = await coordinator.post(`/api/jobs/${job.id}/clear_discount`, {});
-    expect(refused.status).toBe(403);
-    expect((await jobOf(master, 'EJE-1061')).discount?.amount).toBe(5_000);
-
-    const cleared = await master.post(`/api/jobs/${job.id}/clear_discount`, {});
-    expect(cleared.status, JSON.stringify(cleared.error)).toBe(200);
-    expect((await jobOf(master, 'EJE-1061')).discount).toBeNull();
-  });
-
-  it('refuses a parameter nobody offers', async () => {
-    // `.strict()` everywhere: a client sending `percentage` is a client built
-    // against a rule EJE have not settled, and it should be told.
-    const job = await jobOf(master, 'EJE-1061');
-    const response = await master.post(`/api/jobs/${job.id}/apply_discount`, {
-      amount: 5_000,
-      reason: 'Goodwill',
-      percentage: 10,
-    });
-    expect(response.status).toBe(400);
   });
 });

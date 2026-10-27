@@ -102,6 +102,8 @@ export const seedSettings: SystemSettings = {
     double: 190000,
   },
   calloutRate: 85000,
+  // BENCH-1: the demonstration's test bench fee.
+  testBenchFee: 45000,
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',

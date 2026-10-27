@@ -183,6 +183,7 @@ const baseJob = (jobNumber: string): Job => ({
   signatureRefusals: [],
   sparesRequest: null,
   calloutApplied: false,
+  testBenchApplied: false,
   courierCollection: false,
   waybillNumber: '',
   deliveryNote: '',

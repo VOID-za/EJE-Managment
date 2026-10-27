@@ -207,6 +207,9 @@ export const settingsSchema = z
       })
       .strict(),
     calloutRate: z.number().int().nonnegative().max(100_000_000),
+    // BENCH-1: same bounds and units (cents) as the call-out fee.
+    // Optional: a client from before the fee existed keeps the stored value.
+    testBenchFee: z.number().int().nonnegative().max(100_000_000).optional(),
     kilometreRate: z.number().int().nonnegative().max(100_000_000),
     vatPercentage: z.number().nonnegative().max(100),
     jobNumberPrefix: text(20),
@@ -231,6 +234,7 @@ export const runUpdateSettings = async (
   const stored = await context.repos.settings.get();
   return settings.updateSettings(context.operation, {
     ...input,
+    testBenchFee: input.testBenchFee ?? stored.testBenchFee,
     nextJobSequence: stored.nextJobSequence,
   });
 };

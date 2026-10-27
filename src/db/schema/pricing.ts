@@ -44,6 +44,8 @@ export const pricingSnapshots = pgTable(
     labourOvertimeCents: cents('labour_overtime_cents').notNull(),
     labourDoubleCents: cents('labour_double_cents').notNull(),
     calloutRateCents: cents('callout_rate_cents').notNull(),
+    /** BENCH-1. 0 on every snapshot taken before the fee existed. */
+    testBenchFeeCents: cents('test_bench_fee_cents').notNull().default(0),
     kilometreRateCents: cents('kilometre_rate_cents').notNull(),
     /** Hundredths of a percent: 1500 is 15%. */
     vatPercentBasisPoints: integer('vat_percent_basis_points').notNull(),

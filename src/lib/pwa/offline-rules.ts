@@ -171,6 +171,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   save_report:
     'The completion report replaces what is on the server, so it cannot be written offline.',
   set_callout: 'The call-out flag replaces a value on the job, so it needs a connection.',
+  set_test_bench: 'The test bench fee replaces a value on the job, so it needs a connection.',
   /*
    * COST-5. CHARGES AND DISCOUNTS ARE OFFICE WORK, NOT FIELD CAPTURE.
    *
@@ -201,9 +202,6 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
     'A charge is added by the office against what it is being charged for, so it needs a connection.',
   update_additional_charge:
     'Changing a charge replaces a value on the job, so it needs a connection.',
-  apply_discount:
-    'A discount is a Master’s decision and its amount is checked against the job on the server, so it needs a connection.',
-  clear_discount: 'Removing a discount changes the record on the server, so it needs a connection.',
   set_collection: 'The collection method replaces a value on the job, so it needs a connection.',
   set_media_visibility: 'Reclassifying a photograph changes a stored value, so it needs a connection.',
   add_media:

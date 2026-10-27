@@ -671,6 +671,13 @@ export interface Job {
   readonly calloutApplied: boolean;
 
   /**
+   * True when the test bench fee applies to this job. BENCH-1 (27 October
+   * 2026). Optional and off unless ticked; charged once; priced from the
+   * settings until the job is signed, then from its snapshot.
+   */
+  readonly testBenchApplied: boolean;
+
+  /**
    * Collection jobs only: a courier is collecting rather than the customer.
    *
    * A courier has no reason to see what the customer paid, so prices are

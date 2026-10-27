@@ -31,6 +31,8 @@ export const systemSettings = pgTable(
     labourOvertimeCents: cents('labour_overtime_cents').notNull(),
     labourDoubleCents: cents('labour_double_cents').notNull(),
     calloutRateCents: cents('callout_rate_cents').notNull(),
+    /** BENCH-1. The test bench fee; 0 until the office sets one. */
+    testBenchFeeCents: cents('test_bench_fee_cents').notNull().default(0),
     kilometreRateCents: cents('kilometre_rate_cents').notNull(),
     /**
      * VAT as hundredths of a percent: 1500 is 15%.
@@ -58,6 +60,7 @@ export const systemSettings = pgTable(
       and ${table.kilometreRateCents} >= 0
       and ${table.vatPercentBasisPoints} >= 0
     `),
+    check('system_settings_test_bench_fee_non_negative', sql`${table.testBenchFeeCents} >= 0`),
   ],
 );
 

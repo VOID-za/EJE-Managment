@@ -300,7 +300,6 @@ export type Capability =
    * `jobs.captureWork`, like a part, because a technician already enters part
    * prices and a consumable is the same act.
    */
-  | 'jobs.applyDiscount'
   /**
    * RAISING, READING AND RELEASING A DRAFT JOB. DRAFT-1.
    *
@@ -404,7 +403,6 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   // Sending a job card the customer did not sign: BD-06. Master's alone.
   'jobs.authoriseUnsignedDelivery',
   // Money off a job: COST-5. Master's alone, for the same reason the rates are.
-  'jobs.applyDiscount',
   // Draft job cards: DRAFT-1. "Master-only" is the requirement's own wording.
   'jobs.manageDrafts',
   // Correcting a job's recorded details before signature: JOB-EDIT-1 (#72).
@@ -463,8 +461,8 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   /*
    * RATES AND CHECKLISTS, and no other system setting. The owner asked for the
    * Coordinator to maintain both from Administration. What does NOT come with
-   * them: `settings.manage` (everything else), and `jobs.applyDiscount`, which
-   * is a decision about one customer's bill rather than the price list.
+   * them: `settings.manage` (everything else). (Discounts were withdrawn on 27
+   * October 2026 — DISCOUNT-OFF-1 — so there is no discount capability at all.)
    */
   'settings.rates',
   'settings.checklists',

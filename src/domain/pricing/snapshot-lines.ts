@@ -17,6 +17,7 @@ const settingsFromSnapshot = (snapshot: PricingSnapshot): SystemSettings =>
   ({
     labourRates: snapshot.labourRates,
     calloutRate: snapshot.calloutRate,
+    testBenchFee: snapshot.testBenchFee ?? 0,
     kilometreRate: snapshot.kilometreRate,
     vatPercentage: snapshot.vatPercentage,
   }) as SystemSettings;
@@ -40,6 +41,7 @@ const settingsFromSnapshot = (snapshot: PricingSnapshot): SystemSettings =>
 export type PricingLineKind =
   | 'labour'
   | 'callout'
+  | 'test_bench'
   | 'travel'
   | 'part'
   /** COST-5. A charge that is not labour, travel or a part. */
@@ -124,6 +126,9 @@ export const materialisePricingSnapshot = (
   });
   totals.calloutLines.forEach((line) => {
     push('callout', null, line);
+  });
+  totals.testBenchLines.forEach((line) => {
+    push('test_bench', null, line);
   });
   totals.travelLines.forEach((line, index) => {
     push('travel', job.travel[index]?.id ?? null, line);

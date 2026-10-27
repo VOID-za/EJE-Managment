@@ -231,6 +231,7 @@ const RatesPanel = ({
     overtime: (settings.labourRates.overtime / 100).toFixed(2),
     double: (settings.labourRates.double / 100).toFixed(2),
     callout: (settings.calloutRate / 100).toFixed(2),
+    testBench: (settings.testBenchFee / 100).toFixed(2),
     kilometre: (settings.kilometreRate / 100).toFixed(2),
     vat: String(settings.vatPercentage),
   }));
@@ -240,9 +241,10 @@ const RatesPanel = ({
 
   const toCents = (value: string): number => Math.round(Number.parseFloat(value) * 100);
   const valid =
-    ['normal', 'overtime', 'double', 'callout', 'kilometre'].every((key) =>
-      Number.isFinite(Number.parseFloat(draft[key as keyof typeof draft])),
-    ) && Number.isFinite(Number.parseFloat(draft.vat));
+    ['normal', 'overtime', 'double', 'callout', 'testBench', 'kilometre'].every((key) => {
+      const value = Number.parseFloat(draft[key as keyof typeof draft]);
+      return Number.isFinite(value) && value >= 0;
+    }) && Number.isFinite(Number.parseFloat(draft.vat));
 
   const save = async () => {
     setSaving(true);
@@ -273,6 +275,7 @@ const RatesPanel = ({
           double: toCents(draft.double),
         },
         calloutRate: toCents(draft.callout),
+        testBenchFee: toCents(draft.testBench),
         kilometreRate: toCents(draft.kilometre),
         vatPercentage: Number.parseFloat(draft.vat),
       }),
@@ -321,7 +324,7 @@ const RatesPanel = ({
         </Card>
 
         <Card>
-          <CardHeader title="Call-out, travel and VAT" />
+          <CardHeader title="Call-out, test bench, travel and VAT" />
           <div className="mt-4 space-y-4">
             <TextField
               label="Call-out fee"
@@ -335,6 +338,21 @@ const RatesPanel = ({
                 setDraft((current) => ({ ...current, callout: event.target.value }));
               }}
               hint={`Currently ${formatCurrency(settings.calloutRate)}. Charged once, on jobs where the office applies it.`}
+            />
+            {/* BENCH-1: edited by a Master or a Coordinator, like every rate here. */}
+            <TextField
+              label="Test bench fee"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={draft.testBench}
+              onChange={(event) => {
+                setSaved(false);
+                setDraft((current) => ({ ...current, testBench: event.target.value }));
+              }}
+              hint={`Currently ${formatCurrency(settings.testBenchFee)}. Charged once, on jobs where the test bench box is ticked. A signed job keeps the fee it was signed at.`}
+              data-testid="test-bench-fee"
             />
             <TextField
               label="Kilometre rate"

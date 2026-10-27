@@ -135,6 +135,8 @@ export const jobs = pgTable(
     primaryTechnicianId: uuid('primary_technician_id').references(() => users.id),
 
     calloutApplied: boolean('callout_applied').notNull().default(false),
+    /** BENCH-1. Whether the test bench fee applies. Frozen once signed (0035). */
+    testBenchApplied: boolean('test_bench_applied').notNull().default(false),
 
     /**
      * DECISION 3 / the Parts workflow.

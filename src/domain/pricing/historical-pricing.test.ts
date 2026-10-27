@@ -24,6 +24,7 @@ const RATES_A: SystemSettings = {
   companyAddress: '14 Anvil Road, Isando, Kempton Park, 1600',
   labourRates: { normal: 95000, overtime: 142500, double: 190000 },
   calloutRate: 85000,
+  testBenchFee: 0,
   kilometreRate: 1850,
   vatPercentage: 15,
   jobNumberPrefix: 'EJE-',
@@ -187,6 +188,8 @@ describe('snapshot completeness', () => {
       'calloutRate',
       'kilometreRate',
       'labourRates',
+      // BENCH-1: the test bench fee is frozen with the other rates.
+      'testBenchFee',
       'vatPercentage',
     ]);
     expect(Object.keys(snapshot.labourRates).sort()).toEqual([

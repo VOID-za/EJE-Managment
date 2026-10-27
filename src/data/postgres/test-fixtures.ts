@@ -206,6 +206,7 @@ export const jobFixture = (jobNumber: string, over: Partial<Job> = {}): Job => (
   signatureRefusals: [],
   sparesRequest: null,
   calloutApplied: false,
+  testBenchApplied: false,
   courierCollection: false,
   waybillNumber: '',
   deliveryNote: '',

@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadJobView } from './job-view';
 import { updateMachine } from './machine-operations';
-import { applyDiscount } from './job-operations';
-import { WorkflowError } from './errors';
 import type { OperationContext } from './context';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
@@ -71,26 +69,11 @@ const closedJobView = async (harness: Harness) => {
   throw new Error('the demonstration data has no closed job with a machine');
 };
 
-describe('BD-19: the discount rule, as answered', () => {
-  it('is a MASTER’s alone — no Coordinator authority was granted', () => {
-    expect(can(master.role, 'jobs.applyDiscount')).toBe(true);
-    // The owner declined the Coordinator ceiling. This is the assertion that
-    // makes granting it a deliberate act rather than a quiet convenience.
-    expect(can(coordinator.role, 'jobs.applyDiscount')).toBe(false);
-    expect(can(technician.role, 'jobs.applyDiscount')).toBe(false);
-  });
-
-  it('refuses a Coordinator at the operation, not merely in the screen', async () => {
-    const harness = build();
-    const job = (await loadJobView(harness.repos, 'EJE-1061'))!.job;
-
-    const error = await applyDiscount(harness.as(coordinator), job, {
-      amount: 5_000,
-      reason: 'Goodwill',
-    }).catch((cause: unknown) => cause);
-
-    expect(error).toBeInstanceOf(WorkflowError);
-    expect((error as WorkflowError).violations.map((v) => v.code)).toContain('not_permitted');
+describe('DISCOUNT-OFF-1: discounts were withdrawn (27 October 2026)', () => {
+  it('no role holds a discount capability any more — there is nothing to grant', () => {
+    for (const user of [master, coordinator, technician]) {
+      expect(can(user.role, 'jobs.applyDiscount' as never), user.role).toBe(false);
+    }
   });
 });
 

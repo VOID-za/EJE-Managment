@@ -164,6 +164,7 @@ export const withoutPrices = <T extends Job>(job: T): T => ({
   parts: job.parts.map((part) => ({ ...part, unitPrice: 0 })),
   pricingSnapshot: null,
   calloutApplied: false,
+  testBenchApplied: false,
 });
 
 /**

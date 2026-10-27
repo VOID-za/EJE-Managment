@@ -21,7 +21,7 @@ export const updateSettings = async (
       {
         code: 'not_permitted',
         message:
-          'Rates, travel, call-out and VAT are commercial terms and are set by a Master or a Coordinator.',
+          'Rates, travel, call-out, the test bench fee and VAT are commercial terms and are set by a Master or a Coordinator.',
       },
     ]);
   }
@@ -34,6 +34,7 @@ export const updateSettings = async (
   if (previous.labourRates.overtime !== saved.labourRates.overtime) changes.push('overtime');
   if (previous.labourRates.double !== saved.labourRates.double) changes.push('double time');
   if (previous.calloutRate !== saved.calloutRate) changes.push('call-out');
+  if (previous.testBenchFee !== saved.testBenchFee) changes.push('test bench fee');
   if (previous.kilometreRate !== saved.kilometreRate) changes.push('travel');
   if (previous.vatPercentage !== saved.vatPercentage) changes.push('VAT');
 
@@ -60,6 +61,7 @@ export const updateSettings = async (
         labourOvertime: previous.labourRates.overtime,
         labourDouble: previous.labourRates.double,
         callout: previous.calloutRate,
+        testBench: previous.testBenchFee,
         kilometre: previous.kilometreRate,
         vatPercentage: previous.vatPercentage,
       },
@@ -68,6 +70,7 @@ export const updateSettings = async (
         labourOvertime: saved.labourRates.overtime,
         labourDouble: saved.labourRates.double,
         callout: saved.calloutRate,
+        testBench: saved.testBenchFee,
         kilometre: saved.kilometreRate,
         vatPercentage: saved.vatPercentage,
       },

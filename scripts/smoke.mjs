@@ -911,6 +911,22 @@ await step('Add part opens EMPTY and takes several parts at once, an unsaved lin
   await page.reload({ waitUntil: 'networkidle' });
 });
 
+await step('the test bench fee is a checkbox beside the call-out, off by default, charged once (BENCH-1)', async () => {
+  const box = page.getByTestId('test-bench-checkbox');
+  await box.waitFor({ timeout: 10000 });
+  if (await box.isChecked()) throw new Error('the test bench fee was ticked by default');
+  await box.check();
+  await page.getByText('Test bench fee').first().waitFor({ timeout: 10000 });
+  const job = await page.evaluate(async (base) => (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job, BASE);
+  if (job.testBenchApplied !== true) throw new Error('ticking the box did not reach the job');
+  // Untick, so the rest of the journey prices exactly as before.
+  await box.uncheck();
+  await page.waitForFunction(async (base) => {
+    const view = (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job;
+    return view.testBenchApplied === false;
+  }, BASE, { timeout: 10000 });
+});
+
 await step('labour line is priced', async () => {
   // 2 hrs at R950.00 normal time = R1 900.00
   await page.getByText(/R\u00a01\u00a0900,00/).first().waitFor({ timeout: 8000 });
