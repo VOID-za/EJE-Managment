@@ -368,3 +368,18 @@ export const priorityRank = (priority: JobPriority | null): number =>
  */
 export const priorityLabelOrUngraded = (priority: JobPriority | null): string =>
   priority === null ? 'Not graded' : priorityLabel(priority);
+
+/**
+ * WHETHER ACCEPTING THIS JOB OFFERS THE SITE'S PIN LOCATION. PIN-1, the owner's
+ * instruction of 27 October 2026: a Parts job and a Test & Repair job must NOT
+ * send a pin location when a technician accepts them — the work is at EJE's
+ * counter or workshop, not at the customer's site.
+ *
+ * A rule in code rather than a column: `visitsSite` is reference data stored
+ * in the database, and this narrows one message without changing what the job
+ * type is. The accept screen and the server (`sendSiteLocation`) both ask it.
+ */
+const NO_SITE_PIN: readonly JobTypeCode[] = ['parts', 'test_and_repair'];
+
+export const offersSiteLocation = (jobType: JobTypeCode): boolean =>
+  !NO_SITE_PIN.includes(jobType) && getJobTypeDefinition(jobType).visitsSite;

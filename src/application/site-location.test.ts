@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { offersSiteLocation } from '@/domain';
 import {
   SITE_LOCATION_TEMPLATE,
   acceptJob,
@@ -301,5 +302,35 @@ describe('WhatsApp failure never affects the job', () => {
     const harness = build(new FailingWhatsAppService());
     const { job, input } = await acceptEje1048(harness);
     await expect(sendSiteLocation(harness.context, job, input)).resolves.toBeDefined();
+  });
+});
+
+describe('PIN-1 — no pin location for a Parts or a Test & Repair job (27 October 2026)', () => {
+  it.each(['parts', 'test_and_repair'] as const)('refuses to queue a site location for a %s job, and queues nothing', async (jobType) => {
+    const harness = build();
+    const { job, input } = await acceptEje1048(harness);
+    const other = { ...job, jobType };
+    await expect(sendSiteLocation(harness.context, other, input)).rejects.toMatchObject({
+      violations: [{ code: 'not_applicable_to_job_type' }],
+    });
+    expect((await harness.repos.outbox.list()).filter((row) => row.template === SITE_LOCATION_TEMPLATE)).toHaveLength(0);
+    expect(harness.outbox.listSync()).toHaveLength(0);
+  });
+
+  it('still offers it on the job types that go to the customer’s site', () => {
+    expect(offersSiteLocation('parts')).toBe(false);
+    expect(offersSiteLocation('test_and_repair')).toBe(false);
+    for (const code of ['breakdown', 'service', 'installation'] as const) {
+      expect(offersSiteLocation(code), code).toBe(true);
+    }
+  });
+
+  it('a breakdown still queues exactly one site location, unchanged', async () => {
+    const harness = build();
+    const { job, input } = await acceptEje1048(harness);
+    expect(job.jobType).not.toBe('parts');
+    const result = await sendSiteLocation(harness.context, job, input);
+    expect(result.queued).toBe(true);
+    expect((await harness.repos.outbox.list()).filter((row) => row.template === SITE_LOCATION_TEMPLATE)).toHaveLength(1);
   });
 });

@@ -1,5 +1,6 @@
 import {
   can,
+  offersSiteLocation,
   isIssuedStatus,
   asAttachmentId,
   asLineItemId,
@@ -526,6 +527,19 @@ export const sendSiteLocation = async (
   job: Job,
   input: SiteLocationInput,
 ): Promise<SiteLocationResult> => {
+  /*
+   * PIN-1 (27 October 2026): no pin location for a Parts or a Test & Repair
+   * job, on any path — refused here, before anything is queued, whatever the
+   * screen offered.
+   */
+  if (!offersSiteLocation(job.jobType)) {
+    throw new WorkflowError(`${job.jobNumber} does not send a site location.`, [
+      {
+        code: 'not_applicable_to_job_type',
+        message: 'A Parts or Test & Repair job is done at EJE, so no pin location is sent when it is accepted.',
+      },
+    ]);
+  }
   const navigationUrl = siteNavigationUrl(input.site);
   const configured = context.services.whatsapp.configured;
 

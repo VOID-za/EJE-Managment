@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { can, getJobTypeDefinition, type Job } from '@/domain';
+import { can, offersSiteLocation, type Job } from '@/domain';
 import { buildSiteLocationMessage } from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
 import { jobs as api, reads } from '@/api/endpoints';
@@ -180,10 +180,8 @@ export const AcceptJobFlow = ({
            * site — and a future job type that is collected rather than
            * attended would otherwise silently start offering one.
            */
-          if (
-            getJobTypeDefinition(job.jobType).visitsSite &&
-            can(currentUser.role, 'jobs.acceptField')
-          ) {
+          // PIN-1: never for a Parts or a Test & Repair job.
+          if (offersSiteLocation(job.jobType) && can(currentUser.role, 'jobs.acceptField')) {
             setLocationOutcome(null);
             setLocationPrompt(acceptedJob);
           } else {
