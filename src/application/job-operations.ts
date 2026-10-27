@@ -1553,7 +1553,12 @@ export const addMedia = async (
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: input.kind,
-    visibility: input.visibility ?? 'customer_facing',
+    /*
+     * BD-26, approved 27 October 2026: a video is internal and never goes to a
+     * customer. The upload route already filed every video for the office;
+     * this makes the operation say so too, whatever its caller asks for.
+     */
+    visibility: input.kind === 'video' ? 'internal' : (input.visibility ?? 'customer_facing'),
     fileName: input.fileName,
     caption: input.caption,
     storageKey: stored.storageKey,
@@ -1752,6 +1757,21 @@ export const setMediaVisibility = async (
   if (existing === undefined) {
     throw new WorkflowError('That photograph is not on this job.', [
       { code: 'media_not_on_job', message: 'It may already have been removed. Reload the job.' },
+    ]);
+  }
+  /*
+   * BD-26: A VIDEO IS NEVER CUSTOMER-FACING. This reclassification was the one
+   * path that could have labelled one so — nothing would have sent it (the job
+   * card carries photographs only, and the email only the PDF), but a label
+   * saying "for the customer" on something EJE never send them is false.
+   */
+  if (visibility === 'customer_facing' && job.videos.some((item) => item.id === attachmentId)) {
+    throw new WorkflowError('A video is never shown to the customer.', [
+      {
+        code: 'video_internal_only',
+        message:
+          'Videos are kept for EJE only and are never sent to a customer (BD-26). Photograph what the customer needs to see.',
+      },
     ]);
   }
   // Nothing to say and nothing to write.
@@ -4035,7 +4055,7 @@ export const transferJobToTechnician = async (
    * technician may be on the road and not in the application; a transfer that
    * reaches nobody until they next open it is how a breakdown waits. Queued on
    * the outbox inside this transaction and sent after the commit, with the
-   * approved assignment template (BD-25 records the provisional wording).
+   * approved assignment template (BD-25, approved 27 October 2026).
    */
   await queueAssignmentWhatsApp(
     context,

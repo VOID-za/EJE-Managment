@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { isFinalized, type Job } from '@/domain';
+import {
+  ACKNOWLEDGEMENT_REQUIRED_AREAS,
+  CORRECTED_AREAS,
+  acknowledgementRequiredFor,
+  awaitsAcknowledgement,
+  isFinalized,
+  type Job,
+} from '@/domain';
 import {
   acceptJob,
   addLabour,
@@ -84,7 +91,8 @@ const RAISE = {
   reason: 'The labour hours were captured against the wrong rate.',
   narrative: 'Three hours were charged at the after-hours rate and should have been normal time.',
   areas: ['labour', 'charges'],
-  acknowledgementRequired: false,
+  // BD-27: a correction to labour and charges must be acknowledged.
+  acknowledgementRequired: true,
 } as const;
 
 describe('raising a correction to an issued job card', () => {
@@ -286,8 +294,13 @@ describe("the customer's acknowledgement of a correction", () => {
 
   it('REFUSES one on a correction that never asked for it', async () => {
     // Otherwise the addendum the customer holds — which says acknowledgement
-    // is not required — would disagree with the record.
-    const correction = await raiseJobCorrection(harness.as(master), issued, RAISE);
+    // is not required — would disagree with the record. (A dates correction:
+    // BD-27 leaves that one to the Master's judgement.)
+    const correction = await raiseJobCorrection(harness.as(master), issued, {
+      ...RAISE,
+      areas: ['dates'],
+      acknowledgementRequired: false,
+    });
     await expect(
       recordCorrectionAcknowledgement(harness.as(master), correction.id, {
         acknowledgedBy: 'Pieter Nel',
@@ -340,5 +353,71 @@ describe('who may read a correction', () => {
     // needs to know that EJE have corrected their job card.
     const theirs = await listJobCorrections(harness.as(technician), issued);
     expect(theirs.map((entry) => entry.id)).toContain(correction.id);
+  });
+});
+
+describe('BD-27 — when the customer must acknowledge a correction (approved 27 October 2026)', () => {
+  let harness: Harness;
+  let issued: Job;
+  beforeEach(async () => {
+    harness = buildHarness();
+    issued = await issuedAndSigned(harness);
+  });
+
+  it('REFUSES raising a price, quantity or described-work correction as not requiring acknowledgement', async () => {
+    for (const area of ACKNOWLEDGEMENT_REQUIRED_AREAS) {
+      await expect(
+        raiseJobCorrection(harness.as(master), issued, { ...RAISE, areas: [area], acknowledgementRequired: false }),
+        area,
+      ).rejects.toMatchObject({ violations: [{ code: 'acknowledgement_required' }] });
+    }
+    // Refused means nothing was written.
+    expect(await harness.repos.jobs.listCorrections(issued.id)).toHaveLength(0);
+  });
+
+  it('still refuses when such an area is listed beside one the Master decides', async () => {
+    await expect(
+      raiseJobCorrection(harness.as(master), issued, {
+        ...RAISE,
+        areas: ['dates', 'work_performed'],
+        acknowledgementRequired: false,
+      }),
+    ).rejects.toMatchObject({ violations: [{ code: 'acknowledgement_required' }] });
+  });
+
+  it('leaves every other area to the Master, either way', async () => {
+    for (const area of CORRECTED_AREAS.filter((candidate) => !ACKNOWLEDGEMENT_REQUIRED_AREAS.includes(candidate))) {
+      expect(acknowledgementRequiredFor([area]), area).toBe(false);
+    }
+    const optional = await raiseJobCorrection(harness.as(master), issued, {
+      ...RAISE,
+      areas: ['customer_details'],
+      acknowledgementRequired: false,
+    });
+    expect(optional.acknowledgement).toBe('not_required');
+    const chosen = await raiseJobCorrection(harness.as(master), issued, {
+      ...RAISE,
+      areas: ['recommendations'],
+      acknowledgementRequired: true,
+    });
+    expect(chosen.acknowledgement).toBe('required');
+  });
+
+  it('does not treat a required acknowledgement as given until somebody records it', async () => {
+    const correction = await raiseJobCorrection(harness.as(master), issued, RAISE);
+    expect(correction.acknowledgement).toBe('required');
+    expect(awaitsAcknowledgement(correction)).toBe(true);
+    expect(correction.acknowledged).toBeNull();
+
+    const [stored] = await harness.repos.jobs.listCorrections(issued.id);
+    expect(awaitsAcknowledgement(stored!)).toBe(true);
+
+    const recorded = await recordCorrectionAcknowledgement(harness.as(master), correction.id, {
+      acknowledgedBy: 'Pieter Nel',
+      method: 'By telephone',
+      note: '',
+    });
+    expect(recorded.acknowledgement).toBe('recorded');
+    expect(awaitsAcknowledgement(recorded)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import {
   CORRECTED_AREA_LABEL,
+  acknowledgementRequiredFor,
   asCorrectedArea,
   can,
   correctionFileName,
@@ -49,6 +50,12 @@ import { measureStored } from './stored-file';
  * would be exactly the "legally significant approval rule" the mandate says
  * not to invent. The Master states whether it is required; the system records
  * what then happened, and says so on the addendum either way.
+ *
+ * *Amended 27 October 2026 — EJE STATED IT (BD-27, approved by the owner):*
+ * a correction that changes a price, a quantity or the described work
+ * REQUIRES the customer's acknowledgement (`acknowledgementRequiredFor`), and
+ * the server refuses to raise one of those as not requiring it. For every
+ * other area the Master still decides, as above.
  */
 
 const REASON_LIMIT = 2000;
@@ -159,6 +166,22 @@ export const raiseJobCorrection = async (
   const ordered = (Object.keys(CORRECTED_AREA_LABEL) as CorrectedArea[]).filter((area) =>
     areas.includes(area),
   );
+
+  /*
+   * BD-27. Refused, not quietly turned into "required": the Master said it was
+   * not needed, and silently overriding what somebody chose is how a record
+   * ends up saying something its author never meant. They are told the rule
+   * and choose again.
+   */
+  if (acknowledgementRequiredFor(ordered) && !input.acknowledgementRequired) {
+    throw new WorkflowError('This correction needs the customer’s acknowledgement.', [
+      {
+        code: 'acknowledgement_required',
+        message:
+          'It changes a price, a quantity or the work described, and EJE require the customer to acknowledge those (BD-27). Raise it as requiring their acknowledgement.',
+      },
+    ]);
+  }
 
   const existing = await context.repos.jobs.listCorrections(job.id);
   const sequence = existing.length + 1;

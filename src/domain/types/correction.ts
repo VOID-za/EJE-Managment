@@ -104,6 +104,33 @@ export const asCorrectedArea = (value: string): CorrectedArea | null =>
  * one is a job half done. `recorded` is the only state that may follow
  * `required`, and it is write-once.
  */
+/**
+ * THE AREAS WHOSE CORRECTION THE CUSTOMER MUST ACKNOWLEDGE. BD-27, approved by
+ * the owner on 27 October 2026: "Require customer acknowledgement when price,
+ * quantity, or described work changes."
+ *
+ * Price and quantity live in labour (hours), travel (kilometres), parts
+ * (quantities and prices) and the charges and totals; the described work is
+ * the work performed. A correction naming any of these REQUIRES the
+ * acknowledgement and cannot be raised as not requiring one.
+ *
+ * Everything else — the reported fault, recommendations, the checklist,
+ * machine and customer details, dates, other — is still the Master's
+ * judgement, which may also require it. The approval named three things and
+ * this does not widen them.
+ */
+export const ACKNOWLEDGEMENT_REQUIRED_AREAS: readonly CorrectedArea[] = [
+  'labour',
+  'travel',
+  'parts',
+  'charges',
+  'work_performed',
+];
+
+/** Whether a correction to these areas must be acknowledged by the customer. BD-27. */
+export const acknowledgementRequiredFor = (areas: readonly CorrectedArea[]): boolean =>
+  areas.some((area) => ACKNOWLEDGEMENT_REQUIRED_AREAS.includes(area));
+
 export type AcknowledgementState = 'not_required' | 'required' | 'recorded';
 
 /** What the customer did, when acknowledgement was required and has happened. */

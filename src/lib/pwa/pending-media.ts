@@ -195,7 +195,27 @@ export interface HoldOutcome {
  * reached. A queue that silently dropped the oldest photograph would lose
  * exactly the evidence the technician was told was safe.
  */
+/**
+ * WHY A VIDEO IS NOT HELD. BD-30, approved by the owner on 27 October 2026:
+ * videos are not held for later upload, and the technician is told why.
+ * One sentence, used by the screen and by `holdMedia` alike.
+ */
+export const OFFLINE_VIDEO_REFUSAL =
+  'A video cannot be kept on this tablet — one clip would fill the space held for ' +
+  'unsent work. Film it again when you have a signal, or photograph the fault, which ' +
+  'can be held.';
+
+/** Whether bytes of this type may be held on the device. Photographs only. BD-30. */
+export const isHoldableMediaType = (contentType: string): boolean => !contentType.startsWith('video/');
+
 export const holdMedia = async (input: HoldMediaInput): Promise<HoldOutcome> => {
+  /*
+   * BD-30, enforced HERE as well as on the screen: this is the function that
+   * makes a row durable, so no other caller can put a video in the store.
+   */
+  if (!isHoldableMediaType(input.file.type)) {
+    return { held: false, reason: OFFLINE_VIDEO_REFUSAL };
+  }
   if (!isMediaQueueSupported() || input.userId.length === 0) {
     return { held: false, reason: 'This tablet cannot hold photographs for later.' };
   }

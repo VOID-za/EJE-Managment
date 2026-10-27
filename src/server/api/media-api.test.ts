@@ -179,6 +179,29 @@ describe('capturing a photograph on a job', () => {
     expect(view.data.view.job.photos[0]?.sizeBytes).toBe(bytes.length);
   });
 
+  it('does NOT attach the same photograph twice when a retry re-sends the whole file under its key. BD-29', async () => {
+    /*
+     * BD-29, approved 27 October 2026: an interrupted upload is resumed by
+     * re-sending the WHOLE file, and that must never become a second
+     * attachment. The key is minted once per capture, so the retry is the
+     * same request and is answered from the first.
+     */
+    const bytes = jpeg('sent whole, twice');
+    const send = () =>
+      sipho.upload<PhotoList>(
+        `/api/jobs/${job.id}/media`,
+        { name: 'contactor.jpg', type: 'image/jpeg', bytes },
+        { idempotencyKey: 'photo-retry-1' },
+      );
+    const first = await send();
+    const retry = await send();
+
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('Idempotent-Replay')).toBe('true');
+    expect(retry.data.photos).toHaveLength(1);
+    expect(retry.data.photos[0]?.id).toBe(first.data.photos[0]?.id);
+  });
+
   it('attaches a second photograph rather than replaying the first', async () => {
     // Deliberately NOT idempotent: two taps are two photographs, which is what
     // the technician asked for both times.

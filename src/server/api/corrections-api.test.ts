@@ -22,7 +22,8 @@ const RAISE = {
   reason: 'The labour hours were captured against the wrong rate.',
   narrative: 'Three hours were charged after hours and should have been normal time.',
   areas: ['labour', 'charges'],
-  acknowledgementRequired: false,
+  // BD-27: a correction to labour and charges must be acknowledged.
+  acknowledgementRequired: true,
 } as const;
 
 describe('corrections through the API', () => {
@@ -54,6 +55,14 @@ describe('corrections through the API', () => {
   it('REFUSES a technician', async () => {
     const refused = await raise(technician);
     expect([403, 404, 422]).toContain(refused.status);
+  });
+
+  it('REFUSES a labour correction raised as needing no acknowledgement. BD-27', async () => {
+    const unacknowledged = await raise(master, { ...RAISE, acknowledgementRequired: false });
+    expect(unacknowledged.status).toBe(422);
+    expect(unacknowledged.error?.violations?.map((violation) => violation.code)).toContain(
+      'acknowledgement_required',
+    );
   });
 
   it('REFUSES a body with no areas at all', async () => {

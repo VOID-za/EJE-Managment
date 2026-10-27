@@ -12,11 +12,11 @@
 > |---|---|
 > | MEDIA-7 | Real-browser proof that the PREVIEW carries the photograph — **done 26 Oct** |
 > | SITE-2 | Office workflow for legacy multi-site customers: register filter, site-by-site preview — **done 26 Oct** |
-> | WA-TRANSFER-1 | A transfer notifies the receiving technician on WhatsApp with the approved assignment template (provisional, BD-25) |
+> | WA-TRANSFER-1 | A transfer notifies the receiving technician on WhatsApp with the approved assignment template (provisional, BD-25 — *approved 27 Oct, no longer provisional*) |
 > | Register hygiene | AUD-3, AUD-4, AUD-8, DELIV-7, BD-02, BD-06 rows were overtaken and never marked — **amended 26 Oct** |
 > | OFF-10, OFF-11 | Already met by existing behaviour; specified with evidence — **amended 26 Oct** |
 > | SITE-1 follow-up | A preflight report of legacy multi-site customers, so the database constraint can be planned — **done 26 Oct** |
-> | WA-TRANSFER-1 | **done 26 Oct** (provisional wording, BD-25) |
+> | WA-TRANSFER-1 | **done 26 Oct** (provisional wording, BD-25 — *approved 27 Oct*) |
 > | ATTEND-1 reporting | The register exported for a date range, audited — **done 26 Oct** |
 >
 > **2. Owner decisions that change business behaviour** (each OPEN in *Open business decisions*)

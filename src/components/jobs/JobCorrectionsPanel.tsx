@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   CORRECTED_AREAS,
   CORRECTED_AREA_LABEL,
+  acknowledgementRequiredFor,
   awaitsAcknowledgement,
   can,
   userFullName,
@@ -64,6 +65,14 @@ export const JobCorrectionsPanel = ({
     return person === undefined ? 'Somebody no longer on the system' : userFullName(person);
   };
 
+  /*
+   * BD-27, approved 27 October 2026: a correction to a price, a quantity or the
+   * work described REQUIRES the customer's acknowledgement. The same rule the
+   * server enforces, so the form never offers a "No" it would refuse.
+   */
+  const mustAcknowledge = acknowledgementRequiredFor(areas);
+  const askForAcknowledgement = mustAcknowledge || acknowledgementRequired;
+
   const toggleArea = (area: CorrectedArea): void => {
     setAreas((current) =>
       current.includes(area) ? current.filter((entry) => entry !== area) : [...current, area],
@@ -72,7 +81,12 @@ export const JobCorrectionsPanel = ({
 
   const raise = async (): Promise<void> => {
     const ok = await operation.run(() =>
-      api.raiseCorrection(job.id, { reason, narrative, areas, acknowledgementRequired }),
+      api.raiseCorrection(job.id, {
+        reason,
+        narrative,
+        areas,
+        acknowledgementRequired: askForAcknowledgement,
+      }),
     );
     if (!ok) return;
     setReason('');
@@ -341,7 +355,7 @@ export const JobCorrectionsPanel = ({
                   <Button
                     type="button"
                     size="sm"
-                    variant={acknowledgementRequired ? 'primary' : 'secondary'}
+                    variant={askForAcknowledgement ? 'primary' : 'secondary'}
                     onClick={() => setAcknowledgementRequired(true)}
                     data-testid="correction-acknowledgement-required"
                   >
@@ -350,7 +364,8 @@ export const JobCorrectionsPanel = ({
                   <Button
                     type="button"
                     size="sm"
-                    variant={acknowledgementRequired ? 'secondary' : 'primary'}
+                    variant={askForAcknowledgement ? 'secondary' : 'primary'}
+                    disabled={mustAcknowledge}
                     onClick={() => setAcknowledgementRequired(false)}
                     data-testid="correction-acknowledgement-not-required"
                   >
@@ -358,8 +373,9 @@ export const JobCorrectionsPanel = ({
                   </Button>
                 </div>
                 <p className="mt-1 text-[11px] leading-relaxed text-steel-400">
-                  The addendum says which of these it is, either way. EJE have not settled when an
-                  acknowledgement is required, so this is your judgement and is recorded as such.
+                  {mustAcknowledge
+                    ? 'Required: this correction changes a price, a quantity or the work described, and EJE require the customer to acknowledge those.'
+                    : 'The addendum says which of these it is, either way. For these areas EJE leave it to your judgement, and it is recorded as such.'}
                 </p>
               </fieldset>
 

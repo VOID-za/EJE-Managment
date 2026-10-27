@@ -25,6 +25,13 @@ somebody with root on the VPS.
 separate approval to deploy. It is written so that whoever runs it can tell, at
 each step, whether to continue.
 
+*Amended 27 October 2026:* the approved decisions batch (BD-23 offline
+signature, BD-27 correction acknowledgement, BD-26/BD-30 hardening) adds **no
+migration**. The pending list below is unchanged. Two things to check after
+the release, both read-only: the office's **Field Captures** screen opens (held
+signatures that cannot be verified land there), and a correction to labour,
+parts or the work performed cannot be raised as needing no acknowledgement.
+
 ### Which migrations are pending — VERIFY, do not assume
 
 The last release this repository records as LIVE is `4634d5d` (migrations up to

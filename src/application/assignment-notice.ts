@@ -34,8 +34,9 @@ import { audit, notify } from './audit';
 /**
  * `transfer` — WA-TRANSFER-1, 26 October 2026. A transfer hands the job to a
  * technician exactly as an assignment does, so they are told the same way, on
- * the same APPROVED template. Whether a transfer deserves wording of its own is
- * BD-25 and would need a new template approved by Meta first; until then the
+ * the same APPROVED template. Whether a transfer deserves wording of its own
+ * was BD-25, and the owner decided on 27 October 2026 that it does not: the
+ * approved assignment template is reused and no other is invented. The
  * message reads "transferred to you" only in the preview this system keeps,
  * while the template's four placeholders are filled exactly as for an
  * assignment.

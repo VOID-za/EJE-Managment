@@ -22,7 +22,7 @@ import { jobs } from '@/api/endpoints';
 import { newIdempotencyKey } from '@/api/client';
 import { useOperation } from '@/hooks/useOperation';
 import { useOnline } from '@/hooks/useOnline';
-import { holdMedia } from '@/lib/pwa/pending-media';
+import { holdMedia, OFFLINE_VIDEO_REFUSAL } from '@/lib/pwa/pending-media';
 import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatFileSize, formatRelative } from '@/lib/format';
@@ -195,11 +195,8 @@ export const JobMediaPanel = ({
      * silently drops somebody's only photograph of a fault.
      */
     if (selection.kind === 'video') {
-      setHoldProblem(
-        'A video cannot be kept on this tablet — one clip would fill the space held for ' +
-          'unsent work. Film it again when you have a signal, or photograph the fault, which ' +
-          'can be held.',
-      );
+      // BD-30, approved 27 October 2026: the one sentence holdMedia gives too.
+      setHoldProblem(OFFLINE_VIDEO_REFUSAL);
       return false;
     }
     const outcome = await holdMedia({
