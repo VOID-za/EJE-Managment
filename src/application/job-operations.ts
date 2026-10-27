@@ -1461,24 +1461,21 @@ export const addMedia = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  // VIDEO-OFF-1: no new video, on any path. Existing ones are kept.
+  if (input.kind === 'video') {
+    throw new WorkflowError('Video is not accepted.', [
+      { code: 'video_not_supported', message: 'Video is no longer part of the job card. Add a photograph instead.' },
+    ]);
+  }
 
-  const stored = await storeAndMeasure(
-    context,
-    input,
-    input.kind === 'video'
-      ? 'That video could not be stored.'
-      : 'That photograph could not be stored.',
-  );
+  const stored = await storeAndMeasure(context, input, 'That photograph could not be stored.');
 
   const attachment: Attachment = {
     id: asAttachmentId(context.services.ids.next('att')),
     kind: input.kind,
-    /*
-     * BD-26, approved 27 October 2026: a video is internal and never goes to a
-     * customer. The upload route already filed every video for the office;
-     * this makes the operation say so too, whatever its caller asks for.
-     */
-    visibility: input.kind === 'video' ? 'internal' : (input.visibility ?? 'customer_facing'),
+    // Only photographs reach here (VIDEO-OFF-1); BD-26's rule for the videos
+    // already on jobs is kept by `setMediaVisibility`.
+    visibility: input.visibility ?? 'customer_facing',
     fileName: input.fileName,
     caption: input.caption,
     storageKey: stored.storageKey,
@@ -1496,16 +1493,13 @@ export const addMedia = async (
     provenance: 'genuine',
   };
 
-  const next: Job =
-    input.kind === 'photo'
-      ? { ...job, photos: [...job.photos, attachment] }
-      : { ...job, videos: [...job.videos, attachment] };
+  const next: Job = { ...job, photos: [...job.photos, attachment] };
 
   const saved = await context.repos.jobs.save(next);
   await audit(context, {
     jobId: job.id,
     type: 'photo_uploaded',
-    summary: input.kind === 'photo' ? 'Photo uploaded' : 'Video uploaded',
+    summary: 'Photo uploaded',
     detail: input.caption.length > 0 ? input.caption : input.fileName,
   });
   await recordPostSignatureChange(context, saved, 'A photograph or video was added.');

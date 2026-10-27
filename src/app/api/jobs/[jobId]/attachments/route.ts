@@ -1,8 +1,7 @@
 import { attachDocument } from '@/application/job-operations';
-import { getJobTypeDefinition } from '@/domain';
 import { loadVisibleJob } from '@/server/api/commands/jobs';
 import { uploadRoute } from '@/server/api/handler';
-import { MAX_VIDEO_BYTES, validateJobMediaUpload } from '@/server/api/uploads';
+import { MAX_UPLOAD_BYTES, validateJobDocumentUpload } from '@/server/api/uploads';
 
 /**
  * `POST /api/jobs/:jobId/attachments` — attach a PHOTOGRAPH OR A VIDEO to a
@@ -35,7 +34,7 @@ import { MAX_VIDEO_BYTES, validateJobMediaUpload } from '@/server/api/uploads';
  */
 export const POST = uploadRoute({
   operation: 'jobs.attach_document',
-  maxBytes: MAX_VIDEO_BYTES,
+  maxBytes: MAX_UPLOAD_BYTES,
   handler: async (context) => {
     const job = await loadVisibleJob(
       {
@@ -47,16 +46,16 @@ export const POST = uploadRoute({
       context.params.jobId ?? '',
     );
 
-    // What this job's TYPE takes, decided from the stored job — never from
-    // anything the request says about itself. A parts job takes photographs only.
-    const file = validateJobMediaUpload(
-      {
-        fileName: context.file.name,
-        declaredContentType: context.file.type,
-        bytes: new Uint8Array(await context.file.arrayBuffer()),
-      },
-      { videos: getJobTypeDefinition(job.jobType).acceptsVideoAttachments },
-    );
+    /*
+     * DOCUMENTS-1 and VIDEO-OFF-1 (27 October 2026): *Add Documents* on a job
+     * takes a PDF or an image, on every job type, under the same byte-sniffing
+     * and size rules as a customer's or a machine's documents. Video is refused.
+     */
+    const file = validateJobDocumentUpload({
+      fileName: context.file.name,
+      declaredContentType: context.file.type,
+      bytes: new Uint8Array(await context.file.arrayBuffer()),
+    });
 
     const saved = await attachDocument(context.operation, job, {
       ...file,

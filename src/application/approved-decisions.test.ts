@@ -41,43 +41,61 @@ const inProgress = async (): Promise<Job> => {
   return acceptJob(harness.as(technician), opened!);
 };
 
-describe('BD-26 — a video is internal and never reaches the customer', () => {
-  it('is filed internal by the operation, whatever its caller asks for', async () => {
-    const job = await addMedia(harness.as(technician), await inProgress(), {
-      kind: 'video',
-      fileName: 'vibration.mp4',
-      caption: 'Spindle vibration',
-      contentType: 'video/mp4',
-      bytes: MP4,
-      visibility: 'customer_facing',
-    });
-    expect(job.videos).toHaveLength(1);
-    expect(job.videos[0]?.visibility).toBe('internal');
+/**
+ * A video recorded before VIDEO-OFF-1 (27 October 2026). No new video can be
+ * added, so the historical case is seeded straight into the repository.
+ */
+const withHistoricalVideo = async (job: Job): Promise<Job> =>
+  harness.repos.jobs.save({
+    ...job,
+    videos: [
+      {
+        id: 'att-historical-video',
+        kind: 'video',
+        visibility: 'internal',
+        fileName: 'vibration.mp4',
+        caption: 'Spindle vibration',
+        storageKey: 'uploads/vibration.mp4',
+        uploadedAt: '2026-10-20T08:00:00.000Z',
+        uploadedBy: technician.id,
+        sizeBytes: MP4.length,
+        checksumSha256: null,
+        provenance: 'genuine',
+      } as unknown as Job['videos'][number],
+    ],
   });
 
-  it('cannot be reclassified as customer-facing', async () => {
-    const job = await addMedia(harness.as(technician), await inProgress(), {
-      kind: 'video',
-      fileName: 'vibration.mp4',
-      caption: '',
-      contentType: 'video/mp4',
-      bytes: MP4,
-    });
+describe('VIDEO-OFF-1 — no new video, on any path; historical videos kept', () => {
+  it('refuses a new video in the operation itself', async () => {
     await expect(
-      setMediaVisibility(harness.as(technician), job, job.videos[0]!.id, 'customer_facing'),
+      addMedia(harness.as(technician), await inProgress(), {
+        kind: 'video',
+        fileName: 'vibration.mp4',
+        caption: '',
+        contentType: 'video/mp4',
+        bytes: MP4,
+      }),
+    ).rejects.toMatchObject({ violations: [{ code: 'video_not_supported' }] });
+  });
+
+  it('keeps a historical video on the job, internal and unchanged', async () => {
+    const job = await withHistoricalVideo(await inProgress());
+    const reloaded = (await harness.repos.jobs.findByJobNumber(job.jobNumber))!;
+    expect(reloaded.videos.map((video) => [video.fileName, video.visibility])).toEqual([['vibration.mp4', 'internal']]);
+  });
+});
+
+describe('BD-26 — a video is internal and never reaches the customer', () => {
+  it('a historical video cannot be reclassified as customer-facing', async () => {
+    const job = await withHistoricalVideo(await inProgress());
+    await expect(
+      setMediaVisibility(harness.as(technician), job, 'att-historical-video', 'customer_facing'),
     ).rejects.toMatchObject({ violations: [{ code: 'video_internal_only' }] });
   });
 
-  it('is never on the customer’s job card nor attached to their email', async () => {
+  it('a historical video is never on the customer’s job card nor attached to their email', async () => {
     const tech = harness.as(technician);
-    let job = await inProgress();
-    job = await addMedia(tech, job, {
-      kind: 'video',
-      fileName: 'vibration.mp4',
-      caption: 'Spindle vibration',
-      contentType: 'video/mp4',
-      bytes: MP4,
-    });
+    let job = await withHistoricalVideo(await inProgress());
     job = await addMedia(tech, job, {
       kind: 'photo',
       fileName: 'fan.jpg',
@@ -91,7 +109,6 @@ describe('BD-26 — a video is internal and never reaches the customer', () => {
     job = await startSignature(tech, job);
     job = await captureSignature(tech, job, { customerName: 'A', customerSurname: 'B', strokeData: 'M0 0 L1 1' });
 
-    // The document carries photographs only, and only customer-facing ones.
     expect(documentPhotos(job).map((photo) => photo.fileName)).toEqual(['fan.jpg']);
 
     await harness.outbox.clear();

@@ -146,32 +146,27 @@ describe('what the server will accept as a file', () => {
     expect((await attach('plate.png', 'image/png', PNG)).status).toBe(200);
   });
 
-  it('accepts a VIDEO, with the larger budget', async () => {
-    expect((await attach('noise.mp4', 'video/mp4', MP4)).status).toBe(200);
+  it('REFUSES a VIDEO — video is not accepted (VIDEO-OFF-1)', async () => {
+    const response = await attach('noise.mp4', 'video/mp4', MP4);
+    expect(response.status).toBe(400);
+    expect((response.error?.violations ?? []).map((v) => v.code)).toContain('unsupported_file_type');
   });
 
   /*
-   * AND REFUSES A DOCUMENT. Create New Job §3C.
-   *
-   * The owner's rule for this control, enforced on the BYTES rather than on the
-   * name — the two cases below send a real PDF under an honest name and under a
-   * photograph's name, and both are refused for the same reason.
+   * AND ACCEPTS A DOCUMENT. DOCUMENTS-1 (27 October 2026) — *Add Documents* on
+   * a job takes a PDF, superseding Create New Job §3C's photographs-only rule.
+   * Still decided on the BYTES: a PDF under a photograph's name is stored as
+   * what it is.
    */
-  it('REFUSES a PDF, which belongs where documents are kept', async () => {
+  it('accepts a PDF document (DOCUMENTS-1)', async () => {
     const response = await attach('customer-order.pdf', 'application/pdf', PDF);
-
-    expect(response.status).toBe(400);
-    expect((response.error?.violations ?? []).map((v) => v.code)).toContain(
-      'unsupported_file_type',
-    );
+    expect(response.status).toBe(200);
+    expect(response.data.attachments.some((attachment) => attachment.fileName === 'customer-order.pdf')).toBe(true);
   });
 
-  it('REFUSES a PDF renamed as a photograph, because the bytes decide', async () => {
+  it('decides a PDF renamed as a photograph by its bytes, and keeps it as a PDF', async () => {
     const response = await attach('fault.png', 'image/png', PDF);
-    expect(response.status).toBe(400);
-    expect((response.error?.violations ?? []).map((v) => v.code)).toContain(
-      'unsupported_file_type',
-    );
+    expect(response.status).toBe(200);
   });
 
   it('refuses an executable wearing a .pdf name', async () => {

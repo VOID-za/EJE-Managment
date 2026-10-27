@@ -123,8 +123,8 @@ let formHtml = await body();
 check(formHtml.includes('fault-99500.png'), 'an attached photograph is listed on the form');
 check(formHtml.includes('up to 25 MB'), 'the form states the size and formats it accepts');
 check(
-  formHtml.includes('Photographs and videos'),
-  'the control says it takes photographs and videos, not documents',
+  formHtml.includes('Photos and documents'),
+  'the control says it takes photographs and documents, never video (VIDEO-OFF-1)',
 );
 
 await page.getByRole('button', { name: 'Create job' }).click();

@@ -267,6 +267,22 @@ export const validateUpload = (candidate: UploadCandidate): UploadedFile =>
  * cannot end up with a different sniffer or a different order of checks than a
  * document — only the list and the limit differ.
  */
+/**
+ * A document attached to a JOB. DOCUMENTS-1 / VIDEO-OFF-1 (27 October 2026).
+ * The same types and limit as every other document in the system — a PDF or an
+ * image — sniffed from the bytes. Video is not among them.
+ */
+export const validateJobDocumentUpload = (candidate: UploadCandidate): UploadedFile =>
+  validateAgainst(candidate, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    allowed: ACCEPTED_CONTENT_TYPES,
+    tooLarge: `Documents are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
+    wrongType: {
+      message: 'That file cannot be attached to a job.',
+      detail: 'Attach a PDF or an image (PNG, JPEG, TIFF or WebP). Video is not accepted.',
+    },
+  });
+
 export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile =>
   validateAgainst(candidate, {
     maxBytes: MAX_UPLOAD_BYTES,

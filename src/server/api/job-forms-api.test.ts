@@ -247,42 +247,27 @@ describe('photographs and videos, per job type', () => {
       { name, type, bytes },
     );
 
-  for (const jobType of ['breakdown', 'test_and_repair'] as const) {
-    it(`${jobType}: takes a photograph AND a video, and the job shows both`, async () => {
+  /*
+   * VIDEO-OFF-1 / DOCUMENTS-1 (27 October 2026): every job type takes
+   * photographs and documents, and none takes video — decided on the bytes.
+   */
+  for (const jobType of ['breakdown', 'test_and_repair', 'parts'] as const) {
+    it(`${jobType}: takes a photograph AND a document, and the job shows both`, async () => {
       const job = await raise(jobType);
       expect((await attach(job, 'fault.png', 'image/png', PNG)).status).toBe(200);
-      expect((await attach(job, 'noise.mp4', 'video/mp4', MP4)).status).toBe(200);
+      expect((await attach(job, 'order.pdf', 'application/pdf', PDF)).status).toBe(200);
       const names = (await jobOf(master, job.jobNumber)).attachments.map((file) => file.fileName);
-      expect(names).toEqual(expect.arrayContaining(['fault.png', 'noise.mp4']));
+      expect(names).toEqual(expect.arrayContaining(['fault.png', 'order.pdf']));
     });
 
-    it(`${jobType}: refuses a PDF and an executable, whatever they are called`, async () => {
+    it(`${jobType}: refuses a video and an executable, whatever they are called`, async () => {
       const job = await raise(jobType);
-      expect((await attach(job, 'order.pdf', 'application/pdf', PDF)).status).toBe(400);
-      expect((await attach(job, 'photo.png', 'image/png', PDF)).status).toBe(400);
+      expect((await attach(job, 'noise.mp4', 'video/mp4', MP4)).status).toBe(400);
+      expect((await attach(job, 'clip.png', 'image/png', MP4)).status).toBe(400);
       expect((await attach(job, 'photo.jpg', 'image/jpeg', EXE)).status).toBe(400);
       expect((await jobOf(master, job.jobNumber)).attachments).toHaveLength(0);
     });
   }
-
-  it('parts: takes a PHOTOGRAPH, and the job shows it', async () => {
-    const job = await raise('parts');
-    const response = await attach(job, 'goods.png', 'image/png', PNG);
-    expect(response.status, JSON.stringify(response.error)).toBe(200);
-    expect((await jobOf(master, job.jobNumber)).attachments.map((file) => file.fileName)).toEqual([
-      'goods.png',
-    ]);
-  });
-
-  it('parts: REFUSES a video, on its bytes, even one called .png', async () => {
-    const job = await raise('parts');
-    const asVideo = await attach(job, 'clip.mp4', 'video/mp4', MP4);
-    expect(asVideo.status).toBe(400);
-    expect(JSON.stringify(asVideo.error)).toMatch(/photographs/i);
-    expect((await attach(job, 'clip.png', 'image/png', MP4)).status).toBe(400);
-    expect((await attach(job, 'note.pdf', 'application/pdf', PDF)).status).toBe(400);
-    expect((await jobOf(master, job.jobNumber)).attachments).toHaveLength(0);
-  });
 });
 
 describe('the Coordinator maintains the Rates and the Checklists', () => {

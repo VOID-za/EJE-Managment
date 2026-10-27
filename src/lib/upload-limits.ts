@@ -83,6 +83,23 @@ export const JOB_MEDIA_TYPES_SENTENCE =
 /** What a parts job takes: photographs only. See `acceptsVideoAttachments`. */
 export const JOB_PHOTO_TYPES_SENTENCE = `Photographs (PNG, JPEG, TIFF, WebP) up to ${UPLOAD_LIMIT_MB} MB.`;
 
+/**
+ * WHAT A JOB TAKES WHEN IT IS RAISED: photographs and documents, never video.
+ * VIDEO-OFF-1 / DOCUMENTS-1 (27 October 2026). The browser's early answer; the
+ * server sniffs the bytes (`validateJobDocumentUpload`) and decides.
+ */
+export const JOB_ATTACHMENT_ACCEPT_ATTRIBUTE = DOCUMENT_ACCEPT_ATTRIBUTE;
+export const JOB_ATTACHMENT_TYPES_SENTENCE = `Photographs or documents: ${DOCUMENT_TYPES_SENTENCE}`;
+
+export const jobAttachmentProblem = (file: { readonly name: string; readonly type: string; readonly size: number }): string | null => {
+  const type = file.type.toLowerCase();
+  if (file.size === 0) return `${file.name} is empty.`;
+  if (type.startsWith('video/')) return `${file.name} is a video. Video is not accepted — add a photograph instead.`;
+  const allowed = [...PHOTO_ACCEPT_ATTRIBUTE.split(','), 'application/pdf'];
+  if (!allowed.includes(type)) return `${file.name} is not a photograph or a PDF, so it cannot be attached to a job.`;
+  return file.size > MAX_UPLOAD_BYTES ? `${file.name} is larger than ${UPLOAD_LIMIT_MB} MB, the limit.` : null;
+};
+
 const PHOTO_TYPES = PHOTO_ACCEPT_ATTRIBUTE.split(',');
 const VIDEO_TYPES = VIDEO_ACCEPT_ATTRIBUTE.split(',');
 

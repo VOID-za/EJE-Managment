@@ -3,11 +3,7 @@ import { addMedia } from '@/application/job-operations';
 import { loadVisibleJob } from '@/server/api/commands/jobs';
 import { ApiError } from '@/server/api/errors';
 import { uploadRoute } from '@/server/api/handler';
-import {
-  MAX_VIDEO_BYTES,
-  validatePhotoUpload,
-  validateVideoUpload,
-} from '@/server/api/uploads';
+import { MAX_UPLOAD_BYTES, validatePhotoUpload } from '@/server/api/uploads';
 
 /**
  * The fields that travel with the photograph.
@@ -72,7 +68,7 @@ const FIELDS = z
  */
 export const POST = uploadRoute({
   operation: 'jobs.add_media',
-  maxBytes: MAX_VIDEO_BYTES,
+  maxBytes: MAX_UPLOAD_BYTES,
   handler: async (context) => {
     const job = await loadVisibleJob(
       {
@@ -95,13 +91,27 @@ export const POST = uploadRoute({
       ]);
     }
 
-    const kind = parsed.data.kind ?? 'photo';
+    /*
+     * VIDEO-OFF-1, the owner's instruction of 27 October 2026: video is not
+     * used and is no longer accepted. Refused HERE, at the boundary, whatever
+     * the screen offered — and an MP4 sent as a photograph is refused by
+     * `validatePhotoUpload` on its bytes. Videos already on a job are kept.
+     */
+    if (parsed.data.kind === 'video') {
+      throw new ApiError('validation_failed', 'Video is not accepted.', [
+        {
+          code: 'video_not_supported',
+          message: 'Video is no longer part of the job card. Add a photograph instead.',
+        },
+      ]);
+    }
+    const kind = 'photo' as const;
     const candidate = {
       fileName: context.file.name,
       declaredContentType: context.file.type,
       bytes: new Uint8Array(await context.file.arrayBuffer()),
     };
-    const file = kind === 'video' ? validateVideoUpload(candidate) : validatePhotoUpload(candidate);
+    const file = validatePhotoUpload(candidate);
 
     /*
      * A VIDEO IS FILED FOR THE OFFICE, AND THE SERVER DECIDES THAT, NOT THE
@@ -114,7 +124,7 @@ export const POST = uploadRoute({
      * the conservative reading is applied here: internal, which is what the
      * customer receives today. See docs/SCOPE.md, MEDIA-5.
      */
-    const visibility = kind === 'video' ? 'internal' : parsed.data.visibility;
+    const visibility = parsed.data.visibility;
 
     const saved = await addMedia(context.operation, job, {
       kind,

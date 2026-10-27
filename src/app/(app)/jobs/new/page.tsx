@@ -41,11 +41,9 @@ import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
 import {
-  JOB_MEDIA_ACCEPT_ATTRIBUTE,
-  JOB_MEDIA_TYPES_SENTENCE,
-  JOB_PHOTO_TYPES_SENTENCE,
-  PHOTO_ACCEPT_ATTRIBUTE,
-  jobMediaProblem,
+  JOB_ATTACHMENT_ACCEPT_ATTRIBUTE,
+  JOB_ATTACHMENT_TYPES_SENTENCE,
+  jobAttachmentProblem,
 } from '@/lib/upload-limits';
 
 /**
@@ -76,7 +74,7 @@ const AttachmentThumb = ({ file }: { readonly file: File }) => {
   }
   return (
     <span className="flex size-10 shrink-0 items-center justify-center rounded bg-steel-100 text-[10px] font-semibold text-steel-600 uppercase">
-      {file.type.startsWith('video/') ? 'Video' : 'Photo'}
+      {file.type === 'application/pdf' ? 'PDF' : 'Photo'}
     </span>
   );
 };
@@ -953,21 +951,16 @@ const NewJobPage = () => {
               (`validateJobMediaUpload`), so a PDF renamed `fault.jpg` is
               refused on what it is.
             */}
+            {/* VIDEO-OFF-1 / DOCUMENTS-1 (27 October 2026): photographs and documents, no video. */}
             <CardHeader
-              title={definition.acceptsVideoAttachments ? 'Photographs and videos' : 'Photographs'}
-              description={
-                definition.acceptsVideoAttachments
-                  ? `What the caller sent in, or what the fault looks like. ${JOB_MEDIA_TYPES_SENTENCE}`
-                  : `What the goods looked like when they left the counter. ${JOB_PHOTO_TYPES_SENTENCE}`
-              }
+              title="Photos and documents"
+              description={`What the caller sent in, what the fault or the goods look like, or a document that belongs with the job. ${JOB_ATTACHMENT_TYPES_SENTENCE}`}
             />
             <input
               type="file"
               multiple
               className="mt-4 block w-full text-sm text-steel-700 file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-steel-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-steel-700 hover:file:bg-steel-200"
-              accept={
-                definition.acceptsVideoAttachments ? JOB_MEDIA_ACCEPT_ATTRIBUTE : PHOTO_ACCEPT_ATTRIBUTE
-              }
+              accept={JOB_ATTACHMENT_ACCEPT_ATTRIBUTE}
               data-testid="job-attachments-input"
               onChange={(event) => {
                 /*
@@ -985,11 +978,10 @@ const NewJobPage = () => {
                  * The server sniffs the bytes of whatever is kept, and that is
                  * the check that decides.
                  */
-                const videos = definition.acceptsVideoAttachments;
                 const problems = chosen
-                  .map((file) => jobMediaProblem(file, { videos }))
+                  .map((file) => jobAttachmentProblem(file))
                   .filter((problem): problem is string => problem !== null);
-                const accepted = chosen.filter((file) => jobMediaProblem(file, { videos }) === null);
+                const accepted = chosen.filter((file) => jobAttachmentProblem(file) === null);
                 setAttachmentError(problems.length > 0 ? problems.join(' ') : null);
                 setAttachments((current) => [...current, ...accepted]);
                 // Lets the same file be chosen again after being removed.

@@ -978,7 +978,10 @@ await step('the completion step carries the job photographs', async () => {
    * anywhere. It now chooses an actual JPEG, which is what the camera and the
    * gallery both hand the page, and the bytes go to the server.
    */
-  await page.getByRole('button', { name: 'Take photo', exact: true }).waitFor({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Add Photo', exact: true }).waitFor({ timeout: 10000 });
+  // VIDEO-OFF-1: no video control anywhere on the panel.
+  if ((await page.getByRole('button', { name: /video/i }).count()) !== 0) throw new Error('a video control is still offered');
+  await page.getByTestId('job-add-documents').waitFor({ timeout: 5000 });
   await page.getByText('No photos attached').first().waitFor({ timeout: 8000 });
 
   for (const caption of ['Failed cooling fan, as found', 'New fan fitted and running']) {
@@ -2648,7 +2651,7 @@ await step('a Test & Repair offers a delivery note when the job is raised', asyn
  * browser by name (the server refuses it again on its bytes; the API tests
  * prove that half).
  */
-await step('a Test & Repair asks "What is the Job?" in order, and each type attaches only media', async () => {
+await step('a Test & Repair asks "What is the Job?" in order, and each type attaches photos and documents, never video', async () => {
   await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'New Job' }).first().waitFor({ timeout: 15000 });
   await page.getByLabel('Job type').selectOption('test_and_repair');
@@ -2674,14 +2677,15 @@ await step('a Test & Repair asks "What is the Job?" in order, and each type atta
   await page.getByText('Fault description / work requested (optional)').waitFor({ timeout: 5000 });
   await page.getByText('Who is doing the work?').waitFor({ timeout: 5000 });
 
+  // VIDEO-OFF-1 / DOCUMENTS-1 (27 October 2026): photographs and documents, never video.
   const input = page.getByTestId('job-attachments-input');
-  if (!(await input.getAttribute('accept')).includes('video/mp4')) {
-    throw new Error('a Test & Repair was not offered video');
-  }
+  const accepts = await input.getAttribute('accept');
+  if (accepts.includes('video')) throw new Error('a Test & Repair was still offered video');
+  if (!accepts.includes('application/pdf')) throw new Error('a Test & Repair was not offered documents');
   await input.setInputFiles({
-    name: 'order.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 not media'),
+    name: 'order.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 a real document'),
   });
-  await page.getByText('order.pdf is not a photograph or a video').waitFor({ timeout: 5000 });
+  await page.getByText('order.pdf').first().waitFor({ timeout: 5000 });
   await input.setInputFiles({
     name: 'fault.png',
     mimeType: 'image/png',
@@ -2690,14 +2694,14 @@ await step('a Test & Repair asks "What is the Job?" in order, and each type atta
   await page.getByText('fault.png').waitFor({ timeout: 5000 });
 
   await page.getByLabel('Job type').selectOption('parts');
-  await page.getByRole('heading', { name: 'Photographs', exact: true }).waitFor({ timeout: 8000 });
+  await page.getByRole('heading', { name: 'Photos and documents', exact: true }).waitFor({ timeout: 8000 });
   if ((await page.getByTestId('job-attachments-input').getAttribute('accept')).includes('video')) {
     throw new Error('a parts job was offered video');
   }
   await page.getByTestId('job-attachments-input').setInputFiles({
     name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]),
   });
-  await page.getByText('clip.mp4 is a video. A parts job takes photographs only.').waitFor({ timeout: 5000 });
+  await page.getByText('clip.mp4 is a video. Video is not accepted').waitFor({ timeout: 5000 });
   if ((await page.getByLabel('Date received').count()) !== 0) {
     throw new Error('a parts job was offered a date received');
   }
