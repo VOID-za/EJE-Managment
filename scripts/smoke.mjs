@@ -7235,5 +7235,14 @@ if (errors.length === 0) {
 } else {
   console.log(`${errors.length} problem(s):`);
   errors.forEach((e) => console.log(' - ' + e));
+  /*
+   * AND AS ANNOTATIONS, on CI. A run's log needs a signed-in reader; its
+   * annotations do not, so whoever is looking at a red run can see which check
+   * failed without downloading anything. One line each, newlines flattened —
+   * a workflow command ends at the end of its line.
+   */
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    errors.forEach((e) => console.log(`::error title=Smoke check failed::${e.replace(/\r?\n/g, ' ').slice(0, 900)}`));
+  }
   process.exitCode = 1;
 }
