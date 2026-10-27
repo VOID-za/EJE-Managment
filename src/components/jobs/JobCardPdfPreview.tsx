@@ -8,7 +8,38 @@ import { SystemClock } from '@/services/simulated/system';
 import { downloadBytes } from '@/lib/download';
 import { canDisplayPdfInline } from '@/lib/pdf-support';
 import { JobCardDocument } from './JobCardDocument';
-import { renderJobCardPdf } from './job-card-pdf';
+import { loadPreviewPhotos, renderJobCardPdf } from './job-card-pdf';
+import { documentPhotos } from '@/lib/job-card/model';
+import {
+  canComputeDocumentIdentity,
+  documentIdentityFor,
+  sha256Hex,
+} from '@/lib/job-card/document-identity';
+import type { PreparedPhoto } from '@/lib/pdf/image';
+
+/**
+ * WHAT WAS ACTUALLY ON SCREEN. BD-23.
+ *
+ * Reported each time the document is drawn, so a signature taken with no
+ * signal can record the identity of the very document the customer was shown
+ * (`identity`, null where this browser cannot compute one), the SHA-256 of the
+ * PDF bytes displayed, and how many of its genuine photographs could NOT be
+ * drawn — a document missing a photograph is not the complete document, and
+ * is not signed offline.
+ */
+export interface RenderedDocumentReport {
+  readonly renderKey: string;
+  readonly identity: string | null;
+  readonly pdfSha256: string | null;
+  readonly photosMissing: number;
+}
+
+/** Genuine customer-facing photographs whose pixels were not drawn. */
+const missingPhotos = (view: JobView, prepared: ReadonlyMap<string, PreparedPhoto>): number =>
+  documentPhotos(view.job).filter(
+    // A demonstration photograph has no file on any copy, issued or previewed.
+    (photo) => photo.provenance !== 'simulated' && prepared.get(photo.id)?.kind !== 'image',
+  ).length;
 import { PartsCollectionNote } from './PartsCollectionNote';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
@@ -37,10 +68,20 @@ const unknownOnServer = (): boolean | null => null;
 export const JobCardPdfPreview = ({
   view,
   caption,
+  photoImages,
+  onRendered,
 }: {
   readonly view: JobView;
   /** One line above the document saying what this copy is. */
   readonly caption?: string;
+  /**
+   * Pixels already loaded, used instead of fetching them. BD-23: the wizard
+   * loads them while there is signal so the document shown with none is
+   * still the complete one.
+   */
+  readonly photoImages?: ReadonlyMap<string, PreparedPhoto>;
+  /** Told what was drawn, every time it is drawn. BD-23. */
+  readonly onRendered?: (report: RenderedDocumentReport) => void;
 }) => {
   /*
    * The renderer runs HERE, in the browser, on the view the server sent.
@@ -125,8 +166,32 @@ export const JobCardPdfPreview = ({
       try {
         // The shared renderer (`renderJobCardPdf`): the same document the PDF
         // button on the review screens produces, and the one that is issued.
-        const rendered = await renderJobCardPdf(view, pdf, clock);
+        const prepared = photoImages ?? (await loadPreviewPhotos(view));
+        const rendered = await renderJobCardPdf(view, pdf, clock, prepared);
         if (cancelled) return;
+
+        if (onRendered !== undefined) {
+          const computable = canComputeDocumentIdentity();
+          const report: RenderedDocumentReport = {
+            renderKey,
+            identity: computable
+              ? await documentIdentityFor({
+                  job: view.job,
+                  customer: view.customer,
+                  site: view.site,
+                  contact: view.contact,
+                  machine: view.machine,
+                  settings: view.settings,
+                  checklistTemplate: view.checklistTemplate,
+                  users: view.users,
+                })
+              : null,
+            pdfSha256: computable ? await sha256Hex(rendered.bytes) : null,
+            photosMissing: missingPhotos(view, prepared),
+          };
+          if (cancelled) return;
+          onRendered(report);
+        }
 
         const blob = new Blob([new Uint8Array(rendered.bytes)], { type: 'application/pdf' });
         objectUrl = URL.createObjectURL(blob);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   canSubmitJobCard,
   checkCollectionDetails,
@@ -8,6 +8,7 @@ import {
   checkRefusalReason,
   evaluateChecklist,
   getJobTypeDefinition,
+  isJobTechnician,
   signatoryLabelsFor,
   type Job,
 } from '@/domain';
@@ -23,7 +24,8 @@ import {
 } from '@/components/ui';
 import { ChecklistRunner } from './ChecklistRunner';
 import { CompletionReportPanel } from './CompletionReportPanel';
-import { JobCardPdfPreview } from './JobCardPdfPreview';
+import { JobCardPdfPreview, type RenderedDocumentReport } from './JobCardPdfPreview';
+import { loadPreviewPhotos } from './job-card-pdf';
 import { JobCardPdfButton } from './JobCardPdfButton';
 import { JobMediaPanel } from './JobMediaPanel';
 import { RuleViolationNotice } from './RuleViolationNotice';
@@ -31,6 +33,18 @@ import { SignaturePad } from './SignaturePad';
 import { SubmitJobCardDialog } from './SubmitJobCardDialog';
 import { WorkCapturePanel } from './WorkCapturePanel';
 import { jobs as api } from '@/api/endpoints';
+import { ApiRequestError, newIdempotencyKey } from '@/api/client';
+import { useOnline } from '@/hooks/useOnline';
+import { documentPhotos } from '@/lib/job-card/model';
+import { canComputeDocumentIdentity, documentIdentityFor } from '@/lib/job-card/document-identity';
+import type { PreparedPhoto } from '@/lib/pdf/image';
+import {
+  checkSignatureHoldable,
+  holdSignature,
+  type HeldSignatureContent,
+} from '@/lib/pwa/held-signature';
+import { isPendingSupported, readPendingForJob } from '@/lib/pwa/pending-work';
+import { readPendingMediaForJob } from '@/lib/pwa/pending-media';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { cn } from '@/lib/cn';
@@ -221,6 +235,43 @@ export const CompleteJobWizard = ({
    * is a different question — and the answer decides whether the document
    * carries prices.
    */
+  /*
+   * WITH NO SIGNAL AT THE SIGNATURE. BD-23, approved 27 October 2026.
+   *
+   * `noSignal` is the browser saying so, or a request at this step failing
+   * for want of a network. Either way the signature step then SHOWS the job
+   * card itself, and a signature or refusal is held on the tablet tied to the
+   * identity of exactly that document (`held-signature.ts`). The server
+   * accepts it on arrival only if its own copy is identical.
+   *
+   * The photographs' pixels are loaded while there IS signal, from the review
+   * onward, so the document shown with none is still the complete document.
+   */
+  const online = useOnline();
+  const [networkFailed, setNetworkFailed] = useState(false);
+  const noSignal = !online || networkFailed;
+  const [photoImages, setPhotoImages] = useState<ReadonlyMap<string, PreparedPhoto> | null>(null);
+  const [presented, setPresented] = useState<RenderedDocumentReport | null>(null);
+  const [heldMessage, setHeldMessage] = useState<string | null>(null);
+  const [holdRefusal, setHoldRefusal] = useState<string | null>(null);
+  const photoKey = documentPhotos(job)
+    .map((photo) => photo.id)
+    .join(',');
+
+  useEffect(() => {
+    if (!online || correcting) return;
+    if (step.id !== 'review' && step.id !== 'collection' && step.id !== 'signature') return;
+    let cancelled = false;
+    void loadPreviewPhotos(view).then((loaded) => {
+      if (!cancelled) setPhotoImages(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on which photographs the document carries, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, correcting, step.id, photoKey]);
+
   const [courier, setCourier] = useState(job.courierCollection);
   const [waybill, setWaybill] = useState(job.waybillNumber);
 
@@ -323,6 +374,86 @@ export const CompleteJobWizard = ({
   };
 
   /**
+   * Holds the signature or refusal on this tablet. BD-23.
+   *
+   * Only once `checkSignatureHoldable` agrees the customer was shown the
+   * complete, current document. Nothing about the job changes here: it is a
+   * request the server has not yet ruled on, and the screen says exactly that.
+   */
+  const holdOffline = async (content: HeldSignatureContent): Promise<void> => {
+    setHoldRefusal(null);
+    const userId = currentUser?.id ?? '';
+    const currentIdentity = canComputeDocumentIdentity()
+      ? await documentIdentityFor({
+          job: view.job,
+          customer: view.customer,
+          site: view.site,
+          contact: view.contact,
+          machine: view.machine,
+          settings: view.settings,
+          checklistTemplate: view.checklistTemplate,
+          users: view.users,
+        })
+      : null;
+    const heldForJob =
+      userId.length === 0 || !isPendingSupported()
+        ? 0
+        : (await readPendingForJob(userId, job.id)).filter((row) => row.state === 'pending').length +
+          (await readPendingMediaForJob(userId, job.id)).filter((row) => row.state === 'pending').length;
+    const check = checkSignatureHoldable({ presented, currentIdentity, heldForJob });
+    const identity = presented?.identity ?? null;
+    if (!check.allowed || identity === null) {
+      setHoldRefusal(check.reason ?? 'This signature cannot be held on this tablet.');
+      return;
+    }
+    if (userId.length === 0 || !isPendingSupported()) {
+      setHoldRefusal('This tablet cannot hold a signature for later, so it needs a signal.');
+      return;
+    }
+    try {
+      await holdSignature({
+        userId,
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        content,
+        presented: { identity, pdfSha256: presented?.pdfSha256 ?? null, photosMissing: 0 },
+        context: {
+          status: job.status,
+          mine: currentUser !== null && isJobTechnician(currentUser, job),
+          signed: job.signature !== null,
+          observedAt: new Date().toISOString(),
+        },
+        idempotencyKey: newIdempotencyKey(),
+      });
+      operation.clearError();
+      setHeldMessage(
+        content.kind === 'signature'
+          ? 'The signature is held on this tablet. It is NOT on the job yet: when there is a signal it is sent, and the server accepts it only if the job card it holds is identical to the one the customer signed. If it is not, nothing is signed and the office is told.'
+          : 'The refusal is held on this tablet. It is NOT on the job yet: when there is a signal it is sent, and the server records it only if the job card it holds is identical to the one the customer was shown. If it is not, nothing is recorded and the office is told.',
+      );
+    } catch (cause) {
+      setHoldRefusal(cause instanceof Error ? cause.message : 'This tablet could not hold the signature.');
+    }
+  };
+
+  /** Runs an online signature step, noting whether it failed for want of a network. */
+  const attempt = async <T,>(command: () => Promise<T>): Promise<T | null> => {
+    let network = false;
+    const result = await operation.runFor(async () => {
+      try {
+        return await command();
+      } catch (cause) {
+        if (cause instanceof ApiRequestError && cause.code === 'network') network = true;
+        throw cause;
+      }
+    });
+    // Shows the job card on this step, so the customer can be shown it and the
+    // signature held against it on the next tap.
+    if (result === null && network) setNetworkFailed(true);
+    return result;
+  };
+
+  /**
    * Records the refusal and finishes the close-out.
    *
    * Validated against the same domain rule the operation applies, so the
@@ -336,7 +467,11 @@ export const CompleteJobWizard = ({
     }
     setErrors({});
 
-    const refused = await operation.runFor(() => api.recordRefusal(job.id, refusalReason));
+    if (noSignal) {
+      await holdOffline({ kind: 'refusal', reason: refusalReason.trim() });
+      return;
+    }
+    const refused = await attempt(() => api.recordRefusal(job.id, refusalReason));
     if (refused === null) return;
     onChanged();
     onSigned(refused);
@@ -398,7 +533,16 @@ export const CompleteJobWizard = ({
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
-    const signed = await operation.runFor(() =>
+    if (noSignal) {
+      await holdOffline({
+        kind: 'signature',
+        customerName: firstName.trim(),
+        customerSurname: surname.trim(),
+        strokeData,
+      });
+      return;
+    }
+    const signed = await attempt(() =>
       api.captureSignature(job.id, {
         customerName: firstName.trim(),
         customerSurname: surname.trim(),
@@ -741,7 +885,46 @@ export const CompleteJobWizard = ({
         </Card>
       )}
 
-      {step.id === 'signature' && (
+      {step.id === 'signature' && noSignal && heldMessage === null && (
+        <Card>
+          <CardHeader
+            title="No signal — the job card the customer is signing"
+            description="Show the customer this document. With no signal the signature or refusal is held on this tablet, tied to exactly this job card, and checked against EJE’s copy when the signal returns."
+          />
+          <div className="mt-4">
+            <JobCardPdfPreview
+              view={view}
+              photoImages={photoImages ?? undefined}
+              onRendered={setPresented}
+              caption="The document the customer is being asked to sign."
+            />
+          </div>
+        </Card>
+      )}
+
+      {step.id === 'signature' && heldMessage !== null && (
+        <Card>
+          <div role="status" className="rounded-[var(--radius-control)] border border-amber-eje-300 bg-amber-eje-50 px-4 py-3">
+            <p className="text-sm font-semibold text-steel-900">Held on this tablet — not on the job yet</p>
+            <p className="mt-1 text-sm text-steel-700">{heldMessage}</p>
+          </div>
+          <div className="mt-4">
+            <Button size="lg" onClick={onClose}>
+              Done
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {step.id === 'signature' && holdRefusal !== null && heldMessage === null && (
+        <RuleViolationNotice
+          title="The signature cannot be held on this tablet"
+          message={holdRefusal}
+          violations={[]}
+        />
+      )}
+
+      {step.id === 'signature' && heldMessage === null && (
         <Card>
           <CardHeader
             title={refusing ? labels.refusedLabel : labels.sectionTitle}
@@ -904,7 +1087,7 @@ export const CompleteJobWizard = ({
                   : 'Submit job card'
                 : 'Done'}
             </Button>
-          ) : isSignatureStep ? (
+          ) : isSignatureStep && heldMessage !== null ? null : isSignatureStep ? (
             <Button
               size="lg"
               onClick={sign}

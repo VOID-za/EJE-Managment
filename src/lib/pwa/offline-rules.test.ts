@@ -5,6 +5,8 @@ import {
   canCaptureOffline,
   classifyRefusal,
   isOfflineAction,
+  isReferralApplicable,
+  OFFLINE_SIGNATURE_ACTIONS,
   type CaptureContext,
 } from './offline-rules';
 
@@ -25,7 +27,7 @@ const context = (overrides: Partial<CaptureContext> = {}): CaptureContext => ({
 });
 
 describe('what may be captured offline', () => {
-  it('allows exactly the four append-only captures and the checklist answer', () => {
+  it('allows exactly the four append-only captures, the checklist answer and the held signature and refusal', () => {
     /*
      * THE WHOLE LIST, ASSERTED AS A LIST. An action that joins it has to be
      * added here as well, which is the point: widening what a tablet may hold
@@ -41,9 +43,13 @@ describe('what may be captured offline', () => {
       'add_part',
       'add_note',
       'answer_checklist',
+      // BD-23, approved 27 October 2026.
+      'capture_signature_offline',
+      'record_refusal_offline',
     ]);
     for (const action of OFFLINE_ACTIONS) {
-      expect(canCaptureOffline(action, context()).allowed).toBe(true);
+      const status = OFFLINE_SIGNATURE_ACTIONS.includes(action) ? 'customer_signature' : 'in_progress';
+      expect(canCaptureOffline(action, context({ status })).allowed, action).toBe(true);
     }
   });
 
@@ -97,9 +103,33 @@ describe('what may be captured offline', () => {
     );
   });
 
-  it('refuses a signature and a refusal outright. OFF-5', () => {
+  it('keeps the ONLINE signature and refusal commands online-only. OFF-5', () => {
+    // BD-23 added two commands of their own; it did not make these holdable.
     expect(canCaptureOffline('capture_signature', context()).allowed).toBe(false);
-    expect(canCaptureOffline('record_signature_refusal', context()).allowed).toBe(false);
+    expect(canCaptureOffline('record_refusal', context()).allowed).toBe(false);
+    expect(canCaptureOffline('start_signature', context()).allowed).toBe(false);
+  });
+
+  it('holds a signature or refusal ONLY at Customer Signature, on the technician’s own unsigned job. BD-23', () => {
+    for (const action of OFFLINE_SIGNATURE_ACTIONS) {
+      expect(canCaptureOffline(action, context({ status: 'customer_signature' })).allowed, action).toBe(true);
+      for (const status of ['in_progress', 'completion', 'review', 'closed', 'open'] as const) {
+        const verdict = canCaptureOffline(action, context({ status }));
+        expect(verdict.allowed, `${action} at ${status}`).toBe(false);
+        expect(verdict.reason).toContain('waiting for the customer');
+      }
+      expect(canCaptureOffline(action, context({ status: 'customer_signature', signed: true })).allowed).toBe(false);
+      expect(canCaptureOffline(action, context({ status: 'customer_signature', mine: false })).allowed).toBe(false);
+    }
+  });
+
+  it('never lets the office APPLY a referred signature or refusal; ordinary captures still can be. BD-15, BD-23', () => {
+    expect(isReferralApplicable('capture_signature_offline')).toBe(false);
+    expect(isReferralApplicable('record_refusal_offline')).toBe(false);
+    expect(isReferralApplicable('capture_signature')).toBe(false);
+    for (const action of ['add_labour', 'add_travel', 'add_part', 'add_note', 'answer_checklist']) {
+      expect(isReferralApplicable(action), action).toBe(true);
+    }
   });
 
   it('refuses every workflow transition', () => {

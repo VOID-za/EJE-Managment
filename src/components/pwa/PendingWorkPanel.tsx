@@ -5,6 +5,7 @@ import { Badge, Button, Card, ConfirmDialog, Icon } from '@/components/ui';
 import { useOnline } from '@/hooks/useOnline';
 import type { PendingWorkResult } from '@/hooks/usePendingWork';
 import type { PendingWork } from '@/lib/pwa/pending-work';
+import { isOfflineSignatureAction } from '@/lib/pwa/offline-rules';
 import { formatRelative } from '@/lib/format';
 
 const ACTION_LABEL: Readonly<Record<string, string>> = {
@@ -182,9 +183,19 @@ export const PendingWorkPanel = ({
                 decision. BD-15 stops the automatic replay; this stops the
                 manual one.
               */}
-              <Button type="button" variant="ghost" onClick={() => setDiscarding(row)}>
-                {row.state === 'referred' ? 'Remove from tablet' : 'Discard'}
-              </Button>
+              {/*
+                A CUSTOMER'S SIGNATURE OR REFUSAL IS NOT THE TECHNICIAN'S TO
+                DISCARD (BD-23) until the office holds it too.
+              */}
+              {isOfflineSignatureAction(row.action) && row.state !== 'referred' ? (
+                <span className="text-xs text-steel-500">
+                  The customer’s — kept until EJE’s server or office has it.
+                </span>
+              ) : (
+                <Button type="button" variant="ghost" onClick={() => setDiscarding(row)}>
+                  {row.state === 'referred' ? 'Remove from tablet' : 'Discard'}
+                </Button>
+              )}
             </div>
           </li>
         ))}

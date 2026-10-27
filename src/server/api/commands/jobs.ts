@@ -21,6 +21,7 @@ import {
 import * as jobs from '@/application/job-operations';
 import * as corrections from '@/application/job-corrections';
 import * as unsigned from '@/application/unsigned-delivery';
+import { acceptOfflineSignature } from '@/application/offline-signature';
 import { WorkflowError } from '@/application/errors';
 import { createJob, releaseDraft } from '@/application/job-creation';
 import { handleJobCard, recordInvoiceNumber } from '@/application/office-lifecycle';
@@ -111,6 +112,17 @@ const withInput = <T>(
   });
 
 const userId = z.string().uuid().or(z.string().min(1).max(100));
+
+/** What every capture held for BD-23 carries besides its own content. */
+const heldCapture = z.object({
+  captureId: z.string().uuid(),
+  // Any versioned digest is ACCEPTED FOR CHECKING, so a tablet on an older
+  // build is answered `referred` with its evidence kept — not refused at the
+  // door. Only the current version (DOCUMENT_IDENTITY_PATTERN) can verify.
+  documentIdentity: z.string().regex(/^[a-z0-9]{1,16}:[0-9a-f]{64}$/, 'Not a document identity.'),
+  pdfSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  capturedAt: z.string().datetime({ offset: true }),
+});
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a calendar date.');
 const text = (max: number) => z.string().max(max);
 
@@ -704,6 +716,40 @@ export const JOB_COMMANDS: CommandRegistry = {
   record_refusal: withInput(
     z.object({ reason: z.string().min(1).max(2000) }).strict(),
     (context, job, input) => jobs.recordSignatureRefusal(context.operation, job, input),
+  ),
+
+  /*
+   * A SIGNATURE OR REFUSAL TAKEN WITH NO SIGNAL. BD-23, approved 27 October
+   * 2026. Sent by the tablet's queue when the signal returns. The document
+   * identity is checked against the server's own recomputation before anything
+   * is accepted; a mismatch is answered `referred` with the evidence kept for
+   * the office — see `offline-signature.ts`. The response is the outcome, not
+   * the bare job, so the tablet can tell an acceptance from a referral.
+   */
+  capture_signature_offline: withInput(
+    heldCapture
+      .extend({
+        customerName: z.string().trim().min(1).max(120),
+        customerSurname: z.string().trim().min(1).max(120),
+        strokeData: z.string().min(1).max(200_000),
+      })
+      .strict(),
+    async (context, job, input) => {
+      const result = await acceptOfflineSignature(context.operation, job, 'signature', input);
+      return result.outcome === 'accepted'
+        ? { outcome: 'accepted', job: respond(result.job, context.actor) }
+        : result;
+    },
+  ),
+
+  record_refusal_offline: withInput(
+    heldCapture.extend({ reason: z.string().trim().min(1).max(2000) }).strict(),
+    async (context, job, input) => {
+      const result = await acceptOfflineSignature(context.operation, job, 'refusal', input);
+      return result.outcome === 'accepted'
+        ? { outcome: 'accepted', job: respond(result.job, context.actor) }
+        : result;
+    },
   ),
 
   resolve_refusal: withInput(

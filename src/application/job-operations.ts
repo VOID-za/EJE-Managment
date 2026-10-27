@@ -2283,10 +2283,34 @@ export interface SignatureInput {
   readonly strokeData: string;
 }
 
+/**
+ * WHAT A SIGNATURE OR REFUSAL TAKEN WITH NO SIGNAL CARRIES ONTO THE TRAIL.
+ * BD-23. Supplied only by `acceptOfflineSignature`, once it has verified the
+ * document identity; the ordinary online capture passes nothing.
+ *
+ * On the AUDIT TRAIL rather than in new columns: the trail is append-only and
+ * already the job's evidential record, and this keeps the release free of a
+ * schema change. The tablet's clock is recorded as what the tablet said —
+ * `signedAt` stays the server's own time of acceptance.
+ */
+export interface OfflineCaptureEvidence {
+  readonly documentIdentity: string;
+  readonly capturedAt: string;
+  readonly pdfSha256: string | null;
+}
+
+const offlineEvidenceDetail = (evidence: OfflineCaptureEvidence | undefined): string =>
+  evidence === undefined
+    ? ''
+    : ` Captured on the tablet with no signal at ${evidence.capturedAt} (the tablet's clock), against document ${evidence.documentIdentity}` +
+      (evidence.pdfSha256 === null ? '' : ` (PDF shown: sha256 ${evidence.pdfSha256})`) +
+      '; the server recomputed the document on arrival and it was identical.';
+
 export const captureSignature = async (
   context: OperationContext,
   job: Job,
   input: SignatureInput,
+  offline?: OfflineCaptureEvidence,
 ): Promise<Job> => {
   assertCanCapture(context, job);
 
@@ -2366,7 +2390,7 @@ export const captureSignature = async (
       job.jobType === 'parts'
         ? 'Collector signed for the parts'
         : 'Customer signed the job card',
-    detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.`,
+    detail: `Signed by ${input.customerName} ${input.customerSurname}. Rates frozen at signature.${offlineEvidenceDetail(offline)}`,
   });
 
   /*
@@ -2418,6 +2442,7 @@ export const recordSignatureRefusal = async (
   context: OperationContext,
   job: Job,
   input: RefusalInput,
+  offline?: OfflineCaptureEvidence,
 ): Promise<Job> => {
   assertCanCapture(context, job);
   assertAllowsSignatureRefusal(job);
@@ -2505,7 +2530,7 @@ export const recordSignatureRefusal = async (
     jobId: job.id,
     type: 'customer_refused_to_sign',
     summary: attempt === 1 ? 'Customer refused to sign' : `Customer refused to sign (attempt ${attempt})`,
-    detail: `Customer signature refusal recorded by ${userFullName(context.actor)}. The reason is stored on the job.`,
+    detail: `Customer signature refusal recorded by ${userFullName(context.actor)}. The reason is stored on the job.${offlineEvidenceDetail(offline)}`,
   });
 
   /*

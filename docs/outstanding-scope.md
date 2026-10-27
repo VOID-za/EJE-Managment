@@ -21,6 +21,13 @@
 >
 > **2. Owner decisions that change business behaviour** (each OPEN in *Open business decisions*)
 >
+> **Amended 27 October 2026: ALL ELEVEN WERE APPROVED BY THE OWNER, exactly as
+> recommended.** None is open any more; the table is kept as it stood. What each
+> approval took is recorded on its row in `docs/SCOPE.md` (*Open business
+> decisions*) — BD-23 was built (OFF-SIG-1…3) and BD-27 gained a server rule;
+> the rest already behaved as approved and are now proved by tests. Approved
+> decisions are not approved implementations (PROC-4).
+>
 > | ID | Question | Behaviour until answered |
 > |---|---|---|
 > | **BD-23** | Offline signature / refusal (OFF-5) | Needs a connection; recommended default written down |
@@ -68,7 +75,7 @@
 > launcher, the icon, a standalone launch, the real rear camera, gloved use in
 > daylight, and a full job captured with the network off — on the Samsung Tab
 > Active (or EJE's chosen device), against the deployed HTTPS origin, using
-> `docs/tablet-installation.md`. MANDATE-1 also needs BD-23 before it can be met.
+> `docs/tablet-installation.md`. MANDATE-1 also needs BD-23 before it can be met. *Amended 27 October 2026:* BD-23 is approved and built in code; MANDATE-1 still needs device check 23a and the rest of this list on the tablet.
 >
 > **GitHub tracking (PROC-6), checked 26 October 2026.** 73 issues exist (#1–#73). The register's range IDs are tracked by umbrella issues: OFF-1…13 on #15 (MANDATE-1), PWA-1…8 on #16 (MANDATE-2), QA-4 and AUD-5 on #22 (ARCH-6). **Missing, and NOT created** because this environment has no GitHub authentication: OFFICE-1, OFFICE-2, PARTS-JC-1, WRITEUP-4, MEDIA-7, SITE-1, SITE-2, SITE-3, CONTACT-SITE-1, ATTEND-1, TIMESHEET-1, WA-TRANSFER-1, DEMO-TRUTH-1, OFF-QUEUE (1…10), CAP-REF (1…5), OFF-SEC-1, OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1, OFF-DETAIL-1, MEDIA-6, TAB-UPLOAD-1, TAB-STATE-1, PARTS-PHOTO-1, and decisions BD-23…BD-30. **Stale labels** to correct by comment: #29 (AUD-3) and #30 (AUD-4) answered 21 Oct; #61–#63 (BD-19…21) answered 23 Oct; #72 (JOB-EDIT-1) built 25 Oct. A repeat-safe `gh` script that creates only what does not exist and comments on the stale ones, including #73, was prepared alongside this pass and is described in the final report; it is deliberately not committed (no tracker tooling in this repository — docs/project-tracking.md).
 

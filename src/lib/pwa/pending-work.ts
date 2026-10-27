@@ -1,4 +1,9 @@
-import { canCaptureOffline, type CaptureContext, type OfflineAction } from './offline-rules';
+import {
+  canCaptureOffline,
+  isOfflineSignatureAction,
+  type CaptureContext,
+  type OfflineAction,
+} from './offline-rules';
 
 /**
  * WORK CAPTURED ON THE TABLET THAT THE SERVER HAS NOT SEEN. OFF-1, OFF-6,
@@ -429,8 +434,21 @@ export const completeWork = async (userId: string, id: string): Promise<void> =>
  *
  * Only ever from an explicit, confirmed action on a row they can see, which is
  * the only circumstance in which captured work may be destroyed (CR-02).
+ *
+ * NOT A CUSTOMER'S SIGNATURE OR REFUSAL. BD-23. That is the customer's act,
+ * not the technician's work, and it is evidence: it leaves the tablet only
+ * when the server has accepted it, or once it is REFERRED — the office then
+ * holds the same evidence, so removing the tablet's copy loses nothing.
  */
-export const discardWork = completeWork;
+export const discardWork = async (userId: string, id: string): Promise<void> => {
+  const row = (await readPendingWork(userId)).find((candidate) => candidate.id === id);
+  if (row !== undefined && isOfflineSignatureAction(row.action) && row.state !== 'referred') {
+    throw new Error(
+      'A customer’s signature or refusal held on this tablet cannot be discarded. It is sent when there is a signal, and the server or the office decides what happens to it.',
+    );
+  }
+  await completeWork(userId, id);
+};
 
 /** Emptied only where a technician's device is being wiped deliberately. */
 export const clearPendingWork = async (userId: string): Promise<void> => {

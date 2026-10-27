@@ -4,7 +4,7 @@ import {
   loadCaptureReferral,
   resolveCaptureReferral,
 } from '@/application/capture-referral-operations';
-import { isOfflineAction } from '@/lib/pwa/offline-rules';
+import { isReferralApplicable } from '@/lib/pwa/offline-rules';
 import { JOB_COMMANDS } from '@/server/api/commands/jobs';
 import { lookupCommand } from '@/server/api/commands/types';
 import { ApiError, notFound } from '@/server/api/errors';
@@ -107,11 +107,11 @@ export const POST = writeRoute({
     assertMayResolveReferral(context.operation, referral);
 
     if (context.input.resolution === 'applied') {
-      if (!isOfflineAction(referral.action)) {
+      if (!isReferralApplicable(referral.action)) {
         throw new ApiError('validation_failed', 'That capture cannot be applied from here.', [
           {
             code: 'action_not_applicable',
-            message: 'Only work a tablet is allowed to hold offline can be applied this way.',
+            message: 'Only work a tablet is allowed to hold offline can be applied this way. A signature or refusal held offline is never applied from here — have the current document signed, then record no action with a reason.',
           },
         ]);
       }

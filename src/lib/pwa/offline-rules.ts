@@ -71,7 +71,9 @@ export type OfflineAction =
   | 'add_travel'
   | 'add_part'
   | 'add_note'
-  | 'answer_checklist';
+  | 'answer_checklist'
+  | 'capture_signature_offline'
+  | 'record_refusal_offline';
 
 export const OFFLINE_ACTIONS: readonly OfflineAction[] = [
   'add_labour',
@@ -79,7 +81,39 @@ export const OFFLINE_ACTIONS: readonly OfflineAction[] = [
   'add_part',
   'add_note',
   'answer_checklist',
+  'capture_signature_offline',
+  'record_refusal_offline',
 ];
+
+/**
+ * THE CUSTOMER'S SIGNATURE AND REFUSAL, HELD. BD-23 — approved by the owner on
+ * 27 October 2026, and the end of the "signatures and refusals" refusal below.
+ *
+ * Not the online commands made holdable: two commands of their own, because
+ * what they carry is different. Each names the document the customer was shown
+ * by its identity (`document-identity.ts`), and the server accepts it only if
+ * its own recomputation of that document is identical; otherwise nothing on the
+ * job changes and the capture is referred to the office with its evidence
+ * (`offline-signature.ts`). The online `capture_signature` and
+ * `record_refusal` stay online-only and unchanged.
+ */
+export const OFFLINE_SIGNATURE_ACTIONS: readonly OfflineAction[] = [
+  'capture_signature_offline',
+  'record_refusal_offline',
+];
+
+export const isOfflineSignatureAction = (action: string): boolean =>
+  (OFFLINE_SIGNATURE_ACTIONS as readonly string[]).includes(action);
+
+/**
+ * Whether the office may APPLY a referred capture of this action. BD-15, BD-23.
+ *
+ * Not a held signature or refusal: applying one would put the customer's mark
+ * on a document they were not shown. The office has the current document
+ * signed in the ordinary way and closes the referral with a reason.
+ */
+export const isReferralApplicable = (action: string): boolean =>
+  isOfflineAction(action) && !isOfflineSignatureAction(action);
 
 export const isOfflineAction = (action: string): action is OfflineAction =>
   (OFFLINE_ACTIONS as readonly string[]).includes(action);
@@ -175,9 +209,11 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   add_media:
     'A photograph is not sent with the other captures. It is kept on this tablet and uploaded on its own when there is a signal.',
   remove_media: 'Removing a photograph changes the record on the server.',
-  capture_signature: 'A customer signature is only ever taken with a connection.',
+  capture_signature:
+    'This is the signature taken with a connection. With no signal the tablet holds it as an offline signature instead, tied to the document the customer was shown.',
   start_signature: 'Taking a customer signature needs a connection from the first step.',
-  record_refusal: 'A signature refusal is only ever recorded with a connection.',
+  record_refusal:
+    'This is the refusal recorded with a connection. With no signal the tablet holds it as an offline refusal instead, tied to the document the customer was shown.',
   resolve_refusal:
     'What happens after a customer refuses to sign is the office’s decision, recorded on the server.',
   accept: 'Accepting a job moves it through the workflow, which the server decides.',
@@ -265,6 +301,15 @@ export interface CaptureContext {
  */
 export const OFFLINE_CAPTURE_STATUSES: readonly JobStatus[] = ['in_progress'];
 
+/**
+ * The one status a held signature or refusal may be taken at. BD-23.
+ *
+ * Customer Signature, which the job reaches through the ordinary online step
+ * (`start_signature`) — moving the job there is still a transition the server
+ * decides. The signature itself is then the only thing held.
+ */
+export const OFFLINE_SIGNATURE_STATUSES: readonly JobStatus[] = ['customer_signature'];
+
 export interface CaptureVerdict {
   readonly allowed: boolean;
   /** What the technician is told, when it is not allowed. */
@@ -301,6 +346,15 @@ export const canCaptureOffline = (
       allowed: false,
       reason: 'This job is not assigned to you, so work cannot be captured on it offline.',
     };
+  }
+  if (isOfflineSignatureAction(action)) {
+    return OFFLINE_SIGNATURE_STATUSES.includes(context.status)
+      ? { allowed: true, reason: null }
+      : {
+          allowed: false,
+          reason:
+            'This job was not waiting for the customer’s signature on this tablet’s last copy, so a signature cannot be held for it.',
+        };
   }
   if (!OFFLINE_CAPTURE_STATUSES.includes(context.status)) {
     return {

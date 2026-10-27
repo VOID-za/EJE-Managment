@@ -73,7 +73,7 @@ easiest to run them. Record the result against the criterion in
 | 7a | With a job already open, turn flight mode on and add labour, travel, a part and a note | Each is accepted and marked *held on this tablet… not on the server yet*. The job keeps showing the record it already had rather than an error page | OFF-QUEUE-1…3 |
 | 7b | Still offline, kill the application and relaunch it | The offline page says how many captures are waiting and that they are not on the job | OFF-QUEUE-8 |
 | 7c | Turn flight mode off and open the job | The captures send themselves, leave the queue, and appear on the job — each exactly once | OFF-QUEUE-4…5 |
-| 7d | Offline, answer a checklist item, type the write-up, take a photograph, then try to take the signature | The answer, the write-up draft and the photograph are each held and marked *on this tablet*; **the signature and a refusal say they need a connection** (open decision BD-23). Nothing is accepted and dropped — *amended 26 October 2026* | OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1, OFF-QUEUE-10 |
+| 7d | Offline, answer a checklist item, type the write-up, take a photograph, then try to take the signature | The answer, the write-up draft and the photograph are each held and marked *on this tablet*; **the signature and a refusal say they need a connection** (open decision BD-23). Nothing is accepted and dropped — *amended 26 October 2026*. *Amended 27 October 2026:* BD-23 was approved and built — at the signature step the job card is now shown and the signature or refusal can be held (check 23); before that step the job still has to reach Customer Signature with a signal | OFF-CHK-1, OFF-WRITEUP-1, OFF-MEDIA-1, OFF-QUEUE-10 |
 | 8 | Deploy a new build, then reopen the application twice | A bar offers the new version and nothing reloads until it is tapped — including while a capture is open | ACC-PWA-5 |
 | 9 | Sign out, then reopen the application and check with DevTools → Application → IndexedDB | `eje-job-cache` is empty: no jobs, no meta, no device pointer, no last place | PWA-6 |
 | 10 | Use it one-handed, with work gloves, outside in daylight | Every control is reachable and hittable; nothing is a 20px target; the screen is legible | ACC-PWA-6 |
@@ -103,6 +103,12 @@ mandate on the device. **19–22 can be run now. 23 depends on open decision BD-
 (offline signature and refusal): until EJE decide it, a signature needs signal by
 design, and check 23 is recorded as BLOCKED rather than failed.
 
+*Amended 27 October 2026:* **BD-23 was approved by the owner and is built in
+code (OFF-SIG-1…3). Check 23 can now be run** and is UNVERIFIED until somebody
+does it on the device. Moving the job to Customer Signature is still an online
+step (the state machine's, not BD-23's), so take the job to the signature step
+with a signal and THEN turn the network off.
+
 | # | Do this | Pass looks like | Criterion |
 |---|---|---|---|
 | 19 | **A full job with the network off, up to the signature.** Accept a job in signal, open it, then flight mode on: add labour, travel, a part and a note; answer the whole checklist including a failed item with its note; take two photographs; write the completion report | Every capture is held and marked *on this tablet*; nothing is refused that the job allows; the write-up survives scrolling and the keyboard | ACC-OFF-2, ACC-OFF-3, ACC-OFF-4 |
@@ -110,6 +116,7 @@ design, and check 23 is recorded as BLOCKED rather than failed.
 | 21 | **Reconnect.** Flight mode off with everything from 19 held | Captures send oldest first, each row says *Sending…* and leaves when the server has it; photographs upload; the write-up saves; nothing appears twice on the job (check the Activity trail) | ACC-OFF-7, ACC-OFF-8, ACC-OFF-10 |
 | 22 | **A conflict.** Hold a capture offline; meanwhile have the office cancel or reassign the job; reconnect | The capture is not applied, the technician is told in the server's words, and it appears on the office's *Field Captures* to decide — never silently dropped or overwritten | ACC-OFF-9, ACC-OFF-11 |
 | 23 | **The signature and the refusal, offline.** Continue 19 to the signature step with the network still off | **BLOCKED on BD-23.** Today: it says it needs a connection. Once BD-23 is decided and built: re-run 19–22 through to signature, reconnect, and confirm the job submits exactly once | ACC-OFF-5, ACC-OFF-12 |
+| 23a | **Run 23 now (BD-23 built, 27 October 2026).** Send everything held from 19 with a signal, take the job to the signature step, then flight mode on. (a) The job card itself appears on the signature step; show it to the customer; take the signature; the screen says it is **held on this tablet — not on the job yet**. (b) Lock, kill the application and flatten the battery as in 20: the held signature is still listed and cannot be discarded. (c) Reconnect: it is accepted once; the job moves to Review; the Activity trail's *Customer signed* line names the document identity and the tablet's time. (d) Repeat on a second job, but have the office apply the call-out fee while the tablet is offline: on reconnect nothing is signed, the row says *with the office*, and the office's **Field Captures** shows the held signature with the reason *document changed*. (e) Repeat (a)–(c) with **Customer refused to sign** | (a)–(e) exactly as described; the customer is never shown as having signed a card they did not see | ACC-OFF-5, ACC-OFF-12 |
 
 ### The acceptance record
 
@@ -131,7 +138,7 @@ filled from a headless browser, an emulator or a desktop.
 | 10 gloved, one-handed, daylight | UNVERIFIED | | |
 | 11–18 camera permission, bad signal, signing, keyboard, long form, expiry, shared tablet | UNVERIFIED | | |
 | 19–22 full offline job, recovery, reconnect, conflict | UNVERIFIED | | |
-| 23 offline signature / refusal | BLOCKED — BD-23 | | |
+| 23 offline signature / refusal | ~~BLOCKED — BD-23~~ UNVERIFIED — BD-23 approved and built 27 October 2026; run 23a | | |
 
 **Record a result against every one.** A row with no result is not a pass, and
 checks 11, 13, 15 and 17 are the four most likely to find something: each

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiRequestError } from '@/api/client';
 import { captures as capturesApi, jobs as jobsApi } from '@/api/endpoints';
 import { classifyRefusal } from '@/lib/pwa/offline-rules';
+import { referredOutcome } from '@/lib/pwa/held-signature';
 import {
   PENDING_SCHEMA_VERSION,
   clearSending,
@@ -214,8 +215,28 @@ export const usePendingWork = (): PendingWorkResult => {
         // rather than as one spinner for the whole queue.
         markSending(row.id);
         try {
-          await jobsApi.sendCaptured(row.jobId, row.action, row.payload, row.idempotencyKey);
-          await completeWork(userId, row.id);
+          const answer: unknown = await jobsApi.sendCaptured(
+            row.jobId,
+            row.action,
+            row.payload,
+            row.idempotencyKey,
+          );
+          /*
+           * A HELD SIGNATURE OR REFUSAL THE SERVER DID NOT ACCEPT. BD-23.
+           * The server decided — the job card had changed, or could not be
+           * verified — and kept the evidence for the office in the same
+           * transaction. So the row is marked referred with the server's own
+           * reason, exactly as a refused capture is once BD-15 refers it, and
+           * nothing is reported as signed.
+           */
+          const referred = referredOutcome(answer);
+          if (referred !== null) {
+            await markConflict(userId, row.id, { message: referred.message, code: referred.reason });
+            await markReferred(userId, row.id, referred.referralId);
+            blocked.add(row.jobId);
+          } else {
+            await completeWork(userId, row.id);
+          }
           sentAny = true;
         } catch (cause) {
           const code = cause instanceof ApiRequestError ? cause.code : null;
@@ -313,7 +334,8 @@ export const usePendingWork = (): PendingWorkResult => {
 
   const discard = useCallback(
     async (id: string) => {
-      await discardWork(userId, id);
+      // A held signature refuses to be discarded (BD-23); the row stays, as it should.
+      await discardWork(userId, id).catch(() => undefined);
       await refresh();
     },
     [userId, refresh],

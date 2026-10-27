@@ -63,6 +63,8 @@ export const SIMULATED_CAPABILITIES: readonly SimulatedCapability[] = [
    * engine", both untrue: sign-in is session-based with a password (the
    * demonstration accounts share one published password), and work captured
    * offline is held on the tablet and sent when the connection returns. What
-   * offline does NOT yet do — a signature or refusal — is open decision BD-23.
+   * offline does — a signature or refusal included, since BD-23 was approved
+   * on 27 October 2026 — is held on the tablet and checked by the server on
+   * arrival, which is real behaviour, not a simulation.
    */
 ];
