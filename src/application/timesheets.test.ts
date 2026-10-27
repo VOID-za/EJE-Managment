@@ -1,211 +1,162 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { asUserId, type Job, type LabourEntry, type LabourRateType } from '@/domain';
+import { asUserId } from '@/domain';
 import { businessToday } from '@/lib/business-time';
-import { acceptJob, addLabour } from './job-operations';
+import { acceptJob, addLabour, setCalloutApplied } from './job-operations';
 import { recordAttendance } from './attendance-operations';
 import {
-  buildTimesheetRows,
   exportTimesheet,
   listTimesheetPeople,
   loadTimesheet,
+  removeTimesheetEntry,
   saveTimesheetComment,
+  saveTimesheetEntry,
 } from './timesheets';
-import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
 /**
- * TECHNICIAN TIMESHEETS. TIMESHEET-1.
+ * TECHNICIAN TIMESHEETS — COMPLETELY MANUAL. TIMESHEET-2, the owner's
+ * instruction of 27 October 2026.
  *
- * The rules under test: hours are the technician's OWN labour lines, summed by
- * day and customer, never copied and never counted twice; a call-out is counted
- * once per job, on the technician's first day on it; the day's comment is the
- * one new record; and only the office may open somebody else's sheet.
+ * The rules under test: every value is one the technician typed; nothing is
+ * read from job labour or call-out flags; a day with no line is NOT RECORDED
+ * and a line of zeros is a recorded day; only the owner writes their sheet;
+ * every correction is audited; the export carries exactly what was typed.
  */
 const SIPHO = asUserId('user-tech-sipho');
-const RIAAN = asUserId('user-tech-riaan');
 const master = seedUser('user-master-elmarie');
 const sipho = seedUser('user-tech-sipho');
+const riaan = seedUser('user-tech-riaan');
 
-let lineNumber = 0;
-const line = (technicianId: string, date: string, rateType: LabourRateType, hours: number): LabourEntry =>
-  ({
-    id: `line-${(lineNumber += 1)}`,
-    technicianId: asUserId(technicianId),
-    date,
-    rateType,
-    hours,
-    description: 'Work',
-    capturedAt: `${date}T10:00:00.000Z`,
-    capturedBy: asUserId(technicianId),
-  }) as LabourEntry;
+const day = (offset: number): string => {
+  const date = new Date(`${businessToday()}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - offset);
+  return date.toISOString().slice(0, 10);
+};
 
-describe('building the sheet from the labour lines', () => {
-  let base: Job;
-  beforeEach(async () => {
-    base = (await buildHarness().repos.jobs.findByJobNumber('EJE-1048'))!;
-  });
-
-  const job = (jobNumber: string, customerId: string, labour: LabourEntry[], calloutApplied = false): Job =>
-    ({ ...base, id: jobNumber, jobNumber, customerId, labour, calloutApplied }) as unknown as Job;
-
-  const customers = [
-    { id: 'cust-abc', name: 'ABC Engineering' },
-    { id: 'cust-kruger', name: 'Kruger Engineering' },
-  ] as never;
-
-  it('sums each rate by day and customer, from this technician’s lines only', () => {
-    const { rows, totals } = buildTimesheetRows({
-      technicianId: SIPHO,
-      from: '2026-10-01',
-      to: '2026-10-31',
-      jobs: [
-        job('EJE-1', 'cust-abc', [
-          line(SIPHO, '2026-10-05', 'normal', 8),
-          line(SIPHO, '2026-10-05', 'overtime', 2),
-          line(RIAAN, '2026-10-05', 'overtime', 5), // somebody else's — not his
-        ]),
-        // A second job, same customer, same day: one row, both job numbers.
-        job('EJE-2', 'cust-abc', [line(SIPHO, '2026-10-05', 'double', 1.5)]),
-        job('EJE-3', 'cust-kruger', [line(SIPHO, '2026-10-06', 'normal', 4)]),
-      ],
-      customers,
-      comments: [],
-      attendance: new Map(),
-    });
-
-    expect(rows.map((row) => [row.date, row.customerName, row.jobNumbers, row.normalHours, row.overtimeHours, row.doubleHours])).toEqual([
-      ['2026-10-05', 'ABC Engineering', ['EJE-1', 'EJE-2'], 8, 2, 1.5],
-      ['2026-10-06', 'Kruger Engineering', ['EJE-3'], 4, 0, 0],
-    ]);
-    // Every hour counted exactly once — Riaan's five are not on Sipho's sheet.
-    expect(totals).toEqual({ normalHours: 12, overtimeHours: 2, doubleHours: 1.5, callouts: 0 });
-  });
-
-  it('counts a call-out ONCE per job, on the technician’s first day, even across a range boundary', () => {
-    const calloutJob = job(
-      'EJE-9',
-      'cust-abc',
-      [line(SIPHO, '2026-09-30', 'normal', 3), line(SIPHO, '2026-10-01', 'normal', 6), line(SIPHO, '2026-10-02', 'normal', 6)],
-      true,
-    );
-    const october = buildTimesheetRows({
-      technicianId: SIPHO, from: '2026-10-01', to: '2026-10-31', jobs: [calloutJob], customers, comments: [], attendance: new Map(),
-    });
-    // His first day on it was 30 September: October shows no call-out at all.
-    expect(october.totals.callouts).toBe(0);
-
-    const september = buildTimesheetRows({
-      technicianId: SIPHO, from: '2026-09-01', to: '2026-09-30', jobs: [calloutJob], customers, comments: [], attendance: new Map(),
-    });
-    expect(september.rows).toHaveLength(1);
-    expect(september.rows[0]).toMatchObject({ date: '2026-09-30', callouts: 1 });
-
-    // And a job without the fee shows none, however many days.
-    const plain = buildTimesheetRows({
-      technicianId: SIPHO, from: '2026-09-01', to: '2026-10-31', jobs: [{ ...calloutJob, calloutApplied: false }], customers, comments: [], attendance: new Map(),
-    });
-    expect(plain.totals.callouts).toBe(0);
-  });
-
-  it('carries the day’s comment once, keeps a comment-only day, and shows attendance', () => {
-    const { rows } = buildTimesheetRows({
-      technicianId: SIPHO,
-      from: '2026-10-01',
-      to: '2026-10-31',
-      jobs: [
-        job('EJE-1', 'cust-abc', [line(SIPHO, '2026-10-05', 'normal', 4)]),
-        job('EJE-3', 'cust-kruger', [line(SIPHO, '2026-10-05', 'normal', 3)]),
-      ],
-      customers,
-      comments: [
-        { id: 'c1', userId: SIPHO, date: '2026-10-05', comment: 'Waited for the crane', updatedBy: SIPHO, updatedAt: '' },
-        { id: 'c2', userId: SIPHO, date: '2026-10-07', comment: 'Training day', updatedBy: SIPHO, updatedAt: '' },
-      ],
-      attendance: new Map([['2026-10-05', 'present' as const]]),
-    });
-    expect(rows.map((row) => [row.date, row.customerName, row.comment, row.firstOfDay, row.attendance])).toEqual([
-      ['2026-10-05', 'ABC Engineering', 'Waited for the crane', true, 'present'],
-      ['2026-10-05', 'Kruger Engineering', '', false, 'present'],
-      ['2026-10-07', '', 'Training day', true, null],
-    ]);
-  });
+const line = (date: string, overrides: Partial<Parameters<typeof saveTimesheetEntry>[2]> = {}) => ({
+  date,
+  customerName: 'ABC Engineering',
+  normalHours: 8,
+  overtimeHours: 1.5,
+  doubleHours: 0,
+  callouts: 1,
+  ...overrides,
 });
 
-describe('the timesheet through the operations', () => {
-  let harness: Harness;
-  let today: string;
-  beforeEach(() => {
-    harness = buildHarness();
-    today = businessToday();
+let harness: Harness;
+beforeEach(() => {
+  harness = buildHarness();
+});
+
+describe('a technician’s own manual timesheet', () => {
+  it('shows every day in the range as NOT RECORDED until the technician enters it — nothing is derived', async () => {
+    // Labour and a call-out on a job: the timesheet must NOT read them.
+    const opened = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    let job = await acceptJob(harness.as(sipho), opened!);
+    job = await addLabour(harness.as(sipho), job, { date: day(0), rateType: 'normal', hours: 6, description: '' });
+    await setCalloutApplied(harness.as(master), job, true).catch(() => undefined);
+
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(2), day(0));
+    expect(sheet.days).toHaveLength(3);
+    expect(sheet.days.every((entry) => !entry.recorded && entry.entries.length === 0)).toBe(true);
+    expect(sheet.totals).toMatchObject({ normalHours: 0, callouts: 0, recordedDays: 0, unrecordedDays: 3 });
+    expect(sheet.editable).toBe(true);
   });
 
-  it('reads the hours a technician captured on a job, without copying or changing them', async () => {
-    const context = harness.as(sipho);
-    let job = await acceptJob(context, (await harness.repos.jobs.findByJobNumber('EJE-1048'))!);
-    job = await addLabour(context, job, { date: today, rateType: 'overtime', hours: 2.5, description: 'Night call' });
-    const labourBefore = JSON.stringify(job.labour);
+  it('records exactly what was typed — today, or a past day later (payday)', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0)));
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(10), { customerName: 'Kruger', normalHours: 4, overtimeHours: 0, doubleHours: 2, callouts: 0 }));
 
-    const sheet = await loadTimesheet(context, SIPHO, today, today);
-    const row = sheet.rows.find((entry) => entry.jobNumbers.includes('EJE-1048'));
-    expect(row?.overtimeHours).toBeGreaterThanOrEqual(2.5);
-    expect(row?.customerName).toBe('ABC Engineering (Pty) Ltd');
-
-    // Reading and commenting leave the job's labour exactly as it was.
-    await saveTimesheetComment(context, SIPHO, today, 'Called out after hours');
-    const stored = await harness.repos.jobs.findByJobNumber('EJE-1048');
-    expect(JSON.stringify(stored!.labour)).toBe(labourBefore);
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(10), day(0));
+    const today = sheet.days.find((entry) => entry.date === day(0))!;
+    const past = sheet.days.find((entry) => entry.date === day(10))!;
+    expect(today).toMatchObject({ recorded: true, normalHours: 8, overtimeHours: 1.5, doubleHours: 0, callouts: 1 });
+    expect(past).toMatchObject({ recorded: true, normalHours: 4, doubleHours: 2 });
+    expect(past.entries[0]?.customerName).toBe('Kruger');
+    expect(sheet.totals).toMatchObject({ normalHours: 12, overtimeHours: 1.5, doubleHours: 2, callouts: 1, recordedDays: 2 });
   });
 
-  it('a technician opens their own sheet and nobody else’s; the office opens anybody’s', async () => {
-    await expect(loadTimesheet(harness.as(sipho), SIPHO, today, today)).resolves.toBeDefined();
-    const refused = await loadTimesheet(harness.as(sipho), RIAAN, today, today).catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(WorkflowError);
-    expect((refused as WorkflowError).violations[0]?.code).toBe('not_permitted');
-    await expect(loadTimesheet(harness.as(master), RIAAN, today, today)).resolves.toBeDefined();
+  it('keeps a recorded day of zero hours apart from an unrecorded day', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1), { customerName: '', normalHours: 0, overtimeHours: 0, callouts: 0 }));
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(2), day(1));
+    expect(sheet.days.find((entry) => entry.date === day(1))?.recorded).toBe(true);
+    expect(sheet.days.find((entry) => entry.date === day(2))?.recorded).toBe(false);
+  });
 
+  it('takes several customers on one day, and refuses a day over 24 hours', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { normalHours: 8, overtimeHours: 4 }));
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { customerName: 'Kruger', normalHours: 6, overtimeHours: 0 }));
+    await expect(
+      saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { customerName: 'Late', normalHours: 7, overtimeHours: 0 })),
+    ).rejects.toMatchObject({ violations: [{ code: 'day_over_24_hours' }] });
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(0), day(0));
+    expect(sheet.days[0]?.entries).toHaveLength(2);
+  });
+
+  it('validates values and dates on the server', async () => {
+    const refuse = (input: ReturnType<typeof line>) => saveTimesheetEntry(harness.as(sipho), SIPHO, input);
+    await expect(refuse(line(day(0), { normalHours: -1 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_normal_hours' }] });
+    await expect(refuse(line(day(0), { overtimeHours: 25 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_overtime_hours' }] });
+    await expect(refuse(line(day(0), { doubleHours: 1.1 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_double_hours' }] });
+    await expect(refuse(line(day(0), { callouts: 1.5 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_callouts' }] });
+    await expect(refuse(line(day(0), { customerName: '  ' }))).rejects.toMatchObject({ violations: [{ code: 'customer_required' }] });
+    await expect(refuse(line(day(-1)))).rejects.toMatchObject({ violations: [{ code: 'date_in_future' }] });
+    await expect(refuse(line('2026-02-30'))).rejects.toMatchObject({ violations: [{ code: 'invalid_date' }] });
+  });
+
+  it('takes the customer’s name from the register when one is chosen', async () => {
+    const entry = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { customerId: 'cust-abc', customerName: '' }));
+    const customer = await harness.repos.customers.findById(entry.customerId!);
+    expect(entry.customerName).toBe(customer?.name);
+  });
+
+  it('corrects and removes a line, each audited with what changed', async () => {
+    const entry = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0)));
+    const corrected = await saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(0), { normalHours: 7.5 }), entryId: entry.id });
+    expect(corrected.id).toBe(entry.id);
+    expect(corrected.normalHours).toBe(7.5);
+    await removeTimesheetEntry(harness.as(sipho), SIPHO, entry.id);
+
+    const trail = await harness.repos.activity.list(undefined);
+    const types = trail.map((event) => event.type);
+    expect(types).toContain('timesheet_entry_added');
+    expect(types).toContain('timesheet_entry_removed');
+    const correction = trail.find((event) => event.type === 'timesheet_entry_corrected');
+    expect(correction?.changes).toEqual([{ field: 'NT', from: '8', to: '7.5' }]);
+    expect((await loadTimesheet(harness.as(sipho), SIPHO, day(0), day(0))).days[0]?.recorded).toBe(false);
+  });
+
+  it('lets ONLY the owner write: not another technician, not the office', async () => {
+    await expect(saveTimesheetEntry(harness.as(riaan), SIPHO, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(saveTimesheetEntry(harness.as(master), SIPHO, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    const mine = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0)));
+    // Riaan cannot correct or remove Sipho's line through his own sheet either.
+    await expect(
+      saveTimesheetEntry(harness.as(riaan), riaan.id, { ...line(day(0)), entryId: mine.id }),
+    ).rejects.toMatchObject({ violations: [{ code: 'entry_not_found' }] });
+    await expect(removeTimesheetEntry(harness.as(riaan), riaan.id, mine.id)).rejects.toMatchObject({ violations: [{ code: 'entry_not_found' }] });
+    expect(mine.userId).toBe(SIPHO);
+  });
+
+  it('a technician reads their own sheet only; the office reads anybody’s but cannot edit it', async () => {
+    await expect(loadTimesheet(harness.as(riaan), SIPHO, day(0), day(0))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    const office = await loadTimesheet(harness.as(master), SIPHO, day(0), day(0));
+    expect(office.editable).toBe(false);
     expect((await listTimesheetPeople(harness.as(sipho))).map((person) => person.id)).toEqual([SIPHO]);
-    expect((await listTimesheetPeople(harness.as(master))).length).toBeGreaterThan(1);
   });
 
-  it('refuses a backwards range and one longer than a quarter', async () => {
-    const codes = async (from: string, to: string) =>
-      ((await loadTimesheet(harness.as(master), SIPHO, from, to).catch((error: unknown) => error)) as WorkflowError)
-        .violations.map((violation) => violation.code);
-    expect(await codes('2026-10-10', '2026-10-01')).toEqual(['invalid_range']);
-    expect(await codes('2026-01-01', '2026-10-01')).toEqual(['range_too_long']);
+  it('keeps the day comment and shows the manual attendance for reference', async () => {
+    await saveTimesheetComment(harness.as(sipho), SIPHO, day(0), 'Waited for the crane');
+    await recordAttendance(harness.as(master), { userId: SIPHO, date: day(0), status: 'present', note: '' });
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(0), day(0));
+    expect(sheet.days[0]).toMatchObject({ comment: 'Waited for the crane', attendance: 'present', recorded: false });
   });
 
-  it('writes, changes and clears the day’s comment — one per day, each change audited', async () => {
-    const context = harness.as(sipho);
-    await saveTimesheetComment(context, SIPHO, today, 'Waited two hours for the crane');
-    await saveTimesheetComment(context, SIPHO, today, 'Waited three hours for the crane');
-    expect(await harness.repos.attendance.listComments(SIPHO, today, today)).toHaveLength(1);
-    expect((await harness.repos.attendance.findComment(SIPHO, today))?.comment).toBe('Waited three hours for the crane');
-
-    await saveTimesheetComment(context, SIPHO, today, '   ');
-    expect(await harness.repos.attendance.findComment(SIPHO, today)).toBeNull();
-
-    const summaries = (await harness.repos.activity.list())
-      .filter((event) => event.type === 'timesheet_comment_saved')
-      .map((event) => event.summary.split(':')[0]);
-    expect(summaries.sort()).toEqual(['Timesheet comment added', 'Timesheet comment changed', 'Timesheet comment cleared']);
-
-    // Somebody else's day is refused to a technician.
-    const refused = await saveTimesheetComment(context, RIAAN, today, 'Not mine').catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(WorkflowError);
-  });
-
-  it('exports the same rows as a CSV with the timesheet’s columns', async () => {
-    const context = harness.as(sipho);
-    const job = await acceptJob(context, (await harness.repos.jobs.findByJobNumber('EJE-1048'))!);
-    await addLabour(context, job, { date: today, rateType: 'double', hours: 1, description: 'Sunday' });
-    await saveTimesheetComment(context, SIPHO, today, 'Sunday breakdown');
-    await recordAttendance(harness.as(master), { userId: SIPHO, date: today, status: 'present', note: '' });
-
-    const file = await exportTimesheet(harness.as(master), SIPHO, today, today);
-    const [header, ...lines] = file.csv.replace(/^﻿/u, '').trim().split('\r\n');
-    expect(header).toBe('Date,Customer,Jobs,Normal,OT,Dblt,Callout,Comments,Attendance');
-    expect(lines.some((row) => row.includes('EJE-1048') && row.includes('Sunday breakdown') && row.endsWith('Present'))).toBe(true);
-    expect(file.fileName).toMatch(/^eje-timesheet-sipho-mahlangu-.*\.csv$/u);
+  it('exports exactly what was typed, and marks an unrecorded day NOT RECORDED', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0)));
+    const file = await exportTimesheet(harness.as(master), SIPHO, day(1), day(0));
+    const [header, ...rows] = file.csv.replace(/^﻿/u, '').trim().split('\r\n');
+    expect(header).toBe('Date,Customer,NT,OT,DBL T,Callout,Comments,Attendance');
+    expect(rows).toEqual([`${day(1)},NOT RECORDED,,,,,,`, `${day(0)},ABC Engineering,8.00,1.50,0.00,1,,`]);
   });
 });

@@ -66,6 +66,24 @@ const assertManages = (context: OperationContext): void => {
   );
 };
 
+/**
+ * WHO MAY RECORD A DAY. ATTEND-2, the owner's instruction of 27 October 2026:
+ * attendance is entirely manual and each technician marks THEMSELVES present or
+ * absent, daily or catching up later (payday). The office may still record or
+ * correct anybody's day (`attendance.manage`). Nobody else may touch another
+ * person's attendance — the person is checked against the session, never
+ * taken on trust from the request.
+ */
+const assertMayRecordFor = (context: OperationContext, userId: string): void => {
+  if (can(context.actor.role, 'attendance.manage')) return;
+  if (context.actor.id === userId) return;
+  throw refuse(
+    'You can only record your own attendance.',
+    'not_permitted',
+    'Each person marks their own days; the office records or corrects anybody’s.',
+  );
+};
+
 const statusLabel = (status: AttendanceStatus): string =>
   status === 'present' ? 'Present' : 'Absent';
 
@@ -86,7 +104,7 @@ export const recordAttendance = async (
   context: OperationContext,
   input: AttendanceInput,
 ): Promise<AttendanceRecord> => {
-  assertManages(context);
+  assertMayRecordFor(context, input.userId);
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
   if (!ATTENDANCE_STATUSES.includes(input.status)) {
     throw refuse('That is not an attendance status.', 'invalid_status', 'Choose Present or Absent.');
@@ -241,6 +259,54 @@ export const loadAttendanceRegister = async (
 };
 
 /** The longest range one attendance export covers: a quarter, as a timesheet. */
+/** One of the person's own days: recorded (present or absent), or not yet. ATTEND-2. */
+export interface MyAttendanceDay {
+  readonly date: IsoDate;
+  readonly record: AttendanceRecord | null;
+}
+
+export interface MyAttendance {
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly today: IsoDate;
+  /** Newest first, every day in the range. */
+  readonly days: readonly MyAttendanceDay[];
+  readonly unrecorded: number;
+}
+
+/**
+ * The signed-in person's OWN days, recorded or not. ATTEND-2.
+ *
+ * Nothing is inferred: a day nobody marked is shown as not recorded, whatever
+ * jobs, logins or timesheet lines exist for it. Never another person's days.
+ */
+export const loadMyAttendance = async (
+  context: OperationContext,
+  from: string,
+  to: string,
+): Promise<MyAttendance> => {
+  if (!isCalendarDate(from) || !isCalendarDate(to)) {
+    throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
+  }
+  if (from > to) {
+    throw refuse('The range ends before it starts.', 'invalid_range', 'Choose a start on or before the end.');
+  }
+  const today = businessToday(new Date(context.services.clock.now()));
+  const last = to > today ? today : to;
+  const span = (Date.parse(`${last}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+  if (span > ATTENDANCE_EXPORT_MAX_DAYS) {
+    throw refuse('That range is too long.', 'range_too_long', `Choose at most ${ATTENDANCE_EXPORT_MAX_DAYS} days.`);
+  }
+  const records = from > last ? [] : await context.repos.attendance.listRecords(from, last, context.actor.id);
+  const byDate = new Map(records.map((record) => [record.date, record]));
+  const days: MyAttendanceDay[] = [];
+  for (let at = Date.parse(`${last}T00:00:00Z`); at >= Date.parse(`${from}T00:00:00Z`); at -= 86_400_000) {
+    const date = new Date(at).toISOString().slice(0, 10);
+    days.push({ date, record: byDate.get(date) ?? null });
+  }
+  return { from, to: last, today, days, unrecorded: days.filter((day) => day.record === null).length };
+};
+
 export const ATTENDANCE_EXPORT_MAX_DAYS = 92;
 
 export interface AttendanceExportRow {

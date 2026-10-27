@@ -106,7 +106,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     ).toContain('timesheet_comments_not_blank');
   });
 
-  it('the timesheet reads job_labour, leaves it untouched, and stores the day’s comment', async () => {
+  it('the timesheet is MANUAL: job labour is never read; typed lines and the comment are stored (TIMESHEET-2)', async () => {
     const today = businessToday();
     const master = await signIn('elmarie@example-test.co.za');
     const created = await master.post<{ id: string }>('/api/jobs', {
@@ -135,11 +135,34 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     ).toBe(200);
     const labourBefore = await db.select().from(schema.jobLabour).where(eq(schema.jobLabour.jobId, created.data.id));
 
-    const sheet = await tech.get<{ totals: { overtimeHours: number } }>(
+    // Three hours of labour on a job — and the timesheet shows nothing for it.
+    const before = await tech.get<{ totals: { overtimeHours: number; unrecordedDays: number } }>(
       `/api/timesheets/${IDS.technician}?from=${today}&to=${today}`,
     );
-    expect(sheet.status).toBe(200);
-    expect(sheet.data.totals.overtimeHours).toBe(3);
+    expect(before.status).toBe(200);
+    expect(before.data.totals).toMatchObject({ overtimeHours: 0, unrecordedDays: 1 });
+
+    // What the technician types is what is stored, with the owner from the session.
+    const added = await tech.post<{ entry: { id: string } }>(`/api/timesheets/${IDS.technician}/entries`, {
+      date: today, customerId: IDS.customer, customerName: '', normalHours: 6.25, overtimeHours: 2, doubleHours: 0, callouts: 1,
+    });
+    expect(added.status).toBe(200);
+    const rows = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ customerId: IDS.customer, normalHours: '6.25', overtimeHours: '2.00', callouts: 1 });
+    expect(rows[0]?.customerName.length).toBeGreaterThan(0);
+    const corrected = await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
+      entryId: added.data.entry.id, date: today, customerId: IDS.customer, customerName: '', normalHours: 6, overtimeHours: 2, doubleHours: 0, callouts: 1,
+    });
+    expect(corrected.status).toBe(200);
+    const after = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician));
+    expect(after.map((row) => [row.normalHours, row.version])).toEqual([['6.00', 2]]);
+    await expect(
+      db.insert(schema.timesheetEntries).values({
+        id: '00000000-0000-4000-8000-0000000000aa', userId: IDS.technician, workDate: today, customerName: 'x',
+        normalHours: '25', updatedBy: IDS.technician, recordedAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow();
 
     expect((await tech.post(`/api/timesheets/${IDS.technician}/comment`, { date: today, comment: 'Crane late' })).status).toBe(200);
     const comments = await db.select().from(schema.timesheetComments).where(eq(schema.timesheetComments.userId, IDS.technician));

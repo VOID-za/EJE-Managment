@@ -27,6 +27,7 @@ import type {
   AttendanceRecord,
   AvailabilityRecord,
   TimesheetComment,
+  TimesheetEntry,
   Machine,
   MachineDocument,
   MachineMovement,
@@ -510,6 +511,14 @@ export interface AttendanceRepository {
   findComment(userId: UserId, date: string): Promise<TimesheetComment | null>;
   saveComment(comment: TimesheetComment): Promise<TimesheetComment>;
   deleteComment(userId: UserId, date: string): Promise<void>;
+  /**
+   * A technician's own timesheet lines. TIMESHEET-2: typed by the technician,
+   * several per day allowed, matched on id. Oldest day first.
+   */
+  listEntries(userId: UserId, from: string, to: string): Promise<readonly TimesheetEntry[]>;
+  findEntry(id: string): Promise<TimesheetEntry | null>;
+  saveEntry(entry: TimesheetEntry): Promise<TimesheetEntry>;
+  deleteEntry(id: string): Promise<void>;
 }
 
 export interface ChatRepository {

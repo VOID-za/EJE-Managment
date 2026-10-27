@@ -1,7 +1,9 @@
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import {
+  asCustomerId,
   asUserId,
   type AttendanceRecord,
+  type TimesheetEntry,
   type AttendanceStatus,
   type TimesheetComment,
   type UserId,
@@ -12,6 +14,21 @@ import * as schema from '@/db/schema';
 
 type AttendanceRow = typeof schema.attendance.$inferSelect;
 type CommentRow = typeof schema.timesheetComments.$inferSelect;
+type EntryRow = typeof schema.timesheetEntries.$inferSelect;
+
+const toDomainEntry = (row: EntryRow): TimesheetEntry => ({
+  id: row.id,
+  userId: asUserId(row.userId),
+  date: row.workDate,
+  customerId: row.customerId === null ? null : asCustomerId(row.customerId),
+  customerName: row.customerName,
+  normalHours: Number(row.normalHours),
+  overtimeHours: Number(row.overtimeHours),
+  doubleHours: Number(row.doubleHours),
+  callouts: row.callouts,
+  updatedBy: asUserId(row.updatedBy),
+  updatedAt: row.recordedAt,
+});
 
 const toDomainRecord = (row: AttendanceRow): AttendanceRecord => ({
   id: row.id,
@@ -145,6 +162,57 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       })
       .returning();
     return toDomainComment(rows[0]!);
+  }
+
+  async listEntries(userId: UserId, from: string, to: string): Promise<readonly TimesheetEntry[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetEntries)
+      .where(
+        and(
+          eq(schema.timesheetEntries.userId, userId),
+          gte(schema.timesheetEntries.workDate, from),
+          lte(schema.timesheetEntries.workDate, to),
+        ),
+      )
+      .orderBy(asc(schema.timesheetEntries.workDate), asc(schema.timesheetEntries.createdAt));
+    return rows.map(toDomainEntry);
+  }
+
+  async findEntry(id: string): Promise<TimesheetEntry | null> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetEntries)
+      .where(eq(schema.timesheetEntries.id, id))
+      .limit(1);
+    return rows[0] === undefined ? null : toDomainEntry(rows[0]);
+  }
+
+  async saveEntry(entry: TimesheetEntry): Promise<TimesheetEntry> {
+    const values = {
+      workDate: entry.date,
+      customerId: entry.customerId,
+      customerName: entry.customerName,
+      normalHours: entry.normalHours.toFixed(2),
+      overtimeHours: entry.overtimeHours.toFixed(2),
+      doubleHours: entry.doubleHours.toFixed(2),
+      callouts: entry.callouts,
+      updatedBy: entry.updatedBy,
+      recordedAt: entry.updatedAt,
+    };
+    const rows = await this.db
+      .insert(schema.timesheetEntries)
+      .values({ id: entry.id, userId: entry.userId, ...values })
+      .onConflictDoUpdate({
+        target: schema.timesheetEntries.id,
+        set: { ...values, updatedAt: sql`now()`, version: sql`${schema.timesheetEntries.version} + 1` },
+      })
+      .returning();
+    return toDomainEntry(rows[0]!);
+  }
+
+  async deleteEntry(id: string): Promise<void> {
+    await this.db.delete(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
   }
 
   async deleteComment(userId: UserId, date: string): Promise<void> {

@@ -3841,7 +3841,7 @@ await step('the office records attendance, and a correction keeps one record (AT
     .getByText('Planned: Sick leave').waitFor({ timeout: 5000 });
 });
 
-await step('a timesheet shows the day, takes a comment and offers the export (TIMESHEET-1)', async () => {
+await step('a timesheet is manual: unrecorded days say so, the office reads it, takes a comment, exports it (TIMESHEET-2)', async () => {
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await page.getByLabel('Technician').selectOption('user-tech-sipho');
   await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
@@ -3849,9 +3849,18 @@ await step('a timesheet shows the day, takes a comment and offers the export (TI
   if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) {
     throw new Error('the office was not offered the timesheet export');
   }
+  // Nothing is derived: the days nobody entered say NOT RECORDED, and the
+  // office is offered no way to type a technician's hours.
+  await page.getByTestId('timesheet-table').getByText('Not recorded').first().waitFor({ timeout: 5000 });
+  if ((await page.getByTestId('add-timesheet-line').count()) !== 0) {
+    throw new Error('the office was offered a line on a technician’s timesheet');
+  }
 
-  await page.getByLabel('Comment', { exact: true }).fill('Waited two hours for the crane');
-  await page.getByRole('button', { name: 'Add comment' }).click();
+  const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
+  const todayRow = page.locator(`[data-testid="timesheet-day"][data-date="${today}"]`);
+  await todayRow.getByRole('button', { name: 'Add comment' }).click();
+  await todayRow.getByLabel(`Comment for ${today}`).fill('Waited two hours for the crane');
+  await todayRow.getByTestId('save-timesheet-comment').click();
   await page.getByTestId('timesheet-comment').filter({ hasText: 'Waited two hours for the crane' })
     .first().waitFor({ timeout: 10000 });
 

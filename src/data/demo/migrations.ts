@@ -597,6 +597,12 @@ const v28ToV29 = (data: Loose): Loose => ({
   timesheetComments: Array.isArray(data.timesheetComments) ? data.timesheetComments : [],
 });
 
+/** TIMESHEET-2. The technician's own timesheet lines, empty on every snapshot. */
+const v29ToV30 = (data: Loose): Loose => ({
+  ...data,
+  timesheetEntries: Array.isArray(data.timesheetEntries) ? data.timesheetEntries : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -619,6 +625,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   26: v26ToV27,
   27: v27ToV28,
   28: v28ToV29,
+  29: v29ToV30,
 };
 
 /**

@@ -3,6 +3,7 @@
 import type {
   AttendanceRecord,
   TimesheetComment,
+  TimesheetEntry,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -73,8 +74,20 @@ import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs
 import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
-import type { AttendanceRegister } from '@/application/attendance-operations';
+import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
 import type { Timesheet, TimesheetPerson } from '@/application/timesheets';
+
+/** The body of a timesheet line. TIMESHEET-2. */
+export interface TimesheetEntryBody {
+  readonly entryId?: string;
+  readonly date: string;
+  readonly customerId?: string | null;
+  readonly customerName: string;
+  readonly normalHours: number;
+  readonly overtimeHours: number;
+  readonly doubleHours: number;
+  readonly callouts: number;
+}
 import type { LibrarySearchPage } from '@/application/library-search';
 import type { SearchResult } from '@/application/search';
 import type { GeneratedPdf, OutboxEntry } from '@/services/ports';
@@ -1093,6 +1106,8 @@ export const outbox = {
 /** The attendance register. ATTEND-1. The office's. */
 export const attendance = {
   register: (date: string) => query<AttendanceRegister>(`/api/attendance${search({ date })}`),
+  /** ATTEND-2: the signed-in person's own days, recorded or not. */
+  mine: (from: string, to: string) => query<MyAttendance>(`/api/attendance/mine${search({ from, to })}`),
   record: (input: { userId: string; date: string; status: 'present' | 'absent'; note: string }) =>
     command<AttendanceRecord>('/api/attendance', input),
   exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
@@ -1108,6 +1123,11 @@ export const timesheets = {
       date,
       comment,
     }),
+  /** TIMESHEET-2: a line the technician typed, added or corrected (with entryId). */
+  saveEntry: (userId: string, input: TimesheetEntryBody) =>
+    command<{ entry: TimesheetEntry }>(`/api/timesheets/${segment(userId)}/entries`, input),
+  removeEntry: (userId: string, entryId: string) =>
+    command<{ removed: true }>(`/api/timesheets/${segment(userId)}/entries/${segment(entryId)}/remove`),
   exportUrl: (userId: string, from: string, to: string) =>
     `/api/timesheets/${segment(userId)}/export${search({ from, to })}`,
 };

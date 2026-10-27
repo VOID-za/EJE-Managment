@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { asUserId } from '@/domain';
 import { businessToday } from '@/lib/business-time';
-import { loadAttendanceExport, loadAttendanceRegister, recordAttendance } from './attendance-operations';
+import { loadAttendanceExport, loadAttendanceRegister, loadMyAttendance, recordAttendance } from './attendance-operations';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
@@ -73,13 +73,32 @@ describe('recording attendance', () => {
     expect((await harness.repos.activity.list()).length).toBe(before);
   });
 
-  it('is the office’s: a technician cannot record anybody, themselves included', async () => {
+  it('lets a technician mark THEMSELVES — today and an earlier day — and nobody else (ATTEND-2)', async () => {
+    const own = await recordAttendance(harness.as(technician), { userId: technician.id, date: today, status: 'present', note: '' });
+    expect(own).toMatchObject({ userId: technician.id, status: 'present', recordedBy: technician.id });
+    const earlier = shiftDays(today, -12);
+    await recordAttendance(harness.as(technician), { userId: technician.id, date: earlier, status: 'absent', note: 'Sick' });
+    // Corrected later: still one record for that day, and the correction is audited.
+    await recordAttendance(harness.as(technician), { userId: technician.id, date: earlier, status: 'present', note: '' });
+    expect((await harness.repos.attendance.listRecords(earlier, earlier, technician.id)).map((r) => r.status)).toEqual(['present']);
+    expect((await harness.repos.activity.list(undefined)).some((event) => event.type === 'attendance_corrected')).toBe(true);
+
     expect(
-      await refusal(
-        recordAttendance(harness.as(technician), { userId: technician.id, date: today, status: 'present', note: '' }),
-      ),
+      await refusal(recordAttendance(harness.as(technician), { userId: THABO, date: today, status: 'absent', note: '' })),
     ).toEqual(['not_permitted']);
-    expect(await harness.repos.attendance.listRecords(today, today)).toHaveLength(0);
+    expect(await harness.repos.attendance.listRecords(today, today, asUserId(THABO))).toHaveLength(0);
+  });
+
+  it('shows a technician their own days, unrecorded ones said as such — nothing inferred (ATTEND-2)', async () => {
+    await recordAttendance(harness.as(technician), { userId: technician.id, date: today, status: 'present', note: '' });
+    const mine = await loadMyAttendance(harness.as(technician), shiftDays(today, -2), today);
+    expect(mine.days.map((day) => day.date)).toEqual([today, shiftDays(today, -1), shiftDays(today, -2)]);
+    expect(mine.days[0]?.record?.status).toBe('present');
+    expect(mine.days.slice(1).every((day) => day.record === null)).toBe(true);
+    expect(mine.unrecorded).toBe(2);
+    // Another person's record never appears on this list.
+    await recordAttendance(harness.as(master), { userId: THABO, date: shiftDays(today, -1), status: 'present', note: '' });
+    expect((await loadMyAttendance(harness.as(technician), shiftDays(today, -2), today)).unrecorded).toBe(2);
   });
 
   it('refuses a day that has not happened, a non-date, a disabled account and an unknown person', async () => {

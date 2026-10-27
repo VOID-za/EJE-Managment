@@ -14,7 +14,13 @@ interface Register {
 }
 interface Sheet {
   readonly technician: { id: string };
-  readonly rows: readonly { date: string; comment: string }[];
+  readonly editable: boolean;
+  readonly days: readonly {
+    date: string;
+    comment: string;
+    recorded: boolean;
+    entries: readonly { id: string; customerName: string; normalHours: number }[];
+  }[];
 }
 
 describe('the attendance register over HTTP', () => {
@@ -22,7 +28,7 @@ describe('the attendance register over HTTP', () => {
     startTestServer();
   });
 
-  it('the office records a day and reads it back; a technician is refused both', async () => {
+  it('the office records a day and reads it back; a technician records only their OWN day and cannot read the register', async () => {
     const today = businessToday();
     const office = await signedInAs(DEMO_USERS.coordinator);
     const recorded = await office.post('/api/attendance', {
@@ -35,10 +41,20 @@ describe('the attendance register over HTTP', () => {
 
     const technician = await signedInAs(DEMO_USERS.technician);
     expect((await technician.get(`/api/attendance?date=${today}`)).status).toBe(403);
+    // ATTEND-2: their own day, yes; somebody else's, no.
+    const own = await technician.post('/api/attendance', {
+      userId: 'user-tech-sipho', date: today, status: 'absent', note: '',
+    });
+    expect(own.status).toBe(200);
     const refused = await technician.post('/api/attendance', {
-      userId: 'user-tech-sipho', date: today, status: 'present', note: '',
+      userId: 'user-tech-riaan', date: today, status: 'present', note: '',
     });
     expect(refused.status).toBe(403);
+    const mine = await technician.get<{ days: readonly { date: string; record: { status: string } | null }[] }>(
+      `/api/attendance/mine?from=${today}&to=${today}`,
+    );
+    expect(mine.status).toBe(200);
+    expect(mine.data.days[0]?.record?.status).toBe('absent');
   });
 
   it('the office exports a range as a CSV, audited; a technician is refused', async () => {
@@ -71,6 +87,43 @@ describe('timesheets over HTTP', () => {
     startTestServer();
   });
 
+  it('a technician enters, corrects and removes their OWN lines; nobody else may (TIMESHEET-2)', async () => {
+    const today = businessToday();
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const added = await technician.post<{ entry: { id: string } }>('/api/timesheets/user-tech-sipho/entries', {
+      date: today, customerName: 'ABC Engineering', normalHours: 8, overtimeHours: 1, doubleHours: 0, callouts: 1,
+    });
+    expect(added.status).toBe(200);
+    const id = added.data.entry.id;
+    const corrected = await technician.post('/api/timesheets/user-tech-sipho/entries', {
+      entryId: id, date: today, customerName: 'ABC Engineering', normalHours: 7.5, overtimeHours: 1, doubleHours: 0, callouts: 1,
+    });
+    expect(corrected.status).toBe(200);
+    const sheet = await technician.get<Sheet>(`/api/timesheets/user-tech-sipho?from=${today}&to=${today}`);
+    expect(sheet.data.editable).toBe(true);
+    expect(sheet.data.days[0]).toMatchObject({ recorded: true });
+    expect(sheet.data.days[0]?.entries.map((entry) => entry.normalHours)).toEqual([7.5]);
+
+    // Not on somebody else's sheet, and not the office on the technician's.
+    expect((await technician.post('/api/timesheets/user-tech-riaan/entries', {
+      date: today, customerName: 'X', normalHours: 1, overtimeHours: 0, doubleHours: 0, callouts: 0,
+    })).status).toBe(403);
+    const office = await signedInAs(DEMO_USERS.master);
+    expect((await office.post('/api/timesheets/user-tech-sipho/entries', {
+      date: today, customerName: 'X', normalHours: 1, overtimeHours: 0, doubleHours: 0, callouts: 0,
+    })).status).toBe(403);
+    expect((await office.get<Sheet>(`/api/timesheets/user-tech-sipho?from=${today}&to=${today}`)).data.editable).toBe(false);
+    // A value the schema refuses never reaches the operation.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/entries', {
+      date: today, customerName: 'X', normalHours: 30, overtimeHours: 0, doubleHours: 0, callouts: 0,
+    })).status).toBe(400);
+
+    const removed = await technician.post(`/api/timesheets/user-tech-sipho/entries/${id}/remove`, {});
+    expect(removed.status).toBe(200);
+    const after = await technician.get<Sheet>(`/api/timesheets/user-tech-sipho?from=${today}&to=${today}`);
+    expect(after.data.days[0]?.recorded).toBe(false);
+  });
+
   it('a technician reads and comments on their own sheet, and is refused anybody else’s', async () => {
     const today = businessToday();
     const technician = await signedInAs(DEMO_USERS.technician);
@@ -82,7 +135,7 @@ describe('timesheets over HTTP', () => {
     });
     expect(comment.status).toBe(200);
     const after = await technician.get<Sheet>(`/api/timesheets/user-tech-sipho?from=${today}&to=${today}`);
-    expect(after.data.rows.find((row) => row.date === today)?.comment).toBe('Waited for the crane');
+    expect(after.data.days.find((day) => day.date === today)?.comment).toBe('Waited for the crane');
 
     expect((await technician.get(`/api/timesheets/user-tech-riaan?from=${today}&to=${today}`)).status).toBe(403);
     expect(
@@ -99,7 +152,7 @@ describe('timesheets over HTTP', () => {
     expect(file.status).toBe(200);
     expect(file.headers.get('content-type')).toContain('text/csv');
     expect(file.text.replace(/^﻿/u, '').split('\r\n')[0]).toBe(
-      'Date,Customer,Jobs,Normal,OT,Dblt,Callout,Comments,Attendance',
+      'Date,Customer,NT,OT,DBL T,Callout,Comments,Attendance',
     );
 
     const activity = await office.get<{ events: readonly { type: string; summary: string }[] }>('/api/activity');

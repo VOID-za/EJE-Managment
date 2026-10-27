@@ -6,13 +6,12 @@ import {
   Badge,
   Button,
   Card,
-  EmptyState,
-  Icon,
   LoadingPanel,
   QueryFailure,
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { MyAttendance } from '@/components/attendance/MyAttendance';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { attendance } from '@/api/endpoints';
 import type { RegisterRow } from '@/application/attendance-operations';
@@ -43,13 +42,16 @@ const AttendancePage = () => {
 
   const query = useQuery(`attendance:${date}`, () => attendance.register(date));
 
+  // ATTEND-2: a technician marks their own days; the register below is the office's.
   if (!manages) {
     return (
-      <EmptyState
-        title="The attendance register is an office screen"
-        description="The office records who was at work each day. Your own days are on your timesheet."
-        icon={<Icon name="calendar" />}
-      />
+      <>
+        <PageHeader
+          title="Attendance"
+          description="Mark yourself Present or Absent for each day. Nothing is filled in for you."
+        />
+        <MyAttendance />
+      </>
     );
   }
 

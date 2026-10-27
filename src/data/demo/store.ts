@@ -16,6 +16,7 @@ import type {
   AttendanceRecord,
   AvailabilityRecord,
   TimesheetComment,
+  TimesheetEntry,
   SystemSettings,
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
@@ -112,6 +113,8 @@ export interface DemoDatabase {
   attendance: AttendanceRecord[];
   /** Technicians' daily timesheet comments: one per person per day. TIMESHEET-1. */
   timesheetComments: TimesheetComment[];
+  /** A technician's own timesheet lines. TIMESHEET-2. */
+  timesheetEntries: TimesheetEntry[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
   settings: SystemSettings;
@@ -200,11 +203,13 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * v29 added the attendance register and the timesheet's daily comments
  * (ATTEND-1, TIMESHEET-1), both empty: nothing was recorded before they existed.
  *
+ * v30 added the technician's own timesheet lines (TIMESHEET-2), empty.
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 30;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -253,6 +258,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   // the register existed, and a fixture inventing it would be fiction.
   attendance: [],
   timesheetComments: [],
+  timesheetEntries: [],
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at
   // the moment the Master issues them.

@@ -281,6 +281,10 @@ export type ActivityEventType =
   | 'attendance_corrected'
   /** A technician's daily timesheet comment written, changed or cleared. TIMESHEET-1. */
   | 'timesheet_comment_saved'
+  /** A technician added, corrected or removed a line of their own timesheet. TIMESHEET-2. */
+  | 'timesheet_entry_added'
+  | 'timesheet_entry_corrected'
+  | 'timesheet_entry_removed'
   | 'message_sent'
   | 'message_actioned'
   | 'job_transferred_to_open'

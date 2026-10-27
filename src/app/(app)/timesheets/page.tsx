@@ -1,39 +1,78 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { userFullName } from '@/domain';
+import { useEffect, useMemo, useState } from 'react';
+import { userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   Icon,
   LoadingPanel,
   QueryFailure,
   SelectField,
-  TextAreaField,
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
-import { timesheets } from '@/api/endpoints';
-import type { TimesheetRow } from '@/application/timesheets';
+import { reads, timesheets } from '@/api/endpoints';
+import type { TimesheetDay } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 import { formatDate } from '@/lib/format';
 
-const hours = (value: number): string => (value === 0 ? '—' : value.toFixed(2));
+const hours = (value: number): string => value.toFixed(2);
+
+/** A line being typed: strings, exactly as the technician typed them. */
+interface Draft {
+  readonly entryId?: string;
+  readonly date: string;
+  readonly customerId: string;
+  readonly customerName: string;
+  readonly normal: string;
+  readonly overtime: string;
+  readonly double: string;
+  readonly callouts: string;
+}
+
+const emptyDraft = (date: string): Draft => ({
+  date,
+  customerId: '',
+  customerName: '',
+  normal: '0',
+  overtime: '0',
+  double: '0',
+  callouts: '0',
+});
+
+const draftOf = (entry: TimesheetEntry): Draft => ({
+  entryId: entry.id,
+  date: entry.date,
+  customerId: entry.customerId ?? '',
+  customerName: entry.customerName,
+  normal: String(entry.normalHours),
+  overtime: String(entry.overtimeHours),
+  double: String(entry.doubleHours),
+  callouts: String(entry.callouts),
+});
+
+const parse = (value: string): number => Number.parseFloat(value.replace(',', '.'));
 
 /**
- * TECHNICIAN TIMESHEETS. TIMESHEET-1.
+ * TECHNICIAN TIMESHEETS — COMPLETELY MANUAL. TIMESHEET-2 (27 October 2026).
  *
- * Date, customer, normal time, OT, Dblt, call-out and the day's comment, for
- * one technician over a range. The hours are the technician's own labour lines
- * from the jobs — read, never copied — so this sheet and the job cards cannot
- * disagree. The office opens anybody's and exports it; a technician opens
- * their own. Either may write the day's comment on a sheet they can open.
+ * Every value on this sheet is one the technician typed: the customer, normal
+ * time (NT), overtime (OT), double time (DBL T), call-outs and the day's
+ * comment. Nothing is read from job cards, assignments or labour, and nothing
+ * is prefilled or recalculated. A technician fills it in day by day, or all at
+ * once later — the same form either way. A day with no line says NOT RECORDED;
+ * a line of zeros is a recorded day with no hours.
+ *
+ * Only the technician enters their own sheet; the office opens anybody's and
+ * exports it.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
@@ -42,16 +81,34 @@ const TimesheetsPage = () => {
   const [from, setFrom] = useState(`${today.slice(0, 8)}01`);
   const [to, setTo] = useState(today);
   const [chosen, setChosen] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ date: string; text: string } | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [removing, setRemoving] = useState<TimesheetEntry | null>(null);
+  const [editingComment, setEditingComment] = useState<{ date: string; text: string } | null>(null);
 
   const people = useQuery(`timesheets:people:${currentUser.id}`, () => timesheets.people());
   const personId = chosen ?? people.data?.[0]?.id ?? null;
   const sheet = useQuery(`timesheets:${personId ?? 'none'}:${from}:${to}`, () =>
     personId === null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
   );
+  const customers = useQuery('timesheets:customers', () => reads.customers());
 
-  const rows = useMemo(() => sheet.data?.rows ?? [], [sheet.data]);
-  const dayCount = useMemo(() => new Set(rows.map((row) => row.date)).size, [rows]);
+  // Newest day first: a technician filling in today sees today at the top.
+  const days = useMemo(() => [...(sheet.data?.days ?? [])].reverse(), [sheet.data]);
+  const editable = sheet.data?.editable === true;
+
+  /*
+   * NOTHING TYPED IS LOST BY LEAVING. A line half-typed, or a comment being
+   * written, warns before the page is closed or reloaded.
+   */
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   if (people.error !== null) {
     return <QueryFailure code={people.errorCode} message={people.error} onRetry={people.refetch} />;
@@ -69,69 +126,220 @@ const TimesheetsPage = () => {
     );
   }
 
+  const edit = (next: Draft | null) => {
+    setDraft(next);
+    setDirty(next !== null);
+    operation.clearError();
+  };
+
+  const saveDraft = async (): Promise<void> => {
+    if (personId === null || draft === null) return;
+    const ok = await operation.run(async () => {
+      await timesheets.saveEntry(personId, {
+        ...(draft.entryId === undefined ? {} : { entryId: draft.entryId }),
+        date: draft.date,
+        customerId: draft.customerId.length > 0 ? draft.customerId : null,
+        customerName: draft.customerName,
+        normalHours: parse(draft.normal),
+        overtimeHours: parse(draft.overtime),
+        doubleHours: parse(draft.double),
+        callouts: Number(draft.callouts),
+      });
+    });
+    if (ok) {
+      edit(null);
+      sheet.refetch();
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    if (personId === null || removing === null) return;
+    const ok = await operation.run(async () => {
+      await timesheets.removeEntry(personId, removing.id);
+    });
+    setRemoving(null);
+    if (ok) sheet.refetch();
+  };
+
   const saveComment = async (date: string, text: string): Promise<void> => {
     if (personId === null) return;
     const ok = await operation.run(async () => {
       await timesheets.saveComment(personId, date, text);
     });
     if (ok) {
-      setEditing(null);
+      setEditingComment(null);
+      setDirty(false);
       sheet.refetch();
     }
   };
 
-  const commentCell = (row: TimesheetRow) => {
-    if (!row.firstOfDay) return null;
-    if (editing !== null && editing.date === row.date) {
-      return (
-        <div className="space-y-2">
-          <TextAreaField
-            label={`Comment for ${row.date}`}
-            rows={2}
-            maxLength={1000}
-            value={editing.text}
-            onChange={(event) => setEditing({ date: row.date, text: event.target.value })}
-          />
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              loading={operation.running}
-              onClick={() => void saveComment(row.date, editing.text)}
-              data-testid="save-timesheet-comment"
-            >
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-          </div>
+  const customerOptions = [
+    { value: '', label: 'Type the customer below…' },
+    ...(customers.data ?? []).map((customer) => ({ value: customer.id, label: customer.name })),
+  ];
+
+  const lineForm = (current: Draft) => (
+    <div className="mt-2 space-y-3 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50/40 p-3" data-testid="timesheet-line-form">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <TextField
+          label="Date"
+          type="date"
+          value={current.date}
+          max={today}
+          onChange={(event) => edit({ ...current, date: event.target.value })}
+        />
+        <SelectField
+          label="Customer (from the register)"
+          value={current.customerId}
+          options={customerOptions}
+          onChange={(event) => {
+            const picked = (customers.data ?? []).find((customer) => customer.id === event.target.value);
+            edit({ ...current, customerId: event.target.value, customerName: picked?.name ?? current.customerName });
+          }}
+        />
+        <TextField
+          label="Customer"
+          value={current.customerName}
+          maxLength={200}
+          hint="Required when there are hours or a call-out."
+          onChange={(event) => edit({ ...current, customerName: event.target.value })}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <TextField label="NT (hours)" inputMode="decimal" value={current.normal} onChange={(event) => edit({ ...current, normal: event.target.value })} />
+        <TextField label="OT (hours)" inputMode="decimal" value={current.overtime} onChange={(event) => edit({ ...current, overtime: event.target.value })} />
+        <TextField label="DBL T (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
+        <TextField label="Call-outs" inputMode="numeric" value={current.callouts} onChange={(event) => edit({ ...current, callouts: event.target.value })} />
+      </div>
+      <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). A line of zeros records a day with no hours.</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" loading={operation.running} onClick={() => void saveDraft()} data-testid="save-timesheet-line">
+          Save line
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => edit(null)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+
+  const dayRow = (day: TimesheetDay) => (
+    <li
+      key={day.date}
+      className="py-3"
+      data-testid="timesheet-day"
+      data-date={day.date}
+      data-recorded={day.recorded ? 'yes' : 'no'}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-steel-900">{formatDate(day.date)}</span>
+          {day.recorded ? (
+            <Badge tone="green" size="sm">Recorded</Badge>
+          ) : (
+            <Badge tone="amber" size="sm">Not recorded</Badge>
+          )}
+          {day.attendance !== null && (
+            <Badge tone="outline" size="sm">{day.attendance === 'present' ? 'Present' : 'Absent'}</Badge>
+          )}
         </div>
-      );
-    }
-    return (
-      <div className="flex items-start gap-2">
-        <span className="flex-1 whitespace-pre-wrap text-steel-700" data-testid="timesheet-comment">
-          {row.comment}
-        </span>
-        {row.date <= today && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setEditing({ date: row.date, text: row.comment })}
-            aria-label={`Comment on ${row.date}`}
-          >
-            {row.comment.length > 0 ? 'Edit' : 'Comment'}
+        {editable && draft === null && (
+          <Button size="sm" variant="secondary" onClick={() => edit(emptyDraft(day.date))} data-testid="add-timesheet-line">
+            <Icon name="plus" className="size-4" /> Add line
           </Button>
         )}
       </div>
-    );
-  };
+
+      {day.entries.length > 0 && (
+        <div className="eje-scrollbar mt-2 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-steel-500 uppercase">
+                <th className="py-1 pr-3">Customer</th>
+                <th className="py-1 pr-3 text-right">NT</th>
+                <th className="py-1 pr-3 text-right">OT</th>
+                <th className="py-1 pr-3 text-right">DBL T</th>
+                <th className="py-1 pr-3 text-right">Call-out</th>
+                {editable && <th className="py-1" />}
+              </tr>
+            </thead>
+            <tbody>
+              {day.entries.map((entry) => (
+                <tr key={entry.id} className="border-t border-steel-100" data-testid="timesheet-line">
+                  <td className="py-1.5 pr-3">{entry.customerName || '—'}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.normalHours)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.overtimeHours)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.doubleHours)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{entry.callouts}</td>
+                  {editable && (
+                    <td className="py-1.5 text-right whitespace-nowrap">
+                      <Button size="sm" variant="ghost" disabled={draft !== null} onClick={() => edit(draftOf(entry))}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={draft !== null} onClick={() => setRemoving(entry)}>
+                        Remove
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {draft !== null && draft.date === day.date && lineForm(draft)}
+
+      <div className="mt-2 text-sm">
+        {editingComment !== null && editingComment.date === day.date ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <TextField
+              label={`Comment for ${day.date}`}
+              value={editingComment.text}
+              maxLength={1000}
+              onChange={(event) => {
+                setEditingComment({ date: day.date, text: event.target.value });
+                setDirty(true);
+              }}
+              containerClassName="min-w-64 flex-1"
+            />
+            <Button size="sm" loading={operation.running} onClick={() => void saveComment(day.date, editingComment.text)} data-testid="save-timesheet-comment">
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setEditingComment(null); setDirty(false); }}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2">
+            <span className="flex-1 whitespace-pre-wrap text-steel-700" data-testid="timesheet-comment">
+              {day.comment}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setEditingComment({ date: day.date, text: day.comment })}>
+              {day.comment.length > 0 ? 'Edit comment' : 'Add comment'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
 
   return (
     <>
       <PageHeader
         title="Timesheets"
-        description="Hours by day and customer, from the labour recorded on each job, with the day's comment."
+        description="Each technician keeps their own timesheet: the customer, NT, OT, DBL T and call-outs, entered by hand for each day — as you go, or all at once later."
+      />
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove this line?"
+        message={removing === null ? '' : `${removing.customerName || 'This line'} on ${removing.date} will be removed from your timesheet. The removal is recorded.`}
+        confirmLabel="Remove line"
+        confirmVariant="danger"
+        busy={operation.running}
+        onConfirm={() => void remove()}
+        onCancel={() => setRemoving(null)}
       />
 
       <Card className="mb-5">
@@ -150,32 +358,16 @@ const TimesheetsPage = () => {
               <p className="font-semibold text-steel-900">{userFullName(people.data[0]!)}</p>
             </div>
           )}
-          <TextField
-            label="From"
-            type="date"
-            value={from}
-            onChange={(event) => event.target.value.length > 0 && setFrom(event.target.value)}
-            containerClassName="w-44"
-          />
-          <TextField
-            label="To"
-            type="date"
-            value={to}
-            onChange={(event) => event.target.value.length > 0 && setTo(event.target.value)}
-            containerClassName="w-44"
-          />
+          <TextField label="From" type="date" value={from} onChange={(event) => event.target.value.length > 0 && setFrom(event.target.value)} containerClassName="w-44" />
+          <TextField label="To" type="date" value={to} onChange={(event) => event.target.value.length > 0 && setTo(event.target.value)} containerClassName="w-44" />
           {personId !== null && sheet.data !== null && sheet.data !== undefined && (
-            <DownloadFileButton
-              href={timesheets.exportUrl(personId, from, to)}
-              fallbackName={`timesheet-${from}-${to}.csv`}
-              label="Export CSV"
-            />
+            <DownloadFileButton href={timesheets.exportUrl(personId, from, to)} fallbackName={`timesheet-${from}-${to}.csv`} label="Export CSV" />
           )}
         </div>
         <p className="mt-3 text-xs text-steel-500">
-          <strong>Callout</strong> counts the jobs that carried the call-out fee, once per job, on
-          the technician’s first day on that job. Hours are never entered here — correct them on the
-          job, and the timesheet follows.
+          {editable
+            ? 'Add a line for each customer you worked for on a day. You can correct or remove your own lines at any time; every change is recorded.'
+            : 'This is the technician’s own timesheet. Only they enter and correct it; the office reads and exports it.'}
         </p>
         {operation.error !== null && (
           <p role="alert" className="mt-2 text-sm font-medium text-signal-600">
@@ -189,141 +381,27 @@ const TimesheetsPage = () => {
       ) : sheet.loading || sheet.data === null || sheet.data === undefined ? (
         <LoadingPanel rows={6} label="Loading the timesheet" />
       ) : (
-        <Card padded={false}>
-          <div className="flex flex-wrap items-center gap-2 px-5 pt-4">
-            <Badge tone="outline">{dayCount} {dayCount === 1 ? 'day' : 'days'}</Badge>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="mt-3 w-full text-sm" data-testid="timesheet-table">
-              <thead>
-                <tr className="border-b border-steel-200 text-left text-xs font-semibold tracking-wide text-steel-500 uppercase">
-                  <th className="px-5 py-2">Date</th>
-                  <th className="px-3 py-2">Customer</th>
-                  <th className="px-3 py-2 text-right">Normal</th>
-                  <th className="px-3 py-2 text-right">OT</th>
-                  <th className="px-3 py-2 text-right">Dblt</th>
-                  <th className="px-3 py-2 text-right">Callout</th>
-                  <th className="px-3 py-2">Comments</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-5 py-6 text-center text-steel-500">
-                      No labour or comments in this range.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => (
-                    <tr
-                      key={`${row.date}|${row.customerId ?? 'none'}`}
-                      className={row.firstOfDay ? 'border-t border-steel-200' : ''}
-                      data-testid="timesheet-row"
-                      data-date={row.date}
-                    >
-                      <td className="px-5 py-2 align-top whitespace-nowrap">
-                        {row.firstOfDay && (
-                          <>
-                            <span className="font-medium text-steel-900">{formatDate(row.date)}</span>
-                            {row.attendance !== null && (
-                              <Badge
-                                tone={row.attendance === 'present' ? 'green' : 'red'}
-                                size="sm"
-                                className="ml-2"
-                              >
-                                {row.attendance === 'present' ? 'Present' : 'Absent'}
-                              </Badge>
-                            )}
-                          </>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        {row.customerName}
-                        {row.jobNumbers.length > 0 && (
-                          <span className="block font-mono text-xs text-steel-400">
-                            {row.jobNumbers.join(' ')}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right align-top tabular-nums">{hours(row.normalHours)}</td>
-                      <td className="px-3 py-2 text-right align-top tabular-nums">{hours(row.overtimeHours)}</td>
-                      <td className="px-3 py-2 text-right align-top tabular-nums">{hours(row.doubleHours)}</td>
-                      <td className="px-3 py-2 text-right align-top tabular-nums">
-                        {row.callouts === 0 ? '—' : row.callouts}
-                      </td>
-                      <td className="min-w-56 px-3 py-2 align-top">{commentCell(row)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-steel-300 font-semibold" data-testid="timesheet-totals">
-                  <td className="px-5 py-2" colSpan={2}>
-                    Total
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{hours(sheet.data.totals.normalHours)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{hours(sheet.data.totals.overtimeHours)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{hours(sheet.data.totals.doubleHours)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{sheet.data.totals.callouts || '—'}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <div className="border-t border-steel-100 px-5 py-3">
-            <AddDayComment
-              today={today}
-              disabled={operation.running}
-              onSave={(date, text) => void saveComment(date, text)}
-            />
-          </div>
-        </Card>
+        <>
+          <Card className="mb-5">
+            <div className="flex flex-wrap gap-6 text-sm" data-testid="timesheet-totals">
+              <span>NT <strong className="tabular-nums">{hours(sheet.data.totals.normalHours)}</strong></span>
+              <span>OT <strong className="tabular-nums">{hours(sheet.data.totals.overtimeHours)}</strong></span>
+              <span>DBL T <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
+              <span>Call-outs <strong className="tabular-nums">{sheet.data.totals.callouts}</strong></span>
+              <span>Recorded days <strong>{sheet.data.totals.recordedDays}</strong></span>
+              <span className={sheet.data.totals.unrecordedDays > 0 ? 'text-amber-eje-700' : ''}>
+                Not recorded <strong>{sheet.data.totals.unrecordedDays}</strong>
+              </span>
+            </div>
+          </Card>
+          <Card>
+            <ul className="divide-y divide-steel-100" data-testid="timesheet-table">
+              {days.map(dayRow)}
+            </ul>
+          </Card>
+        </>
       )}
     </>
-  );
-};
-
-/** A comment for a day with no labour on it — a day off site, a training day. */
-const AddDayComment = ({
-  today,
-  disabled,
-  onSave,
-}: {
-  readonly today: string;
-  readonly disabled: boolean;
-  readonly onSave: (date: string, text: string) => void;
-}) => {
-  const [date, setDate] = useState(today);
-  const [text, setText] = useState('');
-  return (
-    <div className="flex flex-wrap items-end gap-3">
-      <TextField
-        label="Comment on another day"
-        type="date"
-        value={date}
-        max={today}
-        onChange={(event) => setDate(event.target.value)}
-        containerClassName="w-48"
-      />
-      <TextField
-        label="Comment"
-        value={text}
-        maxLength={1000}
-        onChange={(event) => setText(event.target.value)}
-        containerClassName="min-w-64 flex-1"
-      />
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={disabled || text.trim().length === 0 || date.length === 0}
-        onClick={() => {
-          onSave(date, text);
-          setText('');
-        }}
-      >
-        Add comment
-      </Button>
-    </div>
   );
 };
 

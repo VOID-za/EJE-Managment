@@ -8,6 +8,7 @@ import type {
   AttendanceRecord,
   AvailabilityRecord,
   TimesheetComment,
+  TimesheetEntry,
   ChatMessage,
   ChecklistTemplate,
   ChecklistTemplateId,
@@ -1222,6 +1223,33 @@ class DemoAttendanceRepository implements AttendanceRepository {
       draft.timesheetComments = draft.timesheetComments.filter(
         (candidate) => !(candidate.userId === userId && candidate.date === date),
       );
+    });
+    return Promise.resolve();
+  }
+
+  listEntries(userId: UserId, from: string, to: string): Promise<readonly TimesheetEntry[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetEntries.filter((entry) => entry.userId === userId && entry.date >= from && entry.date <= to)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.updatedAt.localeCompare(b.updatedAt)),
+    );
+  }
+
+  findEntry(id: string): Promise<TimesheetEntry | null> {
+    return Promise.resolve(this.context.read().timesheetEntries.find((entry) => entry.id === id) ?? null);
+  }
+
+  saveEntry(entry: TimesheetEntry): Promise<TimesheetEntry> {
+    this.context.commit((draft) => {
+      draft.timesheetEntries = [...draft.timesheetEntries.filter((candidate) => candidate.id !== entry.id), entry];
+    });
+    return Promise.resolve(entry);
+  }
+
+  deleteEntry(id: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.timesheetEntries = draft.timesheetEntries.filter((candidate) => candidate.id !== id);
     });
     return Promise.resolve();
   }

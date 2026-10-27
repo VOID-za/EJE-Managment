@@ -76,13 +76,12 @@ export const NAVIGATION: readonly NavigationItem[] = [
    * everybody's, because a technician opens their own (the server shows them
    * nobody else's).
    */
-  {
-    href: '/attendance',
-    label: 'Attendance',
-    icon: 'user',
-    capability: 'attendance.manage',
-    group: 'work',
-  },
+  /*
+   * ATTEND-2 (27 October 2026): everybody marks their own attendance, so the
+   * item is everybody's. The page shows a technician their own days and the
+   * office the register; the server enforces both.
+   */
+  { href: '/attendance', label: 'Attendance', icon: 'user', group: 'work' },
   { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work' },
   {
     href: '/customers',
