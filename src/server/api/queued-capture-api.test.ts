@@ -76,6 +76,22 @@ describe('sending work a tablet captured while it was offline', () => {
     expect(sent.data.labour[0]?.hours).toBe(2.5);
   });
 
+  it('applies a capture held from the offline page, which names the job by its NUMBER (OFF-2)', async () => {
+    // The tablet's copy keeps no internal id; the job number is the target.
+    const sent = await sipho.post<JobBody>(`/api/jobs/${job.jobNumber}/add_labour`, LABOUR, {
+      idempotencyKey: 'offline-page-capture-1',
+    });
+    expect(sent.status).toBe(200);
+    expect(sent.data.id).toBe(job.id);
+    expect(sent.data.labour).toHaveLength(1);
+
+    const replay = await sipho.post<JobBody>(`/api/jobs/${job.jobNumber}/add_labour`, LABOUR, {
+      idempotencyKey: 'offline-page-capture-1',
+    });
+    expect(replay.headers.get('Idempotent-Replay')).toBe('true');
+    expect(replay.data.labour).toHaveLength(1);
+  });
+
   /* -- the answer that never came back ------------------------------------- */
 
   it('does NOT double the hours when the same capture is sent twice', async () => {

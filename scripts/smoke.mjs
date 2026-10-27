@@ -6690,6 +6690,8 @@ await step('a write-up the server changed under a held draft is a CONFLICT, not 
 
 /* ---- OFF-DETAIL-1: the job detail, from this device's own copy ----------- */
 
+const OFFLINE_PAGE_NOTE = 'Held from the offline page with no signal (OFF-2).';
+
 await step('the job a technician had open is readable with the network off', async () => {
   /*
    * OFF-DETAIL-1. Until now a tablet with no coverage could show the job LIST
@@ -6783,6 +6785,20 @@ await step('the job a technician had open is readable with the network off', asy
       throw new Error('the cached copy offers an action');
     }
     await page.screenshot({ path: `${shots}/51-cached-detail.png`, fullPage: false });
+
+    /*
+     * OFF-2, completed 27 October 2026: work can now be HELD against the copy.
+     * Beside the read-only card, never inside it — the card above still offers
+     * nothing — and what is held is said to be not on the job.
+     */
+    await page.getByTestId('offline-capture').waitFor({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Note', exact: true }).click();
+    await page.getByLabel('Note', { exact: true }).fill(OFFLINE_PAGE_NOTE);
+    await page.getByTestId('offline-capture-hold').click();
+    const held = await page.getByTestId('offline-capture-message').innerText({ timeout: 10000 });
+    if (!/Held on this tablet/.test(held) || !/not on the job/.test(held)) {
+      throw new Error(`holding from the offline page said: ${held}`);
+    }
   } finally {
     await page.context().setOffline(false);
     offlineExpected = false;
@@ -6797,6 +6813,23 @@ await step('the job a technician had open is readable with the network off', asy
    * from.
    */
   await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+
+  /*
+   * THE NOTE HELD OFFLINE LANDS ON THE JOB once the application is back, sent
+   * by the tablet-wide flush — named against the job's NUMBER, which is all
+   * the copy keeps (OFF-2).
+   */
+  await page.waitForFunction(
+    async ([number, body]) => {
+      const response = await fetch(`/api/jobs/${number}`, { headers: { accept: 'application/json' } });
+      if (!response.ok) return false;
+      const notes = (await response.json()).data?.view?.job?.notes ?? [];
+      return notes.some((note) => note.body === body);
+    },
+    [jobNumber, OFFLINE_PAGE_NOTE],
+    { timeout: 40000, polling: 1000 },
+  );
+
   await signOut();
   const after = await page.evaluate(
     () =>

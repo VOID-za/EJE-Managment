@@ -237,6 +237,14 @@ describe('narrowing one job’s DETAIL to what a tablet may keep', () => {
     expect(blob).not.toContain('finalDocument');
   });
 
+  it('keeps whether work may be held, as two booleans and nothing more (OFF-2)', () => {
+    const kept = toCachedJobDetail('user-tech-sipho', detailSource({ signed: true, capturesLabourAndTravel: false }), '2026-10-20T06:30:00.000Z');
+    expect(kept.signed).toBe(true);
+    expect(kept.capturesLabourAndTravel).toBe(false);
+    // Whether it was signed — never who signed or what.
+    expect(JSON.stringify(kept)).not.toContain('strokeData');
+  });
+
   it('keeps no identifier a client could hand back as authority', () => {
     const blob = JSON.stringify(detail());
 

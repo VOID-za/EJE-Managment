@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect } from 'react';
-import { evaluateChecklist, siteAddressLine, machineDisplayName, type Job } from '@/domain';
+import {
+  evaluateChecklist,
+  getJobTypeDefinition,
+  siteAddressLine,
+  machineDisplayName,
+  type Job,
+} from '@/domain';
 import type { JobView } from '@/application/job-view';
 import { cacheJobDetail, isJobCacheSupported } from '@/lib/pwa/job-cache';
 import { toCachedJobDetail } from '@/lib/pwa/cached-job';
@@ -48,6 +54,8 @@ export const useCacheJobDetail = (view: JobView | null, mine: boolean): void => 
           siteAddress: siteAddressLine(view.site),
           machineLabel: view.machine === null ? '' : machineDisplayName(view.machine),
           machineSerial: view.machine?.serialNumber ?? '',
+          signed: job.signature !== null,
+          capturesLabourAndTravel: getJobTypeDefinition(job.jobType).capturesLabourAndTravel,
           checklist:
             progress === null || view.checklistTemplate === null
               ? null

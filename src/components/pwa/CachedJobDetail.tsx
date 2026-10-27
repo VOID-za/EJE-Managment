@@ -144,8 +144,8 @@ export const CachedJobDetailCard = ({ detail }: { readonly detail: CachedDetail 
 
     <p className="text-xs text-steel-500 dark:text-slate-400">
       Nothing on this copy can be changed from here, and it holds no prices, no signature and no
-      customer contact details. Capture work from the job screen while you have it open — this is
-      what the server last said about the job.
+      customer contact details. New labour, travel, parts and notes can be held below and are sent
+      when there is signal — this is what the server last said about the job.
     </p>
   </Card>
 );

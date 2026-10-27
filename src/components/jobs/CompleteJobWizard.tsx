@@ -398,7 +398,7 @@ export const CompleteJobWizard = ({
     const heldForJob =
       userId.length === 0 || !isPendingSupported()
         ? 0
-        : (await readPendingForJob(userId, job.id)).filter((row) => row.state === 'pending').length +
+        : (await readPendingForJob(userId, job.id, job.jobNumber)).filter((row) => row.state === 'pending').length +
           (await readPendingMediaForJob(userId, job.id)).filter((row) => row.state === 'pending').length;
     const check = checkSignatureHoldable({ presented, currentIdentity, heldForJob });
     const identity = presented?.identity ?? null;

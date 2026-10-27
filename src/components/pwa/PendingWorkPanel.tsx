@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { Badge, Button, Card, ConfirmDialog, Icon } from '@/components/ui';
 import { useOnline } from '@/hooks/useOnline';
 import type { PendingWorkResult } from '@/hooks/usePendingWork';
-import type { PendingWork } from '@/lib/pwa/pending-work';
+import { isRowForJob, type PendingWork } from '@/lib/pwa/pending-work';
 import { isOfflineSignatureAction } from '@/lib/pwa/offline-rules';
+import { SYNC_LABEL, SYNC_TONE, syncStateOf } from '@/lib/pwa/sync-state';
 import { formatRelative } from '@/lib/format';
 
 const ACTION_LABEL: Readonly<Record<string, string>> = {
@@ -39,17 +40,23 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
 export const PendingWorkPanel = ({
   pending,
   jobId,
+  jobNumber,
   className,
 }: {
   readonly pending: PendingWorkResult;
   /** When set, only this job's captures are shown. */
   readonly jobId?: string;
+  /** The same job by its number: captures held from the offline page name it so (OFF-2). */
+  readonly jobNumber?: string;
   readonly className?: string;
 }) => {
   const online = useOnline();
   const [discarding, setDiscarding] = useState<PendingWork | null>(null);
 
-  const rows = jobId === undefined ? pending.rows : pending.rows.filter((row) => row.jobId === jobId);
+  const rows =
+    jobId === undefined
+      ? pending.rows
+      : pending.rows.filter((row) => isRowForJob(row, jobId, jobNumber));
   if (rows.length === 0) return null;
 
   const waiting = rows.filter((row) => row.state === 'pending');
@@ -118,24 +125,10 @@ export const PendingWorkPanel = ({
                   happening at all — so the row that is moving says so.
                 */}
                 <Badge
-                  tone={
-                    row.state === 'conflict'
-                      ? 'red'
-                      : row.state === 'referred'
-                        ? 'blue'
-                        : pending.sending.includes(row.id)
-                          ? 'blue'
-                          : 'amber'
-                  }
+                  tone={SYNC_TONE[syncStateOf({ state: row.state, sending: pending.sending.includes(row.id), online })]}
                   size="sm"
                 >
-                  {row.state === 'conflict'
-                    ? 'Refused'
-                    : row.state === 'referred'
-                      ? 'With the office'
-                      : pending.sending.includes(row.id)
-                        ? 'Sending…'
-                        : 'Not sent'}
+                  {SYNC_LABEL[syncStateOf({ state: row.state, sending: pending.sending.includes(row.id), online })]}
                 </Badge>
                 <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
                   {ACTION_LABEL[row.action] ?? row.action}

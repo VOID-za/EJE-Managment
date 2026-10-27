@@ -6,6 +6,7 @@ import { useOnline } from '@/hooks/useOnline';
 import type { PendingMediaResult } from '@/hooks/usePendingMedia';
 import { heldMediaSummary, type PendingMedia } from '@/lib/pwa/pending-media';
 import { formatFileSize, formatRelative } from '@/lib/format';
+import { SYNC_LABEL, SYNC_TONE, syncStateOf } from '@/lib/pwa/sync-state';
 
 const DESTINATION_LABEL: Readonly<Record<PendingMedia['destination']['kind'], string>> = {
   job_photo: 'Job photo',
@@ -90,8 +91,12 @@ export const PendingMediaPanel = ({
           <li key={row.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={row.state === 'conflict' ? 'red' : 'amber'} size="sm">
-                  {row.state === 'conflict' ? 'Refused' : 'Not sent'}
+                {/* OFF-8: the same five names the capture queue uses. */}
+                <Badge
+                  tone={SYNC_TONE[syncStateOf({ state: row.state, sending: media.sending, online })]}
+                  size="sm"
+                >
+                  {SYNC_LABEL[syncStateOf({ state: row.state, sending: media.sending, online })]}
                 </Badge>
                 <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
                   {DESTINATION_LABEL[row.destination.kind]}

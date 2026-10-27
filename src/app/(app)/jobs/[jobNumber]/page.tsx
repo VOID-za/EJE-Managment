@@ -423,7 +423,7 @@ const JobDetailPage = ({
       {/* Before the record, like the refusal above and for the same reason:
           whether the work on screen has reached the server is the first thing
           a technician needs to know about this job. OFF-8. */}
-      <PendingWorkPanel pending={pending} jobId={job.id} className="mb-5" />
+      <PendingWorkPanel pending={pending} jobId={job.id} jobNumber={job.jobNumber} className="mb-5" />
 
       {/* And the photographs, for the same reason and in the same place:
           bytes this tablet is holding are not on the job. OFF-MEDIA-1. */}

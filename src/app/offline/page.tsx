@@ -17,6 +17,7 @@ import { readPendingWork } from '@/lib/pwa/pending-work';
 import { heldMediaSummary, readPendingMedia } from '@/lib/pwa/pending-media';
 import type { CachedJob, CachedJobDetail } from '@/lib/pwa/cached-job';
 import { CachedJobDetailCard } from '@/components/pwa/CachedJobDetail';
+import { OfflineCapturePanel } from '@/components/pwa/OfflineCapturePanel';
 import { auth } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
 import { useOnline } from '@/hooks/useOnline';
@@ -201,7 +202,26 @@ const OfflinePage = () => {
       */}
       {status.showsCachedData &&
         details.slice(0, 2).map((detail) => (
-          <CachedJobDetailCard key={detail.key} detail={detail} />
+          <div key={detail.key} className="space-y-3">
+            <CachedJobDetailCard detail={detail} />
+            {/*
+              OFF-2: work held against the copy, for the technician whose copy
+              it is. The identity is the one this page resolved — the server's
+              answer, or this tablet's own record of who signed in (BD-16) —
+              and the server authorises the replay with the real session.
+            */}
+            {(identity.state === 'server' || identity.state === 'device') && (
+              <OfflineCapturePanel
+                detail={detail}
+                userId={identity.userId}
+                onHeld={() => {
+                  void readPendingWork(identity.userId)
+                    .then((rows) => setUnsent(rows.length))
+                    .catch(() => undefined);
+                }}
+              />
+            )}
+          </div>
         ))}
 
       {status.showsCachedData ? (
@@ -230,8 +250,9 @@ const OfflinePage = () => {
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Work cannot be captured while this tablet is offline. Anything already sent to the EJE
-        server is safe and will be there when the connection returns.
+        Labour, travel, parts and notes can be held against your own job above while this tablet is
+        offline. Anything already sent to the EJE server is safe and will be there when the
+        connection returns.
       </p>
     </main>
   );

@@ -268,12 +268,25 @@ export const readPendingWork = async (userId: string): Promise<readonly PendingW
   return [...rows].sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
 };
 
-/** This user's captures against one job. */
+/**
+ * This user's captures against one job.
+ *
+ * A capture held from the offline page names the job by its NUMBER (OFF-2:
+ * the tablet's copy keeps no internal id), so a row matches either.
+ */
 export const readPendingForJob = async (
   userId: string,
   jobId: string,
+  jobNumber?: string,
 ): Promise<readonly PendingWork[]> =>
-  (await readPendingWork(userId)).filter((row) => row.jobId === jobId);
+  (await readPendingWork(userId)).filter((row) => isRowForJob(row, jobId, jobNumber));
+
+/** Whether a held row belongs to this job, by id or — from the offline page — by number. */
+export const isRowForJob = (
+  row: Pick<PendingWork, 'jobId'>,
+  jobId: string,
+  jobNumber?: string,
+): boolean => row.jobId === jobId || (jobNumber !== undefined && row.jobId === jobNumber);
 
 /**
  * WHOSE ROW THIS IS. BD-16.

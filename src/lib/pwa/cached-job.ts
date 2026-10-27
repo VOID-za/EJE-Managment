@@ -125,6 +125,18 @@ export interface CachedJobDetail extends CachedJob {
   readonly userId: string;
   /** When the server said this. Rendered wherever the copy is shown. */
   readonly capturedAt: string;
+  /**
+   * WHETHER WORK MAY BE HELD AGAINST THIS COPY. OFF-2, 27 October 2026.
+   *
+   * Two booleans, not identifiers and not authority: `signed` says only that
+   * the customer had signed when the copy was taken (never who, never what),
+   * and `capturesLabourAndTravel` is the job type's own rule. Both only NARROW
+   * what the offline page offers; the server decides on the replay. Optional
+   * because a copy written by an earlier build has neither, and such a copy
+   * offers no capture at all rather than guessing.
+   */
+  readonly signed?: boolean;
+  readonly capturesLabourAndTravel?: boolean;
   readonly siteAddress: string;
   readonly orderNumber: string;
   readonly referenceNumber: string;
@@ -196,6 +208,10 @@ export interface JobDetailSource {
   readonly machineLabel: string;
   readonly machineSerial: string;
   readonly checklist: CachedJobDetail['checklist'];
+  /** Whether the customer had signed. OFF-2: narrows what may be held. */
+  readonly signed: boolean;
+  /** The job type's rule for labour and travel. OFF-2. */
+  readonly capturesLabourAndTravel: boolean;
 }
 
 /**
@@ -255,4 +271,6 @@ export const toCachedJobDetail = (
     photo.caption.length > 0 ? photo.caption : photo.fileName,
   ),
   checklist: source.checklist,
+  signed: source.signed,
+  capturesLabourAndTravel: source.capturesLabourAndTravel,
 });
