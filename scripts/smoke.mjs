@@ -862,6 +862,55 @@ await step('the technician adds the part they fitted', async () => {
   await page.getByText('FAN-24V-80').first().waitFor({ timeout: 8000 });
 });
 
+await step('Add part opens EMPTY and takes several parts at once, an unsaved line removable (PARTS-MULTI-1)', async () => {
+  /*
+   * The defect staff reported: the second Add part opened holding the first
+   * part, which read as editing it. It must open empty, take more than one
+   * line, and drop a line that was never saved.
+   */
+  await page.getByRole('button', { name: 'Add part' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await dialog.waitFor({ timeout: 5000 });
+  const prefilled = await dialog.getByLabel('Part number').inputValue();
+  if (prefilled !== '') throw new Error(`the second Add part opened holding "${prefilled}"`);
+
+  const line = (index) => dialog.getByTestId('part-line').nth(index);
+  await line(0).getByLabel('Part number').fill('BRG-6204');
+  await line(0).getByLabel('Description').fill('Bearing');
+  await line(0).getByLabel(/Unit price/).fill('120');
+  await dialog.getByTestId('add-part-line').click();
+  await line(1).getByLabel('Part number').fill('SEAL-KIT-12');
+  await line(1).getByLabel('Description').fill('Seal kit');
+  await line(1).getByLabel('Quantity').fill('2');
+  await line(1).getByLabel(/Unit price/).fill('45');
+  await dialog.getByTestId('add-part-line').click();
+  await line(2).getByTestId('remove-part-line').click();
+  if ((await dialog.getByTestId('part-line').count()) !== 2) throw new Error('the unsaved line was not removed');
+  await dialog.getByTestId('save-parts').click();
+  await page.getByText('BRG-6204').first().waitFor({ timeout: 10000 });
+  await page.getByText('SEAL-KIT-12').first().waitFor({ timeout: 10000 });
+
+  // All three parts are on the job, each once — then the two test lines are
+  // taken off again so the rest of the journey prices exactly as before.
+  const result = await page.evaluate(async (base) => {
+    const view = (await (await fetch(`${base}/api/jobs/EJE-1048`)).json()).data.view.job;
+    const numbers = view.parts.map((part) => part.partNumber);
+    for (const part of view.parts.filter((p) => p.partNumber === 'BRG-6204' || p.partNumber === 'SEAL-KIT-12')) {
+      await fetch(`${base}/api/jobs/${view.id}/remove_line`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+        body: JSON.stringify({ kind: 'part', lineId: part.id }),
+      });
+    }
+    return numbers;
+  }, BASE);
+  const expected = ['FAN-24V-80', 'BRG-6204', 'SEAL-KIT-12'];
+  if (result.length !== 3 || !expected.every((n) => result.includes(n))) {
+    throw new Error(`the job holds ${JSON.stringify(result)}`);
+  }
+  await page.reload({ waitUntil: 'networkidle' });
+});
+
 await step('labour line is priced', async () => {
   // 2 hrs at R950.00 normal time = R1 900.00
   await page.getByText(/R\u00a01\u00a0900,00/).first().waitFor({ timeout: 8000 });

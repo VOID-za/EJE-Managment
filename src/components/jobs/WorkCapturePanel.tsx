@@ -94,9 +94,21 @@ export const WorkCapturePanel = ({
   const mayDiscount = can(currentUser.role, 'jobs.applyDiscount');
   const [clearingDiscount, setClearingDiscount] = useState(false);
 
+  /*
+   * EVERY DIALOG OPENS FRESH. PARTS-MULTI-1, 27 October 2026.
+   *
+   * The dialogs were keyed `part-new`, `labour-new`, … so React kept the
+   * same component between one *Add* and the next: the second *Add part*
+   * opened holding the first part's number, description and price, which read
+   * as editing the part already on the job — the reason staff reported that
+   * only one part could be added. The nonce moves on every close, so each
+   * opening is a new form.
+   */
+  const [dialogNonce, setDialogNonce] = useState(0);
   const closeDialog = () => {
     setDialog(null);
     setEditingId(null);
+    setDialogNonce((value) => value + 1);
   };
 
   const technicianName = (id: string): string => {
@@ -560,7 +572,7 @@ export const WorkCapturePanel = ({
         amendment cannot drift away from the shape of the original entry.
       */}
       <LabourDialog
-        key={`labour-${editingId ?? 'new'}`}
+        key={`labour-${editingId ?? 'new'}-${dialogNonce}`}
         open={dialog === 'labour'}
         existing={job.labour.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
@@ -592,7 +604,7 @@ export const WorkCapturePanel = ({
       />
 
       <TravelDialog
-        key={`travel-${editingId ?? 'new'}`}
+        key={`travel-${editingId ?? 'new'}-${dialogNonce}`}
         open={dialog === 'travel'}
         existing={job.travel.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
@@ -624,12 +636,20 @@ export const WorkCapturePanel = ({
       />
 
       <PartDialog
-        key={`part-${editingId ?? 'new'}`}
+        key={`part-${editingId ?? 'new'}-${dialogNonce}`}
         open={dialog === 'part'}
         existing={job.parts.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
-        onSubmit={async (values) => {
-          if (editingId === null) {
+        onSubmitNew={async (lines) => {
+          /*
+           * ONE CAPTURE PER LINE, in order, each with its own key — exactly
+           * what adding them one at a time would do, so a retry cannot double
+           * any of them. A line the server refuses stops the run and stays in
+           * the dialog with the server's words; the lines before it are saved.
+           */
+          let saved = 0;
+          let queued = false;
+          for (const values of lines) {
             const result = await capture.capture(
               'add_part',
               values,
@@ -637,12 +657,19 @@ export const WorkCapturePanel = ({
                 values.description.length > 0 ? ` — ${values.description}` : ''
               }`,
             );
-            if (result.kind === 'refused') return;
-            setHeld(result.kind === 'queued' ? 'the part' : null);
-            closeDialog();
-            onChanged();
-            return;
+            if (result.kind === 'refused') break;
+            if (result.kind === 'queued') queued = true;
+            saved += 1;
           }
+          if (saved > 0) onChanged();
+          if (saved === lines.length) {
+            setHeld(queued ? 'the parts' : null);
+            closeDialog();
+          }
+          return saved;
+        }}
+        onSubmitEdit={async (values) => {
+          if (editingId === null) return;
           const ok = await operation.run(() =>
             jobs.updatePart(job.id, { ...values, lineId: editingId }),
           );
@@ -651,11 +678,12 @@ export const WorkCapturePanel = ({
             onChanged();
           }
         }}
+        refusal={capture.outcome?.kind === 'refused' ? capture.outcome.message : null}
         busy={operation.running || capture.running}
       />
 
       <AdditionalChargeDialog
-        key={`charge-${editingId ?? 'new'}`}
+        key={`charge-${editingId ?? 'new'}-${dialogNonce}`}
         open={dialog === 'additional_charge'}
         existing={job.additionalCharges.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
@@ -1025,58 +1053,114 @@ const TravelDialog = ({
   );
 };
 
+type PartValues = {
+  partNumber: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+};
+
+interface PartRow {
+  readonly key: number;
+  readonly partNumber: string;
+  readonly description: string;
+  readonly quantity: string;
+  readonly unitPrice: string;
+}
+
+const blankRow = (key: number): PartRow => ({ key, partNumber: '', description: '', quantity: '1', unitPrice: '' });
+
+const rowErrors = (row: PartRow): Record<string, string> => {
+  const errors: Record<string, string> = {};
+  const quantity = Number(row.quantity);
+  const price = Number.parseFloat(row.unitPrice);
+  if (row.partNumber.trim().length === 0) errors.partNumber = 'A part number is required.';
+  if (row.description.trim().length === 0) errors.description = 'A description is required.';
+  if (!Number.isInteger(quantity) || quantity <= 0) errors.quantity = 'Enter a whole quantity.';
+  if (!Number.isFinite(price) || price < 0) errors.unitPrice = 'Enter a unit price.';
+  return errors;
+};
+
+const valuesOf = (row: PartRow): PartValues => ({
+  partNumber: row.partNumber.trim(),
+  description: row.description.trim(),
+  quantity: Number(row.quantity),
+  // Prices are entered in rands and stored in cents.
+  unitPrice: Math.round(Number.parseFloat(row.unitPrice) * 100),
+});
+
+/**
+ * ADDING PARTS — as many as the job needs. PARTS-MULTI-1, 27 October 2026.
+ *
+ * A NEW entry takes several lines at once: each with its own part number,
+ * description, quantity and unit price, its own line total, and a *Remove* for
+ * a line not yet saved. Saving adds each line through the ordinary capture, in
+ * order. EDITING one existing line is unchanged — one line, one form.
+ */
 const PartDialog = ({
   open,
   onClose,
-  onSubmit,
+  onSubmitNew,
+  onSubmitEdit,
   busy,
   existing,
+  refusal,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly onSubmit: (values: {
-    partNumber: string;
-    description: string;
-    quantity: number;
-    unitPrice: number;
-  }) => void;
+  /** Adds the lines in order; answers how many were saved. */
+  readonly onSubmitNew: (lines: readonly PartValues[]) => Promise<number>;
+  readonly onSubmitEdit: (values: PartValues) => void;
   readonly busy: boolean;
   readonly existing: PartEntry | null;
+  readonly refusal: string | null;
 }) => {
-  const [partNumber, setPartNumber] = useState(existing?.partNumber ?? '');
-  const [description, setDescription] = useState(existing?.description ?? '');
-  const [quantity, setQuantity] = useState(existing === null ? '1' : String(existing.quantity));
-  const [unitPrice, setUnitPrice] = useState(
-    existing === null ? '' : (existing.unitPrice / 100).toFixed(2),
+  const [rows, setRows] = useState<readonly PartRow[]>(() =>
+    existing === null
+      ? [blankRow(0)]
+      : [
+          {
+            key: 0,
+            partNumber: existing.partNumber,
+            description: existing.description,
+            quantity: String(existing.quantity),
+            unitPrice: (existing.unitPrice / 100).toFixed(2),
+          },
+        ],
   );
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [nextKey, setNextKey] = useState(1);
+  const [errors, setErrors] = useState<Record<number, Record<string, string>>>({});
 
-  const parsedQuantity = Number.parseInt(quantity, 10);
-  const parsedPrice = Number.parseFloat(unitPrice);
+  const change = (key: number, field: keyof Omit<PartRow, 'key'>, value: string) =>
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, [field]: value } : row)));
 
-  const submit = () => {
-    const next: Record<string, string> = {};
-    if (partNumber.trim().length === 0) next.partNumber = 'A part number is required.';
-    if (description.trim().length === 0) next.description = 'A description is required.';
-    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) next.quantity = 'Enter a quantity.';
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) next.unitPrice = 'Enter a unit price.';
-
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
-
-    onSubmit({
-      partNumber: partNumber.trim(),
-      description: description.trim(),
-      quantity: parsedQuantity,
-      // Prices are entered in rands and stored in cents.
-      unitPrice: Math.round(parsedPrice * 100),
-    });
+  const submit = async () => {
+    const found: Record<number, Record<string, string>> = {};
+    for (const row of rows) {
+      const problems = rowErrors(row);
+      if (Object.keys(problems).length > 0) found[row.key] = problems;
+    }
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
+    if (existing !== null) {
+      onSubmitEdit(valuesOf(rows[0]!));
+      return;
+    }
+    const saved = await onSubmitNew(rows.map(valuesOf));
+    // The lines that were saved leave the form; anything refused stays to be fixed.
+    setRows((current) => current.slice(saved));
   };
+
+  const grandTotal = rows.reduce((sum, row) => {
+    const quantity = Number(row.quantity);
+    const price = Number.parseFloat(row.unitPrice);
+    return Number.isFinite(quantity) && Number.isFinite(price) ? sum + Math.round(quantity * price * 100) : sum;
+  }, 0);
 
   return (
     <Modal
       open={open}
-      title={existing === null ? 'Add part' : 'Edit part'}
+      title={existing === null ? 'Add parts' : 'Edit part'}
       description="Parts fitted on this job. Prices are entered excluding VAT."
       onClose={onClose}
       footer={
@@ -1084,62 +1168,113 @@ const PartDialog = ({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} loading={busy}>
-            {existing === null ? 'Add part' : 'Save changes'}
+          <Button onClick={() => void submit()} loading={busy} data-testid="save-parts">
+            {existing === null ? (rows.length === 1 ? 'Add part' : `Add ${rows.length} parts`) : 'Save changes'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <TextField
-          label="Part number"
-          value={partNumber}
-          onChange={(event) => setPartNumber(event.target.value)}
-          error={errors.partNumber}
-          placeholder="e.g. FLT-CAB-220"
-          required
-        />
-        <TextField
-          label="Description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          error={errors.description}
-          placeholder="e.g. Electrical cabinet filter mat"
-          required
-        />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <TextField
-            label="Quantity"
-            type="number"
-            min="1"
-            step="1"
-            inputMode="numeric"
-            value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
-            error={errors.quantity}
-            required
-          />
-          <TextField
-            label="Unit price (excl. VAT)"
-            type="number"
-            min="0"
-            step="0.01"
-            inputMode="decimal"
-            value={unitPrice}
-            onChange={(event) => setUnitPrice(event.target.value)}
-            error={errors.unitPrice}
-            placeholder="0.00"
-            required
-          />
-        </div>
-
-        {Number.isFinite(parsedQuantity) && Number.isFinite(parsedPrice) && parsedPrice >= 0 && (
-          <p className="rounded-[var(--radius-control)] bg-steel-50 px-3 py-2.5 text-sm text-steel-600">
-            Line total:{' '}
-            <span className="tabular font-semibold text-steel-900">
-              {formatCurrency(Math.round(parsedQuantity * parsedPrice * 100))}
-            </span>
+        {refusal !== null && (
+          <p role="alert" className="text-sm font-medium text-signal-600">
+            {refusal}
           </p>
+        )}
+        {rows.map((row, index) => {
+          const rowError = errors[row.key] ?? {};
+          const quantity = Number(row.quantity);
+          const price = Number.parseFloat(row.unitPrice);
+          return (
+            <div
+              key={row.key}
+              className="space-y-3 rounded-[var(--radius-control)] border border-steel-200 p-3"
+              data-testid="part-line"
+            >
+              {existing === null && (
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase">Part {index + 1}</p>
+                  {rows.length > 1 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setRows((current) => current.filter((candidate) => candidate.key !== row.key))}
+                      data-testid="remove-part-line"
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              )}
+              <TextField
+                label="Part number"
+                value={row.partNumber}
+                onChange={(event) => change(row.key, 'partNumber', event.target.value)}
+                error={rowError.partNumber}
+                placeholder="e.g. FLT-CAB-220"
+                required
+              />
+              <TextField
+                label="Description"
+                value={row.description}
+                onChange={(event) => change(row.key, 'description', event.target.value)}
+                error={rowError.description}
+                placeholder="e.g. Electrical cabinet filter mat"
+                required
+              />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <TextField
+                  label="Quantity"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={row.quantity}
+                  onChange={(event) => change(row.key, 'quantity', event.target.value)}
+                  error={rowError.quantity}
+                  required
+                />
+                <TextField
+                  label="Unit price (excl. VAT)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={row.unitPrice}
+                  onChange={(event) => change(row.key, 'unitPrice', event.target.value)}
+                  error={rowError.unitPrice}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              {Number.isFinite(quantity) && Number.isFinite(price) && price >= 0 && (
+                <p className="text-sm text-steel-600">
+                  Line total:{' '}
+                  <span className="tabular font-semibold text-steel-900">
+                    {formatCurrency(Math.round(quantity * price * 100))}
+                  </span>
+                </p>
+              )}
+            </div>
+          );
+        })}
+        {existing === null && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button
+              size="sm"
+              variant="secondary"
+              leadingIcon={<Icon name="plus" className="size-4" />}
+              onClick={() => {
+                setRows((current) => [...current, blankRow(nextKey)]);
+                setNextKey((value) => value + 1);
+              }}
+              data-testid="add-part-line"
+            >
+              Add another part
+            </Button>
+            <p className="text-sm text-steel-600">
+              Parts total: <span className="tabular font-semibold text-steel-900">{formatCurrency(grandTotal)}</span>
+            </p>
+          </div>
         )}
       </div>
     </Modal>
