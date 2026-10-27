@@ -10,6 +10,7 @@ import {
   type Machine,
   type TemplateUsage,
   type User,
+  messagesVisibleTo,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { selectPersistenceBackend } from '@/data/backend';
@@ -648,8 +649,12 @@ export const messagesView = async (context: ViewContext, conversationId: string 
    * comes back with it, so the two cannot disagree.
    */
   const selectedId = conversationId ?? summaries[0]?.conversation.id ?? null;
+  // Only what this person still sees: after their deletion, if they deleted it.
+  const selected = summaries.find((summary) => summary.conversation.id === selectedId);
   const thread =
-    selectedId === null ? [] : await repos.chat.listMessages(selectedId);
+    selectedId === null || selected === undefined
+      ? []
+      : messagesVisibleTo(selected.conversation, actor.id, await repos.chat.listMessages(selectedId));
 
   return {
     summaries,

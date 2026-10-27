@@ -991,6 +991,9 @@ export const conversations = {
   start: (input: unknown) => command<unknown>('/api/conversations', input),
   send: (conversationId: string, body: string) =>
     command<ChatMessage>(`/api/conversations/${segment(conversationId)}/send`, { body }),
+  /** CHAT-DELETE-1: off my own list; the others keep it; nothing erased. */
+  deleteForMe: (conversationId: string) =>
+    command<{ deleted: boolean }>(`/api/conversations/${segment(conversationId)}/delete_for_me`),
   markRead: (conversationId: string) =>
     command<{ read: boolean }>(`/api/conversations/${segment(conversationId)}/mark_read`),
   attachAvailability: (conversationId: string, messageId: string, availabilityId: string) =>

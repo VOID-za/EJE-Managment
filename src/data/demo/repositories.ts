@@ -1288,6 +1288,17 @@ class DemoChatRepository implements ChatRepository {
     return Promise.resolve(conversation);
   }
 
+  markDeletedFor(conversationId: string, userId: UserId, at: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.conversations = draft.conversations.map((candidate) =>
+        candidate.id === conversationId
+          ? { ...candidate, deletedFor: { ...(candidate.deletedFor ?? {}), [userId]: at } }
+          : candidate,
+      );
+    });
+    return Promise.resolve();
+  }
+
   listMessages(conversationId: string): Promise<readonly ChatMessage[]> {
     const messages = this.context
       .read()

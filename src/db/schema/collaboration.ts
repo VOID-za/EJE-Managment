@@ -80,6 +80,8 @@ export const chatParticipants = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     joinedAt: createdAt(),
+    /** CHAT-DELETE-1: when this participant deleted the chat from their own list. */
+    deletedAt: instant('deleted_at'),
   },
   (table) => [
     uniqueIndex('chat_participants_pkey').on(table.conversationId, table.userId),

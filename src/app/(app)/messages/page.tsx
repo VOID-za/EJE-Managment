@@ -6,6 +6,7 @@ import { permittedRecipients } from '@/application/chat-operations';
 import {
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   Icon,
   LoadingPanel,
@@ -35,6 +36,9 @@ const MessagesPageContent = () => {
 
   const [selected, setSelected] = useState<string | null>(params.get('conversation'));
   const [composing, setComposing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const query = useQuery(`messages:${currentUser.id}:${selected ?? 'none'}`, () =>
     reads.messages(selected),
@@ -151,6 +155,27 @@ const MessagesPageContent = () => {
                   />
                 </div>
               ) : (
+                <>
+                {/* CHAT-DELETE-1: off my own list, after a confirmation. */}
+                <div className="flex flex-wrap items-center justify-end gap-2 border-b border-steel-100 px-4 py-2">
+                  {deleteError !== null && (
+                    <span role="alert" className="text-sm text-signal-600">
+                      {deleteError}
+                    </span>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    leadingIcon={<Icon name="trash" className="size-4" />}
+                    onClick={() => {
+                      setDeleteError(null);
+                      setDeleting(true);
+                    }}
+                    data-testid="delete-chat"
+                  >
+                    Delete chat
+                  </Button>
+                </div>
                 <ConversationThread
                   conversation={active.conversation}
                   messages={thread}
@@ -159,11 +184,37 @@ const MessagesPageContent = () => {
                   onSent={refresh}
                   onAvailabilityRecorded={refresh}
                 />
+                </>
               )}
             </div>
           </div>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={deleting && active !== null}
+        title="Delete this chat?"
+        message="It is removed from YOUR list only. The other people in the chat keep it, and EJE keep every message on record. If somebody writes in it again, it comes back to your list showing only the new messages."
+        confirmLabel="Delete chat"
+        busy={deleteBusy}
+        onConfirm={async () => {
+          if (active === null) return;
+          setDeleteBusy(true);
+          try {
+            await conversationsApi.deleteForMe(active.conversation.id);
+            setDeleting(false);
+            markedRef.current = null;
+            setSelected(null);
+            refresh();
+          } catch (error) {
+            setDeleting(false);
+            setDeleteError(error instanceof Error ? error.message : 'The chat was not deleted.');
+          } finally {
+            setDeleteBusy(false);
+          }
+        }}
+        onCancel={() => setDeleting(false)}
+      />
 
       {composing && data !== null && data !== undefined && (
         <NewConversationDialog

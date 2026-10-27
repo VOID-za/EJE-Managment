@@ -536,6 +536,8 @@ export interface ChatRepository {
    */
   listMessagesFor(userId: UserId): Promise<readonly ChatMessage[]>;
   findMessage(id: string): Promise<ChatMessage | null>;
+  /** CHAT-DELETE-1: records that this participant deleted the chat from their list. */
+  markDeletedFor(conversationId: string, userId: UserId, at: IsoDateTime): Promise<void>;
   saveMessage(message: ChatMessage): Promise<ChatMessage>;
 }
 

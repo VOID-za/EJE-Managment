@@ -33,6 +33,16 @@ export interface Conversation {
   readonly createdAt: IsoDateTime;
   /** Sort key for the conversation list. */
   readonly lastMessageAt: IsoDateTime;
+  /**
+   * WHO HAS DELETED THIS CHAT FROM THEIR OWN LIST, AND WHEN. CHAT-DELETE-1
+   * (27 October 2026). Deleting is per person: the chat leaves THAT person's
+   * list, the other participants keep it, and every message is retained (some
+   * carry availability evidence, and the office's technician record reads
+   * them). A message sent after the deletion brings the chat back for that
+   * person, showing only what came after. Optional: a conversation nobody has
+   * deleted carries none.
+   */
+  readonly deletedFor?: Readonly<Record<string, IsoDateTime>>;
 }
 
 export interface ChatMessage {
@@ -79,3 +89,23 @@ export const conversationParticipants = (
 /** Whether this user may read the thread at all. */
 export const canReadConversation = (conversation: Conversation, userId: UserId): boolean =>
   conversation.participantIds.includes(userId);
+
+/** When this person deleted the chat from their list, or null. CHAT-DELETE-1. */
+export const deletedAtFor = (conversation: Conversation, userId: UserId): IsoDateTime | null =>
+  conversation.deletedFor?.[userId] ?? null;
+
+/** Whether the chat is on this person's list: never deleted, or written to since. */
+export const isConversationListedFor = (conversation: Conversation, userId: UserId): boolean => {
+  const deletedAt = deletedAtFor(conversation, userId);
+  return deletedAt === null || conversation.lastMessageAt > deletedAt;
+};
+
+/** The messages this person still sees in a chat: those after their deletion, if any. */
+export const messagesVisibleTo = <T extends Pick<ChatMessage, 'sentAt'>>(
+  conversation: Conversation,
+  userId: UserId,
+  messages: readonly T[],
+): readonly T[] => {
+  const deletedAt = deletedAtFor(conversation, userId);
+  return deletedAt === null ? messages : messages.filter((message) => message.sentAt > deletedAt);
+};

@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { asJobId, asUserId, type ChatMessage, type Conversation, type UserId } from '@/domain';
 import type { ChatRepository } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
@@ -98,6 +98,15 @@ export class PostgresChatRepository implements ChatRepository {
   }
 
   /** Oldest first: a conversation reads downwards. */
+  async markDeletedFor(conversationId: string, userId: UserId, at: string): Promise<void> {
+    await this.db
+      .update(schema.chatParticipants)
+      .set({ deletedAt: at })
+      .where(
+        and(eq(schema.chatParticipants.conversationId, conversationId), eq(schema.chatParticipants.userId, userId)),
+      );
+  }
+
   async listMessages(conversationId: string): Promise<readonly ChatMessage[]> {
     const rows = await this.db
       .select()
@@ -203,6 +212,11 @@ export class PostgresChatRepository implements ChatRepository {
       createdBy: asUserId(row.createdBy ?? ''),
       createdAt: row.createdAt,
       lastMessageAt: row.lastMessageAt,
+      deletedFor: Object.fromEntries(
+        participants
+          .filter((participant) => participant.conversationId === row.id && participant.deletedAt !== null)
+          .map((participant) => [participant.userId, participant.deletedAt as string]),
+      ),
     }));
   }
 

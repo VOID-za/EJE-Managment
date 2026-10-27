@@ -291,6 +291,8 @@ export type ActivityEventType =
   | 'timesheet_entry_removed'
   | 'message_sent'
   | 'message_actioned'
+  /** CHAT-DELETE-1: a participant deleted a chat from their own list; nothing erased. */
+  | 'conversation_deleted'
   | 'job_transferred_to_open'
   | 'job_transferred_to_technician'
   | 'job_cancelled'

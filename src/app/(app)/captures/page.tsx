@@ -22,6 +22,7 @@ import type { CaptureReferralRow } from '@/application/capture-referral-view';
 import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
+import { isOfflineSignatureAction } from '@/lib/pwa/offline-rules';
 import { formatDateTime, formatRelative } from '@/lib/format';
 
 /**
@@ -56,15 +57,76 @@ const CapturesPage = () => {
   const [resolution, setResolution] = useState<CaptureResolution>('applied');
   const [note, setNote] = useState('');
 
-  const query = useQuery(`captures:referrals:${currentUser.id}`, () => captures.referrals());
+  /*
+   * FIELD CAPTURES — FOR EVERYBODY, EACH THEIR OWN PART. FIELD-CAP-1 (27 October
+   * 2026). The office sees the whole queue and decides; a technician sees only
+   * THEIR OWN referred captures and what became of them (the server answers
+   * `?mine=1` with that technician's rows and nobody else's).
+   */
+  const office = can(currentUser.role, 'captures.resolveReferral');
+  const query = useQuery(`captures:referrals:${currentUser.id}:${office ? 'all' : 'mine'}`, () =>
+    office ? captures.referrals() : captures.referrals({ mine: true }),
+  );
 
-  if (!can(currentUser.role, 'captures.resolveReferral')) {
+  if (!office) {
+    const mine = query.data?.rows ?? [];
     return (
-      <EmptyState
-        title="You do not have access to this"
-        description="Work referred from a tablet is dealt with by the office."
-        icon={<Icon name="warning" />}
-      />
+      <>
+        <PageHeader
+          title="Field Captures"
+          description="Work you captured on the tablet with no signal that the server could not put on the job — handed to the office, which decides what happens to it."
+          breadcrumbs={[{ label: 'Field Captures' }]}
+        />
+        <Card className="mb-5">
+          <p className="text-sm text-steel-700">
+            <strong>When something appears here:</strong> you captured work offline (hours, travel, a part, a note, a
+            checklist answer, or a customer&apos;s signature or refusal) and by the time it reached the server the job
+            would not take it — it was signed, closed, reassigned, or the job card had changed. Your capture is not
+            lost: it is kept here for the office. <strong>You do not need to do anything</strong> unless the office
+            contacts you. If it was a customer&apos;s signature or refusal, the customer has to sign the current job
+            card again — the office will arrange it.
+          </p>
+        </Card>
+        {query.loading ? (
+          <LoadingPanel rows={3} label="Loading your referred captures" />
+        ) : query.error !== null ? (
+          <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />
+        ) : mine.length === 0 ? (
+          <EmptyState
+            title="Nothing referred"
+            description="Everything you captured offline has reached its job."
+            icon={<Icon name="check" />}
+          />
+        ) : (
+          <Card padded={false}>
+            <ul className="divide-y divide-steel-100" data-testid="my-referrals">
+              {mine.map((row) => (
+                <li key={row.referral.id} className="px-5 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={row.referral.state === 'open' ? 'amber' : row.referral.resolution === 'applied' ? 'green' : 'neutral'} size="sm">
+                      {row.referral.state === 'open'
+                        ? 'With the office'
+                        : row.referral.resolution === 'applied'
+                          ? 'Applied to the job'
+                          : 'No action'}
+                    </Badge>
+                    <Link href={`/jobs/${row.jobNumber}`} className="font-mono text-sm font-semibold hover:underline">
+                      {row.jobNumber}
+                    </Link>
+                    <span className="text-sm text-steel-700">{row.referral.summary}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-steel-500">
+                    Captured {formatRelative(row.referral.capturedAt)} · {row.referral.refusalMessage}
+                  </p>
+                  {row.referral.state === 'resolved' && row.referral.resolutionNote.length > 0 && (
+                    <p className="mt-1 text-xs text-steel-600">The office: {row.referral.resolutionNote}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+      </>
     );
   }
 
@@ -93,7 +155,7 @@ const CapturesPage = () => {
     <>
       <PageHeader
         title="Field Captures"
-        description="Work a technician captured with no signal that the job would not take. Each one needs a decision."
+        description="Work a technician captured with no signal that the job would not take on arrival — hours, travel, parts, notes, checklist answers, or a customer's signature or refusal whose job card had changed. Each one needs a decision; the technician sees the outcome."
         breadcrumbs={[{ label: 'Field Captures' }]}
       />
 
@@ -166,7 +228,7 @@ const CapturesPage = () => {
                           type="button"
                           onClick={() => {
                             setResolving(row);
-                            setResolution('applied');
+                            setResolution(isOfflineSignatureAction(row.referral.action) ? 'no_action' : 'applied');
                             setNote('');
                             operation.clearError();
                           }}
@@ -242,12 +304,18 @@ const CapturesPage = () => {
             label="Decision"
             value={resolution}
             onChange={(event) => setResolution(event.target.value as CaptureResolution)}
-            options={[
-              { value: 'applied', label: 'Apply it to the job' },
-              { value: 'no_action', label: 'No action — record why' },
-            ]}
+            options={
+              resolving !== null && isOfflineSignatureAction(resolving.referral.action)
+                ? [{ value: 'no_action', label: 'No action — record why' }]
+                : [
+                    { value: 'applied', label: 'Apply it to the job' },
+                    { value: 'no_action', label: 'No action — record why' },
+                  ]
+            }
             hint={
-              resolution === 'no_action'
+              resolving !== null && isOfflineSignatureAction(resolving.referral.action)
+                ? 'A signature or refusal taken offline against a job card that has since changed cannot be applied — it would put the customer’s mark on a document they did not see. Have the customer sign the current job card in the ordinary way, then record here what was done.'
+                : resolution === 'no_action'
                 ? 'Nothing further happens to the capture. The reason is kept against it and the technician can see it.'
                 : resolving?.referral.action === 'answer_checklist'
                   ? 'Answered onto the job through the ordinary operation. A checklist answer REPLACES whatever answer is on the job now, and your decision is recorded against it — so read the refusal below first. An answer can never be moved onto a different version of the checklist.'

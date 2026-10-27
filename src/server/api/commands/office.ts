@@ -519,6 +519,15 @@ export const CONVERSATION_COMMANDS: CommandRegistry = {
     },
   }),
 
+  /** CHAT-DELETE-1: off the actor's own list; participants only; nothing erased. */
+  delete_for_me: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      await chat.deleteConversationForMe(context.operation, await loadConversation(context, target));
+      return { deleted: true };
+    },
+  }),
+
   attach_availability: command({
     schema: z.object({ messageId: id, availabilityId: id }).strict(),
     async run(context, input, target) {

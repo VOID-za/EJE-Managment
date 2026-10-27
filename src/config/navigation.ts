@@ -64,13 +64,11 @@ export const NAVIGATION: readonly NavigationItem[] = [
    * technician a screen that then refuses them is how "Something went wrong"
    * ends up on a sidebar item they were invited to click.
    */
-  {
-    href: '/captures',
-    label: 'Field Captures',
-    icon: 'clock',
-    capability: 'captures.resolveReferral',
-    group: 'work',
-  },
+  /*
+   * FIELD-CAP-1 (27 October 2026): everybody's — the office sees the queue, a
+   * technician their own referred captures and what became of them.
+   */
+  { href: '/captures', label: 'Field Captures', icon: 'clock', group: 'work' },
   /*
    * ATTEND-1 and TIMESHEET-1. The register is the office's; the timesheet is
    * everybody's, because a technician opens their own (the server shows them

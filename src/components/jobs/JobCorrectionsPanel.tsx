@@ -131,7 +131,7 @@ export const JobCorrectionsPanel = ({
       <div data-testid="job-corrections">
       <CardHeader
         title="Corrections to this job card"
-        description="The issued job card is never edited. A correction is a separate addendum, linked to it."
+        description="For a job card already issued to the customer that turns out to be wrong. The signed job card is never edited: a Master raises a numbered correction — a separate addendum PDF linked to the original — saying what was wrong and what is right. A correction that changes a price, a quantity or the work described must be acknowledged by the customer; the office records that acknowledgement here."
         action={
           corrections.length === 0 ? (
             <Badge tone="neutral">None</Badge>
@@ -145,7 +145,9 @@ export const JobCorrectionsPanel = ({
 
       {corrections.length === 0 ? (
         <p className="mt-4 text-sm text-steel-500" data-testid="job-corrections-empty">
-          Nothing has been corrected on this job card.
+          Nothing has been corrected on this job card. Only a Master can raise a correction; the office (Master or
+          Coordinator) records the customer&apos;s acknowledgement; anybody who may read the issued job card sees the
+          corrections.
         </p>
       ) : (
         <ul className="mt-4 space-y-4" data-testid="job-corrections-list">

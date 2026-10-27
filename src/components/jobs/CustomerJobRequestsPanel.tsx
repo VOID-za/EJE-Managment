@@ -117,9 +117,11 @@ export const CustomerJobRequestsPanel = ({
 
       {requests.length === 0 ? (
         <p className="px-5 py-4 text-sm text-steel-500">
-          If the customer asks for something on this job — more work, a different date, a change
-          to what was agreed — record it here. It is written down against the job and nothing is
-          changed by itself.
+          For requests the customer makes AFTER the job was raised — more work, a different date, a
+          change to what was agreed. Anybody on the job can record one; the office accepts or declines
+          it and says why. Nothing on the job changes by itself. This is not the fault the customer
+          reported when the job was raised (that is the <em>Fault description</em>), and not what the
+          technician did (that is the write-up).
         </p>
       ) : (
         <ul className="divide-y divide-steel-100">

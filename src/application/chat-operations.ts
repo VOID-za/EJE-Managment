@@ -1,5 +1,7 @@
 import {
   canReadConversation,
+  isConversationListedFor,
+  messagesVisibleTo,
   isMessageRead,
   summariseAvailability,
   userFullName,
@@ -250,8 +252,57 @@ export const unreadMessageCount = async (
   context: OperationContext,
   userId: UserId,
 ): Promise<number> => {
-  const messages = await context.repos.chat.listMessagesFor(userId);
-  return messages.filter((message) => !isMessageRead(message, userId)).length;
+  const [conversations, messages] = await Promise.all([
+    context.repos.chat.listConversations(userId),
+    context.repos.chat.listMessagesFor(userId),
+  ]);
+  // A deleted chat's older messages do not count (CHAT-DELETE-1).
+  return conversations
+    .flatMap((conversation) =>
+      messagesVisibleTo(
+        conversation,
+        userId,
+        messages.filter((message) => message.conversationId === conversation.id),
+      ),
+    )
+    .filter((message) => !isMessageRead(message, userId)).length;
+};
+
+/**
+ * DELETES A CHAT FROM THE ACTOR'S OWN LIST. CHAT-DELETE-1, the owner's
+ * instruction of 27 October 2026.
+ *
+ * A SOFT, PER-PERSON DELETE — NOTHING IS ERASED. Only a participant may do it
+ * (checked here, on the server); it records when THIS person took the chat off
+ * their list. The other participants keep it exactly as it was, every message
+ * stays in the database (some carry availability evidence, and the office's
+ * technician record reads them), and the deletion is audited. The chat's
+ * notifications for this person are marked read so the bell does not count a
+ * chat they removed. A message sent afterwards brings it back for them,
+ * showing only what came after.
+ */
+export const deleteConversationForMe = async (
+  context: OperationContext,
+  conversation: Conversation,
+): Promise<void> => {
+  assertParticipant(conversation, context.actor);
+  const now = context.services.clock.now();
+  await context.repos.chat.markDeletedFor(conversation.id, context.actor.id, now);
+
+  const notifications = await context.repos.notifications.list(context.actor.id);
+  for (const notification of notifications) {
+    if (notification.type !== 'chat_message') continue;
+    if (notification.link !== `/messages?conversation=${conversation.id}`) continue;
+    if (notification.readAt !== null) continue;
+    await context.repos.notifications.markRead(notification.id);
+  }
+
+  await audit(context, {
+    jobId: null,
+    type: 'conversation_deleted',
+    summary: 'Chat deleted from a list',
+    detail: `${userFullName(context.actor)} deleted a chat${conversation.jobNumber === null ? '' : ` about ${conversation.jobNumber}`} from their own list. The other participants keep it, and every message is retained.`,
+  });
 };
 
 /**
@@ -308,10 +359,14 @@ export const loadConversations = async (
     context.repos.chat.listMessagesFor(context.actor.id),
   ]);
 
-  return conversations.map((conversation) => {
-    const inThread = messages
-      .filter((message) => message.conversationId === conversation.id)
-      .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+  return conversations
+    .filter((conversation) => isConversationListedFor(conversation, context.actor.id))
+    .map((conversation) => {
+    const inThread = messagesVisibleTo(
+      conversation,
+      context.actor.id,
+      messages.filter((message) => message.conversationId === conversation.id),
+    ).slice().sort((a, b) => a.sentAt.localeCompare(b.sentAt));
 
     return {
       conversation,

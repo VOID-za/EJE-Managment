@@ -253,6 +253,13 @@
       "when": 1793211267482,
       "tag": "0035_test_bench_fee",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793297667482,
+      "tag": "0036_chat_deleted_for",
+      "breakpoints": true
     }
   ]
 }

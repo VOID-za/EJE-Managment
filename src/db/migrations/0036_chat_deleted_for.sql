@@ -1,0 +1,11 @@
+-- Deleting a chat from your own list. CHAT-DELETE-1, the owner's instruction of
+-- 27 October 2026.
+--
+-- PER PERSON, AND NOTHING IS ERASED. Deleting a chat records WHEN this
+-- participant took it off their list; the other participants keep it, and every
+-- message stays (some carry availability evidence, and the office's technician
+-- record reads them). A message sent afterwards brings the chat back for that
+-- person, showing only what came after.
+--
+-- FORWARD-ONLY AND ADDITIVE: one nullable column; no row is rewritten.
+ALTER TABLE "chat_participants" ADD COLUMN IF NOT EXISTS "deleted_at" timestamp with time zone;

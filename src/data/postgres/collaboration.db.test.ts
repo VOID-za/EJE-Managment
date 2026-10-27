@@ -176,6 +176,19 @@ describeDb('collaboration in PostgreSQL', () => {
       expect(saved.participantIds).toHaveLength(2);
     });
 
+    it('records a per-person deletion and keeps every message (CHAT-DELETE-1)', async () => {
+      const thread = await chat.saveConversation(conversation());
+      await chat.saveMessage(message(thread.id));
+      await chat.markDeletedFor(thread.id, asUserId(IDS.technician), '2026-09-21T06:00:00.000Z');
+
+      const reloaded = await chat.findConversation(thread.id);
+      expect(Object.keys(reloaded?.deletedFor ?? {})).toEqual([IDS.technician]);
+      expect(new Date(reloaded!.deletedFor![IDS.technician]!).toISOString()).toBe('2026-09-21T06:00:00.000Z');
+      expect(await chat.listMessages(thread.id)).toHaveLength(1);
+      // Still a participant, so still listed by the repository; the screen filters.
+      expect(await chat.listConversations(asUserId(IDS.master))).toHaveLength(1);
+    });
+
     it('reads downwards, oldest first', async () => {
       const thread = await chat.saveConversation(conversation());
       await chat.saveMessage(message(thread.id, { body: 'First', sentAt: '2026-09-20T06:00:00.000Z' }));
