@@ -252,7 +252,7 @@ listed below so nothing is hidden.
 | Historical records | Every existing job view loads; 27 signed jobs keep their signatures; job cards issued before this release (EJE-2046, 2045, 2041, 2050, closed EJE-2018) still open as PDFs; EJE-2047's video from before stays on record |
 
 *The six check defects:* a malformed timesheet line id is refused 422 *does
-not exist* — no server error, which is what AUDIT-2 fixed; the check wrongly
+not exist* — no server error, which is what AUDIT-4 fixed; the check wrongly
 demanded 404. A technician not on the job got 404 rather than the 403 the
 check expected; hiding the job is the stronger refusal. Two bell checks ran
 after the office had already returned the refused job, which marks the
