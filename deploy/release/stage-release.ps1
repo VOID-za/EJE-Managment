@@ -35,11 +35,15 @@ param(
   [string]$ExpectHost = 'srv2000625',
   [string]$HealthUrl = 'https://eje.syncza.co.za/api/health',
   [string]$LogDir = '',
-  # The migrations this release is expected to apply, in order, comma-separated.
-  # Empty: the server script's own default (0030 then 0031). Given: checked here
-  # first, then passed to the server, which checks it again against the
-  # preflight and the release's own journal.
-  [string]$ExpectPending = '',
+  # The migrations this release is expected to apply, in order. Empty: the server
+  # script's own default (0030 then 0031). Given: checked here first, then passed
+  # to the server, which checks it again against the preflight and the release's
+  # own journal.
+  # An ARRAY: typed in PowerShell, `-ExpectPending a,b,c` (or @('a','b','c')) is
+  # an array, and a [string] parameter would join it with SPACES into one bad
+  # tag. Each element may itself be comma-separated (`-File` passes 'a,b,c' as
+  # one string), so both forms reach the same validated list.
+  [string[]]$ExpectPending = @(),
   # Test seams.
   [string]$Repo = '',
   [string]$ProbeScript = ''
@@ -70,15 +74,15 @@ function Stop-Stage($why, [int]$code = 1) { Log "`n######## STOPPED ########`n$w
 # ascending, no repeats. A typo here would have the server compare against the
 # wrong thing, so it is refused before anything is contacted.
 $pendingEnv = ''
-if ($ExpectPending -ne '') {
-  $tags = $ExpectPending.Split(',')
+$tags = @(foreach ($part in $ExpectPending) { ([string]$part).Split(',') })
+if (($tags -join '') -ne '') {
   $previous = ''
   foreach ($tag in $tags) {
     if ($tag -cnotmatch '^[0-9]{4}_[a-z0-9_]+$') { Stop-Stage "-ExpectPending: '$tag' is not a migration tag. Nothing was contacted." }
     if ($previous -ne '' -and [string]::CompareOrdinal($tag, $previous) -le 0) { Stop-Stage "-ExpectPending: out of order or repeated ($previous then $tag). Nothing was contacted." }
     $previous = $tag
   }
-  $pendingEnv = "EXPECT_PENDING=$ExpectPending"
+  $pendingEnv = "EXPECT_PENDING=$($tags -join ',')"
 }
 function Sha256Hex([byte[]]$bytes) {
   -join ([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })

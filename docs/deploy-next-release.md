@@ -67,9 +67,19 @@ columns with defaults, a replaced trigger function; no row is rewritten):
 - `0036_chat_deleted_for` — `chat_participants.deleted_at` (nullable).
 
 ```powershell
-.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for
 .\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for
 ```
+
+**Tool fix (28 October 2026).** The first attempt was refused locally, nothing
+contacted: typed at a PowerShell prompt, `a,b,c` is an array, and the old
+`[string]$ExpectPending` joined it with spaces into one invalid tag. The
+parameter is now `[string[]]`; each element may also be comma-separated (the
+`-File` form), and every tag is still checked (format, strictly ascending, no
+repeats, no empty or spaced tag) before anything is contacted, then again on
+the server. Run it from a checkout at or after the fix commit;
+`deploy-release.sh` is unchanged (sha256
+`76e3ef4d3affab370f7f05a120b6286a08b71da5938119e27c28f120f06e94e4`).
 
 **Rollback.** `51fb112` ignores the new table and columns, so
 `stage-release.ps1 -Rollback` stays possible; what it cannot show are the

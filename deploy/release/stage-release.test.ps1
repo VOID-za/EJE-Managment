@@ -83,7 +83,34 @@ $r = Run @{ Sha = $sha; ExpectPending = '0031_test_repair_date_received' } 'ok' 
 Check '-ExpectPending reaches the detached release unit as its environment' ($r.Code -eq 0 -and $r.Calls[0].cmd -match '--setenv=EXPECT_PENDING=0031_test_repair_date_received /bin/bash /root/eje-ops/deploy-release.sh --release')
 $r = Run @{ Sha = $sha; CheckOnly = $true; ExpectPending = '0030_library_page_coverage_unknown,0031_test_repair_date_received' }
 Check '-ExpectPending reaches the read-only check too' ($r.Code -eq 0 -and $r.Calls[0].cmd -match 'EXPECT_PENDING=0030_library_page_coverage_unknown,0031_test_repair_date_received bash /root/eje-ops/deploy-release.sh --check')
-foreach ($bad in @('0031_test_repair_date_received,0030_library_page_coverage_unknown', '0030_a,0030_a', 'library_page_coverage_unknown', '0030_a, 0031_b', '0030_A')) {
+# Typed in PowerShell, a,b,c is an ARRAY: it must arrive as three tags, not one
+# space-joined string (the 0034-0036 release was refused exactly that way).
+$three = '0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for'
+$r = Run @{ Sha = $sha; CheckOnly = $true; ExpectPending = @('0034_manual_timesheets', '0035_test_bench_fee', '0036_chat_deleted_for') }
+Check '-ExpectPending given as an array becomes three tags, comma-joined for the server' ($r.Code -eq 0 -and $r.Calls[0].cmd -match "EXPECT_PENDING=$three bash /root/eje-ops/deploy-release.sh --check")
+$r = Run @{ Sha = $sha; ExpectPending = @('0034_manual_timesheets', '0035_test_bench_fee', '0036_chat_deleted_for') } 'ok' $short
+Check '-ExpectPending given as an array reaches the detached release unit intact' ($r.Code -eq 0 -and $r.Calls[0].cmd -match "--setenv=EXPECT_PENDING=$three /bin/bash /root/eje-ops/deploy-release.sh --release")
+$r = Run @{ Sha = $sha; CheckOnly = $true; ExpectPending = $three }
+Check '-ExpectPending given as one comma-separated string gives the same list' ($r.Code -eq 0 -and $r.Calls[0].cmd -match "EXPECT_PENDING=$three bash")
+# Literally as an operator types it at the prompt (unquoted commas), not via a hashtable.
+Remove-Item (Join-Path $work 'calls.jsonl') -ErrorAction SilentlyContinue
+$env:FAKE_RELEASE = 'ok'
+& $stage -Sha $sha -CheckOnly -ExpectPending 0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for -SshExe $fake -KeyPath $key -Repo $repo -LogDir $work -ProbeScript $probe *> $null
+$code = $LASTEXITCODE
+$calls = @(Get-Content (Join-Path $work 'calls.jsonl') -ErrorAction SilentlyContinue | ForEach-Object { $_ | ConvertFrom-Json })
+Check '-ExpectPending a,b,c typed at the prompt is accepted as three tags' ($code -eq 0 -and $calls.Count -eq 1 -and $calls[0].cmd -match "EXPECT_PENDING=$three bash")
+# Through `powershell -File` (the documented way to run it), where the value arrives as one string.
+Remove-Item (Join-Path $work 'calls.jsonl') -ErrorAction SilentlyContinue
+& powershell -NoProfile -File $stage -Sha $sha -CheckOnly -ExpectPending 0034_manual_timesheets,0035_test_bench_fee,0036_chat_deleted_for -SshExe $fake -KeyPath $key -Repo $repo -LogDir $work -ProbeScript $probe *> $null
+$code = $LASTEXITCODE
+$calls = @(Get-Content (Join-Path $work 'calls.jsonl') -ErrorAction SilentlyContinue | ForEach-Object { $_ | ConvertFrom-Json })
+Check '-ExpectPending a,b,c through powershell -File is accepted as three tags' ($code -eq 0 -and $calls.Count -eq 1 -and $calls[0].cmd -match "EXPECT_PENDING=$three bash")
+# The array form is checked just as strictly, element by element.
+foreach ($badArray in @(@('0035_b', '0034_a'), @('0034_a', '0034_a'), @('0034_a', ''), @('0034_a', '0035 b'), @('0034_a,', '0035_b'))) {
+  $r = Run @{ Sha = $sha; ExpectPending = $badArray }
+  Check "a malformed -ExpectPending array ('$($badArray -join "' '")') is refused, nothing contacted" ($r.Code -eq 1 -and $r.Calls.Count -eq 0 -and $r.Log -match '-ExpectPending')
+}
+foreach ($bad in @('0031_test_repair_date_received,0030_library_page_coverage_unknown', '0030_a,0030_a', 'library_page_coverage_unknown', '0030_a, 0031_b', '0030_A', '0030_a 0031_b', '0030_a,,0031_b', '0030_a,')) {
   $r = Run @{ Sha = $sha; ExpectPending = $bad }
   Check "a malformed -ExpectPending ('$bad') is refused, nothing contacted" ($r.Code -eq 1 -and $r.Calls.Count -eq 0 -and $r.Log -match '-ExpectPending')
 }
@@ -97,3 +124,4 @@ Check 'rollback the public endpoint does not confirm -> exit 2' ($r.Code -eq 2 -
 Remove-Item -Recurse -Force $work
 Write-Host "`n$pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }
+exit 0
