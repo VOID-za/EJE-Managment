@@ -65,6 +65,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     for (const status of ['present', 'absent']) {
       const response = await office.post('/api/attendance', {
         userId: IDS.technician, date: today, status, note: status === 'absent' ? 'Phoned in' : '',
+        // ATT-01: an absent day says why.
+        ...(status === 'absent' ? { absenceReason: 'sick_leave' } : {}),
       });
       expect(response.status).toBe(200);
     }
@@ -73,7 +75,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       .from(schema.attendance)
       .where(and(eq(schema.attendance.userId, IDS.technician), eq(schema.attendance.workDate, today)));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ status: 'absent', note: 'Phoned in', recordedBy: IDS.coordinator, version: 2 });
+    expect(rows[0]).toMatchObject({ status: 'absent', absenceReason: 'sick_leave', note: 'Phoned in', recordedBy: IDS.coordinator, version: 2 });
   });
 
   it('the database refuses a second row for a day, an unknown status and a blank comment', async () => {
@@ -144,19 +146,25 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
 
     // What the technician types is what is stored, with the owner from the session.
     const added = await tech.post<{ entry: { id: string } }>(`/api/timesheets/${IDS.technician}/entries`, {
-      date: today, customerId: IDS.customer, customerName: '', normalHours: 6.25, overtimeHours: 2, doubleHours: 0, callouts: 1,
+      date: today, customerId: IDS.customer, customerName: '', overtimeHours: 2, doubleHours: 0,
+      calloutAmount: 45000, calloutShared: true, internalKm: 5.5, customerKm: 30,
     });
-    expect(added.status).toBe(200);
+    expect(added.status, JSON.stringify(added.error)).toBe(200);
     const rows = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ customerId: IDS.customer, normalHours: '6.25', overtimeHours: '2.00', callouts: 1 });
+    // Migration 0037's columns: NT 0 on a new line, the call-out as an amount, both kilometres.
+    expect(rows[0]).toMatchObject({
+      customerId: IDS.customer, normalHours: '0.00', overtimeHours: '2.00', callouts: 0,
+      calloutAmountCents: 45000, calloutShared: true, internalKm: '5.5', customerKm: '30.0', workshop: false,
+    });
     expect(rows[0]?.customerName.length).toBeGreaterThan(0);
     const corrected = await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
-      entryId: added.data.entry.id, date: today, customerId: IDS.customer, customerName: '', normalHours: 6, overtimeHours: 2, doubleHours: 0, callouts: 1,
+      entryId: added.data.entry.id, date: today, customerId: IDS.customer, customerName: '', overtimeHours: 2.5, doubleHours: 0,
+      calloutAmount: 45000, calloutShared: true, internalKm: 5.5, customerKm: 30,
     });
     expect(corrected.status).toBe(200);
     const after = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician));
-    expect(after.map((row) => [row.normalHours, row.version])).toEqual([['6.00', 2]]);
+    expect(after.map((row) => [row.overtimeHours, row.version])).toEqual([['2.50', 2]]);
     await expect(
       db.insert(schema.timesheetEntries).values({
         id: '00000000-0000-4000-8000-0000000000aa', userId: IDS.technician, workDate: today, customerName: 'x',
@@ -175,5 +183,51 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/timesheets/${IDS.technician}/comment`, { date: today, comment: '' })).status).toBe(200);
     expect(await db.select().from(schema.timesheetComments).where(eq(schema.timesheetComments.userId, IDS.technician)))
       .toHaveLength(0);
+  });
+
+  it('Send to office is stored once with its snapshot, and the database refuses to rewrite or delete it (migration 0037)', async () => {
+    const today = businessToday();
+    const month = today.slice(0, 7);
+    const tech = await signIn('sipho@example-test.co.za');
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
+      date: today, customerName: '', workshop: true, overtimeHours: 1, doubleHours: 0,
+    })).status).toBe(200);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/comment`, { comment: 'Workshop week.' })).status).toBe(200);
+    const sent = await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/submit`, {});
+    expect(sent.status, JSON.stringify(sent.error)).toBe(200);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/submit`, {})).status).toBe(422);
+
+    const rows = await db.select().from(schema.timesheetMonths).where(eq(schema.timesheetMonths.userId, IDS.technician));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ month, comment: 'Workshop week.', submittedBy: IDS.technician });
+    expect(rows[0]?.submittedAt).not.toBeNull();
+    expect((rows[0]?.snapshot as { entries: unknown[] }).entries).toHaveLength(1);
+
+    // The write-once trigger: no script or bug can change or un-send it.
+    expect(await postgresMessage(
+      db.update(schema.timesheetMonths).set({ comment: 'rewritten' }).where(eq(schema.timesheetMonths.id, rows[0]!.id)),
+    )).toContain('sent to the office');
+    expect(await postgresMessage(
+      db.delete(schema.timesheetMonths).where(eq(schema.timesheetMonths.id, rows[0]!.id)),
+    )).toContain('sent to the office');
+  });
+
+  it('the database refuses a reason on a present day, an unknown reason, and a Workshop line naming a customer', async () => {
+    const values = {
+      userId: IDS.technician, workDate: '2026-10-05', recordedBy: IDS.master, recordedAt: '2026-10-05T08:00:00.000Z',
+    };
+    expect(await postgresMessage(
+      db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values, status: 'present', absenceReason: 'leave' }),
+    )).toContain('attendance_absence_reason_known');
+    expect(await postgresMessage(
+      db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values, status: 'absent', absenceReason: 'holiday' }),
+    )).toContain('attendance_absence_reason_known');
+    await db.insert(schema.attendance).values({ id: crypto.randomUUID(), ...values, status: 'absent', absenceReason: null });
+    expect(await postgresMessage(
+      db.insert(schema.timesheetEntries).values({
+        id: crypto.randomUUID(), userId: IDS.technician, workDate: '2026-10-05', customerId: IDS.customer,
+        workshop: true, updatedBy: IDS.technician, recordedAt: '2026-10-05T08:00:00.000Z',
+      }),
+    )).toContain('timesheet_entries_reviewer_bounded');
   });
 });

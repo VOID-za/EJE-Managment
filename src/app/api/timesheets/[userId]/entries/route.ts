@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TIMESHEET_CUSTOMER_LIMIT } from '@/domain';
+import { TIMESHEET_CUSTOMER_LIMIT, TIMESHEET_MAX_CALLOUT_CENTS, TIMESHEET_MAX_KM_PER_LINE } from '@/domain';
 import { saveTimesheetEntry } from '@/application/timesheets';
 import { writeRoute } from '@/server/api/handler';
 
@@ -19,10 +19,21 @@ export const POST = writeRoute({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD'),
       customerId: z.string().min(1).max(100).nullable().optional(),
       customerName: z.string().max(TIMESHEET_CUSTOMER_LIMIT),
-      normalHours: hours,
+      // TS-06. Workshop instead of a customer.
+      workshop: z.boolean().optional(),
+      // TS-07 / TS-08: NT and the call-out COUNT are no longer entered. Accepted
+      // only so a correction can carry an older line's value back unchanged;
+      // the operation refuses any change to either.
+      normalHours: hours.optional(),
       overtimeHours: hours,
       doubleHours: hours,
-      callouts: z.number().int().min(0).max(10),
+      callouts: z.number().int().min(0).max(10).optional(),
+      // TS-08. The call-out in cents, and whether it is shared.
+      calloutAmount: z.number().int().min(0).max(TIMESHEET_MAX_CALLOUT_CENTS).optional(),
+      calloutShared: z.boolean().optional(),
+      // TS-09.
+      internalKm: z.number().min(0).max(TIMESHEET_MAX_KM_PER_LINE).optional(),
+      customerKm: z.number().min(0).max(TIMESHEET_MAX_KM_PER_LINE).optional(),
     })
     .strict(),
   handler: async (context) => ({

@@ -133,6 +133,32 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
   reason. It is not the original fault description and not the technician's
   write-up, and nothing on the job changes by itself.
 
+## H. The reviewer's changes (28 October 2026) — NOT YET DEPLOYED
+
+These are on `claude/office-workflow-parts` and need the next approved release
+(migration 0037). Until then the live site does not have them. Use them only on
+fictional data while the demonstration switcher is on.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| H1 | Technician: **Attendance** → *Absent* on a day | A reason is required — exactly Leave, Sick Leave, Family Responsibility, IOD (Injury on Duty). The day shows "Absent — the reason". An absent day from before shows "reason not recorded" |
+| H2 | Office: Attendance register → *Absent* for someone; export CSV | Same four reasons; the CSV has an *Absence reason* column |
+| H3 | Technician: **Timesheets** | The first day of the month is at the TOP (oldest first), each date with its day ("Mon 26 Oct 2026"). Setting From after To shows a message and breaks nothing. Leave and come back: the From/To boxes are back to the 1st of the month → today; your lines are all still there |
+| H4 | *Add line* → choose **Workshop** in the customer list; OT, DT, **Callout (R)** e.g. 450, tick *shared* if it is; **Internal km** and **Customer km** | No NT box. The line shows Workshop, the amount as R 450,00 (shared), both kilometres. Workshop with a customer name is refused |
+| H5 | Type the month's **Comments** → **Save** | "Saved … Not sent to the office"; it is still a draft and still editable |
+| H6 | **Preview**, then **Print** | The Time Sheet appears in the app: Time Sheet, your name, the Month, Date / Customer / OT / DT / Callout / Km / Hm, your comment in the Comments box. Print prints only the sheet. Neither changes anything |
+| H7 | **Send to office** → confirm | "Sent to office (date) by (you)". Add line, Edit, Remove, Save and Send are gone for that month; trying again is refused |
+| H8 | Office: Timesheets → that technician → that month → Preview | The sent version, read-only, with the comment |
+| H9 | Test & Repair job: press **Complete job**, then try to add or change a part | Not offered; the screen explains why. *Cancel completion* → the part can be added in In Progress |
+| H10 | Test & Repair, on the **tablet**: Complete job → Review → **Job card PDF** | The job card APPEARS on screen (not a silent download), with Print and Download |
+| H11 | New Job → **Parts**: leave the order number empty, fill **Quote number** | The job is raised; the quote number is on the job card |
+| H12 | A Parts or Test & Repair job collected by a **courier**: at the collection choose Courier collection with a waybill; then **Delivery note** on the job or review screen | Two documents: the job card WITH prices, and a Delivery Note with the goods, quantities and waybill and NO prices. Print each separately |
+
+Open questions the owner is asked to answer are listed in
+`docs/reviewer-feedback-2026-10-28.md` (Hm, reopening a sent timesheet, telling
+the office, the courier at the signature step, shared call-outs, TR-01 for other
+job types, TR-02 on the device, the month as the period).
+
 ## F. Documents
 
 | # | Do this | Pass looks like |
@@ -158,6 +184,7 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
 | E1–E5 | | | |
 | F1–F2 | | | |
 | G1–G12 | | | |
+| H1–H12 (after the next release) | | | |
 
 Faults go to the owner with the check number, what was done, what was expected,
 what happened, and a screenshot.

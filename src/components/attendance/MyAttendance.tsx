@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { AttendanceStatus } from '@/domain';
+import { ABSENCE_REASON_LABELS, type AbsenceReason, type AttendanceStatus } from '@/domain';
 import { Badge, Button, Card, LoadingPanel, QueryFailure, TextField } from '@/components/ui';
 import { attendance } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
@@ -9,6 +9,8 @@ import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 import { formatDate } from '@/lib/format';
+import { weekdayOf } from '@/lib/timesheet-dates';
+import { AbsenceReasonPicker } from './AbsenceReasonPicker';
 
 const daysBefore = (date: string, days: number): string => {
   const at = new Date(`${date}T00:00:00Z`);
@@ -30,13 +32,23 @@ export const MyAttendance = () => {
   const operation = useOperation();
   const today = businessToday();
   const [from, setFrom] = useState(() => daysBefore(today, 30));
+  // The day whose absence reason is being chosen (ATT-01).
+  const [choosing, setChoosing] = useState<string | null>(null);
   const query = useQuery(`attendance:mine:${currentUser.id}:${from}`, () => attendance.mine(from, today));
 
-  const mark = async (date: string, status: AttendanceStatus, note: string): Promise<void> => {
+  const mark = async (
+    date: string,
+    status: AttendanceStatus,
+    note: string,
+    absenceReason: AbsenceReason | null = null,
+  ): Promise<void> => {
     const ok = await operation.run(async () => {
-      await attendance.record({ userId: currentUser.id, date, status, note });
+      await attendance.record({ userId: currentUser.id, date, status, absenceReason, note });
     });
-    if (ok) query.refetch();
+    if (ok) {
+      setChoosing(null);
+      query.refetch();
+    }
   };
 
   return (
@@ -84,13 +96,17 @@ export const MyAttendance = () => {
                 data-status={day.record?.status ?? 'unrecorded'}
               >
                 <div className="flex items-center gap-2">
-                  <span className="w-32 font-medium text-steel-900">{formatDate(day.date)}</span>
+                  <span className="w-40 font-medium text-steel-900">
+                    {weekdayOf(day.date)} {formatDate(day.date)}
+                  </span>
                   {day.record === null ? (
                     <Badge tone="amber" size="sm">Not recorded</Badge>
                   ) : day.record.status === 'present' ? (
                     <Badge tone="green" size="sm">Present</Badge>
                   ) : (
-                    <Badge tone="red" size="sm">Absent</Badge>
+                    <Badge tone="red" size="sm" data-testid="my-attendance-reason">
+                      Absent — {day.record.absenceReason === null ? 'reason not recorded' : ABSENCE_REASON_LABELS[day.record.absenceReason]}
+                    </Badge>
                   )}
                 </div>
                 <div className="flex gap-2">
@@ -106,11 +122,20 @@ export const MyAttendance = () => {
                     size="sm"
                     variant={day.record?.status === 'absent' ? 'primary' : 'secondary'}
                     disabled={operation.running}
-                    onClick={() => void mark(day.date, 'absent', day.record?.note ?? '')}
+                    onClick={() => setChoosing(day.date)}
+                    data-testid="my-attendance-absent"
                   >
                     Absent
                   </Button>
                 </div>
+                {choosing === day.date && (
+                  <AbsenceReasonPicker
+                    initial={day.record?.absenceReason ?? null}
+                    busy={operation.running}
+                    onConfirm={(reason) => void mark(day.date, 'absent', day.record?.note ?? '', reason)}
+                    onCancel={() => setChoosing(null)}
+                  />
+                )}
               </li>
             ))}
           </ul>

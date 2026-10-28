@@ -6,6 +6,7 @@ import {
   getJobTypeDefinition,
   labourRateFor,
   labourRateLabel,
+  partsLockedAfterCompletion,
   type Job,
   type LabourEntry,
   type LabourRateType,
@@ -58,6 +59,9 @@ export const WorkCapturePanel = ({
   editable,
   onChanged,
 }: WorkCapturePanelProps) => {
+  // TR-01: parts on a completed Test & Repair job are fixed; the rule is the server's too.
+  const partsLocked = partsLockedAfterCompletion(job);
+  const partsEditable = editable && !partsLocked;
   const totals = calculateJobTotals(job, settings);
   // A parts collection has no site visit, so hours, distance and a call-out fee
   // do not apply. Driven by the job type definition rather than a code check.
@@ -310,7 +314,7 @@ export const WorkCapturePanel = ({
             title="Parts"
             description={`${job.parts.length} ${job.parts.length === 1 ? 'line' : 'lines'} · ${formatCurrency(totals.partsTotal)}`}
           />
-          {editable && (
+          {partsEditable && (
             <Button
               size="sm"
               variant="secondary"
@@ -325,6 +329,13 @@ export const WorkCapturePanel = ({
           )}
         </div>
 
+        {editable && partsLocked && (
+          <p className="border-b border-steel-100 px-5 py-3 text-sm text-steel-600" data-testid="parts-locked-notice">
+            This job has been completed, so its parts can no longer be changed. To change a part, cancel
+            completion — the job returns to In Progress with everything kept.
+          </p>
+        )}
+
         {job.parts.length === 0 ? null : (
           <div className="eje-scrollbar overflow-x-auto">
             <table className="w-full text-sm">
@@ -335,7 +346,7 @@ export const WorkCapturePanel = ({
                   <th className="px-3 py-2.5 text-right font-semibold">Qty</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Unit</th>
                   <th className="px-5 py-2.5 text-right font-semibold">Total</th>
-                  {editable && <th className="w-12" />}
+                  {partsEditable && <th className="w-12" />}
                 </tr>
               </thead>
               <tbody>
@@ -354,7 +365,7 @@ export const WorkCapturePanel = ({
                     <td className="tabular px-5 py-3 text-right font-semibold text-steel-900">
                       {formatCurrency(totals.partLines[index]?.total ?? 0)}
                     </td>
-                    {editable && (
+                    {partsEditable && (
                       <td className="pr-3">
                         <LineActions
                           onEdit={() => {

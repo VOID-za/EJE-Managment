@@ -1,10 +1,13 @@
 import {
+  ABSENCE_REASON_LABELS,
   ATTENDANCE_NOTE_LIMIT,
   ATTENDANCE_STATUSES,
   asUserId,
   availabilityTypeLabel,
+  isAbsenceReason,
   can,
   userFullName,
+  type AbsenceReason,
   type AttendanceRecord,
   type AttendanceStatus,
   type AvailabilityType,
@@ -87,10 +90,18 @@ const assertMayRecordFor = (context: OperationContext, userId: string): void => 
 const statusLabel = (status: AttendanceStatus): string =>
   status === 'present' ? 'Present' : 'Absent';
 
+const reasonLabel = (reason: AbsenceReason | null): string =>
+  reason === null ? 'Not recorded' : ABSENCE_REASON_LABELS[reason];
+
 export interface AttendanceInput {
   readonly userId: string;
   readonly date: string;
   readonly status: AttendanceStatus;
+  /**
+   * ATT-01. Required, and one of the four, when the day is absent; must be
+   * absent (or null) when the day is present.
+   */
+  readonly absenceReason?: string | null | undefined;
   readonly note: string;
 }
 
@@ -108,6 +119,37 @@ export const recordAttendance = async (
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
   if (!ATTENDANCE_STATUSES.includes(input.status)) {
     throw refuse('That is not an attendance status.', 'invalid_status', 'Choose Present or Absent.');
+  }
+  /*
+   * ATT-01. Checked here, whatever the screen sent: an absent day says why,
+   * from exactly the four reasons; a present day carries no reason at all.
+   * An absent day recorded BEFORE the reason existed keeps none until somebody
+   * records that day again — and then a reason is required like any other.
+   */
+  const reasonGiven = input.absenceReason ?? null;
+  let absenceReason: AbsenceReason | null = null;
+  if (input.status === 'absent') {
+    if (reasonGiven === null || reasonGiven === '') {
+      throw refuse(
+        'Choose why you were absent.',
+        'absence_reason_required',
+        'Leave, Sick Leave, Family Responsibility or IOD (Injury on Duty).',
+      );
+    }
+    if (!isAbsenceReason(reasonGiven)) {
+      throw refuse(
+        'That is not an absence reason.',
+        'invalid_absence_reason',
+        'Choose Leave, Sick Leave, Family Responsibility or IOD (Injury on Duty).',
+      );
+    }
+    absenceReason = reasonGiven;
+  } else if (reasonGiven !== null && reasonGiven !== '') {
+    throw refuse(
+      'A present day has no absence reason.',
+      'absence_reason_not_applicable',
+      'Choose Absent to give a reason.',
+    );
   }
   const note = input.note.trim();
   if (note.length > ATTENDANCE_NOTE_LIMIT) {
@@ -131,7 +173,12 @@ export const recordAttendance = async (
   }
 
   const existing = await context.repos.attendance.findRecord(person.id, input.date);
-  if (existing !== null && existing.status === input.status && existing.note === note) {
+  if (
+    existing !== null &&
+    existing.status === input.status &&
+    existing.absenceReason === absenceReason &&
+    existing.note === note
+  ) {
     return existing;
   }
 
@@ -141,6 +188,7 @@ export const recordAttendance = async (
     userId: person.id,
     date: input.date,
     status: input.status,
+    absenceReason,
     note,
     recordedBy: context.actor.id,
     recordedAt: now,
@@ -153,13 +201,18 @@ export const recordAttendance = async (
       type: 'attendance_recorded',
       summary: `Attendance: ${name} ${statusLabel(saved.status).toLowerCase()} on ${saved.date}`,
       detail:
-        `Recorded by ${userFullName(context.actor)}` + (note.length > 0 ? ` — "${note}".` : '.'),
+        `Recorded by ${userFullName(context.actor)}` +
+        (saved.absenceReason === null ? '' : ` — reason: ${reasonLabel(saved.absenceReason)}`) +
+        (note.length > 0 ? ` — "${note}".` : '.'),
     });
   } else {
     const changes = [
       ...(existing.status === saved.status
         ? []
         : [{ field: 'Attendance', from: statusLabel(existing.status), to: statusLabel(saved.status) }]),
+      ...(existing.absenceReason === saved.absenceReason
+        ? []
+        : [{ field: 'Absence reason', from: reasonLabel(existing.absenceReason), to: reasonLabel(saved.absenceReason) }]),
       ...(existing.note === saved.note
         ? []
         : [{ field: 'Note', from: existing.note || '—', to: saved.note || '—' }]),
@@ -314,6 +367,8 @@ export interface AttendanceExportRow {
   readonly person: string;
   readonly role: string;
   readonly status: AttendanceStatus;
+  /** ATT-01: the reason's label, blank for present and for an absent day from before. */
+  readonly absenceReason: string;
   readonly note: string;
   readonly recordedBy: string;
   readonly recordedAt: string;
@@ -362,6 +417,7 @@ export const loadAttendanceExport = async (
       person: person === undefined ? 'Unknown person' : userFullName(person),
       role: person === undefined ? '' : person.jobTitle || person.role,
       status: record.status,
+      absenceReason: record.absenceReason === null ? '' : ABSENCE_REASON_LABELS[record.absenceReason],
       note: record.note,
       recordedBy: recorder === undefined ? '' : userFullName(recorder),
       recordedAt: record.recordedAt,

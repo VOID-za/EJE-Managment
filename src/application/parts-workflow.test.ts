@@ -160,14 +160,11 @@ describe('raising a parts collection', () => {
     expect(job.faultDescription).toBe('');
   });
 
-  it('still requires the customer order number, which is what ties the goods to the order', async () => {
+  it('does not require the customer order number any more (PARTS-01, 28 October 2026)', async () => {
     const job = await raise(harness, master, { orderNumber: '' });
     const withGoods = await withParts(harness, master, job);
     const readiness = checkReadyForSignature(withGoods);
-    expect(readiness.allowed).toBe(false);
-    expect(readiness.violations.map((violation) => violation.code)).toContain(
-      'order_number_required',
-    );
+    expect(readiness.violations.map((violation) => violation.code)).not.toContain('order_number_required');
   });
 });
 

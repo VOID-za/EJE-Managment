@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { buildPartsDocument, showsPricesOnCollectionDocument } from './parts-document';
+import { buildPartsDocument, requiresDeliveryNote, showsPricesOnCollectionDocument } from './parts-document';
 import { asLineItemId, asUserId } from '../types/common';
 import type { PartEntry } from '../types/job';
 
 /**
  * Courier collection.
  *
- * A courier has no reason to see what the customer paid, so the collection
- * document withholds prices. The prices themselves must survive on the job for
- * EJE costing — withheld, never deleted.
+ * A courier has no reason to see what the customer paid. Since PARTS-03/04
+ * (the real-world reviewer, 28 October 2026) that is the DELIVERY NOTE's job —
+ * a separate document with no prices (`src/lib/job-card/delivery-note.test.ts`)
+ * — and the job card itself always carries its prices, because the office must
+ * have a priced job card for every job, courier or not.
  */
 const technicianId = asUserId('user-tech-1');
 
@@ -44,8 +46,12 @@ describe('showsPricesOnCollectionDocument', () => {
     expect(showsPricesOnCollectionDocument(partsJob(false))).toBe(true);
   });
 
-  it('HIDES prices when a courier collects', () => {
-    expect(showsPricesOnCollectionDocument(partsJob(true))).toBe(false);
+  it('KEEPS prices on the job card when a courier collects — the courier gets a delivery note instead', () => {
+    expect(showsPricesOnCollectionDocument(partsJob(true))).toBe(true);
+    expect(requiresDeliveryNote(partsJob(true))).toBe(true);
+    expect(requiresDeliveryNote(partsJob(false))).toBe(false);
+    expect(requiresDeliveryNote({ jobType: 'test_and_repair', courierCollection: true })).toBe(true);
+    expect(requiresDeliveryNote({ jobType: 'breakdown', courierCollection: true })).toBe(false);
   });
 
   it('never suppresses prices on a normal job card', () => {
@@ -75,7 +81,7 @@ describe('buildPartsDocument for a customer collection', () => {
   });
 });
 
-describe('buildPartsDocument for a courier collection', () => {
+describe('buildPartsDocument for a courier collection (the priced job card, PARTS-04)', () => {
   const document = buildPartsDocument(partsJob(true));
 
   it('still lists every part, with quantities', () => {
@@ -85,16 +91,10 @@ describe('buildPartsDocument for a courier collection', () => {
     expect(document.totalQuantity).toBe(5);
   });
 
-  it('withholds every unit price and line total', () => {
-    expect(document.showsPrices).toBe(false);
-    for (const line of document.lines) {
-      expect(line.unitPrice).toBeNull();
-      expect(line.lineTotal).toBeNull();
-    }
-  });
-
-  it('withholds the document total', () => {
-    expect(document.subtotal).toBeNull();
+  it('carries every unit price, line total and the total — it is the office’s job card', () => {
+    expect(document.showsPrices).toBe(true);
+    expect(document.lines[0]).toMatchObject({ unitPrice: 48500, lineTotal: 97000 });
+    expect(document.subtotal).toBe(97000 + 126000);
   });
 
   it('leaves the underlying price data on the job untouched', () => {
@@ -103,11 +103,5 @@ describe('buildPartsDocument for a courier collection', () => {
 
     expect(job.parts[0]?.unitPrice).toBe(48500);
     expect(job.parts[1]?.unitPrice).toBe(42000);
-  });
-
-  it('emits no price anywhere in the serialised document', () => {
-    const serialised = JSON.stringify(buildPartsDocument(partsJob(true)));
-    expect(serialised).not.toContain('48500');
-    expect(serialised).not.toContain('42000');
   });
 });

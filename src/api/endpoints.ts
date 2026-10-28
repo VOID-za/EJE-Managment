@@ -4,6 +4,7 @@ import type {
   AttendanceRecord,
   TimesheetComment,
   TimesheetEntry,
+  TimesheetMonth,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -75,7 +76,7 @@ import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
 import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
-import type { Timesheet, TimesheetPerson } from '@/application/timesheets';
+import type { Timesheet, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
 
 /** The body of a timesheet line. TIMESHEET-2. */
 export interface TimesheetEntryBody {
@@ -83,10 +84,17 @@ export interface TimesheetEntryBody {
   readonly date: string;
   readonly customerId?: string | null;
   readonly customerName: string;
-  readonly normalHours: number;
+  readonly workshop?: boolean;
+  /** TS-07: only an older line's NT, carried back unchanged on a correction. */
+  readonly normalHours?: number;
   readonly overtimeHours: number;
   readonly doubleHours: number;
-  readonly callouts: number;
+  /** TS-08: only an older line's call-out COUNT, carried back unchanged. */
+  readonly callouts?: number;
+  readonly calloutAmount: number;
+  readonly calloutShared: boolean;
+  readonly internalKm: number;
+  readonly customerKm: number;
 }
 import type { LibrarySearchPage } from '@/application/library-search';
 import type { SearchResult } from '@/application/search';
@@ -115,7 +123,7 @@ export interface LibraryUploadResult {
     readonly failureReason: string;
   };
 }
-import { apiGet, apiPatch, apiPost, apiUpload, newIdempotencyKey, segment } from './client';
+import { apiDownload, apiGet, apiPatch, apiPost, apiUpload, newIdempotencyKey, segment } from './client';
 
 /**
  * Every call the browser makes, named.
@@ -673,6 +681,16 @@ export const jobs = {
   generateDocument: (jobId: string) =>
     command<GeneratedPdf>(`/api/jobs/${segment(jobId)}/generate_document`),
   issue: (jobId: string) => command<SubmitResult>(`/api/jobs/${segment(jobId)}/issue`),
+  /** PARTS-03/04: the courier's delivery note, separate from the job card. */
+  deliveryNote: async (jobId: string): Promise<{ bytes: Uint8Array; fileName: string }> => {
+    const file = await command<{ fileName: string; contentType: string; base64: string }>(
+      `/api/jobs/${segment(jobId)}/generate_delivery_note`,
+    );
+    const binary = atob(file.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return { bytes, fileName: file.fileName };
+  },
   confirmDelivery: (jobId: string) => jobAction(jobId, 'confirm_delivery'),
   /** CR-08: the office submits a signed job card its technician cannot. */
   takeOverSubmission: (jobId: string) =>
@@ -1112,7 +1130,14 @@ export const attendance = {
   register: (date: string) => query<AttendanceRegister>(`/api/attendance${search({ date })}`),
   /** ATTEND-2: the signed-in person's own days, recorded or not. */
   mine: (from: string, to: string) => query<MyAttendance>(`/api/attendance/mine${search({ from, to })}`),
-  record: (input: { userId: string; date: string; status: 'present' | 'absent'; note: string }) =>
+  record: (input: {
+    userId: string;
+    date: string;
+    status: 'present' | 'absent';
+    /** ATT-01: required for absent, omitted or null for present. */
+    absenceReason?: string | null;
+    note: string;
+  }) =>
     command<AttendanceRecord>('/api/attendance', input),
   exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
 };
@@ -1134,4 +1159,16 @@ export const timesheets = {
     command<{ removed: true }>(`/api/timesheets/${segment(userId)}/entries/${segment(entryId)}/remove`),
   exportUrl: (userId: string, from: string, to: string) =>
     `/api/timesheets/${segment(userId)}/export${search({ from, to })}`,
+  /** TS-11: one month as its PDF Layout prints it (draft, or what was sent). */
+  document: (userId: string, month: string) =>
+    query<TimesheetDocument>(`/api/timesheets/${segment(userId)}/months/${segment(month)}`),
+  /** TS-11, TS-13: the PDF Layout's bytes. Reading it writes nothing. */
+  pdf: (userId: string, month: string) =>
+    apiDownload(`/api/timesheets/${segment(userId)}/months/${segment(month)}/pdf`, `time-sheet-${month}.pdf`),
+  /** TS-10, TS-12: Save the one comment for the month. Not a submission. */
+  saveMonthComment: (userId: string, month: string, comment: string) =>
+    command<{ month: TimesheetMonth }>(`/api/timesheets/${segment(userId)}/months/${segment(month)}/comment`, { comment }),
+  /** TS-02, TS-14: Send to office. Once; read-only for the technician afterwards. */
+  submit: (userId: string, month: string) =>
+    command<{ month: TimesheetMonth }>(`/api/timesheets/${segment(userId)}/months/${segment(month)}/submit`),
 };

@@ -1,10 +1,13 @@
 import { isUuid } from './identifiers';
-import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import {
   asCustomerId,
   asUserId,
+  type AbsenceReason,
   type AttendanceRecord,
   type TimesheetEntry,
+  type TimesheetMonth,
+  type TimesheetSubmissionSnapshot,
   type AttendanceStatus,
   type TimesheetComment,
   type UserId,
@@ -16,6 +19,19 @@ import * as schema from '@/db/schema';
 type AttendanceRow = typeof schema.attendance.$inferSelect;
 type CommentRow = typeof schema.timesheetComments.$inferSelect;
 type EntryRow = typeof schema.timesheetEntries.$inferSelect;
+type MonthRow = typeof schema.timesheetMonths.$inferSelect;
+
+const toDomainMonth = (row: MonthRow): TimesheetMonth => ({
+  id: row.id,
+  userId: asUserId(row.userId),
+  month: row.month,
+  comment: row.comment,
+  updatedBy: asUserId(row.updatedBy),
+  updatedAt: row.commentedAt,
+  submittedAt: row.submittedAt,
+  submittedBy: row.submittedBy === null ? null : asUserId(row.submittedBy),
+  snapshot: (row.snapshot as TimesheetSubmissionSnapshot | null) ?? null,
+});
 
 const toDomainEntry = (row: EntryRow): TimesheetEntry => ({
   id: row.id,
@@ -27,6 +43,11 @@ const toDomainEntry = (row: EntryRow): TimesheetEntry => ({
   overtimeHours: Number(row.overtimeHours),
   doubleHours: Number(row.doubleHours),
   callouts: row.callouts,
+  workshop: row.workshop,
+  calloutAmount: row.calloutAmountCents,
+  calloutShared: row.calloutShared,
+  internalKm: Number(row.internalKm),
+  customerKm: Number(row.customerKm),
   updatedBy: asUserId(row.updatedBy),
   updatedAt: row.recordedAt,
 });
@@ -36,6 +57,7 @@ const toDomainRecord = (row: AttendanceRow): AttendanceRecord => ({
   userId: asUserId(row.userId),
   date: row.workDate,
   status: row.status as AttendanceStatus,
+  absenceReason: (row.absenceReason as AbsenceReason | null) ?? null,
   note: row.note,
   recordedBy: asUserId(row.recordedBy),
   recordedAt: row.recordedAt,
@@ -95,6 +117,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         userId: record.userId,
         workDate: record.date,
         status: record.status,
+        absenceReason: record.absenceReason,
         note: record.note,
         recordedBy: record.recordedBy,
         recordedAt: record.recordedAt,
@@ -103,6 +126,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         target: [schema.attendance.userId, schema.attendance.workDate],
         set: {
           status: record.status,
+          absenceReason: record.absenceReason,
           note: record.note,
           recordedBy: record.recordedBy,
           recordedAt: record.recordedAt,
@@ -199,6 +223,11 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       overtimeHours: entry.overtimeHours.toFixed(2),
       doubleHours: entry.doubleHours.toFixed(2),
       callouts: entry.callouts,
+      workshop: entry.workshop,
+      calloutAmountCents: entry.calloutAmount,
+      calloutShared: entry.calloutShared,
+      internalKm: entry.internalKm.toFixed(1),
+      customerKm: entry.customerKm.toFixed(1),
       updatedBy: entry.updatedBy,
       recordedAt: entry.updatedAt,
     };
@@ -215,6 +244,72 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
 
   async deleteEntry(id: string): Promise<void> {
     await this.db.delete(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
+  }
+
+  async findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetMonths)
+      .where(and(eq(schema.timesheetMonths.userId, userId), eq(schema.timesheetMonths.month, month)))
+      .limit(1);
+    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
+  }
+
+  async saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null> {
+    // The conflict update only touches a month that has not been sent; a sent
+    // one returns no row, which is the refusal (the trigger would refuse too).
+    const rows = await this.db
+      .insert(schema.timesheetMonths)
+      .values({
+        id: month.id,
+        userId: month.userId,
+        month: month.month,
+        comment: month.comment,
+        updatedBy: month.updatedBy,
+        commentedAt: month.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: [schema.timesheetMonths.userId, schema.timesheetMonths.month],
+        set: {
+          comment: month.comment,
+          updatedBy: month.updatedBy,
+          commentedAt: month.updatedAt,
+          updatedAt: sql`now()`,
+          version: sql`${schema.timesheetMonths.version} + 1`,
+        },
+        setWhere: isNull(schema.timesheetMonths.submittedAt),
+      })
+      .returning();
+    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
+  }
+
+  async submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null> {
+    const rows = await this.db
+      .insert(schema.timesheetMonths)
+      .values({
+        id: month.id,
+        userId: month.userId,
+        month: month.month,
+        comment: month.comment,
+        updatedBy: month.updatedBy,
+        commentedAt: month.updatedAt,
+        submittedAt: month.submittedAt,
+        submittedBy: month.submittedBy,
+        snapshot: month.snapshot,
+      })
+      .onConflictDoUpdate({
+        target: [schema.timesheetMonths.userId, schema.timesheetMonths.month],
+        set: {
+          submittedAt: month.submittedAt,
+          submittedBy: month.submittedBy,
+          snapshot: month.snapshot,
+          updatedAt: sql`now()`,
+          version: sql`${schema.timesheetMonths.version} + 1`,
+        },
+        setWhere: isNull(schema.timesheetMonths.submittedAt),
+      })
+      .returning();
+    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
   }
 
   async deleteComment(userId: UserId, date: string): Promise<void> {

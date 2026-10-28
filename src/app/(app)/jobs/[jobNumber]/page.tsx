@@ -58,6 +58,7 @@ import { PendingWorkPanel } from '@/components/pwa/PendingWorkPanel';
 import { PendingMediaPanel } from '@/components/pwa/PendingMediaPanel';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDate, formatDateTime } from '@/lib/format';
+import { DeliveryNoteButton } from '@/components/jobs/DeliveryNoteButton';
 
 type TabId = 'overview' | 'work' | 'completion' | 'checklist' | 'media' | 'notes' | 'activity';
 
@@ -447,6 +448,10 @@ const JobDetailPage = ({
             onChanged={refresh}
             onCompleteJob={() => setCompleting(true)}
           />
+          {/* PARTS-03/04: the courier's delivery note, separate from the priced job card. */}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <DeliveryNoteButton view={view} />
+          </div>
         </div>
       </Card>
 

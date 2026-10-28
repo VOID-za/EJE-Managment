@@ -2684,8 +2684,11 @@ await step('a Test & Repair offers a delivery note when the job is raised', asyn
   // And on a parts collection too, which is the other thing collected.
   await page.getByLabel('Job type').selectOption('parts');
   await page.getByLabel('Delivery note / waybill number').waitFor({ timeout: 8000 });
-  if ((await page.getByLabel('Quote number').count()) !== 0) {
-    throw new Error('a parts collection was offered a quote number');
+  // PARTS-02 (28 October 2026): a Parts job IS offered the optional quote number,
+  // and PARTS-01: its order number is no longer required.
+  await page.getByLabel('Quote number').waitFor({ timeout: 8000 });
+  if (await page.getByLabel(/^Customer order number/).getAttribute('required') !== null) {
+    throw new Error('a parts collection still requires an order number');
   }
   await page.screenshot({ path: `${shots}/27-new-job-delivery-note.png`, fullPage: false });
 });
@@ -2756,23 +2759,36 @@ await step('a Test & Repair asks "What is the Job?" in order, and each type atta
   await page.screenshot({ path: `${shots}/27b-test-and-repair-what-is-the-job.png`, fullPage: true });
 });
 
-await step('the job review page offers the job card as a PDF, for this job', async () => {
-  await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
+/*
+ * TR-02 (the real-world reviewer, 28 October 2026). On a browser with NO PDF
+ * viewer — the tablets, and headless Chrome here — the button used to download
+ * the file silently, which read as "Preview does not work". It must now SHOW
+ * this job's card in the application, with Print and Download beside it.
+ */
+const previewShows = async (jobNumber, failure) => {
   const button = page.getByTestId('job-card-pdf-button');
   await button.waitFor({ timeout: 10000 });
-  // A download where the browser has no PDF viewer (headless Chrome), a new tab
-  // where it has one. Either way it must be THIS job's card.
-  const delivered = await Promise.race([
-    page.waitForEvent('download', { timeout: 15000 }).then((download) => download.suggestedFilename()),
-    page.context().waitForEvent('page', { timeout: 15000 }).then(async (tab) => {
-      await tab.close();
-      return 'opened in a new tab';
-    }),
-    button.click().then(() => new Promise(() => {})),
-  ]);
-  if (!/EJE-1059.*\.pdf$|opened in a new tab/.test(delivered)) {
-    throw new Error(`the PDF button produced ${delivered}`);
+  let downloaded = false;
+  const onDownload = () => { downloaded = true; };
+  page.on('download', onDownload);
+  await button.click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  const kind = await preview.getAttribute('data-preview-kind');
+  if (kind === 'document') {
+    await preview.getByText(jobNumber).first().waitFor({ timeout: 10000 });
   }
+  await page.getByTestId('preview-print').waitFor({ timeout: 5000 });
+  await page.getByTestId('preview-download').waitFor({ timeout: 5000 });
+  page.off('download', onDownload);
+  if (downloaded) throw new Error(`${failure}: the preview downloaded a file instead of showing it`);
+  await page.getByTestId('preview-close').click();
+  await page.getByTestId('document-preview').waitFor({ state: 'detached', timeout: 10000 });
+};
+
+await step('the job review page SHOWS the job card in the app, for this job (TR-02)', async () => {
+  await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
+  await previewShows('EJE-1059', 'the review page');
 });
 
 await step('a Test & Repair is worked and taken to its collection step', async () => {
@@ -2819,19 +2835,7 @@ await step('a Test & Repair is worked and taken to its collection step', async (
    * (headless Chrome), a new tab where it has one.
    */
   await page.getByText('Ready for the customer').waitFor({ timeout: 10000 });
-  const pdfButton = page.getByTestId('job-card-pdf-button');
-  await pdfButton.waitFor({ timeout: 10000 });
-  const delivered = await Promise.race([
-    page.waitForEvent('download', { timeout: 20000 }).then((download) => download.suggestedFilename()),
-    page.context().waitForEvent('page', { timeout: 20000 }).then(async (tab) => {
-      await tab.close();
-      return 'opened in a new tab';
-    }),
-    pdfButton.click().then(() => new Promise(() => {})),
-  ]);
-  if (!/EJE-1059.*\.pdf$|opened in a new tab/.test(delivered)) {
-    throw new Error(`the Review step's PDF button produced ${delivered}`);
-  }
+  await previewShows('EJE-1059', 'the Review step');
   if ((await page.getByRole('alert').filter({ hasText: /could not be produced/ }).count()) !== 0) {
     throw new Error('the Review step reported that the job card PDF could not be produced');
   }
@@ -2882,7 +2886,43 @@ await step('the waybill sits immediately above the courier signature pad', async
   await page.screenshot({ path: `${shots}/29-waybill-above-signature.png`, fullPage: false });
 });
 
-await step('the courier signs, and the document carries no prices', async () => {
+/*
+ * PARTS-03/04 (the real-world reviewer, 28 October 2026). A courier collection
+ * has TWO documents: the job card, priced, for the office and the customer; and
+ * the Delivery Note, with the goods and no price, for the courier. The note's
+ * text is read from the in-app preview where the browser draws it, otherwise
+ * from the server's PDF (whose text is not compressed).
+ */
+const deliveryNoteText = async (jobNumber) => {
+  await page.getByTestId('delivery-note-button').click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  let text;
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    text = await preview.innerText();
+  } else {
+    text = await page.evaluate(async ({ base, number }) => {
+      const screen = await (await fetch(`${base}/api/jobs/${number}`)).json();
+      const id = screen.data.view.job.id;
+      const response = await fetch(`${base}/api/jobs/${id}/generate_delivery_note`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+      const body = await response.json();
+      return atob(body.data.base64);
+    }, { base: BASE, number: jobNumber });
+  }
+  await page.getByTestId('preview-close').click();
+  return text;
+};
+
+const assertNoPrice = (text, what) => {
+  if (/R[\s\u00a0]\d/u.test(text)) throw new Error(`a price leaked onto ${what}: ${text.match(/R[\s\u00a0][\d\s\u00a0,]+/u)?.[0]}`);
+  for (const forbidden of ['VAT @', 'Subtotal', 'Unit price']) {
+    if (text.includes(forbidden)) throw new Error(`${what} shows "${forbidden}"`);
+  }
+};
+
+await step('the courier signs; the job card keeps its prices and the separate delivery note has none', async () => {
   await page.getByLabel('Collector name').fill('Johan');
   await page.getByLabel('Collector surname').fill('Pretorius');
 
@@ -2905,17 +2945,16 @@ await step('the courier signs, and the document carries no prices', async () => 
   await page.goto(`${BASE}/jobs/EJE-1059/review`, { waitUntil: 'networkidle' });
 
   const card = await page.locator('article').first().innerText();
-  // What the courier must see.
-  for (const expected of ['Courier collection', 'DAW-4471', 'Johan']) {
-    if (!card.includes(expected)) throw new Error(`the courier document omits "${expected}"`);
+  // The job card: how it was collected, and its prices (the office's record).
+  for (const expected of ['Courier collection', 'DAW-4471', 'Johan', 'Subtotal']) {
+    if (!card.includes(expected)) throw new Error(`the priced job card omits "${expected}"`);
   }
-  // What the courier must NOT see. "VAT" alone is EJE's own registration
-  // number in the letter head, so the charges block itself is what is checked.
-  for (const forbidden of ['VAT @', 'Subtotal', 'Total']) {
-    if (card.includes(forbidden)) {
-      throw new Error(`the courier document shows "${forbidden}"`);
-    }
+  // The courier's document is the separate delivery note: goods, no money.
+  const note = await deliveryNoteText('EJE-1059');
+  for (const expected of ['DELIVERY NOTE', 'DAW-4471', 'Courier collection']) {
+    if (!note.toUpperCase().includes(expected.toUpperCase())) throw new Error(`the delivery note omits "${expected}"`);
   }
+  assertNoPrice(note, 'the delivery note');
   await page.screenshot({ path: `${shots}/30-courier-document.png`, fullPage: false });
 });
 
@@ -2954,31 +2993,16 @@ await step('a parts job offers no write-up, and requires parts — not labour or
   }
 });
 
-await step('a COURIER collection note carries no prices at all', async () => {
+await step('a COURIER parts collection: a priced collection note, and a separate delivery note with no prices', async () => {
   await page.goto(`${BASE}/jobs/EJE-1063/review`, { waitUntil: 'networkidle' });
-  await page.getByText('Delivery Note').first().waitFor({ timeout: 10000 });
+  await page.getByText('Parts Collection Note').first().waitFor({ timeout: 10000 });
   // The goods the driver is carrying — a delivery note with no delivery on it
   // is no use to the driver or to the receiving store.
-  await page.getByText('SIE-6SL3-0.75').first().waitFor({ timeout: 8000 });
-  await page
-    .getByText('Prices are withheld from a courier collection.', { exact: false })
-    .first()
-    .waitFor({ timeout: 8000 });
-
-  const note = await page.locator('article').first().innerText();
-  if (/R\u00a0\d/.test(note)) {
-    throw new Error(`a price leaked onto the courier note: ${note.match(/R\u00a0[\d\u00a0,]+/)?.[0]}`);
+  const note = await deliveryNoteText('EJE-1063');
+  for (const expected of ['SIE-6SL3-0.75', 'DSV-4471882', 'Courier collection']) {
+    if (!note.includes(expected)) throw new Error(`the delivery note omits "${expected}"`);
   }
-  if (note.includes('Unit price')) {
-    throw new Error('the courier note kept its unit price column');
-  }
-  // And the waybill, which this screen used to leave off while the PDF printed it.
-  if (!note.includes('DSV-4471882')) {
-    throw new Error('the courier note does not carry the waybill');
-  }
-  if (!note.includes('Courier collection')) {
-    throw new Error('the courier note does not say who is collecting');
-  }
+  assertNoPrice(note, 'the delivery note');
   await page.screenshot({ path: `${shots}/15-parts-courier.png`, fullPage: false });
 });
 
@@ -3939,8 +3963,16 @@ await step('the office records attendance, and a correction keeps one record (AT
   // Corrected the same day: the record changes, it does not multiply.
   await row.getByLabel('Note').fill('Phoned in sick at 07:10');
   await row.getByRole('button', { name: 'Absent', exact: true }).click();
+  // ATT-01: an absent day says why — one of exactly four reasons.
+  const reasons = await row.getByLabel('Reason for absence').locator('option').allInnerTexts();
+  for (const expected of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)']) {
+    if (!reasons.includes(expected)) throw new Error(`the absence reasons did not offer ${expected}: ${reasons.join(', ')}`);
+  }
+  await row.getByLabel('Reason for absence').selectOption('sick_leave');
+  await row.getByTestId('absence-reason-confirm').click();
   await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"]')
     .waitFor({ timeout: 10000 });
+  await row.getByText('Sick Leave', { exact: true }).waitFor({ timeout: 5000 });
 
   // Read back after a reload: the server's record, not the screen's.
   await page.reload({ waitUntil: 'networkidle' });
@@ -3974,21 +4006,80 @@ await step('a timesheet is manual: unrecorded days say so, the office reads it, 
     throw new Error('the office was offered a line on a technician’s timesheet');
   }
 
+  // TS-04/TS-05: oldest day first, each with its day of the week.
+  const dates = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
+  if (dates.length > 1 && [...dates].sort().join() !== dates.join()) {
+    throw new Error('the timesheet is not oldest-first');
+  }
+  const firstLabel = await page.getByTestId('timesheet-day-label').first().innerText();
+  if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) /u.test(firstLabel)) throw new Error(`no day of the week: ${firstLabel}`);
+  // A From after the To is said on the screen, not sent to the server.
+  const from = await page.getByLabel('From').inputValue();
+  await page.getByLabel('From').fill('2099-01-01');
+  await page.getByTestId('timesheet-range-problem').waitFor({ timeout: 5000 });
+  await page.getByLabel('From').fill(from);
+  // The office reads the month and previews it, but has no Save or Send.
+  if ((await page.getByTestId('timesheet-send').count()) !== 0 || (await page.getByTestId('timesheet-save').count()) !== 0) {
+    throw new Error('the office was offered Save or Send to office on a technician’s timesheet');
+  }
+  await page.getByTestId('timesheet-preview').click();
+  await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
+  await page.getByTestId('preview-close').click();
+
+  // And the attendance recorded above, with its reason, is on the same sheet.
+  await page.getByTestId('timesheet-table').getByText(/^Absent — Sick Leave$/).first()
+    .waitFor({ timeout: 5000 });
+});
+
+await step('a technician enters Workshop with OT, a call-out amount and km, saves, and sends the month to the office (TS-02…TS-14)', async () => {
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
   const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
   const todayRow = page.locator(`[data-testid="timesheet-day"][data-date="${today}"]`);
-  await todayRow.getByRole('button', { name: 'Add comment' }).click();
-  await todayRow.getByLabel(`Comment for ${today}`).fill('Waited two hours for the crane');
-  await todayRow.getByTestId('save-timesheet-comment').click();
-  await page.getByTestId('timesheet-comment').filter({ hasText: 'Waited two hours for the crane' })
-    .first().waitFor({ timeout: 10000 });
+  await todayRow.getByTestId('add-timesheet-line').click();
+  const form = page.getByTestId('timesheet-line-form');
+  if ((await form.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
+  await form.getByLabel('Customer or Workshop').selectOption('__workshop__');
+  await form.getByLabel('OT (hours)').fill('2');
+  await form.getByLabel('DT (hours)').fill('0.5');
+  await form.getByLabel('Callout (R)').fill('450');
+  await form.getByLabel('Internal km').fill('12.5');
+  await form.getByLabel('Customer km').fill('0');
+  await form.getByTestId('save-timesheet-line').click();
+  await todayRow.getByTestId('timesheet-line').filter({ hasText: 'Workshop' }).waitFor({ timeout: 10000 });
+  await todayRow.getByText('R 450,00').first().waitFor({ timeout: 5000 }).catch(async () => {
+    const text = await todayRow.innerText();
+    if (!/450[,.]00/u.test(text)) throw new Error(`the call-out amount is not shown: ${text}`);
+  });
 
-  // And the attendance recorded above is on the same day of the same sheet.
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.getByLabel('Technician').selectOption('user-tech-sipho');
-  await page.getByTestId('timesheet-comment').filter({ hasText: 'Waited two hours for the crane' })
-    .first().waitFor({ timeout: 10000 });
-  await page.getByTestId('timesheet-table').getByText('Absent', { exact: true }).first()
-    .waitFor({ timeout: 5000 });
+  await page.getByTestId('timesheet-month-comment').fill('Workshop rebuilds all week.');
+  await page.getByTestId('timesheet-save').click();
+  await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
+
+  await page.getByTestId('timesheet-send').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
+  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
+  // The month is read-only now: no Add line, Edit or Send.
+  if ((await todayRow.getByTestId('add-timesheet-line').count()) !== 0) throw new Error('a sent month still offers Add line');
+  if ((await page.getByTestId('timesheet-send').count()) !== 0) throw new Error('a sent month still offers Send to office');
+  // And the server agrees, whatever the screen shows.
+  const status = await page.evaluate(async ({ base, day }) => {
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/entries`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ date: day, customerName: 'X', overtimeHours: 1, doubleHours: 0 }),
+    });
+    return response.status;
+  }, { base: BASE, day: today });
+  if (status !== 422) throw new Error(`the server accepted a line in a sent month (${status})`);
+  await page.getByTestId('timesheet-preview').click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    await preview.getByText('Workshop rebuilds all week.').waitFor({ timeout: 10000 });
+  }
+  await page.getByTestId('preview-close').click();
+  await signInAsMasterIfNeeded();
 });
 
 /*

@@ -28,6 +28,7 @@ import type {
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
+  TimesheetMonth,
   Machine,
   MachineDocument,
   MachineMovement,
@@ -519,6 +520,19 @@ export interface AttendanceRepository {
   findEntry(id: string): Promise<TimesheetEntry | null>;
   saveEntry(entry: TimesheetEntry): Promise<TimesheetEntry>;
   deleteEntry(id: string): Promise<void>;
+  /** TS-02/TS-10. One technician's month: its comment and its submission. */
+  findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null>;
+  /**
+   * Writes the month's comment. Refused (`null`) when the month has already
+   * been sent to the office — a submitted month is write-once.
+   */
+  saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null>;
+  /**
+   * Sends the month to the office: sets the submission and its snapshot, ONLY
+   * if it has not been sent already. Returns null when it had been, so two
+   * submissions racing produce one record and one refusal, never two.
+   */
+  submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null>;
 }
 
 export interface ChatRepository {

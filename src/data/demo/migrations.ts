@@ -615,6 +615,29 @@ const v30ToV31 = (data: Loose): Loose => ({
     : data.jobs,
 });
 
+/**
+ * The reviewer's changes (28 October 2026). Nothing is invented for history: an
+ * absent day keeps no reason, an existing line is not Workshop and has no
+ * amount or kilometres, and no month has been sent to the office.
+ */
+const v31ToV32 = (data: Loose): Loose => ({
+  ...data,
+  attendance: Array.isArray(data.attendance)
+    ? (data.attendance as Record<string, unknown>[]).map((record) => ({ absenceReason: null, ...record }))
+    : [],
+  timesheetEntries: Array.isArray(data.timesheetEntries)
+    ? (data.timesheetEntries as Record<string, unknown>[]).map((entry) => ({
+        workshop: false,
+        calloutAmount: 0,
+        calloutShared: false,
+        internalKm: 0,
+        customerKm: 0,
+        ...entry,
+      }))
+    : [],
+  timesheetMonths: Array.isArray(data.timesheetMonths) ? data.timesheetMonths : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -639,6 +662,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   28: v28ToV29,
   29: v29ToV30,
   30: v30ToV31,
+  31: v31ToV32,
 };
 
 /**

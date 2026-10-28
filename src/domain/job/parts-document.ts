@@ -6,20 +6,29 @@ import type { TransitionCheck } from './workflow';
 /**
  * Collection document rules.
  *
- * The rule that matters commercially: a courier collecting on a customer's
- * behalf has no business seeing what the customer paid. The prices stay on the
- * job for EJE costing — they are withheld from the DOCUMENT, never deleted.
+ * The rule that matters commercially is unchanged: a courier collecting on a
+ * customer's behalf has no business seeing what the customer paid.
  *
- * It applies to every job whose work is collected from the counter, which is
- * parts AND a workshop test and repair: a driver picking up a repaired spindle
- * drive is in exactly the position a driver picking up a box of filters is.
+ * WHAT CHANGED ON 28 OCTOBER 2026 (PARTS-03/04, the real-world reviewer): a
+ * courier collection used to turn the JOB CARD itself into a price-less copy,
+ * so the office had no priced job card for that job at all. Now there are TWO
+ * documents. The job card always carries its prices — it is the office's
+ * record and the customer's copy. The courier is given a separate DELIVERY
+ * NOTE (`src/lib/job-card/delivery-note.ts`) that lists the goods and never a
+ * price. Job cards issued before keep exactly the bytes they were issued with.
+ *
+ * Kept as a function so the one place that decides stays one place.
  */
 export const showsPricesOnCollectionDocument = (
-  job: Pick<Job, 'jobType' | 'courierCollection'>,
-): boolean => {
-  if (!getJobTypeDefinition(job.jobType).collectedOnCompletion) return true;
-  return !job.courierCollection;
-};
+  _job: Pick<Job, 'jobType' | 'courierCollection'>,
+): boolean => true;
+
+/**
+ * A courier is collecting, so a delivery note goes with the goods. PARTS-03.
+ * Parts and workshop Test & Repair jobs — the two collected from the counter.
+ */
+export const requiresDeliveryNote = (job: Pick<Job, 'jobType' | 'courierCollection'>): boolean =>
+  getJobTypeDefinition(job.jobType).collectedOnCompletion && job.courierCollection;
 
 export interface PartsDocumentLine {
   readonly partNumber: string;

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, date, index, integer, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, date, index, integer, jsonb, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import { users } from './identity';
 import { customers } from './customers';
@@ -24,6 +24,8 @@ export const attendance = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     workDate: date('work_date').notNull(),
     status: text('status').notNull(),
+    /** ATT-01, migration 0037. Null on a present day and on an absent day from before it. */
+    absenceReason: text('absence_reason'),
     note: text('note').notNull().default(''),
     recordedBy: uuid('recorded_by')
       .notNull()
@@ -38,6 +40,10 @@ export const attendance = pgTable(
     index('attendance_date_idx').on(table.workDate),
     check('attendance_status_known', sql`${table.status} in ('present', 'absent')`),
     check('attendance_note_bounded', sql`char_length(${table.note}) <= 500`),
+    check(
+      'attendance_absence_reason_known',
+      sql`${table.absenceReason} is null or (${table.status} = 'absent' and ${table.absenceReason} in ('leave', 'sick_leave', 'family_responsibility', 'iod'))`,
+    ),
   ],
 );
 
@@ -96,6 +102,12 @@ export const timesheetEntries = pgTable(
     overtimeHours: numeric('overtime_hours', { precision: 5, scale: 2 }).notNull().default('0'),
     doubleHours: numeric('double_hours', { precision: 5, scale: 2 }).notNull().default('0'),
     callouts: integer('callouts').notNull().default(0),
+    // Migration 0037: the reviewer's fields (TS-06, TS-08, TS-09).
+    workshop: boolean('workshop').notNull().default(false),
+    calloutAmountCents: integer('callout_amount_cents').notNull().default(0),
+    calloutShared: boolean('callout_shared').notNull().default(false),
+    internalKm: numeric('internal_km', { precision: 7, scale: 1 }).notNull().default('0'),
+    customerKm: numeric('customer_km', { precision: 7, scale: 1 }).notNull().default('0'),
     updatedBy: uuid('updated_by')
       .notNull()
       .references(() => users.id),
@@ -112,5 +124,48 @@ export const timesheetEntries = pgTable(
     ),
     check('timesheet_entries_callouts_bounded', sql`${table.callouts} between 0 and 10`),
     check('timesheet_entries_customer_bounded', sql`char_length(${table.customerName}) <= 200`),
+    check(
+      'timesheet_entries_reviewer_bounded',
+      sql`${table.calloutAmountCents} between 0 and 100000000 and ${table.internalKm} between 0 and 10000 and ${table.customerKm} between 0 and 10000 and not (${table.workshop} and ${table.customerId} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * ONE TECHNICIAN'S TIMESHEET FOR ONE MONTH. TS-02, TS-03, TS-10; migration 0037.
+ *
+ * The one comment for the whole timesheet, and its submission to the office.
+ * Once `submitted_at` is set the row is write-once — the application refuses
+ * every change and the trigger `timesheet_months_write_once` refuses it again —
+ * and `snapshot` is exactly what was sent.
+ */
+export const timesheetMonths = pgTable(
+  'timesheet_months',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    month: text('month').notNull(),
+    comment: text('comment').notNull().default(''),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    commentedAt: instant('commented_at').notNull(),
+    submittedAt: instant('submitted_at'),
+    submittedBy: uuid('submitted_by').references(() => users.id),
+    snapshot: jsonb('snapshot'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    uniqueIndex('timesheet_months_user_month_key').on(table.userId, table.month),
+    check('timesheet_months_month_format', sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+    check('timesheet_months_comment_bounded', sql`char_length(${table.comment}) <= 2000`),
+    check(
+      'timesheet_months_submission_whole',
+      sql`(${table.submittedAt} is null and ${table.submittedBy} is null and ${table.snapshot} is null) or (${table.submittedAt} is not null and ${table.submittedBy} is not null and ${table.snapshot} is not null)`,
+    ),
   ],
 );

@@ -784,6 +784,29 @@ export const isFinalized = (job: Pick<Job, 'signature' | 'status'>): boolean =>
  * about a status alone. This is the question every mutation must ask, because
  * status alone cannot tell a signed job from a refused one.
  */
+/**
+ * NO PART CHANGES ONCE A TEST & REPAIR JOB IS COMPLETED. TR-01 (the real-world
+ * reviewer, 28 October 2026).
+ *
+ * "Completed" is the moment the technician pressed Complete job: the job is in
+ * `completion` (the close-out wizard) or `customer_signature`. From there the
+ * parts on a workshop repair are what the customer is about to be shown and
+ * sign for, so adding, changing or removing one is refused — on the server and
+ * on the screens alike. To change a part, the technician cancels completion
+ * (COMPLETE-CANCEL-1), which returns the job to In Progress with everything
+ * kept, and completes again.
+ *
+ * Narrow on purpose. Before completion (`open`, `in_progress`,
+ * `awaiting_spares`) parts are entered as always. After the signature the
+ * signed-record rule already refuses every change. In `review` a refused job
+ * card is the office's to correct (the refusal workflow), which this does not
+ * touch. Other job types are unchanged: the reviewer asked about Test & Repair,
+ * and a Parts job is processed AT completion by the office — its parts are the
+ * whole of its work.
+ */
+export const partsLockedAfterCompletion = (job: Pick<Job, 'jobType' | 'status'>): boolean =>
+  job.jobType === 'test_and_repair' && (job.status === 'completion' || job.status === 'customer_signature');
+
 export const canEditJobRecord = (
   role: UserRole,
   job: Pick<Job, 'signature' | 'status'>,

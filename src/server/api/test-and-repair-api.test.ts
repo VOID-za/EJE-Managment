@@ -128,16 +128,17 @@ describe('raising a Test & Repair job over the API', () => {
     expect(raised.job!.repairItem.quantity).toBeNull();
   });
 
-  it('CLEARS them on a parts collection, where the owner struck the quote number out', async () => {
+  it('CLEARS the repair item on a parts collection, and keeps its quote number with no order number (PARTS-01/02)', async () => {
     const raised = await raise(master, {
       jobType: 'parts',
-      orderNumber: 'PO-77123',
-      quoteNumber: 'Q-STRUCK-OUT',
+      orderNumber: '',
+      quoteNumber: 'Q-PARTS-9',
       repairPartNumber: 'X',
     });
 
     expect(raised.status, JSON.stringify(raised.error)).toBe(200);
-    expect(raised.job!.quoteNumber).toBe('');
+    expect(raised.job!.quoteNumber).toBe('Q-PARTS-9');
+    expect(raised.job!.orderNumber).toBe('');
     expect(raised.job!.repairItem.partNumber).toBe('');
   });
 });

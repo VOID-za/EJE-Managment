@@ -10,6 +10,8 @@ import {
 import { createJob } from './job-creation';
 import { loadFinalDocumentFile } from './final-document';
 import { loadJobView } from './job-view';
+import { generateDeliveryNote } from './delivery-note';
+import { buildDeliveryNoteModel } from '@/lib/job-card/delivery-note';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 import { buildJobCardModel } from '@/lib/job-card/model';
 import { pdfPlainText } from '@/lib/pdf/inspect';
@@ -207,9 +209,11 @@ describe('a courier collection', () => {
     job = await partsJob(harness, { courier: true });
   });
 
-  it('is titled a delivery note', async () => {
+  it('keeps the job card a priced collection note; the Delivery Note is a separate document (PARTS-04)', async () => {
     const model = await modelFor(harness, job);
-    expect(model.documentTitle).toBe('Delivery Note');
+    expect(model.documentTitle).toBe('Parts Collection Note');
+    const view = await loadJobView(harness.repos, job.jobNumber);
+    expect(buildDeliveryNoteModel(view!, '2026-10-28T10:00:00.000Z').title).toBe('Delivery Note');
   });
 
   it('carries the waybill, which the screen used to leave off', async () => {
@@ -221,39 +225,36 @@ describe('a courier collection', () => {
     expect(rows.get('Delivery note')).toBe(DELIVERY_NOTE);
   });
 
-  it('lists the goods without a single price, which the PDF used to leave off', async () => {
+  it('the job card carries the prices; the delivery note lists the goods without a single price', async () => {
     const model = await modelFor(harness, job);
+    expect(model.charges).not.toBeNull();
+    expect(model.collection).toBeNull();
 
-    expect(model.charges).toBeNull();
-    expect(model.collection).not.toBeNull();
-    expect(model.collection?.lines).toEqual([
-      {
-        partNumber: 'ENC-INC-1024',
-        description: 'Incremental encoder, 1024 ppr',
-        quantity: '2',
-      },
+    const view = await loadJobView(harness.repos, job.jobNumber);
+    const note = buildDeliveryNoteModel(view!, '2026-10-28T10:00:00.000Z');
+    expect(note.items).toEqual([
+      { kind: 'Part', partNumber: 'ENC-INC-1024', description: 'Incremental encoder, 1024 ppr', quantity: '2' },
     ]);
-    expect(model.collection?.totalQuantity).toBe('2');
-    // A count of goods, never a "Total" on a document with no money on it.
-    expect(model.collection?.totalLabel).toBe('Items');
-    expect(JSON.stringify(model.collection)).not.toContain('386');
-    expect(JSON.stringify(model.collection)).not.toMatch(/R /);
+    expect(note.totalQuantity).toBe('2');
+    expect(JSON.stringify(note)).not.toContain('386');
+    expect(JSON.stringify(note)).not.toMatch(/R\s\d/u);
   });
 
-  it('prints the goods and the waybill, and no money at all', async () => {
-    const text = await issuedText(harness, job);
+  it('the delivery note prints the goods and the waybill, and no money at all; the issued card is priced', async () => {
+    const note = await generateDeliveryNote(harness.as(master), job);
+    const text = pdfPlainText(Buffer.from(note.base64, 'base64'));
 
     expect(text.toUpperCase()).toContain('DELIVERY NOTE');
     expect(text).toContain(WAYBILL);
     expect(text).toContain('Courier collection');
     // The goods the driver is carrying, which is the point of a delivery note.
     expect(text).toContain('ENC-INC-1024');
-    expect(text).toContain('Items');
-
+    expect(text).toContain('Total items');
     for (const forbidden of ['VAT @', 'Subtotal', 'Amount', '3 860,00', '7 720,00']) {
       expect(text, forbidden).not.toContain(forbidden);
     }
-    expect(text).not.toMatch(/R [\d ]+,\d\d/);
+    expect(text).not.toMatch(/R\s\d/u);
+    expect(await issuedText(harness, job)).toContain('Subtotal');
   });
 });
 

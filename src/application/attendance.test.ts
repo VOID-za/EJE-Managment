@@ -47,13 +47,15 @@ describe('recording attendance', () => {
       userId: 'user-tech-sipho',
       date: today,
       status: 'absent',
+      // ATT-01 (28 October 2026): an absent day says why.
+      absenceReason: 'sick_leave',
       note: 'Phoned in at 07:10',
     });
 
     expect(corrected.id).toBe(first.id);
     const records = await harness.repos.attendance.listRecords(today, today, asUserId('user-tech-sipho'));
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ status: 'absent', note: 'Phoned in at 07:10', recordedBy: coordinator.id });
+    expect(records[0]).toMatchObject({ status: 'absent', absenceReason: 'sick_leave', note: 'Phoned in at 07:10', recordedBy: coordinator.id });
 
     // The history is the audit trail: what it said, and what it says now.
     const events = await harness.repos.activity.list();
@@ -61,6 +63,7 @@ describe('recording attendance', () => {
     const correction = events.find((event) => event.type === 'attendance_corrected');
     expect(correction?.changes).toEqual([
       { field: 'Attendance', from: 'Present', to: 'Absent' },
+      { field: 'Absence reason', from: 'Not recorded', to: 'Sick Leave' },
       { field: 'Note', from: '—', to: 'Phoned in at 07:10' },
     ]);
   });
@@ -77,14 +80,14 @@ describe('recording attendance', () => {
     const own = await recordAttendance(harness.as(technician), { userId: technician.id, date: today, status: 'present', note: '' });
     expect(own).toMatchObject({ userId: technician.id, status: 'present', recordedBy: technician.id });
     const earlier = shiftDays(today, -12);
-    await recordAttendance(harness.as(technician), { userId: technician.id, date: earlier, status: 'absent', note: 'Sick' });
+    await recordAttendance(harness.as(technician), { userId: technician.id, date: earlier, status: 'absent', absenceReason: 'sick_leave', note: 'Sick' });
     // Corrected later: still one record for that day, and the correction is audited.
     await recordAttendance(harness.as(technician), { userId: technician.id, date: earlier, status: 'present', note: '' });
     expect((await harness.repos.attendance.listRecords(earlier, earlier, technician.id)).map((r) => r.status)).toEqual(['present']);
     expect((await harness.repos.activity.list(undefined)).some((event) => event.type === 'attendance_corrected')).toBe(true);
 
     expect(
-      await refusal(recordAttendance(harness.as(technician), { userId: THABO, date: today, status: 'absent', note: '' })),
+      await refusal(recordAttendance(harness.as(technician), { userId: THABO, date: today, status: 'absent', absenceReason: 'leave', note: '' })),
     ).toEqual(['not_permitted']);
     expect(await harness.repos.attendance.listRecords(today, today, asUserId(THABO))).toHaveLength(0);
   });
@@ -140,7 +143,7 @@ describe('the register, and what it keeps apart', () => {
   it('touches no job', async () => {
     const harness = buildHarness();
     const before = JSON.stringify(await harness.repos.jobs.list());
-    await recordAttendance(harness.as(master), { userId: 'user-tech-sipho', date: businessToday(), status: 'absent', note: '' });
+    await recordAttendance(harness.as(master), { userId: 'user-tech-sipho', date: businessToday(), status: 'absent', absenceReason: 'leave', note: '' });
     expect(JSON.stringify(await harness.repos.jobs.list())).toBe(before);
   });
 
@@ -155,7 +158,7 @@ describe('the register as a spreadsheet', () => {
     const harness = buildHarness();
     const today = businessToday();
     await recordAttendance(harness.as(master), { userId: THABO, date: today, status: 'present', note: 'Came in' });
-    await recordAttendance(harness.as(coordinator), { userId: 'user-tech-sipho', date: today, status: 'absent', note: '' });
+    await recordAttendance(harness.as(coordinator), { userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'family_responsibility', note: '' });
 
     const rows = await loadAttendanceExport(harness.as(coordinator), shiftDays(today, -2), today);
     expect(rows).toHaveLength(2);
@@ -165,6 +168,7 @@ describe('the register as a spreadsheet', () => {
       recordedBy: 'Elmarie Coetzee',
       plannedLeave: 'Sick leave',
     });
+    expect(rows.find((row) => row.person === 'Sipho Mahlangu')).toMatchObject({ status: 'absent', absenceReason: 'Family Responsibility' });
     // Nobody else was recorded, so nobody else is in the file — not as absent.
     expect(rows.every((row) => ['Thabo Nkosi', 'Sipho Mahlangu'].includes(row.person))).toBe(true);
   });

@@ -434,3 +434,19 @@ describe('v21 -> v22: a checksum on every attachment', () => {
     expect(photos[0]?.checksumSha256).not.toEqual(expect.any(String));
   });
 });
+
+describe('v31 -> v32: the reviewer’s timesheet and attendance fields (28 October 2026)', () => {
+  const v31 = {
+    attendance: [{ id: 'att-1', userId: 'user-tech-sipho', date: '2026-10-01', status: 'absent', note: 'flu', recordedBy: 'user-tech-sipho', recordedAt: '2026-10-01T08:00:00.000Z' }],
+    timesheetEntries: [{ id: 'tse-1', userId: 'user-tech-sipho', date: '2026-10-01', customerId: null, customerName: 'ABC', normalHours: 8, overtimeHours: 1, doubleHours: 0, callouts: 1, updatedBy: 'user-tech-sipho', updatedAt: '2026-10-01T08:00:00.000Z' }],
+  };
+
+  it('invents nothing for history: no absence reason, no Workshop, no amount, no kilometres, nothing sent', () => {
+    const migrated = migrateDatabase(31, v31, SCHEMA_VERSION) as unknown as Record<string, Record<string, unknown>[]>;
+    expect(migrated.attendance?.[0]).toMatchObject({ status: 'absent', absenceReason: null, note: 'flu' });
+    expect(migrated.timesheetEntries?.[0]).toMatchObject({
+      normalHours: 8, callouts: 1, workshop: false, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
+    });
+    expect(migrated.timesheetMonths).toEqual([]);
+  });
+});

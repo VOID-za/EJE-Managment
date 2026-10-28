@@ -104,15 +104,17 @@ describe('which job types capture the repair fields', () => {
     const item = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).capturesRepairItem);
     expect(item).toEqual(['test_and_repair']);
 
+    // PARTS-02 (28 October 2026): the quote number is offered on Parts too.
     const quote = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).capturesQuoteNumber);
-    expect(quote).toEqual(['test_and_repair']);
+    expect(quote).toEqual(['test_and_repair', 'parts']);
   });
 
-  it('does NOT put the quote number on a parts collection', () => {
-    // The owner struck it out there. A collection is reconciled by its order
-    // number, which that type already requires.
-    expect(getJobTypeDefinition('parts').capturesQuoteNumber).toBe(false);
-    expect(getJobTypeDefinition('parts').requiresOrderNumber).toBe(true);
+  it('puts the quote number on a parts collection, and makes the order number optional there', () => {
+    // The owner had struck the quote number out on Parts and required the order
+    // number; the real-world reviewer reversed both on 28 October 2026
+    // (PARTS-01, PARTS-02).
+    expect(getJobTypeDefinition('parts').capturesQuoteNumber).toBe(true);
+    expect(getJobTypeDefinition('parts').requiresOrderNumber).toBe(false);
   });
 
   it('keeps the delivery note on both, because both are reconciled by one', () => {
@@ -299,18 +301,18 @@ describe('a job type that does not capture them stores nothing', () => {
     expect(hasRepairItem(job.repairItem)).toBe(false);
   });
 
-  it('CLEARS them on a parts collection too', async () => {
+  it('CLEARS the repair item on a parts collection, and KEEPS its quote number (PARTS-02)', async () => {
     const job = await createJob(
       harness.as(master),
       await input(harness, {
         jobType: 'parts',
         machineId: null,
         orderNumber: 'PO-77123',
-        quoteNumber: 'Q-STRUCK-OUT',
+        quoteNumber: 'Q-PARTS-1',
         repairItem: { partNumber: 'X', description: 'Y', quantity: 1 },
       }),
     );
-    expect(job.quoteNumber).toBe('');
+    expect(job.quoteNumber).toBe('Q-PARTS-1');
     expect(hasRepairItem(job.repairItem)).toBe(false);
   });
 });

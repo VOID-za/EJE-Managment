@@ -1,4 +1,5 @@
 import 'server-only';
+import { generateDeliveryNote } from '@/application/delivery-note';
 import { z } from 'zod';
 import {
   asContactId,
@@ -776,6 +777,19 @@ export const JOB_COMMANDS: CommandRegistry = {
    * there is no fallback; a request that could name its own recipient would be
    * a way to have EJE email a customer's signed job card to anybody.
    */
+  /**
+   * The courier's delivery note (PARTS-03/04): a separate, price-less document,
+   * generated on request. Same visibility rule as every job action; the job
+   * and its issued job card are not changed.
+   */
+  generate_delivery_note: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      const job = await loadVisibleJob(context, target);
+      return generateDeliveryNote(context.operation, job);
+    },
+  }),
+
   issue: command({
     schema: z.object({}).strict(),
     async run(context, _input: Record<string, never>, target) {

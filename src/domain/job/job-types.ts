@@ -273,15 +273,24 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     // No site visit, so nothing to charge for hours or distance.
     capturesLabourAndTravel: false,
     visitsSite: false,
-    requiresOrderNumber: true,
-    orderNumberExpectation: 'required',
+    /*
+     * PARTS-01 (the real-world reviewer, 28 October 2026): the order number is
+     * OPTIONAL on a Parts job. It used to be required — the reasoning was that
+     * the order number reconciles the goods against the customer's purchase
+     * order — but EJE hand over parts without one, and the requirement stopped
+     * them raising the job. Recorded when the customer has one; never demanded.
+     */
+    requiresOrderNumber: false,
+    orderNumberExpectation: 'optional',
     capturesDeliveryNote: true,
     collectedOnCompletion: true,
     requiresFaultDescription: false,
     requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: false,
-    capturesQuoteNumber: false,
+    // PARTS-02: the customer's quote number, optional — the same field a Test &
+    // Repair job already records (`jobs.quote_number`, migration 0028).
+    capturesQuoteNumber: true,
     acceptsVideoAttachments: false,
     capturesCompletionWriteUp: false,
     allowsSignatureRefusal: false,

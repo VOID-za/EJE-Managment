@@ -33,6 +33,8 @@ export const POST = writeRoute({
       userId: z.string().min(1).max(100),
       date: day,
       status: z.enum(['present', 'absent']),
+      // ATT-01. Its value is the operation's rule (four reasons, absent only).
+      absenceReason: z.string().max(40).nullable().optional(),
       note: z.string().max(ATTENDANCE_NOTE_LIMIT).default(''),
     })
     .strict(),

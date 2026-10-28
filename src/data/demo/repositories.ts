@@ -9,6 +9,7 @@ import type {
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
+  TimesheetMonth,
   ChatMessage,
   ChecklistTemplate,
   ChecklistTemplateId,
@@ -1252,6 +1253,42 @@ class DemoAttendanceRepository implements AttendanceRepository {
       draft.timesheetEntries = draft.timesheetEntries.filter((candidate) => candidate.id !== id);
     });
     return Promise.resolve();
+  }
+
+  findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null> {
+    return Promise.resolve(
+      this.context.read().timesheetMonths.find((row) => row.userId === userId && row.month === month) ?? null,
+    );
+  }
+
+  saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null> {
+    let saved: TimesheetMonth | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.timesheetMonths.find((row) => row.userId === month.userId && row.month === month.month);
+      if (existing !== undefined && existing.submittedAt !== null) return;
+      const next: TimesheetMonth =
+        existing === undefined
+          ? month
+          : { ...existing, comment: month.comment, updatedBy: month.updatedBy, updatedAt: month.updatedAt };
+      draft.timesheetMonths = [...draft.timesheetMonths.filter((row) => row !== existing), next];
+      saved = next;
+    });
+    return Promise.resolve(saved);
+  }
+
+  submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null> {
+    let saved: TimesheetMonth | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.timesheetMonths.find((row) => row.userId === month.userId && row.month === month.month);
+      if (existing !== undefined && existing.submittedAt !== null) return;
+      const next: TimesheetMonth =
+        existing === undefined
+          ? month
+          : { ...existing, submittedAt: month.submittedAt, submittedBy: month.submittedBy, snapshot: month.snapshot };
+      draft.timesheetMonths = [...draft.timesheetMonths.filter((row) => row !== existing), next];
+      saved = next;
+    });
+    return Promise.resolve(saved);
   }
 }
 

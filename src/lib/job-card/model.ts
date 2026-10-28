@@ -328,12 +328,9 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       : evaluateChecklist(checklistTemplate, job.checklist);
 
   return {
-    documentTitle:
-      job.jobType === 'parts'
-        ? job.courierCollection
-          ? 'Delivery Note'
-          : 'Parts Collection Note'
-        : 'Job Card',
+    // A courier's copy is the separate Delivery Note now (PARTS-04); this
+    // document is the priced one either way.
+    documentTitle: job.jobType === 'parts' ? 'Parts Collection Note' : 'Job Card',
     company: {
       name: settings.companyName,
       address: settings.companyAddress,

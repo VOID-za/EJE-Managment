@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { userFullName, type TimesheetEntry } from '@/domain';
+import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
   Button,
@@ -12,90 +12,137 @@ import {
   LoadingPanel,
   QueryFailure,
   SelectField,
+  TextAreaField,
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
+import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
+import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { reads, timesheets } from '@/api/endpoints';
-import type { TimesheetDay } from '@/application/timesheets';
+import { TIMESHEET_MAX_DAYS, type TimesheetDay, type TimesheetDocument } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
-import { formatDate } from '@/lib/format';
+import { formatCurrency, formatDateTime } from '@/lib/format';
+import {
+  defaultTimesheetRange,
+  formatDayAndDate,
+  formatMonth,
+  monthOf,
+  timesheetRangeProblem,
+} from '@/lib/timesheet-dates';
 
 const hours = (value: number): string => value.toFixed(2);
+const kilometres = (value: number): string => value.toFixed(1);
+
+/** The customer picker's value for Workshop: not a customer id, never sent as one. */
+const WORKSHOP = '__workshop__';
 
 /** A line being typed: strings, exactly as the technician typed them. */
 interface Draft {
   readonly entryId?: string;
   readonly date: string;
-  readonly customerId: string;
+  /** A customer id, WORKSHOP, or '' for a typed name. */
+  readonly pick: string;
   readonly customerName: string;
-  readonly normal: string;
   readonly overtime: string;
   readonly double: string;
-  readonly callouts: string;
+  /** Rand, as typed ("450" or "450.00"). */
+  readonly callout: string;
+  readonly calloutShared: boolean;
+  readonly internalKm: string;
+  readonly customerKm: string;
+  /** An older line's NT and call-out count, carried back unchanged (TS-07/08). */
+  readonly keepNormal?: number;
+  readonly keepCallouts?: number;
 }
 
 const emptyDraft = (date: string): Draft => ({
   date,
-  customerId: '',
+  pick: '',
   customerName: '',
-  normal: '0',
   overtime: '0',
   double: '0',
-  callouts: '0',
+  callout: '0',
+  calloutShared: false,
+  internalKm: '0',
+  customerKm: '0',
 });
 
 const draftOf = (entry: TimesheetEntry): Draft => ({
   entryId: entry.id,
   date: entry.date,
-  customerId: entry.customerId ?? '',
-  customerName: entry.customerName,
-  normal: String(entry.normalHours),
+  pick: entry.workshop ? WORKSHOP : entry.customerId ?? '',
+  customerName: entry.workshop ? '' : entry.customerName,
   overtime: String(entry.overtimeHours),
   double: String(entry.doubleHours),
-  callouts: String(entry.callouts),
+  callout: (entry.calloutAmount / 100).toFixed(2),
+  calloutShared: entry.calloutShared,
+  internalKm: String(entry.internalKm),
+  customerKm: String(entry.customerKm),
+  keepNormal: entry.normalHours,
+  keepCallouts: entry.callouts,
 });
 
 const parse = (value: string): number => Number.parseFloat(value.replace(',', '.'));
+/** Rand as typed, to whole cents. NaN stays NaN so the server refuses it. */
+const toCents = (value: string): number => Math.round(parse(value) * 100);
 
 /**
- * TECHNICIAN TIMESHEETS — COMPLETELY MANUAL. TIMESHEET-2 (27 October 2026).
+ * TECHNICIAN TIMESHEETS. TIMESHEET-2 (27 October 2026), reshaped by the
+ * real-world reviewer on 28 October 2026 (TS-01 … TS-14).
  *
- * Every value on this sheet is one the technician typed: the customer, normal
- * time (NT), overtime (OT), double time (DBL T), call-outs and the day's
- * comment. Nothing is read from job cards, assignments or labour, and nothing
- * is prefilled or recalculated. A technician fills it in day by day, or all at
- * once later — the same form either way. A day with no line says NOT RECORDED;
- * a line of zeros is a recorded day with no hours.
+ * Each technician keeps their own: for each day, the customer — or Workshop —
+ * overtime (OT), double time (DT), the call-out as a rand amount (marked shared
+ * when several jobs share it), internal and customer kilometres. NT is no
+ * longer entered; older lines keep theirs, shown as historical.
  *
- * Only the technician enters their own sheet; the office opens anybody's and
- * exports it.
+ * The page opens on this month to today, OLDEST DAY FIRST — the From and To
+ * boxes reset on every visit; saved lines are never touched by that. The
+ * month's one comment, Preview, Save, Print and Send to office sit together:
+ * Send to office makes that month read-only, and the office then reads the
+ * version that was sent.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
   const operation = useOperation();
   const today = businessToday();
-  const [from, setFrom] = useState(`${today.slice(0, 8)}01`);
-  const [to, setTo] = useState(today);
+  // Reset on every visit (TS-04): plain state, deliberately not remembered.
+  const initial = defaultTimesheetRange(today);
+  const [from, setFrom] = useState(initial.from);
+  const [to, setTo] = useState(initial.to);
+  const [month, setMonth] = useState(monthOf(today));
   const [chosen, setChosen] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
   const [removing, setRemoving] = useState<TimesheetEntry | null>(null);
-  const [editingComment, setEditingComment] = useState<{ date: string; text: string } | null>(null);
+  const [comment, setComment] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
+  const [confirmSend, setConfirmSend] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
 
+  const rangeProblem = timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS);
   const people = useQuery(`timesheets:people:${currentUser.id}`, () => timesheets.people());
   const personId = chosen ?? people.data?.[0]?.id ?? null;
   const sheet = useQuery(`timesheets:${personId ?? 'none'}:${from}:${to}`, () =>
-    personId === null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
+    personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
+  );
+  const monthDocument = useQuery(`timesheets:document:${personId ?? 'none'}:${month}`, () =>
+    personId === null ? Promise.resolve(null) : timesheets.document(personId, month),
   );
   const customers = useQuery('timesheets:customers', () => reads.customers());
 
-  // Newest day first: a technician filling in today sees today at the top.
-  const days = useMemo(() => [...(sheet.data?.days ?? [])].reverse(), [sheet.data]);
+  // OLDEST DAY FIRST (TS-04): the first entries of the range are at the top.
+  const days = sheet.data?.days ?? [];
   const editable = sheet.data?.editable === true;
+  const sentAt = monthDocument.data?.submittedAt ?? null;
+  const monthOpen = editable && sentAt === null;
+  const savedComment = monthDocument.data?.comment ?? '';
+  const commentValue = comment ?? savedComment;
+  const showHistoricalNt = days.some((day) => day.normalHours > 0);
+  const showHistoricalCount = days.some((day) => day.callouts > 0);
 
   /*
    * NOTHING TYPED IS LOST BY LEAVING. A line half-typed, or a comment being
@@ -109,6 +156,17 @@ const TimesheetsPage = () => {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
+
+  const monthOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [];
+    const [year, index] = monthOf(today).split('-').map(Number) as [number, number];
+    for (let back = 0; back < 13; back += 1) {
+      const date = new Date(Date.UTC(year, index - 1 - back, 1));
+      const value = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+      options.push({ value, label: formatMonth(value) });
+    }
+    return options;
+  }, [today]);
 
   if (people.error !== null) {
     return <QueryFailure code={people.errorCode} message={people.error} onRetry={people.refetch} />;
@@ -126,30 +184,61 @@ const TimesheetsPage = () => {
     );
   }
 
+  const refresh = () => {
+    sheet.refetch();
+    monthDocument.refetch();
+  };
+
   const edit = (next: Draft | null) => {
     setDraft(next);
-    setDirty(next !== null);
+    setDirty(next !== null || comment !== null);
+    setSaved(null);
     operation.clearError();
   };
 
-  const saveDraft = async (): Promise<void> => {
-    if (personId === null || draft === null) return;
+  const saveLine = async (): Promise<boolean> => {
+    if (personId === null || draft === null) return true;
+    const workshop = draft.pick === WORKSHOP;
     const ok = await operation.run(async () => {
       await timesheets.saveEntry(personId, {
         ...(draft.entryId === undefined ? {} : { entryId: draft.entryId }),
         date: draft.date,
-        customerId: draft.customerId.length > 0 ? draft.customerId : null,
-        customerName: draft.customerName,
-        normalHours: parse(draft.normal),
+        customerId: workshop || draft.pick.length === 0 ? null : draft.pick,
+        customerName: workshop ? '' : draft.customerName,
+        workshop,
+        ...(draft.keepNormal === undefined ? {} : { normalHours: draft.keepNormal }),
+        ...(draft.keepCallouts === undefined ? {} : { callouts: draft.keepCallouts }),
         overtimeHours: parse(draft.overtime),
         doubleHours: parse(draft.double),
-        callouts: Number(draft.callouts),
+        calloutAmount: toCents(draft.callout),
+        calloutShared: draft.calloutShared,
+        internalKm: parse(draft.internalKm),
+        customerKm: parse(draft.customerKm),
       });
     });
+    // On a refusal the form stays open with every value as typed (TS-12).
     if (ok) {
-      edit(null);
-      sheet.refetch();
+      setDraft(null);
+      setDirty(comment !== null);
     }
+    return ok;
+  };
+
+  /** SAVE (TS-12): the open line, if any, and the month's comment. Never a submission. */
+  const save = async (): Promise<void> => {
+    if (personId === null) return;
+    const lineOk = await saveLine();
+    if (!lineOk) return;
+    if (comment !== null && comment !== savedComment) {
+      const ok = await operation.run(async () => {
+        await timesheets.saveMonthComment(personId, month, comment);
+      });
+      if (!ok) return;
+    }
+    setComment(null);
+    setDirty(false);
+    setSaved(`Saved ${formatDateTime(new Date().toISOString())}. Not sent to the office.`);
+    refresh();
   };
 
   const remove = async (): Promise<void> => {
@@ -158,23 +247,30 @@ const TimesheetsPage = () => {
       await timesheets.removeEntry(personId, removing.id);
     });
     setRemoving(null);
-    if (ok) sheet.refetch();
+    if (ok) refresh();
   };
 
-  const saveComment = async (date: string, text: string): Promise<void> => {
+  /** SEND TO OFFICE (TS-02, TS-14): saves first, then sends the month once. */
+  const send = async (): Promise<void> => {
     if (personId === null) return;
+    setConfirmSend(false);
+    const lineOk = await saveLine();
+    if (!lineOk) return;
     const ok = await operation.run(async () => {
-      await timesheets.saveComment(personId, date, text);
+      if (comment !== null && comment !== savedComment) await timesheets.saveMonthComment(personId, month, comment);
+      await timesheets.submit(personId, month);
     });
     if (ok) {
-      setEditingComment(null);
+      setComment(null);
       setDirty(false);
-      sheet.refetch();
+      setSaved(null);
     }
+    refresh();
   };
 
   const customerOptions = [
     { value: '', label: 'Type the customer below…' },
+    { value: WORKSHOP, label: WORKSHOP_LABEL },
     ...(customers.data ?? []).map((customer) => ({ value: customer.id, label: customer.name })),
   ];
 
@@ -189,31 +285,55 @@ const TimesheetsPage = () => {
           onChange={(event) => edit({ ...current, date: event.target.value })}
         />
         <SelectField
-          label="Customer (from the register)"
-          value={current.customerId}
+          label="Customer or Workshop"
+          value={current.pick}
           options={customerOptions}
+          data-testid="timesheet-customer-pick"
           onChange={(event) => {
-            const picked = (customers.data ?? []).find((customer) => customer.id === event.target.value);
-            edit({ ...current, customerId: event.target.value, customerName: picked?.name ?? current.customerName });
+            const value = event.target.value;
+            const picked = (customers.data ?? []).find((customer) => customer.id === value);
+            edit({
+              ...current,
+              pick: value,
+              customerName: value === WORKSHOP ? '' : picked?.name ?? (current.pick === WORKSHOP ? '' : current.customerName),
+            });
           }}
         />
-        <TextField
-          label="Customer"
-          value={current.customerName}
-          maxLength={200}
-          hint="Required when there are hours or a call-out."
-          onChange={(event) => edit({ ...current, customerName: event.target.value })}
-        />
+        {current.pick !== WORKSHOP && (
+          <TextField
+            label="Customer"
+            value={current.customerName}
+            maxLength={200}
+            hint="Required when there are hours, a call-out or kilometres — or choose Workshop."
+            onChange={(event) => edit({ ...current, customerName: event.target.value })}
+          />
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <TextField label="NT (hours)" inputMode="decimal" value={current.normal} onChange={(event) => edit({ ...current, normal: event.target.value })} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <TextField label="OT (hours)" inputMode="decimal" value={current.overtime} onChange={(event) => edit({ ...current, overtime: event.target.value })} />
-        <TextField label="DBL T (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
-        <TextField label="Call-outs" inputMode="numeric" value={current.callouts} onChange={(event) => edit({ ...current, callouts: event.target.value })} />
+        <TextField label="DT (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
+        <TextField label="Callout (R)" inputMode="decimal" value={current.callout} onChange={(event) => edit({ ...current, callout: event.target.value })} data-testid="timesheet-callout" />
+        <TextField label="Internal km" inputMode="decimal" value={current.internalKm} onChange={(event) => edit({ ...current, internalKm: event.target.value })} />
+        <TextField label="Customer km" inputMode="decimal" value={current.customerKm} onChange={(event) => edit({ ...current, customerKm: event.target.value })} />
       </div>
-      <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). A line of zeros records a day with no hours.</p>
+      <label className="flex items-center gap-2 text-sm text-steel-700">
+        <input
+          type="checkbox"
+          checked={current.calloutShared}
+          onChange={(event) => edit({ ...current, calloutShared: event.target.checked })}
+          className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+          data-testid="timesheet-callout-shared"
+        />
+        This call-out is shared with other jobs (the amount is recorded as entered, not divided)
+      </label>
+      {(current.keepNormal ?? 0) > 0 && (
+        <p className="text-xs text-steel-500">
+          This line was entered before 28 October 2026 with NT {hours(current.keepNormal ?? 0)} h. NT is no longer recorded; it is kept as it was.
+        </p>
+      )}
+      <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). Kilometres to one decimal.</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" loading={operation.running} onClick={() => void saveDraft()} data-testid="save-timesheet-line">
+        <Button size="sm" loading={operation.running} onClick={() => void saveLine().then((ok) => ok && refresh())} data-testid="save-timesheet-line">
           Save line
         </Button>
         <Button size="sm" variant="ghost" onClick={() => edit(null)}>
@@ -233,17 +353,26 @@ const TimesheetsPage = () => {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-steel-900">{formatDate(day.date)}</span>
+          <span className="font-semibold text-steel-900" data-testid="timesheet-day-label">
+            {formatDayAndDate(day.date)}
+          </span>
           {day.recorded ? (
             <Badge tone="green" size="sm">Recorded</Badge>
           ) : (
             <Badge tone="amber" size="sm">Not recorded</Badge>
           )}
+          {day.locked && <Badge tone="outline" size="sm">Sent to office</Badge>}
           {day.attendance !== null && (
-            <Badge tone="outline" size="sm">{day.attendance === 'present' ? 'Present' : 'Absent'}</Badge>
+            <Badge tone="outline" size="sm">
+              {day.attendance === 'present'
+                ? 'Present'
+                : day.absenceReason === null
+                  ? 'Absent'
+                  : `Absent — ${ABSENCE_REASON_LABELS[day.absenceReason]}`}
+            </Badge>
           )}
         </div>
-        {editable && draft === null && (
+        {editable && !day.locked && draft === null && (
           <Button size="sm" variant="secondary" onClick={() => edit(emptyDraft(day.date))} data-testid="add-timesheet-line">
             <Icon name="plus" className="size-4" /> Add line
           </Button>
@@ -256,22 +385,31 @@ const TimesheetsPage = () => {
             <thead>
               <tr className="text-left text-xs text-steel-500 uppercase">
                 <th className="py-1 pr-3">Customer</th>
-                <th className="py-1 pr-3 text-right">NT</th>
                 <th className="py-1 pr-3 text-right">OT</th>
-                <th className="py-1 pr-3 text-right">DBL T</th>
-                <th className="py-1 pr-3 text-right">Call-out</th>
-                {editable && <th className="py-1" />}
+                <th className="py-1 pr-3 text-right">DT</th>
+                <th className="py-1 pr-3 text-right">Callout</th>
+                <th className="py-1 pr-3 text-right">Internal km</th>
+                <th className="py-1 pr-3 text-right">Customer km</th>
+                {showHistoricalNt && <th className="py-1 pr-3 text-right">NT (historical)</th>}
+                {showHistoricalCount && <th className="py-1 pr-3 text-right">Call-outs (historical)</th>}
+                {editable && !day.locked && <th className="py-1" />}
               </tr>
             </thead>
             <tbody>
               {day.entries.map((entry) => (
                 <tr key={entry.id} className="border-t border-steel-100" data-testid="timesheet-line">
-                  <td className="py-1.5 pr-3">{entry.customerName || '—'}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.normalHours)}</td>
+                  <td className="py-1.5 pr-3">{entry.workshop ? WORKSHOP_LABEL : entry.customerName || '—'}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.overtimeHours)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.doubleHours)}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{entry.callouts}</td>
-                  {editable && (
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {formatCurrency(entry.calloutAmount)}
+                    {entry.calloutShared && ' (shared)'}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.internalKm)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.customerKm)}</td>
+                  {showHistoricalNt && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.normalHours > 0 ? hours(entry.normalHours) : ''}</td>}
+                  {showHistoricalCount && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.callouts > 0 ? entry.callouts : ''}</td>}
+                  {editable && !day.locked && (
                     <td className="py-1.5 text-right whitespace-nowrap">
                       <Button size="sm" variant="ghost" disabled={draft !== null} onClick={() => edit(draftOf(entry))}>
                         Edit
@@ -290,37 +428,12 @@ const TimesheetsPage = () => {
 
       {draft !== null && draft.date === day.date && lineForm(draft)}
 
-      <div className="mt-2 text-sm">
-        {editingComment !== null && editingComment.date === day.date ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <TextField
-              label={`Comment for ${day.date}`}
-              value={editingComment.text}
-              maxLength={1000}
-              onChange={(event) => {
-                setEditingComment({ date: day.date, text: event.target.value });
-                setDirty(true);
-              }}
-              containerClassName="min-w-64 flex-1"
-            />
-            <Button size="sm" loading={operation.running} onClick={() => void saveComment(day.date, editingComment.text)} data-testid="save-timesheet-comment">
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => { setEditingComment(null); setDirty(false); }}>
-              Cancel
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-start gap-2">
-            <span className="flex-1 whitespace-pre-wrap text-steel-700" data-testid="timesheet-comment">
-              {day.comment}
-            </span>
-            <Button size="sm" variant="ghost" onClick={() => setEditingComment({ date: day.date, text: day.comment })}>
-              {day.comment.length > 0 ? 'Edit comment' : 'Add comment'}
-            </Button>
-          </div>
-        )}
-      </div>
+      {day.comment.length > 0 && (
+        <p className="mt-2 text-sm whitespace-pre-wrap text-steel-600" data-testid="timesheet-day-comment">
+          <span className="text-xs font-semibold text-steel-500">Day comment (written before one comment per timesheet): </span>
+          {day.comment}
+        </p>
+      )}
     </li>
   );
 
@@ -328,13 +441,13 @@ const TimesheetsPage = () => {
     <>
       <PageHeader
         title="Timesheets"
-        description="Each technician keeps their own timesheet: the customer, NT, OT, DBL T and call-outs, entered by hand for each day — as you go, or all at once later."
+        description="Each technician keeps their own timesheet: the customer or Workshop, OT, DT, the call-out amount and kilometres, entered by hand for each day — as you go, or all at once later."
       />
 
       <ConfirmDialog
         open={removing !== null}
         title="Remove this line?"
-        message={removing === null ? '' : `${removing.customerName || 'This line'} on ${removing.date} will be removed from your timesheet. The removal is recorded.`}
+        message={removing === null ? '' : `${removing.workshop ? WORKSHOP_LABEL : removing.customerName || 'This line'} on ${removing.date} will be removed from your timesheet. The removal is recorded.`}
         confirmLabel="Remove line"
         confirmVariant="danger"
         busy={operation.running}
@@ -342,13 +455,43 @@ const TimesheetsPage = () => {
         onCancel={() => setRemoving(null)}
       />
 
+      <ConfirmDialog
+        open={confirmSend}
+        title={`Send the ${formatMonth(month)} timesheet to the office?`}
+        message="It is saved first, then sent. Once sent you can no longer add, change or remove a line on any day of that month, or change the comment. The office reads the version you sent."
+        confirmLabel="Send to office"
+        busy={operation.running}
+        onConfirm={() => void send()}
+        onCancel={() => setConfirmSend(false)}
+      />
+
+      {personId !== null && (
+        <DocumentPreviewDialog
+          open={previewing !== null}
+          autoPrint={previewing === 'print'}
+          title={`Time Sheet — ${formatMonth(month)}`}
+          description={sentAt === null ? 'Preview of the draft. Nothing is saved or sent by looking at it.' : 'The version that was sent to the office.'}
+          loadPdf={() => timesheets.pdf(personId, month)}
+          renderHtml={() =>
+            monthDocument.data === null || monthDocument.data === undefined ? null : (
+              <TimesheetDocumentView document={monthDocument.data as TimesheetDocument} />
+            )
+          }
+          onClose={() => setPreviewing(null)}
+        />
+      )}
+
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-4">
           {people.data.length > 1 ? (
             <SelectField
               label="Technician"
               value={personId ?? ''}
-              onChange={(event) => setChosen(event.target.value)}
+              onChange={(event) => {
+                setChosen(event.target.value);
+                // A comment being typed belongs to the sheet it was typed on.
+                setComment(null);
+              }}
               options={people.data.map((person) => ({ value: person.id, label: userFullName(person) }))}
               containerClassName="w-64"
             />
@@ -358,25 +501,106 @@ const TimesheetsPage = () => {
               <p className="font-semibold text-steel-900">{userFullName(people.data[0]!)}</p>
             </div>
           )}
-          <TextField label="From" type="date" value={from} onChange={(event) => event.target.value.length > 0 && setFrom(event.target.value)} containerClassName="w-44" />
-          <TextField label="To" type="date" value={to} onChange={(event) => event.target.value.length > 0 && setTo(event.target.value)} containerClassName="w-44" />
-          {personId !== null && sheet.data !== null && sheet.data !== undefined && (
+          <TextField label="From" type="date" value={from} onChange={(event) => setFrom(event.target.value)} containerClassName="w-44" data-testid="timesheet-from" />
+          <TextField label="To" type="date" value={to} onChange={(event) => setTo(event.target.value)} containerClassName="w-44" data-testid="timesheet-to" />
+          {personId !== null && rangeProblem === null && sheet.data !== null && sheet.data !== undefined && (
             <DownloadFileButton href={timesheets.exportUrl(personId, from, to)} fallbackName={`timesheet-${from}-${to}.csv`} label="Export CSV" />
           )}
         </div>
+        {rangeProblem !== null && (
+          <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="timesheet-range-problem">
+            {rangeProblem}
+          </p>
+        )}
         <p className="mt-3 text-xs text-steel-500">
           {editable
-            ? 'Add a line for each customer you worked for on a day. You can correct or remove your own lines at any time; every change is recorded.'
-            : 'This is the technician’s own timesheet. Only they enter and correct it; the office reads and exports it.'}
+            ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines until the month is sent to the office; every change is recorded.'
+            : 'This is the technician’s own timesheet. Only they enter it; the office reads it, previews and prints it, and exports it.'}
         </p>
+      </Card>
+
+      <Card className="mb-5" data-testid="timesheet-month">
+        <div className="flex flex-wrap items-end gap-4">
+          <SelectField
+            label="Timesheet month"
+            value={month}
+            options={monthOptions}
+            onChange={(event) => {
+              setMonth(event.target.value);
+              setComment(null);
+            }}
+            containerClassName="w-52"
+            data-testid="timesheet-month-select"
+          />
+          <div className="pb-2">
+            {sentAt === null ? (
+              <Badge tone="amber" size="sm">Draft — not sent</Badge>
+            ) : (
+              <Badge tone="green" size="sm">
+                Sent to office {formatDateTime(sentAt)}
+                {monthDocument.data?.submittedByName ? ` by ${monthDocument.data.submittedByName}` : ''}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="mt-3">
+          {monthOpen ? (
+            <TextAreaField
+              label={`Comments for ${formatMonth(month)}`}
+              value={commentValue}
+              maxLength={2000}
+              rows={3}
+              hint="One comment for the whole timesheet. It is printed in the Comments box."
+              onChange={(event) => {
+                setComment(event.target.value);
+                setDirty(true);
+                setSaved(null);
+              }}
+              data-testid="timesheet-month-comment"
+            />
+          ) : (
+            <div className="text-sm">
+              <p className="mb-1 font-medium text-steel-700">Comments for {formatMonth(month)}</p>
+              <p className="whitespace-pre-wrap text-steel-800" data-testid="timesheet-month-comment-read">
+                {savedComment.length > 0 ? savedComment : '—'}
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('preview')} data-testid="timesheet-preview">
+            Preview
+          </Button>
+          {monthOpen && (
+            <Button variant="secondary" loading={operation.running} onClick={() => void save()} data-testid="timesheet-save">
+              Save
+            </Button>
+          )}
+          <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('print')} data-testid="timesheet-print">
+            Print
+          </Button>
+          {monthOpen && (
+            <Button onClick={() => setConfirmSend(true)} loading={operation.running} data-testid="timesheet-send">
+              Send to office
+            </Button>
+          )}
+        </div>
+        {saved !== null && (
+          <p role="status" className="mt-2 text-sm text-verdant-700" data-testid="timesheet-saved">
+            {saved}
+          </p>
+        )}
         {operation.error !== null && (
           <p role="alert" className="mt-2 text-sm font-medium text-signal-600">
             {operation.error}
           </p>
         )}
+        <p className="mt-2 text-xs text-steel-500">
+          Preview and Print show the Time Sheet exactly as it prints, and change nothing. Send to office is once per month; after that the month is read-only.
+        </p>
       </Card>
 
-      {sheet.error !== null ? (
+      {rangeProblem !== null ? null : sheet.error !== null ? (
         <QueryFailure code={sheet.errorCode} message={sheet.error} onRetry={sheet.refetch} />
       ) : sheet.loading || sheet.data === null || sheet.data === undefined ? (
         <LoadingPanel rows={6} label="Loading the timesheet" />
@@ -384,10 +608,14 @@ const TimesheetsPage = () => {
         <>
           <Card className="mb-5">
             <div className="flex flex-wrap gap-6 text-sm" data-testid="timesheet-totals">
-              <span>NT <strong className="tabular-nums">{hours(sheet.data.totals.normalHours)}</strong></span>
               <span>OT <strong className="tabular-nums">{hours(sheet.data.totals.overtimeHours)}</strong></span>
-              <span>DBL T <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
-              <span>Call-outs <strong className="tabular-nums">{sheet.data.totals.callouts}</strong></span>
+              <span>DT <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
+              <span>Callout <strong className="tabular-nums">{formatCurrency(sheet.data.totals.calloutAmount)}</strong></span>
+              <span>Internal km <strong className="tabular-nums">{kilometres(sheet.data.totals.internalKm)}</strong></span>
+              <span>Customer km <strong className="tabular-nums">{kilometres(sheet.data.totals.customerKm)}</strong></span>
+              {sheet.data.totals.normalHours > 0 && (
+                <span className="text-steel-500">NT (historical) <strong className="tabular-nums">{hours(sheet.data.totals.normalHours)}</strong></span>
+              )}
               <span>Recorded days <strong>{sheet.data.totals.recordedDays}</strong></span>
               <span className={sheet.data.totals.unrecordedDays > 0 ? 'text-amber-eje-700' : ''}>
                 Not recorded <strong>{sheet.data.totals.unrecordedDays}</strong>

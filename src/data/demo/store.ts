@@ -17,6 +17,7 @@ import type {
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
+  TimesheetMonth,
   SystemSettings,
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
@@ -115,6 +116,8 @@ export interface DemoDatabase {
   timesheetComments: TimesheetComment[];
   /** A technician's own timesheet lines. TIMESHEET-2. */
   timesheetEntries: TimesheetEntry[];
+  /** One technician's month: its comment and its submission. TS-02, TS-10. */
+  timesheetMonths: TimesheetMonth[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
   settings: SystemSettings;
@@ -208,11 +211,17 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * v31 added the test bench fee (BENCH-1): 0 in settings until set, and unticked
  * on every existing job.
  *
+ * v32 added the reviewer's fields (28 October 2026): an absence reason on
+ * attendance (none on existing days), Workshop, a call-out amount, shared
+ * call-outs and internal and customer kilometres on timesheet lines (false or 0
+ * on existing lines, whose NT and call-out count are kept), and the month's
+ * comment and submission, empty.
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 31;
+export const SCHEMA_VERSION = 32;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -262,6 +271,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   attendance: [],
   timesheetComments: [],
   timesheetEntries: [],
+  timesheetMonths: [],
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at
   // the moment the Master issues them.

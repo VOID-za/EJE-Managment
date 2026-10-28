@@ -354,7 +354,27 @@
   }
 }
 
+/*
+ * PRINTING ONE DOCUMENT FROM A PREVIEW. TS-13, TR-04.
+ *
+ * `DocumentPreviewDialog` renders the document into `.eje-print-root` at the
+ * top of the page and sets `html.eje-print-isolate` for the length of the
+ * print: everything else on the page — the application, the dialog itself —
+ * is left out of the printed sheets. On screen the root is never visible.
+ */
+.eje-print-root {
+  display: none;
+}
+
 @media print {
+  html.eje-print-isolate body > *:not(.eje-print-root) {
+    display: none !important;
+  }
+
+  html.eje-print-isolate .eje-print-root {
+    display: block;
+  }
+
   .no-print {
     display: none !important;
   }

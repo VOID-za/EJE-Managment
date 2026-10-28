@@ -289,6 +289,10 @@ export type ActivityEventType =
   | 'timesheet_entry_added'
   | 'timesheet_entry_corrected'
   | 'timesheet_entry_removed'
+  /** TS-02/TS-03: a technician sent a month's timesheet to the office; read-only from then. */
+  | 'timesheet_submitted'
+  /** PARTS-03/04: a courier delivery note was produced for a job (a separate, price-less document). */
+  | 'delivery_note_generated'
   | 'message_sent'
   | 'message_actioned'
   /** CHAT-DELETE-1: a participant deleted a chat from their own list; nothing erased. */

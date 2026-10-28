@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { can, roleLabel, userFullName, type AttendanceStatus } from '@/domain';
+import { ABSENCE_REASON_LABELS, can, roleLabel, userFullName, type AbsenceReason, type AttendanceStatus } from '@/domain';
 import {
   Badge,
   Button,
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MyAttendance } from '@/components/attendance/MyAttendance';
+import { AbsenceReasonPicker } from '@/components/attendance/AbsenceReasonPicker';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { attendance } from '@/api/endpoints';
 import type { RegisterRow } from '@/application/attendance-operations';
@@ -38,6 +39,8 @@ const AttendancePage = () => {
   const operation = useOperation();
   const [date, setDate] = useState(() => businessToday());
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // The person whose absence reason is being chosen (ATT-01).
+  const [choosing, setChoosing] = useState<string | null>(null);
   const manages = can(currentUser.role, 'attendance.manage');
 
   const query = useQuery(`attendance:${date}`, () => attendance.register(date));
@@ -55,12 +58,19 @@ const AttendancePage = () => {
     );
   }
 
-  const record = async (row: RegisterRow, status: AttendanceStatus): Promise<void> => {
+  const record = async (
+    row: RegisterRow,
+    status: AttendanceStatus,
+    absenceReason: AbsenceReason | null = null,
+  ): Promise<void> => {
     const note = notes[row.user.id] ?? row.record?.note ?? '';
     const ok = await operation.run(async () => {
-      await attendance.record({ userId: row.user.id, date, status, note });
+      await attendance.record({ userId: row.user.id, date, status, absenceReason, note });
     });
-    if (ok) query.refetch();
+    if (ok) {
+      setChoosing(null);
+      query.refetch();
+    }
   };
 
   const data = query.data;
@@ -169,11 +179,24 @@ const AttendancePage = () => {
                       variant={status === 'absent' ? 'danger' : 'secondary'}
                       disabled={operation.running || isFuture}
                       aria-pressed={status === 'absent'}
-                      onClick={() => void record(row, 'absent')}
+                      onClick={() => setChoosing(row.user.id)}
                     >
                       Absent
                     </Button>
                   </div>
+                  {status === 'absent' && (
+                    <Badge tone="red" size="sm">
+                      {row.record?.absenceReason == null ? 'Reason not recorded' : ABSENCE_REASON_LABELS[row.record.absenceReason]}
+                    </Badge>
+                  )}
+                  {choosing === row.user.id && (
+                    <AbsenceReasonPicker
+                      initial={row.record?.absenceReason ?? null}
+                      busy={operation.running}
+                      onConfirm={(reason) => void record(row, 'absent', reason)}
+                      onCancel={() => setChoosing(null)}
+                    />
+                  )}
                   <p className="w-full text-xs text-steel-400 sm:w-auto">
                     {row.record === null
                       ? 'Not recorded'

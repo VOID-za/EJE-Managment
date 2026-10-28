@@ -35,6 +35,7 @@ import { cn } from '@/lib/cn';
 import { downloadBytes } from '@/lib/download';
 import { JobCardDocument } from '@/components/jobs/JobCardDocument';
 import { JobCardPdfButton } from '@/components/jobs/JobCardPdfButton';
+import { DeliveryNoteButton } from '@/components/jobs/DeliveryNoteButton';
 import { PartsCollectionNote } from '@/components/jobs/PartsCollectionNote';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { SignatureRefusalPanel } from '@/components/jobs/SignatureRefusalPanel';
@@ -274,6 +275,8 @@ const ReviewJobPage = ({
               the customer holds — so this is offered only until then.
             */}
             {job.finalDocument === null && <JobCardPdfButton view={view} />}
+            {/* PARTS-04: printed separately from the job card, before or after it is issued. */}
+            <DeliveryNoteButton view={view} />
             <Button
               variant="secondary"
               leadingIcon={<Icon name="arrowLeft" className="size-4" />}

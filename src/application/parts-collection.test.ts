@@ -109,7 +109,7 @@ describe('the Parts job type', () => {
     );
   });
 
-  it('requires an order number before the collector signs', () => {
+  it('no longer requires an order number before the collector signs (PARTS-01, 28 October 2026)', () => {
     const withoutOrder = {
       ...({} as Job),
       jobType: 'parts' as const,
@@ -137,14 +137,11 @@ describe('the Parts job type', () => {
     } as unknown as Job;
 
     const readiness = checkReadyForSignature(withoutOrder);
-    expect(readiness.allowed).toBe(false);
-    expect(readiness.violations.map((violation) => violation.code)).toContain(
-      'order_number_required',
-    );
+    expect(readiness.violations.map((violation) => violation.code)).not.toContain('order_number_required');
   });
 
-  it('requires an order number on parts jobs only', () => {
-    expect(getJobTypeDefinition('parts').requiresOrderNumber).toBe(true);
+  it('requires an order number on no job type now — Parts included (PARTS-01)', () => {
+    expect(getJobTypeDefinition('parts').requiresOrderNumber).toBe(false);
     expect(getJobTypeDefinition('breakdown').requiresOrderNumber).toBe(false);
     expect(getJobTypeDefinition('service').requiresOrderNumber).toBe(false);
   });
@@ -208,18 +205,14 @@ describe('the courier collection document', () => {
     harness = build();
   });
 
-  it('withholds prices from the courier document but keeps them on the job', async () => {
+  it('keeps prices on the courier’s JOB CARD too; the courier is given the separate delivery note (PARTS-04)', async () => {
     const courier = await loadJob(harness, 'EJE-1063');
     expect(courier.courierCollection).toBe(true);
 
     const document = buildPartsDocument(courier);
-    expect(document.showsPrices).toBe(false);
-    expect(document.subtotal).toBeNull();
-    expect(document.lines.every((line) => line.unitPrice === null)).toBe(true);
-
-    // The prices are withheld from the document, never deleted from the job.
+    expect(document.showsPrices).toBe(true);
+    expect(document.lines.every((line) => line.unitPrice !== null)).toBe(true);
     expect(courier.parts.every((part) => part.unitPrice > 0)).toBe(true);
-    expect(JSON.stringify(document)).not.toContain('1240000');
   });
 
   it('shows prices when the customer collects in person', async () => {

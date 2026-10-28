@@ -37,6 +37,7 @@ import {
   submissionCover,
   finalizedRefusal,
   isJobAtOrPastCompletion,
+  partsLockedAfterCompletion,
   labourRateLabel,
   siteAddressLine,
   siteNavigationUrl,
@@ -140,6 +141,18 @@ export const assertEditable = (context: OperationContext, job: Job): void => {
       },
     ],
   );
+};
+
+/** TR-01. See `partsLockedAfterCompletion`: refused on every path that changes a part. */
+const assertPartsOpen = (job: Job): void => {
+  if (!partsLockedAfterCompletion(job)) return;
+  throw new WorkflowError(`${job.jobNumber} has been completed — its parts can no longer be changed.`, [
+    {
+      code: 'parts_locked_after_completion',
+      message:
+        'Parts cannot be added, changed or removed once a Test & Repair job is completed. Cancel completion to return it to In Progress, change the parts, then complete it again.',
+    },
+  ]);
 };
 
 /**
@@ -832,6 +845,7 @@ export const addPart = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertPartsOpen(job);
   const entry = {
     id: asLineItemId(context.services.ids.next('prt')),
     partNumber: input.partNumber,
@@ -1104,6 +1118,7 @@ export const updatePart = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertPartsOpen(job);
 
   const existing = job.parts.find((entry) => entry.id === lineId);
   if (existing === undefined) {
@@ -1245,6 +1260,7 @@ export const removeLineItem = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  if (kind === 'part') assertPartsOpen(job);
 
   /*
    * THE LINE IS READ BEFORE IT IS REMOVED, FOR TWO REASONS. AUDIT-3.

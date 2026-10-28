@@ -1,3 +1,4 @@
+import { generateDeliveryNote } from './delivery-note';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acceptJob,
@@ -107,9 +108,9 @@ describe('who sees the prices', () => {
     expect(at('test_and_repair', false)).toBe(true);
   });
 
-  it('withholds them from a courier, for both collected types', () => {
-    expect(at('parts', true)).toBe(false);
-    expect(at('test_and_repair', true)).toBe(false);
+  it('keeps them on the JOB CARD for a courier too — the courier is given the separate delivery note (PARTS-04)', () => {
+    expect(at('parts', true)).toBe(true);
+    expect(at('test_and_repair', true)).toBe(true);
   });
 
   it('never withholds them from a job done on the customer’s site', () => {
@@ -117,7 +118,7 @@ describe('who sees the prices', () => {
     expect(at('service', true)).toBe(true);
   });
 
-  it('withholds them from the parts lines as well as the totals', () => {
+  it('the job card’s parts lines carry their prices for a courier collection as for a customer one', () => {
     const parts = [
       {
         id: asLineItemId('prt-1'),
@@ -131,12 +132,9 @@ describe('who sees the prices', () => {
     ] as Job['parts'];
 
     const courier = buildPartsDocument({ jobType: 'parts', courierCollection: true, parts });
-    expect(courier.showsPrices).toBe(false);
-    expect(courier.subtotal).toBeNull();
-    expect(courier.lines[0]?.unitPrice).toBeNull();
-    expect(courier.lines[0]?.lineTotal).toBeNull();
-    // The quantity is not a price, and the courier needs it to check the load.
-    expect(courier.lines[0]?.quantity).toBe(2);
+    expect(courier.showsPrices).toBe(true);
+    expect(courier.subtotal).toBe(97000);
+    expect(courier.lines[0]).toMatchObject({ unitPrice: 48500, lineTotal: 97000, quantity: 2 });
 
     const customer = buildPartsDocument({ jobType: 'parts', courierCollection: false, parts });
     expect(customer.showsPrices).toBe(true);
@@ -323,13 +321,19 @@ describe('a test and repair collected from the counter', () => {
     );
   };
 
-  it('gives the courier a document with no prices on it', async () => {
+  it('gives the courier a SEPARATE delivery note with no prices on it, and the office a priced job card', async () => {
     const job = await workshopJob({ courier: true, deliveryNote: 'DN-98765' });
     const collected = await setCollectionMethod(harness.as(technician), job, {
       courier: true,
       waybillNumber: 'DAW-4471',
     });
-    const text = await issuedText(collected);
+    const note = await generateDeliveryNote(harness.as(technician), collected);
+    const text = pdfPlainText(Buffer.from(note.base64, 'base64'));
+    const card = await issuedText(collected);
+    // The issued job card keeps its prices (PARTS-04) and says how it was collected.
+    expect(card).toContain('Total');
+    expect(card).toContain('Courier collection');
+    expect(card).toContain('DAW-4471');
 
     /*
      * What it MUST NOT say.
@@ -339,7 +343,8 @@ describe('a test and repair collected from the counter', () => {
      * charges block is what must be absent, so the charges block is what is
      * asserted: its labels, and the money itself.
      */
-    for (const forbidden of ['VAT @', 'Subtotal', 'Total', '1 320,00', '320,00', 'Amount']) {
+    // "Total items" is a count of goods, not money, so the word alone is not forbidden.
+    for (const forbidden of ['VAT @', 'Subtotal', '1 320,00', '320,00', 'Amount']) {
       expect(text, forbidden).not.toContain(forbidden);
     }
     expect(text).not.toMatch(/R\u00a0[\d\u00a0]+,\d\d/);
@@ -347,7 +352,7 @@ describe('a test and repair collected from the counter', () => {
     expect(text).toContain('Courier collection');
     expect(text).toContain('DAW-4471');
     expect(text).toContain('DN-98765');
-    expect(text).toContain('Thabo');
+    expect(text).toContain('DELIVERY NOTE');
   });
 
   it('gives the customer a document that does show the prices', async () => {

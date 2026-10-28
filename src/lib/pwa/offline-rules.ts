@@ -225,6 +225,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   take_over_submission:
     'Submitting a job card on somebody else’s behalf is an office step the server decides.',
   generate_document: 'The job card is rendered on the server, from what the server holds.',
+  generate_delivery_note: 'The delivery note is rendered on the server, from what the server holds.',
   confirm_delivery:
     'Whether the customer received their copy is something only the mail provider can answer.',
   retry_delivery: 'Sending the customer their copy again needs a connection to the mail provider.',

@@ -16,6 +16,7 @@ const COLUMNS: readonly CsvColumn<AttendanceExportRow>[] = [
   { header: 'Person', value: (row) => row.person },
   { header: 'Role', value: (row) => row.role },
   { header: 'Attendance', value: (row) => (row.status === 'present' ? 'Present' : 'Absent') },
+  { header: 'Absence reason', value: (row) => row.absenceReason },
   { header: 'Note', value: (row) => row.note },
   { header: 'Recorded by', value: (row) => row.recordedBy },
   { header: 'Recorded at', value: (row) => row.recordedAt },

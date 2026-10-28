@@ -408,11 +408,14 @@ const NewJobPage = () => {
   const quoteNumberField = (
     <>
       {/*
-        THE CUSTOMER'S QUOTE NUMBER. Test & Repair §4.
+        THE CUSTOMER'S QUOTE NUMBER. Test & Repair §4, and Parts since
+        PARTS-02 (the real-world reviewer, 28 October 2026).
 
-        Test & Repair only. The owner struck it out on a parts
-        collection, which is reconciled by its order number — and
-        that one is already required there.
+        It was Test & Repair only: the owner had struck it out on a
+        parts collection, which was then reconciled by a REQUIRED order
+        number. The reviewer reversed both — the order number is
+        optional on Parts (PARTS-01) and the quote number is offered
+        there — so a Parts job can be raised against a quote alone.
       */}
       {definition.capturesQuoteNumber && (
         <TextField
@@ -420,7 +423,11 @@ const NewJobPage = () => {
           value={quoteNumber}
           onChange={(event) => setQuoteNumber(event.target.value)}
           placeholder="e.g. Q-20451"
-          hint="Optional. The quote this repair was accepted against."
+          hint={
+            jobType === 'parts'
+              ? 'Optional. The quote these parts were sold against.'
+              : 'Optional. The quote this repair was accepted against.'
+          }
         />
       )}
     </>

@@ -52,6 +52,41 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### NEXT — NOT DEPLOYED, NOT APPROVED: the real-world reviewer's changes (28 October 2026)
+
+**Not run, and not to be run without the owner's approval of the work and a
+separate approval to deploy.** The changes and their tests are in
+`docs/reviewer-feedback-2026-10-28.md`. Live is `ef0f695`, so when it is
+approved **one migration is pending**, forward-only and additive (new nullable
+or defaulted columns, one new table with a write-once trigger; no row is
+rewritten):
+
+- `0037_reviewer_timesheets_attendance` — `attendance.absence_reason`; on
+  `timesheet_entries` `workshop`, `callout_amount_cents`, `callout_shared`,
+  `internal_km`, `customer_km`; the `timesheet_months` table (the month's comment
+  and its Send to office) with the trigger `timesheet_months_write_once`.
+
+```powershell
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0037_reviewer_timesheets_attendance
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0037_reviewer_timesheets_attendance
+```
+
+**Rollback.** `ef0f695` ignores the new columns and table, so a rollback stays
+possible. What it cannot show: absence reasons, Workshop lines, call-out amounts,
+kilometres, month comments and sent timesheets recorded after the release (they
+stay in the database). A timesheet sent to the office under the new release
+would be editable again under the old one — the old release knows no lock.
+
+**Refresh the tablets after the release.** A courier collection's
+job card is now priced, so its document identity (BD-23) changes: an offline
+signature held on a tablet still on the old build, for a courier collection,
+is referred to Field Captures rather than applied.
+
+**After the release** (read-only checks, then `docs/staff-testing.md` section H):
+`/api/health` names the new commit; Attendance asks for a reason on Absent; a
+technician's Timesheets show no NT box, oldest day first, and Preview / Save /
+Print / Send to office; a courier collection offers *Delivery note*.
+
 ### DEPLOYED — 28 October 2026: `ef0f695` is live (the real-world testing fixes, on top of `51fb112`)
 
 Run by the owner with the guarded release tool (fixed first in `3194e69`, so

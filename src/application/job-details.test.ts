@@ -246,7 +246,8 @@ describe('what: the fields this job type carries, validated as creation validate
       'referenceNumber',
       'faultDescription',
     ]);
-    expect(editableDetailFields('parts')).toEqual(['orderNumber', 'referenceNumber', 'deliveryNote']);
+    // PARTS-02 (28 October 2026): the quote number is a Parts field too.
+    expect(editableDetailFields('parts')).toEqual(['orderNumber', 'referenceNumber', 'quoteNumber', 'deliveryNote']);
     expect(editableDetailFields('test_and_repair')).toEqual([
       'orderNumber',
       'referenceNumber',
