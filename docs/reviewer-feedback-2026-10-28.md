@@ -107,7 +107,12 @@ development migration: **not applied to production**.
   collection-document, parts and test-and-repair tests and a demo-migration
   test — all passing.
 - **PostgreSQL tests** (`*.db.test.ts`, including the new write-once trigger and
-  constraint cases): not runnable on this PC (no test database); they run in CI.
+  constraint cases): not runnable on this PC (no test database); run in CI. The
+  first run (40751059583, on `b4c7bad`) failed one existing expectation that
+  still said the Parts order number was required; corrected in `694f526`.
+- **CI on `694f526`** (run 40752942845): all three jobs passed — lint, types,
+  unit tests and build; PostgreSQL integration tests; routes, workflow e2e and
+  smoke.
 - **Lint** (`eslint .`) and **type check** (`tsc --noEmit`): clean.
 - **Production build** (`next build`): passes.
 - **Browser, against a local production build on the demo backend:** the smoke
