@@ -203,7 +203,8 @@ describeDb('the library, the settings and the reference data', () => {
       ]);
 
       const parts = rows.find((row) => row.code === 'parts');
-      expect(parts?.orderNumberExpectation).toBe('required');
+      // PARTS-01 (the real-world reviewer, 28 October 2026): optional on Parts now.
+      expect(parts?.orderNumberExpectation).toBe('optional');
       expect(parts?.collectedOnCompletion).toBe(true);
       expect(parts?.checklistRequired).toBe(getJobTypeDefinition('parts').checklistRequired);
 
