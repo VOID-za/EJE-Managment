@@ -32,7 +32,7 @@ the release, both read-only: the office's **Field Captures** screen opens (held
 signatures that cannot be verified land there), and a correction to labour,
 parts or the work performed cannot be raised as needing no acknowledgement.
 
-### DEPLOYED — 27 October 2026: `51fb112` is live
+### DEPLOYED — 27 October 2026: `51fb112` was live (superseded by `ef0f695` on 28 October, below)
 
 Run by the owner with the guarded release tool. From the release output:
 running commit `51fb112`; migrations `0032_office_lifecycle` and
@@ -52,12 +52,29 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### NEXT — the real-world testing fixes (27 October 2026), on top of `51fb112`
+### DEPLOYED — 28 October 2026: `ef0f695` is live (the real-world testing fixes, on top of `51fb112`)
 
-**Not yet run.** The owner's instruction of 27 October 2026 authorises
-deploying these fixes for staff testing. Live is `51fb112`, so **three
-migrations are pending**, all forward-only and additive (new table, new
-columns with defaults, a replaced trigger function; no row is rewritten):
+Run by the owner with the guarded release tool (fixed first in `3194e69`, so
+`-ExpectPending` takes several tags). From the release output: running commit
+`ef0f695`; migrations `0034_manual_timesheets`, `0035_test_bench_fee` and
+`0036_chat_deleted_for` applied; backup and restore verification passed;
+health reports PostgreSQL reachable; previous release `51fb112` retained for
+rollback (`stage-release.ps1 -Rollback`).
+
+**Verified afterwards from outside the server** (28 October 2026; results at
+the end of `docs/staff-testing.md`): `/api/health` independently reports
+`ef0f695`, PostgreSQL reachable, `email refuse`, `deployment demonstration`;
+all three migrations proven by use — manual timesheet lines saved, edited,
+removed, read back and exported (0034); the test bench fee set, ticked on a
+job, frozen in the signed pricing snapshot and on the PDF (0035); a chat
+deleted for one participant stays deleted when re-read (0036). 92 API checks
+and 38 browser checks passed; no application defect blocks staff testing. The
+schema ledger itself was not read (that needs the server); the release
+output above is the record of it.
+
+The release carried **three migrations**, all forward-only and additive (new
+table, new columns with defaults, a replaced trigger function; no row is
+rewritten):
 
 - `0034_manual_timesheets` — the `timesheet_entries` table (manual timesheets).
 - `0035_test_bench_fee` — `system_settings.test_bench_fee_cents` (default 0),

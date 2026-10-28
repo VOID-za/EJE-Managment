@@ -2,12 +2,14 @@
 
 *Written 27 October 2026 for the release from `claude/office-workflow-parts`.*
 
-> **DEPLOYED AND VERIFIED — 27 October 2026.** `https://eje.syncza.co.za`
-> runs commit **`51fb112`** (`/api/health`: `status ok`, `backend postgres`,
-> `database reachable`, `email refuse`, `deployment demonstration`,
-> `demoSwitcher true`). Migrations `0032` and `0033` were applied by the
-> release; the previous release `e85f239` is retained for rollback. The
-> automated post-deployment verification results are at the end of this file.
+> **DEPLOYED AND VERIFIED — 28 October 2026.** `https://eje.syncza.co.za`
+> runs commit **`ef0f695`** — the real-world testing fixes (`/api/health`:
+> `status ok`, `backend postgres`, `database reachable`, `email refuse`,
+> `deployment demonstration`, `demoSwitcher true`). Migrations `0034`, `0035`
+> and `0036` were applied by the release; the previous release `51fb112` is
+> retained for rollback. Section **G** is what to test for this release. The
+> automated post-deployment verification results are at the end of this file
+> (28 October, then the 27 October run against `51fb112`).
 
 **Where:** https://eje.syncza.co.za — the existing EJE server. It holds
 **demonstration data** (fictional customers and jobs), so nothing you do here
@@ -207,3 +209,96 @@ in the check, not the application.
 the app on the tablet, the rear camera, gloved and daylight use, lock / kill /
 flat battery recovery (check 20), a full shift offline, and the D section above
 on the real tablet. Email and WhatsApp delivery need EJE's credentials.
+
+## Automated post-deployment verification — 28 October 2026, against `ef0f695`
+
+Run from outside the server against `https://eje.syncza.co.za`, signed in
+only through the deployment's demonstration switcher (no password handled).
+Every record created is labelled **DEPLOY-VERIFY ef0f695 28-Oct-2026**: jobs
+**EJE-2055 … EJE-2061**; for Technician 3, one timesheet line and comment
+(26 October), attendance for 28 October (present) and 23 October (absent); one
+chat between Technicians 3 and 2; one customer request on EJE-2056 (declined);
+one Field Capture (closed *No action*). The test bench fee was set to R450.00
+for the run and **restored to R0.00**, its value before. No existing job,
+customer, signed document or audit line was changed and nothing that existed
+before was deleted (the only removal was a timesheet line the run itself had
+just typed, to test *Remove*). Email is in `refuse` mode and WhatsApp has no
+credentials, so no message reached anybody.
+
+**API: 92 checks passed, 0 application failures, plus 25 informational
+results.** The first pass had six failures, every one a defect in the check
+(wrong expectation or wrong order of steps), each re-run corrected and passed —
+listed below so nothing is hidden.
+
+| Area | Verified |
+|---|---|
+| Deployment | `/api/health` reports commit `ef0f695`, PostgreSQL reachable, `email refuse`, `deployment demonstration`, `demoSwitcher true`; HTTP → HTTPS 308; an unauthenticated read is refused (401) |
+| Migrations | **0034**: manual lines saved, edited, removed, read back and exported. **0035**: `testBenchFee` in settings, `testBenchApplied` on the job, `testBenchFee` frozen in the pricing snapshot. **0036**: a chat deleted for one participant stays deleted when re-read from the server. (The schema ledger itself is read only on the server; the release output records it.) |
+| Permissions | Technician refused: administration, the attendance register, another technician's timesheet, the office's Field Captures list, the settings (403). Technician reads their own Field Captures and sees no one else's; Coordinator reads the office list. Neither another technician nor the Master can write a technician's timesheet (403). A technician not on a job cannot even see it (404) |
+| Timesheets (TIMESHEET-2) | Past-date line with customer, NT 7.5 → edited to 8, OT 1.25, call-out 1; a second line by customer name; daily comment; remove. Refused: hours not in quarter hours, over 24 h in a day, hours without a customer, a future date. Office reads the sheet; export shows the line and **NOT RECORDED** for unrecorded days |
+| Attendance (ATTEND-2) | Technician marks self Present today and Absent on an earlier day; future day refused; cannot mark another technician (403); office register shows it; CSV export |
+| Multiple parts (PARTS-MULTI-1) | Three parts on one job, none lost or merged |
+| Test bench fee (BENCH-1) | Master sets it; unticked on a new job; ticked beside call-out; after signature it cannot be changed; frozen at R450.00 in the signed pricing; changing the setting afterwards leaves the signed pricing identical; the issued PDF carries the *Test bench* line |
+| Discount (DISCOUNT-OFF-1) | `apply_discount` and `clear_discount` do not exist on the API, even for the Master (404) |
+| Media (VIDEO-OFF-1 / DOCUMENTS-1) | A photo and a PDF document stored; a video refused as video (400 *Video is not accepted*) and as a photo (400 *not a photograph*) |
+| Cancel completion (COMPLETE-CANCEL-1) | From the first step and from the signature step: back to In Progress with labour, travel, parts, photo, document, note, call-out, bench fee and write-up all kept, each on the activity trail. Refused: when not completing; after the signature (`already_signed`); while a refusal waits for the office; after a refusal froze the prices (`pricing_frozen`); on a Parts job (no In Progress stage) |
+| Pin location (PIN-1) | *Send Site Location* refused on a Parts job and a Test & Repair job |
+| Submission and PDF | Signed → issued → **Office Handling**; the issued job card is a PDF |
+| Notifications (NOTIF-AUDIT-1) | The office gets *job card submitted*; the Master's refusal notice is created and marked handled when the office returns the job; marking a notice read drops the bell count by exactly one (1 → 0) |
+| Offline capture | A held capture sent by job number lands once (the resend is a replay). A late capture on a signed job is refused, referred to the office, visible to that technician only, cannot be applied to the signed job, closed *No action* with a note the technician sees; the signed job unchanged |
+| Field Captures (FIELD-CAP-1) | As above, and the technician's list holds only their own referral |
+| Customer requests (CUST-REQ-HELP-1) | Recorded by the technician on the job, waiting for the office, nothing on the job changed; the office declines with a reason |
+| Delete chat (CHAT-DELETE-1) | Someone not in the chat cannot delete it; delete removes it from my list only; the other participant keeps it and the first message; when they write again it returns to me with only the new message |
+| Historical records | Every existing job view loads; 27 signed jobs keep their signatures; job cards issued before this release (EJE-2046, 2045, 2041, 2050, closed EJE-2018) still open as PDFs; EJE-2047's video from before stays on record |
+
+*The six check defects:* a malformed timesheet line id is refused 422 *does
+not exist* — no server error, which is what AUDIT-2 fixed; the check wrongly
+demanded 404. A technician not on the job got 404 rather than the 403 the
+check expected; hiding the job is the stronger refusal. Two bell checks ran
+after the office had already returned the refused job, which marks the
+refusal notice handled; re-run on an unread *job card submitted* notice:
+1 → 0. One historical PDF check picked EJE-2048, which is signed but was never
+issued; re-run on issued job cards.
+
+**Real browser (headless Chrome): 38 of 38 passed, no page errors.** Four
+steps first failed — three because this PC went to sleep mid-run and the app
+correctly fell back to the tablet's copy ("Could not reach the EJE server",
+"as the server had it 12 hours ago" — the PC really had been asleep for 12
+hours), one because the check looked on the wrong Admin tab — and passed when
+re-run.
+
+| Area | Verified |
+|---|---|
+| Screens | Master (8), Coordinator (5) and Technician (7) screens render with no page error |
+| Technician menu | *Field Captures*, *Timesheets*, *Attendance*; Field Captures lists only my referral, with its outcome and the office's note |
+| Timesheets | My typed line, *Not recorded* days, *Add line* |
+| Accept (PIN-1) | Test & Repair (EJE-2061): no *Send Site Location?* prompt. Breakdown (EJE-2060): still asks; *No, Thanks* sends nothing |
+| Complete job (COMPLETE-POS-1) | Exactly one *Complete job* button, below the tabs, with the summary of what is recorded; reachable at tablet width (800 × 1280) |
+| Multiple parts | *Add part* → *Add another part* twice → three parts saved in one go; the next dialog starts with one empty line |
+| Test bench / discount | The checkbox beside call-out, unticked; no discount control on the job |
+| Media | *Add Photo* and *Add Documents*; no video button; EJE-2047 shows *Videos (historical)* |
+| Cancel completion | *Complete job* → wizard → *Cancel completion* → *Back to In Progress*; the summary is unchanged |
+| Offline | Network off: a note is held and says so; network on: it lands on the job exactly once |
+| Delete chat | Asks for confirmation, saying it is removed from your list only and EJE keep every message (cancelled here) |
+| Notifications | *Job card submitted* labelled, with the green edge |
+| Admin | *Rates & VAT* shows *Test bench fee* |
+| Help text | Corrections and *What the customer has asked for* show their explanations |
+
+**Not verified here, and why:**
+
+- `npm run smoke` / `npm run e2e` were **not** run against the live site:
+  both begin by resetting the demonstration data (`/api/demo/reset`). On this
+  server that must not happen. Both passed in CI on `ef0f695` against a
+  throw-away server.
+- *Discount (historical)*: no job on the live site has ever carried a
+  discount, so the historical display cannot be seen here; the unit tests
+  cover it.
+- Needs a person and the real tablet: installing the app, the camera, gloved
+  and daylight use, lock / kill / flat battery recovery, a full shift
+  offline, and section G on the device. Email and WhatsApp delivery need
+  EJE's credentials.
+
+**Minor defect found (not blocking):** a timesheet line for a future date is
+refused with the attendance wording, *"Attendance cannot be recorded for a day
+that has not happened."* The refusal is right; the sentence should say
+timesheet. Not fixed in this release, to avoid a redeploy for wording.
