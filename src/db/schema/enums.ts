@@ -140,6 +140,8 @@ export const notificationType = pgEnum('notification_type', [
   'job_submitted',
   'signature_refused',
   'chat_message',
+  // Migration 0038: a timesheet period sent to the office (TS-02).
+  'timesheet_submitted',
 ]);
 
 export const notificationChannel = pgEnum('notification_channel', ['in_app', 'whatsapp', 'email']);

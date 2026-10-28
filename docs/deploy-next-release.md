@@ -52,40 +52,55 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### NEXT — NOT DEPLOYED, NOT APPROVED: the real-world reviewer's changes (28 October 2026)
+### NEXT — NOT DEPLOYED, NOT APPROVED: the real-world reviewer's changes and the owner's decisions (28 October 2026)
 
 **Not run, and not to be run without the owner's approval of the work and a
 separate approval to deploy.** The changes and their tests are in
 `docs/reviewer-feedback-2026-10-28.md`. Live is `ef0f695`, so when it is
-approved **one migration is pending**, forward-only and additive (new nullable
-or defaulted columns, one new table with a write-once trigger; no row is
-rewritten):
+approved **two migrations are pending**, in order, both forward-only and
+additive (new nullable or defaulted columns, new tables with write-once
+triggers, one new enum value; nothing dropped, no row rewritten):
 
 - `0037_reviewer_timesheets_attendance` — `attendance.absence_reason`; on
   `timesheet_entries` `workshop`, `callout_amount_cents`, `callout_shared`,
-  `internal_km`, `customer_km`; the `timesheet_months` table (the month's comment
-  and its Send to office) with the trigger `timesheet_months_write_once`.
+  `internal_km`, `customer_km`; `timesheet_months` (superseded by 0038, kept).
+- `0038_timesheet_periods_delivery_notes` — `timesheet_periods` (the From/To
+  period: its comment and its Send to office) with `timesheet_periods_guard`
+  (write-once once sent; sent periods never overlap); copies any
+  `timesheet_months` row across; `notification_type` gains
+  `timesheet_submitted`; `delivery_note_documents` (the courier's issued
+  Delivery Note, one per job, write-once).
 
 ```powershell
-.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0037_reviewer_timesheets_attendance
-.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0037_reviewer_timesheets_attendance
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes
 ```
 
-**Rollback.** `ef0f695` ignores the new columns and table, so a rollback stays
-possible. What it cannot show: absence reasons, Workshop lines, call-out amounts,
-kilometres, month comments and sent timesheets recorded after the release (they
-stay in the database). A timesheet sent to the office under the new release
-would be editable again under the old one — the old release knows no lock.
+**Release dependencies.** Both migrations together (0038 builds on 0037). The
+backup's reference scan now also counts `delivery_note_documents.storage_key`
+(its job-card column is named `job_card_document_key` so it is not counted
+twice). Real email and WhatsApp delivery still need EJE's credentials; a
+submitted timesheet notifies the office in-app only.
 
-**Refresh the tablets after the release.** A courier collection's
-job card is now priced, so its document identity (BD-23) changes: an offline
-signature held on a tablet still on the old build, for a courier collection,
-is referred to Field Captures rather than applied.
+**Rollback.** `ef0f695` ignores the new columns and tables, so a rollback stays
+possible. What it cannot show: absence reasons, Workshop lines, call-out amounts,
+kilometres, period comments, sent timesheets, `timesheet_submitted`
+notifications and issued Delivery Notes recorded after the release (they stay
+in the database and storage). A timesheet sent under the new release would be
+editable again under the old one — the old release knows no lock.
+
+**Refresh every tablet after the release, before any courier collection.** A
+courier collection is now signed on its Delivery Note, whose identity (`dln1:`)
+an older build does not compute: an older build would show the courier the
+priced job card, and a signature it holds offline would be referred to Field
+Captures rather than applied (the courier signs again — nothing is attached to
+the wrong document).
 
 **After the release** (read-only checks, then `docs/staff-testing.md` section H):
 `/api/health` names the new commit; Attendance asks for a reason on Absent; a
-technician's Timesheets show no NT box, oldest day first, and Preview / Save /
-Print / Send to office; a courier collection offers *Delivery note*.
+technician's Timesheets show no NT box, oldest day first, the From/To period
+with Preview / Save / Print / Send to office; a courier collection's signature
+step shows the Delivery Note.
 
 ### DEPLOYED — 28 October 2026: `ef0f695` is live (the real-world testing fixes, on top of `51fb112`)
 

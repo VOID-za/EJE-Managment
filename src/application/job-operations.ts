@@ -80,6 +80,7 @@ import { deliveryFailureKindOf } from '@/services/ports';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment, queueAssignmentWhatsApp } from './assignment-notice';
+import { issueDeliveryNote, issuesDeliveryNote } from './delivery-note';
 import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { storeAndMeasure } from './stored-file';
@@ -150,7 +151,7 @@ const assertPartsOpen = (job: Job): void => {
     {
       code: 'parts_locked_after_completion',
       message:
-        'Parts cannot be added, changed or removed once a Test & Repair job is completed. Cancel completion to return it to In Progress, change the parts, then complete it again.',
+        'Parts cannot be added, changed or removed once a job is completed. Cancel completion to return it to In Progress, change the parts, then complete it again.',
     },
   ]);
 };
@@ -3139,6 +3140,28 @@ const renderAndStoreFinalDocument = async (
     ]);
   }
 
+  /*
+   * A COURIER COLLECTION ISSUES TWO DOCUMENTS (PARTS-03/04): this priced job
+   * card, and the Delivery Note the courier signed — stored, proved and
+   * recorded here, before anything is sent. If it cannot be, this throws and
+   * the issue is refused as a whole.
+   */
+  if (issuesDeliveryNote(finalJob)) {
+    await issueDeliveryNote(
+      context,
+      {
+        job: finalJob,
+        customer: view.customer,
+        site: view.site,
+        contact: view.contact,
+        settings: view.settings,
+        users: view.users,
+      },
+      document.storageKey,
+      document.generatedAt,
+    );
+  }
+
   await audit(context, {
     jobId: job.id,
     type: 'pdf_generated',
@@ -3376,6 +3399,28 @@ const performIssue = async (
         message: 'The final job card could not be stored, so it was not sent. Try again.',
       },
     ]);
+  }
+
+  /*
+   * A COURIER COLLECTION ISSUES TWO DOCUMENTS (PARTS-03/04): this priced job
+   * card, and the Delivery Note the courier signed — stored, proved and
+   * recorded here, before anything is sent. If it cannot be, this throws and
+   * the issue is refused as a whole.
+   */
+  if (issuesDeliveryNote(finalJob)) {
+    await issueDeliveryNote(
+      context,
+      {
+        job: finalJob,
+        customer: view.customer,
+        site: view.site,
+        contact: view.contact,
+        settings: view.settings,
+        users: view.users,
+      },
+      document.storageKey,
+      document.generatedAt,
+    );
   }
 
   await audit(context, {

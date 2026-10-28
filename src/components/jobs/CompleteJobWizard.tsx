@@ -11,6 +11,7 @@ import {
   isJobTechnician,
   signatoryLabelsFor,
   type Job,
+  requiresDeliveryNote,
 } from '@/domain';
 import type { JobView } from '@/application/job-view';
 import {
@@ -115,6 +116,8 @@ export const CompleteJobWizard = ({
   const currentUser = useCurrentUser();
   const definition = getJobTypeDefinition(job.jobType);
   const labels = signatoryLabelsFor(job.jobType);
+  // PARTS-03/04: a courier collection recorded at the collection step signs its Delivery Note.
+  const courierSigning = requiresDeliveryNote(job);
   const correcting = mode === 'correct';
 
   const steps = useMemo<readonly Step[]>(() => {
@@ -923,18 +926,33 @@ export const CompleteJobWizard = ({
         </Card>
       )}
 
-      {step.id === 'signature' && noSignal && heldMessage === null && (
+      {/*
+        A COURIER COLLECTION IS SIGNED ON ITS DELIVERY NOTE (PARTS-03/04): the
+        courier is shown the price-less Delivery Note — with or without a
+        signal — and signs it ONCE. That one signature is then carried by the
+        priced job card, which goes to the customer and the office.
+      */}
+      {step.id === 'signature' && (noSignal || courierSigning) && heldMessage === null && (
         <Card>
           <CardHeader
-            title="No signal — the job card the customer is signing"
-            description="Show the customer this document. With no signal the signature or refusal is held on this tablet, tied to exactly this job card, and checked against EJE’s copy when the signal returns."
+            title={
+              courierSigning
+                ? 'The Delivery Note the courier is signing'
+                : 'No signal — the job card the customer is signing'
+            }
+            description={
+              courierSigning
+                ? 'Show the courier this Delivery Note: the goods and quantities, no prices. They sign once, below. The same signature is carried by the priced job card, which goes to the customer and the office — the courier never signs it separately.' +
+                  (noSignal ? ' With no signal the signature is held on this tablet, tied to exactly this Delivery Note, and checked against EJE’s copy when the signal returns.' : '')
+                : 'Show the customer this document. With no signal the signature or refusal is held on this tablet, tied to exactly this job card, and checked against EJE’s copy when the signal returns.'
+            }
           />
           <div className="mt-4">
             <JobCardPdfPreview
               view={view}
               photoImages={photoImages ?? undefined}
               onRendered={setPresented}
-              caption="The document the customer is being asked to sign."
+              caption={courierSigning ? 'The Delivery Note the courier is signing.' : 'The document the customer is being asked to sign.'}
             />
           </div>
         </Card>

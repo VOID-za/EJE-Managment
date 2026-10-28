@@ -785,27 +785,36 @@ export const isFinalized = (job: Pick<Job, 'signature' | 'status'>): boolean =>
  * status alone cannot tell a signed job from a refused one.
  */
 /**
- * NO PART CHANGES ONCE A TEST & REPAIR JOB IS COMPLETED. TR-01 (the real-world
- * reviewer, 28 October 2026).
+ * NO PART CHANGES ONCE A JOB IS COMPLETED. TR-01 (the real-world reviewer), and
+ * the owner's decision of 28 October 2026 extending it from Test & Repair to
+ * every job type that has an In Progress stage: breakdown, installation,
+ * service and test & repair.
  *
  * "Completed" is the moment the technician pressed Complete job: the job is in
  * `completion` (the close-out wizard) or `customer_signature`. From there the
- * parts on a workshop repair are what the customer is about to be shown and
- * sign for, so adding, changing or removing one is refused — on the server and
- * on the screens alike. To change a part, the technician cancels completion
- * (COMPLETE-CANCEL-1), which returns the job to In Progress with everything
- * kept, and completes again.
+ * parts are what the customer is about to be shown and sign for, so adding,
+ * changing or removing one is refused — on the server, on every mutation path,
+ * and on the screens alike. The ONE way back is the legitimate transition:
+ * Cancel completion (COMPLETE-CANCEL-1) returns the job to In Progress with
+ * everything kept, and parts open again there. Nothing reopens a job merely to
+ * change a part.
  *
- * Narrow on purpose. Before completion (`open`, `in_progress`,
+ * Unchanged around it. Before completion (`open`, `in_progress`,
  * `awaiting_spares`) parts are entered as always. After the signature the
- * signed-record rule already refuses every change. In `review` a refused job
- * card is the office's to correct (the refusal workflow), which this does not
- * touch. Other job types are unchanged: the reviewer asked about Test & Repair,
- * and a Parts job is processed AT completion by the office — its parts are the
- * whole of its work.
+ * signed-record rule already refuses every change, so a signed job card cannot
+ * be repriced. In `review` a refused job card is the office's to correct (the
+ * refusal workflow), which this does not touch.
+ *
+ * THE ONE EXCEPTION, FROM THE ARCHITECTURE: a Parts job (`officeProcessed`)
+ * has no In Progress stage. It is raised straight into `completion`, where the
+ * office records the goods — its parts ARE its work there — and Cancel
+ * completion is refused for it (`not_applicable_to_job_type`), so locking its
+ * parts at `completion` would leave no way to record them at all. Its parts are
+ * locked by the signature, as before.
  */
 export const partsLockedAfterCompletion = (job: Pick<Job, 'jobType' | 'status'>): boolean =>
-  job.jobType === 'test_and_repair' && (job.status === 'completion' || job.status === 'customer_signature');
+  !getJobTypeDefinition(job.jobType).officeProcessed &&
+  (job.status === 'completion' || job.status === 'customer_signature');
 
 export const canEditJobRecord = (
   role: UserRole,

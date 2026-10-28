@@ -1,4 +1,5 @@
-import type { Job } from '@/domain';
+import { requiresDeliveryNote, type Job } from '@/domain';
+import { buildDeliveryNoteModel, identifiedDeliveryNoteContent } from './delivery-note';
 import { buildJobCardModel, type JobCardModel, type JobCardModelInput } from './model';
 
 /**
@@ -48,7 +49,18 @@ import { buildJobCardModel, type JobCardModel, type JobCardModelInput } from './
  */
 export const DOCUMENT_IDENTITY_VERSION = 'jcm1';
 
-export const DOCUMENT_IDENTITY_PATTERN = /^jcm1:[0-9a-f]{64}$/;
+/**
+ * A COURIER COLLECTION IS SIGNED ON ITS DELIVERY NOTE (the owner's decision of
+ * 28 October 2026, PARTS-03/04). So for such a job the document the signer was
+ * shown — and therefore the document identified — is the Delivery Note, under
+ * its own version prefix. An older tablet build that identified the job card
+ * for a courier collection sends a `jcm1:` identity; the server computes a
+ * `dln1:` one, the two never match, and the held signature is REFERRED to
+ * Field Captures — never attached to a document the courier did not see.
+ */
+export const DELIVERY_NOTE_IDENTITY_VERSION = 'dln1';
+
+export const DOCUMENT_IDENTITY_PATTERN = /^(jcm1|dln1):[0-9a-f]{64}$/;
 
 export const isDocumentIdentity = (value: string): boolean => DOCUMENT_IDENTITY_PATTERN.test(value);
 
@@ -115,6 +127,21 @@ export const sha256Hex = async (bytes: Uint8Array): Promise<string> =>
 export const documentIdentityFor = async (
   input: Omit<JobCardModelInput, 'generatedAt'>,
 ): Promise<string> => {
+  if (requiresDeliveryNote(input.job)) {
+    const note = buildDeliveryNoteModel(
+      {
+        job: input.job,
+        customer: input.customer,
+        site: input.site,
+        contact: input.contact,
+        settings: input.settings,
+        users: input.users,
+      },
+      '1970-01-01T00:00:00.000Z',
+    );
+    const canonical = canonicalJson(identifiedDeliveryNoteContent(note));
+    return `${DELIVERY_NOTE_IDENTITY_VERSION}:${await sha256Hex(new TextEncoder().encode(canonical))}`;
+  }
   const model = buildJobCardModel({ ...input, generatedAt: '1970-01-01T00:00:00.000Z' });
   const canonical = canonicalJson(identifiedContent(model, input.job));
   const digest = await sha256Hex(new TextEncoder().encode(canonical));

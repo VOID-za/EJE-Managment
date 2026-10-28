@@ -2923,10 +2923,19 @@ const assertNoPrice = (text, what) => {
 };
 
 await step('the courier signs; the job card keeps its prices and the separate delivery note has none', async () => {
+  // The owner's decision: the courier is shown — and signs — the Delivery Note, once.
+  await page.getByText('The Delivery Note the courier is signing').first().waitFor({ timeout: 15000 });
+  // The note renders asynchronously ABOVE the pad: wait for it, so the pad does
+  // not move while the signature is being drawn.
+  await page.getByTestId('job-card-preview').first().waitFor({ timeout: 20000 });
+  await page.waitForTimeout(500);
   await page.getByLabel('Collector name').fill('Johan');
   await page.getByLabel('Collector surname').fill('Pretorius');
 
+  // The Delivery Note card sits above the pad, so the pad may start below the
+  // fold: bring it into view before measuring where to draw.
   const pad = page.locator('div.touch-none').first();
+  await pad.scrollIntoViewIfNeeded();
   const box = await pad.boundingBox();
   await page.mouse.move(box.x + 60, box.y + 110);
   await page.mouse.down();
@@ -2951,9 +2960,11 @@ await step('the courier signs; the job card keeps its prices and the separate de
   }
   // The courier's document is the separate delivery note: goods, no money.
   const note = await deliveryNoteText('EJE-1059');
-  for (const expected of ['DELIVERY NOTE', 'DAW-4471', 'Courier collection']) {
+  // The one signature, on the note the courier signed, as issued and stored.
+  for (const expected of ['DELIVERY NOTE', 'DAW-4471', 'Courier collection', 'Johan']) {
     if (!note.toUpperCase().includes(expected.toUpperCase())) throw new Error(`the delivery note omits "${expected}"`);
   }
+  if (!card.includes('Delivery Note')) throw new Error('the priced job card does not say the courier signed on the Delivery Note');
   assertNoPrice(note, 'the delivery note');
   await page.screenshot({ path: `${shots}/30-courier-document.png`, fullPage: false });
 });
@@ -4042,10 +4053,10 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   if ((await form.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
   await form.getByLabel('Customer or Workshop').selectOption('__workshop__');
   await form.getByLabel('OT (hours)').fill('2');
-  await form.getByLabel('DT (hours)').fill('0.5');
+  await form.getByLabel('D/T (hours)').fill('0.5');
   await form.getByLabel('Callout (R)').fill('450');
-  await form.getByLabel('Internal km').fill('12.5');
-  await form.getByLabel('Customer km').fill('0');
+  await form.getByLabel('Int Km').fill('12.5');
+  await form.getByLabel('Cust Km').fill('0');
   await form.getByTestId('save-timesheet-line').click();
   await todayRow.getByTestId('timesheet-line').filter({ hasText: 'Workshop' }).waitFor({ timeout: 10000 });
   await todayRow.getByText('R 450,00').first().waitFor({ timeout: 5000 }).catch(async () => {
@@ -4053,7 +4064,9 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
     if (!/450[,.]00/u.test(text)) throw new Error(`the call-out amount is not shown: ${text}`);
   });
 
-  await page.getByTestId('timesheet-month-comment').fill('Workshop rebuilds all week.');
+  // The From/To dates ARE the period (the owner, 28 October 2026).
+  await page.getByTestId('timesheet-period-label').waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week.');
   await page.getByTestId('timesheet-save').click();
   await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
 
@@ -4080,6 +4093,9 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   }
   await page.getByTestId('preview-close').click();
   await signInAsMasterIfNeeded();
+  // The office was told, through the bell (the existing notifications).
+  await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  await page.getByText('Timesheet sent to the office').first().waitFor({ timeout: 10000 });
 });
 
 /*

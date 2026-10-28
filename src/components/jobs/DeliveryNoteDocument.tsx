@@ -1,4 +1,5 @@
 import type { DeliveryNoteModel } from '@/lib/job-card/delivery-note';
+import { SignatureDisplay } from './SignaturePad';
 
 /**
  * THE DELIVERY NOTE, DRAWN BY THE BROWSER. PARTS-04.
@@ -59,10 +60,27 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
       </tbody>
     </table>
     <p className="mt-3 text-[11px] text-steel-500">{model.priceNote}</p>
-    {model.signedFor !== null && <p className="mt-1 text-[11px]">{model.signedFor}</p>}
-    <div className="mt-10 grid grid-cols-2 gap-8 text-[11px] text-steel-500">
-      <p className="border-t border-steel-300 pt-1">Collected by (courier) — name, signature, date</p>
-      <p className="border-t border-steel-300 pt-1">Released by (EJE) — name, signature, date</p>
-    </div>
+    {model.signature !== null ? (
+      <section className="mt-6" data-testid="delivery-note-signature">
+        <p className="text-[10px] font-bold tracking-wide text-steel-500 uppercase">Courier acceptance</p>
+        <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <p>{model.signature.declaration}</p>
+            <p><span className="text-steel-500">Name </span>{model.signature.name}</p>
+            <p><span className="text-steel-500">Signed </span>{model.signature.signedAt}</p>
+            <p><span className="text-steel-500">Signature reference </span>{model.signature.reference}</p>
+          </div>
+          <div>
+            <SignatureDisplay pathData={model.signature.signatureData} />
+            <p className="mt-1 text-[10px] text-steel-500">Courier signature — the same signature is on the priced job card</p>
+          </div>
+        </div>
+      </section>
+    ) : (
+      <div className="mt-10 grid grid-cols-2 gap-8 text-[11px] text-steel-500">
+        <p className="border-t border-steel-300 pt-1">Collected by (courier) — name, signature, date</p>
+        <p className="border-t border-steel-300 pt-1">Released by (EJE) — name, signature, date</p>
+      </div>
+    )}
   </article>
 );

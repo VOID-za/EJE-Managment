@@ -1,4 +1,5 @@
 import {
+  requiresDeliveryNote,
   buildPartsDocument,
   jobDetailLabel,
   calculateJobTotals,
@@ -27,6 +28,7 @@ import {
   type User,
 } from '@/domain';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
+import { courierSignatureReference } from './delivery-note';
 
 /**
  * The EJE job card, as one canonical document.
@@ -604,6 +606,24 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
             ],
             signatureData: job.signature.strokeData,
             caption: job.jobType === 'parts' ? 'Collector signature' : 'Customer signature',
+            /*
+             * A COURIER COLLECTION: THE ONE SIGNATURE, GIVEN ON THE DELIVERY NOTE.
+             * PARTS-03/04. The courier signed once, on the Delivery Note they were
+             * shown; this priced card carries that same signature and says so,
+             * with the reference both documents print — it never implies the
+             * courier signed the job card separately.
+             */
+            ...(requiresDeliveryNote(job)
+              ? {
+                  caption: 'Courier signature — given once, on the Delivery Note',
+                  rows: [
+                    { label: 'Name', value: `${job.signature.customerName} ${job.signature.customerSurname}` },
+                    { label: 'Signed', value: formatDateTime(job.signature.signedAt) },
+                    { label: 'Signed on', value: 'The Delivery Note for this courier collection (one signature for both documents)' },
+                    { label: 'Signature reference', value: courierSignatureReference(job) ?? '' },
+                  ],
+                }
+              : {}),
           },
 
     // The customer's refusal, frozen onto the document exactly as a signature

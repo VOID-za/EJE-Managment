@@ -638,6 +638,32 @@ const v31ToV32 = (data: Loose): Loose => ({
   timesheetMonths: Array.isArray(data.timesheetMonths) ? data.timesheetMonths : [],
 });
 
+/** The owner's decisions of 28 October 2026: a chosen period, and issued delivery notes. */
+const monthEnd = (month: string): string => {
+  const [year, index] = month.split('-').map(Number) as [number, number];
+  return `${month}-${String(new Date(Date.UTC(year, index, 0)).getUTCDate()).padStart(2, '0')}`;
+};
+const v32ToV33 = (data: Loose): Loose => {
+  const { timesheetMonths, ...rest } = data as Loose & { timesheetMonths?: unknown };
+  const months = Array.isArray(timesheetMonths) ? (timesheetMonths as Record<string, unknown>[]) : [];
+  return {
+    ...rest,
+    timesheetPeriods: Array.isArray(data.timesheetPeriods)
+      ? data.timesheetPeriods
+      : months.map(({ month, snapshot, ...row }) => {
+          const from = `${String(month)}-01`;
+          const to = monthEnd(String(month));
+          return {
+            ...row,
+            from,
+            to,
+            snapshot: snapshot === null || snapshot === undefined ? null : { ...(snapshot as Record<string, unknown>), from, to },
+          };
+        }),
+    deliveryNoteDocuments: Array.isArray(data.deliveryNoteDocuments) ? data.deliveryNoteDocuments : [],
+  };
+};
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -663,6 +689,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   29: v29ToV30,
   30: v30ToV31,
   31: v31ToV32,
+  32: v32ToV33,
 };
 
 /**

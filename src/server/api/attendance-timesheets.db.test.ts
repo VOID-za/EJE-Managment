@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Database } from '@/db/client';
 import * as schema from '@/db/schema';
 import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
@@ -21,6 +23,13 @@ const url = testDatabaseUrl();
 const describeDb = url === null ? describe.skip : describe;
 
 const PASSWORD = 'a-real-test-password';
+
+/** A calendar date `days` from another, by the calendar. */
+const shift = (date: string, days: number): string => {
+  const at = new Date(`${date}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+};
 
 const postgresMessage = async (work: Promise<unknown>): Promise<string> => {
   try {
@@ -185,31 +194,98 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       .toHaveLength(0);
   });
 
-  it('Send to office is stored once with its snapshot, and the database refuses to rewrite or delete it (migration 0037)', async () => {
+  it('Send to office stores the chosen period once with its snapshot; the database refuses to rewrite, delete or overlap it (migration 0038)', async () => {
     const today = businessToday();
-    const month = today.slice(0, 7);
+    const from = shift(today, -2);
     const tech = await signIn('sipho@example-test.co.za');
     expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
       date: today, customerName: '', workshop: true, overtimeHours: 1, doubleHours: 0,
     })).status).toBe(200);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/comment`, { comment: 'Workshop week.' })).status).toBe(200);
-    const sent = await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/submit`, {});
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/comment`, { from, to: today, comment: 'Workshop days.' })).status).toBe(200);
+    const sent = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today });
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/months/${month}/submit`, {})).status).toBe(422);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(422);
 
-    const rows = await db.select().from(schema.timesheetMonths).where(eq(schema.timesheetMonths.userId, IDS.technician));
+    const rows = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ month, comment: 'Workshop week.', submittedBy: IDS.technician });
+    expect(rows[0]).toMatchObject({ periodFrom: from, periodTo: today, comment: 'Workshop days.', submittedBy: IDS.technician });
     expect(rows[0]?.submittedAt).not.toBeNull();
     expect((rows[0]?.snapshot as { entries: unknown[] }).entries).toHaveLength(1);
 
-    // The write-once trigger: no script or bug can change or un-send it.
+    // The office was notified, once, through the existing notifications table.
+    const told = await db.select().from(schema.notifications).where(eq(schema.notifications.type, 'timesheet_submitted'));
+    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.master].sort());
+
+    // The guard trigger: no script or bug can change, un-send or overlap it.
     expect(await postgresMessage(
-      db.update(schema.timesheetMonths).set({ comment: 'rewritten' }).where(eq(schema.timesheetMonths.id, rows[0]!.id)),
+      db.update(schema.timesheetPeriods).set({ comment: 'rewritten' }).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
     )).toContain('sent to the office');
     expect(await postgresMessage(
-      db.delete(schema.timesheetMonths).where(eq(schema.timesheetMonths.id, rows[0]!.id)),
+      db.delete(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
     )).toContain('sent to the office');
+    expect(await postgresMessage(
+      db.insert(schema.timesheetPeriods).values({
+        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: shift(today, -5), periodTo: from,
+        updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
+      }),
+    )).toContain('overlaps a period already sent');
+    // From after To is refused by the table itself.
+    expect(await postgresMessage(
+      db.insert(schema.timesheetPeriods).values({
+        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: today, periodTo: shift(today, -3),
+        updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
+      }),
+    )).toContain('timesheet_periods_range_valid');
+  });
+
+  it('0038 carries a month 0037 may hold across as the period it covered, exactly', async () => {
+    const id = crypto.randomUUID();
+    await db.insert(schema.timesheetMonths).values({
+      id, userId: IDS.technician, month: '2026-02', comment: 'February.', updatedBy: IDS.technician,
+      commentedAt: '2026-03-01T08:00:00.000Z', submittedAt: '2026-03-01T08:00:00.000Z', submittedBy: IDS.technician,
+      snapshot: { technicianName: 'Sipho', month: '2026-02', comment: 'February.', entries: [] },
+    });
+    const migration = readFileSync(join(process.cwd(), 'src/db/migrations/0038_timesheet_periods_delivery_notes.sql'), 'utf8');
+    const copy = migration.split('--> statement-breakpoint').find((statement) => statement.includes('FROM "timesheet_months"'));
+    expect(copy).toBeDefined();
+    await db.execute(sql.raw(copy!));
+    const [period] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, id));
+    expect(period).toMatchObject({ periodFrom: '2026-02-01', periodTo: '2026-02-28', comment: 'February.', submittedBy: IDS.technician });
+    expect(period?.snapshot).toMatchObject({ from: '2026-02-01', to: '2026-02-28', comment: 'February.' });
+    // Run again (a re-applied migration): nothing doubles.
+    await db.execute(sql.raw(copy!));
+    expect(await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician))).toHaveLength(1);
+  });
+
+  it('an issued Delivery Note is one per job and write-once (migration 0038)', async () => {
+    const master = await signIn('elmarie@example-test.co.za');
+    const created = await master.post<{ id: string }>('/api/jobs', {
+      customerId: IDS.customer, siteId: IDS.site, contactId: IDS.contact, machineId: null, jobType: 'parts',
+      priority: null, scheduledDate: null, scheduledEndDate: null, orderNumber: '', referenceNumber: '',
+      faultDescription: '', primaryTechnicianId: null, courierCollection: false, deliveryNote: '',
+    });
+    expect(created.status, JSON.stringify(created.error)).toBe(200);
+    const row = {
+      jobId: created.data.id, fileName: 'EJE-X-Delivery-Note.pdf', pageCount: 1, sizeBytes: 100,
+      generatedAt: '2026-10-28T10:00:00.000Z', jobCardDocumentKey: 'jobcards/final/EJE-X.pdf',
+      signedByName: 'Johan Pretorius', signedAt: '2026-10-28T09:59:00.000Z', signatureSha256: 'a'.repeat(64),
+    };
+    const id = crypto.randomUUID();
+    await db.insert(schema.deliveryNoteDocuments).values({ id, storageKey: 'jobcards/final/EJE-X-delivery-note.pdf', ...row });
+    expect(await postgresMessage(
+      db.insert(schema.deliveryNoteDocuments).values({ id: crypto.randomUUID(), storageKey: 'other-key.pdf', ...row }),
+    )).toContain('delivery_note_documents_job_key');
+    expect(await postgresMessage(
+      db.update(schema.deliveryNoteDocuments).set({ signedByName: 'Somebody else' }).where(eq(schema.deliveryNoteDocuments.id, id)),
+    )).toContain('write-once');
+    expect(await postgresMessage(
+      db.delete(schema.deliveryNoteDocuments).where(eq(schema.deliveryNoteDocuments.id, id)),
+    )).toContain('write-once');
+    // A signature is recorded whole or not at all.
+    expect(await postgresMessage(
+      db.insert(schema.deliveryNoteDocuments).values({ ...row, id: crypto.randomUUID(), storageKey: 'third.pdf', jobId: created.data.id, signatureSha256: null }),
+    )).toMatch(/delivery_note_documents_(signature_whole|job_key)/u);
   });
 
   it('the database refuses a reason on a present day, an unknown reason, and a Workshop line naming a customer', async () => {

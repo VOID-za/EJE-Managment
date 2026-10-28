@@ -447,6 +447,32 @@ describe('v31 -> v32: the reviewer’s timesheet and attendance fields (28 Octob
     expect(migrated.timesheetEntries?.[0]).toMatchObject({
       normalHours: 8, callouts: 1, workshop: false, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
     });
-    expect(migrated.timesheetMonths).toEqual([]);
+    expect(migrated.timesheetPeriods).toEqual([]);
+    expect(migrated.deliveryNoteDocuments).toEqual([]);
+  });
+});
+
+describe('v32 -> v33: a chosen period replaces the month; issued delivery notes (28 October 2026)', () => {
+  it('carries a month across as the period it covered, with its submission and snapshot, and drops nothing else', () => {
+    const v32 = {
+      attendance: [],
+      timesheetEntries: [],
+      timesheetMonths: [{
+        id: 'tsm-1', userId: 'user-tech-sipho', month: '2024-02', comment: 'February.',
+        updatedBy: 'user-tech-sipho', updatedAt: '2024-03-01T08:00:00.000Z',
+        submittedAt: '2024-03-01T08:00:00.000Z', submittedBy: 'user-tech-sipho',
+        snapshot: { technicianName: 'Sipho', month: '2024-02', comment: 'February.', entries: [] },
+      }],
+    };
+    const migrated = migrateDatabase(32, v32, SCHEMA_VERSION) as unknown as Record<string, unknown>;
+    expect(migrated.timesheetMonths).toBeUndefined();
+    expect(migrated.timesheetPeriods).toEqual([{
+      id: 'tsm-1', userId: 'user-tech-sipho', comment: 'February.',
+      updatedBy: 'user-tech-sipho', updatedAt: '2024-03-01T08:00:00.000Z',
+      submittedAt: '2024-03-01T08:00:00.000Z', submittedBy: 'user-tech-sipho',
+      from: '2024-02-01', to: '2024-02-29',
+      snapshot: { technicianName: 'Sipho', month: '2024-02', comment: 'February.', entries: [], from: '2024-02-01', to: '2024-02-29' },
+    }]);
+    expect(migrated.deliveryNoteDocuments).toEqual([]);
   });
 });

@@ -77,6 +77,47 @@ export const finalDocuments = pgTable(
 );
 
 /**
+ * THE COURIER'S DELIVERY NOTE, AS ISSUED. WRITE-ONCE. PARTS-03/04, migration 0038.
+ *
+ * Rendered and stored at the same moment as the priced job card it goes with
+ * (`final_documents`), for a courier collection only, and never regenerated.
+ * The courier signs ONCE — on the Delivery Note — and that one signature is the
+ * job's signature: `signature_sha256` is the SHA-256 of its stroke data, which
+ * the priced job card also prints, so the two documents can be tied to the same
+ * signing act without either pretending to a second one.
+ */
+export const deliveryNoteDocuments = pgTable(
+  'delivery_note_documents',
+  {
+    id: primaryId(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'restrict' }),
+    fileName: text('file_name').notNull(),
+    storageKey: text('storage_key').notNull(),
+    pageCount: integer('page_count').notNull(),
+    sizeBytes: integer('size_bytes').notNull().default(0),
+    checksumSha256: text('checksum_sha256'),
+    generatedAt: instant('generated_at').notNull(),
+    generatedBy: uuid('generated_by').references(() => users.id),
+    /** The priced job card this note accompanies: `final_documents.storage_key`, so named not to be counted twice by the backup scan. */
+    jobCardDocumentKey: text('job_card_document_key').notNull(),
+    signedByName: text('signed_by_name'),
+    signedAt: instant('signed_at'),
+    signatureSha256: text('signature_sha256'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('delivery_note_documents_job_key').on(table.jobId),
+    uniqueIndex('delivery_note_documents_storage_key_key').on(table.storageKey),
+    check(
+      'delivery_note_documents_signature_whole',
+      sql`(${table.signedAt} is null and ${table.signedByName} is null and ${table.signatureSha256} is null) or (${table.signedAt} is not null and ${table.signedByName} is not null and ${table.signatureSha256} is not null)`,
+    ),
+  ],
+);
+
+/**
  * Every attempt to get the customer's copy to them. APPEND-ONLY.
  *
  * One row per attempt, not a counter. The question the office asks is "we tried

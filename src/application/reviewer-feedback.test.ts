@@ -5,13 +5,13 @@ import { pdfPlainText } from '@/lib/pdf/inspect';
 import {
   defaultTimesheetRange,
   formatDayAndDate,
-  monthBounds,
-  monthOf,
-  monthsBetween,
+  formatPeriod,
   timesheetRangeProblem,
   weekdayOf,
 } from '@/lib/timesheet-dates';
-import { renderTimesheetPdf } from '@/services/simulated/timesheet-pdf';
+import { renderTimesheetPdf, TIMESHEET_PDF_COLUMNS, timesheetPdfCells } from '@/services/simulated/timesheet-pdf';
+import { formatCurrency } from '@/lib/format';
+
 import { SimulatedPdfService } from '@/services/simulated/pdf';
 import { renderJobCardPdf } from '@/components/jobs/job-card-pdf';
 import { recordAttendance } from './attendance-operations';
@@ -21,8 +21,8 @@ import {
   removeTimesheetEntry,
   saveTimesheetComment,
   saveTimesheetEntry,
-  saveTimesheetMonthComment,
-  submitTimesheetMonth,
+  saveTimesheetPeriodComment,
+  submitTimesheetPeriod,
 } from './timesheets';
 import {
   acceptJob,
@@ -59,9 +59,6 @@ const day = (offset: number): string => {
   date.setUTCDate(date.getUTCDate() - offset);
   return date.toISOString().slice(0, 10);
 };
-const thisMonth = monthOf(businessToday());
-/** A day in the current month that has already happened. */
-const firstOfMonth = `${thisMonth}-01`;
 
 const line = (date: string, overrides: Record<string, unknown> = {}) => ({
   date,
@@ -143,9 +140,9 @@ describe('TS-01 — a technician’s timesheet is theirs', () => {
     await expect(saveTimesheetEntry(harness.as(riaan), SIPHO, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
     expect((await loadTimesheet(harness.as(master), SIPHO, day(2), day(0))).editable).toBe(false);
     await expect(saveTimesheetEntry(harness.as(master), SIPHO, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
-    await expect(loadTimesheetDocument(harness.as(riaan), SIPHO, thisMonth)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
-    await expect(submitTimesheetMonth(harness.as(riaan), SIPHO, thisMonth)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
-    await expect(submitTimesheetMonth(harness.as(master), SIPHO, thisMonth)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(loadTimesheetDocument(harness.as(riaan), SIPHO, day(6), day(2))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(submitTimesheetPeriod(harness.as(riaan), SIPHO, day(6), day(2))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(submitTimesheetPeriod(harness.as(master), SIPHO, day(6), day(2))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
   });
 });
 
@@ -157,10 +154,10 @@ describe('TS-04 / TS-05 — dates, order and the day of the week', () => {
     expect(formatDayAndDate('2026-10-26')).toBe('Mon 26 Oct 2026');
   });
 
-  it('month arithmetic covers leap years and year ends', () => {
-    expect(monthBounds('2024-02')).toEqual({ from: '2024-02-01', to: '2024-02-29' });
-    expect(monthBounds('2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' });
-    expect(monthsBetween('2026-11-20', '2027-01-03')).toEqual(['2026-11', '2026-12', '2027-01']);
+  it('a period prints as its two days, across a year end, a leap day and a single day', () => {
+    expect(formatPeriod('2026-12-28', '2027-01-03')).toBe('Mon 28 Dec 2026 – Sun 3 Jan 2027');
+    expect(formatPeriod('2024-02-28', '2024-03-01')).toBe('Wed 28 Feb 2024 – Fri 1 Mar 2024');
+    expect(formatPeriod('2026-10-26', '2026-10-26')).toBe('Mon 26 Oct 2026');
   });
 
   it('the page opens on the first of the month to today, and an impossible range is said, not queried', () => {
@@ -257,91 +254,151 @@ describe('TS-09 — internal and customer kilometres', () => {
   });
 });
 
-describe('TS-10 / TS-12 — one comment for the timesheet; Save is not a submission', () => {
-  it('saves and changes the month’s comment; an unchanged comment writes nothing', async () => {
-    const saved = await saveTimesheetMonthComment(harness.as(sipho), SIPHO, thisMonth, 'Waited for the crane on the 14th.');
-    expect(saved).toMatchObject({ comment: 'Waited for the crane on the 14th.', submittedAt: null });
+/** A chosen period, inside the last week: the owner's From/To decision. */
+const FROM = day(6);
+const TO = day(2);
+
+describe('TS-10 / TS-12 — one comment for the timesheet period; Save is not a submission', () => {
+  it('saves and changes the period’s comment; an unchanged comment writes nothing', async () => {
+    const saved = await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Waited for the crane on the 14th.');
+    expect(saved).toMatchObject({ from: FROM, to: TO, comment: 'Waited for the crane on the 14th.', submittedAt: null });
     const before = (await events('timesheet_comment_saved')).length;
-    await saveTimesheetMonthComment(harness.as(sipho), SIPHO, thisMonth, 'Waited for the crane on the 14th.');
+    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Waited for the crane on the 14th.');
     expect((await events('timesheet_comment_saved')).length).toBe(before);
-    expect((await loadTimesheetDocument(harness.as(master), SIPHO, thisMonth)).comment).toBe('Waited for the crane on the 14th.');
-    await expect(saveTimesheetMonthComment(harness.as(master), SIPHO, thisMonth, 'x')).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    expect((await loadTimesheetDocument(harness.as(master), SIPHO, FROM, TO)).comment).toBe('Waited for the crane on the 14th.');
+    // The exact period: another range has its own comment.
+    expect((await loadTimesheetDocument(harness.as(master), SIPHO, FROM, day(1))).comment).toBe('');
+    await expect(saveTimesheetPeriodComment(harness.as(master), SIPHO, FROM, TO, 'x')).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
   });
 });
 
-describe('TS-02 / TS-03 / TS-14 — Send to office', () => {
-  it('records the submission once, audited, with the content frozen; the month is then read-only on every path', async () => {
-    const first = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(firstOfMonth));
-    await saveTimesheetMonthComment(harness.as(sipho), SIPHO, thisMonth, 'All in order.');
-    const sent = await submitTimesheetMonth(harness.as(sipho), SIPHO, thisMonth);
+describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () => {
+  it('records the submission once, audited, with the content frozen; the period is then read-only on every path', async () => {
+    const inside = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    const before = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
+    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'All in order.');
+    const sent = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(sent).toMatchObject({ from: FROM, to: TO, submittedBy: SIPHO });
     expect(sent.submittedAt).not.toBeNull();
-    expect(sent.submittedBy).toBe(SIPHO);
-    expect(sent.snapshot?.entries.map((entry) => entry.id)).toEqual([first.id]);
-    expect(sent.snapshot?.comment).toBe('All in order.');
+    // Exactly the lines inside the period, boundaries included, and the comment.
+    expect(sent.snapshot?.entries.map((entry) => entry.id)).toEqual([inside.id]);
+    expect(sent.snapshot).toMatchObject({ from: FROM, to: TO, comment: 'All in order.' });
     expect((await events('timesheet_submitted')).length).toBe(1);
 
     const refusedCode = { violations: [{ code: 'timesheet_submitted' }] };
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(firstOfMonth))).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(firstOfMonth, { overtimeHours: 3 }), entryId: first.id })).rejects.toMatchObject(refusedCode);
-    await expect(removeTimesheetEntry(harness.as(sipho), SIPHO, first.id)).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetMonthComment(harness.as(sipho), SIPHO, thisMonth, 'changed')).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetComment(harness.as(sipho), SIPHO, firstOfMonth, 'day note')).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)))).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(FROM))).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(TO))).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id })).rejects.toMatchObject(refusedCode);
+    await expect(removeTimesheetEntry(harness.as(sipho), SIPHO, inside.id)).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'changed')).rejects.toMatchObject(refusedCode);
+    await expect(saveTimesheetComment(harness.as(sipho), SIPHO, day(4), 'day note')).rejects.toMatchObject(refusedCode);
+    // A correction cannot move a line INTO the sent period either.
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4)), entryId: before.id })).rejects.toMatchObject(refusedCode);
+    // Days outside it stay open.
+    expect((await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1)))).date).toBe(day(1));
     // A second send — a double tap, a retry, another tab — is refused, not duplicated.
-    await expect(submitTimesheetMonth(harness.as(sipho), SIPHO, thisMonth)).rejects.toMatchObject(refusedCode);
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject(refusedCode);
     expect((await events('timesheet_submitted')).length).toBe(1);
 
     // The office reads exactly what was sent.
-    const document = await loadTimesheetDocument(harness.as(coordinator), SIPHO, thisMonth);
+    const document = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
     expect(document.submittedAt).toBe(sent.submittedAt);
     expect(document.comment).toBe('All in order.');
     expect(document.rows.filter((row) => row.recorded)).toHaveLength(1);
-    // And the sheet shows the month's days locked.
-    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, firstOfMonth, firstOfMonth);
-    expect(sheet.days[0]?.locked).toBe(true);
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, FROM, TO);
+    expect(sheet.days.every((entry) => entry.locked)).toBe(true);
+    expect(sheet.period).toMatchObject({ from: FROM, to: TO, submittedAt: sent.submittedAt });
   });
 
-  it('a correction cannot move a line out of, or into, a sent month', async () => {
-    const lastMonthDay = monthBounds(monthOf(day(40))).to;
-    if (monthOf(lastMonthDay) === thisMonth) return;
-    const old = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(lastMonthDay));
-    await submitTimesheetMonth(harness.as(sipho), SIPHO, monthOf(lastMonthDay));
-    await expect(
-      saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(0)), entryId: old.id }),
-    ).rejects.toMatchObject({ violations: [{ code: 'timesheet_submitted' }] });
+  it('a period sharing ANY day with a sent one is refused, so no work is sent twice', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    const overlap = { violations: [{ code: 'period_overlaps_submitted' }] };
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), FROM)).rejects.toMatchObject(overlap);
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, day(0))).rejects.toMatchObject(overlap);
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(5), day(3))).rejects.toMatchObject(overlap);
+    await expect(saveTimesheetPeriodComment(harness.as(sipho), SIPHO, day(10), day(0), 'x')).rejects.toMatchObject(overlap);
+    // The days either side are free: a period ending the day before is accepted.
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
+    const next = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(9), day(7));
+    expect(next).toMatchObject({ from: day(9), to: day(7) });
+    // And the view says which sent periods overlap a wider range.
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(12), day(0));
+    expect(sheet.period.overlapsSent).toEqual([{ from: day(9), to: day(7) }, { from: FROM, to: TO }]);
   });
 
-  it('a month that has not started cannot be sent', async () => {
-    const [year, index] = thisMonth.split('-').map(Number) as [number, number];
-    const next = index === 12 ? `${year + 1}-01` : `${year}-${String(index + 1).padStart(2, '0')}`;
-    await expect(submitTimesheetMonth(harness.as(sipho), SIPHO, next)).rejects.toMatchObject({ violations: [{ code: 'month_in_future' }] });
+  it('validates the period: From after To refused, a To after today refused, at most 92 days', async () => {
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, FROM)).rejects.toMatchObject({ violations: [{ code: 'invalid_range' }] });
+    const tomorrow = (() => { const d = new Date(`${businessToday()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(2), tomorrow)).rejects.toMatchObject({ violations: [{ code: 'period_in_future' }] });
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(120), day(0))).rejects.toMatchObject({ violations: [{ code: 'range_too_long' }] });
+    // A one-day period is a period.
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(0), day(0))).toMatchObject({ from: day(0), to: day(0) });
+  });
+
+  it('tells the office — every active Master and Coordinator, once — only after the submission is saved', async () => {
+    const officeIds = (await harness.repos.users.list())
+      .filter((user) => (user.role === 'master' || user.role === 'coordinator') && user.active)
+      .map((user) => user.id);
+    const count = async () => {
+      let total = 0;
+      for (const id of officeIds) total += (await harness.repos.notifications.list(id)).filter((n) => n.type === 'timesheet_submitted').length;
+      return total;
+    };
+    // A refused send notifies nobody.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, FROM)).rejects.toBeDefined();
+    expect(await count()).toBe(0);
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(await count()).toBe(officeIds.length);
+    const one = (await harness.repos.notifications.list(officeIds[0]!)).find((n) => n.type === 'timesheet_submitted');
+    expect(one?.title).toContain('Sipho');
+    expect(one?.body).toContain(formatDayAndDate(FROM));
+    expect(one?.link).toBe('/timesheets');
+    // A second attempt is refused and notifies nobody again; nor is a technician told.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toBeDefined();
+    expect(await count()).toBe(officeIds.length);
+    expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_submitted')).toBe(false);
   });
 });
 
 describe('TS-11 / PDF-01…03 — Preview and the PDF Layout', () => {
-  it('reading the document writes nothing: no month row, no audit event, no lock', async () => {
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(firstOfMonth));
+  it('reading the document writes nothing: no period row, no audit event, no lock', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const before = (await harness.repos.activity.list()).length;
-    await loadTimesheetDocument(harness.as(sipho), SIPHO, thisMonth);
+    await loadTimesheetDocument(harness.as(sipho), SIPHO, FROM, TO);
     expect((await harness.repos.activity.list()).length).toBe(before);
-    expect(await harness.repos.attendance.findMonth(SIPHO, thisMonth)).toBeNull();
+    expect(await harness.repos.attendance.findPeriod(SIPHO, FROM, TO)).toBeNull();
   });
 
-  it('prints Time Sheet, the Technician Name, the Month, the seven columns and the Comments box', async () => {
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(firstOfMonth, { customerName: '', workshop: true, overtimeHours: 2, doubleHours: 1, calloutAmount: 45000, internalKm: 10, customerKm: 0 }));
-    await saveTimesheetMonthComment(harness.as(sipho), SIPHO, thisMonth, 'Bench work all day.');
-    const document = await loadTimesheetDocument(harness.as(sipho), SIPHO, thisMonth);
-    const text = pdfPlainText(renderTimesheetPdf(document, { companyName: 'EJE Industrial Electronics', generatedAt: '2026-10-28T10:00:00.000Z' }).bytes);
+  it('prints Time Sheet, the Technician Name, the Period, EXACTLY the seven columns and the Comments box', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4), { customerName: '', workshop: true, overtimeHours: 2, doubleHours: 1, calloutAmount: 45000, internalKm: 10, customerKm: 37.5 }));
+    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Bench work all day.');
+    const document = await loadTimesheetDocument(harness.as(sipho), SIPHO, FROM, TO);
+    const text = pdfPlainText(renderTimesheetPdf(document, { generatedAt: '2026-10-28T10:00:00.000Z' }).bytes);
     for (const expected of [
-      'Time Sheet', 'Technician Name', 'Sipho', 'Month', document.monthLabel,
-      'Date', 'Customer', 'OT', 'DT', 'Callout', 'Km', 'Hm', 'Comments', 'Bench work all day.',
-      'Workshop', formatDayAndDate(firstOfMonth), '2.00', '1.00', '10.0 / 0.0',
+      // The period's two ends (the extractor drops the dash between them).
+      'Time Sheet', 'Technician Name', 'Sipho', 'Period', formatDayAndDate(FROM), formatDayAndDate(TO),
+      'Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km', 'Comments', 'Bench work all day.',
+      'Workshop', formatDayAndDate(day(4)), '2.00', '1.00', '10.0', '37.5',
     ]) {
       expect(text, expected).toContain(expected);
     }
+    // Hm was never a requested field; NT is no longer entered.
+    expect(text).not.toMatch(/\bHm\b/u);
     expect(text).not.toMatch(/\bNT\b/u);
-    // Every day of the month is on it, oldest first.
-    expect(document.rows[0]?.date).toBe(firstOfMonth);
-    expect(new Set(document.rows.map((row) => row.date)).size).toBe(Number(monthBounds(thisMonth).to.slice(8)));
+    // The header, in order, is exactly the seven columns.
+    expect(TIMESHEET_PDF_COLUMNS.map((column) => column.header)).toEqual(['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']);
+    // Every day of the period is on it, oldest first, boundaries included.
+    expect(document.rows[0]?.date).toBe(FROM);
+    expect(document.rows.at(-1)?.date).toBe(TO);
+    expect(new Set(document.rows.map((row) => row.date)).size).toBe(5);
+    // The row's cells align with the columns.
+    const row = document.rows.find((candidate) => candidate.recorded)!;
+    expect(timesheetPdfCells(row, true)).toEqual({
+      date: formatDayAndDate(day(4)), customer: 'Workshop', ot: '2.00', dt: '1.00', callout: formatCurrency(45000), intKm: '10.0', custKm: '37.5',
+    });
   });
 });
 
@@ -369,7 +426,7 @@ const workshopJob = async (opts: { courier?: boolean; jobType?: 'test_and_repair
   return job;
 };
 
-describe('TR-01 — no part changes once a Test & Repair job is completed', () => {
+describe('TR-01 — no part changes once a job is completed (every job type with an In Progress stage)', () => {
   it('adding, changing and removing a part are refused in completion; cancelling completion opens them again', async () => {
     let job = await workshopJob();
     const tech = harness.as(sipho);
@@ -388,11 +445,14 @@ describe('TR-01 — no part changes once a Test & Repair job is completed', () =
     expect(job.parts).toHaveLength(2);
   });
 
-  it('only parts, and only on Test & Repair: labour still flows the old way, a breakdown is unchanged', async () => {
+  it('a breakdown is locked the same way now (the owner, 28 October 2026); labour is not part of the rule', async () => {
     let breakdown = await workshopJob({ jobType: 'breakdown' });
     breakdown = await startCompletion(harness.as(sipho), breakdown);
-    const added = await addPart(harness.as(sipho), breakdown, { partNumber: 'B', description: 'allowed', quantity: 1, unitPrice: 100 });
-    expect(added.parts).toHaveLength(2);
+    await expect(
+      addPart(harness.as(sipho), breakdown, { partNumber: 'B', description: 'late', quantity: 1, unitPrice: 100 }),
+    ).rejects.toMatchObject({ violations: [{ code: 'parts_locked_after_completion' }] });
+    const withLabour = await addLabour(harness.as(sipho), breakdown, { date: day(0), rateType: 'normal', hours: 1, description: '' });
+    expect(withLabour.labour).toHaveLength(2);
   });
 });
 

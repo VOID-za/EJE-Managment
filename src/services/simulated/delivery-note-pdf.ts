@@ -1,5 +1,6 @@
 import type { DeliveryNoteModel } from '@/lib/job-card/delivery-note';
 import { PdfBuilder, textWidth } from '@/lib/pdf/writer';
+import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
 import {
   BAND,
   BODY,
@@ -90,18 +91,60 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
   sheet.textRight(QTY - 3, model.totalQuantity, { font: 'bold', size: SIZE.body, colour: INK });
   sheet.move(GAP.section);
   sheet.paragraph(model.priceNote, { size: SIZE.small, colour: MUTED });
-  if (model.signedFor !== null) sheet.paragraph(model.signedFor, { size: SIZE.small, colour: BODY });
 
-  // Signatures on paper: the courier and EJE.
-  sheet.move(GAP.sectionLarge);
-  sheet.need(60);
   const half = (CONTENT_WIDTH - 30) / 2;
-  sheet.move(30);
-  sheet.pdf.line(MARGIN, sheet.cursor, MARGIN + half, sheet.cursor, 0.6, RULE);
-  sheet.pdf.line(MARGIN + half + 30, sheet.cursor, RIGHT, sheet.cursor, 0.6, RULE);
-  sheet.move(GAP.line);
-  sheet.text(MARGIN, 'Collected by (courier) — name, signature, date', { size: SIZE.small, colour: MUTED });
-  sheet.text(MARGIN + half + 30, 'Released by (EJE) — name, signature, date', { size: SIZE.small, colour: MUTED });
+  if (model.signature !== null) {
+    // THE COURIER'S ONE SIGNATURE, taken on this document (PARTS-03/04).
+    const boxHeight = 62;
+    sheet.move(GAP.sectionLarge);
+    sheet.need(boxHeight + 70);
+    sheet.sectionTitle('Courier acceptance');
+    const top = sheet.cursor;
+    sheet.paragraph(model.signature.declaration, { colour: BODY, width: half });
+    for (const [label, value] of [
+      ['Name', model.signature.name],
+      ['Signed', model.signature.signedAt],
+      ['Signature reference', model.signature.reference],
+    ] as const) {
+      sheet.need(GAP.line);
+      sheet.text(MARGIN, label, { size: SIZE.body, colour: MUTED });
+      sheet.text(MARGIN + 100, value, { size: SIZE.body, colour: BODY });
+      sheet.move(GAP.line);
+    }
+    const leftBottom = sheet.cursor;
+    const x = MARGIN + half + 30;
+    const boxTop = top + 10;
+    const boxBottom = boxTop - boxHeight;
+    sheet.pdf.rect(x, boxBottom, half, boxHeight, BAND);
+    sheet.pdf.line(x, boxTop, x + half, boxTop, 0.6, RULE);
+    sheet.pdf.line(x, boxBottom, x + half, boxBottom, 0.6, RULE);
+    sheet.pdf.line(x, boxTop, x, boxBottom, 0.6, RULE);
+    sheet.pdf.line(x + half, boxTop, x + half, boxBottom, 0.6, RULE);
+    const mark = signatureFacsimile(model.signature.signatureData);
+    if (mark.kind === 'path') {
+      sheet.pdf.normalisedPath(
+        mark.path,
+        { x: x + 10, y: boxBottom + 7, width: half - 20, height: boxHeight - 14 },
+        { colour: SIGNATURE_INK, width: 1.5 },
+      );
+    } else {
+      const centred = x + half / 2 - textWidth(mark.text, SIZE.signature, 'script') / 2;
+      sheet.pdf.text(centred, boxBottom + boxHeight / 2 - 5, mark.text, { font: 'script', size: SIZE.signature, colour: SIGNATURE_INK });
+    }
+    sheet.pdf.text(x, boxBottom - 11, 'Courier signature — the same signature is on the priced job card', { size: SIZE.tiny, colour: MUTED });
+    sheet.setCursor(Math.min(leftBottom, boxBottom - 11));
+    sheet.move(GAP.section);
+  } else {
+    // Not signed in the system yet: lines for signing on paper at the counter.
+    sheet.move(GAP.sectionLarge);
+    sheet.need(60);
+    sheet.move(30);
+    sheet.pdf.line(MARGIN, sheet.cursor, MARGIN + half, sheet.cursor, 0.6, RULE);
+    sheet.pdf.line(MARGIN + half + 30, sheet.cursor, RIGHT, sheet.cursor, 0.6, RULE);
+    sheet.move(GAP.line);
+    sheet.text(MARGIN, 'Collected by (courier) — name, signature, date', { size: SIZE.small, colour: MUTED });
+    sheet.text(MARGIN + half + 30, 'Released by (EJE) — name, signature, date', { size: SIZE.small, colour: MUTED });
+  }
 
   const pages = sheet.pdf.pageCount;
   for (let index = 0; index < pages; index += 1) {

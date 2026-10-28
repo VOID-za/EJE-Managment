@@ -41,6 +41,10 @@ const missingPhotos = (view: JobView, prepared: ReadonlyMap<string, PreparedPhot
     (photo) => photo.provenance !== 'simulated' && prepared.get(photo.id)?.kind !== 'image',
   ).length;
 import { PartsCollectionNote } from './PartsCollectionNote';
+import { DeliveryNoteDocument } from './DeliveryNoteDocument';
+import { requiresDeliveryNote } from '@/domain';
+import { buildDeliveryNoteModel, deliveryNoteFileName } from '@/lib/job-card/delivery-note';
+import { renderDeliveryNotePdf } from '@/services/simulated/delivery-note-pdf';
 import { RuleViolationNotice } from './RuleViolationNotice';
 
 /**
@@ -131,9 +135,11 @@ export const JobCardPdfPreview = ({
    * the signature are all separately mutable — so the key names them.
    */
   const { job } = view;
+  const courierNote = requiresDeliveryNote(job);
   const renderKey = [
     job.id,
     job.status,
+    job.courierCollection ? `courier:${job.waybillNumber}` : 'no-courier',
     job.labour.length,
     job.travel.length,
     job.parts.length,
@@ -168,7 +174,18 @@ export const JobCardPdfPreview = ({
         // The shared renderer (`renderJobCardPdf`): the same document the PDF
         // button on the review screens produces, and the one that is issued.
         const prepared = photoImages ?? (await loadPreviewPhotos(view));
-        const rendered = await renderJobCardPdf(view, pdf, clock, prepared);
+        /*
+         * A COURIER COLLECTION IS SIGNED ON ITS DELIVERY NOTE (PARTS-03/04): the
+         * courier is shown the price-less Delivery Note, not the priced job
+         * card, and the identity reported below is the Delivery Note's
+         * (`documentIdentityFor` decides, on the tablet and on the server alike).
+         */
+        const rendered = courierNote
+          ? (() => {
+              const note = renderDeliveryNotePdf(buildDeliveryNoteModel(view, clock.now()));
+              return { fileName: deliveryNoteFileName(view.job), bytes: note.bytes, pageCount: note.pageCount };
+            })()
+          : await renderJobCardPdf(view, pdf, clock, prepared);
         if (cancelled) return;
 
         if (onRendered !== undefined) {
@@ -261,7 +278,7 @@ export const JobCardPdfPreview = ({
       {!useNativeViewer && (
         <p className="mb-2 text-xs text-steel-500">
           This browser has no built-in PDF viewer, so the document is shown here directly. It is
-          the same job card, from the same record — use Download preview for the PDF file itself.
+          the same {courierNote ? 'Delivery Note' : 'job card'}, from the same record — use Download preview for the PDF file itself.
         </p>
       )}
 
@@ -331,7 +348,9 @@ export const JobCardPdfPreview = ({
             data-preview-kind="document"
             className="eje-scrollbar aspect-[595.28/841.89] w-full overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2"
           >
-            {view.job.jobType === 'parts' ? (
+            {courierNote ? (
+              <DeliveryNoteDocument model={buildDeliveryNoteModel(view, new Date().toISOString())} />
+            ) : view.job.jobType === 'parts' ? (
               <PartsCollectionNote view={view} />
             ) : (
               <JobCardDocument view={view} />

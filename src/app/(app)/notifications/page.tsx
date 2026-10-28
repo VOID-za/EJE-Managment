@@ -43,6 +43,7 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   job_submitted: 'document',
   signature_refused: 'warning',
   chat_message: 'note',
+  timesheet_submitted: 'clock',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -54,6 +55,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   job_submitted: 'Job card submitted',
   signature_refused: 'Customer refused to sign',
   chat_message: 'New message',
+  timesheet_submitted: 'Timesheet sent to the office',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {

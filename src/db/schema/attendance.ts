@@ -169,3 +169,49 @@ export const timesheetMonths = pgTable(
     ),
   ],
 );
+
+/**
+ * A TECHNICIAN'S TIMESHEET FOR A CHOSEN PERIOD. TS-02, TS-03, TS-10; migration
+ * 0038 (the owner's decision that the period is From/To, not a month).
+ *
+ * `timesheet_months` above is kept only because 0037 created it; 0038 copied
+ * any rows it held into this table and nothing writes it any more.
+ *
+ * The trigger `timesheet_periods_guard` makes a sent period write-once and
+ * refuses two sent periods of one technician that overlap.
+ */
+export const timesheetPeriods = pgTable(
+  'timesheet_periods',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    comment: text('comment').notNull().default(''),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    commentedAt: instant('commented_at').notNull(),
+    submittedAt: instant('submitted_at'),
+    submittedBy: uuid('submitted_by').references(() => users.id),
+    snapshot: jsonb('snapshot'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    uniqueIndex('timesheet_periods_user_range_key').on(table.userId, table.periodFrom, table.periodTo),
+    index('timesheet_periods_user_idx').on(table.userId, table.periodFrom),
+    check(
+      'timesheet_periods_range_valid',
+      sql`${table.periodFrom} <= ${table.periodTo} and ${table.periodTo} - ${table.periodFrom} < 92`,
+    ),
+    check('timesheet_periods_comment_bounded', sql`char_length(${table.comment}) <= 2000`),
+    check(
+      'timesheet_periods_submission_whole',
+      sql`(${table.submittedAt} is null and ${table.submittedBy} is null and ${table.snapshot} is null) or (${table.submittedAt} is not null and ${table.submittedBy} is not null and ${table.snapshot} is not null)`,
+    ),
+  ],
+);

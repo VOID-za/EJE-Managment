@@ -17,7 +17,8 @@ import type {
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
-  TimesheetMonth,
+  TimesheetPeriod,
+  IssuedDeliveryNote,
   SystemSettings,
   TechnicalDocument,
   UnsignedDeliveryAuthorisation,
@@ -116,8 +117,10 @@ export interface DemoDatabase {
   timesheetComments: TimesheetComment[];
   /** A technician's own timesheet lines. TIMESHEET-2. */
   timesheetEntries: TimesheetEntry[];
-  /** One technician's month: its comment and its submission. TS-02, TS-10. */
-  timesheetMonths: TimesheetMonth[];
+  /** One technician's chosen period: its comment and its submission. TS-02, TS-10. */
+  timesheetPeriods: TimesheetPeriod[];
+  /** Courier Delivery Notes issued beside priced job cards. PARTS-03/04. */
+  deliveryNoteDocuments: IssuedDeliveryNote[];
   conversations: Conversation[];
   chatMessages: ChatMessage[];
   settings: SystemSettings;
@@ -217,11 +220,15 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * on existing lines, whose NT and call-out count are kept), and the month's
  * comment and submission, empty.
  *
+ * v33 replaced the month with a chosen From/To period (any month a snapshot
+ * held is carried across as the period it covered) and added the issued
+ * courier Delivery Notes, empty.
+ *
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -271,7 +278,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
   attendance: [],
   timesheetComments: [],
   timesheetEntries: [],
-  timesheetMonths: [],
+  timesheetPeriods: [],
+  deliveryNoteDocuments: [],
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at
   // the moment the Master issues them.

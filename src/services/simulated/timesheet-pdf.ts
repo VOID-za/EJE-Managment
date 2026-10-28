@@ -19,34 +19,45 @@ import {
 } from './pdf-sheet';
 
 /**
- * THE TIMESHEET PDF LAYOUT. PDF-01 … PDF-04 (the real-world reviewer,
- * 28 October 2026).
+ * THE TIMESHEET PDF LAYOUT. PDF-01 … PDF-04 (the real-world reviewer, and the
+ * owner's decisions of 28 October 2026).
  *
- * Heading "Time Sheet", the Technician Name and the Month; one table with the
- * columns Date, Customer, OT, DT, Callout, Km, Hm; a Comments box at the bottom
- * holding the one comment for the whole timesheet. The date carries its day of
- * the week. Printed from `TimesheetDocument` and nothing else, so Preview,
- * Print and the office's copy of a submitted month are the same document.
+ * Heading "Time Sheet", the Technician Name and the chosen Period (From – To);
+ * one table with EXACTLY these columns, in this order:
  *
- * Km is the line's internal and customer kilometres, "internal / customer",
- * because the reviewer asked for both and for one Km column. Hm is printed as
- * the reviewer drew it and left EMPTY: nothing on the timesheet defines what it
- * holds (the open question is in docs/reviewer-feedback-2026-10-28.md), and
- * inventing a value would put a number on a payroll document nobody typed.
+ *   Date | Customer | OT | D/T | Callout | Int Km | Cust Km
  *
- * The totals row adds up the columns the sheet already totals on screen; no new
- * calculation is introduced. Values written before 28 October 2026 that the
- * Layout no longer has a column for — NT and call-out counts — are stated under
- * the table, never dropped and never moved into another column.
+ * and a Comments box at the bottom holding the one comment for the period.
+ * The date carries its day of the week. There is no Hm column — it was a
+ * mistake in an earlier summary, not a requested field — and no NT column.
+ *
+ * Printed from `TimesheetDocument` and nothing else, so Preview, Print and the
+ * office's copy of a sent period are the same document. The totals row adds
+ * up the columns the sheet already totals on screen; nothing new is
+ * calculated. Values written before 28 October 2026 that the Layout has no
+ * column for — NT and call-out counts — are stated under the table, never
+ * dropped and never moved into another column.
  */
 
+/** The columns, in order, with their widths: the one definition both header and rows use. */
+export const TIMESHEET_PDF_COLUMNS = [
+  { key: 'date', header: 'Date', width: 82, align: 'left' },
+  { key: 'customer', header: 'Customer', width: 165, align: 'left' },
+  { key: 'ot', header: 'OT', width: 42, align: 'right' },
+  { key: 'dt', header: 'D/T', width: 42, align: 'right' },
+  { key: 'callout', header: 'Callout', width: 80, align: 'right' },
+  { key: 'intKm', header: 'Int Km', width: 52, align: 'right' },
+  { key: 'custKm', header: 'Cust Km', width: 52, align: 'right' },
+] as const;
+
+type ColumnKey = (typeof TIMESHEET_PDF_COLUMNS)[number]['key'];
+
 const COLUMNS = (() => {
-  const widths = { date: 78, customer: 150, ot: 40, dt: 40, callout: 78, km: 82, hm: 47 };
   let x = MARGIN;
-  const at = {} as Record<keyof typeof widths, { readonly x: number; readonly width: number }>;
-  for (const key of Object.keys(widths) as (keyof typeof widths)[]) {
-    at[key] = { x, width: widths[key] };
-    x += widths[key];
+  const at = {} as Record<ColumnKey, { readonly x: number; readonly width: number; readonly right: boolean }>;
+  for (const column of TIMESHEET_PDF_COLUMNS) {
+    at[column.key] = { x, width: column.width, right: column.align === 'right' };
+    x += column.width;
   }
   return at;
 })();
@@ -62,35 +73,42 @@ const fit = (value: string, width: number, size: number): string => {
 };
 
 const hours = (value: number | null): string => (value === null ? '' : value.toFixed(2));
-const km = (row: TimesheetDocumentRow): string =>
-  row.internalKm === null || row.customerKm === null ? '' : `${row.internalKm.toFixed(1)} / ${row.customerKm.toFixed(1)}`;
+const km = (value: number | null): string => (value === null ? '' : value.toFixed(1));
 const callout = (row: TimesheetDocumentRow): string =>
   row.calloutAmount === null || row.calloutAmount === 0
     ? row.recorded ? '—' : ''
     : `${formatCurrency(row.calloutAmount)}${row.calloutShared ? ' (sh)' : ''}`;
 
+/** A row's cell values, column by column. Pure, and what the tests read. */
+export const timesheetPdfCells = (
+  row: TimesheetDocumentRow,
+  showDate: boolean,
+): Readonly<Record<ColumnKey, string>> => ({
+  date: showDate ? formatDayAndDate(row.date) : '',
+  customer: row.customer,
+  ot: hours(row.overtimeHours),
+  dt: hours(row.doubleHours),
+  callout: callout(row),
+  intKm: km(row.internalKm),
+  custKm: km(row.customerKm),
+});
+
 const tableHeader = (sheet: Sheet): void => {
   sheet.need(ROW * 2);
   sheet.pdf.rect(MARGIN, sheet.cursor - 4, CONTENT_WIDTH, ROW + 1, BAND);
-  const label = (key: keyof typeof COLUMNS, text: string, right = false) => {
-    const column = COLUMNS[key];
-    const x = right ? column.x + column.width - 3 - textWidth(text, CELL, 'bold') : column.x + 3;
-    sheet.pdf.text(x, sheet.cursor, text, { font: 'bold', size: CELL, colour: INK });
-  };
-  label('date', 'Date');
-  label('customer', 'Customer');
-  label('ot', 'OT', true);
-  label('dt', 'DT', true);
-  label('callout', 'Callout', true);
-  label('km', 'Km (int / cust)', true);
-  label('hm', 'Hm', true);
+  for (const column of TIMESHEET_PDF_COLUMNS) {
+    const place = COLUMNS[column.key];
+    const x = place.right
+      ? place.x + place.width - 3 - textWidth(column.header, CELL, 'bold')
+      : place.x + 3;
+    sheet.pdf.text(x, sheet.cursor, column.header, { font: 'bold', size: CELL, colour: INK });
+  }
   sheet.move(ROW);
   sheet.rule(RULE, 0.6);
   sheet.move(3);
 };
 
 export interface TimesheetPdfOptions {
-  readonly companyName: string;
   readonly generatedAt: string;
 }
 
@@ -100,14 +118,14 @@ export interface RenderedTimesheet {
   readonly pageCount: number;
 }
 
-export const timesheetFileName = (doc: Pick<TimesheetDocument, 'technicianName' | 'month'>): string =>
-  `Time-Sheet-${doc.technicianName.replace(/[^A-Za-z0-9]+/gu, '-')}-${doc.month}.pdf`;
+export const timesheetFileName = (doc: Pick<TimesheetDocument, 'technicianName' | 'from' | 'to'>): string =>
+  `Time-Sheet-${doc.technicianName.replace(/[^A-Za-z0-9]+/gu, '-')}-${doc.from}-to-${doc.to}.pdf`;
 
 export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdfOptions): RenderedTimesheet => {
   const sheet = new Sheet();
 
   // Heading.
-  sheet.text(MARGIN, options.companyName, { font: 'bold', size: SIZE.companyName, colour: INK });
+  sheet.text(MARGIN, doc.companyName, { font: 'bold', size: SIZE.companyName, colour: INK });
   sheet.pdf.text(RIGHT - textWidth('TIME SHEET', SIZE.jobNumber, 'bold') - TRACK_TITLE * 10, sheet.cursor, 'TIME SHEET', {
     font: 'bold',
     size: SIZE.jobNumber,
@@ -123,7 +141,7 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
     sheet.move(GAP.line);
   };
   labelled('Technician Name', doc.technicianName);
-  labelled('Month', doc.monthLabel);
+  labelled('Period', doc.periodLabel);
   labelled(
     'Status',
     doc.submittedAt === null
@@ -142,19 +160,15 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
       lastDate = '';
     }
     const colour = row.recorded ? BODY : MUTED;
-    const cell = (key: keyof typeof COLUMNS, text: string, right = false) => {
-      if (text.length === 0) return;
-      const column = COLUMNS[key];
-      const value = fit(text, column.width, CELL);
-      const x = right ? column.x + column.width - 3 - textWidth(value, CELL) : column.x + 3;
+    const cells = timesheetPdfCells(row, row.date !== lastDate);
+    for (const column of TIMESHEET_PDF_COLUMNS) {
+      const text = cells[column.key];
+      if (text.length === 0) continue;
+      const place = COLUMNS[column.key];
+      const value = fit(text, place.width, CELL);
+      const x = place.right ? place.x + place.width - 3 - textWidth(value, CELL) : place.x + 3;
       sheet.pdf.text(x, sheet.cursor, value, { size: CELL, colour });
-    };
-    cell('date', row.date === lastDate ? '' : formatDayAndDate(row.date));
-    cell('customer', row.customer);
-    cell('ot', hours(row.overtimeHours), true);
-    cell('dt', hours(row.doubleHours), true);
-    cell('callout', callout(row), true);
-    cell('km', km(row), true);
+    }
     lastDate = row.date;
     sheet.move(ROW - 3);
     sheet.rule(RULE_SOFT, 0.4);
@@ -165,24 +179,29 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
   sheet.need(ROW + 6);
   sheet.rule(RULE, 0.8);
   sheet.move(ROW - 2);
-  const total = (key: keyof typeof COLUMNS, text: string) => {
-    const column = COLUMNS[key];
-    sheet.pdf.text(column.x + column.width - 3 - textWidth(text, CELL, 'bold'), sheet.cursor, text, {
+  const totals: Partial<Record<ColumnKey, string>> = {
+    ot: doc.totals.overtimeHours.toFixed(2),
+    dt: doc.totals.doubleHours.toFixed(2),
+    callout: formatCurrency(doc.totals.calloutAmount),
+    intKm: doc.totals.internalKm.toFixed(1),
+    custKm: doc.totals.customerKm.toFixed(1),
+  };
+  sheet.pdf.text(COLUMNS.customer.x + 3, sheet.cursor, 'Totals', { font: 'bold', size: CELL, colour: INK });
+  for (const [key, text] of Object.entries(totals) as [ColumnKey, string][]) {
+    const place = COLUMNS[key];
+    sheet.pdf.text(place.x + place.width - 3 - textWidth(text, CELL, 'bold'), sheet.cursor, text, {
       font: 'bold',
       size: CELL,
       colour: INK,
     });
-  };
-  sheet.pdf.text(COLUMNS.customer.x + 3, sheet.cursor, 'Totals', { font: 'bold', size: CELL, colour: INK });
-  total('ot', doc.totals.overtimeHours.toFixed(2));
-  total('dt', doc.totals.doubleHours.toFixed(2));
-  total('callout', formatCurrency(doc.totals.calloutAmount));
-  total('km', `${doc.totals.internalKm.toFixed(1)} / ${doc.totals.customerKm.toFixed(1)}`);
+  }
   sheet.move(GAP.line + 4);
 
   // History the Layout has no column for — stated, not dropped.
   const notes: string[] = [];
-  if (doc.rows.some((row) => row.calloutShared)) notes.push('(sh) — a call-out shared with other jobs; the amount is as entered, not divided.');
+  if (doc.rows.some((row) => row.calloutShared)) {
+    notes.push('(sh) — a shared call-out: the amount is this technician’s own share, as they entered it; nothing is divided.');
+  }
   if (doc.totals.historicalNormalHours > 0) {
     notes.push(`NT entered before 28 October 2026 (no longer recorded): ${doc.totals.historicalNormalHours.toFixed(2)} hours, kept as entered.`);
   }
@@ -214,7 +233,7 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
   const pages = sheet.pdf.pageCount;
   for (let index = 0; index < pages; index += 1) {
     sheet.pdf.selectPage(index);
-    const footer = `${options.companyName} · Time Sheet · ${doc.technicianName} · ${doc.monthLabel} · Generated ${formatDateTime(options.generatedAt)}`;
+    const footer = `${doc.companyName} · Time Sheet · ${doc.technicianName} · ${doc.periodLabel} · Generated ${formatDateTime(options.generatedAt)}`;
     sheet.pdf.text(MARGIN, MARGIN - 12, fit(footer, CONTENT_WIDTH - 70, SIZE.tiny), { size: SIZE.tiny, colour: MUTED });
     const page = `Page ${index + 1} of ${pages}`;
     sheet.pdf.text(RIGHT - textWidth(page, SIZE.tiny), MARGIN - 12, page, { size: SIZE.tiny, colour: MUTED });

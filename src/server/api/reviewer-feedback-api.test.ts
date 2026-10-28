@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { businessToday } from '@/lib/business-time';
-import { monthOf } from '@/lib/timesheet-dates';
 import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
 
 /**
@@ -10,66 +9,88 @@ import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
  * permission or a state rule, so each is proved against the HTTP surface — a
  * client that never loads the screen gets exactly the same answers.
  */
-interface MonthDocument {
+/** A calendar date `days` from another, by the calendar (no time zone). */
+const shift = (date: string, days: number): string => {
+  const at = new Date(`${date}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+};
+
+interface PeriodDocument {
   readonly technicianName: string;
+  readonly from: string;
+  readonly to: string;
   readonly comment: string;
   readonly submittedAt: string | null;
   readonly rows: readonly { recorded: boolean; customer: string }[];
 }
 
-describe('timesheet Send to office over HTTP (TS-02, TS-03, TS-14)', () => {
+describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02, TS-03, TS-14)', () => {
   beforeEach(() => {
     startTestServer();
   });
 
-  it('sends once, then the month is read-only for the technician; the office reads the submitted version', async () => {
+  it('sends once, then the period is read-only for the technician; the office is notified and reads the submitted version', async () => {
     const today = businessToday();
-    const month = monthOf(today);
+    const from = shift(today, -2);
+    const period = `from=${from}&to=${today}`;
     const technician = await signedInAs(DEMO_USERS.technician);
     const added = await technician.post<{ entry: { id: string } }>('/api/timesheets/user-tech-sipho/entries', {
       date: today, customerName: '', workshop: true, overtimeHours: 2, doubleHours: 0, calloutAmount: 0,
     });
     expect(added.status, JSON.stringify(added.error)).toBe(200);
-    expect((await technician.post(`/api/timesheets/user-tech-sipho/months/${month}/comment`, { comment: 'Bench day.' })).status).toBe(200);
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'Bench days.' })).status).toBe(200);
 
-    const sent = await technician.post<{ month: { submittedAt: string } }>(`/api/timesheets/user-tech-sipho/months/${month}/submit`, {});
+    const sent = await technician.post<{ period: { submittedAt: string; from: string; to: string } }>('/api/timesheets/user-tech-sipho/period/submit', { from, to: today });
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    expect(sent.data.month.submittedAt).toBeTruthy();
+    expect(sent.data.period).toMatchObject({ from, to: today });
 
-    // The lock, on every write path, and no second submission.
-    expect((await technician.post(`/api/timesheets/user-tech-sipho/months/${month}/submit`, {})).status).toBe(422);
+    // The lock, on every write path; no second submission; no overlapping one.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(422);
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -5), to: from })).status).toBe(422);
     expect((await technician.post('/api/timesheets/user-tech-sipho/entries', {
       date: today, customerName: 'X', overtimeHours: 1, doubleHours: 0,
     })).status).toBe(422);
     expect((await technician.post(`/api/timesheets/user-tech-sipho/entries/${added.data.entry.id}/remove`, {})).status).toBe(422);
-    expect((await technician.post(`/api/timesheets/user-tech-sipho/months/${month}/comment`, { comment: 'changed' })).status).toBe(422);
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'changed' })).status).toBe(422);
+
+    // The office was told — in-app, through the existing notifications.
+    const office = await signedInAs(DEMO_USERS.coordinator);
+    const notes = await office.get<{ notifications: readonly { type: string; title: string; link: string | null }[] }>('/api/notifications');
+    const told = notes.data.notifications.filter((n) => n.type === 'timesheet_submitted');
+    expect(told).toHaveLength(1);
+    expect(told[0]).toMatchObject({ link: '/timesheets' });
+    expect(told[0]!.title).toContain('Sipho');
 
     // The office reads what was sent, read-only.
-    const office = await signedInAs(DEMO_USERS.coordinator);
-    const document = await office.get<MonthDocument>(`/api/timesheets/user-tech-sipho/months/${month}`);
+    const document = await office.get<PeriodDocument>(`/api/timesheets/user-tech-sipho/period?${period}`);
     expect(document.status).toBe(200);
-    expect(document.data).toMatchObject({ technicianName: 'Sipho Mahlangu', comment: 'Bench day.' });
-    expect(document.data.submittedAt).toBe(sent.data.month.submittedAt);
+    expect(document.data).toMatchObject({ technicianName: 'Sipho Mahlangu', comment: 'Bench days.', from, to: today });
+    expect(document.data.submittedAt).toBe(sent.data.period.submittedAt);
     expect(document.data.rows.filter((row) => row.recorded).map((row) => row.customer)).toEqual(['Workshop']);
-    expect((await office.post(`/api/timesheets/user-tech-sipho/months/${month}/submit`, {})).status).toBe(403);
-    expect((await office.post(`/api/timesheets/user-tech-sipho/months/${month}/comment`, { comment: 'x' })).status).toBe(403);
+    expect((await office.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(403);
+    expect((await office.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'x' })).status).toBe(403);
   });
 
-  it('the PDF Layout: the owner and the office get it; another technician does not', async () => {
-    const month = monthOf(businessToday());
+  it('the PDF Layout: the owner and the office get it; another technician does not; From after To is refused', async () => {
+    const today = businessToday();
+    const period = `from=${shift(today, -6)}&to=${today}`;
     const technician = await signedInAs(DEMO_USERS.technician);
-    const own = await technician.download(`/api/timesheets/user-tech-sipho/months/${month}/pdf`);
+    const own = await technician.download(`/api/timesheets/user-tech-sipho/period/pdf?${period}`);
     expect(own.status).toBe(200);
     expect(own.headers.get('content-type')).toBe('application/pdf');
     expect(own.text.slice(0, 5)).toBe('%PDF-');
+    for (const header of ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']) expect(own.text, header).toContain(`(${header})`);
+    expect(own.text).not.toContain('(Hm)');
     const office = await signedInAs(DEMO_USERS.master);
-    expect((await office.download(`/api/timesheets/user-tech-sipho/months/${month}/pdf`)).status).toBe(200);
+    expect((await office.download(`/api/timesheets/user-tech-sipho/period/pdf?${period}`)).status).toBe(200);
     const other = await signedInAs(DEMO_USERS.otherTechnician);
-    expect((await other.download(`/api/timesheets/user-tech-sipho/months/${month}/pdf`)).status).toBe(403);
-    expect((await other.get(`/api/timesheets/user-tech-sipho/months/${month}`)).status).toBe(403);
-    expect((await other.post(`/api/timesheets/user-tech-sipho/months/${month}/submit`, {})).status).toBe(403);
-    // Opening it wrote nothing: the month is still a draft.
-    expect((await office.get<MonthDocument>(`/api/timesheets/user-tech-sipho/months/${month}`)).data.submittedAt).toBeNull();
+    expect((await other.download(`/api/timesheets/user-tech-sipho/period/pdf?${period}`)).status).toBe(403);
+    expect((await other.get(`/api/timesheets/user-tech-sipho/period?${period}`)).status).toBe(403);
+    expect((await other.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -6), to: today })).status).toBe(403);
+    expect((await technician.get(`/api/timesheets/user-tech-sipho/period?from=${today}&to=${shift(today, -6)}`)).status).toBe(422);
+    // Opening it wrote nothing: the period is still a draft.
+    expect((await office.get<PeriodDocument>(`/api/timesheets/user-tech-sipho/period?${period}`)).data.submittedAt).toBeNull();
   });
 });
 

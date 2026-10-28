@@ -4,7 +4,7 @@ import type {
   AttendanceRecord,
   TimesheetComment,
   TimesheetEntry,
-  TimesheetMonth,
+  TimesheetPeriod,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -1159,16 +1159,16 @@ export const timesheets = {
     command<{ removed: true }>(`/api/timesheets/${segment(userId)}/entries/${segment(entryId)}/remove`),
   exportUrl: (userId: string, from: string, to: string) =>
     `/api/timesheets/${segment(userId)}/export${search({ from, to })}`,
-  /** TS-11: one month as its PDF Layout prints it (draft, or what was sent). */
-  document: (userId: string, month: string) =>
-    query<TimesheetDocument>(`/api/timesheets/${segment(userId)}/months/${segment(month)}`),
+  /** TS-11: one chosen period as its PDF Layout prints it (draft, or what was sent). */
+  document: (userId: string, from: string, to: string) =>
+    query<TimesheetDocument>(`/api/timesheets/${segment(userId)}/period${search({ from, to })}`),
   /** TS-11, TS-13: the PDF Layout's bytes. Reading it writes nothing. */
-  pdf: (userId: string, month: string) =>
-    apiDownload(`/api/timesheets/${segment(userId)}/months/${segment(month)}/pdf`, `time-sheet-${month}.pdf`),
-  /** TS-10, TS-12: Save the one comment for the month. Not a submission. */
-  saveMonthComment: (userId: string, month: string, comment: string) =>
-    command<{ month: TimesheetMonth }>(`/api/timesheets/${segment(userId)}/months/${segment(month)}/comment`, { comment }),
+  pdf: (userId: string, from: string, to: string) =>
+    apiDownload(`/api/timesheets/${segment(userId)}/period/pdf${search({ from, to })}`, `time-sheet-${from}-to-${to}.pdf`),
+  /** TS-10, TS-12: Save the one comment for the period. Not a submission. */
+  savePeriodComment: (userId: string, from: string, to: string, comment: string) =>
+    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/comment`, { from, to, comment }),
   /** TS-02, TS-14: Send to office. Once; read-only for the technician afterwards. */
-  submit: (userId: string, month: string) =>
-    command<{ month: TimesheetMonth }>(`/api/timesheets/${segment(userId)}/months/${segment(month)}/submit`),
+  submit: (userId: string, from: string, to: string) =>
+    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, { from, to }),
 };

@@ -185,6 +185,33 @@ export const cancellationReasonLabel = (reason: CancellationReason): string => {
  * `pricingSnapshot`, the checklist resolves by its stored version, and this
  * records exactly which document was issued and when.
  */
+/**
+ * THE COURIER'S DELIVERY NOTE AS ISSUED. PARTS-03/04 (the owner's decision of
+ * 28 October 2026). Write-once, one per job, stored beside the priced job card
+ * it accompanies (`jobCardDocumentKey` = that card's storage key).
+ *
+ * ONE SIGNING ACT. The courier signs the Delivery Note once; that signature is
+ * the job's signature (`Job.signature`). `signatureSha256` — the SHA-256 of its
+ * stroke data — is printed on BOTH documents, so each can be traced to the same
+ * act without either claiming a second one. Null on a note issued without a
+ * signature (an authorised unsigned delivery).
+ */
+export interface IssuedDeliveryNote {
+  readonly id: string;
+  readonly jobId: JobId;
+  readonly fileName: string;
+  readonly storageKey: string;
+  readonly pageCount: number;
+  readonly sizeBytes: number;
+  readonly checksumSha256: string | null;
+  readonly generatedAt: IsoDateTime;
+  readonly generatedBy: UserId | null;
+  readonly jobCardDocumentKey: string;
+  readonly signedByName: string | null;
+  readonly signedAt: IsoDateTime | null;
+  readonly signatureSha256: string | null;
+}
+
 export interface FinalDocument {
   readonly fileName: string;
   readonly storageKey: string;

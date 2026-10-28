@@ -45,10 +45,42 @@ export interface DeliveryNoteModel {
   }[];
   readonly totalQuantity: string;
   readonly priceNote: string;
-  /** The collector's signature on the job, when one has been taken. */
-  readonly signedFor: string | null;
+  /**
+   * THE COURIER'S SIGNATURE — taken ONCE, on this document. It is the job's
+   * signature (`Job.signature`); the priced job card refers to it rather than
+   * claiming a second signing. Null until the courier has signed.
+   */
+  readonly signature: {
+    readonly declaration: string;
+    readonly name: string;
+    readonly signedAt: string;
+    readonly signatureData: string;
+    /** Printed on BOTH documents, so each can be traced to this one signing act. */
+    readonly reference: string;
+  } | null;
   readonly footer: string;
 }
+
+/**
+ * The reference that ties the priced job card to the Delivery Note the courier
+ * signed: the job number and the moment of the one signature. Printed on both
+ * documents; the issued delivery-note record also keeps the SHA-256 of the
+ * signature's stroke data.
+ */
+export const courierSignatureReference = (job: Pick<Job, 'jobNumber' | 'signature'>): string | null =>
+  job.signature === null ? null : `${job.jobNumber}-S${job.signature.signedAt.replace(/\D/gu, '').slice(0, 14)}`;
+
+/**
+ * What a Delivery Note's IDENTITY is drawn from (BD-23): the document the
+ * courier was shown, without the outcome block (the signature they add) or the
+ * footer (when it was rendered). See `documentIdentityFor`.
+ */
+export const identifiedDeliveryNoteContent = (
+  model: DeliveryNoteModel,
+): Omit<DeliveryNoteModel, 'signature' | 'footer'> => {
+  const { signature: _signature, footer: _footer, ...rest } = model;
+  return rest;
+};
 
 export interface DeliveryNoteInput {
   readonly job: Job;
@@ -111,10 +143,16 @@ export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: st
     items,
     totalQuantity: String(totalQuantity),
     priceNote: 'No prices are shown on a delivery note. The priced job card is kept by EJE and sent to the customer.',
-    signedFor:
+    signature:
       job.signature === null
         ? null
-        : `Collected and signed for by ${job.signature.customerName} ${job.signature.customerSurname} on ${formatDateTime(job.signature.signedAt)}.`,
+        : {
+            declaration: job.signature.declaration,
+            name: `${job.signature.customerName} ${job.signature.customerSurname}`,
+            signedAt: formatDateTime(job.signature.signedAt),
+            signatureData: job.signature.strokeData,
+            reference: courierSignatureReference(job) ?? '',
+          },
     footer: `${settings.companyName} · ${job.jobNumber} · Delivery Note · Generated ${formatDateTime(generatedAt)}`,
   };
 };

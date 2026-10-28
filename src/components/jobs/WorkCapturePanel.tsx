@@ -59,7 +59,7 @@ export const WorkCapturePanel = ({
   editable,
   onChanged,
 }: WorkCapturePanelProps) => {
-  // TR-01: parts on a completed Test & Repair job are fixed; the rule is the server's too.
+  // TR-01: parts on a completed job are fixed (Parts jobs excepted); the rule is the server's too.
   const partsLocked = partsLockedAfterCompletion(job);
   const partsEditable = editable && !partsLocked;
   const totals = calculateJobTotals(job, settings);

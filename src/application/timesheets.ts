@@ -5,7 +5,7 @@ import {
   TIMESHEET_MAX_CALLOUT_CENTS,
   TIMESHEET_MAX_HOURS_PER_DAY,
   TIMESHEET_MAX_KM_PER_LINE,
-  TIMESHEET_MONTH_COMMENT_LIMIT,
+  TIMESHEET_PERIOD_COMMENT_LIMIT,
   WORKSHOP_LABEL,
   asCustomerId,
   asUserId,
@@ -18,23 +18,16 @@ import {
   type IsoDateTime,
   type TimesheetComment,
   type TimesheetEntry,
-  type TimesheetMonth,
+  type TimesheetPeriod,
   type User,
   type UserId,
 } from '@/domain';
 import { businessToday } from '@/lib/business-time';
 import { csvFileName, toCsv, type CsvColumn } from '@/lib/csv';
 import { formatCurrency } from '@/lib/format';
-import {
-  formatMonth,
-  isCalendarMonth,
-  monthBounds,
-  monthOf,
-  monthsBetween,
-  weekdayOf,
-} from '@/lib/timesheet-dates';
+import { formatPeriod, weekdayOf } from '@/lib/timesheet-dates';
 import type { OperationContext } from './context';
-import { audit } from './audit';
+import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
 import { assertRecordableDate, isCalendarDate } from './attendance-operations';
 
@@ -53,14 +46,18 @@ import { assertRecordableDate, isCalendarDate } from './attendance-operations';
  *   - The call-out is an AMOUNT (TS-08). A line written before keeps its COUNT,
  *     shown as historical; a count is never turned into an amount. A call-out
  *     may be marked shared; the amount is not divided — no rule for that exists.
- *   - One comment for the whole timesheet (TS-10): the MONTH's comment, which
+ *   - One comment for the whole timesheet (TS-10): the PERIOD's comment, which
  *     the PDF Layout prints in its Comments box. The day comments written
  *     before stay readable as history.
- *   - SEND TO OFFICE (TS-02, TS-03, TS-14): a month is sent once. From then on
- *     the technician cannot add, correct or remove a line on any day of it, nor
- *     change its comment — refused here on every path, and the database refuses
- *     a change to the sent row. The office reads the submitted version. There is
- *     no reopening (no rule for it was given).
+ *   - THE PERIOD IS CHOSEN (the owner, 28 October 2026): the technician's From
+ *     and To dates, not a calendar month.
+ *   - SEND TO OFFICE (TS-02, TS-03, TS-14): a period is sent once. From then on
+ *     the technician cannot add, correct or remove a line on any day inside it,
+ *     nor change its comment — refused here on every path, and the database
+ *     refuses a change to the sent row. Two sent periods never overlap, so no
+ *     day's work is sent twice. The office is notified, and reads the
+ *     submitted version. There is no reopening; a correction is a separate,
+ *     audited process.
  *
  * WHO. A technician writes, corrects and removes their OWN lines, and only
  * theirs — the owner is taken from the session, never from the request. The
@@ -85,7 +82,7 @@ export interface TimesheetDay {
   readonly weekday: string;
   /** True when the technician has entered at least one line for the day. */
   readonly recorded: boolean;
-  /** True when the day's month has been sent to the office: read-only. */
+  /** True when the day is inside a period already sent to the office: read-only. */
   readonly locked: boolean;
   readonly entries: readonly TimesheetEntry[];
   /** A day comment written before TS-10 (one comment per timesheet). History. */
@@ -116,13 +113,17 @@ export interface TimesheetTotals {
   readonly unrecordedDays: number;
 }
 
-/** One month the view touches: its comment and whether it was sent. */
-export interface TimesheetMonthState {
-  readonly month: string;
+/** The chosen period: its comment, and whether it — or any day inside it — was sent. */
+export interface TimesheetPeriodState {
+  readonly from: IsoDate;
+  readonly to: IsoDate;
   readonly label: string;
   readonly comment: string;
+  /** Set when exactly this period was sent to the office. */
   readonly submittedAt: IsoDateTime | null;
   readonly submittedByName: string | null;
+  /** Other sent periods sharing days with this one: those days are read-only. */
+  readonly overlapsSent: readonly { readonly from: IsoDate; readonly to: IsoDate }[];
 }
 
 export interface Timesheet {
@@ -132,8 +133,8 @@ export interface Timesheet {
   /** Every day in the range, OLDEST FIRST, recorded or not (TS-04). */
   readonly days: readonly TimesheetDay[];
   readonly totals: TimesheetTotals;
-  /** Every month the range touches, oldest first. */
-  readonly months: readonly TimesheetMonthState[];
+  /** The From/To period itself: what Save, Preview, Print and Send act on. */
+  readonly period: TimesheetPeriodState;
   /** Whether the person reading it may enter and correct its lines (its owner). */
   readonly editable: boolean;
 }
@@ -160,7 +161,8 @@ export const buildTimesheetDays = (input: {
   readonly entries: readonly TimesheetEntry[];
   readonly comments: readonly TimesheetComment[];
   readonly attendance: ReadonlyMap<IsoDate, Pick<AttendanceRecord, 'status' | 'absenceReason'>>;
-  readonly lockedMonths?: ReadonlySet<string>;
+  /** Sent periods: every day inside one is read-only. */
+  readonly lockedRanges?: readonly { readonly from: IsoDate; readonly to: IsoDate }[];
 }): { readonly days: readonly TimesheetDay[]; readonly totals: TimesheetTotals } => {
   const comments = new Map(input.comments.map((comment) => [comment.date, comment.comment]));
   const days = daysBetween(input.from, input.to).map((date): TimesheetDay => {
@@ -170,7 +172,7 @@ export const buildTimesheetDays = (input: {
       date,
       weekday: weekdayOf(date),
       recorded: entries.length > 0,
-      locked: input.lockedMonths?.has(monthOf(date)) ?? false,
+      locked: (input.lockedRanges ?? []).some((range) => range.from <= date && date <= range.to),
       entries,
       comment: comments.get(date) ?? '',
       attendance: attendance?.status ?? null,
@@ -239,17 +241,15 @@ const assertRange = (from: string, to: string): void => {
   }
 };
 
-/** A timesheet month: real, and not after the current one. */
-const assertMonth = (context: OperationContext, month: string): void => {
-  if (!isCalendarMonth(month)) {
-    throw refuse('That is not a month.', 'invalid_month', 'Give the month as YYYY-MM.');
-  }
-  const current = monthOf(businessToday(new Date(context.services.clock.now())));
-  if (month > current) {
+/** A timesheet period: a valid From/To range that has ended by today. */
+const assertPeriod = (context: OperationContext, from: string, to: string): void => {
+  assertRange(from, to);
+  const today = businessToday(new Date(context.services.clock.now()));
+  if (to > today) {
     throw refuse(
-      'That month has not started yet.',
-      'month_in_future',
-      `The current month is ${current}.`,
+      'That period has not ended yet.',
+      'period_in_future',
+      `Today is ${today}. Choose a To on or before today.`,
     );
   }
 };
@@ -273,20 +273,17 @@ const assertTimesheetDate = (context: OperationContext, date: string): void => {
 
 /**
  * SENT TO THE OFFICE MEANS READ-ONLY. TS-02. Asked of every write, for every
- * month the write touches — a correction that moves a line from one month to
- * another touches two.
+ * day the write touches — a correction that moves a line from one day to
+ * another touches two. A day inside ANY sent period is refused.
  */
-const assertMonthOpen = async (
-  context: OperationContext,
-  technicianId: UserId,
-  month: string,
-): Promise<void> => {
-  const row = await context.repos.attendance.findMonth(technicianId, month);
-  if (row?.submittedAt != null) {
+const assertDayOpen = async (context: OperationContext, technicianId: UserId, date: string): Promise<void> => {
+  const sent = await context.repos.attendance.listSubmittedPeriods(technicianId, date, date);
+  const period = sent[0];
+  if (period !== undefined) {
     throw refuse(
-      `The ${formatMonth(month)} timesheet has been sent to the office.`,
+      `The timesheet for ${formatPeriod(period.from, period.to)} has been sent to the office.`,
       'timesheet_submitted',
-      'A timesheet sent to the office is read-only. Ask the office if something on it is wrong.',
+      'A timesheet sent to the office is read-only. A correction goes through the office’s separate, recorded process.',
     );
   }
 };
@@ -323,43 +320,38 @@ export const loadTimesheet = async (
   assertMayRead(context, id);
   assertRange(from, to);
   const technician = await findTechnician(context, id);
-  const monthKeys = monthsBetween(from, to);
-  const [entries, comments, records, monthRows] = await Promise.all([
+  const [entries, comments, records, sent, exact] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
     context.repos.attendance.listComments(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
-    Promise.all(monthKeys.map((month) => context.repos.attendance.findMonth(id, month))),
+    context.repos.attendance.listSubmittedPeriods(id, from, to),
+    context.repos.attendance.findPeriod(id, from, to),
   ]);
-  const locked = new Set(
-    monthRows.filter((row): row is TimesheetMonth => row?.submittedAt != null).map((row) => row.month),
-  );
   const { days, totals } = buildTimesheetDays({
     from,
     to,
     entries,
     comments,
     attendance: new Map(records.map((record) => [record.date, record])),
-    lockedMonths: locked,
+    lockedRanges: sent.map((period) => ({ from: period.from, to: period.to })),
   });
-  const months = await Promise.all(
-    monthKeys.map(async (month, index): Promise<TimesheetMonthState> => {
-      const row = monthRows[index] ?? null;
-      return {
-        month,
-        label: formatMonth(month),
-        comment: row?.comment ?? '',
-        submittedAt: row?.submittedAt ?? null,
-        submittedByName: await nameOf(context, row?.submittedBy ?? null),
-      };
-    }),
-  );
   return {
     technician: personOf(technician),
     from,
     to,
     days,
     totals,
-    months,
+    period: {
+      from,
+      to,
+      label: formatPeriod(from, to),
+      comment: exact?.comment ?? '',
+      submittedAt: exact?.submittedAt ?? null,
+      submittedByName: await nameOf(context, exact?.submittedBy ?? null),
+      overlapsSent: sent
+        .filter((period) => period.id !== exact?.id)
+        .map((period) => ({ from: period.from, to: period.to })),
+    },
     editable: context.actor.id === id,
   };
 };
@@ -428,7 +420,7 @@ const describe = (entry: TimesheetEntry): string =>
 /**
  * Adds a line to the technician's own timesheet, or corrects one of theirs.
  * Validated here, whatever the screen did: a calendar day not in the future,
- * in a month not sent to the office; quarter hours from 0 to 24 per value and
+ * in no period already sent to the office; quarter hours from 0 to 24 per value and
  * per day; a call-out amount in whole cents; kilometres to one decimal; and a
  * customer — or Workshop — whenever anything is above zero.
  */
@@ -446,9 +438,9 @@ export const saveTimesheetEntry = async (
     // Somebody else's line is refused exactly like a line that does not exist.
     throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
   }
-  await assertMonthOpen(context, id, monthOf(input.date));
-  if (existing !== null && monthOf(existing.date) !== monthOf(input.date)) {
-    await assertMonthOpen(context, id, monthOf(existing.date));
+  await assertDayOpen(context, id, input.date);
+  if (existing !== null && existing.date !== input.date) {
+    await assertDayOpen(context, id, existing.date);
   }
 
   /*
@@ -606,7 +598,7 @@ export const removeTimesheetEntry = async (
   if (existing === null || existing.userId !== id) {
     throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
   }
-  await assertMonthOpen(context, id, monthOf(existing.date));
+  await assertDayOpen(context, id, existing.date);
   await context.repos.attendance.deleteEntry(existing.id);
   await audit(context, {
     jobId: null,
@@ -619,8 +611,8 @@ export const removeTimesheetEntry = async (
 /**
  * Writes, changes or clears a DAY's comment. TIMESHEET-1's per-day comment,
  * kept so the comments written before TS-10 stay correct and correctable; the
- * screen no longer offers it — the timesheet's comment is the month's
- * (`saveTimesheetMonthComment`). Locked once the month is sent.
+ * screen no longer offers it — the timesheet's comment is the period's
+ * (`saveTimesheetPeriodComment`). Locked once a period holding the day is sent.
  */
 export const saveTimesheetComment = async (
   context: OperationContext,
@@ -640,7 +632,7 @@ export const saveTimesheetComment = async (
     );
   }
   const technician = await findTechnician(context, id);
-  await assertMonthOpen(context, id, monthOf(date));
+  await assertDayOpen(context, id, date);
 
   const existing = await context.repos.attendance.findComment(id, date);
   if ((existing?.comment ?? '') === comment) return existing;
@@ -676,36 +668,64 @@ export const saveTimesheetComment = async (
   return saved;
 };
 
+/** No day of the period may already be inside a DIFFERENT sent period. */
+const assertNoOverlap = async (
+  context: OperationContext,
+  technicianId: UserId,
+  from: string,
+  to: string,
+): Promise<void> => {
+  const sent = await context.repos.attendance.listSubmittedPeriods(technicianId, from, to);
+  const exact = sent.find((period) => period.from === from && period.to === to);
+  if (exact !== undefined) {
+    throw refuse(
+      `The timesheet for ${formatPeriod(from, to)} has already been sent to the office.`,
+      'timesheet_submitted',
+      'It was sent once; the office has it.',
+    );
+  }
+  const other = sent[0];
+  if (other !== undefined) {
+    throw refuse(
+      `Part of ${formatPeriod(from, to)} was already sent to the office (${formatPeriod(other.from, other.to)}).`,
+      'period_overlaps_submitted',
+      'Choose From and To dates that do not include a day already sent, so no work is sent twice.',
+    );
+  }
+};
+
 /**
- * SAVE: the one comment for the whole timesheet. TS-10, TS-12. The owner only,
- * a month that has started and has not been sent. An unchanged comment writes
- * nothing. Saving is never a submission.
+ * SAVE: the one comment for the whole timesheet period. TS-10, TS-12. The
+ * owner only, for a period that has ended and shares no day with a sent one.
+ * An unchanged comment writes nothing. Saving is never a submission.
  */
-export const saveTimesheetMonthComment = async (
+export const saveTimesheetPeriodComment = async (
   context: OperationContext,
   technicianId: string,
-  month: string,
+  from: string,
+  to: string,
   text: string,
-): Promise<TimesheetMonth> => {
+): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
-  assertMonth(context, month);
+  assertPeriod(context, from, to);
   const comment = text.trim();
-  if (comment.length > TIMESHEET_MONTH_COMMENT_LIMIT) {
+  if (comment.length > TIMESHEET_PERIOD_COMMENT_LIMIT) {
     throw refuse(
       'That comment is too long.',
       'comment_too_long',
-      `Keep it to ${TIMESHEET_MONTH_COMMENT_LIMIT} characters.`,
+      `Keep it to ${TIMESHEET_PERIOD_COMMENT_LIMIT} characters.`,
     );
   }
-  await assertMonthOpen(context, id, month);
-  const existing = await context.repos.attendance.findMonth(id, month);
+  await assertNoOverlap(context, id, from, to);
+  const existing = await context.repos.attendance.findPeriod(id, from, to);
   if (existing !== null && existing.comment === comment) return existing;
 
-  const saved = await context.repos.attendance.saveMonthComment({
-    id: existing?.id ?? context.services.ids.next('tsm'),
+  const saved = await context.repos.attendance.savePeriodComment({
+    id: existing?.id ?? context.services.ids.next('tsp'),
     userId: id,
-    month,
+    from,
+    to,
     comment,
     updatedBy: context.actor.id,
     updatedAt: context.services.clock.now(),
@@ -714,14 +734,14 @@ export const saveTimesheetMonthComment = async (
     snapshot: null,
   });
   if (saved === null) {
-    // Sent by another tab between the check and the write.
-    await assertMonthOpen(context, id, month);
+    // Sent from another tab between the check and the write.
+    await assertNoOverlap(context, id, from, to);
     throw refuse('The comment could not be saved.', 'comment_not_saved', 'Reload the timesheet.');
   }
   await audit(context, {
     jobId: null,
     type: 'timesheet_comment_saved',
-    summary: `Timesheet comment ${existing === null || existing.comment === '' ? 'added' : 'changed'}: ${userFullName(context.actor)}'s timesheet for ${formatMonth(month)}`,
+    summary: `Timesheet comment ${existing === null || existing.comment === '' ? 'added' : 'changed'}: ${userFullName(context.actor)}'s timesheet for ${formatPeriod(from, to)}`,
     detail: `Written by ${userFullName(context.actor)}.`,
     changes: [{ field: 'Comment', from: existing?.comment ?? '', to: comment }],
   });
@@ -729,55 +749,78 @@ export const saveTimesheetMonthComment = async (
 };
 
 /**
- * SEND TO OFFICE. TS-02, TS-03, TS-14.
+ * SEND TO OFFICE. TS-02, TS-03, TS-14 — for the period the technician chose.
  *
- * The owner sends one month, once. What is sent is FROZEN in the submission:
- * every line of the month and the comment, exactly as they stand — the record
- * of what the office received cannot be changed by anything later, and the
- * database refuses a change to the sent row. The repository sets the
+ * The owner sends one period, once. What is sent is FROZEN in the submission:
+ * every line inside the period and the comment, exactly as they stand. It may
+ * not share a day with a period already sent, so no work is sent twice —
+ * checked here, and again by the database's trigger. The repository sets the
  * submission only where none exists, so a double tap, a retry or two tabs
- * produce one submission and one refusal, never two. Audited with who and when.
+ * produce one submission and one refusal.
+ *
+ * THE OFFICE IS TOLD AFTER, AND ONLY AFTER, THE SUBMISSION IS SAVED: every
+ * active Master and Coordinator, through the existing in-app notifications
+ * (`notifyOffice`). A refused send notifies nobody, and a replayed request is
+ * answered from the idempotency store without running this again — so a
+ * double click never notifies twice. Audited with who and when.
  */
-export const submitTimesheetMonth = async (
+export const submitTimesheetPeriod = async (
   context: OperationContext,
   technicianId: string,
-  month: string,
-): Promise<TimesheetMonth> => {
+  from: string,
+  to: string,
+): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
-  assertMonth(context, month);
-  await assertMonthOpen(context, id, month);
+  assertPeriod(context, from, to);
+  await assertNoOverlap(context, id, from, to);
   const technician = await findTechnician(context, id);
-  const { from, to } = monthBounds(month);
   const [entries, existing] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
-    context.repos.attendance.findMonth(id, month),
+    context.repos.attendance.findPeriod(id, from, to),
   ]);
   const now = context.services.clock.now();
   const comment = existing?.comment ?? '';
-  const saved = await context.repos.attendance.submitMonth({
-    id: existing?.id ?? context.services.ids.next('tsm'),
-    userId: id,
-    month,
-    comment,
-    updatedBy: existing?.updatedBy ?? context.actor.id,
-    updatedAt: existing?.updatedAt ?? now,
-    submittedAt: now,
-    submittedBy: context.actor.id,
-    snapshot: { technicianName: userFullName(technician), month, comment, entries },
-  });
+  let saved: TimesheetPeriod | null;
+  try {
+    saved = await context.repos.attendance.submitPeriod({
+      id: existing?.id ?? context.services.ids.next('tsp'),
+      userId: id,
+      from,
+      to,
+      comment,
+      updatedBy: existing?.updatedBy ?? context.actor.id,
+      updatedAt: existing?.updatedAt ?? now,
+      submittedAt: now,
+      submittedBy: context.actor.id,
+      snapshot: { technicianName: userFullName(technician), from, to, comment, entries },
+    });
+  } catch (cause) {
+    // Another send for an overlapping period got there first (the database's guard).
+    if (cause instanceof Error && /overlaps a period already sent/u.test(`${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}`)) {
+      await assertNoOverlap(context, id, from, to);
+    }
+    throw cause;
+  }
   if (saved === null) {
     throw refuse(
-      `The ${formatMonth(month)} timesheet has already been sent to the office.`,
+      `The timesheet for ${formatPeriod(from, to)} has already been sent to the office.`,
       'timesheet_submitted',
       'It was sent once; the office has it.',
     );
   }
+  const label = formatPeriod(from, to);
   await audit(context, {
     jobId: null,
     type: 'timesheet_submitted',
-    summary: `Timesheet sent to the office: ${userFullName(technician)}, ${formatMonth(month)}`,
+    summary: `Timesheet sent to the office: ${userFullName(technician)}, ${label}`,
     detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}. Read-only from now on.`,
+  });
+  await notifyOffice(context, {
+    type: 'timesheet_submitted',
+    title: `${userFullName(technician)} sent a timesheet to the office`,
+    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}. Open Timesheets, choose ${userFullName(technician)} and these dates to read the version that was sent.`,
+    link: '/timesheets',
   });
   return saved;
 };
@@ -805,9 +848,11 @@ export interface TimesheetDocument {
   /** The heading's company, from the settings — the office's own name. */
   readonly companyName: string;
   readonly technicianName: string;
-  readonly month: string;
-  readonly monthLabel: string;
-  /** Every day of the month, oldest first; several rows for a day of several lines. */
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  /** "Thu 1 Oct 2026 – Wed 28 Oct 2026". */
+  readonly periodLabel: string;
+  /** Every day of the period, oldest first; several rows for a day of several lines. */
   readonly rows: readonly TimesheetDocumentRow[];
   readonly comment: string;
   readonly totals: {
@@ -819,20 +864,20 @@ export interface TimesheetDocument {
     readonly historicalNormalHours: number;
     readonly historicalCallouts: number;
   };
-  /** Null for a draft; the moment it was sent for a submitted month. */
+  /** Null for a draft; the moment it was sent for a submitted period. */
   readonly submittedAt: IsoDateTime | null;
   readonly submittedByName: string | null;
   /** Absence reasons from the register, for days absent (reference only). */
   readonly absences: readonly { readonly date: IsoDate; readonly reason: string }[];
 }
 
-/** The document's rows from a month's lines. Pure. */
+/** The document's rows from a period's lines. Pure. */
 export const buildTimesheetDocumentRows = (
-  month: string,
+  from: IsoDate,
+  to: IsoDate,
   entries: readonly TimesheetEntry[],
-): readonly TimesheetDocumentRow[] => {
-  const { from, to } = monthBounds(month);
-  return daysBetween(from, to).flatMap((date): TimesheetDocumentRow[] => {
+): readonly TimesheetDocumentRow[] =>
+  daysBetween(from, to).flatMap((date): TimesheetDocumentRow[] => {
     const lines = entries
       .filter((entry) => entry.date === date)
       .slice()
@@ -859,45 +904,44 @@ export const buildTimesheetDocumentRows = (
       historicalCallouts: entry.callouts,
     }));
   });
-};
 
 /**
- * THE TIMESHEET AS ITS PDF LAYOUT PRINTS IT. TS-11, TS-13, PDF-01…04.
+ * THE TIMESHEET AS ITS PDF LAYOUT PRINTS IT, for the chosen period. TS-11,
+ * TS-13, PDF-01…04.
  *
- * A SUBMITTED month is printed from its SNAPSHOT — exactly what was sent —
- * so the office's copy can never differ from what the technician sent. A
- * draft is printed from the lines as they stand. Reading it changes nothing:
- * Preview and Print never submit, lock or write anything.
+ * A SENT period is printed from its SNAPSHOT — exactly what was sent — so the
+ * office's copy can never differ from what the technician sent. A draft is
+ * printed from the lines inside the period as they stand. Reading it changes
+ * nothing: Preview and Print never submit, lock or write anything.
  */
 export const loadTimesheetDocument = async (
   context: OperationContext,
   technicianId: string,
-  month: string,
+  from: string,
+  to: string,
 ): Promise<TimesheetDocument> => {
   const id = asUserId(technicianId);
   assertMayRead(context, id);
-  if (!isCalendarMonth(month)) {
-    throw refuse('That is not a month.', 'invalid_month', 'Give the month as YYYY-MM.');
-  }
+  assertRange(from, to);
   const technician = await findTechnician(context, id);
-  const { from, to } = monthBounds(month);
   const [row, records, settings] = await Promise.all([
-    context.repos.attendance.findMonth(id, month),
+    context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
     context.repos.settings.get(),
   ]);
-  const submitted = row?.submittedAt != null && row.snapshot !== null;
-  const entries = submitted ? row!.snapshot!.entries : await context.repos.attendance.listEntries(id, from, to);
-  const rows = buildTimesheetDocumentRows(month, entries);
+  const snapshot = row?.submittedAt != null ? row.snapshot : null;
+  const entries = snapshot !== null ? snapshot.entries : await context.repos.attendance.listEntries(id, from, to);
+  const rows = buildTimesheetDocumentRows(from, to, entries);
   const total = (pick: (r: TimesheetDocumentRow) => number | null): number =>
     rows.reduce((acc, r) => acc + (pick(r) ?? 0), 0);
   return {
     companyName: settings.companyName,
-    technicianName: submitted ? row!.snapshot!.technicianName : userFullName(technician),
-    month,
-    monthLabel: formatMonth(month),
+    technicianName: snapshot !== null ? snapshot.technicianName : userFullName(technician),
+    from,
+    to,
+    periodLabel: formatPeriod(from, to),
     rows,
-    comment: submitted ? row!.snapshot!.comment : row?.comment ?? '',
+    comment: snapshot !== null ? snapshot.comment : row?.comment ?? '',
     totals: {
       overtimeHours: round2(total((r) => r.overtimeHours)),
       doubleHours: round2(total((r) => r.doubleHours)),
@@ -907,8 +951,8 @@ export const loadTimesheetDocument = async (
       historicalNormalHours: round2(total((r) => r.historicalNormalHours)),
       historicalCallouts: total((r) => r.historicalCallouts),
     },
-    submittedAt: submitted ? row!.submittedAt : null,
-    submittedByName: submitted ? await nameOf(context, row!.submittedBy) : null,
+    submittedAt: snapshot !== null ? row!.submittedAt : null,
+    submittedByName: snapshot !== null ? await nameOf(context, row!.submittedBy) : null,
     absences: records
       .filter((record) => record.status === 'absent')
       .map((record) => ({
@@ -943,11 +987,11 @@ const TIMESHEET_COLUMNS: readonly CsvColumn<ExportRow>[] = [
   { header: 'Day', value: (row) => row.day },
   { header: 'Customer', value: (row) => row.customer },
   { header: 'OT', value: (row) => row.overtime },
-  { header: 'DT', value: (row) => row.double },
+  { header: 'D/T', value: (row) => row.double },
   { header: 'Callout (R)', value: (row) => row.callout },
   { header: 'Callout shared', value: (row) => row.shared },
-  { header: 'Internal km', value: (row) => row.internalKm },
-  { header: 'Customer km', value: (row) => row.customerKm },
+  { header: 'Int Km', value: (row) => row.internalKm },
+  { header: 'Cust Km', value: (row) => row.customerKm },
   // History: values entered before 28 October 2026 stay in the export.
   { header: 'NT (historical)', value: (row) => row.normal },
   { header: 'Callouts (historical count)', value: (row) => row.callouts },

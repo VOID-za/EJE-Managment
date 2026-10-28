@@ -150,25 +150,28 @@ export interface TimesheetEntry {
 }
 
 /**
- * ONE TECHNICIAN'S TIMESHEET FOR ONE MONTH. TS-02, TS-03, TS-10.
+ * ONE TECHNICIAN'S TIMESHEET FOR ONE PERIOD. TS-02, TS-03, TS-10 — the owner's
+ * decision of 28 October 2026: the period is CHOSEN, by its From and To dates,
+ * not a calendar month.
  *
- * The month is the timesheet the PDF Layout prints ("Month" in its heading),
- * so it is what carries the one comment for the whole timesheet and what is
- * sent to the office. A month with no row is a draft nobody has commented on.
+ * A period carries the one comment for the whole timesheet and is what is sent
+ * to the office. A period nobody has commented on and not sent has no row.
  *
  * SENT TO THE OFFICE IS FINAL FOR THE TECHNICIAN. Once `submittedAt` is set the
- * technician can no longer add, correct or remove a line on any day of that
- * month, nor change the comment; the server refuses it on every path. The
- * office reads the submitted version — `snapshot` holds exactly the lines and
- * the comment as they were sent, so the record of what was submitted cannot be
- * changed by anything later. There is no reopening: no rule for it has been
- * given (see the requirements matrix).
+ * technician can no longer add, correct or remove a line on any day inside it,
+ * nor change its comment; the server refuses it on every path. `snapshot`
+ * holds exactly the lines and the comment as they were sent, and the office
+ * reads that. Two SENT periods of one technician never overlap, so no day's
+ * work can be sent twice (refused here and again by the database). There is
+ * no reopening; a correction is a separate, audited process.
  */
-export interface TimesheetMonth {
+export interface TimesheetPeriod {
   readonly id: string;
   readonly userId: UserId;
-  /** YYYY-MM. */
-  readonly month: string;
+  /** First day, inclusive. */
+  readonly from: IsoDate;
+  /** Last day, inclusive. */
+  readonly to: IsoDate;
   readonly comment: string;
   readonly updatedBy: UserId;
   readonly updatedAt: IsoDateTime;
@@ -180,7 +183,8 @@ export interface TimesheetMonth {
 /** What was sent to the office, frozen. */
 export interface TimesheetSubmissionSnapshot {
   readonly technicianName: string;
-  readonly month: string;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
   readonly comment: string;
   readonly entries: readonly TimesheetEntry[];
 }
@@ -191,5 +195,5 @@ export const TIMESHEET_MAX_CALLOUTS_PER_LINE = 10;
 /** R1 000 000 per line: a ceiling against a slipped finger, not a business rule. */
 export const TIMESHEET_MAX_CALLOUT_CENTS = 100_000_000;
 export const TIMESHEET_MAX_KM_PER_LINE = 10_000;
-export const TIMESHEET_MONTH_COMMENT_LIMIT = 2000;
+export const TIMESHEET_PERIOD_COMMENT_LIMIT = 2000;
 export const WORKSHOP_LABEL = 'Workshop';

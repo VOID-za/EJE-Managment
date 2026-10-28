@@ -1,12 +1,12 @@
 import { isUuid } from './identifiers';
-import { and, asc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import {
   asCustomerId,
   asUserId,
   type AbsenceReason,
   type AttendanceRecord,
   type TimesheetEntry,
-  type TimesheetMonth,
+  type TimesheetPeriod,
   type TimesheetSubmissionSnapshot,
   type AttendanceStatus,
   type TimesheetComment,
@@ -19,12 +19,13 @@ import * as schema from '@/db/schema';
 type AttendanceRow = typeof schema.attendance.$inferSelect;
 type CommentRow = typeof schema.timesheetComments.$inferSelect;
 type EntryRow = typeof schema.timesheetEntries.$inferSelect;
-type MonthRow = typeof schema.timesheetMonths.$inferSelect;
+type PeriodRow = typeof schema.timesheetPeriods.$inferSelect;
 
-const toDomainMonth = (row: MonthRow): TimesheetMonth => ({
+const toDomainPeriod = (row: PeriodRow): TimesheetPeriod => ({
   id: row.id,
   userId: asUserId(row.userId),
-  month: row.month,
+  from: row.periodFrom,
+  to: row.periodTo,
   comment: row.comment,
   updatedBy: asUserId(row.updatedBy),
   updatedAt: row.commentedAt,
@@ -246,70 +247,94 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     await this.db.delete(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
   }
 
-  async findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null> {
+  async findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
     const rows = await this.db
       .select()
-      .from(schema.timesheetMonths)
-      .where(and(eq(schema.timesheetMonths.userId, userId), eq(schema.timesheetMonths.month, month)))
+      .from(schema.timesheetPeriods)
+      .where(
+        and(
+          eq(schema.timesheetPeriods.userId, userId),
+          eq(schema.timesheetPeriods.periodFrom, from),
+          eq(schema.timesheetPeriods.periodTo, to),
+        ),
+      )
       .limit(1);
-    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
+    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }
 
-  async saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null> {
-    // The conflict update only touches a month that has not been sent; a sent
+  async listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetPeriods)
+      .where(
+        and(
+          eq(schema.timesheetPeriods.userId, userId),
+          isNotNull(schema.timesheetPeriods.submittedAt),
+          lte(schema.timesheetPeriods.periodFrom, to),
+          gte(schema.timesheetPeriods.periodTo, from),
+        ),
+      )
+      .orderBy(asc(schema.timesheetPeriods.periodFrom));
+    return rows.map(toDomainPeriod);
+  }
+
+  async savePeriodComment(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+    // The conflict update only touches a period that has not been sent; a sent
     // one returns no row, which is the refusal (the trigger would refuse too).
     const rows = await this.db
-      .insert(schema.timesheetMonths)
+      .insert(schema.timesheetPeriods)
       .values({
-        id: month.id,
-        userId: month.userId,
-        month: month.month,
-        comment: month.comment,
-        updatedBy: month.updatedBy,
-        commentedAt: month.updatedAt,
+        id: period.id,
+        userId: period.userId,
+        periodFrom: period.from,
+        periodTo: period.to,
+        comment: period.comment,
+        updatedBy: period.updatedBy,
+        commentedAt: period.updatedAt,
       })
       .onConflictDoUpdate({
-        target: [schema.timesheetMonths.userId, schema.timesheetMonths.month],
+        target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
         set: {
-          comment: month.comment,
-          updatedBy: month.updatedBy,
-          commentedAt: month.updatedAt,
+          comment: period.comment,
+          updatedBy: period.updatedBy,
+          commentedAt: period.updatedAt,
           updatedAt: sql`now()`,
-          version: sql`${schema.timesheetMonths.version} + 1`,
+          version: sql`${schema.timesheetPeriods.version} + 1`,
         },
-        setWhere: isNull(schema.timesheetMonths.submittedAt),
+        setWhere: isNull(schema.timesheetPeriods.submittedAt),
       })
       .returning();
-    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
+    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }
 
-  async submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null> {
+  async submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
     const rows = await this.db
-      .insert(schema.timesheetMonths)
+      .insert(schema.timesheetPeriods)
       .values({
-        id: month.id,
-        userId: month.userId,
-        month: month.month,
-        comment: month.comment,
-        updatedBy: month.updatedBy,
-        commentedAt: month.updatedAt,
-        submittedAt: month.submittedAt,
-        submittedBy: month.submittedBy,
-        snapshot: month.snapshot,
+        id: period.id,
+        userId: period.userId,
+        periodFrom: period.from,
+        periodTo: period.to,
+        comment: period.comment,
+        updatedBy: period.updatedBy,
+        commentedAt: period.updatedAt,
+        submittedAt: period.submittedAt,
+        submittedBy: period.submittedBy,
+        snapshot: period.snapshot,
       })
       .onConflictDoUpdate({
-        target: [schema.timesheetMonths.userId, schema.timesheetMonths.month],
+        target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
         set: {
-          submittedAt: month.submittedAt,
-          submittedBy: month.submittedBy,
-          snapshot: month.snapshot,
+          submittedAt: period.submittedAt,
+          submittedBy: period.submittedBy,
+          snapshot: period.snapshot,
           updatedAt: sql`now()`,
-          version: sql`${schema.timesheetMonths.version} + 1`,
+          version: sql`${schema.timesheetPeriods.version} + 1`,
         },
-        setWhere: isNull(schema.timesheetMonths.submittedAt),
+        setWhere: isNull(schema.timesheetPeriods.submittedAt),
       })
       .returning();
-    return rows[0] === undefined ? null : toDomainMonth(rows[0]);
+    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }
 
   async deleteComment(userId: UserId, date: string): Promise<void> {

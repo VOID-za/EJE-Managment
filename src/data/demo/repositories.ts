@@ -9,7 +9,8 @@ import type {
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
-  TimesheetMonth,
+  TimesheetPeriod,
+  IssuedDeliveryNote,
   ChatMessage,
   ChecklistTemplate,
   ChecklistTemplateId,
@@ -64,6 +65,7 @@ import type {
   JobRepository,
   RegisterFilter,
   AttendanceRepository,
+  DeliveryNoteRepository,
   AvailabilityRepository,
   ChatRepository,
   MachineRepository,
@@ -1255,40 +1257,82 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve();
   }
 
-  findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null> {
+  findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
     return Promise.resolve(
-      this.context.read().timesheetMonths.find((row) => row.userId === userId && row.month === month) ?? null,
+      this.context.read().timesheetPeriods.find((row) => row.userId === userId && row.from === from && row.to === to) ?? null,
     );
   }
 
-  saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null> {
-    let saved: TimesheetMonth | null = null;
+  listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetPeriods.filter((row) => row.userId === userId && row.submittedAt !== null && row.from <= to && row.to >= from)
+        .sort((x, y) => x.from.localeCompare(y.from)),
+    );
+  }
+
+  savePeriodComment(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+    let saved: TimesheetPeriod | null = null;
     this.context.commit((draft) => {
-      const existing = draft.timesheetMonths.find((row) => row.userId === month.userId && row.month === month.month);
+      const existing = draft.timesheetPeriods.find(
+        (row) => row.userId === period.userId && row.from === period.from && row.to === period.to,
+      );
       if (existing !== undefined && existing.submittedAt !== null) return;
-      const next: TimesheetMonth =
+      const next: TimesheetPeriod =
         existing === undefined
-          ? month
-          : { ...existing, comment: month.comment, updatedBy: month.updatedBy, updatedAt: month.updatedAt };
-      draft.timesheetMonths = [...draft.timesheetMonths.filter((row) => row !== existing), next];
+          ? period
+          : { ...existing, comment: period.comment, updatedBy: period.updatedBy, updatedAt: period.updatedAt };
+      draft.timesheetPeriods = [...draft.timesheetPeriods.filter((row) => row !== existing), next];
       saved = next;
     });
     return Promise.resolve(saved);
   }
 
-  submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null> {
-    let saved: TimesheetMonth | null = null;
+  submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+    let saved: TimesheetPeriod | null = null;
     this.context.commit((draft) => {
-      const existing = draft.timesheetMonths.find((row) => row.userId === month.userId && row.month === month.month);
+      const existing = draft.timesheetPeriods.find(
+        (row) => row.userId === period.userId && row.from === period.from && row.to === period.to,
+      );
       if (existing !== undefined && existing.submittedAt !== null) return;
-      const next: TimesheetMonth =
+      // As the database's trigger does: a sent period may not overlap another.
+      const overlaps = draft.timesheetPeriods.some(
+        (row) =>
+          row !== existing && row.userId === period.userId && row.submittedAt !== null &&
+          row.from <= period.to && row.to >= period.from,
+      );
+      if (overlaps) throw new Error('timesheet period overlaps a period already sent to the office');
+      const next: TimesheetPeriod =
         existing === undefined
-          ? month
-          : { ...existing, submittedAt: month.submittedAt, submittedBy: month.submittedBy, snapshot: month.snapshot };
-      draft.timesheetMonths = [...draft.timesheetMonths.filter((row) => row !== existing), next];
+          ? period
+          : { ...existing, submittedAt: period.submittedAt, submittedBy: period.submittedBy, snapshot: period.snapshot };
+      draft.timesheetPeriods = [...draft.timesheetPeriods.filter((row) => row !== existing), next];
       saved = next;
     });
     return Promise.resolve(saved);
+  }
+}
+
+/** Issued courier Delivery Notes, write-once: the first one recorded for a job stays. */
+class DemoDeliveryNoteRepository implements DeliveryNoteRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  findByJob(jobId: JobId): Promise<IssuedDeliveryNote | null> {
+    return Promise.resolve(this.context.read().deliveryNoteDocuments.find((note) => note.jobId === jobId) ?? null);
+  }
+
+  record(note: IssuedDeliveryNote): Promise<IssuedDeliveryNote> {
+    let stored: IssuedDeliveryNote = note;
+    this.context.commit((draft) => {
+      const existing = draft.deliveryNoteDocuments.find((candidate) => candidate.jobId === note.jobId);
+      if (existing !== undefined) {
+        stored = existing;
+        return;
+      }
+      draft.deliveryNoteDocuments = [...draft.deliveryNoteDocuments, note];
+    });
+    return Promise.resolve(stored);
   }
 }
 
@@ -1603,6 +1647,7 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   outbox: new DemoOutboxRepository(context),
   captureReferrals: new DemoCaptureReferralRepository(context),
   changeRequests: new DemoChangeRequestRepository(context),
+  deliveryNotes: new DemoDeliveryNoteRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),

@@ -1,3 +1,4 @@
+import { PostgresDeliveryNoteRepository } from './delivery-note-repository';
 import type { RepositoryBundle } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import { PostgresActivityRepository } from './activity-repository';
@@ -47,4 +48,5 @@ export const createPostgresRepositories = (db: DatabaseExecutor): RepositoryBund
   outbox: new PostgresOutboxRepository(db),
   captureReferrals: new PostgresCaptureReferralRepository(db),
   changeRequests: new PostgresChangeRequestRepository(db),
+  deliveryNotes: new PostgresDeliveryNoteRepository(db),
 });

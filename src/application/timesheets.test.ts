@@ -159,7 +159,7 @@ describe('a technician’s own manual timesheet', () => {
     const file = await exportTimesheet(harness.as(master), SIPHO, day(1), day(0));
     const [header, ...rows] = file.csv.replace(/^﻿/u, '').trim().split('\r\n');
     expect(header).toBe(
-      'Date,Day,Customer,OT,DT,Callout (R),Callout shared,Internal km,Customer km,NT (historical),Callouts (historical count),Day comment (historical),Attendance',
+      'Date,Day,Customer,OT,D/T,Callout (R),Callout shared,Int Km,Cust Km,NT (historical),Callouts (historical count),Day comment (historical),Attendance',
     );
     expect(rows).toEqual([
       `${day(1)},${weekdayOf(day(1))},NOT RECORDED,,,,,,,,,,`,

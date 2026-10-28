@@ -23,12 +23,13 @@ import type {
   Job,
   JobCorrection,
   IssuedTotals,
-  JobId,
   AttendanceRecord,
   AvailabilityRecord,
   TimesheetComment,
   TimesheetEntry,
-  TimesheetMonth,
+  TimesheetPeriod,
+  IssuedDeliveryNote,
+  JobId,
   Machine,
   MachineDocument,
   MachineMovement,
@@ -520,19 +521,22 @@ export interface AttendanceRepository {
   findEntry(id: string): Promise<TimesheetEntry | null>;
   saveEntry(entry: TimesheetEntry): Promise<TimesheetEntry>;
   deleteEntry(id: string): Promise<void>;
-  /** TS-02/TS-10. One technician's month: its comment and its submission. */
-  findMonth(userId: UserId, month: string): Promise<TimesheetMonth | null>;
+  /** TS-02/TS-10. One technician's period, by its exact From and To. */
+  findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null>;
+  /** Every SENT period of this technician that shares at least one day with the range. */
+  listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]>;
   /**
-   * Writes the month's comment. Refused (`null`) when the month has already
-   * been sent to the office — a submitted month is write-once.
+   * Writes the period's comment. Refused (`null`) when that period has
+   * already been sent to the office — a sent period is write-once.
    */
-  saveMonthComment(month: TimesheetMonth): Promise<TimesheetMonth | null>;
+  savePeriodComment(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
   /**
-   * Sends the month to the office: sets the submission and its snapshot, ONLY
-   * if it has not been sent already. Returns null when it had been, so two
-   * submissions racing produce one record and one refusal, never two.
+   * Sends the period to the office: sets the submission and its snapshot ONLY
+   * if that period has not been sent already. Returns null when it had been,
+   * so two submissions racing produce one record and one refusal. A sent
+   * period that would overlap another is refused by the database itself.
    */
-  submitMonth(month: TimesheetMonth): Promise<TimesheetMonth | null>;
+  submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
 }
 
 export interface ChatRepository {
@@ -663,6 +667,16 @@ export interface ChangeRequestRepository {
   resolve(request: ChangeRequest): Promise<ChangeRequest | null>;
 }
 
+/**
+ * Issued courier Delivery Notes. PARTS-03/04. Write-once: `record` inserts the
+ * note for a job, and when one is already on file it returns THAT one
+ * unchanged — so a retried issue never produces a second note.
+ */
+export interface DeliveryNoteRepository {
+  findByJob(jobId: JobId): Promise<IssuedDeliveryNote | null>;
+  record(note: IssuedDeliveryNote): Promise<IssuedDeliveryNote>;
+}
+
 export interface RepositoryBundle {
   readonly jobs: JobRepository;
   readonly customers: CustomerRepository;
@@ -682,4 +696,6 @@ export interface RepositoryBundle {
   readonly captureReferrals: CaptureReferralRepository;
   /** Reports that the register is wrong, raised by people who cannot edit it. */
   readonly changeRequests: ChangeRequestRepository;
+  /** The courier Delivery Notes issued beside priced job cards. PARTS-03/04. */
+  readonly deliveryNotes: DeliveryNoteRepository;
 }

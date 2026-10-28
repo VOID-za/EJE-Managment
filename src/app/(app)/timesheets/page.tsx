@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
@@ -29,8 +29,7 @@ import { formatCurrency, formatDateTime } from '@/lib/format';
 import {
   defaultTimesheetRange,
   formatDayAndDate,
-  formatMonth,
-  monthOf,
+  formatPeriod,
   timesheetRangeProblem,
 } from '@/lib/timesheet-dates';
 
@@ -99,11 +98,13 @@ const toCents = (value: string): number => Math.round(parse(value) * 100);
  * when several jobs share it), internal and customer kilometres. NT is no
  * longer entered; older lines keep theirs, shown as historical.
  *
- * The page opens on this month to today, OLDEST DAY FIRST — the From and To
+ * THE FROM AND TO DATES ARE THE TIMESHEET PERIOD (the owner, 28 October 2026).
+ * The page opens on the 1st of this month to today, OLDEST DAY FIRST — the two
  * boxes reset on every visit; saved lines are never touched by that. The
- * month's one comment, Preview, Save, Print and Send to office sit together:
- * Send to office makes that month read-only, and the office then reads the
- * version that was sent.
+ * period's one comment, Preview, Save, Print and Send to office act on exactly
+ * those dates: Send to office makes that period read-only, the office is
+ * notified and reads the version that was sent. A period that shares a day
+ * with one already sent cannot be sent, so no work is sent twice.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
@@ -113,7 +114,6 @@ const TimesheetsPage = () => {
   const initial = defaultTimesheetRange(today);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
-  const [month, setMonth] = useState(monthOf(today));
   const [chosen, setChosen] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -129,17 +129,21 @@ const TimesheetsPage = () => {
   const sheet = useQuery(`timesheets:${personId ?? 'none'}:${from}:${to}`, () =>
     personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
   );
-  const monthDocument = useQuery(`timesheets:document:${personId ?? 'none'}:${month}`, () =>
-    personId === null ? Promise.resolve(null) : timesheets.document(personId, month),
+  const periodDocument = useQuery(`timesheets:document:${personId ?? 'none'}:${from}:${to}`, () =>
+    personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.document(personId, from, to),
   );
   const customers = useQuery('timesheets:customers', () => reads.customers());
 
   // OLDEST DAY FIRST (TS-04): the first entries of the range are at the top.
   const days = sheet.data?.days ?? [];
   const editable = sheet.data?.editable === true;
-  const sentAt = monthDocument.data?.submittedAt ?? null;
-  const monthOpen = editable && sentAt === null;
-  const savedComment = monthDocument.data?.comment ?? '';
+  const period = sheet.data?.period ?? null;
+  const sentAt = period?.submittedAt ?? null;
+  const overlapsSent = period?.overlapsSent ?? [];
+  // Save and Send act on a period that has ended, was not sent, and shares no
+  // day with one that was. The server asks the same questions.
+  const periodOpen = editable && sentAt === null && overlapsSent.length === 0 && to <= today;
+  const savedComment = period?.comment ?? '';
   const commentValue = comment ?? savedComment;
   const showHistoricalNt = days.some((day) => day.normalHours > 0);
   const showHistoricalCount = days.some((day) => day.callouts > 0);
@@ -156,17 +160,6 @@ const TimesheetsPage = () => {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
-
-  const monthOptions = useMemo(() => {
-    const options: { value: string; label: string }[] = [];
-    const [year, index] = monthOf(today).split('-').map(Number) as [number, number];
-    for (let back = 0; back < 13; back += 1) {
-      const date = new Date(Date.UTC(year, index - 1 - back, 1));
-      const value = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-      options.push({ value, label: formatMonth(value) });
-    }
-    return options;
-  }, [today]);
 
   if (people.error !== null) {
     return <QueryFailure code={people.errorCode} message={people.error} onRetry={people.refetch} />;
@@ -186,7 +179,7 @@ const TimesheetsPage = () => {
 
   const refresh = () => {
     sheet.refetch();
-    monthDocument.refetch();
+    periodDocument.refetch();
   };
 
   const edit = (next: Draft | null) => {
@@ -224,14 +217,14 @@ const TimesheetsPage = () => {
     return ok;
   };
 
-  /** SAVE (TS-12): the open line, if any, and the month's comment. Never a submission. */
+  /** SAVE (TS-12): the open line, if any, and the period's comment. Never a submission. */
   const save = async (): Promise<void> => {
     if (personId === null) return;
     const lineOk = await saveLine();
     if (!lineOk) return;
     if (comment !== null && comment !== savedComment) {
       const ok = await operation.run(async () => {
-        await timesheets.saveMonthComment(personId, month, comment);
+        await timesheets.savePeriodComment(personId, from, to, comment);
       });
       if (!ok) return;
     }
@@ -250,15 +243,15 @@ const TimesheetsPage = () => {
     if (ok) refresh();
   };
 
-  /** SEND TO OFFICE (TS-02, TS-14): saves first, then sends the month once. */
+  /** SEND TO OFFICE (TS-02, TS-14): saves first, then sends the period once. */
   const send = async (): Promise<void> => {
     if (personId === null) return;
     setConfirmSend(false);
     const lineOk = await saveLine();
     if (!lineOk) return;
     const ok = await operation.run(async () => {
-      if (comment !== null && comment !== savedComment) await timesheets.saveMonthComment(personId, month, comment);
-      await timesheets.submit(personId, month);
+      if (comment !== null && comment !== savedComment) await timesheets.savePeriodComment(personId, from, to, comment);
+      await timesheets.submit(personId, from, to);
     });
     if (ok) {
       setComment(null);
@@ -311,10 +304,10 @@ const TimesheetsPage = () => {
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <TextField label="OT (hours)" inputMode="decimal" value={current.overtime} onChange={(event) => edit({ ...current, overtime: event.target.value })} />
-        <TextField label="DT (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
+        <TextField label="D/T (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
         <TextField label="Callout (R)" inputMode="decimal" value={current.callout} onChange={(event) => edit({ ...current, callout: event.target.value })} data-testid="timesheet-callout" />
-        <TextField label="Internal km" inputMode="decimal" value={current.internalKm} onChange={(event) => edit({ ...current, internalKm: event.target.value })} />
-        <TextField label="Customer km" inputMode="decimal" value={current.customerKm} onChange={(event) => edit({ ...current, customerKm: event.target.value })} />
+        <TextField label="Int Km" inputMode="decimal" value={current.internalKm} onChange={(event) => edit({ ...current, internalKm: event.target.value })} />
+        <TextField label="Cust Km" inputMode="decimal" value={current.customerKm} onChange={(event) => edit({ ...current, customerKm: event.target.value })} />
       </div>
       <label className="flex items-center gap-2 text-sm text-steel-700">
         <input
@@ -324,7 +317,7 @@ const TimesheetsPage = () => {
           className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
           data-testid="timesheet-callout-shared"
         />
-        This call-out is shared with other jobs (the amount is recorded as entered, not divided)
+        Shared call-out — enter only YOUR share (e.g. R500 of a R1 000 call-out shared by two). Nothing is divided for you.
       </label>
       {(current.keepNormal ?? 0) > 0 && (
         <p className="text-xs text-steel-500">
@@ -386,10 +379,10 @@ const TimesheetsPage = () => {
               <tr className="text-left text-xs text-steel-500 uppercase">
                 <th className="py-1 pr-3">Customer</th>
                 <th className="py-1 pr-3 text-right">OT</th>
-                <th className="py-1 pr-3 text-right">DT</th>
+                <th className="py-1 pr-3 text-right">D/T</th>
                 <th className="py-1 pr-3 text-right">Callout</th>
-                <th className="py-1 pr-3 text-right">Internal km</th>
-                <th className="py-1 pr-3 text-right">Customer km</th>
+                <th className="py-1 pr-3 text-right">Int Km</th>
+                <th className="py-1 pr-3 text-right">Cust Km</th>
                 {showHistoricalNt && <th className="py-1 pr-3 text-right">NT (historical)</th>}
                 {showHistoricalCount && <th className="py-1 pr-3 text-right">Call-outs (historical)</th>}
                 {editable && !day.locked && <th className="py-1" />}
@@ -441,7 +434,7 @@ const TimesheetsPage = () => {
     <>
       <PageHeader
         title="Timesheets"
-        description="Each technician keeps their own timesheet: the customer or Workshop, OT, DT, the call-out amount and kilometres, entered by hand for each day — as you go, or all at once later."
+        description="Each technician keeps their own timesheet: the customer or Workshop, OT, D/T, the call-out amount and Int Km / Cust Km, entered by hand for each day — as you go, or all at once later."
       />
 
       <ConfirmDialog
@@ -457,8 +450,8 @@ const TimesheetsPage = () => {
 
       <ConfirmDialog
         open={confirmSend}
-        title={`Send the ${formatMonth(month)} timesheet to the office?`}
-        message="It is saved first, then sent. Once sent you can no longer add, change or remove a line on any day of that month, or change the comment. The office reads the version you sent."
+        title={`Send the timesheet for ${formatPeriod(from, to)} to the office?`}
+        message="It is saved first, then sent. Once sent you can no longer add, change or remove a line on any day in this period, or change the comment, and no other period may include these days. The office is notified and reads the version you sent."
         confirmLabel="Send to office"
         busy={operation.running}
         onConfirm={() => void send()}
@@ -469,12 +462,12 @@ const TimesheetsPage = () => {
         <DocumentPreviewDialog
           open={previewing !== null}
           autoPrint={previewing === 'print'}
-          title={`Time Sheet — ${formatMonth(month)}`}
+          title={`Time Sheet — ${formatPeriod(from, to)}`}
           description={sentAt === null ? 'Preview of the draft. Nothing is saved or sent by looking at it.' : 'The version that was sent to the office.'}
-          loadPdf={() => timesheets.pdf(personId, month)}
+          loadPdf={() => timesheets.pdf(personId, from, to)}
           renderHtml={() =>
-            monthDocument.data === null || monthDocument.data === undefined ? null : (
-              <TimesheetDocumentView document={monthDocument.data as TimesheetDocument} />
+            periodDocument.data === null || periodDocument.data === undefined ? null : (
+              <TimesheetDocumentView document={periodDocument.data as TimesheetDocument} />
             )
           }
           onClose={() => setPreviewing(null)}
@@ -514,39 +507,38 @@ const TimesheetsPage = () => {
         )}
         <p className="mt-3 text-xs text-steel-500">
           {editable
-            ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines until the month is sent to the office; every change is recorded.'
+            ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines until a period holding that day is sent to the office; every change is recorded.'
             : 'This is the technician’s own timesheet. Only they enter it; the office reads it, previews and prints it, and exports it.'}
         </p>
       </Card>
 
-      <Card className="mb-5" data-testid="timesheet-month">
-        <div className="flex flex-wrap items-end gap-4">
-          <SelectField
-            label="Timesheet month"
-            value={month}
-            options={monthOptions}
-            onChange={(event) => {
-              setMonth(event.target.value);
-              setComment(null);
-            }}
-            containerClassName="w-52"
-            data-testid="timesheet-month-select"
-          />
-          <div className="pb-2">
-            {sentAt === null ? (
-              <Badge tone="amber" size="sm">Draft — not sent</Badge>
-            ) : (
-              <Badge tone="green" size="sm">
-                Sent to office {formatDateTime(sentAt)}
-                {monthDocument.data?.submittedByName ? ` by ${monthDocument.data.submittedByName}` : ''}
-              </Badge>
-            )}
-          </div>
+      {rangeProblem === null && period !== null && (
+      <Card className="mb-5" data-testid="timesheet-period">
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm font-semibold text-steel-900" data-testid="timesheet-period-label">
+            Timesheet period: {period.label}
+          </p>
+          {sentAt === null ? (
+            <Badge tone="amber" size="sm">Draft — not sent</Badge>
+          ) : (
+            <Badge tone="green" size="sm">
+              Sent to office {formatDateTime(sentAt)}
+              {period.submittedByName ? ` by ${period.submittedByName}` : ''}
+            </Badge>
+          )}
         </div>
+        {sentAt === null && overlapsSent.length > 0 && (
+          <p role="status" className="mt-2 text-sm text-amber-eje-700" data-testid="timesheet-period-overlap">
+            Part of these dates was already sent to the office ({overlapsSent.map((sent) => formatPeriod(sent.from, sent.to)).join('; ')}). Choose From and To dates outside it to send a new period.
+          </p>
+        )}
+        {sentAt === null && overlapsSent.length === 0 && to > today && editable && (
+          <p role="status" className="mt-2 text-sm text-steel-600">A period can be sent once its To date has passed or is today.</p>
+        )}
         <div className="mt-3">
-          {monthOpen ? (
+          {periodOpen ? (
             <TextAreaField
-              label={`Comments for ${formatMonth(month)}`}
+              label={`Comments for ${period.label}`}
               value={commentValue}
               maxLength={2000}
               rows={3}
@@ -556,12 +548,12 @@ const TimesheetsPage = () => {
                 setDirty(true);
                 setSaved(null);
               }}
-              data-testid="timesheet-month-comment"
+              data-testid="timesheet-period-comment"
             />
           ) : (
             <div className="text-sm">
-              <p className="mb-1 font-medium text-steel-700">Comments for {formatMonth(month)}</p>
-              <p className="whitespace-pre-wrap text-steel-800" data-testid="timesheet-month-comment-read">
+              <p className="mb-1 font-medium text-steel-700">Comments for {period.label}</p>
+              <p className="whitespace-pre-wrap text-steel-800" data-testid="timesheet-period-comment-read">
                 {savedComment.length > 0 ? savedComment : '—'}
               </p>
             </div>
@@ -571,7 +563,7 @@ const TimesheetsPage = () => {
           <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('preview')} data-testid="timesheet-preview">
             Preview
           </Button>
-          {monthOpen && (
+          {periodOpen && (
             <Button variant="secondary" loading={operation.running} onClick={() => void save()} data-testid="timesheet-save">
               Save
             </Button>
@@ -579,7 +571,7 @@ const TimesheetsPage = () => {
           <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('print')} data-testid="timesheet-print">
             Print
           </Button>
-          {monthOpen && (
+          {periodOpen && (
             <Button onClick={() => setConfirmSend(true)} loading={operation.running} data-testid="timesheet-send">
               Send to office
             </Button>
@@ -596,9 +588,10 @@ const TimesheetsPage = () => {
           </p>
         )}
         <p className="mt-2 text-xs text-steel-500">
-          Preview and Print show the Time Sheet exactly as it prints, and change nothing. Send to office is once per month; after that the month is read-only.
+          Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. Send to office is once per period; after that its days are read-only.
         </p>
       </Card>
+      )}
 
       {rangeProblem !== null ? null : sheet.error !== null ? (
         <QueryFailure code={sheet.errorCode} message={sheet.error} onRetry={sheet.refetch} />
@@ -609,10 +602,10 @@ const TimesheetsPage = () => {
           <Card className="mb-5">
             <div className="flex flex-wrap gap-6 text-sm" data-testid="timesheet-totals">
               <span>OT <strong className="tabular-nums">{hours(sheet.data.totals.overtimeHours)}</strong></span>
-              <span>DT <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
+              <span>D/T <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
               <span>Callout <strong className="tabular-nums">{formatCurrency(sheet.data.totals.calloutAmount)}</strong></span>
-              <span>Internal km <strong className="tabular-nums">{kilometres(sheet.data.totals.internalKm)}</strong></span>
-              <span>Customer km <strong className="tabular-nums">{kilometres(sheet.data.totals.customerKm)}</strong></span>
+              <span>Int Km <strong className="tabular-nums">{kilometres(sheet.data.totals.internalKm)}</strong></span>
+              <span>Cust Km <strong className="tabular-nums">{kilometres(sheet.data.totals.customerKm)}</strong></span>
               {sheet.data.totals.normalHours > 0 && (
                 <span className="text-steel-500">NT (historical) <strong className="tabular-nums">{hours(sheet.data.totals.normalHours)}</strong></span>
               )}

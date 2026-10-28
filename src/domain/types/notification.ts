@@ -13,7 +13,9 @@ export type NotificationType =
    */
   | 'signature_refused'
   /** A chat message from another user. Links to the conversation, not a job. */
-  | 'chat_message';
+  | 'chat_message'
+  /** TS-02: a technician sent a timesheet period to the office. To Masters and Coordinators. */
+  | 'timesheet_submitted';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 

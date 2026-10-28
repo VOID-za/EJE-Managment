@@ -133,31 +133,35 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
   reason. It is not the original fault description and not the technician's
   write-up, and nothing on the job changes by itself.
 
-## H. The reviewer's changes (28 October 2026) — NOT YET DEPLOYED
+## H. The reviewer's changes and the owner's decisions (28 October 2026) — NOT YET DEPLOYED
 
 These are on `claude/office-workflow-parts` and need the next approved release
-(migration 0037). Until then the live site does not have them. Use them only on
-fictional data while the demonstration switcher is on.
+(migrations 0037 and 0038). Until then the live site does not have them. Use
+them only on fictional data while the demonstration switcher is on.
+
+**Before testing, refresh every tablet to this build** (close the app fully and
+reopen it, or reload the page). An older build shows a courier the priced job
+card at the signature step, and a courier signature it holds offline is sent to
+Field Captures instead of the job — safe, but the courier must sign again.
 
 | # | Do this | Pass looks like |
 |---|---|---|
 | H1 | Technician: **Attendance** → *Absent* on a day | A reason is required — exactly Leave, Sick Leave, Family Responsibility, IOD (Injury on Duty). The day shows "Absent — the reason". An absent day from before shows "reason not recorded" |
 | H2 | Office: Attendance register → *Absent* for someone; export CSV | Same four reasons; the CSV has an *Absence reason* column |
-| H3 | Technician: **Timesheets** | The first day of the month is at the TOP (oldest first), each date with its day ("Mon 26 Oct 2026"). Setting From after To shows a message and breaks nothing. Leave and come back: the From/To boxes are back to the 1st of the month → today; your lines are all still there |
-| H4 | *Add line* → choose **Workshop** in the customer list; OT, DT, **Callout (R)** e.g. 450, tick *shared* if it is; **Internal km** and **Customer km** | No NT box. The line shows Workshop, the amount as R 450,00 (shared), both kilometres. Workshop with a customer name is refused |
-| H5 | Type the month's **Comments** → **Save** | "Saved … Not sent to the office"; it is still a draft and still editable |
-| H6 | **Preview**, then **Print** | The Time Sheet appears in the app: Time Sheet, your name, the Month, Date / Customer / OT / DT / Callout / Km / Hm, your comment in the Comments box. Print prints only the sheet. Neither changes anything |
-| H7 | **Send to office** → confirm | "Sent to office (date) by (you)". Add line, Edit, Remove, Save and Send are gone for that month; trying again is refused |
-| H8 | Office: Timesheets → that technician → that month → Preview | The sent version, read-only, with the comment |
-| H9 | Test & Repair job: press **Complete job**, then try to add or change a part | Not offered; the screen explains why. *Cancel completion* → the part can be added in In Progress |
-| H10 | Test & Repair, on the **tablet**: Complete job → Review → **Job card PDF** | The job card APPEARS on screen (not a silent download), with Print and Download |
+| H3 | Technician: **Timesheets**; set **From** and **To** to any dates (e.g. the 3rd to the 12th) | The first day of the period is at the TOP (oldest first), both chosen days included, each date with its day ("Mon 26 Oct 2026"). From after To shows a message and breaks nothing. Leave and come back: From and To are back to the 1st of the month → today; your lines are all still there |
+| H4 | *Add line* → **Workshop** in the customer list; OT, D/T, **Callout (R)**; **Int Km** and **Cust Km** | No NT box. The line shows Workshop, the amount, both kilometres. Workshop with a customer name is refused |
+| H5 | Two technicians shared a R1 000 call-out: each enters **R500** on their own sheet and ticks *Shared* | Each shows R500 (shared). Nothing is divided or changed by the system |
+| H6 | Type the period's **Comments** → **Save**; then **Preview**, then **Print** | "Saved … Not sent to the office"; still a draft. The Time Sheet appears in the app: Time Sheet, your name, the Period, the columns **Date, Customer, OT, D/T, Callout, Int Km, Cust Km** (no Hm, no NT), your comment in the Comments box. Print prints only the sheet. Neither changes anything |
+| H7 | **Send to office** → confirm | "Sent to office (date) by (you)". For those days: Add line, Edit, Remove, Save and Send are gone; sending again is refused; a new period that includes any of those days cannot be sent |
+| H8 | Office (Master or Coordinator): the **bell** → *Timesheet sent to the office* → Timesheets → that technician → the same From and To → Preview | The notification is there once; the sent version, read-only, with the comment |
+| H9 | A **breakdown, installation, service and Test & Repair** job: press **Complete job**, then try to add, change or remove a part | Not offered on any of them; the screen explains why. *Cancel completion* → parts can be changed in In Progress. A Parts job still records its goods at completion |
+| H10 | **The preview on the actual rugged tablet** (the reviewer's report is UNCONFIRMED): a Test & Repair job → Complete job → Review → **Job card PDF**, in the browser EJE uses on the tablet | Record what happens. Pass: the job card appears INSIDE the app (not a silent download, not a blank screen). Then press **Print** — record whether the print dialog opens and what it prints; press **Download PDF** — record whether the file saves and opens. Note the tablet model, Android version and browser |
 | H11 | New Job → **Parts**: leave the order number empty, fill **Quote number** | The job is raised; the quote number is on the job card |
-| H12 | A Parts or Test & Repair job collected by a **courier**: at the collection choose Courier collection with a waybill; then **Delivery note** on the job or review screen | Two documents: the job card WITH prices, and a Delivery Note with the goods, quantities and waybill and NO prices. Print each separately |
+| H12 | A Parts or Test & Repair job collected by a **courier**: at the collection choose *Courier collection* with a waybill; at the signature step | The screen shows the **Delivery Note** (goods and quantities, NO prices) and the courier signs **once**. After submitting: the job card WITH prices (sent to the customer, kept for the office) shows the courier's signature "given once, on the Delivery Note" with a signature reference; *Delivery note* shows the stored note with the same signature and reference and no prices. Print each separately |
+| H13 | Repeat H12 **with no signal** at the signature step, then restore the signal | The signature is held, then accepted when the signal returns; both documents carry it once |
 
-Open questions the owner is asked to answer are listed in
-`docs/reviewer-feedback-2026-10-28.md` (Hm, reopening a sent timesheet, telling
-the office, the courier at the signature step, shared call-outs, TR-01 for other
-job types, TR-02 on the device, the month as the period).
+What these do NOT prove: real email or WhatsApp delivery (EJE's credentials are
+needed); in-app notifications only are sent for a submitted timesheet.
 
 ## F. Documents
 
@@ -184,7 +188,7 @@ job types, TR-02 on the device, the month as the period).
 | E1–E5 | | | |
 | F1–F2 | | | |
 | G1–G12 | | | |
-| H1–H12 (after the next release) | | | |
+| H1–H13 (after the next release) | | | |
 
 Faults go to the owner with the check number, what was done, what was expected,
 what happened, and a screenshot.

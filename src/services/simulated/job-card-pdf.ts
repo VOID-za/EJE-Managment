@@ -669,7 +669,8 @@ const acceptance = (sheet: Sheet, model: JobCardModel): void => {
   sheet.sectionTitle(
     model.acceptance === null
       ? 'Customer acceptance'
-      : `${model.acceptance.caption.replace(' signature', '')} acceptance`,
+      // "Courier signature — given once, on the Delivery Note" titles as "Courier acceptance".
+      : `${model.acceptance.caption.split(' signature')[0]} acceptance`,
   );
 
   if (model.acceptance === null) {
