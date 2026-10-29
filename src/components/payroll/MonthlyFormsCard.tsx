@@ -130,8 +130,15 @@ export const MonthlyFormsCard = ({ userId, month }: { readonly userId: string; r
                 className="mt-0.5 size-4.5 rounded border-steel-300 text-eje-600"
                 data-testid="monthly-forms-acknowledge"
               />
-              No attendance is recorded for {unrecorded.map(formatDayAndDate).join(', ')}. I confirm the attendance is right as it is.
+              No attendance is recorded for {unrecorded.length} weekday{unrecorded.length === 1 ? '' : 's'}. I confirm the attendance is right as it is.
             </label>
+          )}
+          {unrecorded.length > 0 && state.canSubmit && (
+            // Outside the label, so opening the list never ticks the confirmation.
+            <details className="ml-6.5 text-xs text-steel-500" data-testid="monthly-forms-unrecorded">
+              <summary className="cursor-pointer">Which days</summary>
+              {unrecorded.map(formatDayAndDate).join(', ')}
+            </details>
           )}
           <Button
             disabled={!state.canSubmit || (unrecorded.length > 0 && !acknowledged)}

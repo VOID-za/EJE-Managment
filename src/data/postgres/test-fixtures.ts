@@ -58,44 +58,28 @@ export const IDS = {
 export const seedBaseline = async (db: Database): Promise<void> => {
   await syncReferenceData(db);
 
-  await db.insert(schema.users).values([
-    {
-      id: IDS.master,
-      firstName: 'Elmarie',
-      lastName: 'Coetzee',
-      initials: 'EC',
-      email: 'elmarie@example-test.co.za',
-      role: 'master',
-    },
-    {
-      id: IDS.technician,
-      // A mobile number, because the assignment notification has somewhere to
-      // go only if the technician can be reached — which is the case the
-      // outbox exists for.
-      mobile: '082 555 0134',
-      firstName: 'Sipho',
-      lastName: 'Mahlangu',
-      initials: 'SM',
-      email: 'sipho@example-test.co.za',
-      role: 'technician',
-    },
-    {
-      id: IDS.coordinator,
-      firstName: 'Christene',
-      lastName: 'Botha',
-      initials: 'CB',
-      email: 'christene@example-test.co.za',
-      role: 'coordinator',
-    },
-    {
-      id: IDS.otherTechnician,
-      firstName: 'Lerato',
-      lastName: 'Dlamini',
-      initials: 'LD',
-      email: 'lerato@example-test.co.za',
-      role: 'technician',
-    },
-  ]);
+  /*
+   * RAW SQL NAMING ONLY THE COLUMNS EVERY SCHEMA VERSION HAS — as for the
+   * settings below. The upgrade tests seed a database migrated to an OLDER
+   * version (0029), and drizzle's insert names every column it knows,
+   * including `users.document_name` (0040), which an old database refuses.
+   * Columns added later take their defaults.
+   */
+  const people: readonly (readonly [string, string, string, string, string, string, string])[] = [
+    [IDS.master, 'Elmarie', 'Coetzee', 'EC', 'elmarie@example-test.co.za', '', 'master'],
+    // A mobile number, because the assignment notification has somewhere to
+    // go only if the technician can be reached — which is the case the
+    // outbox exists for.
+    [IDS.technician, 'Sipho', 'Mahlangu', 'SM', 'sipho@example-test.co.za', '082 555 0134', 'technician'],
+    [IDS.coordinator, 'Christene', 'Botha', 'CB', 'christene@example-test.co.za', '', 'coordinator'],
+    [IDS.otherTechnician, 'Lerato', 'Dlamini', 'LD', 'lerato@example-test.co.za', '', 'technician'],
+  ];
+  for (const [id, firstName, lastName, initials, email, mobile, role] of people) {
+    await db.execute(sql`
+      insert into users (id, first_name, last_name, initials, email, mobile, role)
+      values (${id}, ${firstName}, ${lastName}, ${initials}, ${email}, ${mobile}, ${role})
+    `);
+  }
 
   await db
     .insert(schema.customers)

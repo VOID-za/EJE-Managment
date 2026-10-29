@@ -239,6 +239,9 @@ describe('PAY-05…08 — the Finance package: both PDFs per selected technician
     ].sort());
     for (const attachment of prepared.attachments) {
       expect(attachment.pageCount).toBe(1);
+      // The production file store accepts only these characters in a key.
+      expect(attachment.storageKey).toMatch(/^[A-Za-z0-9/._-]+$/u);
+      expect(attachment.storageKey).not.toContain('..');
       const stored = await harness.services.storage.getDocument(attachment.storageKey);
       expect(stored?.bytes.byteLength).toBe(attachment.sizeBytes);
       expect(await sha256Hex(stored!.bytes)).toBe(attachment.sha256);

@@ -268,7 +268,10 @@ export const prepareFinancePackage = async (
           'Give each technician a distinct name on documents (Administration → Users) so their files cannot be confused.',
         );
       }
-      const storageKey = `finance-packages/${packageId}/${fileName}`;
+      // The KEY is storage's (letters, digits and . _ - / only — the production
+      // store refuses anything else); the human file name travels in the
+      // manifest and the stored document beside it.
+      const storageKey = `finance-packages/${packageId}/${String(attachments.length + 1).padStart(2, '0')}-${kind}.pdf`;
       await context.services.storage.putDocument({
         storageKey, fileName, contentType: 'application/pdf', bytes: rendered.bytes, renderer: 1, backfilled: false,
       });
