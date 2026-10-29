@@ -193,7 +193,7 @@ Notifications for timesheets and corrections are in-app only.
 
 ## I. Monthly forms and the Finance package (29 October 2026)
 
-In the release carrying migration 0040 (see `docs/deploy-next-release.md`).
+**LIVE since 29 October 2026** in `a46e767` (migration 0040 applied; `docs/deploy-next-release.md`).
 Fictional data only while the demonstration switcher is on. Needs a technician
 account, a Coordinator or Master account, and — for I12 — a Master.
 
@@ -449,3 +449,33 @@ courier collection were NOT exercised on production (the owner asked for no
 test records there); each is proved by CI and the local browser suites above,
 and is staff checks H7–H17. The physical tablet, its print dialog and a printer
 are H18–H20.
+
+## Automated post-deployment verification — 29 October 2026, against `a46e767`
+
+Run from outside the server against `https://eje.syncza.co.za`, signed in only
+through the demonstration switcher. **Read-only: no submission, package,
+attendance, timesheet or setting was created.** The only writes sent had to be
+refused — and were. Email `refuse`; nothing reached anybody.
+
+**API and screens: 36 passed, 0 failed.**
+
+| Area | Verified |
+|---|---|
+| Deployment | `/api/health`: commit `a46e767`, ok, PostgreSQL reachable, `email refuse`, `deployment demonstration`, `demoSwitcher true` (unchanged); unauthenticated read 401 |
+| Screens | Master: dashboard, Monthly forms, timesheets, attendance, admin, jobs; Technician: dashboard, Monthly forms, timesheets, attendance — all 200 |
+| 0040 | The office month view reads `monthly_submissions` and `finance_packages` (3 technicians, 0 packages); production email reported NOT ready ("Microsoft 365 credentials are not set") and no Finance recipient set — nothing can be sent |
+| PDFs | A technician's monthly forms load; the timesheet and attendance PDFs download under **`PETER TIMESHEET SEP.pdf`** and **`PETER ATTEN SEPTEMBER.pdf`** and are **exactly one page each**, counted in the downloaded files; the office downloads a technician's attendance PDF |
+| Permissions (refused, nothing written) | Another technician cannot read the forms or download the PDFs (403); a technician cannot see the office month or prepare a package (403); the office cannot submit a technician's month (403); a month not yet ended → 422 `month_not_ended`; preparing with no recipient → 422 `finance_recipient_missing` |
+| Historical records | Every job view loads; **the same 58 open-list, 10 closed, 33 signed and 20 issued jobs as just before the release**; issued job cards EJE-2050, EJE-2046, EJE-2041 and EJE-2001 **byte-identical** (SHA-256 taken while `1a34d1c` was serving) |
+| Visual | The live `/icons/icon-192.png` is byte-identical to the generated EJE mark; the live favicon is the same mark |
+
+**Emulated rugged tablet (no PDF viewer), live: 8 of 8 passed.** The Time
+Sheet preview in the app with exactly the seven columns; Print asked once; the
+monthly attendance and timesheet forms shown IN the app; no page errors; no
+write request from looking; nothing downloaded by itself.
+
+**Not verified live, by design:** submitting a month and preparing or sending a
+Finance package were NOT done on production (no test records there; email is
+not configured). They are proved by CI and the local browser suites, and are
+staff checks I1–I13. The physical tablet, its print dialog and a printer
+remain staff checks (H18–H20, I13).

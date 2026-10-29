@@ -87,9 +87,47 @@ documentation, checked against the code:
    - 500-character attendance notes on every day of the month.
    Realistic heavy months fit (section 2, PAY-04).
 
-## 3. Verification (filled in from the runs)
+## 3. Verification
 
-See "Release" below.
+- **CI run 40941799194** on `a46e767` — every job and step green:
+  - lint, types, the whole unit and application suite and the build;
+  - the PostgreSQL suite, including every 0040 database refusal and the
+    payroll flow on the production repositories;
+  - **rollback compatibility: `1a34d1c`'s own code against a database at
+    0040**;
+  - routes, the end-to-end workflow, the signed-document and tablet PDF checks,
+    the tablet and phone layout, and smoke.
+  - Earlier runs on this work found three real defects, each fixed before the
+    release:
+    - package storage keys the production file store refuses (6864914);
+    - a test seed naming the new users column on an older schema (6864914);
+    - the rollback probe writing the previous release's data shapes (d1de8a3).
+- **This PC (Windows):**
+  - **Unit suite:** 3300 passed, 32 failed. 21 are Windows-only, in files this
+    work does not touch: GNU tar reading `C:` as a host, POSIX paths, Unix file
+    modes, symlink permission, no OCR engine. They pass on Linux in CI. 11 are
+    5-second timeouts under parallel load; those five files then passed on their
+    own, 96 of 96.
+  - **New suites:** `payroll.test.ts` 27/27; `one-page-form.test.ts` 12/12;
+    `payroll-api.test.ts` 2/2; demo migrations.
+  - **Lint, types and build:** clean.
+  - **Browser:**
+    - smoke **260/260** with no console or page errors (one earlier run failed
+      the site-location step once — intermittent; it passed in the full re-run
+      and in CI);
+    - workflow e2e passed;
+    - routes passed;
+    - tablet and phone layout passed;
+    - tablet PDF check **18/18** (the monthly attendance form included).
+- **Live (`a46e767`):** 36 API/screen checks and 8 tablet-browser checks
+  passed (`docs/staff-testing.md`, last section). Among them:
+  - the timesheet and attendance PDFs downloaded from the live site are
+    **exactly one page each** (counted in the files) and named
+    **`PETER TIMESHEET SEP.pdf` / `PETER ATTEN SEPTEMBER.pdf`**;
+  - every bypass was refused;
+  - the same 58 open-list, 10 closed, 33 signed and 20 issued jobs as before
+    the release, and four issued job cards **byte-identical**;
+  - the live icon and favicon are the new mark.
 
 ## 4. What only a person, a device, a credential or a decision can finish
 
@@ -105,3 +143,29 @@ See "Release" below.
 | AUD-8 | Demo data that can show a takeover — low priority, open |
 
 ## Release
+
+**DEPLOYED — 29 October 2026: `a46e767` is live** (full SHA
+`a46e767271ea668b531b8f923302b44ff2c58679`; CI run 40941799194 green on every
+step, including the PostgreSQL suite and rollback compatibility of `1a34d1c`
+against a database at 0040). Run by Claude on the owner's instruction with the
+guarded release tool (`-SshExe` Windows OpenSSH, the key in the owner's
+ssh-agent; logs kept outside the working tree).
+
+- **Read-only check**: host `srv2000625`; `1a34d1c` serving, healthy, database
+  reachable; `/opt/eje/releases/a46e767` new; 186 383 MB free; script SHA-256
+  `76e3ef4d…94e4` matched. CHECK PASSED.
+- **Release** (`-ExpectPending 0040_monthly_payroll`), from the server: 1/6 build
+  beside the live release; 2/6 **backup proven** —
+  `/var/backups/eje/eje-eje_production-2026-10-29T19-50-01Z`, verified,
+  key-checked, restore-tested before anything changed; 3/6 preflight showed
+  exactly 0040 pending; 4/6 migrated, every shipped migration applied after;
+  5/6 switch `1a34d1c` → `a46e767` at 19:50:14Z; 6/6 health at 19:50:16Z.
+  "RELEASED a46e767 — confirmed from outside." **Rollback target: `1a34d1c`.**
+- **Verified afterwards from outside** (read-only — no submission, package,
+  attendance, timesheet or setting created): **36 API/screen checks and 8 live
+  tablet-browser checks passed** — see `docs/staff-testing.md`, "Automated
+  post-deployment verification — 29 October 2026, against `a46e767`".
+- **Email unchanged**: `refuse`; the Finance recipient is not set on
+  production. Monthly forms and package preparation work there; Send is
+  refused with a message until EJE's Microsoft 365 credentials and an approved
+  Finance address exist.

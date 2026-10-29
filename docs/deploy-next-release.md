@@ -52,11 +52,37 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### NEXT: monthly payroll forms, the Finance package and the app mark (29 October 2026)
+### DEPLOYED — 29 October 2026: `a46e767` — monthly payroll forms, the Finance package and the app mark
 
-**The owner instructed this release on 29 October 2026.** What it carries and
-its tests: `docs/delivery-register-2026-10-29.md`. Live is `1a34d1c`, so **one
-migration is pending**, forward-only and additive:
+**DEPLOYED — 29 October 2026: `a46e767` is live** (full SHA
+`a46e767271ea668b531b8f923302b44ff2c58679`; CI run 40941799194 green on every
+step, including the PostgreSQL suite and rollback compatibility of `1a34d1c`
+against a database at 0040). Run by Claude on the owner's instruction with the
+guarded release tool (`-SshExe` Windows OpenSSH, the key in the owner's
+ssh-agent; logs kept outside the working tree).
+
+- **Read-only check**: host `srv2000625`; `1a34d1c` serving, healthy, database
+  reachable; `/opt/eje/releases/a46e767` new; 186 383 MB free; script SHA-256
+  `76e3ef4d…94e4` matched. CHECK PASSED.
+- **Release** (`-ExpectPending 0040_monthly_payroll`), from the server: 1/6 build
+  beside the live release; 2/6 **backup proven** —
+  `/var/backups/eje/eje-eje_production-2026-10-29T19-50-01Z`, verified,
+  key-checked, restore-tested before anything changed; 3/6 preflight showed
+  exactly 0040 pending; 4/6 migrated, every shipped migration applied after;
+  5/6 switch `1a34d1c` → `a46e767` at 19:50:14Z; 6/6 health at 19:50:16Z.
+  "RELEASED a46e767 — confirmed from outside." **Rollback target: `1a34d1c`.**
+- **Verified afterwards from outside** (read-only — no submission, package,
+  attendance, timesheet or setting created): **36 API/screen checks and 8 live
+  tablet-browser checks passed** — see `docs/staff-testing.md`, "Automated
+  post-deployment verification — 29 October 2026, against `a46e767`".
+- **Email unchanged**: `refuse`; the Finance recipient is not set on
+  production. Monthly forms and package preparation work there; Send is
+  refused with a message until EJE's Microsoft 365 credentials and an approved
+  Finance address exist.
+
+The release as planned (kept as the record of what was checked). What it
+carries and its tests: `docs/delivery-register-2026-10-29.md`. Live was
+`1a34d1c`, so **one migration was pending**, forward-only and additive:
 
 - `0040_monthly_payroll` — `users.document_name` (nullable, bounded);
   `system_settings.finance_email` (defaulted to empty = not configured);
@@ -97,7 +123,7 @@ and a Finance address set by a Master — not invented here.
 installed tablet picks up the new build and icons on its next update; refresh
 every tablet before testing (staff testing H0).
 
-### DEPLOYED — 29 October 2026: `1a34d1c` — the real-world reviewer's changes, the owner's decisions and timesheet corrections
+### DEPLOYED — 29 October 2026: `1a34d1c` — the real-world reviewer's changes, the owner's decisions and timesheet corrections (superseded by `a46e767` the same day, above)
 
 **DEPLOYED — 29 October 2026: `1a34d1c` is live** (full SHA
 `1a34d1c2348f544524952c1f0a5298d8ca48cd52`, CI run 40913736786 green on all

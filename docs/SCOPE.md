@@ -1501,7 +1501,7 @@ the audits, the files, the tests and the remaining checks are in
 | PARTS-04 | **One signature**: the courier is shown and signs the Delivery Note once; the same signature is carried by the priced job card with a shared reference, never a second signing. Offline: verified against the Delivery Note; a stale tablet build is quarantined to Field Captures. | **TESTED — awaiting approval.** Tablets must be on this build before courier testing. Detail, files and tests: `docs/reviewer-feedback-2026-10-28.md`. Migrations 0037–0039. |
 | PARTS-05 | **Document consistency**: permissions, audit, write-once records, no overwrite of the issued card; a failure to store either document refuses the issue. | **TESTED — awaiting approval.** Detail, files and tests: `docs/reviewer-feedback-2026-10-28.md`. Migrations 0037–0039. |
 
-### Monthly payroll forms, the Finance package and the app mark — 29 October 2026
+### Monthly payroll forms, the Finance package and the app mark — 29 October 2026 (DEPLOYED in `a46e767`; not yet approved)
 
 Asked for by the owner on 29 October 2026. The delivery register — what was
 audited, built, tested and deployed, and what only a person or a credential can
