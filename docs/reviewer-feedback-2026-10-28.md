@@ -185,7 +185,7 @@ Tests: `timesheet-corrections.test.ts` (15), `reviewer-feedback-api.test.ts`
 (HTTP, bypasses, replay), `attendance-timesheets.db.test.ts` (every database
 refusal), the smoke journey.
 
-## Migrations — three, in order
+## Migrations — three, in order (applied to production on 29 October 2026)
 
 - `0037_reviewer_timesheets_attendance` — absence reason; timesheet Workshop,
   call-out amount and shared flag, Int Km and Cust Km; `timesheet_months` with a
@@ -273,3 +273,68 @@ production build. Nothing touched the live site or its database.
   absent.
 - **Not automatable / not done:** the browser's print dialog, the real tablet,
   and any staff test. Real email and WhatsApp delivery (no credentials).
+
+## Release — 29 October 2026
+
+**DEPLOYED — 29 October 2026: `1a34d1c` is live** (full SHA
+`1a34d1c2348f544524952c1f0a5298d8ca48cd52`, CI run 40913736786 green on all
+three jobs, rollback compatibility included). Run by Claude on the owner's
+instruction, from the owner's PC, with the guarded release tool, the key
+unlocked by the owner in the Windows ssh-agent.
+
+- **Read-only check** (`-CheckOnly`): host `srv2000625`; `ef0f695` serving,
+  healthy, database reachable; `/opt/eje/releases/1a34d1c` new; 187 389 MB
+  free; pdftotext/pdfinfo present; env files readable; uploaded script SHA-256
+  `76e3ef4d…94e4` matched the reviewed copy. CHECK PASSED.
+- **The release** (`-ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes,0039_timesheet_corrections`),
+  from the server's own output: 1/6 build beside the live release; 2/6
+  **backup proven** — `/var/backups/eje/eje-eje_production-2026-10-29T17-02-41Z`,
+  verified, key-checked and restore-tested BEFORE anything changed; 3/6
+  preflight showed exactly the three expected migrations pending, in order;
+  4/6 migrated, and preflight afterwards showed every shipped migration
+  applied; 5/6 atomic switch `ef0f695` → `1a34d1c` at 17:02:52Z; 6/6 health
+  gate passed at 17:02:55Z. "RELEASED 1a34d1c — confirmed from outside."
+  Recorded state: `previous=/opt/eje/releases/ef0f695 … backup=… migrated=yes
+  switched=… healthy=…`. **Rollback target: `ef0f695`**
+  (`stage-release.ps1 -Rollback`), proven compatible with a database at 0039.
+- A first attempt minutes earlier never reached the server: launched from Git
+  Bash it used Git's `ssh`, which cannot see the Windows agent — "Permission
+  denied (publickey)", nothing uploaded or run. Re-run from PowerShell with
+  `-SshExe C:\Windows\System32\OpenSSH\ssh.exe`.
+- **Verified afterwards from outside** (read-only; no job, timesheet, period,
+  correction, attendance record or setting created — the only writes sent were
+  requests that had to be, and were, refused): see
+  `docs/staff-testing.md`, "Automated post-deployment verification — 29
+  October 2026". Email stays `refuse`, WhatsApp unconfigured — untouched.
+- **Before courier testing, refresh every tablet** (staff testing H0).
+
+
+**Test results for the release commit `1a34d1c`** (29 October 2026):
+
+- **CI run 40913736786: all three jobs green** — lint, types, the whole unit and
+  application suite and the build (Linux); the PostgreSQL suite including every
+  `timesheet_corrections` refusal; **rollback compatibility — ef0f695 against a
+  database at 0039**; routes, the workflow end to end, the signed-document and
+  tablet PDF checks, the tablet and phone layout, and smoke.
+- **On this PC:** unit 3256 passed / 32 failed before two fixes. The two were
+  real and mine (CSV header expectations not updated for the new *Sent
+  version* column) and are fixed. Nine were load timeouts on this low-memory
+  machine — those files then passed together (126 of 126). Twenty-one are
+  Windows-only, in files this change does not touch, each with its cause seen:
+  GNU tar reading `C:` as a remote host, POSIX paths compared with Windows
+  paths, Unix file modes (438 vs 384), symlink permission, no OCR engine. They
+  pass on Linux in CI. New suites: `timesheet-corrections.test.ts` 15/15,
+  HTTP 5/5, demo migrations 28/28. Lint and types clean; build passes.
+- **Browser, local production build:** smoke **259/259** with no console or
+  page errors (one earlier run failed from the messaging step on, a load flake
+  on this PC — the messaging page did not render within 10 s; the full re-run
+  passed, and messaging is untouched); workflow e2e passed; routes 30/30;
+  tablet check **17/17** (5 new: in-app preview, Print once with only the
+  document and nothing written, Download identical each time, the Delivery
+  Note without prices, the Time Sheet's seven columns).
+- **Live, after the release:** see `docs/staff-testing.md` — 43 API checks and
+  6 browser checks passed.
+
+Physical confirmation still outstanding (needs a person and the device): the
+rugged tablet's own browser, its print dialog and a real printer, and opening
+the downloaded file on the tablet (staff testing H18–H20).

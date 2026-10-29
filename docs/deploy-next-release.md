@@ -52,12 +52,43 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### NEXT: the real-world reviewer's changes, the owner's decisions and timesheet corrections (28–29 October 2026)
+### DEPLOYED — 29 October 2026: `1a34d1c` — the real-world reviewer's changes, the owner's decisions and timesheet corrections
 
-**The owner instructed this release on 29 October 2026** ("deploy the finished
-release to the EJE VPS using the established release process"). The changes
-and their tests are in `docs/reviewer-feedback-2026-10-28.md`. Live is
-`ef0f695`, so **three migrations are pending**, in order, all forward-only and
+**DEPLOYED — 29 October 2026: `1a34d1c` is live** (full SHA
+`1a34d1c2348f544524952c1f0a5298d8ca48cd52`, CI run 40913736786 green on all
+three jobs, rollback compatibility included). Run by Claude on the owner's
+instruction, from the owner's PC, with the guarded release tool, the key
+unlocked by the owner in the Windows ssh-agent.
+
+- **Read-only check** (`-CheckOnly`): host `srv2000625`; `ef0f695` serving,
+  healthy, database reachable; `/opt/eje/releases/1a34d1c` new; 187 389 MB
+  free; pdftotext/pdfinfo present; env files readable; uploaded script SHA-256
+  `76e3ef4d…94e4` matched the reviewed copy. CHECK PASSED.
+- **The release** (`-ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes,0039_timesheet_corrections`),
+  from the server's own output: 1/6 build beside the live release; 2/6
+  **backup proven** — `/var/backups/eje/eje-eje_production-2026-10-29T17-02-41Z`,
+  verified, key-checked and restore-tested BEFORE anything changed; 3/6
+  preflight showed exactly the three expected migrations pending, in order;
+  4/6 migrated, and preflight afterwards showed every shipped migration
+  applied; 5/6 atomic switch `ef0f695` → `1a34d1c` at 17:02:52Z; 6/6 health
+  gate passed at 17:02:55Z. "RELEASED 1a34d1c — confirmed from outside."
+  Recorded state: `previous=/opt/eje/releases/ef0f695 … backup=… migrated=yes
+  switched=… healthy=…`. **Rollback target: `ef0f695`**
+  (`stage-release.ps1 -Rollback`), proven compatible with a database at 0039.
+- A first attempt minutes earlier never reached the server: launched from Git
+  Bash it used Git's `ssh`, which cannot see the Windows agent — "Permission
+  denied (publickey)", nothing uploaded or run. Re-run from PowerShell with
+  `-SshExe C:\Windows\System32\OpenSSH\ssh.exe`.
+- **Verified afterwards from outside** (read-only; no job, timesheet, period,
+  correction, attendance record or setting created — the only writes sent were
+  requests that had to be, and were, refused): see
+  `docs/staff-testing.md`, "Automated post-deployment verification — 29
+  October 2026". Email stays `refuse`, WhatsApp unconfigured — untouched.
+- **Before courier testing, refresh every tablet** (staff testing H0).
+
+The release as planned (kept as the record of what was checked). The changes
+and their tests are in `docs/reviewer-feedback-2026-10-28.md`. Live was
+`ef0f695`, so **three migrations were pending**, in order, all forward-only and
 additive (new nullable or defaulted columns, new tables with write-once
 triggers, new enum values; nothing dropped, no row rewritten):
 
@@ -118,7 +149,7 @@ technician's Timesheets show no NT box, oldest day first, the From/To period
 with Preview / Save / Print / Send to office; a courier collection's signature
 step shows the Delivery Note.
 
-### DEPLOYED — 28 October 2026: `ef0f695` is live (the real-world testing fixes, on top of `51fb112`)
+### DEPLOYED — 28 October 2026: `ef0f695` was live (superseded by `1a34d1c` on 29 October, above)
 
 Run by the owner with the guarded release tool (fixed first in `3194e69`, so
 `-ExpectPending` takes several tags). From the release output: running commit

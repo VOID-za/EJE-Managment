@@ -135,8 +135,8 @@ Do these on the tablet with **flight mode** on, after opening the job once with 
 
 ## H. The reviewer's changes, the owner's decisions and timesheet corrections (28–29 October 2026)
 
-In the release that carries migrations 0037, 0038 and 0039 (see
-`docs/deploy-next-release.md` for whether it is live). Use fictional data only
+**LIVE since 29 October 2026** in `1a34d1c` (migrations 0037, 0038 and 0039
+applied; `docs/deploy-next-release.md`). Use fictional data only
 while the demonstration switcher is on. Two accounts are needed for the
 corrections: a technician and a Master or Coordinator.
 
@@ -361,3 +361,40 @@ re-run.
 refused with the attendance wording, *"Attendance cannot be recorded for a day
 that has not happened."* The refusal is right; the sentence should say
 timesheet. Not fixed in this release, to avoid a redeploy for wording.
+
+## Automated post-deployment verification — 29 October 2026, against `1a34d1c`
+
+Run from outside the server against `https://eje.syncza.co.za`, signed in only
+through the demonstration switcher (no password handled). **Read-only, as the
+owner asked: no job, timesheet line, period, correction, attendance record or
+setting was created or changed.** The only writes sent were requests that had
+to be refused — and were — plus sign-in sessions and the audited "document
+opened" line each job-card read records. Email is `refuse`, WhatsApp
+unconfigured; nothing reached anybody.
+
+**API and screens: 43 passed, 0 failed** (two checks first failed because the
+check sent the wrong query parameters to the attendance endpoints — `?date=`
+and `?from=&to=` were needed — and passed when sent correctly).
+
+| Area | Verified |
+|---|---|
+| Deployment | `/api/health`: commit `1a34d1c`, status ok, PostgreSQL reachable, `email refuse`, `deployment demonstration`, `demoSwitcher true` (unchanged); HTTP → HTTPS 308; unauthenticated read 401 |
+| Screens | Master: dashboard, jobs, timesheets, attendance, notifications, calendar, admin, Field Captures; Technician: dashboard, jobs, timesheets, attendance, messages — all 200 |
+| 0037 | Attendance register and a technician's own attendance load; **Absent without a reason is refused** (422 `absence_reason_required`, nothing recorded); the absent day recorded before the release (23 Oct) keeps **no invented reason** |
+| 0038 | A technician's timesheet loads with the From/To period model; the period document and the Time Sheet PDF load; the CSV has D/T, Int Km, Cust Km and *Sent version*, no Hm |
+| 0039 | The office's (Master's and Coordinator's) pending-corrections list reads `timesheet_corrections` (empty) |
+| Permissions (refused, nothing written) | A technician cannot read another's timesheet (403), decide a correction (403), or ask to correct another's (403); the office cannot ask on a technician's behalf (403) or send a technician's timesheet (403); deciding a correction that does not exist → 422 `correction_not_found`; a period over 92 days / ending in the future → 422; a technician is refused administration |
+| Historical records | Every job view loads (58); **the same 58 open-list jobs, 10 closed, 33 signed and 20 issued as just before the release**; the same 3 technicians; **issued job cards EJE-2050, EJE-2046, EJE-2041 and EJE-2001 are byte-identical** (SHA-256 taken while `ef0f695` was serving, compared after the switch) |
+
+**Browser on an emulated rugged tablet (no PDF viewer), live: 6 of 6 passed.**
+The technician's Time Sheet preview shows IN the app with exactly Date,
+Customer, OT, D/T, Callout, Int Km, Cust Km; Print asks the browser to print
+once; the office Timesheets screen renders; no page errors; no write request
+from looking; nothing downloaded by itself. (EJE-2050's screen offered this
+role no job-card preview button — recorded, not counted.)
+
+**Not verified live, by design:** the correction workflow, Send to office and a
+courier collection were NOT exercised on production (the owner asked for no
+test records there); each is proved by CI and the local browser suites above,
+and is staff checks H7–H17. The physical tablet, its print dialog and a printer
+are H18–H20.
