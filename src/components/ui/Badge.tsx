@@ -26,6 +26,8 @@ export interface BadgeProps {
   readonly dot?: boolean;
   readonly className?: string;
   readonly size?: 'sm' | 'md';
+  /** Passed through, so a browser test can find this badge (as Card does). */
+  readonly 'data-testid'?: string;
 }
 
 export const Badge = ({
@@ -34,8 +36,10 @@ export const Badge = ({
   dot = false,
   size = 'md',
   className,
+  'data-testid': testId,
 }: BadgeProps) => (
   <span
+    data-testid={testId}
     className={cn(
       'inline-flex items-center gap-1.5 rounded-full font-semibold ring-1 ring-inset whitespace-nowrap',
       size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',

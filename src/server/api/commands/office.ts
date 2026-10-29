@@ -114,6 +114,8 @@ export const USER_COMMANDS: CommandRegistry = {
         mobile: text(60),
         jobTitle: text(160),
         role: roles,
+        // PAY-03: the name on the monthly PDFs. Optional: a client from before keeps the stored one.
+        documentName: z.string().max(60).nullable().optional(),
       })
       .strict(),
     async run(context, input, target) {
@@ -124,7 +126,11 @@ export const USER_COMMANDS: CommandRegistry = {
        * Activation has its own command, because disabling somebody revokes
        * their sessions and that must not be a side effect of an edit.
        */
-      return users.updateUser(context.operation, { ...stored, ...input });
+      return users.updateUser(context.operation, {
+        ...stored,
+        ...input,
+        documentName: input.documentName === undefined ? stored.documentName ?? null : input.documentName,
+      });
     },
   }),
 
@@ -215,6 +221,8 @@ export const settingsSchema = z
     jobNumberPrefix: text(20),
     quietHoursStart: text(5),
     quietHoursEnd: text(5),
+    // PAY-05: the Finance recipient. Optional: a client from before keeps the stored one.
+    financeEmail: z.string().max(320).optional(),
   })
   .strict();
 
@@ -235,6 +243,7 @@ export const runUpdateSettings = async (
   return settings.updateSettings(context.operation, {
     ...input,
     testBenchFee: input.testBenchFee ?? stored.testBenchFee,
+    financeEmail: input.financeEmail ?? stored.financeEmail ?? '',
     nextJobSequence: stored.nextJobSequence,
   });
 };

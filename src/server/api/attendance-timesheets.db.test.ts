@@ -335,6 +335,90 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(decided.map((n) => n.recipientId)).toEqual([IDS.technician]);
   });
 
+  it('monthly payroll: one write-once submission per month, and a Finance package whose contents never change (migration 0040)', async () => {
+    const today = businessToday();
+    const month = (() => {
+      const [y, m] = today.slice(0, 7).split('-').map(Number) as [number, number];
+      return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    })();
+    const tech = await signIn('sipho@example-test.co.za');
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
+      date: `${month}-03`, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0,
+    })).status).toBe(200);
+    const submitted = await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true });
+    expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
+    expect((await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(422);
+    const [row] = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.technician));
+    expect(row?.month).toBe(month);
+
+    // The database refuses: a rewrite, a delete, a second row, a submission not backed by the exact sent month.
+    expect(await postgresMessage(
+      db.update(schema.monthlySubmissions).set({ attendanceSnapshot: {} }).where(eq(schema.monthlySubmissions.id, row!.id)),
+    )).toContain('cannot be changed');
+    expect(await postgresMessage(db.delete(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.id, row!.id)))).toContain('cannot be changed');
+    const [draft] = await db.insert(schema.timesheetPeriods).values({
+      id: crypto.randomUUID(), userId: IDS.coordinator, periodFrom: `${month}-01`, periodTo: `${month}-05`,
+      updatedBy: IDS.coordinator, commentedAt: new Date().toISOString(),
+    }).returning();
+    expect(await postgresMessage(
+      db.insert(schema.monthlySubmissions).values({
+        id: crypto.randomUUID(), userId: IDS.coordinator, month, timesheetPeriodId: draft!.id,
+        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.coordinator,
+      }),
+    )).toContain('sent timesheet for exactly');
+
+    // The technician's own attendance for that month is frozen; the office can still correct it.
+    expect((await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' })).status).toBe(422);
+    const master = await signIn('elmarie@example-test.co.za');
+    expect((await master.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: 'office' })).status).toBe(200);
+
+    // The Finance recipient: a Master's to set; then the package is prepared and stored.
+    const coordinator = await signIn('christene@example-test.co.za');
+    const prepareWithoutRecipient = await coordinator.post('/api/payroll/packages', { month, technicianIds: [IDS.technician] });
+    expect(prepareWithoutRecipient.status).toBe(422);
+    await db.update(schema.systemSettings).set({ financeEmail: 'payroll@finance.example.test' });
+    const prepared = await coordinator.post<{ package: { id: string; attachments: readonly { fileName: string; pageCount: number; storageKey: string }[] } }>(
+      '/api/payroll/packages', { month, technicianIds: [IDS.technician] },
+    );
+    expect(prepared.status, JSON.stringify(prepared.error)).toBe(200);
+    expect(prepared.data.package.attachments).toHaveLength(2);
+    expect(prepared.data.package.attachments.every((attachment) => attachment.pageCount === 1)).toBe(true);
+    const id = prepared.data.package.id;
+    expect((await coordinator.post('/api/payroll/packages', { month, technicianIds: [IDS.technician] })).status).toBe(422);
+
+    // This deployment has no email configured — as production today — so Send is REFUSED before
+    // anything is claimed, and the package stays prepared. Nothing is recorded as sent.
+    const send = await coordinator.post<unknown>(`/api/payroll/packages/${id}/send`, {});
+    const refusedOrSent = send.status;
+    const [after] = await db.select().from(schema.financePackages).where(eq(schema.financePackages.id, id));
+    if (refusedOrSent === 422) {
+      expect(after?.status).toBe('prepared');
+    } else {
+      expect(refusedOrSent).toBe(200);
+      expect(['sent', 'failed']).toContain(after?.status);
+    }
+
+    // The guard: the manifest and recipient never change; no delete; only the allowed moves.
+    expect(await postgresMessage(
+      db.update(schema.financePackages).set({ recipient: 'attacker@example.test' }).where(eq(schema.financePackages.id, id)),
+    )).toContain('cannot be changed once prepared');
+    expect(await postgresMessage(db.delete(schema.financePackages).where(eq(schema.financePackages.id, id)))).toContain('cannot be deleted');
+    if (after?.status === 'prepared') {
+      expect(await postgresMessage(
+        db.update(schema.financePackages).set({ status: 'sent' }).where(eq(schema.financePackages.id, id)),
+      )).toMatch(/cannot go from prepared to sent|finance_packages_sent_whole/u);
+    }
+    expect(await postgresMessage(
+      db.insert(schema.financePackages).values({
+        id: crypto.randomUUID(), month, status: 'prepared', recipient: 'x@example.test', manifest: [], attachmentCount: 2, totalBytes: 10,
+        preparedBy: IDS.master, preparedAt: new Date().toISOString(),
+      }),
+    )).toMatch(/finance_packages_one_open_per_month|duplicate key/u);
+    expect(await postgresMessage(
+      db.update(schema.users).set({ documentName: '' }).where(eq(schema.users.id, IDS.technician)),
+    )).toContain('users_document_name_bounded');
+  });
+
   it('an issued Delivery Note is one per job and write-once (migration 0038)', async () => {
     const master = await signIn('elmarie@example-test.co.za');
     const created = await master.post<{ id: string }>('/api/jobs', {

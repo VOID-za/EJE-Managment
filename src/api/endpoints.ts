@@ -5,6 +5,7 @@ import type {
   TimesheetComment,
   TimesheetEntry,
   TimesheetPeriod,
+  MonthlySubmission,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -78,6 +79,9 @@ import type { JobListRow, JobView } from '@/application/job-view';
 import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
 import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
 import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
+import type { MonthlyFormsState } from '@/application/monthly-submissions';
+import type { AttendanceDocument } from '@/application/attendance-document';
+import type { FinancePackageView, PayrollMonthView } from '@/application/finance-packages';
 
 /** The body of a timesheet line. TIMESHEET-2. */
 export interface TimesheetEntryBody {
@@ -1144,6 +1148,26 @@ export const attendance = {
 };
 
 /** Technician timesheets. TIMESHEET-1. */
+/** PAY-01…08: monthly payroll forms and the Finance package. */
+export const payroll = {
+  forms: (userId: string, month: string) => query<MonthlyFormsState>(`/api/payroll/${segment(userId)}/${segment(month)}`),
+  timesheet: (userId: string, month: string) => query<TimesheetDocument>(`/api/payroll/${segment(userId)}/${segment(month)}/timesheet`),
+  attendance: (userId: string, month: string, version: 'current' | 'submitted' = 'current') =>
+    query<AttendanceDocument>(`/api/payroll/${segment(userId)}/${segment(month)}/attendance${search({ version: version === 'current' ? undefined : version })}`),
+  timesheetPdf: (userId: string, month: string, fallbackName: string) =>
+    apiDownload(`/api/payroll/${segment(userId)}/${segment(month)}/timesheet/pdf`, fallbackName),
+  attendancePdf: (userId: string, month: string, fallbackName: string, version: 'current' | 'submitted' = 'current') =>
+    apiDownload(`/api/payroll/${segment(userId)}/${segment(month)}/attendance/pdf${search({ version: version === 'current' ? undefined : version })}`, fallbackName),
+  submit: (userId: string, month: string, confirmUnrecorded: boolean) =>
+    command<{ submission: MonthlySubmission }>(`/api/payroll/${segment(userId)}/${segment(month)}/submit`, { confirmUnrecorded }),
+  month: (month: string) => query<PayrollMonthView>(`/api/payroll/months/${segment(month)}`),
+  prepare: (month: string, technicianIds: readonly string[]) =>
+    command<{ package: FinancePackageView }>('/api/payroll/packages', { month, technicianIds }),
+  send: (packageId: string) => command<{ package: FinancePackageView }>(`/api/payroll/packages/${segment(packageId)}/send`),
+  discard: (packageId: string) => command<{ package: FinancePackageView }>(`/api/payroll/packages/${segment(packageId)}/discard`),
+  fileUrl: (packageId: string, name: string) => `/api/payroll/packages/${segment(packageId)}/files${search({ name })}`,
+};
+
 export const timesheets = {
   people: () => query<readonly TimesheetPerson[]>('/api/timesheets'),
   sheet: (userId: string, from: string, to: string) =>

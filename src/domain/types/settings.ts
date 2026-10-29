@@ -58,4 +58,6 @@ export interface SystemSettings {
   readonly nextJobSequence: number;
   readonly quietHoursStart: string;
   readonly quietHoursEnd: string;
+  /** PAY-05. The one Finance recipient of the monthly package. Empty: not configured. */
+  readonly financeEmail?: string;
 }

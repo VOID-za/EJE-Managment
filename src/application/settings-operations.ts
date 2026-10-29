@@ -27,7 +27,33 @@ export const updateSettings = async (
   }
 
   const previous = await context.repos.settings.get();
-  const saved = await context.repos.settings.save(settings);
+  /*
+   * PAY-05. THE FINANCE RECIPIENT decides where every technician's payroll forms
+   * go, so changing it is a Master's (settings.manage), validated, and recorded
+   * from-and-to. Empty means not configured: nothing can be sent.
+   */
+  const financeEmail = (settings.financeEmail ?? previous.financeEmail ?? '').trim();
+  const financeChanged = financeEmail !== (previous.financeEmail ?? '');
+  if (financeChanged && !can(context.actor.role, 'settings.manage')) {
+    throw new WorkflowError('Only a Master can change the Finance recipient.', [
+      { code: 'not_permitted', message: 'Payroll forms go to this address; a Master sets it.' },
+    ]);
+  }
+  if (financeEmail !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(financeEmail)) {
+    throw new WorkflowError('That is not an email address.', [
+      { code: 'invalid_finance_email', message: 'Give the Finance address, e.g. payroll@company.co.za, or leave it empty.' },
+    ]);
+  }
+  const saved = await context.repos.settings.save({ ...settings, financeEmail });
+  if (financeChanged) {
+    await audit(context, {
+      jobId: null,
+      type: 'settings_updated',
+      summary: 'Finance recipient changed',
+      detail: `The monthly payroll package now goes to ${financeEmail || 'nobody (not configured)'}. Changed by a Master.`,
+      changes: [{ field: 'Finance recipient', from: previous.financeEmail || '—', to: financeEmail || '—' }],
+    });
+  }
 
   const changes: string[] = [];
   if (previous.labourRates.normal !== saved.labourRates.normal) changes.push('normal labour');

@@ -1,6 +1,7 @@
 #!/bin/bash
-# ROLLBACK COMPATIBILITY: the live release (ef0f695) against a database this
-# release has migrated to its newest migration (0039). First written for de0d9b6
+# ROLLBACK COMPATIBILITY: the live release (1a34d1c) against a database this
+# release has migrated to its newest migration (0040). Moved from ef0f695/0039
+# to the live 1a34d1c and migration 0040 on 29 October 2026. First written for de0d9b6
 # (25 October 2026, live 4634d5d, migration 0030); moved to the live ef0f695 and
 # migrations 0037–0039 on 29 October 2026.
 #
@@ -29,7 +30,7 @@
 # reach the VPS.
 set -euo pipefail
 
-LIVE=${LIVE_COMMIT:-ef0f695ac7121b4f10a0caced2c0be917309c3cb}
+LIVE=${LIVE_COMMIT:-1a34d1c2348f544524952c1f0a5298d8ca48cd52}
 : "${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a disposable test database}"
 
 root=$(git rev-parse --show-toplevel)

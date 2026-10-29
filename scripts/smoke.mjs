@@ -4146,6 +4146,77 @@ await step('the technician asks to correct the sent timesheet; the office accept
 });
 
 /*
+ * PAY-01…PAY-08: MONTHLY FORMS. The technician previews last month's timesheet
+ * and attendance (the actual documents, one page each, named by the rule) and
+ * submits both together; the office sees the month, prepares the Finance
+ * package, reviews the exact attachments and sends ONE email (the
+ * demonstration's email is simulated — it reaches the demo outbox only).
+ */
+await step('a technician previews and submits last month’s timesheet and attendance together; the office sends Finance one email (PAY-01…08)', async () => {
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  const forms = page.getByTestId('monthly-forms');
+  await forms.waitFor({ timeout: 15000 });
+  const timesheetFile = await page.getByTestId('monthly-timesheet-file').innerText();
+  const attendanceFile = await page.getByTestId('monthly-attendance-file').innerText();
+  if (!/^SIPHO TIMESHEET [A-Z]{3}\.pdf/u.test(timesheetFile)) throw new Error(`timesheet file name: ${timesheetFile}`);
+  if (!/^SIPHO ATTEN [A-Z]+\.pdf/u.test(attendanceFile)) throw new Error(`attendance file name: ${attendanceFile}`);
+
+  await page.getByTestId('monthly-attendance-preview').click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    await page.getByTestId('attendance-document').waitFor({ timeout: 15000 });
+    const header = await page.getByTestId('attendance-document-header').innerText();
+    if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(header)) throw new Error(`attendance columns: ${header}`);
+  }
+  await page.getByTestId('preview-close').click();
+  await page.getByTestId('monthly-timesheet-preview').click();
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    await page.getByTestId('timesheet-document').waitFor({ timeout: 15000 });
+  }
+  await page.getByTestId('preview-close').click();
+
+  // Weekdays without attendance must be confirmed before the month can go.
+  const acknowledge = page.getByTestId('monthly-forms-acknowledge');
+  if ((await acknowledge.count()) > 0) {
+    if (await page.getByTestId('monthly-forms-submit').isEnabled()) throw new Error('Submit was enabled before the unrecorded weekdays were confirmed');
+    await acknowledge.check();
+  }
+  await page.getByTestId('monthly-forms-submit').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
+  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  await page.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('a submitted month still offers Submit');
+
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  const panel = page.getByTestId('finance-package');
+  await panel.waitFor({ timeout: 15000 });
+  await page.getByTestId('finance-recipient').getByText('finance@eje-demo.co.za').waitFor({ timeout: 5000 });
+  const siphoRow = page.getByTestId('finance-row').filter({ hasText: 'Sipho' });
+  if ((await siphoRow.getAttribute('data-status')) !== 'ready') throw new Error(`Sipho's month is ${await siphoRow.getAttribute('data-status')}`);
+  await siphoRow.getByTestId('finance-select').check();
+  await page.getByTestId('finance-prepare').click();
+  const item = page.locator('[data-testid="finance-package-item"][data-status="prepared"]');
+  await item.waitFor({ timeout: 30000 });
+  const files = await item.getByTestId('finance-attachment').allInnerTexts();
+  if (files.length !== 2) throw new Error(`${files.length} attachments prepared, expected 2`);
+  if (!files.some((text) => text.includes(timesheetFile.split(' · ')[0])) || !files.some((text) => text.includes(attendanceFile.split(' · ')[0]))) {
+    throw new Error(`attachments: ${files.join(' | ')}`);
+  }
+  for (const pages of await item.getByTestId('finance-attachment-pages').allInnerTexts()) {
+    if (pages.trim() !== '1') throw new Error(`an attachment has ${pages} pages`);
+  }
+  await item.getByTestId('finance-send').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Send one email' }).click();
+  await page.getByTestId('finance-result').getByText(/one email to finance@eje-demo\.co\.za with 2 attachments/u).waitFor({ timeout: 30000 });
+  await page.locator('[data-testid="finance-package-item"][data-status="sent"]').waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('finance-send').count()) !== 0) throw new Error('a sent package still offers Send');
+});
+
+/*
  * SITE-2: THE OFFICE CONSOLIDATES A LEGACY CUSTOMER — by choosing, never by
  * default. Found from the register's own filter, previewed site by site before
  * confirming, and afterwards the jobs done at the archived sites still say so.

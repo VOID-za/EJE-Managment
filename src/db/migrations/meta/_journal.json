@@ -281,6 +281,13 @@
       "when": 1793556867482,
       "tag": "0039_timesheet_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793643267482,
+      "tag": "0040_monthly_payroll",
+      "breakpoints": true
     }
   ]
 }

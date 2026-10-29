@@ -29,6 +29,7 @@ import { AdminNotice } from '@/components/admin/AdminNotice';
 import { ChecklistAdminPanel } from '@/components/admin/ChecklistAdminPanel';
 import { LibraryAdminPanel } from '@/components/admin/LibraryAdminPanel';
 import { UsersPanel } from '@/components/admin/UsersPanel';
+import { FinanceRecipientCard } from '@/components/admin/FinanceRecipientCard';
 import { SIMULATED_CAPABILITIES } from '@/config/demo';
 import { useOperation } from '@/hooks/useOperation';
 import { demo, reads, settings as settingsApi } from '@/api/endpoints';
@@ -130,6 +131,11 @@ const AdminPage = () => {
           )}
           {tab === 'library' && can(user.role, 'library.manage') && (
             <LibraryAdminPanel documents={data.documents} onChanged={query.refetch} />
+          )}
+          {tab === 'system' && can(user.role, 'payroll.finance') && (
+            <div className="mb-5">
+              <FinanceRecipientCard user={user} settings={data.settings} onSaved={query.refetch} />
+            </div>
           )}
           {tab === 'system' && (
             <SystemPanel

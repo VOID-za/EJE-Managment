@@ -300,6 +300,8 @@ const UserEditor = ({
   const [email, setEmail] = useState(existing?.email ?? '');
   const [mobile, setMobile] = useState(existing?.mobile ?? '');
   const [jobTitle, setJobTitle] = useState(existing?.jobTitle ?? 'Field Service Technician');
+  // PAY-03: the name on the monthly PDFs and their file names ("JC" → "JC TIMESHEET OCT.pdf").
+  const [documentName, setDocumentName] = useState(existing?.documentName ?? '');
   // What this actor is allowed to create. A Master may add an office
   // Coordinator or a technician; a Coordinator may add technicians only, so she
   // cannot promote herself by creating an account and signing in as it.
@@ -334,6 +336,7 @@ const UserEditor = ({
             email: email.trim(),
             mobile: mobile.trim(),
             jobTitle: jobTitle.trim(),
+            documentName: documentName.trim() === '' ? null : documentName.trim(),
             // Unchanged unless this actor may set it, and the operation checks
             // that again rather than trusting what arrives.
             role: settable.length > 1 ? role : existing.role,
@@ -405,6 +408,17 @@ const UserEditor = ({
             value={jobTitle}
             onChange={(event) => setJobTitle(event.target.value)}
           />
+          {existing !== null && (
+            <TextField
+              label="Name on documents"
+              value={documentName}
+              maxLength={30}
+              placeholder={existing.firstName.toUpperCase()}
+              hint={`Names the monthly PDFs: "${(documentName.trim() || existing.firstName).toUpperCase()} TIMESHEET OCT.pdf". Empty uses the first name.`}
+              onChange={(event) => setDocumentName(event.target.value)}
+              data-testid="user-document-name"
+            />
+          )}
         </div>
 
         {settable.length > 1 ? (

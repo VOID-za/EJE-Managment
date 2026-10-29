@@ -731,4 +731,12 @@ export class UnconfiguredEmailService implements EmailService {
   deliveryState(): Promise<DeliveryReceipt | null> {
     return Promise.resolve(null);
   }
+
+  readiness(): { readonly ready: boolean; readonly detail: string } {
+    return {
+      ready: false,
+      detail: 'Email is not configured on this deployment (Microsoft 365 credentials are not set), so nothing can be sent.' +
+        (this.detail.length > 0 ? ' ' + this.detail : ''),
+    };
+  }
 }

@@ -137,6 +137,14 @@ export interface EmailService {
    * provider's webhook state). Returns null when the provider has no record.
    */
   deliveryState(messageId: string): Promise<DeliveryReceipt | null>;
+  /**
+   * Whether this deployment can hand a message to a provider at all, and in
+   * plain words why not. PAY-06: the Finance package asks BEFORE it claims a
+   * send, so an unconfigured deployment refuses up front instead of recording
+   * a send that could never happen. Optional: an adapter that says nothing is
+   * taken as ready, and its send() still decides.
+   */
+  readiness?(): { readonly ready: boolean; readonly detail: string };
 }
 
 export interface WhatsAppMessage {

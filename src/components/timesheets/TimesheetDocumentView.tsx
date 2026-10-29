@@ -95,11 +95,13 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
       {document.totals.historicalCallouts > 0 && (
         <p>Call-outs counted before 28 October 2026 (now an amount): {document.totals.historicalCallouts}, kept as entered.</p>
       )}
-      {document.absences.map((absence) => (
-        <p key={absence.date}>
-          {formatDayAndDate(absence.date)}: {absence.reason}.
+      {document.absences.length > 0 && (
+        // The same one paragraph as the PDF (PAY-04: it keeps the page to one).
+        <p>
+          Absent (attendance register):{' '}
+          {document.absences.map((absence) => `${formatDayAndDate(absence.date)} — ${absence.reason}`).join('; ')}.
         </p>
-      ))}
+      )}
     </div>
 
     <section className="mt-4 min-h-24 rounded border border-steel-300 p-3" data-testid="timesheet-document-comments">

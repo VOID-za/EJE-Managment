@@ -11,6 +11,9 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  MonthlySubmission,
+  FinancePackage,
+  FinancePackageStatus,
   IssuedDeliveryNote,
   ChatMessage,
   ChecklistTemplate,
@@ -67,6 +70,7 @@ import type {
   RegisterFilter,
   AttendanceRepository,
   DeliveryNoteRepository,
+  PayrollRepository,
   AvailabilityRepository,
   ChatRepository,
   MachineRepository,
@@ -1406,6 +1410,101 @@ class DemoDeliveryNoteRepository implements DeliveryNoteRepository {
   }
 }
 
+/**
+ * PAY-02, PAY-05…08 in memory, keeping the database's rules: one submission per
+ * technician per month (its timesheet period sent, covering exactly the month);
+ * one open package per month; a package's contents fixed; only the allowed
+ * status moves.
+ */
+const PACKAGE_MOVES: Readonly<Record<FinancePackageStatus, readonly FinancePackageStatus[]>> = {
+  prepared: ['sending', 'discarded'],
+  failed: ['sending', 'discarded'],
+  sending: ['sent', 'failed'],
+  sent: [],
+  discarded: [],
+};
+const OPEN_PACKAGE: readonly FinancePackageStatus[] = ['prepared', 'sending', 'failed'];
+
+class DemoPayrollRepository implements PayrollRepository {
+  constructor(private readonly context: DemoContext) {}
+
+  findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null> {
+    return Promise.resolve(
+      this.context.read().monthlySubmissions.find((row) => row.userId === userId && row.month === month) ?? null,
+    );
+  }
+
+  listSubmissions(month: string): Promise<readonly MonthlySubmission[]> {
+    return Promise.resolve(this.context.read().monthlySubmissions.filter((row) => row.month === month));
+  }
+
+  async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {
+    let saved: MonthlySubmission | null = null;
+    this.context.commit((draft) => {
+      const period = draft.timesheetPeriods.find((row) => row.id === submission.timesheetPeriodId);
+      const [year, month] = submission.month.split('-').map(Number) as [number, number];
+      const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      if (
+        period === undefined || period.userId !== submission.userId || period.submittedAt === null ||
+        period.from !== `${submission.month}-01` || period.to !== last
+      ) {
+        throw new Error(`a monthly submission needs the same technician's sent timesheet for exactly ${submission.month}`);
+      }
+      const taken = draft.monthlySubmissions.some(
+        (row) =>
+          (row.userId === submission.userId && row.month === submission.month) ||
+          row.timesheetPeriodId === submission.timesheetPeriodId,
+      );
+      if (taken) return;
+      saved = submission;
+      draft.monthlySubmissions = [...draft.monthlySubmissions, submission];
+    });
+    return saved;
+  }
+
+  findPackage(id: string): Promise<FinancePackage | null> {
+    return Promise.resolve(this.context.read().financePackages.find((row) => row.id === id) ?? null);
+  }
+
+  listPackages(month: string): Promise<readonly FinancePackage[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .financePackages.filter((row) => row.month === month)
+        .sort((a, b) => b.preparedAt.localeCompare(a.preparedAt)),
+    );
+  }
+
+  async createPackage(financePackage: FinancePackage): Promise<FinancePackage | null> {
+    let saved: FinancePackage | null = null;
+    this.context.commit((draft) => {
+      if (draft.financePackages.some((row) => row.month === financePackage.month && OPEN_PACKAGE.includes(row.status))) return;
+      saved = { ...financePackage, status: 'prepared' };
+      draft.financePackages = [...draft.financePackages, saved];
+    });
+    return saved;
+  }
+
+  async transitionPackage(
+    id: string,
+    from: readonly FinancePackageStatus[],
+    to: FinancePackageStatus,
+    patch: Partial<Pick<FinancePackage, 'sentBy' | 'sendStartedAt' | 'sentAt' | 'providerMessageId' | 'providerState' | 'failureReason' | 'failureKind' | 'attempts'>>,
+  ): Promise<FinancePackage | null> {
+    let saved: FinancePackage | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.financePackages.find((row) => row.id === id);
+      if (existing === undefined || !from.includes(existing.status)) return;
+      if (!PACKAGE_MOVES[existing.status].includes(to)) {
+        throw new Error(`Finance package ${id} cannot go from ${existing.status} to ${to}`);
+      }
+      saved = { ...existing, ...patch, status: to };
+      draft.financePackages = draft.financePackages.map((row) => (row === existing ? saved! : row));
+    });
+    return saved;
+  }
+}
+
 class DemoChatRepository implements ChatRepository {
   constructor(private readonly context: DemoContext) {}
 
@@ -1718,6 +1817,7 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   captureReferrals: new DemoCaptureReferralRepository(context),
   changeRequests: new DemoChangeRequestRepository(context),
   deliveryNotes: new DemoDeliveryNoteRepository(context),
+  payroll: new DemoPayrollRepository(context),
   notifications: new DemoNotificationRepository(context),
   settings: new DemoSettingsRepository(context),
   availability: new DemoAvailabilityRepository(context),

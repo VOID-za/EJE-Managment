@@ -490,3 +490,12 @@ describe('v33 -> v34: corrections of sent timesheets (29 October 2026)', () => {
     expect(migrated.timesheetPeriods).toEqual([period]);
   });
 });
+
+describe('v34 -> v35: monthly submissions and Finance packages (29 October 2026)', () => {
+  it('adds empty lists and changes nothing else', () => {
+    const migrated = migrateDatabase(34, { timesheetCorrections: [], timesheetPeriods: [] }, SCHEMA_VERSION) as unknown as Record<string, unknown>;
+    expect(migrated.monthlySubmissions).toEqual([]);
+    expect(migrated.financePackages).toEqual([]);
+    expect(migrated.timesheetPeriods).toEqual([]);
+  });
+});

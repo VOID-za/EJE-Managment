@@ -2,14 +2,14 @@
 
 *Written 27 October 2026 for the release from `claude/office-workflow-parts`.*
 
-> **DEPLOYED AND VERIFIED — 28 October 2026.** `https://eje.syncza.co.za`
-> runs commit **`ef0f695`** — the real-world testing fixes (`/api/health`:
-> `status ok`, `backend postgres`, `database reachable`, `email refuse`,
-> `deployment demonstration`, `demoSwitcher true`). Migrations `0034`, `0035`
-> and `0036` were applied by the release; the previous release `51fb112` is
-> retained for rollback. Section **G** is what to test for this release. The
-> automated post-deployment verification results are at the end of this file
-> (28 October, then the 27 October run against `51fb112`).
+> **WHAT IS LIVE:** see the newest "Automated post-deployment verification"
+> section at the end of this file and `docs/deploy-next-release.md`. For the
+> releases of 29 October 2026, test **section H** (the reviewer's changes and
+> timesheet corrections) and **section I** (monthly forms and the Finance
+> package).
+>
+> *History: on 28 October 2026 `ef0f695` was live (migrations 0034–0036, rollback
+> `51fb112`) and section G was what to test then.*
 
 **Where:** https://eje.syncza.co.za — the existing EJE server. It holds
 **demonstration data** (fictional customers and jobs), so nothing you do here
@@ -191,6 +191,56 @@ What these do NOT prove: real email or WhatsApp delivery (out of scope; EJE's
 credentials are needed — job cards are recorded as *pending*/refused, not sent).
 Notifications for timesheets and corrections are in-app only.
 
+## I. Monthly forms and the Finance package (29 October 2026)
+
+In the release carrying migration 0040 (see `docs/deploy-next-release.md`).
+Fictional data only while the demonstration switcher is on. Needs a technician
+account, a Coordinator or Master account, and — for I12 — a Master.
+
+**Before you start:** refresh every tablet to the deployed build (H0). A Master
+sets each technician's **Name on documents** (Administration → Users → edit,
+e.g. JC, RUAN) and the **Finance recipient** (Administration → System). On this
+site email is NOT configured (`email: refuse`): Prepare works, Send is refused
+with a message — that is correct until EJE's Microsoft 365 credentials and the
+approved Finance address are in place. Do not use a real Finance mailbox for
+testing.
+
+### What the automated checks already prove (no person needed)
+
+Both PDFs are exactly ONE page — read back from the PDF file itself — for
+normal and worst-case months (three long lines every day, the longest comment,
+155 lines in two panels, a 92-day period, 31 days of long attendance notes),
+with every row present and nothing cut off. The file names follow the rule. A
+month is submitted once, both documents together, and freezes the attendance
+for the technician. The package carries exactly two one-page PDFs per selected
+technician; ten technicians make twenty PDFs in ONE email (with a fake mail
+transport); two clicks send once; a failure is recorded and can be retried; an
+unconfigured server refuses before anything is recorded as sent; a correction
+after sending never changes what was sent. Technicians are refused every
+office route.
+
+### Needs a person — in this order
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| I1 | Master: Administration → Users → a technician → **Name on documents** = e.g. "JC" → Save | Saved; the hint shows "JC TIMESHEET OCT.pdf" |
+| I2 | Master: Administration → System → **Finance recipient** = a TEST address you control → Save. A Coordinator tries the same | Saved and on the activity trail; the Coordinator cannot change it |
+| I3 | Technician: **Monthly forms** → last month | Your name and the month; two cards: Timesheet "JC TIMESHEET OCT.pdf · one page", Attendance "JC ATTEN OCTOBER.pdf · one page" |
+| I4 | **Preview** each, then **Print** each, then **Export PDF** each | The documents appear in the app (not a silent download): Time Sheet with Date, Customer, OT, D/T, Callout, Int Km, Cust Km; Attendance with Date, Attendance, Absence reason, Note and the month's count. Print shows only the document. The downloaded files carry exactly those names and open as ONE page each |
+| I5 | Make an absent day with no reason impossible to submit: try to submit a month that has one (if any) | Refused, naming the day — record the reason in Attendance first |
+| I6 | With weekdays unrecorded, look at **Submit** | Disabled until you tick the confirmation that lists those days |
+| I7 | **Submit** → confirm | "Submitted to the office: JC TIMESHEET OCT.pdf and JC ATTEN OCTOBER.pdf"; Submit is gone; the office's bell shows one notification |
+| I8 | Technician: Attendance → try to change a day in that month | Refused: the month has been submitted (the office can still correct it) |
+| I9 | Office: **Monthly forms** → the month | Every technician with a status (Not submitted / Ready / Correction waiting / Sent / Corrected after sending), the Finance recipient, and the email readiness sentence |
+| I10 | Tick the ready technicians → **Prepare package** | The package lists exactly two files per technician with their names, "1" page each, sizes and the total against the limit; nothing is sent. **Open** a file: it is the same document the technician previews |
+| I11 | **Send to Finance** → confirm | On this site: refused — "Email cannot be sent from this deployment", the package stays Prepared. Once email is configured: ONE email to the test address with every file attached; the package shows Sent, who, when and the provider's answer; Send is gone |
+| I12 | After a send: accept a timesheet correction for one of those technicians (H10–H12), then look at the month | That technician shows "Corrected after sending"; a new package marks their files "… CORRECTED.pdf"; the first package is unchanged |
+| I13 | On the **actual rugged tablet**: I3–I4 in the tablet's browser | Record whether the previews show in the app, whether the print dialog opens, and whether the exported files save and open as one page each |
+
+What these do NOT prove: real delivery to Finance (EJE's Microsoft 365
+credentials and an approved Finance address are needed — section 4 of
+`docs/delivery-register-2026-10-29.md`).
+
 ## F. Documents
 
 | # | Do this | Pass looks like |
@@ -217,6 +267,7 @@ Notifications for timesheets and corrections are in-app only.
 | F1–F2 | | | |
 | G1–G12 | | | |
 | H0–H21 (after the release) | | | |
+| I1–I13 (after the release carrying 0040) | | | |
 
 Faults go to the owner with the check number, what was done, what was expected,
 what happened, and a screenshot.

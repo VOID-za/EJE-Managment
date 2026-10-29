@@ -52,6 +52,51 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### NEXT: monthly payroll forms, the Finance package and the app mark (29 October 2026)
+
+**The owner instructed this release on 29 October 2026.** What it carries and
+its tests: `docs/delivery-register-2026-10-29.md`. Live is `1a34d1c`, so **one
+migration is pending**, forward-only and additive:
+
+- `0040_monthly_payroll` — `users.document_name` (nullable, bounded);
+  `system_settings.finance_email` (defaulted to empty = not configured);
+  `monthly_submissions` (write-once, must reference the same technician's
+  sent period for exactly that month); `finance_packages` (guard trigger:
+  manifest and recipient fixed once prepared, only the allowed status moves,
+  never deleted, one open package per month).
+
+```powershell
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0040_monthly_payroll -SshExe "$env:WINDIR\System32\OpenSSH\ssh.exe" -LogDir <a folder outside the repository>
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0040_monthly_payroll -SshExe "$env:WINDIR\System32\OpenSSH\ssh.exe" -LogDir <a folder outside the repository>
+```
+
+`-SshExe` names Windows' own ssh, which uses the Windows ssh-agent holding the
+key (launched from Git Bash, Git's ssh is found first and cannot see that agent
+— the 29 October first attempt failed that way, harmlessly). `-LogDir` keeps
+the tool's logs out of the working tree.
+
+**Compatibility, both ways — proved in CI.** `scripts/release/rollback-compat.sh`
+now pins the live `1a34d1c`: this release migrates a disposable database to
+0040 and writes a name on documents, a Finance recipient, a submitted month and
+a sent package; `1a34d1c`'s own code then reads and saves users and settings
+(leaving the new columns untouched), reads attendance, timesheets and
+corrections, the library and jobs. The backup and restore test run before the
+migration (step 2).
+
+**Rollback.** `1a34d1c` ignores the new columns and tables. It cannot show
+monthly forms, the Finance package, names on documents or the recipient; its
+attendance has no monthly lock; the submitted months and packages stay in the
+database and storage untouched. No down migration exists or is claimed.
+
+**Email.** Production email is `refuse` (no Microsoft 365 credentials).
+Monthly forms and package preparation work; Send to Finance is refused with a
+message, and nothing is recorded as sent. Real delivery needs the credentials
+and a Finance address set by a Master — not invented here.
+
+**Tablets.** The service-worker cache moves to v2 (the icons changed): an
+installed tablet picks up the new build and icons on its next update; refresh
+every tablet before testing (staff testing H0).
+
 ### DEPLOYED — 29 October 2026: `1a34d1c` — the real-world reviewer's changes, the owner's decisions and timesheet corrections
 
 **DEPLOYED — 29 October 2026: `1a34d1c` is live** (full SHA
@@ -231,6 +276,8 @@ unhealthy. Then run `docs/vps-smoke-test.md` and hand staff
 `docs/staff-testing.md`.
 
 ### Which migrations are pending — VERIFY, do not assume
+
+*Superseded 29 October 2026: this section describes the state before `e85f239`. The current pending list is in the newest NEXT section at the top of this file; the release tool always verifies it against the server (preflight) and refuses anything else.*
 
 The last release this repository records as LIVE is `4634d5d` (migrations up to
 `0029`). The `e85f239` release below (0030, 0031) is recorded as prepared and

@@ -81,6 +81,11 @@ export const NAVIGATION: readonly NavigationItem[] = [
    */
   { href: '/attendance', label: 'Attendance', icon: 'user', group: 'work' },
   { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work' },
+  /*
+   * PAY-01…08 (29 October 2026): everybody's — a technician's own monthly forms,
+   * the office's month and Finance package. The page and the server decide which.
+   */
+  { href: '/payroll', label: 'Monthly forms', icon: 'document', group: 'work' },
   {
     href: '/customers',
     label: 'Customers',

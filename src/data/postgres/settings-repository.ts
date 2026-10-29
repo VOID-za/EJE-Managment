@@ -62,6 +62,7 @@ export class PostgresSettingsRepository implements SettingsRepository {
       jobNumberPrefix: settings.jobNumberPrefix,
       quietHoursStart: settings.quietHoursStart,
       quietHoursEnd: settings.quietHoursEnd,
+      financeEmail: settings.financeEmail ?? '',
     } as const;
 
     const written = await this.db
@@ -122,6 +123,7 @@ export class PostgresSettingsRepository implements SettingsRepository {
       nextJobSequence,
       quietHoursStart: row.quietHoursStart,
       quietHoursEnd: row.quietHoursEnd,
+      financeEmail: row.financeEmail,
     };
   }
 }

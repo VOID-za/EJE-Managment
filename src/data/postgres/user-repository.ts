@@ -19,6 +19,7 @@ const toDomainUser = (row: UserRow): User => ({
   jobTitle: row.jobTitle,
   active: row.active,
   createdAt: row.createdAt,
+  documentName: row.documentName,
 });
 
 /**
@@ -77,6 +78,7 @@ export class PostgresUserRepository implements UserRepository {
           mobile: user.mobile,
           role: user.role,
           jobTitle: user.jobTitle,
+          documentName: user.documentName ?? null,
           active: user.active,
           createdAt: user.createdAt,
         })
@@ -96,6 +98,7 @@ export class PostgresUserRepository implements UserRepository {
         mobile: user.mobile,
         role: user.role,
         jobTitle: user.jobTitle,
+        documentName: user.documentName ?? null,
         active: user.active,
         /*
          * When the account was switched off, stamped once.

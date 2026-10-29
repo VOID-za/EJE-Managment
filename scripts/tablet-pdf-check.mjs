@@ -649,6 +649,18 @@ await step('TABLET: the Time Sheet preview has exactly Date, Customer, OT, D/T, 
   await previewPage.getByTestId('preview-close').click();
 });
 
+await step('TABLET: the monthly attendance form shows in the app, as its own document, and writes nothing (PAY-01)', async () => {
+  await previewPage.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  writes.length = 0;
+  await previewPage.getByTestId('monthly-attendance-preview').click();
+  await previewPage.getByTestId('attendance-document').waitFor({ timeout: 20000 });
+  const header = await previewPage.getByTestId('attendance-document-header').innerText();
+  if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(header)) throw new Error(`the columns are ${header}`);
+  if (writes.length !== 0) throw new Error(`previewing sent ${writes.join(', ')}`);
+  if (silentDownloads !== 0) throw new Error('the attendance form was downloaded silently');
+  await previewPage.getByTestId('preview-close').click();
+});
+
 await previews.close();
 await browser.close();
 

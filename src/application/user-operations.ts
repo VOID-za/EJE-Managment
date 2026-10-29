@@ -13,6 +13,7 @@ import {
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
+import { sanitiseDocumentName } from '@/lib/payroll-files';
 
 /**
  * User administration.
@@ -182,8 +183,18 @@ export const updateUser = async (context: OperationContext, user: User): Promise
 
   await assertEmailFree(context, user.email, user.id);
 
+  // PAY-03. The name on the monthly PDFs: upper-case, file-safe; blank means "use the first name".
+  const documentName = user.documentName === undefined || user.documentName === null || user.documentName.trim() === ''
+    ? null
+    : sanitiseDocumentName(user.documentName);
+  if (user.documentName !== undefined && user.documentName !== null && user.documentName.trim() !== '' && documentName === '') {
+    throw new WorkflowError('That name cannot be used on documents.', [
+      { code: 'invalid_document_name', message: 'Use letters or numbers, e.g. JC or RUAN.' },
+    ]);
+  }
   const saved = await context.repos.users.save({
     ...user,
+    documentName,
     initials:
       user.initials.trim().length > 0
         ? user.initials.trim()

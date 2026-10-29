@@ -117,6 +117,22 @@ export const recordAttendance = async (
 ): Promise<AttendanceRecord> => {
   assertMayRecordFor(context, input.userId);
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
+  /*
+   * PAY-02. A MONTH SUBMITTED TO THE OFFICE IS FROZEN FOR THE TECHNICIAN: their
+   * own days in it can no longer be changed by them. The office still records
+   * and corrects its register (ATTEND-1) — audited, and shown on the monthly
+   * attendance form as a correction after submission.
+   */
+  if (!can(context.actor.role, 'attendance.manage') && isCalendarDate(input.date)) {
+    const submitted = await context.repos.payroll.findSubmission(asUserId(input.userId), input.date.slice(0, 7));
+    if (submitted !== null) {
+      throw refuse(
+        'This month has been submitted to the office.',
+        'attendance_month_submitted',
+        'Your attendance for a submitted month can no longer be changed by you. Ask the office to correct it.',
+      );
+    }
+  }
   if (!ATTENDANCE_STATUSES.includes(input.status)) {
     throw refuse('That is not an attendance status.', 'invalid_status', 'Choose Present or Absent.');
   }

@@ -26,6 +26,11 @@ export interface User {
   readonly jobTitle: string;
   readonly active: boolean;
   readonly createdAt: IsoDateTime;
+  /**
+   * PAY-03. The name on this person's monthly PDFs and in their file names
+   * ("JC", "RUAN"), set by the office. Absent: the first name, upper-case.
+   */
+  readonly documentName?: string | null;
 }
 
 export const userFullName = (user: Pick<User, 'firstName' | 'lastName'>): string =>

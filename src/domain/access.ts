@@ -202,6 +202,12 @@ export type Capability =
    * again by the database). Asking is the technician's own, and needs no capability.
    */
   | 'timesheets.reviewCorrections'
+  /**
+   * THE MONTHLY PAYROLL PACKAGE FOR FINANCE. PAY-05…PAY-08. See every
+   * technician's monthly status, prepare the package, send it, read what was
+   * sent. The office — Master and Coordinator; never a technician.
+   */
+  | 'payroll.finance'
   // Administration
   | 'admin.access'
   | 'users.manageTechnicians'
@@ -395,6 +401,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'attendance.manage',
   'timesheets.viewAll',
   'timesheets.reviewCorrections',
+  'payroll.finance',
   'admin.access',
   'users.manageTechnicians',
   'users.manageMasters',
@@ -464,6 +471,7 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'attendance.manage',
   'timesheets.viewAll',
   'timesheets.reviewCorrections',
+  'payroll.finance',
   'admin.access',
   'users.manageTechnicians',
   /*

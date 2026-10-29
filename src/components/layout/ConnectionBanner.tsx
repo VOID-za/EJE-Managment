@@ -28,8 +28,10 @@ export const ConnectionBanner = () => {
   if (connectionError === null) {
     if (backend !== 'demo') return null;
     return (
-      <div className="border-b border-amber-300 bg-amber-50 px-4 py-1.5 text-center lg:px-8 print:hidden">
-        <p className="text-xs font-semibold text-amber-800">
+      // Dark theme: the same dark amber as the app's other notices (CacheStatusNotice),
+      // instead of a cream band across a dark page.
+      <div className="border-b border-amber-300 bg-amber-50 px-4 py-1.5 text-center lg:px-8 dark:border-amber-700 dark:bg-amber-950/40 print:hidden">
+        <p className="text-xs font-semibold text-amber-800 dark:text-amber-100">
           Demonstration data — nothing recorded here is the business&apos;s record.
         </p>
       </div>

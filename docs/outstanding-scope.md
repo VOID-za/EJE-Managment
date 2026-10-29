@@ -1,5 +1,7 @@
 # What is actually left, 20 October 2026
 
+> *Superseded 29 October 2026 by `docs/delivery-register-2026-10-29.md`, which re-audits the register against the code and the live release. Kept as the record of what was left on 26 October.*
+
 > **COMPLETE INVENTORY, 26 October 2026** — made from `docs/SCOPE.md` at
 > `87276d3` (CI green, run 40362376094) after the photograph, customer/site and
 > attendance/timesheet work. **Nothing below is approved:** 172 register rows

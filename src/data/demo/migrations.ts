@@ -670,6 +670,13 @@ const v33ToV34 = (data: Loose): Loose => ({
   timesheetCorrections: Array.isArray(data.timesheetCorrections) ? data.timesheetCorrections : [],
 });
 
+/** v35: monthly submissions and Finance packages (PAY-02, PAY-05). None existed before. */
+const v34ToV35 = (data: Loose): Loose => ({
+  ...data,
+  monthlySubmissions: Array.isArray(data.monthlySubmissions) ? data.monthlySubmissions : [],
+  financePackages: Array.isArray(data.financePackages) ? data.financePackages : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -697,6 +704,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   31: v31ToV32,
   32: v32ToV33,
   33: v33ToV34,
+  34: v34ToV35,
 };
 
 /**

@@ -17,3 +17,4 @@ export * from './outbox';
 export * from './capture';
 export * from './change-request';
 export * from './settings';
+export * from './payroll';

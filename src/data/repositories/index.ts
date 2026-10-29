@@ -29,6 +29,9 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  MonthlySubmission,
+  FinancePackage,
+  FinancePackageStatus,
   IssuedDeliveryNote,
   JobId,
   Machine,
@@ -694,6 +697,32 @@ export interface ChangeRequestRepository {
  * note for a job, and when one is already on file it returns THAT one
  * unchanged — so a retried issue never produces a second note.
  */
+/**
+ * MONTHLY PAYROLL. PAY-02, PAY-05…PAY-08. Monthly submissions (write-once) and
+ * the Finance packages (status moves only as the database's guard allows).
+ */
+export interface PayrollRepository {
+  findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null>;
+  listSubmissions(month: string): Promise<readonly MonthlySubmission[]>;
+  /** Null when this technician's month was already submitted — one per month. */
+  createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null>;
+  findPackage(id: string): Promise<FinancePackage | null>;
+  /** Every package for the month, newest first. */
+  listPackages(month: string): Promise<readonly FinancePackage[]>;
+  /** Null when another package for the month is already open (prepared, sending or failed). */
+  createPackage(financePackage: FinancePackage): Promise<FinancePackage | null>;
+  /**
+   * Moves a package from one of `from` to `to`, setting `patch`, ONLY if it is
+   * still in one of `from`. Null otherwise — the claim two clicks race for.
+   */
+  transitionPackage(
+    id: string,
+    from: readonly FinancePackageStatus[],
+    to: FinancePackageStatus,
+    patch: Partial<Pick<FinancePackage, 'sentBy' | 'sendStartedAt' | 'sentAt' | 'providerMessageId' | 'providerState' | 'failureReason' | 'failureKind' | 'attempts'>>,
+  ): Promise<FinancePackage | null>;
+}
+
 export interface DeliveryNoteRepository {
   findByJob(jobId: JobId): Promise<IssuedDeliveryNote | null>;
   record(note: IssuedDeliveryNote): Promise<IssuedDeliveryNote>;
@@ -720,4 +749,5 @@ export interface RepositoryBundle {
   readonly changeRequests: ChangeRequestRepository;
   /** The courier Delivery Notes issued beside priced job cards. PARTS-03/04. */
   readonly deliveryNotes: DeliveryNoteRepository;
+  readonly payroll: PayrollRepository;
 }

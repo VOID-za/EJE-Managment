@@ -19,6 +19,10 @@ export const ROLLBACK_TIMESHEET = {
   period: '00000000-0000-4000-8000-0000000005b1',
   correction: '00000000-0000-4000-8000-0000000005c1',
   deliveryNote: '00000000-0000-4000-8000-0000000005d1',
+  // 0040 (written for the 1a34d1c probe): a September period, its monthly submission, a Finance package.
+  monthPeriod: '00000000-0000-4000-8000-0000000005e1',
+  submission: '00000000-0000-4000-8000-0000000005e2',
+  financePackage: '00000000-0000-4000-8000-0000000005e3',
 } as const;
 
 export const ROLLBACK_DOCUMENTS = {

@@ -31,6 +31,11 @@ export class SimulatedEmailService implements EmailService {
     private readonly ids: IdGenerator,
   ) {}
 
+  /** Ready — but simulated: the message goes to the demonstration outbox and leaves nobody's server. */
+  readiness(): { readonly ready: boolean; readonly detail: string } {
+    return { ready: true, detail: 'Simulated email: the message is recorded in the demonstration outbox and is NOT sent to anyone.' };
+  }
+
   async send(message: EmailMessage): Promise<DeliveryReceipt> {
     const to = message.to.join(', ');
     const entry: OutboxEntry = {

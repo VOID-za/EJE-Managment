@@ -13,6 +13,9 @@ import { ROLLBACK_DOCUMENTS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
 import { PostgresDeliveryNoteRepository } from '@/data/postgres/delivery-note-repository';
 import { asCustomerId, asJobId, type TimesheetEntry } from '@/domain';
+import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
+import { PostgresSettingsRepository } from '@/data/postgres/settings-repository';
+import { PostgresUserRepository } from '@/data/postgres/user-repository';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 1 OF 2: THIS RELEASE PREPARES THE DATABASE.
@@ -228,5 +231,51 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       signatureSha256: 'a'.repeat(64),
     });
     expect(note.jobId).toBe(job!.id);
+  });
+
+  /*
+   * 0040: a technician's name on documents, the Finance recipient, a sent
+   * September period with its monthly submission, and a SENT Finance package.
+   * Phase 2 has the live code (1a34d1c) meet them.
+   */
+  it('writes the monthly payroll rows only this release can (0040)', async () => {
+    const T = ROLLBACK_TIMESHEET;
+    const tech = asUserId(IDS.technician);
+    const users = new PostgresUserRepository(db);
+    const stored = await users.findById(tech);
+    await users.save({ ...stored!, documentName: 'SM' });
+    const settings = new PostgresSettingsRepository(db);
+    await settings.save({ ...(await settings.get()), financeEmail: 'payroll@finance.example.test' });
+
+    const attendance = new PostgresAttendanceRepository(db);
+    const snapshot = { technicianName: 'Sipho', from: '2026-09-01', to: '2026-09-30', comment: '', entries: [] };
+    const sent = await attendance.submitPeriod({
+      id: T.monthPeriod, userId: tech, from: '2026-09-01', to: '2026-09-30', comment: '', updatedBy: tech,
+      updatedAt: '2026-10-01T08:00:00.000Z', submittedAt: '2026-10-01T08:00:00.000Z', submittedBy: tech, snapshot,
+    });
+    expect(sent?.submittedAt).not.toBeNull();
+    const payroll = new PostgresPayrollRepository(db);
+    const submission = await payroll.createSubmission({
+      id: T.submission, userId: tech, month: '2026-09', timesheetPeriodId: T.monthPeriod,
+      attendance: { technicianName: 'Sipho', month: '2026-09', days: [] },
+      submittedAt: '2026-10-01T08:00:00.000Z', submittedBy: tech,
+    });
+    expect(submission?.month).toBe('2026-09');
+    const attachment = (kind: 'timesheet' | 'attendance', fileName: string) => ({
+      technicianId: tech, technicianName: 'Sipho', kind, fileName, storageKey: `finance-packages/${T.financePackage}/${fileName}`,
+      sha256: 'b'.repeat(64), sizeBytes: 1000, pageCount: 1, versionLabel: 'Original submission', correctedResend: false,
+    });
+    const prepared = await payroll.createPackage({
+      id: T.financePackage, month: '2026-09', status: 'prepared', recipient: 'payroll@finance.example.test',
+      attachments: [attachment('timesheet', 'SM TIMESHEET SEP.pdf'), attachment('attendance', 'SM ATTEN SEPTEMBER.pdf')],
+      totalBytes: 2000, preparedBy: asUserId(IDS.coordinator), preparedAt: '2026-10-02T08:00:00.000Z',
+      sentBy: null, sendStartedAt: null, sentAt: null, providerMessageId: null, providerState: null, failureReason: '', failureKind: null, attempts: 0,
+    });
+    expect(prepared?.status).toBe('prepared');
+    await payroll.transitionPackage(T.financePackage, ['prepared'], 'sending', { sentBy: asUserId(IDS.coordinator), sendStartedAt: '2026-10-02T08:01:00.000Z', attempts: 1 });
+    const done = await payroll.transitionPackage(T.financePackage, ['sending'], 'sent', {
+      sentAt: '2026-10-02T08:01:05.000Z', providerMessageId: 'rollback-probe', providerState: 'pending_delivery',
+    });
+    expect(done?.status).toBe('sent');
   });
 });

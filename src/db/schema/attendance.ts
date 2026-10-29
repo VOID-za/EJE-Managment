@@ -270,3 +270,80 @@ export const timesheetCorrections = pgTable(
     ),
   ],
 );
+
+/**
+ * A TECHNICIAN'S MONTH SENT TO THE OFFICE. PAY-02, migration 0040. The sent
+ * timesheet period covering exactly the month, and the month's attendance
+ * frozen as it stood. One per technician per month; write-once.
+ */
+export const monthlySubmissions = pgTable(
+  'monthly_submissions',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    month: text('month').notNull(),
+    timesheetPeriodId: uuid('timesheet_period_id')
+      .notNull()
+      .references(() => timesheetPeriods.id, { onDelete: 'restrict' }),
+    attendanceSnapshot: jsonb('attendance_snapshot').notNull(),
+    submittedAt: instant('submitted_at').notNull(),
+    submittedBy: uuid('submitted_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('monthly_submissions_user_month_key').on(table.userId, table.month),
+    uniqueIndex('monthly_submissions_period_key').on(table.timesheetPeriodId),
+    check('monthly_submissions_month_format', sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  ],
+);
+
+/**
+ * ONE MONTH'S PAYROLL PACKAGE FOR FINANCE. PAY-05…PAY-08, migration 0040.
+ * The manifest names every attachment, stored write-once; sent at most once.
+ * The trigger `finance_packages_guard` keeps the manifest and recipient fixed
+ * and allows only prepared/failed → sending → sent/failed, or → discarded.
+ */
+export const financePackages = pgTable(
+  'finance_packages',
+  {
+    id: primaryId(),
+    month: text('month').notNull(),
+    status: text('status').notNull().default('prepared'),
+    recipient: text('recipient').notNull(),
+    manifest: jsonb('manifest').notNull(),
+    attachmentCount: integer('attachment_count').notNull(),
+    totalBytes: integer('total_bytes').notNull(),
+    preparedBy: uuid('prepared_by')
+      .notNull()
+      .references(() => users.id),
+    preparedAt: instant('prepared_at').notNull(),
+    sentBy: uuid('sent_by').references(() => users.id),
+    sendStartedAt: instant('send_started_at'),
+    sentAt: instant('sent_at'),
+    providerMessageId: text('provider_message_id'),
+    providerState: text('provider_state'),
+    failureReason: text('failure_reason').notNull().default(''),
+    failureKind: text('failure_kind'),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    uniqueIndex('finance_packages_one_open_per_month')
+      .on(table.month)
+      .where(sql`${table.status} in ('prepared', 'sending', 'failed')`),
+    index('finance_packages_month_idx').on(table.month),
+    check('finance_packages_month_format', sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+    check('finance_packages_status_known', sql`${table.status} in ('prepared', 'sending', 'sent', 'failed', 'discarded')`),
+    check('finance_packages_has_attachments', sql`${table.attachmentCount} >= 2 and ${table.totalBytes} > 0`),
+    check(
+      'finance_packages_sent_whole',
+      sql`(${table.status} = 'sent') = (${table.sentAt} is not null and ${table.sentBy} is not null and ${table.providerMessageId} is not null)`,
+    ),
+  ],
+);

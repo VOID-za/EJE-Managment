@@ -45,6 +45,8 @@ export const systemSettings = pgTable(
     jobNumberPrefix: text('job_number_prefix').notNull().default('EJE-'),
     quietHoursStart: text('quiet_hours_start').notNull().default('18:00'),
     quietHoursEnd: text('quiet_hours_end').notNull().default('07:00'),
+    /** PAY-05, migration 0040. The Finance recipient; empty = not configured. */
+    financeEmail: text('finance_email').notNull().default(''),
 
     updatedAt: updatedAt(),
     updatedBy: uuid('updated_by').references(() => users.id),

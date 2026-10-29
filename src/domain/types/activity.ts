@@ -295,6 +295,13 @@ export type ActivityEventType =
   | 'timesheet_correction_requested'
   | 'timesheet_correction_accepted'
   | 'timesheet_correction_rejected'
+  /** PAY-02: a technician submitted the month's timesheet and attendance together. */
+  | 'monthly_forms_submitted'
+  /** PAY-05…08: the monthly Finance package, prepared, sent, failed or discarded. */
+  | 'finance_package_prepared'
+  | 'finance_package_sent'
+  | 'finance_package_failed'
+  | 'finance_package_discarded'
   /** PARTS-03/04: a courier delivery note was produced for a job (a separate, price-less document). */
   | 'delivery_note_generated'
   | 'message_sent'

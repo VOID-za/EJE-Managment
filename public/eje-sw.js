@@ -23,7 +23,8 @@
  * quietly retried a POST would be exactly the silent overwrite CR-02 forbids.
  */
 
-const CACHE_VERSION = 'v1';
+// v2 (29 October 2026): the icons changed to the application's own EJE mark.
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `eje-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `eje-assets-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'eje-';

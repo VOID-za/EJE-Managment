@@ -11,22 +11,24 @@ import { describeSearchability } from '@/application/library-ocr';
 import { checkMigrations } from '@/ops/preflight-rules';
 import { asDocumentId, asUserId, type DocumentId, type TechnicalDocument } from '@/domain';
 import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
+import { PostgresUserRepository } from '@/data/postgres/user-repository';
+import { PostgresSettingsRepository } from '@/data/postgres/settings-repository';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (ef0f695), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (1a34d1c), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in ef0f695, and it does: each of these was checked against that commit.
+ * in 1a34d1c, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0039)
+ * The database was migrated to the newest migration THIS release ships (0040)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
- * library, jobs, and (0037–0039) attendance and timesheets, beside absence
- * reasons, Workshop lines, sent periods, corrections and Delivery Notes it has
- * never heard of?
+ * library, jobs, attendance, timesheets and corrections (0037–0039, which it
+ * knows), beside monthly submissions, Finance packages, a name on documents
+ * and a Finance recipient (0040) that it has never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -63,11 +65,15 @@ const TIMESHEET = {
   period: '00000000-0000-4000-8000-0000000005b1',
   correction: '00000000-0000-4000-8000-0000000005c1',
   deliveryNote: '00000000-0000-4000-8000-0000000005d1',
+  // 0040 (written for the 1a34d1c probe): a September period, its monthly submission, a Finance package.
+  monthPeriod: '00000000-0000-4000-8000-0000000005e1',
+  submission: '00000000-0000-4000-8000-0000000005e2',
+  financePackage: '00000000-0000-4000-8000-0000000005e3',
 } as const;
 
 const id = (value: string): DocumentId => asDocumentId(value);
 
-describePhase('rollback compatibility — phase 2: the live release (ef0f695) against a database at 0039', () => {
+describePhase('rollback compatibility — phase 2: the live release (1a34d1c) against a database at 0040', () => {
   let db: Database;
   let repository: PostgresDocumentRepository;
 
@@ -85,14 +91,14 @@ describePhase('rollback compatibility — phase 2: the live release (ef0f695) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    expect(shipped).toHaveLength(37);
-    expect(shipped.at(-1)).toBe('0036_chat_deleted_for');
-    expect(shipped).not.toContain('0037_reviewer_timesheets_attendance');
+    expect(shipped).toHaveLength(40);
+    expect(shipped.at(-1)).toBe('0039_timesheet_corrections');
+    expect(shipped).not.toContain('0040_monthly_payroll');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0037, 0038 and 0039 applied beyond what the live release ships.
-    expect(applied).toBe(40);
+    // 0040 applied beyond what the live release ships.
+    expect(applied).toBe(41);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -227,7 +233,7 @@ describePhase('rollback compatibility — phase 2: the live release (ef0f695) ag
    * and still write its own — the new columns take their defaults, and the
    * new tables are left alone.
    */
-  it('still reads and writes ATTENDANCE and TIMESHEET LINES on a database at 0039', async () => {
+  it('still reads and writes ATTENDANCE and TIMESHEET LINES on a database at 0040', async () => {
     const attendance = new PostgresAttendanceRepository(db);
     const tech = asUserId(IDS.technician);
     const records = await attendance.listRecords(TIMESHEET.absentDay, TIMESHEET.absentDay, tech);
@@ -268,5 +274,35 @@ describePhase('rollback compatibility — phase 2: the live release (ef0f695) ag
       sql`select count(*)::text as n from delivery_note_documents where id = ${TIMESHEET.deliveryNote}`,
     );
     expect(note?.n).toBe('1');
+  });
+
+  /*
+   * 0040. The live release has never heard of monthly submissions, Finance
+   * packages, a technician's name on documents or the Finance recipient. After
+   * a rollback it must still read and save users and the settings (leaving the
+   * new columns as they are), and read its own corrections; the new tables
+   * stay exactly as written.
+   */
+  it('still reads and saves USERS, SETTINGS and CORRECTIONS on a database at 0040', async () => {
+    const users = new PostgresUserRepository(db);
+    const tech = await users.findById(asUserId(IDS.technician));
+    expect(tech?.firstName).toBeTruthy();
+    await users.save({ ...tech!, jobTitle: 'Field Technician (rolled back)' });
+    const [kept] = await db.execute<{ document_name: string | null }>(sql`select document_name from users where id = ${IDS.technician}`);
+    expect(kept?.document_name).toBe('SM');
+
+    const settings = new PostgresSettingsRepository(db);
+    const current = await settings.get();
+    await settings.save({ ...current, companyPhone: '+27 11 000 0000' });
+    const [finance] = await db.execute<{ finance_email: string }>(sql`select finance_email from system_settings`);
+    expect(finance?.finance_email).toBe('payroll@finance.example.test');
+
+    const corrections = await new PostgresAttendanceRepository(db).listCorrections(TIMESHEET.period);
+    expect(corrections.map((correction) => correction.status)).toEqual(['accepted']);
+
+    const [submission] = await db.execute<{ n: string }>(sql`select count(*)::text as n from monthly_submissions where id = ${TIMESHEET.submission}`);
+    expect(submission?.n).toBe('1');
+    const [financePackage] = await db.execute<{ status: string }>(sql`select status from finance_packages where id = ${TIMESHEET.financePackage}`);
+    expect(financePackage?.status).toBe('sent');
   });
 });

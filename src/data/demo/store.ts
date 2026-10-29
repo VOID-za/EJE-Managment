@@ -19,6 +19,8 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  MonthlySubmission,
+  FinancePackage,
   IssuedDeliveryNote,
   SystemSettings,
   TechnicalDocument,
@@ -122,6 +124,10 @@ export interface DemoDatabase {
   timesheetPeriods: TimesheetPeriod[];
   /** Corrections of sent periods. TS-16. */
   timesheetCorrections: TimesheetCorrection[];
+  /** PAY-02. Monthly submissions. */
+  monthlySubmissions: MonthlySubmission[];
+  /** PAY-05…08. Finance packages. */
+  financePackages: FinancePackage[];
   /** Courier Delivery Notes issued beside priced job cards. PARTS-03/04. */
   deliveryNoteDocuments: IssuedDeliveryNote[];
   conversations: Conversation[];
@@ -223,6 +229,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * on existing lines, whose NT and call-out count are kept), and the month's
  * comment and submission, empty.
  *
+ * v35 added monthly submissions and Finance packages (PAY-02, PAY-05), none to begin with.
  * v34 added the corrections of sent timesheets (TS-16), none to begin with.
  * v33 replaced the month with a chosen From/To period (any month a snapshot
  * held is carried across as the period it covered) and added the issued
@@ -232,7 +239,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -284,6 +291,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
   timesheetEntries: [],
   timesheetPeriods: [],
   timesheetCorrections: [],
+  monthlySubmissions: [],
+  financePackages: [],
   deliveryNoteDocuments: [],
   // Empty: seeded closed jobs have their file written on first access, since a
   // seed cannot ship binary content. Jobs closed in a session get theirs at

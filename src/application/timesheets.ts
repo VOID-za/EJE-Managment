@@ -29,6 +29,7 @@ import { businessToday } from '@/lib/business-time';
 import { csvFileName, toCsv, type CsvColumn } from '@/lib/csv';
 import { formatCurrency } from '@/lib/format';
 import { formatDayAndDate, formatPeriod, weekdayOf } from '@/lib/timesheet-dates';
+import { documentNameOf, timesheetPeriodFileName } from '@/lib/payroll-files';
 import type { OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
@@ -941,6 +942,8 @@ export const submitTimesheetPeriod = async (
   technicianId: string,
   from: string,
   to: string,
+  /** PAY-02: a monthly submission tells the office once itself, about both documents. */
+  options: { readonly notify?: boolean } = {},
 ): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
@@ -988,7 +991,7 @@ export const submitTimesheetPeriod = async (
     summary: `Timesheet sent to the office: ${userFullName(technician)}, ${label}`,
     detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}. Read-only from now on.`,
   });
-  await notifyOffice(context, {
+  if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',
     title: `${userFullName(technician)} sent a timesheet to the office`,
     body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}. Open Timesheets, choose ${userFullName(technician)} and these dates to read the version that was sent.`,
@@ -1020,6 +1023,8 @@ export interface TimesheetDocument {
   /** The heading's company, from the settings — the office's own name. */
   readonly companyName: string;
   readonly technicianName: string;
+  /** PAY-03. The file name downloads, prints and the Finance package use: "JC TIMESHEET OCT.pdf". */
+  readonly fileName: string;
   readonly from: IsoDate;
   readonly to: IsoDate;
   /** "Thu 1 Oct 2026 – Wed 28 Oct 2026". */
@@ -1148,6 +1153,7 @@ export const loadTimesheetDocument = async (
   return {
     companyName: settings.companyName,
     technicianName: snapshot !== null ? snapshot.technicianName : userFullName(technician),
+    fileName: timesheetPeriodFileName(documentNameOf(technician), from, to),
     from,
     to,
     periodLabel: formatPeriod(from, to),

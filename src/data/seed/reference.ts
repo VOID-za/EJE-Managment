@@ -96,6 +96,9 @@ export const seedSettings: SystemSettings = {
   companyPhone: '+27 11 555 0100',
   companyEmail: 'service@eje-demo.co.za',
   companyAddress: '14 Anvil Road, Isando, Kempton Park, 1600',
+  // PAY-05: a fictional Finance mailbox. The demonstration's email is simulated:
+  // the package lands in the demo outbox and reaches nobody.
+  financeEmail: 'finance@eje-demo.co.za',
   labourRates: {
     normal: 95000,
     overtime: 142500,

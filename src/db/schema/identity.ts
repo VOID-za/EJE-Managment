@@ -42,6 +42,8 @@ export const users = pgTable(
     mobile: text('mobile').notNull().default(''),
     role: userRole('role').notNull(),
     jobTitle: text('job_title').notNull().default(''),
+    /** PAY-03, migration 0040. The name on the monthly PDFs; null = first name. */
+    documentName: text('document_name'),
 
     /*
      * ---- credentials ----

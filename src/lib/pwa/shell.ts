@@ -42,7 +42,8 @@
  * Deploys are handled by the hashing described above. This exists so that a
  * change to what is cached cannot leave a browser serving yesterday's policy.
  */
-export const CACHE_VERSION = 'v1';
+// v2 (29 October 2026): the icons changed to the application's own EJE mark (PWA-1).
+export const CACHE_VERSION = 'v2';
 
 export const SHELL_CACHE = `eje-shell-${CACHE_VERSION}`;
 export const ASSET_CACHE = `eje-assets-${CACHE_VERSION}`;
