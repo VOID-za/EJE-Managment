@@ -7,6 +7,8 @@ import {
   type AttendanceRecord,
   type TimesheetEntry,
   type TimesheetPeriod,
+  type TimesheetCorrection,
+  type TimesheetCorrectionStatus,
   type TimesheetSubmissionSnapshot,
   type AttendanceStatus,
   type TimesheetComment,
@@ -20,6 +22,23 @@ type AttendanceRow = typeof schema.attendance.$inferSelect;
 type CommentRow = typeof schema.timesheetComments.$inferSelect;
 type EntryRow = typeof schema.timesheetEntries.$inferSelect;
 type PeriodRow = typeof schema.timesheetPeriods.$inferSelect;
+type CorrectionRow = typeof schema.timesheetCorrections.$inferSelect;
+
+const toDomainCorrection = (row: CorrectionRow): TimesheetCorrection => ({
+  id: row.id,
+  periodId: row.periodId,
+  userId: asUserId(row.userId),
+  sequence: row.sequence,
+  reason: row.reason,
+  before: row.beforeSnapshot as TimesheetSubmissionSnapshot,
+  after: row.afterSnapshot as TimesheetSubmissionSnapshot,
+  requestedBy: asUserId(row.requestedBy),
+  requestedAt: row.requestedAt,
+  status: row.status as TimesheetCorrectionStatus,
+  decidedBy: row.decidedBy === null ? null : asUserId(row.decidedBy),
+  decidedAt: row.decidedAt,
+  decisionNote: row.decisionNote,
+});
 
 const toDomainPeriod = (row: PeriodRow): TimesheetPeriod => ({
   id: row.id,
@@ -335,6 +354,80 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       })
       .returning();
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
+  }
+
+  async listCorrections(periodId: string): Promise<readonly TimesheetCorrection[]> {
+    if (!isUuid(periodId)) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetCorrections)
+      .where(eq(schema.timesheetCorrections.periodId, periodId))
+      .orderBy(asc(schema.timesheetCorrections.sequence));
+    return rows.map(toDomainCorrection);
+  }
+
+  async findCorrection(id: string): Promise<TimesheetCorrection | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetCorrections)
+      .where(eq(schema.timesheetCorrections.id, id))
+      .limit(1);
+    return rows[0] === undefined ? null : toDomainCorrection(rows[0]);
+  }
+
+  async listPendingCorrections(): Promise<readonly TimesheetCorrection[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetCorrections)
+      .where(eq(schema.timesheetCorrections.status, 'pending'))
+      .orderBy(asc(schema.timesheetCorrections.requestedAt));
+    return rows.map(toDomainCorrection);
+  }
+
+  async createCorrection(correction: TimesheetCorrection): Promise<TimesheetCorrection | null> {
+    // Any unique conflict — a pending correction already open for the period,
+    // or the sequence taken — is "not created", never a second row.
+    const rows = await this.db
+      .insert(schema.timesheetCorrections)
+      .values({
+        id: correction.id,
+        periodId: correction.periodId,
+        userId: correction.userId,
+        sequence: correction.sequence,
+        reason: correction.reason,
+        beforeSnapshot: correction.before,
+        afterSnapshot: correction.after,
+        requestedBy: correction.requestedBy,
+        requestedAt: correction.requestedAt,
+        status: 'pending',
+      })
+      .onConflictDoNothing()
+      .returning();
+    return rows[0] === undefined ? null : toDomainCorrection(rows[0]);
+  }
+
+  async decideCorrection(decision: {
+    readonly id: string;
+    readonly status: 'accepted' | 'rejected';
+    readonly decidedBy: UserId;
+    readonly decidedAt: string;
+    readonly decisionNote: string;
+  }): Promise<TimesheetCorrection | null> {
+    if (!isUuid(decision.id)) return null;
+    const rows = await this.db
+      .update(schema.timesheetCorrections)
+      .set({
+        status: decision.status,
+        decidedBy: decision.decidedBy,
+        decidedAt: decision.decidedAt,
+        decisionNote: decision.decisionNote,
+        updatedAt: sql`now()`,
+        version: sql`${schema.timesheetCorrections.version} + 1`,
+      })
+      .where(and(eq(schema.timesheetCorrections.id, decision.id), eq(schema.timesheetCorrections.status, 'pending')))
+      .returning();
+    return rows[0] === undefined ? null : toDomainCorrection(rows[0]);
   }
 
   async deleteComment(userId: UserId, date: string): Promise<void> {

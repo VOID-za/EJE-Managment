@@ -156,7 +156,7 @@ describe('timesheets over HTTP', () => {
     expect(file.status).toBe(200);
     expect(file.headers.get('content-type')).toContain('text/csv');
     expect(file.text.replace(/^﻿/u, '').split('\r\n')[0]).toBe(
-      'Date,Day,Customer,OT,D/T,Callout (R),Callout shared,Int Km,Cust Km,NT (historical),Callouts (historical count),Day comment (historical),Attendance',
+      'Date,Day,Customer,OT,D/T,Callout (R),Callout shared,Int Km,Cust Km,NT (historical),Callouts (historical count),Day comment (historical),Attendance,Sent version',
     );
 
     const activity = await office.get<{ events: readonly { type: string; summary: string }[] }>('/api/activity');

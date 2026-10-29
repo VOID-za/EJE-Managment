@@ -28,6 +28,7 @@ import type {
   TimesheetComment,
   TimesheetEntry,
   TimesheetPeriod,
+  TimesheetCorrection,
   IssuedDeliveryNote,
   JobId,
   Machine,
@@ -537,6 +538,27 @@ export interface AttendanceRepository {
    * period that would overlap another is refused by the database itself.
    */
   submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
+  /** TS-16. One period's corrections, oldest (sequence 1) first. */
+  listCorrections(periodId: string): Promise<readonly TimesheetCorrection[]>;
+  findCorrection(id: string): Promise<TimesheetCorrection | null>;
+  /** Every correction still waiting for the office, oldest first. */
+  listPendingCorrections(): Promise<readonly TimesheetCorrection[]>;
+  /**
+   * Records a correction request. Null when one is already pending for that
+   * period (or the sequence is taken) — two racing requests produce one.
+   */
+  createCorrection(correction: TimesheetCorrection): Promise<TimesheetCorrection | null>;
+  /**
+   * Records the office's decision ONLY while the correction is pending. Null
+   * when it was already decided — a decision is taken once.
+   */
+  decideCorrection(decision: {
+    readonly id: string;
+    readonly status: 'accepted' | 'rejected';
+    readonly decidedBy: UserId;
+    readonly decidedAt: string;
+    readonly decisionNote: string;
+  }): Promise<TimesheetCorrection | null>;
 }
 
 export interface ChatRepository {

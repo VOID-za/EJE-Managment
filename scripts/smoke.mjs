@@ -4099,6 +4099,53 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
 });
 
 /*
+ * TS-16: A SENT TIMESHEET IS CORRECTED, NOT EDITED. The technician asks, with a
+ * reason; the office sees it waiting, opens it, accepts it; the correction is
+ * the version in force and the original stays on record.
+ */
+await step('the technician asks to correct the sent timesheet; the office accepts it; the original stays on record (TS-16)', async () => {
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-corrections').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-correction-start').click();
+  const form = page.getByTestId('timesheet-correction-form');
+  const workshopRow = form
+    .getByTestId('timesheet-correction-row')
+    .filter({ has: page.locator('option:checked', { hasText: /^Workshop$/u }) })
+    .last();
+  await workshopRow.getByTestId('timesheet-correction-ot').fill('3');
+  // No reason: refused, and the form keeps what was typed.
+  await page.getByTestId('timesheet-correction-submit').click();
+  await page.getByTestId('timesheet-correction-error').waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-correction-reason').fill('The workshop overtime was 3 hours, not 2.');
+  await page.getByTestId('timesheet-correction-submit').click();
+  await page.getByTestId('timesheet-correction-done').waitFor({ timeout: 15000 });
+  await page.locator('[data-testid="timesheet-correction"][data-status="pending"]').waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('timesheet-correction-start').count()) !== 0) {
+    throw new Error('a second correction is offered while one is pending');
+  }
+
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-pending-corrections').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-pending-open').first().click();
+  const pending = page.locator('[data-testid="timesheet-correction"][data-status="pending"]');
+  await pending.waitFor({ timeout: 15000 });
+  await pending.getByText(/added — Workshop, OT 3/u).waitFor({ timeout: 10000 });
+  await pending.getByTestId('timesheet-correction-accept').click();
+  await page.locator('[data-testid="timesheet-correction"][data-status="accepted"]').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-version-in-force').getByText(/Correction 1, accepted/u).waitFor({ timeout: 10000 });
+  // The original is still there to read.
+  await page.getByTestId('timesheet-preview-original').click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    await page.getByTestId('timesheet-document-version').getByText(/Original submission/u).waitFor({ timeout: 10000 });
+  }
+  await page.getByTestId('preview-close').click();
+});
+
+/*
  * SITE-2: THE OFFICE CONSOLIDATES A LEGACY CUSTOMER — by choosing, never by
  * default. Found from the register's own filter, previewed site by site before
  * confirming, and afterwards the jobs done at the archived sites still say so.

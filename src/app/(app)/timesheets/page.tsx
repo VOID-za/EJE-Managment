@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, userFullName, type TimesheetEntry } from '@/domain';
+import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
   Button,
@@ -19,6 +19,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
+import { TimesheetCorrections } from '@/components/timesheets/TimesheetCorrections';
 import { reads, timesheets } from '@/api/endpoints';
 import { TIMESHEET_MAX_DAYS, type TimesheetDay, type TimesheetDocument } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
@@ -105,6 +106,10 @@ const toCents = (value: string): number => Math.round(parse(value) * 100);
  * those dates: Send to office makes that period read-only, the office is
  * notified and reads the version that was sent. A period that shares a day
  * with one already sent cannot be sent, so no work is sent twice.
+ *
+ * A SENT TIMESHEET IS CORRECTED, NOT EDITED (TS-16): its technician asks for a
+ * correction; the office accepts or rejects it. The office sees the
+ * corrections waiting for it at the top of this page.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
@@ -133,6 +138,10 @@ const TimesheetsPage = () => {
     personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.document(personId, from, to),
   );
   const customers = useQuery('timesheets:customers', () => reads.customers());
+  const reviewer = can(currentUser.role, 'timesheets.reviewCorrections');
+  const pendingCorrections = useQuery(`timesheets:corrections:pending:${currentUser.id}`, () =>
+    reviewer ? timesheets.pendingCorrections() : Promise.resolve([]),
+  );
 
   // OLDEST DAY FIRST (TS-04): the first entries of the range are at the top.
   const days = sheet.data?.days ?? [];
@@ -180,6 +189,7 @@ const TimesheetsPage = () => {
   const refresh = () => {
     sheet.refetch();
     periodDocument.refetch();
+    pendingCorrections.refetch();
   };
 
   const edit = (next: Draft | null) => {
@@ -354,7 +364,11 @@ const TimesheetsPage = () => {
           ) : (
             <Badge tone="amber" size="sm">Not recorded</Badge>
           )}
-          {day.locked && <Badge tone="outline" size="sm">Sent to office</Badge>}
+          {day.locked && (
+            <span data-testid="timesheet-day-sent-version">
+              <Badge tone="outline" size="sm">{day.sentVersion || 'Sent to office'}</Badge>
+            </span>
+          )}
           {day.attendance !== null && (
             <Badge tone="outline" size="sm">
               {day.attendance === 'present'
@@ -463,7 +477,7 @@ const TimesheetsPage = () => {
           open={previewing !== null}
           autoPrint={previewing === 'print'}
           title={`Time Sheet — ${formatPeriod(from, to)}`}
-          description={sentAt === null ? 'Preview of the draft. Nothing is saved or sent by looking at it.' : 'The version that was sent to the office.'}
+          description={sentAt === null ? 'Preview of the draft. Nothing is saved or sent by looking at it.' : `The version in force: ${period?.versionInForce ?? ''}.`}
           loadPdf={() => timesheets.pdf(personId, from, to)}
           renderHtml={() =>
             periodDocument.data === null || periodDocument.data === undefined ? null : (
@@ -472,6 +486,34 @@ const TimesheetsPage = () => {
           }
           onClose={() => setPreviewing(null)}
         />
+      )}
+
+      {reviewer && (pendingCorrections.data ?? []).length > 0 && (
+        <Card className="mb-5" data-testid="timesheet-pending-corrections">
+          <p className="text-sm font-semibold text-steel-900">Timesheet corrections waiting for you</p>
+          <ul className="mt-2 divide-y divide-steel-100 text-sm">
+            {(pendingCorrections.data ?? []).map((pending) => (
+              <li key={pending.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <strong>{pending.technicianName}</strong> — {pending.periodLabel}, correction {pending.sequence}, asked for {formatDateTime(pending.requestedAt)}. Reason: {pending.reason}
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setChosen(pending.technicianId);
+                    setFrom(pending.from);
+                    setTo(pending.to);
+                    setComment(null);
+                  }}
+                  data-testid="timesheet-pending-open"
+                >
+                  Open
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       <Card className="mb-5">
@@ -588,8 +630,19 @@ const TimesheetsPage = () => {
           </p>
         )}
         <p className="mt-2 text-xs text-steel-500">
-          Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. Send to office is once per period; after that its days are read-only.
+          Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. Send to office is once per period; after that its days are read-only, and a mistake is put right by a correction the office accepts.
         </p>
+        {sentAt !== null && personId !== null && (
+          <TimesheetCorrections
+            user={currentUser}
+            personId={personId}
+            period={period}
+            entries={days.flatMap((day) => day.entries)}
+            owner={editable}
+            customers={customers.data ?? []}
+            onChanged={refresh}
+          />
+        )}
       </Card>
       )}
 

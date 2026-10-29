@@ -10,6 +10,7 @@ import type {
   TimesheetComment,
   TimesheetEntry,
   TimesheetPeriod,
+  TimesheetCorrection,
   IssuedDeliveryNote,
   ChatMessage,
   ChecklistTemplate,
@@ -1255,6 +1256,75 @@ class DemoAttendanceRepository implements AttendanceRepository {
       draft.timesheetEntries = draft.timesheetEntries.filter((candidate) => candidate.id !== id);
     });
     return Promise.resolve();
+  }
+
+  listCorrections(periodId: string): Promise<readonly TimesheetCorrection[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetCorrections.filter((row) => row.periodId === periodId)
+        .sort((a, b) => a.sequence - b.sequence),
+    );
+  }
+
+  findCorrection(id: string): Promise<TimesheetCorrection | null> {
+    return Promise.resolve(this.context.read().timesheetCorrections.find((row) => row.id === id) ?? null);
+  }
+
+  listPendingCorrections(): Promise<readonly TimesheetCorrection[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetCorrections.filter((row) => row.status === 'pending')
+        .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt)),
+    );
+  }
+
+  async createCorrection(correction: TimesheetCorrection): Promise<TimesheetCorrection | null> {
+    let saved: TimesheetCorrection | null = null;
+    this.context.commit((draft) => {
+      // As the database does: the period must be sent and the technician's,
+      // one pending per period, sequences unique.
+      const period = draft.timesheetPeriods.find((row) => row.id === correction.periodId);
+      if (period === undefined || period.submittedAt === null || period.userId !== correction.userId) {
+        throw new Error('only a timesheet sent to the office, by its own technician, can be corrected');
+      }
+      const clash = draft.timesheetCorrections.some(
+        (row) =>
+          row.periodId === correction.periodId &&
+          (row.status === 'pending' || row.sequence === correction.sequence),
+      );
+      if (clash) return;
+      saved = { ...correction, status: 'pending', decidedBy: null, decidedAt: null, decisionNote: '' };
+      draft.timesheetCorrections = [...draft.timesheetCorrections, saved];
+    });
+    return saved;
+  }
+
+  async decideCorrection(decision: {
+    readonly id: string;
+    readonly status: 'accepted' | 'rejected';
+    readonly decidedBy: UserId;
+    readonly decidedAt: string;
+    readonly decisionNote: string;
+  }): Promise<TimesheetCorrection | null> {
+    let saved: TimesheetCorrection | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.timesheetCorrections.find((row) => row.id === decision.id);
+      if (existing === undefined || existing.status !== 'pending') return;
+      if (existing.requestedBy === decision.decidedBy) {
+        throw new Error('a timesheet correction is decided by somebody other than who asked for it');
+      }
+      saved = {
+        ...existing,
+        status: decision.status,
+        decidedBy: decision.decidedBy,
+        decidedAt: decision.decidedAt,
+        decisionNote: decision.decisionNote,
+      };
+      draft.timesheetCorrections = draft.timesheetCorrections.map((row) => (row === existing ? saved! : row));
+    });
+    return saved;
   }
 
   findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {

@@ -552,6 +552,104 @@ await step('TABLET: the library preview offers the file instead of faking the pa
 });
 
 await tabletLibrary.close();
+
+/* -------------------------------------------------------------------------- */
+/* TABLET — the reviewer's preview (TR-02), print and download, and the        */
+/* Delivery Note and Time Sheet (PARTS-03, PDF-01). 29 October 2026.           */
+/* -------------------------------------------------------------------------- */
+
+const previews = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, acceptDownloads: true });
+await previews.addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { get: () => false, configurable: true });
+  // The print dialog cannot be driven by a test: count the calls instead, and
+  // note whether ONLY the document was on the page when it was asked for.
+  window.__printCalls = [];
+  window.print = () => {
+    window.__printCalls.push(document.documentElement.classList.contains('eje-print-isolate'));
+    window.dispatchEvent(new Event('afterprint'));
+  };
+});
+const previewPage = await previews.newPage();
+let silentDownloads = 0;
+const writes = [];
+previewPage.on('download', () => { silentDownloads += 1; });
+previewPage.on('request', (request) => {
+  if (request.method() !== 'GET' && request.url().includes('/api/') && !request.url().includes('/api/auth/')) {
+    writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  }
+});
+await signInAs(previewPage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
+
+await step('TABLET: Job card PDF opens the job card INSIDE the app — no silent download (TR-02)', async () => {
+  await previewPage.goto(`${BASE}/jobs/EJE-1067/review`, { waitUntil: 'networkidle' });
+  writes.length = 0;
+  await previewPage.getByTestId('job-card-pdf-button').click();
+  const preview = previewPage.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) !== 'document') throw new Error('not drawn as the document');
+  if (!(await preview.innerText()).includes('EJE-1067')) throw new Error('the preview is not this job card');
+  if (silentDownloads !== 0) throw new Error(`${silentDownloads} silent download(s)`);
+});
+
+await step('TABLET: Print prints the document alone, once, and writes nothing', async () => {
+  await previewPage.getByTestId('preview-print').click();
+  await previewPage.waitForFunction(() => window.__printCalls.length > 0, null, { timeout: 10000 });
+  const calls = await previewPage.evaluate(() => window.__printCalls);
+  if (calls.length !== 1) throw new Error(`print was asked for ${calls.length} times`);
+  if (calls[0] !== true) throw new Error('the application was still on the page when printing');
+  if (await previewPage.evaluate(() => document.documentElement.classList.contains('eje-print-isolate'))) {
+    throw new Error('the page stayed in print mode after printing');
+  }
+  if (writes.length !== 0) throw new Error(`printing sent ${writes.join(', ')}`);
+});
+
+await step('TABLET: Download PDF saves the same PDF each time, separately from Print, and writes nothing', async () => {
+  const take = async () => {
+    const started = previewPage.waitForEvent('download', { timeout: 20000 });
+    await previewPage.getByTestId('preview-download').click();
+    const file = await started;
+    const path = await file.path();
+    const { readFile } = await import('node:fs/promises');
+    return { name: file.suggestedFilename(), bytes: await readFile(path) };
+  };
+  const first = await take();
+  const second = await take();
+  silentDownloads = 0; // these two were asked for
+  if (!first.name.endsWith('.pdf')) throw new Error(`downloaded ${first.name}`);
+  if (first.bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('the download is not a PDF');
+  if (!first.bytes.equals(second.bytes)) throw new Error('two downloads of the same preview differ');
+  if (writes.length !== 0) throw new Error(`downloading sent ${writes.join(', ')}`);
+  await previewPage.getByTestId('preview-close').click();
+});
+
+await step('TABLET: a courier collection offers its price-less Delivery Note, in the app (PARTS-03)', async () => {
+  await previewPage.goto(`${BASE}/jobs/EJE-1063`, { waitUntil: 'networkidle' });
+  await previewPage.getByTestId('delivery-note-button').click();
+  const preview = previewPage.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  const text = await preview.innerText();
+  if (!text.includes('DSV-4471882')) throw new Error('the waybill is not on the Delivery Note');
+  if (/R[\s\u00a0]\d/u.test(text) || text.includes('Subtotal')) throw new Error('the Delivery Note shows a price');
+  if (silentDownloads !== 0) throw new Error('the Delivery Note was downloaded silently');
+  await previewPage.getByTestId('preview-close').click();
+});
+
+await step('TABLET: the Time Sheet preview has exactly Date, Customer, OT, D/T, Callout, Int Km, Cust Km (PDF-01)', async () => {
+  await signInAs(previewPage, 'Sipho Mahlangu', { base: BASE, greeting: /Sipho/ });
+  await previewPage.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  writes.length = 0;
+  await previewPage.getByTestId('timesheet-preview').click();
+  await previewPage.getByTestId('timesheet-document').waitFor({ timeout: 20000 });
+  const header = (await previewPage.getByTestId('timesheet-document-header').innerText())
+    .split(/\s*\n\s*|\t+/u).map((cell) => cell.trim()).filter(Boolean);
+  const expected = ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km'];
+  if (JSON.stringify(header) !== JSON.stringify(expected)) throw new Error(`the columns are ${JSON.stringify(header)}`);
+  if (writes.length !== 0) throw new Error(`previewing sent ${writes.join(', ')}`);
+  if (silentDownloads !== 0) throw new Error('the Time Sheet was downloaded silently');
+  await previewPage.getByTestId('preview-close').click();
+});
+
+await previews.close();
 await browser.close();
 
 console.log('\n=== SUMMARY ===');

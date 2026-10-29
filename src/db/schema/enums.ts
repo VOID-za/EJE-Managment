@@ -142,6 +142,9 @@ export const notificationType = pgEnum('notification_type', [
   'chat_message',
   // Migration 0038: a timesheet period sent to the office (TS-02).
   'timesheet_submitted',
+  // Migration 0039: a correction of a sent timesheet asked for, and decided (TS-16).
+  'timesheet_correction_requested',
+  'timesheet_correction_decided',
 ]);
 
 export const notificationChannel = pgEnum('notification_channel', ['in_app', 'whatsapp', 'email']);

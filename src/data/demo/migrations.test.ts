@@ -476,3 +476,17 @@ describe('v32 -> v33: a chosen period replaces the month; issued delivery notes 
     expect(migrated.deliveryNoteDocuments).toEqual([]);
   });
 });
+
+describe('v33 -> v34: corrections of sent timesheets (29 October 2026)', () => {
+  it('adds an empty list of corrections and leaves every sent period exactly as it was', () => {
+    const period = {
+      id: 'tsp-1', userId: 'user-tech-sipho', from: '2026-10-01', to: '2026-10-07', comment: 'Week one.',
+      updatedBy: 'user-tech-sipho', updatedAt: '2026-10-08T08:00:00.000Z',
+      submittedAt: '2026-10-08T08:00:00.000Z', submittedBy: 'user-tech-sipho',
+      snapshot: { technicianName: 'Sipho', from: '2026-10-01', to: '2026-10-07', comment: 'Week one.', entries: [] },
+    };
+    const migrated = migrateDatabase(33, { timesheetPeriods: [period], deliveryNoteDocuments: [] }, SCHEMA_VERSION) as unknown as Record<string, unknown>;
+    expect(migrated.timesheetCorrections).toEqual([]);
+    expect(migrated.timesheetPeriods).toEqual([period]);
+  });
+});

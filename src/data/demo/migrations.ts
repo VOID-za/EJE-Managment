@@ -664,6 +664,12 @@ const v32ToV33 = (data: Loose): Loose => {
   };
 };
 
+/** v34: corrections of sent timesheets (TS-16). None existed before. */
+const v33ToV34 = (data: Loose): Loose => ({
+  ...data,
+  timesheetCorrections: Array.isArray(data.timesheetCorrections) ? data.timesheetCorrections : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -690,6 +696,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   30: v30ToV31,
   31: v31ToV32,
   32: v32ToV33,
+  33: v33ToV34,
 };
 
 /**

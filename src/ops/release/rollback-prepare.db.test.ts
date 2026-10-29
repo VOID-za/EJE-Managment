@@ -9,7 +9,10 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_DOCUMENTS } from './rollback-fixture';
+import { ROLLBACK_DOCUMENTS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
+import { PostgresDeliveryNoteRepository } from '@/data/postgres/delivery-note-repository';
+import { asCustomerId, asJobId, type TimesheetEntry } from '@/domain';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 1 OF 2: THIS RELEASE PREPARES THE DATABASE.
@@ -175,5 +178,55 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     );
     expect(saved.dateReceived).toBe('2026-10-20');
     expect((await jobs.list()).filter((job) => job.jobType === 'test_and_repair')).toHaveLength(1);
+  });
+
+  /*
+   * 0037–0039: an absence reason, a Workshop line with a call-out amount and
+   * kilometres, a period SENT to the office, an ACCEPTED correction of it, and
+   * an issued Delivery Note. Phase 2 has the live code (ef0f695) meet them.
+   */
+  it('writes the timesheet, attendance and delivery-note rows only this release can (0037–0039)', async () => {
+    const attendance = new PostgresAttendanceRepository(db);
+    const T = ROLLBACK_TIMESHEET;
+    const tech = asUserId(IDS.technician);
+    await attendance.saveRecord({
+      id: crypto.randomUUID(), userId: tech, date: T.absentDay, status: 'absent', absenceReason: 'sick_leave',
+      note: '', recordedBy: asUserId(IDS.master), recordedAt: '2026-10-20T08:00:00.000Z',
+    });
+    const entry = (id: string, over: Partial<TimesheetEntry>): TimesheetEntry => ({
+      id, userId: tech, date: '2026-10-21', customerId: null, customerName: '', workshop: false,
+      normalHours: 0, overtimeHours: 2, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false,
+      internalKm: 0, customerKm: 0, updatedBy: tech, updatedAt: '2026-10-21T17:00:00.000Z', ...over,
+    });
+    const workshop = await attendance.saveEntry(entry(T.workshopLine, { workshop: true, internalKm: 12.5 }));
+    const customer = await attendance.saveEntry(entry(T.customerLine, {
+      date: '2026-10-22', customerId: asCustomerId(IDS.customer), customerName: 'Test customer',
+      calloutAmount: 50000, calloutShared: true, customerKm: 40,
+    }));
+    const snapshot = { technicianName: 'Sipho', from: '2026-10-19', to: '2026-10-25', comment: 'Sent.', entries: [workshop, customer] };
+    const sent = await attendance.submitPeriod({
+      id: T.period, userId: tech, from: '2026-10-19', to: '2026-10-25', comment: 'Sent.', updatedBy: tech,
+      updatedAt: '2026-10-26T08:00:00.000Z', submittedAt: '2026-10-26T08:00:00.000Z', submittedBy: tech, snapshot,
+    });
+    expect(sent?.submittedAt).not.toBeNull();
+    const asked = await attendance.createCorrection({
+      id: T.correction, periodId: T.period, userId: tech, sequence: 1, reason: 'OT was 3',
+      before: snapshot, after: { ...snapshot, entries: [{ ...workshop, overtimeHours: 3 }, customer] },
+      requestedBy: tech, requestedAt: '2026-10-27T08:00:00.000Z', status: 'pending', decidedBy: null, decidedAt: null, decisionNote: '',
+    });
+    expect(asked?.status).toBe('pending');
+    const accepted = await attendance.decideCorrection({
+      id: T.correction, status: 'accepted', decidedBy: asUserId(IDS.master), decidedAt: '2026-10-27T09:00:00.000Z', decisionNote: '',
+    });
+    expect(accepted?.status).toBe('accepted');
+
+    const job = (await new PostgresJobRepository(db).list()).find((candidate) => candidate.jobType === 'test_and_repair');
+    const note = await new PostgresDeliveryNoteRepository(db).record({
+      id: T.deliveryNote, jobId: asJobId(job!.id), fileName: 'delivery-note.pdf', storageKey: 'documents/rollback-delivery-note.pdf',
+      pageCount: 1, sizeBytes: 100, checksumSha256: null, generatedAt: '2026-10-27T10:00:00.000Z', generatedBy: tech,
+      jobCardDocumentKey: 'documents/rollback-job-card.pdf', signedByName: 'Johan Courier', signedAt: '2026-10-27T10:00:00.000Z',
+      signatureSha256: 'a'.repeat(64),
+    });
+    expect(note.jobId).toBe(job!.id);
   });
 });

@@ -258,6 +258,83 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician))).toHaveLength(1);
   });
 
+  it('a sent timesheet is corrected through a separate, linked, write-once record; the sent period is never touched (migration 0039)', async () => {
+    const today = businessToday();
+    const from = shift(today, -3);
+    const to = shift(today, -1);
+    const tech = await signIn('sipho@example-test.co.za');
+    const added = await tech.post<{ entry: { id: string } }>(`/api/timesheets/${IDS.technician}/entries`, {
+      date: to, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0,
+    });
+    expect(added.status, JSON.stringify(added.error)).toBe(200);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to })).status).toBe(200);
+    const [sentBefore] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician));
+
+    const body = {
+      from, to, reason: 'OT was 3', comment: '',
+      lines: [{ entryId: added.data.entry.id, date: to, customerName: 'ABC Engineering', overtimeHours: 3, doubleHours: 0 }],
+    };
+    const asked = await tech.post<{ correction: { id: string } }>(`/api/timesheets/${IDS.technician}/period/corrections`, body);
+    expect(asked.status, JSON.stringify(asked.error)).toBe(200);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/corrections`, body)).status).toBe(422);
+    const told = await db.select().from(schema.notifications).where(eq(schema.notifications.type, 'timesheet_correction_requested'));
+    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.master].sort());
+
+    const id = asked.data.correction.id;
+    const [row] = await db.select().from(schema.timesheetCorrections).where(eq(schema.timesheetCorrections.id, id));
+    expect(row).toMatchObject({ periodId: sentBefore!.id, userId: IDS.technician, sequence: 1, status: 'pending', requestedBy: IDS.technician });
+    expect((row!.beforeSnapshot as { entries: { overtimeHours: number }[] }).entries[0]?.overtimeHours).toBe(2);
+    expect((row!.afterSnapshot as { entries: { overtimeHours: number }[] }).entries[0]?.overtimeHours).toBe(3);
+
+    // What the database refuses on its own.
+    const insert = (values: Partial<typeof schema.timesheetCorrections.$inferInsert>) =>
+      db.insert(schema.timesheetCorrections).values({
+        id: crypto.randomUUID(), periodId: sentBefore!.id, userId: IDS.technician, sequence: 9, reason: 'x',
+        beforeSnapshot: {}, afterSnapshot: {}, requestedBy: IDS.technician, requestedAt: new Date().toISOString(),
+        ...values,
+      });
+    expect(await postgresMessage(insert({}))).toContain('timesheet_corrections_one_pending_key');
+    expect(await postgresMessage(insert({ status: 'accepted', decidedBy: IDS.master, decidedAt: new Date().toISOString() }))).toContain('starts pending');
+    expect(await postgresMessage(insert({ userId: IDS.coordinator, requestedBy: IDS.coordinator }))).toContain('only a timesheet sent to the office');
+    expect(await postgresMessage(
+      db.update(schema.timesheetCorrections).set({ reason: 'rewritten' }).where(eq(schema.timesheetCorrections.id, id)),
+    )).toContain('only the decision');
+    expect(await postgresMessage(
+      db.update(schema.timesheetCorrections)
+        .set({ status: 'accepted', decidedBy: IDS.technician, decidedAt: new Date().toISOString() })
+        .where(eq(schema.timesheetCorrections.id, id)),
+    )).toContain('timesheet_corrections_decided_by_another');
+    expect(await postgresMessage(
+      db.update(schema.timesheetCorrections)
+        .set({ status: 'rejected', decidedBy: IDS.master, decidedAt: new Date().toISOString(), decisionNote: ' ' })
+        .where(eq(schema.timesheetCorrections.id, id)),
+    )).toContain('timesheet_corrections_rejection_explained');
+    expect(await postgresMessage(db.delete(schema.timesheetCorrections).where(eq(schema.timesheetCorrections.id, id)))).toContain('cannot be deleted');
+
+    // The office decides once; the decision is then write-once.
+    const master = await signIn('elmarie@example-test.co.za');
+    const decide = `/api/timesheets/${IDS.technician}/corrections/${id}/decide`;
+    expect((await tech.post(decide, { decision: 'accept' })).status).toBe(403);
+    const accepted = await master.post(decide, { decision: 'accept' });
+    expect(accepted.status, JSON.stringify(accepted.error)).toBe(200);
+    const coordinator = await signIn('christene@example-test.co.za');
+    expect((await coordinator.post(decide, { decision: 'reject', note: 'no' })).status).toBe(422);
+    expect(await postgresMessage(
+      db.update(schema.timesheetCorrections).set({ status: 'rejected', decisionNote: 'reversed' }).where(eq(schema.timesheetCorrections.id, id)),
+    )).toContain('already decided');
+
+    // The sent period is exactly as it was; the version in force is the correction.
+    const [sentAfter] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, sentBefore!.id));
+    expect(sentAfter).toEqual(sentBefore);
+    const current = await master.get<{ totals: { overtimeHours: number }; versionLabel: string }>(`/api/timesheets/${IDS.technician}/period?from=${from}&to=${to}`);
+    expect(current.data.totals.overtimeHours).toBe(3);
+    expect(current.data.versionLabel).toMatch(/^Correction 1, accepted/u);
+    const original = await master.get<{ totals: { overtimeHours: number } }>(`/api/timesheets/${IDS.technician}/period?from=${from}&to=${to}&version=original`);
+    expect(original.data.totals.overtimeHours).toBe(2);
+    const decided = await db.select().from(schema.notifications).where(eq(schema.notifications.type, 'timesheet_correction_decided'));
+    expect(decided.map((n) => n.recipientId)).toEqual([IDS.technician]);
+  });
+
   it('an issued Delivery Note is one per job and write-once (migration 0038)', async () => {
     const master = await signIn('elmarie@example-test.co.za');
     const created = await master.post<{ id: string }>('/api/jobs', {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { loadTimesheetDocument } from '@/application/timesheets';
 import { parseWith, readRoute } from '@/server/api/handler';
+import { parseTimesheetVersion, timesheetVersionParam } from '@/server/api/timesheet-line';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD');
 
@@ -10,8 +11,8 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM
  * viewer. A read: opening it never submits, locks or writes anything.
  */
 export const GET = readRoute('timesheets.period', (context) => {
-  const { from, to } = parseWith(
-    z.object({ from: day, to: day }).strict(),
+  const { from, to, version } = parseWith(
+    z.object({ from: day, to: day, version: timesheetVersionParam }).strict(),
     Object.fromEntries(context.request.nextUrl.searchParams),
   );
   return loadTimesheetDocument(
@@ -19,5 +20,6 @@ export const GET = readRoute('timesheets.period', (context) => {
     context.params.userId ?? '',
     from,
     to,
+    parseTimesheetVersion(version),
   );
 });

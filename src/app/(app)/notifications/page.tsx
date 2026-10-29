@@ -44,6 +44,8 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   signature_refused: 'warning',
   chat_message: 'note',
   timesheet_submitted: 'clock',
+  timesheet_correction_requested: 'clock',
+  timesheet_correction_decided: 'clock',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -56,6 +58,8 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   signature_refused: 'Customer refused to sign',
   chat_message: 'New message',
   timesheet_submitted: 'Timesheet sent to the office',
+  timesheet_correction_requested: 'Timesheet correction to review',
+  timesheet_correction_decided: 'Timesheet correction decided',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {

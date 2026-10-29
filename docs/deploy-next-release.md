@@ -52,14 +52,14 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### NEXT — NOT DEPLOYED, NOT APPROVED: the real-world reviewer's changes and the owner's decisions (28 October 2026)
+### NEXT: the real-world reviewer's changes, the owner's decisions and timesheet corrections (28–29 October 2026)
 
-**Not run, and not to be run without the owner's approval of the work and a
-separate approval to deploy.** The changes and their tests are in
-`docs/reviewer-feedback-2026-10-28.md`. Live is `ef0f695`, so when it is
-approved **two migrations are pending**, in order, both forward-only and
+**The owner instructed this release on 29 October 2026** ("deploy the finished
+release to the EJE VPS using the established release process"). The changes
+and their tests are in `docs/reviewer-feedback-2026-10-28.md`. Live is
+`ef0f695`, so **three migrations are pending**, in order, all forward-only and
 additive (new nullable or defaulted columns, new tables with write-once
-triggers, one new enum value; nothing dropped, no row rewritten):
+triggers, new enum values; nothing dropped, no row rewritten):
 
 - `0037_reviewer_timesheets_attendance` — `attendance.absence_reason`; on
   `timesheet_entries` `workshop`, `callout_amount_cents`, `callout_shared`,
@@ -70,13 +70,25 @@ triggers, one new enum value; nothing dropped, no row rewritten):
   `timesheet_months` row across; `notification_type` gains
   `timesheet_submitted`; `delivery_note_documents` (the courier's issued
   Delivery Note, one per job, write-once).
+- `0039_timesheet_corrections` — `timesheet_corrections` (TS-16: a correction of a
+  sent period, decided once by the office) with `timesheet_corrections_guard`;
+  `notification_type` gains `timesheet_correction_requested` and
+  `timesheet_correction_decided`.
 
 ```powershell
-.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes
-.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes
+.\deploy\release\stage-release.ps1 -Sha <SHA> -CheckOnly -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes,0039_timesheet_corrections
+.\deploy\release\stage-release.ps1 -Sha <SHA> -ExpectPending 0037_reviewer_timesheets_attendance,0038_timesheet_periods_delivery_notes,0039_timesheet_corrections
 ```
 
-**Release dependencies.** Both migrations together (0038 builds on 0037). The
+**Order and compatibility.** All three together, in order (0038 builds on 0037,
+0039 on 0038). The release script applies them while `ef0f695` keeps serving,
+then switches; an unhealthy new release is rolled back to `ef0f695` on the
+migrated database. That combination is proved in CI by
+`scripts/release/rollback-compat.sh` (now pinned to `ef0f695`): ef0f695's own
+preflight, attendance/timesheet repository, library and jobs code run against a
+database at 0039 holding every new kind of row. The backup and its restore test
+run BEFORE the migration (step 2 of the script); a failed migration stops with
+`ef0f695` still serving. The
 backup's reference scan now also counts `delivery_note_documents.storage_key`
 (its job-card column is named `job_card_document_key` so it is not counted
 twice). Real email and WhatsApp delivery still need EJE's credentials; a
@@ -87,7 +99,11 @@ possible. What it cannot show: absence reasons, Workshop lines, call-out amounts
 kilometres, period comments, sent timesheets, `timesheet_submitted`
 notifications and issued Delivery Notes recorded after the release (they stay
 in the database and storage). A timesheet sent under the new release would be
-editable again under the old one — the old release knows no lock.
+editable again under the old one — the old release knows no lock — though the
+sent snapshot and every correction stay untouched. The migrations are NOT
+reversed by a rollback and need not be; there is no down migration, and none is
+claimed. Recovery from a damaged database is the verified backup the release
+takes before migrating (`docs/vps-backups.md`), restored by a person.
 
 **Refresh every tablet after the release, before any courier collection.** A
 courier collection is now signed on its Delivery Note, whose identity (`dln1:`)

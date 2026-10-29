@@ -104,9 +104,11 @@ export const MyAttendance = () => {
                   ) : day.record.status === 'present' ? (
                     <Badge tone="green" size="sm">Present</Badge>
                   ) : (
-                    <Badge tone="red" size="sm" data-testid="my-attendance-reason">
-                      Absent — {day.record.absenceReason === null ? 'reason not recorded' : ABSENCE_REASON_LABELS[day.record.absenceReason]}
-                    </Badge>
+                    <span data-testid="my-attendance-reason">
+                      <Badge tone="red" size="sm">
+                        Absent — {day.record.absenceReason === null ? 'reason not recorded' : ABSENCE_REASON_LABELS[day.record.absenceReason]}
+                      </Badge>
+                    </span>
                   )}
                 </div>
                 <div className="flex gap-2">

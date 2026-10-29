@@ -10,20 +10,23 @@ import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { describeSearchability } from '@/application/library-ocr';
 import { checkMigrations } from '@/ops/preflight-rules';
 import { asDocumentId, asUserId, type DocumentId, type TechnicalDocument } from '@/domain';
+import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (4634d5d), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (ef0f695), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 4634d5d, and it does: each of these was checked against that commit.
+ * in ef0f695, and it does: each of these was checked against that commit.
  *
- * The database was migrated to `0030` and populated by THIS release (phase 1).
- * The question is the one a rollback asks: after `0030` has run, does the old
- * code still read, search and write the library — including the
- * "coverage unknown" row only the new code can produce?
+ * The database was migrated to the newest migration THIS release ships (0039)
+ * and populated by it (phase 1). The question is the one a rollback asks: after
+ * the migrations have run, does the old code still read and write — the
+ * library, jobs, and (0037–0039) attendance and timesheets, beside absence
+ * reasons, Workshop lines, sent periods, corrections and Delivery Notes it has
+ * never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -52,9 +55,19 @@ const DOCUMENTS = {
 } as const;
 const WRITTEN_BY_OLD_CODE = '00000000-0000-4000-8000-0000000004b1';
 
+// A copy of ROLLBACK_TIMESHEET in `src/ops/release/rollback-fixture.ts`.
+const TIMESHEET = {
+  absentDay: '2026-10-20',
+  workshopLine: '00000000-0000-4000-8000-0000000005a1',
+  customerLine: '00000000-0000-4000-8000-0000000005a2',
+  period: '00000000-0000-4000-8000-0000000005b1',
+  correction: '00000000-0000-4000-8000-0000000005c1',
+  deliveryNote: '00000000-0000-4000-8000-0000000005d1',
+} as const;
+
 const id = (value: string): DocumentId => asDocumentId(value);
 
-describePhase('rollback compatibility — phase 2: the live release against a database at 0030', () => {
+describePhase('rollback compatibility — phase 2: the live release (ef0f695) against a database at 0039', () => {
   let db: Database;
   let repository: PostgresDocumentRepository;
 
@@ -72,13 +85,14 @@ describePhase('rollback compatibility — phase 2: the live release against a da
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    expect(shipped).toHaveLength(30);
-    expect(shipped).not.toContain('0030_library_page_coverage_unknown');
+    expect(shipped).toHaveLength(37);
+    expect(shipped.at(-1)).toBe('0036_chat_deleted_for');
+    expect(shipped).not.toContain('0037_reviewer_timesheets_attendance');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 31 with 0030 alone; more once later migrations (0031 onwards) ship too.
-    expect(applied).toBeGreaterThan(30);
+    // 0037, 0038 and 0039 applied beyond what the live release ships.
+    expect(applied).toBe(40);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -204,5 +218,55 @@ describePhase('rollback compatibility — phase 2: the live release against a da
       sql`select date_received from jobs where job_number = ${allocated.jobNumber}`,
     );
     expect(row?.date_received ?? null).toBeNull();
+  });
+
+  /*
+   * 0037–0039. The live release has never heard of absence reasons, Workshop,
+   * call-out amounts, kilometres, sent periods, corrections or Delivery Notes.
+   * After a rollback it must still read the register and the timesheet lines,
+   * and still write its own — the new columns take their defaults, and the
+   * new tables are left alone.
+   */
+  it('still reads and writes ATTENDANCE and TIMESHEET LINES on a database at 0039', async () => {
+    const attendance = new PostgresAttendanceRepository(db);
+    const tech = asUserId(IDS.technician);
+    const records = await attendance.listRecords(TIMESHEET.absentDay, TIMESHEET.absentDay, tech);
+    expect(records.map((record) => record.status)).toEqual(['absent']);
+    // An absent day of its own, with no reason (the old screen asks for none): accepted.
+    // The OLD shapes, exactly as ef0f695 types them; cast only so this checkout's
+    // newer types accept the file (it runs against ef0f695's own).
+    const own = await attendance.saveRecord({
+      id: crypto.randomUUID(), userId: tech, date: '2026-10-23', status: 'absent', note: 'rolled back',
+      recordedBy: asUserId(IDS.master), recordedAt: '2026-10-23T08:00:00.000Z',
+    } as Parameters<typeof attendance.saveRecord>[0]);
+    expect(own.status).toBe('absent');
+
+    const lines = await attendance.listEntries(tech, '2026-10-19', '2026-10-25');
+    expect(lines.map((line) => line.id).sort()).toEqual([TIMESHEET.workshopLine, TIMESHEET.customerLine].sort());
+    // A line in the old shape — NT and a call-out count — is still written.
+    const written = await attendance.saveEntry({
+      id: crypto.randomUUID(), userId: tech, date: '2026-10-28', customerId: null, customerName: 'Old-style line',
+      normalHours: 8, overtimeHours: 1, doubleHours: 0, callouts: 1, updatedBy: tech, updatedAt: '2026-10-28T17:00:00.000Z',
+    } as Parameters<typeof attendance.saveEntry>[0]);
+    expect(written.normalHours).toBe(8);
+    const [stored] = await db.execute<{ workshop: boolean; callout_amount_cents: number; internal_km: string }>(
+      sql`select workshop, callout_amount_cents, internal_km from timesheet_entries where id = ${written.id}`,
+    );
+    expect(stored).toMatchObject({ workshop: false, callout_amount_cents: 0 });
+    expect(Number(stored?.internal_km)).toBe(0);
+
+    // What the live release cannot see stays exactly as written.
+    const [sent] = await db.execute<{ n: string }>(
+      sql`select count(*)::text as n from timesheet_periods where id = ${TIMESHEET.period} and submitted_at is not null`,
+    );
+    expect(sent?.n).toBe('1');
+    const [correction] = await db.execute<{ status: string }>(
+      sql`select status from timesheet_corrections where id = ${TIMESHEET.correction}`,
+    );
+    expect(correction?.status).toBe('accepted');
+    const [note] = await db.execute<{ n: string }>(
+      sql`select count(*)::text as n from delivery_note_documents where id = ${TIMESHEET.deliveryNote}`,
+    );
+    expect(note?.n).toBe('1');
   });
 });

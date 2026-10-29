@@ -1,6 +1,8 @@
 #!/bin/bash
-# ROLLBACK COMPATIBILITY: the live release (4634d5d) against a database this
-# release has migrated to 0030. Release readiness for de0d9b6, 25 October 2026.
+# ROLLBACK COMPATIBILITY: the live release (ef0f695) against a database this
+# release has migrated to its newest migration (0039). First written for de0d9b6
+# (25 October 2026, live 4634d5d, migration 0030); moved to the live ef0f695 and
+# migrations 0037–0039 on 29 October 2026.
 #
 #   TEST_DATABASE_URL=postgres://…/eje_test bash scripts/release/rollback-compat.sh
 #
@@ -27,7 +29,7 @@
 # reach the VPS.
 set -euo pipefail
 
-LIVE=${LIVE_COMMIT:-4634d5d061c02f3aa9af034be4363403a87f18cf}
+LIVE=${LIVE_COMMIT:-ef0f695ac7121b4f10a0caced2c0be917309c3cb}
 : "${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a disposable test database}"
 
 root=$(git rev-parse --show-toplevel)
@@ -76,7 +78,7 @@ run_phase() {
 }
 
 echo
-echo "=== phase 1 — THIS release migrates a disposable database to 0030 and writes every state"
+echo "=== phase 1 — THIS release migrates a disposable database to its newest migration and writes every state"
 run_phase "$root" prepare src/ops/release/rollback-prepare.db.test.ts
 
 echo
@@ -86,4 +88,4 @@ cp scripts/release/rollback-probe.db.test.ts "$live/src/release-probe/"
 run_phase "$live" probe src/release-probe/rollback-probe.db.test.ts
 
 echo
-echo "ROLLBACK COMPATIBLE: the live release ($LIVE) works against a database at 0030."
+echo "ROLLBACK COMPATIBLE: the live release ($LIVE) works against a database at this release's newest migration."

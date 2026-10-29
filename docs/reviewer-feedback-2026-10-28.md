@@ -1,12 +1,14 @@
 # Real-world reviewer feedback — requirements matrix (28 October 2026)
 
 Branch `claude/office-workflow-parts`. First implementation `b4c7bad`,
-`694f526`, `e5e7ca4`; the owner's follow-up decisions implemented on top of
-`e5e7ca4` (see "Follow-up" below). **Nothing here is deployed** — deployment,
-production migrations and any change to the live site are forbidden for this
-work. Statuses use the project's terms: nothing is DONE or approved without the
-owner; *TESTED — awaiting approval* means automated tests ran and passed, not
-that staff have tried it on the device.
+`694f526`, `e5e7ca4`; the owner's follow-up decisions in `7499768`; on
+29 October 2026 the correction of a sent timesheet (TS-16), migration 0039,
+the rollback-compatibility proof against the live release and the tablet
+preview/print/download checks — and, on the owner's instruction of that day,
+the release (see "Release" at the end). Statuses use the project's terms:
+nothing is DONE or approved without the owner; *TESTED — awaiting approval*
+means automated tests ran and passed, not that staff have tried it on the
+device.
 
 The term is **PDF Layout** throughout (not "PDF Log-out"), and **Parts** (not
 "Ports").
@@ -85,8 +87,9 @@ or staff-verified. Migrations `0037` and `0038` are development migrations,
 | ATT-01 | Absent needs exactly Leave, Sick Leave, Family Responsibility or IOD (Injury on Duty); attendance only; old absences keep no reason | `domain/types/attendance.ts`, `attendance-operations.ts` (`recordAttendance`), `/api/attendance`, `AbsenceReasonPicker.tsx`, register and My attendance, attendance CSV | `reviewer-feedback.test.ts`, `reviewer-feedback-api.test.ts`, `attendance.test.ts`, db constraint test, smoke | 0037 `absence_reason` (null on old rows) | TESTED — awaiting approval |
 | ATT-02 | Own attendance only; office per permission model | unchanged | unit + HTTP | — | TESTED — awaiting approval |
 | TS-01 | Own timesheet only, on every route (sheet, period document, PDF, comment, submit) | `timesheets.ts` `assertMayRead` / `assertOwner` | unit + HTTP | — | TESTED — awaiting approval |
-| TS-02 / TS-14 | **Send to office for the chosen From/To period**: once; the period's days become read-only for the technician on every path; the office reads the sent version; a sent period may not share a day with another sent one; no reopening — corrections are a separate, audited process | `submitTimesheetPeriod`, `assertNoOverlap`, `assertDayOpen` (`src/application/timesheets.ts`); `POST /api/timesheets/[userId]/period/submit`; repository `submitPeriod` (conditional) | unit (lock, boundaries, duplicate, overlap), HTTP, db (trigger: write-once, overlap), smoke | 0038 `timesheet_periods` + trigger `timesheet_periods_guard` | TESTED — awaiting approval |
+| TS-02 / TS-14 | **Send to office for the chosen From/To period**: once; the period's days become read-only for the technician on every path; the office reads the sent version; a sent period may not share a day with another sent one; no reopening — a mistake is put right by a correction (TS-16) | `submitTimesheetPeriod`, `assertNoOverlap`, `assertDayOpen` (`src/application/timesheets.ts`); `POST /api/timesheets/[userId]/period/submit`; repository `submitPeriod` (conditional) | unit (lock, boundaries, duplicate, overlap), HTTP, db (trigger: write-once, overlap), smoke | 0038 `timesheet_periods` + trigger `timesheet_periods_guard` | TESTED — awaiting approval |
 | TS-03 | Submission audited (`timesheet_submitted`, actor, time); lines and comment frozen in `snapshot`; the office's copy and PDF are drawn from it | as above | as above | as above | TESTED — awaiting approval |
+| TS-16 | **Correcting a sent timesheet**: the technician asks (reason + complete corrected lines); the office (Master/Coordinator, not the asker) accepts or rejects with a note, once; the sent original never changes; the version in force is the correction last accepted, shown and labelled on the sheet, PDF Layout and export; one pending per period; audited and notified | `application/timesheet-corrections.ts`, `timesheets.ts`, `TimesheetCorrections.tsx`, routes `…/period/corrections`, `…/corrections/[id]/decide`, `/api/timesheets/corrections/pending` | `timesheet-corrections.test.ts` (15), HTTP (bypasses, replay), db (every refusal), smoke | 0039 `timesheet_corrections` + trigger | TESTED — awaiting approval |
 | Notify | **On a successful send, every active Master and Coordinator is notified** through the existing in-app notifications (`notifyOffice`, type `timesheet_submitted`), only after the submission is saved; a refused send notifies nobody; a retried request is answered from the idempotency store and a second send is refused, so there is never a second notification; technicians are not notified | `submitTimesheetPeriod`, `application/audit.ts` `notifyOffice`, notifications page | unit (recipients, once, refusal), HTTP, db (recipients), smoke (the bell) | 0038 adds `timesheet_submitted` to `notification_type` | TESTED — awaiting approval. In-app only; nothing is emailed or sent by WhatsApp |
 | TS-04 | From before To; From after To said on screen and refused on the server; boundaries included; oldest first; reset on every visit without touching saved lines | `lib/timesheet-dates.ts`, `timesheets/page.tsx`, `loadTimesheet` | unit (boundaries, order, empty, invalid, 92-day limit), smoke | — | TESTED — awaiting approval |
 | TS-05 | Day of the week beside every date (page, PDF Layout, export, My attendance), UTC calendar arithmetic | `lib/timesheet-dates.ts` | unit (incl. leap day, year end) | — | TESTED — awaiting approval |
@@ -124,7 +127,65 @@ review screens. **Real email delivery needs EJE's Microsoft 365 credentials;**
 without them a PostgreSQL deployment records the job card as *pending*/refused
 rather than sent, and nothing claims it was delivered. WhatsApp likewise.
 
-## Migrations — both pending, neither applied to production
+## Correcting a sent timesheet (TS-16, 29 October 2026)
+
+The owner asked for the correction workflow to be built, not left as a
+limitation. The smallest complete design on the existing architecture:
+
+- **The sent timesheet is never changed.** `timesheet_periods` and its
+  snapshot stay exactly as sent (0038's trigger already refuses any change).
+- **A correction is its own record** (`timesheet_corrections`, migration 0039),
+  linked to the one sent period. It holds the reason, who asked and when, the
+  COMPLETE version it corrects (`before` — the original, or the correction last
+  accepted) and the COMPLETE corrected version (`after`), and the decision: who,
+  when, accepted or rejected, and the note.
+- **Who.** Only the technician whose timesheet it is asks (the session's user;
+  another technician or the office is refused, also by direct request). The
+  office decides: a new capability, `timesheets.reviewCorrections`, held by
+  Master and Coordinator only — the same two roles the office notifications go
+  to — and never by the person who asked (refused by the application and by a
+  database CHECK).
+- **Lines.** Every corrected line passes exactly the timesheet's own rules (the
+  line validation was extracted into `normaliseTimesheetLine`, shared by both
+  paths): quarter hours, call-out in cents, km to one decimal, Workshop or a
+  customer, NT and the old call-out count only as history; no day over 24 hours;
+  every line inside the period's own days. A correction identical to the version
+  in force is refused.
+- **Periods.** A correction has no dates of its own, so it cannot create a
+  period, overlap one, or send a day twice. The From/To rules (inclusive, 92 days
+  at most, no future To, one send per period) are untouched and still enforced.
+- **One at a time, decided once.** One pending correction per period (a partial
+  unique index — a retry, a double tap or two tabs cannot open two); a decision
+  only while pending (a conditional update — the second decision is refused);
+  then the row is write-once and can never be deleted (trigger
+  `timesheet_corrections_guard`). A replayed request with the same
+  idempotency key is answered from the idempotency store.
+- **The version in force** is the correction last accepted, else the original.
+  The sheet, the totals, the PDF Layout (a *Version* line in its heading) and
+  the CSV export (a *Sent version* column) show it; Preview offers the original
+  and every correction, each labelled (in force / superseded / pending /
+  rejected).
+- **Told and recorded.** The office is notified (in-app) when a correction is
+  asked for; the technician when it is decided. Audit events
+  `timesheet_correction_requested`, `…_accepted`, `…_rejected`, the request's
+  event listing every change line by line.
+- **Screens.** On a sent period: the corrections with their state (Pending the
+  office's review / Accepted / Rejected), what each changes, Preview of any
+  version; for the technician *Ask for a correction* (the complete lines,
+  editable, plus the reason); for the office *Accept correction* / *Reject* (a
+  note required to reject), and a list of corrections waiting at the top of
+  Timesheets.
+
+Files: `src/application/timesheet-corrections.ts`, `timesheets.ts`
+(`versionInForce`, `describeCorrectionChanges`, the document and export),
+`src/components/timesheets/TimesheetCorrections.tsx`, the routes under
+`src/app/api/timesheets/[userId]/period/corrections`,
+`…/corrections/[correctionId]/decide` and `src/app/api/timesheets/corrections/pending`.
+Tests: `timesheet-corrections.test.ts` (15), `reviewer-feedback-api.test.ts`
+(HTTP, bypasses, replay), `attendance-timesheets.db.test.ts` (every database
+refusal), the smoke journey.
+
+## Migrations — three, in order
 
 - `0037_reviewer_timesheets_attendance` — absence reason; timesheet Workshop,
   call-out amount and shared flag, Int Km and Cust Km; `timesheet_months` with a
@@ -136,9 +197,31 @@ rather than sent, and nothing claims it was delivered. WhatsApp likewise.
   `timesheet_submitted` to `notification_type`; `delivery_note_documents`
   (write-once, one per job). Additive; nothing is dropped or reinterpreted.
 
-0037 was not edited after it was committed: it has never been released, but a
-development database may have applied it, so the period model is a follow-up
-migration rather than a rewrite. Demo store: v32 → v33 does the same in memory.
+- `0039_timesheet_corrections` — `timesheet_corrections` with its guard trigger,
+  partial unique index and CHECKs; `notification_type` gains
+  `timesheet_correction_requested` and `timesheet_correction_decided`.
+  Additive.
+
+0037 and 0038 were not edited after they were committed: a development database
+may have applied them, so each later change is a further migration. Demo store:
+v32 → v33 → v34 does the same in memory.
+
+**Compatibility, both ways.** The live release keeps serving while the
+migrations run, and an automatic rollback would run it against the migrated
+database, so the old code must work on it: every new column is nullable or
+defaulted, the absence-reason CHECK accepts NULL, and the new tables are never
+read by the old code. This is now PROVED, not argued: the CI step
+`scripts/release/rollback-compat.sh`, moved from the long-gone 4634d5d/0030 to
+the live `ef0f695`, migrates a disposable database to 0039 with this release,
+writes an absence reason, a Workshop line, a sent period, an accepted correction
+and a Delivery Note, then runs **ef0f695's own code** against it — its preflight
+(not refused by a database three migrations ahead), its attendance and timesheet
+repository (reads them, writes an old-shape absent day and an old-shape line
+with NT and a call-out count), its library and its jobs. What a rollback cannot
+give back: the old screens do not show absence reasons, Workshop, amounts,
+kilometres, periods, corrections or Delivery Notes, and the old release knows no
+Send-to-office lock, so a technician could edit lines on a sent day there — the
+sent snapshot and every correction stay untouched in the database.
 
 ## Tests (filled in from the runs on 28 October 2026)
 
@@ -149,9 +232,8 @@ See the final section of this file, "Test results".
 1. **TR-02 on the device** (unconfirmed): is the silent download what the
    reviewer saw? Staff check H10.
 2. **Print** on the real tablet and browser (H6, H10, H12).
-3. **Corrections to a sent timesheet** use a separate, audited process; none is
-   built here and no office-reopen exists. If the owner wants one, it needs its
-   own rule.
+3. **Corrections to a sent timesheet**: built (TS-16, above). There is still no
+   office reopen — by design.
 4. **Tablets must be refreshed** to this build before courier-collection testing
    or release: an older build would show the courier the job card, and its held
    signature would be referred to Field Captures (safe, but the courier would

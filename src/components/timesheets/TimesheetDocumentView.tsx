@@ -33,6 +33,14 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
           ? 'Draft — not sent to the office'
           : `Sent to the office ${formatDateTime(document.submittedAt)}${document.submittedByName === null ? '' : ` by ${document.submittedByName}`}`}
       </dd>
+      {document.versionLabel.length > 0 && (
+        <>
+          <dt className="text-steel-500">Version</dt>
+          <dd className={document.inForce ? 'font-semibold' : 'font-semibold text-signal-600'} data-testid="timesheet-document-version">
+            {document.versionLabel}
+          </dd>
+        </>
+      )}
     </dl>
 
     <table className="mt-4 w-full border-collapse text-[11px]">

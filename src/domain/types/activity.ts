@@ -291,6 +291,10 @@ export type ActivityEventType =
   | 'timesheet_entry_removed'
   /** TS-02/TS-03: a technician sent a month's timesheet to the office; read-only from then. */
   | 'timesheet_submitted'
+  /** TS-16: a correction of a sent timesheet was asked for, accepted or rejected. */
+  | 'timesheet_correction_requested'
+  | 'timesheet_correction_accepted'
+  | 'timesheet_correction_rejected'
   /** PARTS-03/04: a courier delivery note was produced for a job (a separate, price-less document). */
   | 'delivery_note_generated'
   | 'message_sent'

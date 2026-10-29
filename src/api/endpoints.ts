@@ -76,7 +76,8 @@ import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
 import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
-import type { Timesheet, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
+import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
+import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
 
 /** The body of a timesheet line. TIMESHEET-2. */
 export interface TimesheetEntryBody {
@@ -1160,15 +1161,31 @@ export const timesheets = {
   exportUrl: (userId: string, from: string, to: string) =>
     `/api/timesheets/${segment(userId)}/export${search({ from, to })}`,
   /** TS-11: one chosen period as its PDF Layout prints it (draft, or what was sent). */
-  document: (userId: string, from: string, to: string) =>
-    query<TimesheetDocument>(`/api/timesheets/${segment(userId)}/period${search({ from, to })}`),
-  /** TS-11, TS-13: the PDF Layout's bytes. Reading it writes nothing. */
-  pdf: (userId: string, from: string, to: string) =>
-    apiDownload(`/api/timesheets/${segment(userId)}/period/pdf${search({ from, to })}`, `time-sheet-${from}-to-${to}.pdf`),
+  document: (userId: string, from: string, to: string, version = 'current') =>
+    query<TimesheetDocument>(`/api/timesheets/${segment(userId)}/period${search({ from, to, version: version === 'current' ? undefined : version })}`),
+  /** TS-11, TS-13: the PDF Layout's bytes. Reading it writes nothing. TS-16: any version of a sent one. */
+  pdf: (userId: string, from: string, to: string, version = 'current') =>
+    apiDownload(
+      `/api/timesheets/${segment(userId)}/period/pdf${search({ from, to, version: version === 'current' ? undefined : version })}`,
+      `time-sheet-${from}-to-${to}${version === 'current' ? '' : `-${version}`}.pdf`,
+    ),
   /** TS-10, TS-12: Save the one comment for the period. Not a submission. */
   savePeriodComment: (userId: string, from: string, to: string, comment: string) =>
     command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/comment`, { from, to, comment }),
   /** TS-02, TS-14: Send to office. Once; read-only for the technician afterwards. */
   submit: (userId: string, from: string, to: string) =>
     command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, { from, to }),
+  /** TS-16: ask to correct a sent timesheet — the reason and the complete corrected period. */
+  requestCorrection: (
+    userId: string,
+    input: { from: string; to: string; reason: string; comment: string; lines: readonly TimesheetEntryBody[] },
+  ) =>
+    command<{ correction: TimesheetCorrectionView }>(`/api/timesheets/${segment(userId)}/period/corrections`, input),
+  /** TS-16: the office accepts, or rejects with a note. */
+  decideCorrection: (userId: string, correctionId: string, decision: 'accept' | 'reject', note: string) =>
+    command<{ correction: TimesheetCorrectionView }>(
+      `/api/timesheets/${segment(userId)}/corrections/${segment(correctionId)}/decide`,
+      { decision, note },
+    ),
+  pendingCorrections: () => query<readonly PendingTimesheetCorrection[]>('/api/timesheets/corrections/pending'),
 };

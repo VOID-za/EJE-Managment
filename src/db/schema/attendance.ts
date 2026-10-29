@@ -215,3 +215,58 @@ export const timesheetPeriods = pgTable(
     ),
   ],
 );
+
+/**
+ * THE CORRECTION OF A SENT TIMESHEET. TS-16, migration 0039.
+ *
+ * Linked to the ONE sent period it corrects, which it never changes. Holds the
+ * complete version it corrects and the complete corrected version; decided
+ * once by the office. One pending per period; write-once after the decision;
+ * never deleted — the trigger `timesheet_corrections_guard` enforces it.
+ */
+export const timesheetCorrections = pgTable(
+  'timesheet_corrections',
+  {
+    id: primaryId(),
+    periodId: uuid('period_id')
+      .notNull()
+      .references(() => timesheetPeriods.id, { onDelete: 'restrict' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    sequence: integer('sequence').notNull(),
+    reason: text('reason').notNull(),
+    beforeSnapshot: jsonb('before_snapshot').notNull(),
+    afterSnapshot: jsonb('after_snapshot').notNull(),
+    requestedBy: uuid('requested_by')
+      .notNull()
+      .references(() => users.id),
+    requestedAt: instant('requested_at').notNull(),
+    status: text('status').notNull().default('pending'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: instant('decided_at'),
+    decisionNote: text('decision_note').notNull().default(''),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    uniqueIndex('timesheet_corrections_period_sequence_key').on(table.periodId, table.sequence),
+    uniqueIndex('timesheet_corrections_one_pending_key').on(table.periodId).where(sql`${table.status} = 'pending'`),
+    index('timesheet_corrections_user_idx').on(table.userId),
+    index('timesheet_corrections_status_idx').on(table.status),
+    check('timesheet_corrections_sequence_positive', sql`${table.sequence} >= 1`),
+    check('timesheet_corrections_status_known', sql`${table.status} in ('pending', 'accepted', 'rejected')`),
+    check('timesheet_corrections_reason_given', sql`char_length(btrim(${table.reason})) between 1 and 2000`),
+    check('timesheet_corrections_note_bounded', sql`char_length(${table.decisionNote}) <= 2000`),
+    check(
+      'timesheet_corrections_decision_whole',
+      sql`(${table.status} = 'pending' and ${table.decidedBy} is null and ${table.decidedAt} is null) or (${table.status} <> 'pending' and ${table.decidedBy} is not null and ${table.decidedAt} is not null)`,
+    ),
+    check('timesheet_corrections_decided_by_another', sql`${table.decidedBy} is null or ${table.decidedBy} <> ${table.requestedBy}`),
+    check(
+      'timesheet_corrections_rejection_explained',
+      sql`${table.status} <> 'rejected' or char_length(btrim(${table.decisionNote})) > 0`,
+    ),
+  ],
+);

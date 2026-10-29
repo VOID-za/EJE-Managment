@@ -189,6 +189,38 @@ export interface TimesheetSubmissionSnapshot {
   readonly entries: readonly TimesheetEntry[];
 }
 
+/**
+ * A CORRECTION OF A SENT TIMESHEET. TS-16 (29 October 2026).
+ *
+ * Asked for by the technician whose timesheet it is, with a reason; accepted or
+ * rejected once by the office (a Master or Coordinator who did not ask for it).
+ * `before` is the complete version it corrects — the original submission, or
+ * the correction last accepted — and `after` the complete corrected version.
+ * The sent period and its snapshot are never changed.
+ */
+export type TimesheetCorrectionStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface TimesheetCorrection {
+  readonly id: string;
+  readonly periodId: string;
+  readonly userId: UserId;
+  /** 1, 2, 3 … within its period. */
+  readonly sequence: number;
+  readonly reason: string;
+  readonly before: TimesheetSubmissionSnapshot;
+  readonly after: TimesheetSubmissionSnapshot;
+  readonly requestedBy: UserId;
+  readonly requestedAt: IsoDateTime;
+  readonly status: TimesheetCorrectionStatus;
+  readonly decidedBy: UserId | null;
+  readonly decidedAt: IsoDateTime | null;
+  readonly decisionNote: string;
+}
+
+export const TIMESHEET_CORRECTION_REASON_LIMIT = 2000;
+/** More lines than a quarter of very busy days: a ceiling against a runaway request. */
+export const TIMESHEET_CORRECTION_MAX_LINES = 500;
+
 export const TIMESHEET_CUSTOMER_LIMIT = 200;
 export const TIMESHEET_MAX_HOURS_PER_DAY = 24;
 export const TIMESHEET_MAX_CALLOUTS_PER_LINE = 10;

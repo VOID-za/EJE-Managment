@@ -196,6 +196,12 @@ export type Capability =
    * their OWN timesheet, which needs no capability because it is their own.
    */
   | 'timesheets.viewAll'
+  /**
+   * ACCEPT OR REJECT THE CORRECTION OF A SENT TIMESHEET. TS-16. The office —
+   * Master and Coordinator — and never the person who asked for it (refused
+   * again by the database). Asking is the technician's own, and needs no capability.
+   */
+  | 'timesheets.reviewCorrections'
   // Administration
   | 'admin.access'
   | 'users.manageTechnicians'
@@ -388,6 +394,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
   'attendance.manage',
   'timesheets.viewAll',
+  'timesheets.reviewCorrections',
   'admin.access',
   'users.manageTechnicians',
   'users.manageMasters',
@@ -456,6 +463,7 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
   'attendance.manage',
   'timesheets.viewAll',
+  'timesheets.reviewCorrections',
   'admin.access',
   'users.manageTechnicians',
   /*

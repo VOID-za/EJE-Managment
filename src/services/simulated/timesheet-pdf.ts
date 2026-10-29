@@ -148,6 +148,8 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
       ? 'Draft — not sent to the office'
       : `Sent to the office ${formatDateTime(doc.submittedAt)}${doc.submittedByName === null ? '' : ` by ${doc.submittedByName}`}`,
   );
+  // TS-16: which version of a sent timesheet this is, and whether it is in force.
+  if (doc.versionLabel.length > 0) labelled('Version', doc.versionLabel);
   sheet.move(GAP.tight);
 
   // The table.

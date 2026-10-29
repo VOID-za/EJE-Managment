@@ -141,3 +141,73 @@ describe('the delivery note over HTTP (PARTS-03/04/05)', () => {
     expect([403, 404]).toContain(refused.status);
   });
 });
+
+describe('correcting a sent timesheet over HTTP (TS-16)', () => {
+  beforeEach(() => {
+    startTestServer();
+  });
+
+  it('asks, refuses every bypass, replays a retry without duplicating, and lets the office decide once', async () => {
+    const today = businessToday();
+    const from = shift(today, -3);
+    const to = shift(today, -1);
+    const technician = await signedInAs(DEMO_USERS.technician);
+    const added = await technician.post<{ entry: { id: string } }>('/api/timesheets/user-tech-sipho/entries', {
+      date: to, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0, calloutAmount: 0,
+    });
+    expect(added.status, JSON.stringify(added.error)).toBe(200);
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to })).status).toBe(200);
+
+    const body = {
+      from,
+      to,
+      reason: 'Overtime was 3 hours, not 2',
+      comment: '',
+      lines: [{ entryId: added.data.entry.id, date: to, customerName: 'ABC Engineering', overtimeHours: 3, doubleHours: 0, calloutAmount: 0 }],
+    };
+    // Another technician, and the office, cannot ask on Sipho's behalf.
+    const riaan = await signedInAs(DEMO_USERS.otherTechnician);
+    expect((await riaan.post('/api/timesheets/user-tech-sipho/period/corrections', body)).status).toBe(403);
+    const master = await signedInAs(DEMO_USERS.master);
+    expect((await master.post('/api/timesheets/user-tech-sipho/period/corrections', body)).status).toBe(403);
+    // Unknown fields are refused by the schema, not ignored.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/corrections', { ...body, status: 'accepted' })).status).toBe(400);
+
+    const asked = await technician.post<{ correction: { id: string; sequence: number; status: string } }>(
+      '/api/timesheets/user-tech-sipho/period/corrections', body, { idempotencyKey: 'ts16-ask-1' },
+    );
+    expect(asked.status, JSON.stringify(asked.error)).toBe(200);
+    expect(asked.data.correction).toMatchObject({ sequence: 1, status: 'pending' });
+    // The same request retried (same key) is answered from the record: the same correction, not a second.
+    const replay = await technician.post<{ correction: { id: string } }>(
+      '/api/timesheets/user-tech-sipho/period/corrections', body, { idempotencyKey: 'ts16-ask-1' },
+    );
+    expect(replay.status).toBe(200);
+    expect(replay.data.correction.id).toBe(asked.data.correction.id);
+    // A fresh second request while one is pending is refused.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/corrections', body)).status).toBe(422);
+
+    const decide = `/api/timesheets/user-tech-sipho/corrections/${asked.data.correction.id}/decide`;
+    expect((await technician.post(decide, { decision: 'accept' })).status).toBe(403);
+    expect((await riaan.post(decide, { decision: 'accept' })).status).toBe(403);
+    const pending = await master.get<readonly { id: string }[]>('/api/timesheets/corrections/pending');
+    expect(pending.data.map((row) => row.id)).toContain(asked.data.correction.id);
+    expect((await technician.get<readonly unknown[]>('/api/timesheets/corrections/pending')).data).toEqual([]);
+
+    const accepted = await master.post<{ correction: { status: string } }>(decide, { decision: 'accept' });
+    expect(accepted.status, JSON.stringify(accepted.error)).toBe(200);
+    expect(accepted.data.correction.status).toBe('accepted');
+    const coordinator = await signedInAs(DEMO_USERS.coordinator);
+    expect((await coordinator.post(decide, { decision: 'reject', note: 'no' })).status).toBe(422);
+
+    // The version in force, and the original, through the period read and the PDF.
+    const current = await master.get<PeriodDocument & { versionLabel: string; inForce: boolean }>(`/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}`);
+    expect(current.data.versionLabel).toMatch(/^Correction 1, accepted/u);
+    const original = await master.get<PeriodDocument & { versionLabel: string; inForce: boolean }>(`/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}&version=original`);
+    expect(original.data.inForce).toBe(false);
+    expect((await master.get(`/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}&version=bogus`)).status).toBe(400);
+    expect((await riaan.get(`/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}&version=original`)).status).toBe(403);
+    const told = await technician.get<{ notifications: readonly { type: string }[] }>('/api/notifications');
+    expect(told.data.notifications.filter((n) => n.type === 'timesheet_correction_decided')).toHaveLength(1);
+  });
+});

@@ -17,15 +17,18 @@ import {
   type IsoDate,
   type IsoDateTime,
   type TimesheetComment,
+  type TimesheetCorrection,
+  type TimesheetCorrectionStatus,
   type TimesheetEntry,
   type TimesheetPeriod,
+  type TimesheetSubmissionSnapshot,
   type User,
   type UserId,
 } from '@/domain';
 import { businessToday } from '@/lib/business-time';
 import { csvFileName, toCsv, type CsvColumn } from '@/lib/csv';
 import { formatCurrency } from '@/lib/format';
-import { formatPeriod, weekdayOf } from '@/lib/timesheet-dates';
+import { formatDayAndDate, formatPeriod, weekdayOf } from '@/lib/timesheet-dates';
 import type { OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
@@ -56,8 +59,13 @@ import { assertRecordableDate, isCalendarDate } from './attendance-operations';
  *     nor change its comment — refused here on every path, and the database
  *     refuses a change to the sent row. Two sent periods never overlap, so no
  *     day's work is sent twice. The office is notified, and reads the
- *     submitted version. There is no reopening; a correction is a separate,
- *     audited process.
+ *     submitted version. There is no reopening.
+ *   - CORRECTING A SENT TIMESHEET (TS-16, 29 October 2026): the technician asks
+ *     for a correction with a reason and the complete corrected lines; the
+ *     office accepts or rejects it (`timesheet-corrections.ts`). The sent
+ *     period and its snapshot are never changed. The version IN FORCE — what
+ *     the sheet, the PDF Layout and the export show for those days — is the
+ *     correction last accepted, or the original when none has been.
  *
  * WHO. A technician writes, corrects and removes their OWN lines, and only
  * theirs — the owner is taken from the session, never from the request. The
@@ -84,6 +92,11 @@ export interface TimesheetDay {
   readonly recorded: boolean;
   /** True when the day is inside a period already sent to the office: read-only. */
   readonly locked: boolean;
+  /**
+   * For a sent day, which version of the sent timesheet its lines are:
+   * "Sent — original" or "Sent — correction 2 accepted". Empty when not sent.
+   */
+  readonly sentVersion: string;
   readonly entries: readonly TimesheetEntry[];
   /** A day comment written before TS-10 (one comment per timesheet). History. */
   readonly comment: string;
@@ -124,6 +137,28 @@ export interface TimesheetPeriodState {
   readonly submittedByName: string | null;
   /** Other sent periods sharing days with this one: those days are read-only. */
   readonly overlapsSent: readonly { readonly from: IsoDate; readonly to: IsoDate }[];
+  /** TS-16. Corrections of exactly this sent period, oldest first. */
+  readonly corrections: readonly TimesheetCorrectionView[];
+  /** "Original submission" or "Correction 2, accepted …": the version in force. Empty for a draft. */
+  readonly versionInForce: string;
+}
+
+/** One correction as the screen shows it: who, when, why, the decision, and what changed. */
+export interface TimesheetCorrectionView {
+  readonly id: string;
+  readonly sequence: number;
+  readonly status: TimesheetCorrectionStatus;
+  readonly reason: string;
+  readonly requestedAt: IsoDateTime;
+  readonly requestedById: UserId;
+  readonly requestedByName: string | null;
+  readonly decidedAt: IsoDateTime | null;
+  readonly decidedByName: string | null;
+  readonly decisionNote: string;
+  readonly before: { readonly comment: string; readonly entries: readonly TimesheetEntry[] };
+  readonly after: { readonly comment: string; readonly entries: readonly TimesheetEntry[] };
+  /** Plain sentences, one per change, oldest day first. */
+  readonly changes: readonly string[];
 }
 
 export interface Timesheet {
@@ -161,8 +196,8 @@ export const buildTimesheetDays = (input: {
   readonly entries: readonly TimesheetEntry[];
   readonly comments: readonly TimesheetComment[];
   readonly attendance: ReadonlyMap<IsoDate, Pick<AttendanceRecord, 'status' | 'absenceReason'>>;
-  /** Sent periods: every day inside one is read-only. */
-  readonly lockedRanges?: readonly { readonly from: IsoDate; readonly to: IsoDate }[];
+  /** Sent periods: every day inside one is read-only, labelled with the version shown. */
+  readonly lockedRanges?: readonly { readonly from: IsoDate; readonly to: IsoDate; readonly label?: string }[];
 }): { readonly days: readonly TimesheetDay[]; readonly totals: TimesheetTotals } => {
   const comments = new Map(input.comments.map((comment) => [comment.date, comment.comment]));
   const days = daysBetween(input.from, input.to).map((date): TimesheetDay => {
@@ -173,6 +208,7 @@ export const buildTimesheetDays = (input: {
       weekday: weekdayOf(date),
       recorded: entries.length > 0,
       locked: (input.lockedRanges ?? []).some((range) => range.from <= date && date <= range.to),
+      sentVersion: (input.lockedRanges ?? []).find((range) => range.from <= date && date <= range.to)?.label ?? '',
       entries,
       comment: comments.get(date) ?? '',
       attendance: attendance?.status ?? null,
@@ -310,6 +346,87 @@ const nameOf = async (context: OperationContext, id: UserId | null): Promise<str
   return user === null ? null : userFullName(user);
 };
 
+/**
+ * THE VERSION OF A SENT PERIOD IN FORCE. TS-16. The correction last accepted;
+ * the original submission when none has been. Pending and rejected
+ * corrections change nothing.
+ */
+export const versionInForce = (
+  period: TimesheetPeriod,
+  corrections: readonly TimesheetCorrection[],
+): { readonly snapshot: TimesheetSubmissionSnapshot; readonly correction: TimesheetCorrection | null } => {
+  const accepted = corrections
+    .filter((correction) => correction.status === 'accepted')
+    .sort((a, b) => b.sequence - a.sequence)[0];
+  if (accepted !== undefined) return { snapshot: accepted.after, correction: accepted };
+  if (period.snapshot === null) throw new Error(`timesheet period ${period.id} has not been sent`);
+  return { snapshot: period.snapshot, correction: null };
+};
+
+const versionLabel = async (context: OperationContext, correction: TimesheetCorrection | null): Promise<string> => {
+  if (correction === null) return 'Original submission';
+  const by = await nameOf(context, correction.decidedBy);
+  return `Correction ${correction.sequence}, accepted ${correction.decidedAt?.slice(0, 10) ?? ''}${by === null ? '' : ` by ${by}`}`;
+};
+
+/** A line in a sentence, for the list of changes and the audit trail. */
+export const describeTimesheetLine = (entry: TimesheetEntry): string => describe(entry);
+
+/**
+ * WHAT A CORRECTION CHANGES, in sentences, oldest day first: every line taken
+ * out, every line put in, and the comment. A line that is unchanged is not
+ * mentioned; a changed line reads as the old one out and the new one in.
+ */
+export const describeCorrectionChanges = (
+  before: Pick<TimesheetSubmissionSnapshot, 'comment' | 'entries'>,
+  after: Pick<TimesheetSubmissionSnapshot, 'comment' | 'entries'>,
+): readonly string[] => {
+  const key = (entry: TimesheetEntry) => `${entry.date}|${describe(entry)}`;
+  const remaining = new Map<string, number>();
+  for (const entry of after.entries) remaining.set(key(entry), (remaining.get(key(entry)) ?? 0) + 1);
+  const removed: TimesheetEntry[] = [];
+  for (const entry of before.entries) {
+    const count = remaining.get(key(entry)) ?? 0;
+    if (count > 0) remaining.set(key(entry), count - 1);
+    else removed.push(entry);
+  }
+  const kept = new Map<string, number>();
+  for (const entry of before.entries) kept.set(key(entry), (kept.get(key(entry)) ?? 0) + 1);
+  const added: TimesheetEntry[] = [];
+  for (const entry of after.entries) {
+    const count = kept.get(key(entry)) ?? 0;
+    if (count > 0) kept.set(key(entry), count - 1);
+    else added.push(entry);
+  }
+  const lines = [
+    ...removed.map((entry) => ({ date: entry.date, order: 0, text: `${formatDayAndDate(entry.date)}: removed — ${describe(entry)}` })),
+    ...added.map((entry) => ({ date: entry.date, order: 1, text: `${formatDayAndDate(entry.date)}: added — ${describe(entry)}` })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+  return [
+    ...lines.map((line) => line.text),
+    ...(before.comment === after.comment ? [] : [`Comment: “${before.comment || '—'}” → “${after.comment || '—'}”`]),
+  ];
+};
+
+export const correctionView = async (
+  context: OperationContext,
+  correction: TimesheetCorrection,
+): Promise<TimesheetCorrectionView> => ({
+  id: correction.id,
+  sequence: correction.sequence,
+  status: correction.status,
+  reason: correction.reason,
+  requestedAt: correction.requestedAt,
+  requestedById: correction.requestedBy,
+  requestedByName: await nameOf(context, correction.requestedBy),
+  decidedAt: correction.decidedAt,
+  decidedByName: await nameOf(context, correction.decidedBy),
+  decisionNote: correction.decisionNote,
+  before: { comment: correction.before.comment, entries: correction.before.entries },
+  after: { comment: correction.after.comment, entries: correction.after.entries },
+  changes: describeCorrectionChanges(correction.before, correction.after),
+});
+
 export const loadTimesheet = async (
   context: OperationContext,
   technicianId: string,
@@ -327,14 +444,39 @@ export const loadTimesheet = async (
     context.repos.attendance.listSubmittedPeriods(id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
   ]);
+  /*
+   * THE VERSION IN FORCE for every sent day (TS-16): where a correction of its
+   * period has been accepted, the day shows that correction's lines, not the
+   * lines as they stood when it was sent. The sent snapshot is not touched.
+   */
+  const correctionsBySent = await Promise.all(sent.map((period) => context.repos.attendance.listCorrections(period.id)));
+  let shown: readonly TimesheetEntry[] = entries;
+  const lockedRanges = sent.map((period, index) => {
+    const inForce = versionInForce(period, correctionsBySent[index] ?? []);
+    if (inForce.correction !== null) {
+      const inside = (date: string) => period.from <= date && date <= period.to;
+      shown = [
+        ...shown.filter((entry) => !inside(entry.date)),
+        ...inForce.snapshot.entries.filter((entry) => inside(entry.date) && from <= entry.date && entry.date <= to),
+      ];
+    }
+    return {
+      from: period.from,
+      to: period.to,
+      label: inForce.correction === null ? 'Sent — original' : `Sent — correction ${inForce.correction.sequence} accepted`,
+    };
+  });
   const { days, totals } = buildTimesheetDays({
     from,
     to,
-    entries,
+    entries: shown,
     comments,
     attendance: new Map(records.map((record) => [record.date, record])),
-    lockedRanges: sent.map((period) => ({ from: period.from, to: period.to })),
+    lockedRanges,
   });
+  const exactIndex = exact === null ? -1 : sent.findIndex((period) => period.id === exact.id);
+  const exactCorrections = exactIndex < 0 ? [] : correctionsBySent[exactIndex] ?? [];
+  const exactInForce = exactIndex < 0 || exact === null ? null : versionInForce(exact, exactCorrections);
   return {
     technician: personOf(technician),
     from,
@@ -345,12 +487,14 @@ export const loadTimesheet = async (
       from,
       to,
       label: formatPeriod(from, to),
-      comment: exact?.comment ?? '',
+      comment: exactInForce?.snapshot.comment ?? exact?.comment ?? '',
       submittedAt: exact?.submittedAt ?? null,
       submittedByName: await nameOf(context, exact?.submittedBy ?? null),
       overlapsSent: sent
         .filter((period) => period.id !== exact?.id)
         .map((period) => ({ from: period.from, to: period.to })),
+      corrections: await Promise.all(exactCorrections.map((correction) => correctionView(context, correction))),
+      versionInForce: exactInForce === null ? '' : await versionLabel(context, exactInForce.correction),
     },
     editable: context.actor.id === id,
   };
@@ -417,32 +561,25 @@ const describe = (entry: TimesheetEntry): string =>
     ...(entry.callouts > 0 ? [`call-outs ${entry.callouts} (historical)`] : []),
   ].join(', ');
 
+/** A line's values once every rule has been applied: what is stored. */
+export type TimesheetLineValues = Pick<
+  TimesheetEntry,
+  | 'customerId' | 'customerName' | 'workshop' | 'normalHours' | 'overtimeHours' | 'doubleHours'
+  | 'callouts' | 'calloutAmount' | 'calloutShared' | 'internalKm' | 'customerKm'
+>;
+
 /**
- * Adds a line to the technician's own timesheet, or corrects one of theirs.
- * Validated here, whatever the screen did: a calendar day not in the future,
- * in no period already sent to the office; quarter hours from 0 to 24 per value and
- * per day; a call-out amount in whole cents; kilometres to one decimal; and a
- * customer — or Workshop — whenever anything is above zero.
+ * THE RULES FOR ONE LINE, whatever writes it — the technician's own sheet or a
+ * correction of a sent one (TS-16): NT and the old call-out count are history;
+ * quarter hours; a call-out amount in whole cents; kilometres to one decimal;
+ * Workshop or a customer, and one of them whenever anything is above zero.
+ * `existing` is the line being corrected, whose history is carried unchanged.
  */
-export const saveTimesheetEntry = async (
+export const normaliseTimesheetLine = async (
   context: OperationContext,
-  technicianId: string,
   input: TimesheetEntryInput,
-): Promise<TimesheetEntry> => {
-  const id = asUserId(technicianId);
-  assertOwner(context, id);
-  assertTimesheetDate(context, input.date);
-
-  const existing = input.entryId === undefined ? null : await context.repos.attendance.findEntry(input.entryId);
-  if (input.entryId !== undefined && (existing === null || existing.userId !== id)) {
-    // Somebody else's line is refused exactly like a line that does not exist.
-    throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
-  }
-  await assertDayOpen(context, id, input.date);
-  if (existing !== null && existing.date !== input.date) {
-    await assertDayOpen(context, id, existing.date);
-  }
-
+  existing: Pick<TimesheetEntry, 'normalHours' | 'callouts'> | null,
+): Promise<TimesheetLineValues> => {
   /*
    * NT AND THE CALL-OUT COUNT ARE HISTORY. TS-07, TS-08. A new line carries
    * neither; a correction of a line written before keeps exactly what it had.
@@ -521,6 +658,41 @@ export const saveTimesheetEntry = async (
       'Choose a customer or Workshop for any line with hours, a call-out or kilometres.',
     );
   }
+
+  return {
+    customerId, customerName, workshop, normalHours, overtimeHours: input.overtimeHours,
+    doubleHours: input.doubleHours, callouts, calloutAmount, calloutShared, internalKm, customerKm,
+  };
+};
+
+/**
+ * Adds a line to the technician's own timesheet, or corrects one of theirs.
+ * Validated here, whatever the screen did: a calendar day not in the future,
+ * in no period already sent to the office; quarter hours from 0 to 24 per value and
+ * per day; a call-out amount in whole cents; kilometres to one decimal; and a
+ * customer — or Workshop — whenever anything is above zero.
+ */
+export const saveTimesheetEntry = async (
+  context: OperationContext,
+  technicianId: string,
+  input: TimesheetEntryInput,
+): Promise<TimesheetEntry> => {
+  const id = asUserId(technicianId);
+  assertOwner(context, id);
+  assertTimesheetDate(context, input.date);
+
+  const existing = input.entryId === undefined ? null : await context.repos.attendance.findEntry(input.entryId);
+  if (input.entryId !== undefined && (existing === null || existing.userId !== id)) {
+    // Somebody else's line is refused exactly like a line that does not exist.
+    throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
+  }
+  await assertDayOpen(context, id, input.date);
+  if (existing !== null && existing.date !== input.date) {
+    await assertDayOpen(context, id, existing.date);
+  }
+
+  const values = await normaliseTimesheetLine(context, input, existing);
+  const { normalHours, customerId, customerName, workshop, callouts, calloutAmount, calloutShared, internalKm, customerKm } = values;
 
   const sameDay = await context.repos.attendance.listEntries(id, input.date, input.date);
   const others = sameDay.filter((entry) => entry.id !== existing?.id);
@@ -866,6 +1038,13 @@ export interface TimesheetDocument {
   };
   /** Null for a draft; the moment it was sent for a submitted period. */
   readonly submittedAt: IsoDateTime | null;
+  /**
+   * TS-16. Which version of a sent period this is — "Original submission",
+   * "Correction 2, accepted 29 Oct 2026 by …", "Correction 3 — PENDING, not in
+   * force" — and whether it is the version in force. Empty for a draft.
+   */
+  readonly versionLabel: string;
+  readonly inForce: boolean;
   readonly submittedByName: string | null;
   /** Absence reasons from the register, for days absent (reference only). */
   readonly absences: readonly { readonly date: IsoDate; readonly reason: string }[];
@@ -919,6 +1098,8 @@ export const loadTimesheetDocument = async (
   technicianId: string,
   from: string,
   to: string,
+  /** TS-16. 'current' (the version in force), 'original', or a correction's sequence. */
+  version: 'current' | 'original' | number = 'current',
 ): Promise<TimesheetDocument> => {
   const id = asUserId(technicianId);
   assertMayRead(context, id);
@@ -929,7 +1110,37 @@ export const loadTimesheetDocument = async (
     context.repos.attendance.listRecords(from, to, id),
     context.repos.settings.get(),
   ]);
-  const snapshot = row?.submittedAt != null ? row.snapshot : null;
+  const sentRow = row?.submittedAt != null ? row : null;
+  const corrections = sentRow === null ? [] : await context.repos.attendance.listCorrections(sentRow.id);
+  const inForce = sentRow === null ? null : versionInForce(sentRow, corrections);
+  let snapshot: TimesheetSubmissionSnapshot | null = inForce?.snapshot ?? null;
+  let versionText = '';
+  let isInForce = true;
+  if (inForce !== null && sentRow !== null) {
+    if (version === 'original') {
+      snapshot = sentRow.snapshot;
+      isInForce = inForce.correction === null;
+      versionText = isInForce ? 'Original submission' : 'Original submission — superseded by an accepted correction';
+    } else if (typeof version === 'number') {
+      const chosen = corrections.find((correction) => correction.sequence === version);
+      if (chosen === undefined) {
+        throw refuse('That correction does not exist.', 'correction_not_found', 'Reload the timesheet.');
+      }
+      snapshot = chosen.after;
+      isInForce = inForce.correction?.id === chosen.id;
+      versionText = isInForce
+        ? await versionLabel(context, chosen)
+        : chosen.status === 'pending'
+          ? `Correction ${chosen.sequence} — PENDING the office's decision, not in force`
+          : chosen.status === 'rejected'
+            ? `Correction ${chosen.sequence} — REJECTED, not in force`
+            : `Correction ${chosen.sequence} — superseded by a later accepted correction`;
+    } else {
+      versionText = await versionLabel(context, inForce.correction);
+    }
+  } else if (version !== 'current') {
+    throw refuse('This timesheet has not been sent to the office.', 'timesheet_not_sent', 'Only a sent timesheet has versions.');
+  }
   const entries = snapshot !== null ? snapshot.entries : await context.repos.attendance.listEntries(id, from, to);
   const rows = buildTimesheetDocumentRows(from, to, entries);
   const total = (pick: (r: TimesheetDocumentRow) => number | null): number =>
@@ -953,6 +1164,8 @@ export const loadTimesheetDocument = async (
     },
     submittedAt: snapshot !== null ? row!.submittedAt : null,
     submittedByName: snapshot !== null ? await nameOf(context, row!.submittedBy) : null,
+    versionLabel: versionText,
+    inForce: isInForce,
     absences: records
       .filter((record) => record.status === 'absent')
       .map((record) => ({
@@ -977,6 +1190,7 @@ interface ExportRow {
   readonly callouts: string;
   readonly comment: string;
   readonly attendance: string;
+  readonly sentVersion: string;
 }
 
 const hours = (value: number): string => value.toFixed(2);
@@ -997,6 +1211,8 @@ const TIMESHEET_COLUMNS: readonly CsvColumn<ExportRow>[] = [
   { header: 'Callouts (historical count)', value: (row) => row.callouts },
   { header: 'Day comment (historical)', value: (row) => row.comment },
   { header: 'Attendance', value: (row) => row.attendance },
+  // TS-16: a sent day says which version of the sent timesheet it shows.
+  { header: 'Sent version', value: (row) => row.sentVersion },
 ];
 
 export const timesheetExportColumns = TIMESHEET_COLUMNS.map((column) => column.header);
@@ -1015,6 +1231,7 @@ export const timesheetExportRows = (sheet: Pick<Timesheet, 'days'>): readonly Ex
       return [{
         date: day.date, day: day.weekday, customer: 'NOT RECORDED', overtime: '', double: '', callout: '',
         shared: '', internalKm: '', customerKm: '', normal: '', callouts: '', comment: day.comment, attendance,
+        sentVersion: day.sentVersion,
       }];
     }
     return day.entries.map((entry, index) => ({
@@ -1031,6 +1248,7 @@ export const timesheetExportRows = (sheet: Pick<Timesheet, 'days'>): readonly Ex
       callouts: entry.callouts > 0 ? String(entry.callouts) : '',
       comment: index === 0 ? day.comment : '',
       attendance: index === 0 ? attendance : '',
+      sentVersion: day.sentVersion,
     }));
   });
 

@@ -15,7 +15,11 @@ export type NotificationType =
   /** A chat message from another user. Links to the conversation, not a job. */
   | 'chat_message'
   /** TS-02: a technician sent a timesheet period to the office. To Masters and Coordinators. */
-  | 'timesheet_submitted';
+  | 'timesheet_submitted'
+  /** TS-16: a technician asked to correct a sent timesheet. To Masters and Coordinators. */
+  | 'timesheet_correction_requested'
+  /** TS-16: the office accepted or rejected the correction. To the technician. */
+  | 'timesheet_correction_decided';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 
