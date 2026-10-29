@@ -239,27 +239,30 @@ describePhase('rollback compatibility — phase 2: the live release (1a34d1c) ag
     const records = await attendance.listRecords(TIMESHEET.absentDay, TIMESHEET.absentDay, tech);
     expect(records.map((record) => record.status)).toEqual(['absent']);
     // An absent day of its own, with no reason (the old screen asks for none): accepted.
-    // The OLD shapes, exactly as ef0f695 types them; cast only so this checkout's
-    // newer types accept the file (it runs against ef0f695's own).
+    // Written in 1a34d1c's OWN shapes (the live release knows absence reasons,
+    // Workshop and kilometres; it does not know the monthly lock of 0040, so a
+    // day inside a submitted month is writable under it — recorded in
+    // docs/deploy-next-release.md as a rollback limit).
     const own = await attendance.saveRecord({
-      id: crypto.randomUUID(), userId: tech, date: '2026-10-23', status: 'absent', note: 'rolled back',
+      id: crypto.randomUUID(), userId: tech, date: '2026-10-23', status: 'absent', absenceReason: 'leave', note: 'rolled back',
       recordedBy: asUserId(IDS.master), recordedAt: '2026-10-23T08:00:00.000Z',
-    } as Parameters<typeof attendance.saveRecord>[0]);
+    });
     expect(own.status).toBe('absent');
 
     const lines = await attendance.listEntries(tech, '2026-10-19', '2026-10-25');
     expect(lines.map((line) => line.id).sort()).toEqual([TIMESHEET.workshopLine, TIMESHEET.customerLine].sort());
-    // A line in the old shape — NT and a call-out count — is still written.
+    // A line of its own, as its screen writes one.
     const written = await attendance.saveEntry({
-      id: crypto.randomUUID(), userId: tech, date: '2026-10-28', customerId: null, customerName: 'Old-style line',
-      normalHours: 8, overtimeHours: 1, doubleHours: 0, callouts: 1, updatedBy: tech, updatedAt: '2026-10-28T17:00:00.000Z',
-    } as Parameters<typeof attendance.saveEntry>[0]);
-    expect(written.normalHours).toBe(8);
-    const [stored] = await db.execute<{ workshop: boolean; callout_amount_cents: number; internal_km: string }>(
-      sql`select workshop, callout_amount_cents, internal_km from timesheet_entries where id = ${written.id}`,
+      id: crypto.randomUUID(), userId: tech, date: '2026-10-28', customerId: null, customerName: 'Written after a rollback',
+      workshop: false, normalHours: 0, overtimeHours: 1, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false,
+      internalKm: 0, customerKm: 12.5, updatedBy: tech, updatedAt: '2026-10-28T17:00:00.000Z',
+    });
+    expect(written.customerKm).toBe(12.5);
+    const [stored] = await db.execute<{ workshop: boolean; callout_amount_cents: number; customer_km: string }>(
+      sql`select workshop, callout_amount_cents, customer_km from timesheet_entries where id = ${written.id}`,
     );
     expect(stored).toMatchObject({ workshop: false, callout_amount_cents: 0 });
-    expect(Number(stored?.internal_km)).toBe(0);
+    expect(Number(stored?.customer_km)).toBe(12.5);
 
     // What the live release cannot see stays exactly as written.
     const [sent] = await db.execute<{ n: string }>(
