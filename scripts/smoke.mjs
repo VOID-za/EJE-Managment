@@ -3676,6 +3676,19 @@ await step('a duplicate serial number is refused', async () => {
   if (typed !== 'mz-qt200-11902') {
     throw new Error(`the serial field holds "${typed}", so this is not the duplicate case`);
   }
+  /*
+   * THE SAME FOR THE OTHER TWO FIELDS (CI run 40944023955, 29 October 2026):
+   * the serial read back correctly, yet the form went with an EMPTY required
+   * field — the first fill had landed before the dialog's open-reset effect
+   * and was wiped, which only a machine typing within milliseconds of the
+   * dialog painting can do. Read back, fill once more, then assert.
+   */
+  for (const [label, value] of [['Manufacturer', 'Mazak'], ['Model', 'QT-250']]) {
+    const field = dialog.getByLabel(label);
+    if ((await field.inputValue()) !== value) await field.fill(value);
+    const held = await field.inputValue();
+    if (held !== value) throw new Error(`the ${label} field holds "${held}", so the form is not the duplicate case`);
+  }
 
   await submit.click();
 
