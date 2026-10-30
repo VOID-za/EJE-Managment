@@ -514,7 +514,7 @@ remain staff checks (H18–H20, I13).
 
 ## K. The tester's changes and the timesheet freeze (30 October 2026, evening)
 
-In the release after `e54f7d3` (no migration; `docs/delivery-register-2026-10-30.md`, second part).
+**LIVE since 30 October 2026** in `42cd3d3` (no migration; `docs/delivery-register-2026-10-30.md`, second part).
 Fictional data only while the demonstration switcher is on.
 
 | # | Do this | Pass looks like |

@@ -230,3 +230,26 @@ line — both now full tablet tap targets.
 | Routes | **33 passed** |
 | Signed document on both PDF paths | **18 passed** |
 | Update notice across two real builds | **6 of 6** |
+
+## Release (evening)
+
+**DEPLOYED — 30 October 2026: `42cd3d3` is live** (full SHA
+`42cd3d3b9bd71f93d71f6f2ec87c3adbb72a296a`; CI run 41128358488 completed, success, every
+job and step green). Guarded release tool, `-ExpectPending none`.
+
+- **Read-only check**: `srv2000625`; `e54f7d3` serving, healthy; `/opt/eje/releases/42cd3d3`
+  new; 184 286 MB free; script SHA-256 `5ab56162…b3c6` matched. CHECK PASSED. No migration
+  or schema file changed since `e54f7d3`.
+- **Release**: 1/6 build; 2/6 **backup proven** —
+  `/var/backups/eje/eje-eje_production-2026-10-30T21-22-32Z`, verified, key-checked,
+  restore-tested; 3/6 all 41 migrations already applied; 4/6 **migrate: none**; 5/6 switch
+  `e54f7d3` → `42cd3d3` at 21:22:40Z; 6/6 health at 21:22:42Z. From outside: health
+  `42cd3d3`, page and worker present `42cd3d3`. **Rollback target: `e54f7d3`.**
+- **Verified afterwards, read-only** (nothing saved, sent, submitted or recorded):
+  the tester's changes **22 of 22** (sidebars for all three roles; Jobs controls; My Jobs =
+  the server's 8; In progress 10 = 10 rows, Awaiting completion 27 = 27 rows; the timesheet
+  freeze trigger keeps the form, every field takes typing, then cancelled; Send visible at
+  tablet size; Users and `/api/staff` availability-only; the Coordinator's Attendance; EJE
+  Monthly Forms with every role, "2 submitted, 3 not submitted of 5"); API, PDFs and records
+  **36 of 36** (62/15/37/25 jobs unchanged; four issued job cards byte-identical; both
+  monthly PDFs one page); Attendance controls **17 of 17**; update mechanism **8 of 8**.
