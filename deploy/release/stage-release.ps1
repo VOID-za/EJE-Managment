@@ -75,7 +75,14 @@ function Stop-Stage($why, [int]$code = 1) { Log "`n######## STOPPED ########`n$w
 # wrong thing, so it is refused before anything is contacted.
 $pendingEnv = ''
 $tags = @(foreach ($part in $ExpectPending) { ([string]$part).Split(',') })
-if (($tags -join '') -ne '') {
+# A CODE-ONLY release is said in so many words: `-ExpectPending none`, alone.
+# The server then demands every shipped migration already applied and migrates
+# nothing (deploy-release.sh, EXPECT_PENDING=none).
+if ($tags.Count -eq 1 -and $tags[0] -ceq 'none') {
+  $pendingEnv = 'EXPECT_PENDING=none'
+} elseif ($tags -contains 'none') {
+  Stop-Stage "-ExpectPending: 'none' stands alone; it cannot be combined with migration tags. Nothing was contacted."
+} elseif (($tags -join '') -ne '') {
   $previous = ''
   foreach ($tag in $tags) {
     if ($tag -cnotmatch '^[0-9]{4}_[a-z0-9_]+$') { Stop-Stage "-ExpectPending: '$tag' is not a migration tag. Nothing was contacted." }

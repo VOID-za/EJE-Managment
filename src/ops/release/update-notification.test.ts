@@ -54,4 +54,11 @@ describe('every release carries a version an installed app can detect', () => {
     expect(stage).toMatch(/if \(UpdateNoticeReady \$short\)/u);
     expect(stage).toMatch(/name=`"eje-build-commit`" content=`"\$Build`"/u);
   });
+
+  it('a code-only release is accepted by BOTH halves of the release tool (REL-NOMIG-1)', () => {
+    // The first attempt stopped at the client: the server accepted `none`, the
+    // PowerShell half refused it as "not a migration tag". Pinned on both sides.
+    expect(read('deploy/release/stage-release.ps1')).toMatch(/\$tags\[0\] -ceq 'none'\) \{\s+\$pendingEnv = 'EXPECT_PENDING=none'/u);
+    expect(read('deploy/release/deploy-release.sh')).toMatch(/\[ "\$EXPECT_PENDING" = none \] && return/u);
+  });
 });
