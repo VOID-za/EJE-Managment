@@ -68,3 +68,20 @@ export const timesheetRangeProblem = (from: string, to: string, maxDays: number)
   if (days > maxDays) return `Choose at most ${maxDays} days.`;
   return null;
 };
+
+/**
+ * Why the date typed on a timesheet LINE cannot be saved, or null when it can.
+ *
+ * Asked while the technician types, because a date field reports an EMPTY
+ * value whenever any part of the date is cleared or retyped, and in-between
+ * dates as digits arrive. Those are states of typing, not answers: the form
+ * stays where it was opened and says what is wrong, rather than acting on
+ * them (the 30 October 2026 freeze — see the timesheets page). The server asks
+ * its own questions again on Save.
+ */
+export const lineDateProblem = (date: string, from: string, to: string, today: string): string | null => {
+  if (!isCalendarDay(date)) return 'Enter the whole date (day, month and year).';
+  if (date > today) return 'That day has not happened yet.';
+  if (date < from || date > to) return `Choose a day in this timesheet: ${formatPeriod(from, to)}.`;
+  return null;
+};

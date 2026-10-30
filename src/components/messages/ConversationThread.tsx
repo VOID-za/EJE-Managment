@@ -172,7 +172,7 @@ export const ConversationThread = ({
             A message reaches the person. It does not change the job or anyone&rsquo;s
             availability.
           </p>
-          <Button onClick={send} loading={operation.running} disabled={body.trim().length === 0}>
+          <Button onClick={send} loading={operation.running} disabled={body.trim().length === 0} data-testid="chat-send">
             Send
           </Button>
         </div>

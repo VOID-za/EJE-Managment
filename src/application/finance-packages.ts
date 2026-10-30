@@ -8,6 +8,7 @@ import {
   type PayrollDocumentKind,
   type User,
   type UserId,
+  type UserRole,
 } from '@/domain';
 import { sha256Hex } from '@/lib/job-card/document-identity';
 import { correctedFileName, documentNameOf, monthBounds, monthTitle } from '@/lib/payroll-files';
@@ -74,7 +75,7 @@ export type PayrollRowStatus =
   | 'corrected_after_sent';
 
 export interface PayrollMonthRow {
-  readonly technician: { readonly id: UserId; readonly name: string; readonly documentName: string; readonly active: boolean };
+  readonly technician: { readonly id: UserId; readonly name: string; readonly documentName: string; readonly active: boolean; readonly role: UserRole };
   readonly status: PayrollRowStatus;
   /** Plain words for the status, and anything the office should look at. */
   readonly detail: string;
@@ -145,8 +146,11 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
   ]);
   const submitted = new Map(submissions.map((submission) => [submission.userId, submission]));
   const sentPackages = packages.filter((financePackage) => financePackage.status === 'sent');
+  // EVERY USER — Masters, Coordinators and Technicians (the tester, 30 October
+  // 2026): everybody on the payroll submits a month. A disabled user still
+  // appears for a month they submitted, so nothing submitted is ever hidden.
   const people = users
-    .filter((user) => user.role === 'technician' && (user.active || submitted.has(user.id)))
+    .filter((user) => user.active || submitted.has(user.id))
     .sort((a, b) => a.firstName.localeCompare(b.firstName) || a.lastName.localeCompare(b.lastName));
 
   const rows: PayrollMonthRow[] = [];
@@ -160,7 +164,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     let detail: string;
     if (submission === null) {
       status = 'not_submitted';
-      detail = forms.problems.length > 0 && !forms.monthEnded ? 'Month not ended' : 'Not submitted by the technician';
+      detail = forms.problems.length > 0 && !forms.monthEnded ? 'Month not ended' : 'Not submitted yet';
     } else if (forms.timesheet.correctionPending) {
       status = 'correction_pending';
       detail = 'A timesheet correction is waiting for the office’s decision';
@@ -178,7 +182,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       detail += `; attendance corrected by the office after submission (${forms.attendance.changedAfterSubmission.length} day(s))`;
     }
     rows.push({
-      technician: { id: person.id, name: userFullName(person), documentName: documentNameOf(person), active: person.active },
+      technician: { id: person.id, name: userFullName(person), documentName: documentNameOf(person), active: person.active, role: person.role },
       status,
       detail,
       submittedAt: submission?.submittedAt ?? null,

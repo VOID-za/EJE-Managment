@@ -38,10 +38,13 @@ export const MonthlyFormsCard = ({
   userId,
   month,
   focus,
+  onSubmitted,
 }: {
   readonly userId: string;
   readonly month: string;
   readonly focus?: 'attendance';
+  /** Told after a successful submission (My Monthly Forms refreshes its history). */
+  readonly onSubmitted?: () => void;
 }) => {
   const operation = useOperation();
   const [previewing, setPreviewing] = useState<{ kind: Kind; print: boolean } | null>(null);
@@ -67,6 +70,7 @@ export const MonthlyFormsCard = ({
       forms.refetch();
       timesheet.refetch();
       attendance.refetch();
+      onSubmitted?.();
     }
   };
 
@@ -144,7 +148,7 @@ export const MonthlyFormsCard = ({
       {state.owner && state.submission === null && (
         <div className="mt-3 space-y-2">
           {unrecorded.length > 0 && state.canSubmit && (
-            <label className="flex items-start gap-2 text-sm text-steel-700">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 py-1 text-sm text-steel-700">
               <input
                 type="checkbox"
                 checked={acknowledged}

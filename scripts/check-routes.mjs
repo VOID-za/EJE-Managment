@@ -50,6 +50,9 @@ const MATRIX = [
   { url: '/admin', role: 'Master', status: 'any', purpose: 'Administration' },
   { url: '/attendance', role: 'Master / Coordinator', status: 'any', purpose: 'Attendance register (ATTEND-1)' },
   { url: '/timesheets', role: 'Office / self', status: 'any', purpose: 'Technician timesheets (TIMESHEET-1)' },
+  { url: '/payroll', role: 'Master / Coordinator', status: 'any', purpose: 'EJE Monthly Forms — every user, the Finance package' },
+  { url: '/payroll/mine', role: 'any', status: 'any', purpose: 'My Monthly Forms — own month and history' },
+  { url: '/users', role: 'Coordinator', status: 'any', purpose: 'Users — availability only' },
   { url: '/schedule', role: 'any', status: 'any', purpose: 'Superseded — redirects to Calendar' },
 ];
 

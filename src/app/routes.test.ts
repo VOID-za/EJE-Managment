@@ -86,6 +86,10 @@ const sourceLinks = (): readonly { readonly link: string; readonly file: string 
   for (const file of walk(SRC_DIR)) {
     if (!file.endsWith('.ts') && !file.endsWith('.tsx')) continue;
     if (file.includes('.test.')) continue;
+    // The outbound integrations build paths on OTHER systems' APIs — Microsoft
+    // Graph's `/users/{sender}/messages`, say — not links into this one. It
+    // surfaced when this application gained a `/users` screen (30 October 2026).
+    if (/[\\/]src[\\/]services[\\/]/u.test(file)) continue;
 
     const text = readFileSync(file, 'utf8');
     for (const match of text.matchAll(pattern)) {

@@ -107,3 +107,19 @@ export const availabilityTimeLabel = (record: AvailabilityRecord): string =>
 
 export const isMultiDayAvailability = (record: AvailabilityRecord): boolean =>
   record.endDate > record.startDate;
+
+/**
+ * One person on the Users screen (the tester, 30 October 2026): who they are and
+ * their availability. Nothing about the account — no email, phone or login.
+ */
+export interface StaffAvailabilityRow {
+  readonly id: string;
+  readonly name: string;
+  readonly role: 'master' | 'coordinator' | 'technician';
+  readonly jobTitle: string;
+  readonly active: boolean;
+  /** An active absence covering today, if any. */
+  readonly today: AvailabilityRecord | null;
+  /** Active absences that end today or later, soonest first. */
+  readonly upcoming: readonly AvailabilityRecord[];
+}

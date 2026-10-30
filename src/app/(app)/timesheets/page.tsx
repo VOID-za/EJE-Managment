@@ -32,6 +32,7 @@ import {
   defaultTimesheetRange,
   formatDayAndDate,
   formatPeriod,
+  lineDateProblem,
   timesheetRangeProblem,
 } from '@/lib/timesheet-dates';
 
@@ -44,6 +45,20 @@ const WORKSHOP = '__workshop__';
 /** A line being typed: strings, exactly as the technician typed them. */
 interface Draft {
   readonly entryId?: string;
+  /**
+   * The day the form was OPENED on, and where it stays while it is open.
+   *
+   * THE 30 OCTOBER 2026 FREEZE. The form used to be drawn under whichever day
+   * equalled `date` — the value being TYPED. A date field reports an empty
+   * value whenever part of the date is cleared or retyped, and in-between dates
+   * as digits arrive, so one keystroke in Date matched no day: the form, with
+   * the field the technician was typing in, was removed from the page, and
+   * every key after that went nowhere. The typed values were still held, but
+   * nothing on screen could reach them. Drawn under `anchor` instead, the form
+   * never moves while it is open; the typed date is validated where it is
+   * typed (`lineDateProblem`) and the line lands on its date when saved.
+   */
+  readonly anchor: string;
   readonly date: string;
   /** A customer id, WORKSHOP, or '' for a typed name. */
   readonly pick: string;
@@ -61,6 +76,7 @@ interface Draft {
 }
 
 const emptyDraft = (date: string): Draft => ({
+  anchor: date,
   date,
   pick: '',
   customerName: '',
@@ -74,6 +90,7 @@ const emptyDraft = (date: string): Draft => ({
 
 const draftOf = (entry: TimesheetEntry): Draft => ({
   entryId: entry.id,
+  anchor: entry.date,
   date: entry.date,
   pick: entry.workshop ? WORKSHOP : entry.customerId ?? '',
   customerName: entry.workshop ? '' : entry.customerName,
@@ -196,6 +213,8 @@ const TimesheetsPage = () => {
 
   const saveLine = async (): Promise<boolean> => {
     if (personId === null || draft === null) return true;
+    // A date still being typed is not sent; the form says what is wrong.
+    if (lineDateProblem(draft.date, from, to, today) !== null) return false;
     const workshop = draft.pick === WORKSHOP;
     const ok = await operation.run(async () => {
       await timesheets.saveEntry(personId, {
@@ -272,15 +291,20 @@ const TimesheetsPage = () => {
     ...(customers.data ?? []).map((customer) => ({ value: customer.id, label: customer.name })),
   ];
 
-  const lineForm = (current: Draft) => (
+  const lineForm = (current: Draft) => {
+    const dateProblem = lineDateProblem(current.date, from, to, today);
+    return (
     <div className="mt-2 space-y-3 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50/40 p-3" data-testid="timesheet-line-form">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TextField
           label="Date"
           type="date"
           value={current.date}
-          max={today}
+          min={from}
+          max={to < today ? to : today}
+          error={dateProblem ?? undefined}
           onChange={(event) => edit({ ...current, date: event.target.value })}
+          data-testid="timesheet-line-date"
         />
         <SelectField
           label="Customer or Workshop"
@@ -331,7 +355,7 @@ const TimesheetsPage = () => {
       )}
       <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). Kilometres to one decimal.</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" loading={operation.running} onClick={() => void saveLine().then((ok) => ok && refresh())} data-testid="save-timesheet-line">
+        <Button size="sm" loading={operation.running} disabled={dateProblem !== null} onClick={() => void saveLine().then((ok) => ok && refresh())} data-testid="save-timesheet-line">
           Save line
         </Button>
         <Button size="sm" variant="ghost" onClick={() => edit(null)}>
@@ -339,7 +363,8 @@ const TimesheetsPage = () => {
         </Button>
       </div>
     </div>
-  );
+    );
+  };
 
   const dayRow = (day: TimesheetDay) => (
     <li
@@ -428,7 +453,7 @@ const TimesheetsPage = () => {
         </div>
       )}
 
-      {draft !== null && draft.date === day.date && lineForm(draft)}
+      {draft !== null && draft.anchor === day.date && lineForm(draft)}
 
       {day.comment.length > 0 && (
         <p className="mt-2 text-sm whitespace-pre-wrap text-steel-600" data-testid="timesheet-day-comment">

@@ -4055,6 +4055,103 @@ await step('a timesheet is manual: unrecorded days say so, the office reads it, 
     .waitFor({ timeout: 5000 });
 });
 
+/*
+ * THE 30 OCTOBER 2026 TIMESHEET FREEZE, AS A TECHNICIAN MET IT. The line form
+ * was drawn under the day equal to the date being TYPED; a date field reports
+ * an empty value the moment part of the date is cleared (Backspace), so the
+ * form — and the field being typed in — vanished, and nothing after that
+ * responded. Reproduced here exactly that way (Backspace in Date), then every
+ * field filled by typing, an earlier field edited again, saved, reopened and
+ * read back after a reload and from the server. With Technician permissions.
+ */
+await step('a technician types a whole timesheet line, clearing and retyping the date, and it is saved exactly as typed (the timesheet freeze)', async () => {
+  await signInAs(page, 'Deon Botha');
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-day').first().waitFor({ timeout: 15000 });
+  const days = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
+  if (days.length < 6) throw new Error(`the period has ${days.length} days; the step needs six`);
+  const opened = days[1];
+  const target = days[4];
+  await page.locator(`[data-testid="timesheet-day"][data-date="${opened}"]`).getByTestId('add-timesheet-line').click();
+  const form = page.getByTestId('timesheet-line-form');
+  await form.waitFor({ timeout: 5000 });
+
+  // THE FAILURE: clear part of the date. The browser now reports an empty date.
+  const date = form.getByTestId('timesheet-line-date');
+  await date.click();
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(300);
+  if ((await form.count()) !== 1) throw new Error('the line form vanished when the date was cleared (the freeze)');
+  if ((await date.inputValue()) !== '') throw new Error(`clearing the date left "${await date.inputValue()}" — the reproduction did not happen`);
+  await form.getByText('Enter the whole date', { exact: false }).waitFor({ timeout: 3000 });
+  if (await form.getByTestId('save-timesheet-line').isEnabled()) throw new Error('Save line was enabled with half a date');
+
+  // Retype it as another day: the form stays where it was opened, still answering.
+  await date.fill(target);
+  if ((await form.count()) !== 1) throw new Error('the form moved or vanished when the date changed');
+  const formDay = await form.evaluate((node) => node.closest('[data-testid="timesheet-day"]')?.getAttribute('data-date'));
+  if (formDay !== opened) throw new Error(`the form jumped from ${opened} to ${formDay}`);
+
+  // Every field, typed like a person types.
+  const typeInto = async (label, text) => {
+    const field = form.getByLabel(label, { exact: true });
+    await field.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type(text, { delay: 20 });
+    const value = await field.inputValue();
+    if (value !== text) throw new Error(`${label} reads "${value}" after typing "${text}"`);
+  };
+  await form.getByTestId('timesheet-customer-pick').selectOption({ index: 0 });
+  await typeInto('Customer', 'Kruger Engineering');
+  await typeInto('OT (hours)', '2.5');
+  await typeInto('D/T (hours)', '1.25');
+  await typeInto('Callout (R)', '450');
+  await typeInto('Int Km', '12.5');
+  await typeInto('Cust Km', '30');
+  await form.getByTestId('timesheet-callout-shared').check();
+  // An earlier field corrected after the later ones: nothing else moves or resets.
+  await typeInto('OT (hours)', '3');
+  for (const [label, expected] of [['Customer', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
+    const value = await form.getByLabel(label, { exact: true }).inputValue();
+    if (value !== expected) throw new Error(`${label} became "${value}" after OT was edited`);
+  }
+  if ((await date.inputValue()) !== target) throw new Error('the date changed by itself');
+
+  await form.getByTestId('save-timesheet-line').click();
+  await form.waitFor({ state: 'detached', timeout: 15000 });
+
+  // It landed on the day it was dated, and reads back exactly as typed — after a reload too.
+  const check = async (when) => {
+    const day = page.locator(`[data-testid="timesheet-day"][data-date="${target}"]`);
+    const line = day.getByTestId('timesheet-line').filter({ hasText: 'Kruger Engineering' });
+    await line.waitFor({ timeout: 10000 });
+    await line.getByRole('button', { name: 'Edit' }).click();
+    const reopened = page.getByTestId('timesheet-line-form');
+    await reopened.waitFor({ timeout: 5000 });
+    const read = async (label) => reopened.getByLabel(label, { exact: true }).inputValue();
+    const values = { date: await reopened.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km'), shared: await reopened.getByTestId('timesheet-callout-shared').isChecked() };
+    const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30', shared: true };
+    if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`${when}: reopened as ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
+    await reopened.getByRole('button', { name: 'Cancel' }).click();
+  };
+  await check('after saving');
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await check('after leaving and coming back');
+
+  // And the server holds exactly that.
+  const stored = await page.evaluate(async ({ base, from, to }) => {
+    const me = (await (await fetch(`${base}/api/auth/me`)).json()).data.user.id;
+    const sheet = (await (await fetch(`${base}/api/timesheets/${me}?from=${from}&to=${to}`)).json()).data;
+    return sheet.days.flatMap((day) => day.entries ?? []).filter((entry) => entry.customerName === 'Kruger Engineering');
+  }, { base: BASE, from: days[0], to: days.at(-1) });
+  if (stored.length !== 1) throw new Error(`${stored.length} stored lines for the customer`);
+  const [line] = stored;
+  if (line.date !== target || line.overtimeHours !== 3 || line.doubleHours !== 1.25 || line.calloutAmount !== 45000 || line.calloutShared !== true || line.internalKm !== 12.5 || line.customerKm !== 30) {
+    throw new Error(`stored: ${JSON.stringify(line)}`);
+  }
+});
+
 await step('a technician enters Workshop with OT, a call-out amount and km, saves, and sends the month to the office (TS-02…TS-14)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
@@ -4159,6 +4256,172 @@ await step('the technician asks to correct the sent timesheet; the office accept
 });
 
 /*
+ * THE TESTER'S CHANGES, ROLE BY ROLE (30 October 2026): what each role's
+ * sidebar offers, the Jobs page's controls and filters, Messages end to end at
+ * tablet size, the Coordinator's Users screen, and both Monthly Forms pages.
+ */
+const sidebarLabels = async () => {
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  // The desktop sidebar (the drawer holds the same list on a phone).
+  return (await page.locator('aside nav a, nav.eje-scrollbar a').allInnerTexts()).map((text) => text.replace(/\s*\d+\s*$/u, '').trim());
+};
+const expectSidebar = (who, labels, present, absent) => {
+  for (const label of present) if (!labels.includes(label)) throw new Error(`${who}'s sidebar has no "${label}" (${labels.join(', ')})`);
+  for (const label of absent) if (labels.includes(label)) throw new Error(`${who}'s sidebar still offers "${label}"`);
+};
+const chipLabels = async () =>
+  (await page.locator('main button[aria-pressed]').allInnerTexts()).map((name) => name.replace(/[\s ]*(\d+|—)\s*$/u, '').replace(/\s+/gu, ' ').trim());
+const tableJobCount = async () => page.locator('main table tbody tr').filter({ hasText: 'EJE-' }).count();
+
+await step('the technician: no New Job or Download CSV, My Jobs and the new filters, My Monthly Forms in the sidebar (tester)', async () => {
+  await signInAs(page, 'Sipho Mahlangu');
+  expectSidebar('The technician', await sidebarLabels(), ['Jobs', 'Attendance', 'Timesheets', 'My Monthly Forms', 'Messages'], ['EJE Monthly Forms', 'Closed Jobs', 'Users', 'Monthly forms']);
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('main button[aria-pressed]').first().waitFor({ timeout: 10000 });
+  if ((await page.getByRole('button', { name: 'New Job' }).count()) !== 0 || (await page.getByRole('link', { name: 'New Job' }).count()) !== 0) throw new Error('a technician was offered New Job');
+  if ((await page.getByRole('button', { name: 'Download CSV' }).count()) !== 0) throw new Error('a technician was offered Download CSV');
+  const chips = await chipLabels();
+  for (const label of ['My Jobs', 'In progress', 'Awaiting completion']) if (!chips.includes(label)) throw new Error(`no "${label}" filter for the technician (${chips.join(', ')})`);
+  if (chips.includes('Open work')) throw new Error('the Open work filter is still offered');
+  // My Jobs: every row is the technician's own, and the count is what the button said.
+  const said = Number((await page.getByTestId('jobs-my-jobs').innerText()).replace(/\D+/gu, ''));
+  await page.getByLabel('Status').selectOption('all');
+  await page.getByTestId('jobs-my-jobs').click();
+  await page.waitForTimeout(300);
+  if ((await page.getByTestId('jobs-my-jobs').getAttribute('aria-pressed')) !== 'true') throw new Error('My Jobs did not switch on');
+  const shown = await tableJobCount();
+  if (shown !== said) throw new Error(`My Jobs said ${said} and showed ${shown}`);
+  const mine = await page.evaluate(async (base) => {
+    const me = (await (await fetch(`${base}/api/auth/me`)).json()).data.user.id;
+    const rows = (await (await fetch(`${base}/api/jobs`)).json()).data.rows;
+    return rows.filter((row) => row.job.primaryTechnicianId === me || row.job.additionalTechnicianIds.includes(me)).length;
+  }, BASE);
+  if (mine !== said) throw new Error(`the server has ${mine} jobs on the technician, My Jobs said ${said}`);
+  // Raising a job is refused by the server too, not only hidden.
+  const refused = await page.evaluate(async (base) => (await fetch(`${base}/api/jobs`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `smoke-tech-create-${Date.now()}` }, body: '{}' })).status, BASE);
+  if (refused !== 403 && refused !== 400) throw new Error(`a technician's job creation answered ${refused}`);
+});
+
+await step('Messages at tablet size: Send is visible and works; the office reads it and replies; the technician reads the reply (tester)', async () => {
+  const before = page.viewportSize();
+  await page.setViewportSize({ width: 800, height: 1280 });
+  try {
+    await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+    const send = page.getByTestId('chat-send');
+    await send.waitFor({ timeout: 10000 });
+    await send.scrollIntoViewIfNeeded();
+    // Not clipped: the point at the middle of Send IS Send (it used to sit under the card's edge).
+    const reachable = await send.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return box.height >= 30 && (hit === button || button.contains(hit));
+    });
+    if (!reachable) throw new Error('the Send button is not visible where it is drawn');
+    const text = `Smoke reply ${Date.now()}`;
+    await page.getByLabel('Message').fill(text);
+    await send.click();
+    await page.getByText(text).first().waitFor({ timeout: 10000 });
+    await page.screenshot({ path: `${shots}/messages-tablet.png`, fullPage: true });
+
+    await signInAsMasterIfNeeded();
+    await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+    await page.getByText(text).first().click();
+    await page.getByText(text).first().waitFor({ timeout: 10000 });
+    const answer = `Office answer ${Date.now()}`;
+    await page.getByLabel('Message').fill(answer);
+    await page.getByTestId('chat-send').click();
+    await page.getByText(answer).first().waitFor({ timeout: 10000 });
+
+    await signInAs(page, 'Sipho Mahlangu');
+    await page.goto(`${BASE}/messages`, { waitUntil: 'networkidle' });
+    await page.getByText(answer).first().waitFor({ timeout: 10000 });
+  } finally {
+    await page.setViewportSize(before);
+  }
+});
+
+await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, no Timesheets or Closed Jobs; the Jobs page and her Attendance (tester)', async () => {
+  await signInAs(page, 'Christene van Niekerk');
+  expectSidebar('The Coordinator', await sidebarLabels(), ['Jobs', 'Attendance', 'My Monthly Forms', 'EJE Monthly Forms', 'Users'], ['Timesheets', 'Closed Jobs', 'Monthly forms']);
+
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('main button[aria-pressed]').first().waitFor({ timeout: 10000 });
+  if ((await page.getByRole('button', { name: 'Download CSV' }).count()) !== 0) throw new Error('the Coordinator was offered Download CSV');
+  const chips = await chipLabels();
+  for (const label of ['In progress', 'Awaiting completion']) if (!chips.includes(label)) throw new Error(`no "${label}" filter (${chips.join(', ')})`);
+  if (chips.includes('Open work')) throw new Error('the Open work filter is still offered');
+  if (chips.includes('My Jobs')) throw new Error('the office was offered My Jobs');
+  await page.getByRole('link', { name: 'New Job' }).waitFor({ timeout: 5000 });
+  // In progress and Awaiting completion: the Status box follows, and the table holds what the count said.
+  for (const [value, testid] of [['in_progress', 'jobs-filter-in_progress'], ['awaiting_completion', 'jobs-filter-awaiting_completion']]) {
+    const said = Number((await page.getByTestId(testid).innerText()).replace(/\D+/gu, ''));
+    await page.getByTestId(testid).click();
+    await page.waitForTimeout(300);
+    if ((await page.getByLabel('Status').inputValue()) !== value) throw new Error(`${value}: the Status box says ${await page.getByLabel('Status').inputValue()}`);
+    const shown = await tableJobCount();
+    if (shown !== said) throw new Error(`${value}: the filter said ${said} and showed ${shown}`);
+  }
+  // Closed jobs are reached from Jobs.
+  await page.getByRole('link', { name: /^Closed Jobs/ }).first().click();
+  await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
+
+  // Her Attendance: the technician's layout first — her own form and days — then the team register.
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const own = page.getByTestId('monthly-attendance-own');
+  await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
+  if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('CHRISTENE ATTEN ')) throw new Error('the Coordinator’s own form is not hers');
+  for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-attendance-export']) await own.getByTestId(id).waitFor({ timeout: 5000 });
+  await page.getByTestId('my-attendance').waitFor({ timeout: 10000 });
+  await page.getByTestId('team-register-heading').waitFor({ timeout: 5000 });
+  await page.getByTestId('attendance-register').waitFor({ timeout: 10000 });
+});
+
+await step('the Coordinator’s Users screen: everybody’s availability, and the way to record it — no account controls (tester)', async () => {
+  await page.goto(`${BASE}/users`, { waitUntil: 'networkidle' });
+  const rows = page.getByTestId('users-row');
+  await rows.first().waitFor({ timeout: 10000 });
+  if ((await rows.count()) < 10) throw new Error(`only ${await rows.count()} users listed`);
+  const text = await page.locator('main').innerText();
+  for (const forbidden of ['@eje-demo', 'Reset password', 'Disable', 'Change role']) if (text.includes(forbidden)) throw new Error(`the Users screen shows "${forbidden}"`);
+  // Thabo is on sick leave today in the demonstration.
+  const thabo = rows.filter({ hasText: 'Thabo' });
+  if ((await thabo.getAttribute('data-available')) !== 'no') throw new Error('Thabo is on sick leave and the screen says available');
+  await rows.filter({ hasText: 'Sipho' }).getByTestId('users-manage-availability').click();
+  await page.getByRole('button', { name: 'Mark unavailable' }).waitFor({ timeout: 10000 });
+  await page.getByRole('link', { name: 'Users' }).first().waitFor({ timeout: 5000 });
+});
+
+await step('My Monthly Forms and EJE Monthly Forms: the Coordinator’s own month and history; every user’s status for the office (tester)', async () => {
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'My Monthly Forms' }).waitFor({ timeout: 10000 });
+  const card = page.getByTestId('my-monthly-forms').getByTestId('monthly-forms');
+  await card.waitFor({ timeout: 15000 });
+  if (!(await card.getByTestId('monthly-forms-title').innerText()).startsWith('Christene')) throw new Error('My Monthly Forms shows another person');
+  await page.getByTestId('my-monthly-history').waitFor({ timeout: 10000 });
+
+  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'EJE Monthly Forms' }).waitFor({ timeout: 10000 });
+  const rows = page.getByTestId('finance-row');
+  await rows.first().waitFor({ timeout: 15000 });
+  const roles = new Set(await rows.evaluateAll((list) => list.map((row) => row.getAttribute('data-role'))));
+  for (const role of ['master', 'coordinator', 'technician']) if (!roles.has(role)) throw new Error(`EJE Monthly Forms has no ${role} (${[...roles].join(', ')})`);
+  const summary = await page.getByTestId('finance-summary').innerText();
+  const submitted = await rows.filter({ has: page.locator('[data-submitted]') }).evaluateAll((list) => list.filter((row) => row.getAttribute('data-submitted') === 'yes').length);
+  if (!summary.includes(`${submitted} submitted`) || !summary.includes(`${(await rows.count()) - submitted} not submitted`)) throw new Error(`summary "${summary}" does not match the rows`);
+});
+
+await step('the Master: EJE and My Monthly Forms, Timesheets kept, no Closed Jobs or Users in the sidebar; the new Jobs filters (tester)', async () => {
+  await signInAsMasterIfNeeded();
+  expectSidebar('The Master', await sidebarLabels(), ['Jobs', 'Timesheets', 'My Monthly Forms', 'EJE Monthly Forms', 'Administration'], ['Closed Jobs', 'Users', 'Monthly forms']);
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  await page.locator('main button[aria-pressed]').first().waitFor({ timeout: 10000 });
+  if ((await page.getByRole('button', { name: 'Download CSV' }).count()) !== 0) throw new Error('the Master was offered Download CSV');
+  const chips = await chipLabels();
+  for (const label of ['In progress', 'Awaiting completion']) if (!chips.includes(label)) throw new Error(`no "${label}" filter (${chips.join(', ')})`);
+  if (chips.includes('Open work')) throw new Error('the Open work filter is still offered');
+});
+
+/*
  * PAY-01, PAY-02 ON THE ATTENDANCE PAGE (30 October 2026). The owner found the
  * Attendance page without the Time Sheet's controls. Every one is exercised
  * here, on the real PDF: Preview shows the form, Print asks the browser once,
@@ -4171,7 +4434,7 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   const pdfPages = (bytes) => (Buffer.from(bytes).toString('latin1').match(/\/Type\s*\/Page(?!s)/gu) ?? []).length;
   await signInAs(page, 'Naledi Molefe');
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const section = page.getByTestId('monthly-attendance-section');
+  const section = page.getByTestId('monthly-attendance-own');
   await section.waitFor({ timeout: 15000 });
   const card = section.getByTestId('monthly-forms');
   await card.waitFor({ timeout: 15000 });
@@ -4289,7 +4552,7 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   // Another technician sees only their own month, and is refused Naledi's.
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const own = page.getByTestId('monthly-attendance-section');
+  const own = page.getByTestId('monthly-attendance-own');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
   if ((await own.getByTestId('monthly-attendance-status').count()) !== 0) throw new Error('a technician was shown the office month list');
   if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('SIPHO ATTEN ')) throw new Error('a technician was shown another person’s form');
@@ -4649,11 +4912,14 @@ await step('the Jobs screen offers the lists the office asks for by name', async
   const labels = (await chips.allInnerTexts()).map((name) =>
     name.replace(/[\s\u00a0]*(\d+|—)\s*$/, '').replace(/\s+/g, ' ').trim(),
   );
-  for (const label of ['Open work', 'Open', 'Awaiting spares', 'Office handling', 'Awaiting PO', 'Cancelled']) {
+  for (const label of ['Open', 'In progress', 'Awaiting completion', 'Awaiting spares', 'Office handling', 'Awaiting PO', 'Cancelled']) {
     if (!labels.includes(label)) {
       throw new Error(`the Jobs screen has no "${label}" quick filter (found ${labels.join(', ')})`);
     }
   }
+  // The tester, 30 October 2026: no Open work button, and no Download CSV.
+  if (labels.includes('Open work')) throw new Error('the Open work quick filter is still offered');
+  if ((await page.getByRole('button', { name: 'Download CSV' }).count()) !== 0) throw new Error('the Jobs page still offers Download CSV');
   if (labels.some((label) => /master review/i.test(label))) {
     throw new Error(`the Jobs screen still offers a Master Review quick filter (${labels.join(', ')})`);
   }
@@ -4704,9 +4970,11 @@ await step('a job left in the retired stage is listed under Review, not Master R
   if (/master review/i.test(detail)) throw new Error('the job detail still says Master Review');
 });
 
-await step('Closed Jobs is its own place in the navigation', async () => {
+await step('Closed Jobs is reached from the Jobs page, and is no longer a sidebar item (tester)', async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  const link = page.getByRole('link', { name: 'Closed Jobs' }).first();
+  if ((await page.locator('nav.eje-scrollbar a', { hasText: 'Closed Jobs' }).count()) !== 0) throw new Error('Closed Jobs is still in the sidebar');
+  await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
+  const link = page.locator('main').getByRole('link', { name: /^Closed Jobs/ }).first();
   await link.waitFor({ timeout: 10000 });
   await link.click();
   await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });

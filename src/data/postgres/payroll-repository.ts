@@ -63,6 +63,15 @@ export class PostgresPayrollRepository implements PayrollRepository {
     return rows.map(toSubmission);
   }
 
+  async listSubmissionsFor(userId: UserId): Promise<readonly MonthlySubmission[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.monthlySubmissions)
+      .where(eq(schema.monthlySubmissions.userId, userId))
+      .orderBy(desc(schema.monthlySubmissions.month));
+    return rows.map(toSubmission);
+  }
+
   async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {
     const rows = await this.db
       .insert(schema.monthlySubmissions)

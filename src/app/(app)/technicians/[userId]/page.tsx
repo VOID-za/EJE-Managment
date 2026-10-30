@@ -59,7 +59,8 @@ const TechnicianProfilePage = ({
   const [cancelling, setCancelling] = useState<AvailabilityRecord | null>(null);
 
   const today = businessToday();
-  const canManage = can(currentUser.role, 'admin.access');
+  // The capability every availability write checks (the Users screen, 30 October 2026).
+  const canManage = can(currentUser.role, 'availability.manage');
 
   const query = useQuery(`technician:${userId}`, () => reads.technician(userId));
 
@@ -162,7 +163,8 @@ const TechnicianProfilePage = ({
       <PageHeader
         title={userFullName(technician)}
         breadcrumbs={[
-          { label: 'Administration', href: '/admin' },
+          // The Coordinator arrives from Users (30 October 2026); a Master from Administration.
+          currentUser.role === 'coordinator' ? { label: 'Users', href: '/users' } : { label: 'Administration', href: '/admin' },
           { label: userFullName(technician) },
         ]}
         description={`${technician.jobTitle} · ${roleLabel(technician.role)}`}

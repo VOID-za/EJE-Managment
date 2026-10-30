@@ -26,9 +26,16 @@ export const Sidebar = ({
 
   const visible = NAVIGATION.filter(
     (item) =>
-      item.capability === undefined ||
-      (currentUser !== null && can(currentUser.role, item.capability)),
+      (item.capability === undefined ||
+        (currentUser !== null && can(currentUser.role, item.capability))) &&
+      (item.roles === undefined || (currentUser !== null && item.roles.includes(currentUser.role))),
   );
+
+  // The MOST SPECIFIC item is the current one: /payroll/mine is My Monthly
+  // Forms, not also EJE Monthly Forms because it starts with /payroll/.
+  const current = visible
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .reduce<string | null>((best, item) => (best === null || item.href.length > best.length ? item.href : best), null);
 
   return (
     <div className="eje-grid-texture flex h-full flex-col bg-chrome">
@@ -50,8 +57,7 @@ export const Sidebar = ({
               </p>
               <ul className="space-y-0.5">
                 {items.map((item) => {
-                  const active =
-                    pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  const active = item.href === current;
                   return (
                     <li key={item.href}>
                       <Link

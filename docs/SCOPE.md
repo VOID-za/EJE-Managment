@@ -1519,6 +1519,21 @@ finish — is `docs/delivery-register-2026-10-29.md`. Nothing here is approved.
 | PAY-08 | **Audit and archive**: who prepared and sent, the month, recipient, technicians, file names, time, provider answer and package reference; every file downloadable again exactly as sent (office only). A correction after sending never alters the sent package; the corrected forms go in a new package, marked CORRECTED. | **TESTED — awaiting approval.** Detail, files, tests and decisions: `docs/delivery-register-2026-10-29.md`. Migration 0040. |
 | VIS-1 | **One EJE mark**: the favicon, the home-screen/PWA icons and the in-app logo are the same "EJE" tile in the brand blue (generated from one geometry, `scripts/generate-pwa-icons.mjs`); the demonstration banner follows the dark theme. No other colour, font, layout or workflow changed. | **IMPLEMENTED.** There is no real EJE company logo in the repository or the project folder; it replaces this mark when supplied (owner). Detail, files, tests and decisions: `docs/delivery-register-2026-10-29.md`. Migration 0040. |
 
+### The tester's changes and the timesheet freeze — 30 October 2026 (evening)
+
+The tester's three handwritten pages. Register: `docs/delivery-register-2026-10-30.md`
+(second part). No migration. Nothing here is approved.
+
+| ID | Requirement | Status |
+|---|---|---|
+| TST-TS-1 | **The Technician timesheet must not freeze.** Root cause: the line form was drawn under the day equal to the date being typed, and a date field reports an empty value while part of it is cleared or retyped — the form, and the field, vanished. The form now stays on the day it was opened; the date is validated in place. | **TESTED — awaiting approval.** Reproduced, fixed, regression in smoke and unit tests. |
+| TST-JOBS-1 | **Jobs, every role**: no Download CSV, no Open work button; In progress and Awaiting completion added (the existing status model). Technician: no New Job (server refuses too), My Jobs added. | **TESTED — awaiting approval.** |
+| TST-NAV-1 | **Sidebars**: Coordinator — no Timesheets, no Closed Jobs; My Monthly Forms, EJE Monthly Forms, Users. Master — no Closed Jobs; EJE and My Monthly Forms. Closed jobs reached from Jobs. | **TESTED — awaiting approval.** |
+| TST-USERS-1 | **Users** for the Coordinator: availability only (`availability.manage`), no account administration. | **TESTED — awaiting approval.** |
+| TST-PAY-1 | **My Monthly Forms** for every role (own month, history, submission) and **EJE Monthly Forms** for the office with EVERY user, who has and has not submitted, selection and the Finance package unchanged in its rules. | **TESTED — awaiting approval.** Real Finance email still needs Microsoft 365 (production `refuse`). |
+| TST-ATT-1 | **The office's Attendance page** has the technician's layout first (own form and days), then the team register. | **TESTED — awaiting approval.** |
+| TST-MSG-1 | **Messages**: a usable chat with a visible Send — the existing chat, whose Send button was clipped by the card; fixed and tested at tablet size, both directions, with persistence and permissions. | **TESTED — awaiting approval.** |
+
 ### The Attendance page's monthly form, the update notice on every release — 30 October 2026 (DEPLOYED in `e54f7d3`; not yet approved)
 
 Asked for by the owner on 30 October 2026. Register: `docs/delivery-register-2026-10-30.md`.

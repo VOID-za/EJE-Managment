@@ -1,10 +1,18 @@
-import type { Capability } from '@/domain';
+import type { Capability, UserRole } from '@/domain';
 
 export interface NavigationItem {
   readonly href: string;
   readonly label: string;
   readonly icon: string;
   readonly capability?: Capability;
+  /**
+   * Only these roles, where a capability cannot say it. The tester's changes of
+   * 30 October 2026: the Coordinator does not complete timesheets, yet still
+   * holds the capabilities the Timesheets page reads with (the correction
+   * review stays reachable from its notifications). The SERVER still decides
+   * what each role may do; this only decides what the sidebar offers.
+   */
+  readonly roles?: readonly UserRole[];
   /** Marks a section heading in the sidebar. */
   readonly group: 'work' | 'records' | 'system';
 }
@@ -38,20 +46,11 @@ export const NAVIGATION: readonly NavigationItem[] = [
     capability: 'calendar.view',
     group: 'work',
   },
-  /**
-   * The job card archive. A Master's obvious answer to "where do I find a
-   * closed job?", which a status filter buried inside Jobs was not.
-   *
-   * Master-only: a technician still reaches historical jobs through the
-   * customer, site and machine history they already have access to.
+  /*
+   * CLOSED JOBS IS NO LONGER A SIDEBAR ITEM (the tester, 30 October 2026, for
+   * the Master and the Coordinator). The archive is unchanged and is reached
+   * from the Jobs page, whose "Closed Jobs" filter opens it.
    */
-  {
-    href: '/jobs/closed',
-    label: 'Closed Jobs',
-    icon: 'document',
-    capability: 'jobs.viewAll',
-    group: 'work',
-  },
   /**
    * Work a tablet could not get onto a job. THE OFFICE. BD-15.
    *
@@ -80,12 +79,15 @@ export const NAVIGATION: readonly NavigationItem[] = [
    * office the register; the server enforces both.
    */
   { href: '/attendance', label: 'Attendance', icon: 'user', group: 'work' },
-  { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work' },
+  // Not the Coordinator's: she does not complete technician timesheets (the tester, 30 October 2026).
+  { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work', roles: ['master', 'technician'] },
   /*
-   * PAY-01…08 (29 October 2026): everybody's — a technician's own monthly forms,
-   * the office's month and Finance package. The page and the server decide which.
+   * PAY-01…08, split on 30 October 2026 (the tester): EVERYBODY has their own
+   * month — My Monthly Forms — and the office (Master, Coordinator) also has
+   * EJE Monthly Forms: every user's status and the package to Finance.
    */
-  { href: '/payroll', label: 'Monthly forms', icon: 'document', group: 'work' },
+  { href: '/payroll/mine', label: 'My Monthly Forms', icon: 'document', group: 'work' },
+  { href: '/payroll', label: 'EJE Monthly Forms', icon: 'document', capability: 'payroll.finance', group: 'work' },
   {
     href: '/customers',
     label: 'Customers',
@@ -94,6 +96,13 @@ export const NAVIGATION: readonly NavigationItem[] = [
     group: 'records',
   },
   { href: '/library', label: 'Technical Library', icon: 'library', capability: 'library.view', group: 'records' },
+  /*
+   * USERS — WHO IS AVAILABLE, AND THEIR LEAVE. The Coordinator's (the tester,
+   * 30 October 2026), so she need not go through Administration for it. It
+   * offers availability only (`availability.manage`): no account, role or
+   * password change. A Master keeps doing those in Administration.
+   */
+  { href: '/users', label: 'Users', icon: 'user', capability: 'availability.manage', roles: ['coordinator'], group: 'records' },
   /**
    * The company-wide audit trail. Office only.
    *

@@ -28,23 +28,28 @@ import { isPayrollMonth, monthOfDate, previousMonth } from '@/lib/payroll-files'
  * says it was corrected by the office after submission. The office does not
  * send a technician's month for them — the server refuses that too.
  */
-export const MonthlyAttendanceForms = () => {
+export const MonthlyAttendanceForms = ({ scope }: { readonly scope?: 'own' | 'office' } = {}) => {
   const user = useCurrentUser();
-  const office = can(user.role, 'payroll.finance');
+  /*
+   * 'own' is the person's own month — every role's, at the top of the page
+   * (the tester, 30 October 2026: the office's Attendance page has the
+   * technician's layout). 'office' is every user's month, for the office.
+   */
+  const office = (scope ?? (can(user.role, 'payroll.finance') ? 'office' : 'own')) === 'office' && can(user.role, 'payroll.finance');
   const [month, setMonth] = useState(previousMonth(monthOfDate(businessToday())));
   const [viewing, setViewing] = useState<string | null>(null);
   const valid = isPayrollMonth(month);
   const formsFor = office ? viewing : user.id;
 
   return (
-    <section className="mb-5" data-testid="monthly-attendance-section">
+    <section className="mb-5" data-testid={office ? 'monthly-attendance-section' : 'monthly-attendance-own'}>
       <Card className="mb-3">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-steel-900">Monthly attendance form</p>
+            <p className="text-sm font-semibold text-steel-900">{office ? 'Everybody’s monthly attendance' : 'My monthly attendance form'}</p>
             <p className="text-xs text-steel-500">
               {office
-                ? 'Each technician’s attendance for the month as its one-page PDF, and whether it was sent to the office.'
+                ? 'Each user’s attendance for the month as its one-page PDF, and whether it was sent to the office.'
                 : 'Your attendance for the month as a one-page PDF: preview, print, download or export it, then send it to the office.'}
             </p>
           </div>

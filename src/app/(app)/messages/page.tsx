@@ -147,7 +147,14 @@ const MessagesPageContent = () => {
               />
             </div>
 
-            <div className="min-h-[28rem]">
+            {/*
+              A COLUMN: the Delete chat bar, then the thread in what is left.
+              The thread is `h-full`; beside the bar (CHAT-DELETE-1) it was the
+              whole pane PLUS the bar, and the card's overflow-hidden cut off
+              its last ~50px — the Send button. The tester's "no Send/Reply"
+              (30 October 2026).
+            */}
+            <div className="flex min-h-[28rem] flex-col">
               {active === null || data === null || data === undefined ? (
                 <div className="p-6">
                   <EmptyState
@@ -159,7 +166,7 @@ const MessagesPageContent = () => {
               ) : (
                 <>
                 {/* CHAT-DELETE-1: off my own list, after a confirmation. */}
-                <div className="flex flex-wrap items-center justify-end gap-2 border-b border-steel-100 px-4 py-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-steel-100 px-4 py-2">
                   {deleteError !== null && (
                     <span role="alert" className="text-sm text-signal-600">
                       {deleteError}
@@ -178,6 +185,7 @@ const MessagesPageContent = () => {
                     Delete chat
                   </Button>
                 </div>
+                <div className="min-h-0 flex-1">
                 <ConversationThread
                   conversation={active.conversation}
                   messages={thread}
@@ -186,6 +194,7 @@ const MessagesPageContent = () => {
                   onSent={refresh}
                   onAvailabilityRecorded={refresh}
                 />
+                </div>
                 </>
               )}
             </div>

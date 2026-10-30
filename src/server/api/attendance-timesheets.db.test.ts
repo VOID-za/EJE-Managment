@@ -350,6 +350,11 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(422);
     const [row] = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.technician));
     expect(row?.month).toBe(month);
+    // My Monthly Forms' history, read from PostgreSQL (30 October 2026): that month, with its files.
+    const history = await tech.get<readonly { month: string; fileNames: { attendance: string } }[]>(`/api/payroll/${IDS.technician}/history`);
+    expect(history.status).toBe(200);
+    expect(history.data.map((entry) => entry.month)).toEqual([month]);
+    expect(history.data[0]?.fileNames.attendance).toMatch(/ ATTEN [A-Z]+\.pdf$/u);
 
     // The database refuses: a rewrite, a delete, a second row, a submission not backed by the exact sent month.
     expect(await postgresMessage(

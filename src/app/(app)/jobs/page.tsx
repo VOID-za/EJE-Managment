@@ -22,7 +22,6 @@ import {
 } from '@/application/job-list-filters';
 import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
 import { CachedJobList } from '@/components/pwa/CachedJobList';
@@ -65,9 +64,18 @@ const STATUS_OPTIONS: readonly { value: StatusFilter; label: string }[] = [
  * closed job is a historical record with its own search, not a row in the
  * working list.
  */
+/*
+ * THE TESTER'S FILTERS (30 October 2026), for every role: "Open work" is gone
+ * as a button (the list still OPENS on open work, and the Status box still
+ * offers it); In progress and Awaiting completion are added. Both are the job
+ * status model as it stands — `in_progress`, and the existing
+ * `awaiting_completion` filter (completion, customer signature, review) — no
+ * status or workflow was changed to make them.
+ */
 const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: string }[] = [
-  { value: 'open-work', label: 'Open work' },
   { value: 'open', label: 'Open' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'awaiting_completion', label: 'Awaiting completion' },
   { value: 'awaiting_spares', label: 'Awaiting spares' },
   // The office lifecycle (issue #73): submitted job cards the office has to
   // handle, then the ones waiting on a PO and an invoice number.
@@ -140,22 +148,10 @@ const JobsPageContent = () => {
   );
 
   /*
-   * THE EXPORT IS THIS SCREEN'S OWN FILTERS, IN A URL. SEARCH-4.
-   *
-   * Built from the same state the table is built from, so there is no second
-   * idea anywhere of what "what I am looking at" means. The server applies
-   * them with `filterJobListRows` — the function this screen just used — over
-   * the rows its own read says this person may have.
+   * NO "DOWNLOAD CSV" HERE ANY MORE (the tester, 30 October 2026, for every
+   * role). The export route stays (SEARCH-4); the closed-job archive keeps its
+   * own download.
    */
-  const exportHref = useMemo(() => {
-    const search = new URLSearchParams({ status });
-    if (jobType !== 'all') search.set('jobType', jobType);
-    if (priority !== 'all') search.set('priority', priority);
-    if (mineOnly) search.set('mine', '1');
-    if (refusalsOnly) search.set('signatureRefusal', 'unresolved');
-    if (term.trim().length > 0) search.set('term', term.trim());
-    return `/api/jobs/export?${search.toString()}`;
-  }, [status, jobType, priority, mineOnly, refusalsOnly, term]);
 
   // Counted over everything this user may see — which is what the read
   // returned, so nothing has to be filtered out again here.
@@ -167,6 +163,13 @@ const JobsPageContent = () => {
   const closedCount = query.data?.closedCount ?? 0;
   const refusalCount = visible.filter((row) => refusalAwaitingResolution(row.job)).length;
   const canSeeRefusalQueue = can(user.role, 'jobs.viewAnySignatureRefusal');
+  // The server refuses `jobs.create` to a technician; the button follows it (the tester, 30 October 2026).
+  const canCreate = can(user.role, 'jobs.create');
+  // MY JOBS: a technician's own work as a button (the tester, 30 October 2026) — the "assigned to me" filter.
+  const offerMyJobs = user.role === 'technician';
+  const myJobsCount = visible.filter(
+    (row) => row.job.primaryTechnicianId === user.id || row.job.additionalTechnicianIds.includes(user.id),
+  ).length;
 
   /*
    * A FAILED READ WITH A CACHED COPY IS NOT A BLANK SCREEN — AND NOT A LIE
@@ -206,12 +209,11 @@ const JobsPageContent = () => {
         description="Every job card in the system, filtered the way you need it."
         breadcrumbs={[{ label: 'Jobs' }]}
         actions={
-          <>
-            <DownloadFileButton href={exportHref} fallbackName="eje-jobs.csv" label="Download CSV" />
+          canCreate ? (
             <Link href="/jobs/new">
               <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
             </Link>
-          </>
+          ) : undefined
         }
       />
 
@@ -263,6 +265,24 @@ const JobsPageContent = () => {
           </button>
         )}
 
+        {offerMyJobs && (
+          <button
+            type="button"
+            onClick={() => setMineOnly((current) => !current)}
+            aria-pressed={mineOnly}
+            data-testid="jobs-my-jobs"
+            className={cn(
+              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+              mineOnly ? 'border-eje-500 bg-eje-600 text-white' : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
+            )}
+          >
+            My Jobs
+            <span className={cn('tabular rounded-full px-1.5 text-xs', mineOnly ? 'bg-white/20' : 'bg-steel-100 text-steel-600')}>
+              {query.loading ? '—' : myJobsCount}
+            </span>
+          </button>
+        )}
+
         {QUICK_FILTERS.filter((filter) => isMaster || filter.value !== 'cancelled').map(
           (filter) => (
             <button
@@ -273,6 +293,7 @@ const JobsPageContent = () => {
                 setStatus(filter.value);
               }}
               aria-pressed={!refusalsOnly && status === filter.value}
+              data-testid={`jobs-filter-${filter.value}`}
               className={cn(
                 'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
                 !refusalsOnly && status === filter.value

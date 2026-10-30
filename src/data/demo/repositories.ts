@@ -1438,6 +1438,15 @@ class DemoPayrollRepository implements PayrollRepository {
     return Promise.resolve(this.context.read().monthlySubmissions.filter((row) => row.month === month));
   }
 
+  listSubmissionsFor(userId: UserId): Promise<readonly MonthlySubmission[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .monthlySubmissions.filter((row) => row.userId === userId)
+        .sort((a, b) => b.month.localeCompare(a.month)),
+    );
+  }
+
   async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {
     let saved: MonthlySubmission | null = null;
     this.context.commit((draft) => {

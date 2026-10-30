@@ -231,3 +231,40 @@ export const submitMonth = async (
 /** True when the technician's own attendance for this day is frozen by a monthly submission. */
 export const attendanceDayFrozen = async (context: OperationContext, userId: string, date: string): Promise<MonthlySubmission | null> =>
   context.repos.payroll.findSubmission(asUserId(userId), date.slice(0, 7));
+
+/** One month in a person's monthly form history. */
+export interface MonthlyHistoryEntry {
+  readonly month: string;
+  readonly monthLabel: string;
+  readonly submittedAt: IsoDateTime;
+  readonly submittedByName: string | null;
+  readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+}
+
+/**
+ * A PERSON'S MONTHLY FORM HISTORY. My Monthly Forms (the tester, 30 October
+ * 2026): every month they submitted, newest first, with the files it carried.
+ * Their own, or the office's view of anybody's — the same rule as the forms.
+ */
+export const loadMonthlyHistory = async (context: OperationContext, userId: string): Promise<readonly MonthlyHistoryEntry[]> => {
+  assertMayReadAttendanceOf(context, userId);
+  const person = await findPayrollPerson(context, userId);
+  const submissions = await context.repos.payroll.listSubmissionsFor(person.id);
+  const names = new Map<string, string | null>();
+  for (const submission of submissions) {
+    if (!names.has(submission.submittedBy)) {
+      const by = await context.repos.users.findById(submission.submittedBy);
+      names.set(submission.submittedBy, by === null ? null : userFullName(by));
+    }
+  }
+  return submissions.map((submission) => ({
+    month: submission.month,
+    monthLabel: monthTitle(submission.month),
+    submittedAt: submission.submittedAt,
+    submittedByName: names.get(submission.submittedBy) ?? null,
+    fileNames: {
+      timesheet: timesheetMonthFileName(documentNameOf(person), submission.month),
+      attendance: attendanceMonthFileName(documentNameOf(person), submission.month),
+    },
+  }));
+};

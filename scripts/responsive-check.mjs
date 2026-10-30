@@ -291,9 +291,13 @@ const OFFICE_SCREENS = [
   // ATTEND-1 and TIMESHEET-1.
   '/attendance',
   '/timesheets',
+  // The tester's changes, 30 October 2026.
+  '/payroll',
+  '/payroll/mine',
+  '/users',
 ];
 
-const FIELD_SCREENS = ['/dashboard', '/jobs', '/jobs/EJE-1052', '/library', '/calendar', '/messages', '/timesheets'];
+const FIELD_SCREENS = ['/dashboard', '/jobs', '/jobs/EJE-1052', '/library', '/calendar', '/messages', '/timesheets', '/attendance', '/payroll/mine'];
 
 await resetDemonstration(page, BASE);
 await signInAs(page, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });

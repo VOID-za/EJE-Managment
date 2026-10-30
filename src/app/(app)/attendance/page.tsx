@@ -57,7 +57,7 @@ const AttendancePage = () => {
           title="Attendance"
           description="Mark yourself Present or Absent for each day. Nothing is filled in for you."
         />
-        <MonthlyAttendanceForms />
+        <MonthlyAttendanceForms scope="own" />
         <MyAttendance />
       </>
     );
@@ -85,8 +85,17 @@ const AttendancePage = () => {
     <>
       <PageHeader
         title="Attendance"
-        description="Who was at work, day by day. Kept apart from planned leave and from job status."
+        description="Your own days and monthly form first — the same as every technician's — then the team register."
       />
+
+      {/* The technician's layout, for the office's OWN attendance (the tester, 30 October 2026). */}
+      <MonthlyAttendanceForms scope="own" />
+      <div className="mb-8">
+        <MyAttendance />
+      </div>
+
+      <h2 className="mb-1 text-lg font-semibold text-steel-900" data-testid="team-register-heading">Team register</h2>
+      <p className="mb-4 text-sm text-steel-500">Who was at work, day by day. Kept apart from planned leave and from job status.</p>
 
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-4">
@@ -127,7 +136,7 @@ const AttendancePage = () => {
 
       <AttendanceExport today={data?.today ?? date} />
 
-      <MonthlyAttendanceForms />
+      <MonthlyAttendanceForms scope="office" />
 
       {query.error !== null ? (
         <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />

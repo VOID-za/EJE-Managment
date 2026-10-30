@@ -512,6 +512,23 @@ not configured). They are proved by CI and the local browser suites, and are
 staff checks I1–I13. The physical tablet, its print dialog and a printer
 remain staff checks (H18–H20, I13).
 
+## K. The tester's changes and the timesheet freeze (30 October 2026, evening)
+
+In the release after `e54f7d3` (no migration; `docs/delivery-register-2026-10-30.md`, second part).
+Fictional data only while the demonstration switcher is on.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| K1 | Technician: Timesheets → Add line on a day → in **Date** press Backspace, then retype a day of the period; fill Customer, OT, D/T, Callout, Int Km, Cust Km, Shared; change OT again; Save line | The form never disappears or stops responding; while the date is incomplete it says so and Save line is disabled; the line saves on its date; Edit shows exactly what was typed |
+| K2 | Technician: Jobs | No New Job, no Download CSV; My Jobs, In progress, Awaiting completion; no Open work |
+| K3 | Coordinator: the sidebar | My Monthly Forms, EJE Monthly Forms, Users; no Timesheets, no Closed Jobs. Jobs → Closed Jobs still opens the archive |
+| K4 | Coordinator: Users → a person → Availability | Who is away today and what is booked; Mark unavailable works; no account, role or password controls anywhere |
+| K5 | Coordinator and Master: Attendance | Their own monthly form and days at the top, the team register below |
+| K6 | Any role: My Monthly Forms → submit last month | Submitted once; it appears in History; EJE Monthly Forms shows them as submitted |
+| K7 | Master: EJE Monthly Forms | Every user (Masters, Coordinators, Technicians) with role and status, and "N submitted / M not submitted" |
+| K8 | Technician on the tablet: Messages → write → Send; the office replies | Send is visible without hunting; both messages stay in the conversation |
+| K9 | On the **actual rugged tablet**: K1 and K8 | Record the result |
+
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
 Run from outside the server against `https://eje.syncza.co.za`, signed in only

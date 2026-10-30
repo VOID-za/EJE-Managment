@@ -8,6 +8,7 @@ import type { FinancePackageView, PayrollMonthRow } from '@/application/finance-
 import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDateTime } from '@/lib/format';
+import { roleLabel } from '@/domain';
 
 export const PAYROLL_STATUS: Record<PayrollMonthRow['status'], { label: string; tone: 'amber' | 'green' | 'red' | 'blue' | 'outline' }> = {
   not_submitted: { label: 'Not submitted', tone: 'amber' },
@@ -48,6 +49,7 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
   const data = view.data;
   const open = data.packages.find((financePackage) => ['prepared', 'failed', 'sending'].includes(financePackage.status)) ?? null;
   const selectable = data.rows.filter((row) => row.selectable).map((row) => row.technician.id);
+  const submittedCount = data.rows.filter((row) => row.submittedAt !== null).length;
 
   const prepare = async () => {
     setResult(null);
@@ -95,20 +97,31 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
         {data.email.detail}
       </p>
 
+      {/* Who has submitted and who has not, at a glance (the tester, 30 October 2026). */}
+      <p className="mt-3 flex flex-wrap gap-2 text-sm" data-testid="finance-summary">
+        <Badge tone="green" size="sm">{submittedCount} submitted</Badge>
+        <Badge tone="amber" size="sm">{data.rows.length - submittedCount} not submitted</Badge>
+        <span className="text-xs text-steel-500">of {data.rows.length} users — Masters, Coordinators and Technicians</span>
+      </p>
+
       <div className="eje-scrollbar mt-3 overflow-x-auto">
         <table className="min-w-full text-sm" data-testid="finance-rows">
           <thead>
             <tr className="text-left text-xs text-steel-500 uppercase">
               <th className="py-1 pr-2">
-                <input
-                  type="checkbox"
-                  aria-label="Select every ready technician"
-                  checked={selectable.length > 0 && selectable.every((id) => selected.includes(id))}
-                  disabled={selectable.length === 0 || open !== null}
-                  onChange={(event) => setSelected(event.target.checked ? selectable : [])}
-                />
+                {/* A whole tap target around the box, not 13 px of it (tablets). */}
+                <label className="inline-flex size-11 cursor-pointer items-center justify-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Select every ready user"
+                    checked={selectable.length > 0 && selectable.every((id) => selected.includes(id))}
+                    disabled={selectable.length === 0 || open !== null}
+                    onChange={(event) => setSelected(event.target.checked ? selectable : [])}
+                    className="size-5 rounded border-steel-300 text-eje-600"
+                  />
+                </label>
               </th>
-              <th className="py-1 pr-3">Technician</th>
+              <th className="py-1 pr-3">User</th>
               <th className="py-1 pr-3">Status</th>
               <th className="py-1 pr-3">Files</th>
               <th className="py-1" />
@@ -116,8 +129,9 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
           </thead>
           <tbody>
             {data.rows.map((row) => (
-              <tr key={row.technician.id} className="border-t border-steel-100 align-top" data-testid="finance-row" data-status={row.status}>
+              <tr key={row.technician.id} className="border-t border-steel-100 align-top" data-testid="finance-row" data-status={row.status} data-role={row.technician.role} data-submitted={row.submittedAt === null ? 'no' : 'yes'}>
                 <td className="py-1.5 pr-2">
+                  <label className="inline-flex size-11 cursor-pointer items-center justify-center">
                   <input
                     type="checkbox"
                     aria-label={`Include ${row.technician.name}`}
@@ -126,10 +140,15 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                     onChange={(event) =>
                       setSelected(event.target.checked ? [...selected, row.technician.id] : selected.filter((id) => id !== row.technician.id))
                     }
+                    className="size-5 rounded border-steel-300 text-eje-600"
                     data-testid="finance-select"
                   />
+                  </label>
                 </td>
-                <td className="py-1.5 pr-3 font-medium text-steel-900">{row.technician.name}</td>
+                <td className="py-1.5 pr-3 font-medium text-steel-900">
+                  {row.technician.name}
+                  <span className="block text-xs font-normal text-steel-500">{roleLabel(row.technician.role)}</span>
+                </td>
                 <td className="py-1.5 pr-3">
                   <Badge tone={PAYROLL_STATUS[row.status].tone} size="sm">{PAYROLL_STATUS[row.status].label}</Badge>
                   <p className="mt-0.5 text-xs text-steel-500">{row.detail}</p>

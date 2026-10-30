@@ -704,6 +704,8 @@ export interface ChangeRequestRepository {
 export interface PayrollRepository {
   findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null>;
   listSubmissions(month: string): Promise<readonly MonthlySubmission[]>;
+  /** One person's submissions, newest month first — their monthly form history. */
+  listSubmissionsFor(userId: UserId): Promise<readonly MonthlySubmission[]>;
   /** Null when this technician's month was already submitted — one per month. */
   createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null>;
   findPackage(id: string): Promise<FinancePackage | null>;

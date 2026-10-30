@@ -168,3 +168,65 @@ first CODE-ONLY release.
   tablet **17 of 17**; the live update mechanism **8 of 8** — see
   `docs/staff-testing.md`, "Automated post-deployment verification — 30
   October 2026".
+
+---
+
+# Tester's changes and the timesheet freeze — 30 October 2026 (evening)
+
+The tester's three handwritten pages, implemented. Nothing here is approved.
+
+## The timesheet freeze — root cause and fix
+
+- **Reproduced** as a Technician (Sipho, tablet size, real browser): open a line, then
+  touch the **Date** field. A date field reports an EMPTY value the moment any part of
+  the date is cleared or retyped (Backspace, or retyping the day or month) and in-between
+  dates as digits arrive (`0005-10-03`). Traced keystroke by keystroke.
+- **Cause**: the line form was drawn only under the day row whose date equalled the
+  draft's CURRENT `date` — the value being typed. One keystroke in Date matched no row,
+  so React removed the form, with the input being typed in; every key after that went
+  nowhere. The typed values stayed in memory with nothing on screen able to reach them.
+  A clean change to another day also made the form jump rows and lose focus. No console
+  error, no failed request — which is why it looked like the page "stopped responding".
+- **Fix** (`src/app/(app)/timesheets/page.tsx`): the draft carries an `anchor` — the day
+  the form was opened on — and the form is drawn there and never moves. The typed date is
+  validated where it is typed (`lineDateProblem`, `src/lib/timesheet-dates.ts`): "Enter
+  the whole date", "That day has not happened yet", or "Choose a day in this timesheet";
+  Save line is disabled until it is a day of the period; the line lands on its date when
+  saved. No field or requirement was removed.
+- **Regression tests**: `src/lib/timesheet-dates.test.ts` (the half-typed states) and the
+  smoke step "a technician types a whole timesheet line, clearing and retyping the date,
+  and it is saved exactly as typed" — Backspace in Date (the original failure), every
+  field typed, an earlier field corrected, saved, reopened, read back after leaving and
+  returning, and checked on the server — with Technician permissions.
+
+## Built
+
+| Role | Change |
+|---|---|
+| All | **Jobs**: no Download CSV; no "Open work" button (the list still opens on open work; the Status box still offers it); **In progress** (`in_progress`) and **Awaiting completion** (the existing filter: completion, customer signature, review) added. No status or workflow changed. Closed Jobs is reached from the Jobs page. |
+| All | **My Monthly Forms** (`/payroll/mine`): the month's timesheet and attendance — Preview, Print, Download PDF, Export PDF, Submit once — and the **history** of every month submitted (`GET /api/payroll/:userId/history`; own, or the office). |
+| All | **Messages**: the existing chat (it already persisted and sent). Its defect: the **Send button was clipped** — the Delete chat bar made the pane taller than the card, whose `overflow-hidden` cut off the composer's last ~50 px. The pane is now a column; Send is visible and tested at tablet size, end to end both ways. |
+| Technician | **No New Job** (hidden; the server already refused `jobs.create` — now tested over HTTP); **My Jobs** filter. |
+| Coordinator | Sidebar: Timesheets and Closed Jobs removed; **My Monthly Forms**, **EJE Monthly Forms** and **Users** added. **Users** (`/users`): everybody's availability today and what is booked, each opening the person's page to record or cancel it — `availability.manage` only, and the read (`GET /api/staff`) carries no email, phone or account field. No account, role or password control. **Attendance**: the technician's layout first (her own monthly form with save/preview/print/download/export, and her own days), then the team register. |
+| Master | Sidebar: Closed Jobs removed; **EJE Monthly Forms** and **My Monthly Forms** added (Timesheets kept). Attendance as the Coordinator's. |
+| Office | **EJE Monthly Forms** (`/payroll`): **every user** — Masters, Coordinators, Technicians — with role, status, and a "submitted / not submitted" summary; select and send to Finance with the existing duplicate, integrity, correction and audit rules. A Master or Coordinator submits their own month like a technician (their timesheet is whatever lines they recorded; the package keeps two PDFs per person — no migration). |
+
+Also found and fixed by the tablet layout check, which now measures the new pages: the
+Finance package checkboxes were 13×13 px and the unrecorded-weekday confirmation a 20 px
+line — both now full tablet tap targets.
+
+**No migration.** Code-only.
+
+## Verification (this PC, every browser suite run alone)
+
+| Check | Result |
+|---|---|
+| Unit and application | **3349 passed, 0 failed**, 19 skipped (Windows-only, reasons in the tests) |
+| New API tests (`tester-changes-api.test.ts`) | 5 of 5: technician job creation 403; Users read for the office only, no account fields; every role in the month; the Coordinator submits her month once and is packaged; history own/office only; a message and its reply persist, a stranger gets 404 |
+| Typecheck, lint, build | clean |
+| Smoke | **268 passed, 0 failed**, no console or page errors (7 new steps) |
+| Tablet and phone layout | **123 passed, 0 failed** (the new pages included, after the two tap-target fixes) |
+| Workflow end-to-end | **65 passed, 0 failed** |
+| Routes | **33 passed** |
+| Signed document on both PDF paths | **18 passed** |
+| Update notice across two real builds | **6 of 6** |

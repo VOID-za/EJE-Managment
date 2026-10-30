@@ -7,7 +7,9 @@ import {
   isJobOpenWork,
   machineDisplayName,
   submissionCover,
+  userFullName,
   type Machine,
+  type StaffAvailabilityRow,
   type TemplateUsage,
   type User,
   messagesVisibleTo,
@@ -726,4 +728,42 @@ export const shellView = async ({ repos, actor }: ViewContext) => {
     ).length,
     delivery: deliveryTransports(),
   };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Users — who is available (the Coordinator's Records item)                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * USERS — WHO IS AVAILABLE. The tester, 30 October 2026: the Coordinator
+ * manages availability without going through Administration.
+ *
+ * Gated on `availability.manage` — the capability every availability WRITE
+ * already checks — and it returns names, roles, job titles and availability
+ * ONLY: no email, phone, login state or anything an account screen holds, so
+ * it is not a way into account administration. Recording and cancelling leave
+ * happen on the person's page, through the existing availability operations.
+ */
+export const staffAvailabilityView = async ({ repos, actor }: ViewContext) => {
+  requireOffice(actor, 'availability.manage', 'Users');
+  const today = businessToday();
+  const [users, records] = await Promise.all([repos.users.list(), repos.availability.list()]);
+  const rows: StaffAvailabilityRow[] = users
+    .slice()
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.firstName.localeCompare(b.firstName) || a.lastName.localeCompare(b.lastName))
+    .map((user) => {
+      const theirs = records
+        .filter((record) => record.userId === user.id && record.status === 'active' && record.endDate >= today)
+        .sort((a, b) => a.startDate.localeCompare(b.startDate));
+      return {
+        id: user.id,
+        name: userFullName(user),
+        role: user.role,
+        jobTitle: user.jobTitle,
+        active: user.active,
+        today: theirs.find((record) => record.startDate <= today) ?? null,
+        upcoming: theirs,
+      };
+    });
+  return { today, rows };
 };

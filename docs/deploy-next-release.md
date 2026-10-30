@@ -52,6 +52,13 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### NEXT: the tester's changes and the timesheet freeze (30 October 2026, evening)
+
+**The owner instructed this release on 30 October 2026.** What it carries and its tests:
+`docs/delivery-register-2026-10-30.md` (second part). Live is `e54f7d3`. **No migration,
+no schema change** — a code-only release: `-ExpectPending none`, the server's preflight
+must show all 41 shipped migrations already applied. Rollback target: `e54f7d3`.
+
 ### DEPLOYED — 30 October 2026: `e54f7d3` — the Attendance page's monthly form and the update notice on every release
 
 **DEPLOYED — 30 October 2026: `e54f7d3` is live** (full SHA

@@ -2,6 +2,7 @@
 
 import type {
   AttendanceRecord,
+  StaffAvailabilityRow,
   TimesheetComment,
   TimesheetEntry,
   TimesheetPeriod,
@@ -79,7 +80,7 @@ import type { JobListRow, JobView } from '@/application/job-view';
 import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
 import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
 import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
-import type { MonthlyFormsState } from '@/application/monthly-submissions';
+import type { MonthlyFormsState, MonthlyHistoryEntry } from '@/application/monthly-submissions';
 import type { AttendanceDocument } from '@/application/attendance-document';
 import type { FinancePackageView, PayrollMonthView } from '@/application/finance-packages';
 
@@ -442,6 +443,8 @@ export const reads = {
   machines: () => query<readonly MachineRow[]>('/api/machines'),
   machine: (machineId: string) => query<MachineScreen>(`/api/machines/${segment(machineId)}`),
   technician: (userId: string) => query<TechnicianScreen>(`/api/users/${segment(userId)}`),
+  /** The Users screen: every user's availability (`availability.manage`). */
+  staff: () => query<{ today: string; rows: readonly StaffAvailabilityRow[] }>('/api/staff'),
   admin: () => query<AdminScreen>('/api/admin'),
   library: () =>
     query<{
@@ -1151,6 +1154,8 @@ export const attendance = {
 /** PAY-01…08: monthly payroll forms and the Finance package. */
 export const payroll = {
   forms: (userId: string, month: string) => query<MonthlyFormsState>(`/api/payroll/${segment(userId)}/${segment(month)}`),
+  /** My Monthly Forms: every month this person submitted, newest first. */
+  history: (userId: string) => query<readonly MonthlyHistoryEntry[]>(`/api/payroll/${segment(userId)}/history`),
   timesheet: (userId: string, month: string) => query<TimesheetDocument>(`/api/payroll/${segment(userId)}/${segment(month)}/timesheet`),
   attendance: (userId: string, month: string, version: 'current' | 'submitted' = 'current') =>
     query<AttendanceDocument>(`/api/payroll/${segment(userId)}/${segment(month)}/attendance${search({ version: version === 'current' ? undefined : version })}`),
