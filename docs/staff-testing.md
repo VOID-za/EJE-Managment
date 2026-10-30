@@ -243,7 +243,7 @@ credentials and an approved Finance address are needed — section 4 of
 
 ## J. The Attendance page's monthly form, and the update notice (30 October 2026)
 
-In the release after `a46e767` (no migration; `docs/delivery-register-2026-10-30.md`).
+**LIVE since 30 October 2026** in `e54f7d3` (no migration; `docs/delivery-register-2026-10-30.md`).
 Fictional data only while the demonstration switcher is on.
 
 ### What the automated checks already prove (no person needed)
@@ -511,3 +511,39 @@ Finance package were NOT done on production (no test records there; email is
 not configured). They are proved by CI and the local browser suites, and are
 staff checks I1–I13. The physical tablet, its print dialog and a printer
 remain staff checks (H18–H20, I13).
+
+## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
+
+Run from outside the server against `https://eje.syncza.co.za`, signed in only
+through the demonstration switcher. **Read-only: no submission, package,
+attendance, timesheet or setting was created; Send to office was NOT pressed.**
+Email `refuse`.
+
+**API and screens: 36 passed, 0 failed** — health `e54f7d3`, ok, PostgreSQL
+reachable, `email refuse`, demonstration with switcher (unchanged); every
+screen renders for Master and Technician; the payroll month view; both monthly
+PDFs download under `PETER TIMESHEET SEP.pdf` / `PETER ATTEN SEPTEMBER.pdf`,
+**one page each** (counted in the files); every bypass refused (403/422);
+**the same 62 open-list, 15 closed, 37 signed and 25 issued jobs as just before
+the release**, and issued job cards EJE-2050, EJE-2046, EJE-2041, EJE-2001
+**byte-identical**.
+
+**Attendance page, emulated rugged tablet (no PDF viewer): 17 passed, 0
+failed.** Technician: the monthly attendance form (`PETER ATTEN
+SEPTEMBER.pdf`) with Preview (the form in the app), Print (asked exactly once),
+Download PDF (ONE page, the rule's name, 8 864 bytes), Export PDF (the same
+one-page file to the share sheet), and "Send September 2026 to the office"
+offered (not pressed). Master and Coordinator: all three technicians' status
+(David Ready, Mike Ready, Peter Not submitted), Open form with
+Preview/Print/Download/Export and **no** Send. No page errors; nothing written
+but sign-ins.
+
+**Update mechanism, live: 8 passed, 0 failed.** The page is `e54f7d3` and the
+worker in control is registered as `/eje-sw.js?build=e54f7d3`; with the server
+agreeing, no notice. When `/api/health` reports another build (simulated in
+that browser only), the deployed code shows "A new version of EJE is
+available" with Update now, naming both versions, without reloading; Not now
+hides it. Update now activating a real new release is proved across two real
+builds (CI and this PC, 6 of 6); on production it will first be seen at the
+NEXT release. Tablets still open on `a46e767` get that release's older bar
+when their browser re-checks the worker (next page load, or within about 24 h).

@@ -1519,7 +1519,7 @@ finish — is `docs/delivery-register-2026-10-29.md`. Nothing here is approved.
 | PAY-08 | **Audit and archive**: who prepared and sent, the month, recipient, technicians, file names, time, provider answer and package reference; every file downloadable again exactly as sent (office only). A correction after sending never alters the sent package; the corrected forms go in a new package, marked CORRECTED. | **TESTED — awaiting approval.** Detail, files, tests and decisions: `docs/delivery-register-2026-10-29.md`. Migration 0040. |
 | VIS-1 | **One EJE mark**: the favicon, the home-screen/PWA icons and the in-app logo are the same "EJE" tile in the brand blue (generated from one geometry, `scripts/generate-pwa-icons.mjs`); the demonstration banner follows the dark theme. No other colour, font, layout or workflow changed. | **IMPLEMENTED.** There is no real EJE company logo in the repository or the project folder; it replaces this mark when supplied (owner). Detail, files, tests and decisions: `docs/delivery-register-2026-10-29.md`. Migration 0040. |
 
-### The Attendance page's monthly form, the update notice on every release — 30 October 2026
+### The Attendance page's monthly form, the update notice on every release — 30 October 2026 (DEPLOYED in `e54f7d3`; not yet approved)
 
 Asked for by the owner on 30 October 2026. Register: `docs/delivery-register-2026-10-30.md`.
 No migration. Nothing here is approved.

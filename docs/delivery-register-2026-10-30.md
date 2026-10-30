@@ -141,3 +141,30 @@ See "Release" below for CI and the live part.
 | Off-site backup copy | An object-storage account (rclone remote) or a mounted second disk — `EJE_BACKUP_OFFSITE_RCLONE` / `EJE_BACKUP_OFFSITE_DIR` | Owner |
 | GitHub issues | This session has no GitHub write access; the stale issues are listed in `docs/delivery-register-2026-10-29.md` §1 | Owner |
 | Approval | Every TESTED row | Owner |
+
+## Release
+
+**DEPLOYED — 30 October 2026: `e54f7d3` is live** (full SHA
+`e54f7d31ad424ed64209cc12cd546629e8c74ca3`; CI run 41114092953 green on every
+job and step, as was run 41112183321 on `1254e13`). Run by Claude on the
+owner's instruction with the guarded release tool, `-ExpectPending none` — the
+first CODE-ONLY release.
+
+- **Read-only check**: host `srv2000625`; `a46e767` serving, healthy, database
+  reachable; `/opt/eje/releases/e54f7d3` new; 185 323 MB free; script SHA-256
+  `5ab56162…b3c6` matched. CHECK PASSED. No migration or schema file changed
+  since `a46e767` (journal: 41 entries, last `0040_monthly_payroll`).
+- **Release**, from the server: 1/6 build beside the live release; 2/6 **backup
+  proven** — `/var/backups/eje/eje-eje_production-2026-10-30T19-56-09Z`,
+  verified, key-checked, restore-tested; 3/6 preflight: all 41 shipped
+  migrations already applied; 4/6 **migrate: none — the database is not
+  touched** (`migrated=none` on record); 5/6 switch `a46e767` → `e54f7d3` at
+  19:56:18Z; 6/6 health at 19:56:20Z. From outside: health `e54f7d3`, and
+  "update notice: page carries build e54f7d3; worker for e54f7d3 served".
+  "RELEASED e54f7d3 - confirmed from outside; installed apps will be offered the
+  update." **Rollback target: `a46e767`** (same database).
+- **Verified afterwards from outside** (read-only — nothing submitted, prepared
+  or recorded): API/screens **36 of 36**; live Attendance in an emulated rugged
+  tablet **17 of 17**; the live update mechanism **8 of 8** — see
+  `docs/staff-testing.md`, "Automated post-deployment verification — 30
+  October 2026".
