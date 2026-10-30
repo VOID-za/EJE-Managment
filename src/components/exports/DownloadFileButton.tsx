@@ -31,6 +31,7 @@ export const DownloadFileButton = ({
   fallbackName,
   label = 'Download',
   disabled = false,
+  testId = 'export-csv',
 }: {
   /** The export route, with this screen's current filters already on it. */
   readonly href: string;
@@ -38,6 +39,8 @@ export const DownloadFileButton = ({
   readonly fallbackName: string;
   readonly label?: string;
   readonly disabled?: boolean;
+  /** The button's test id; its failure line gets `-failure` after it. */
+  readonly testId?: string;
 }) => {
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -70,12 +73,12 @@ export const DownloadFileButton = ({
         disabled={disabled}
         leadingIcon={<Icon name="download" className="size-4" />}
         onClick={() => void run()}
-        data-testid="export-csv"
+        data-testid={testId}
       >
         {label}
       </Button>
       {failure !== null && (
-        <p className="text-xs text-signal-600" role="status" data-testid="export-csv-failure">
+        <p className="text-xs text-signal-600" role="status" data-testid={`${testId}-failure`}>
           {failure}
         </p>
       )}

@@ -24,6 +24,12 @@
  */
 
 // v2 (29 October 2026): the icons changed to the application's own EJE mark.
+//
+// 30 October 2026 (REL-UPD-1): this file is now registered as
+// `/eje-sw.js?build=<commit>`, so every release installs a new worker without
+// this file changing. These lines are also the one change that lets a tablet
+// still running the release before that (which registered plain `/eje-sw.js`)
+// notice this release: its browser sees new bytes here.
 const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `eje-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `eje-assets-${CACHE_VERSION}`;

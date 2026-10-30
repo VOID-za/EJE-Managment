@@ -13,6 +13,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MyAttendance } from '@/components/attendance/MyAttendance';
 import { AbsenceReasonPicker } from '@/components/attendance/AbsenceReasonPicker';
+import { MonthlyAttendanceForms } from '@/components/attendance/MonthlyAttendanceForms';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { attendance } from '@/api/endpoints';
 import type { RegisterRow } from '@/application/attendance-operations';
@@ -33,6 +34,9 @@ import { formatDateTime } from '@/lib/format';
  * carries a badge saying so, because that is what the office checks against;
  * the register still records what actually happened, and recording it does not
  * touch the leave. Job status plays no part.
+ *
+ * THE MONTHLY FORM IS HERE TOO (30 October 2026): Preview, Print, Download PDF,
+ * Export PDF and Send to office for the month — see `MonthlyAttendanceForms`.
  */
 const AttendancePage = () => {
   const currentUser = useCurrentUser();
@@ -53,6 +57,7 @@ const AttendancePage = () => {
           title="Attendance"
           description="Mark yourself Present or Absent for each day. Nothing is filled in for you."
         />
+        <MonthlyAttendanceForms />
         <MyAttendance />
       </>
     );
@@ -121,6 +126,8 @@ const AttendancePage = () => {
       </Card>
 
       <AttendanceExport today={data?.today ?? date} />
+
+      <MonthlyAttendanceForms />
 
       {query.error !== null ? (
         <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />

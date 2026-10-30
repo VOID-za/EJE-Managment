@@ -52,6 +52,38 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### NEXT: the Attendance page's monthly form and the update notice on every release (30 October 2026)
+
+**The owner instructed this release on 30 October 2026.** What it carries and
+its tests: `docs/delivery-register-2026-10-30.md`. Live is `a46e767` (journal
+at 0040, all applied). **No migration** — so it is the first CODE-ONLY release
+through the guarded tool, which now supports one:
+
+```powershell
+# from the worktree, under the PowerShell tool (Windows OpenSSH sees the agent)
+.\deploy\release\stage-release.ps1 -Sha <full-sha> -CheckOnly -ExpectPending none -SshExe "$env:WINDIR\System32\OpenSSH\ssh.exe" -LogDir <scratch>
+.\deploy\release\stage-release.ps1 -Sha <full-sha> -ExpectPending none -SshExe "$env:WINDIR\System32\OpenSSH\ssh.exe" -LogDir <scratch>
+```
+
+The server still builds beside the live release, backs up, verifies,
+key-checks and restore-tests; its preflight must show all 41 shipped
+migrations already applied (anything pending → STOP, nothing changed); nothing
+is migrated; then the switch and the health gate with automatic rollback. The
+tool then checks from outside that a freshly served page carries the new build
+and the worker answers for it — the condition for installed apps to be offered
+the update. **Rollback target: `a46e767`** (identical database; nothing in this
+release writes a new shape).
+
+**FROM THIS RELEASE ON, EVERY RELEASE SHOWS THE UPDATE NOTICE** with no extra
+step: it is detected from the build commit the release script already stamps.
+**The first time is different:** a tablet left open on `a46e767` runs the old
+detection, which only reacts when the worker file's bytes change. This release
+changes them (a recorded comment in `public/eje-sw.js`), so such a tablet shows
+the old bar ("A new version of EJE is ready") when its browser next checks the
+worker — on its next page load, or within about 24 hours — and any tablet that
+opens EJE afresh simply gets this release. From this release on, an open page
+notices within five minutes or on coming back to the screen.
+
 ### DEPLOYED — 29 October 2026: `a46e767` — monthly payroll forms, the Finance package and the app mark
 
 **DEPLOYED — 29 October 2026: `a46e767` is live** (full SHA

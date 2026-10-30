@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { planOffsite, rcloneCommands, sameMediaWarning } from './offsite';
 
@@ -22,7 +23,8 @@ describe('planning the copy off this machine', () => {
 
   it('takes a mounted directory', () => {
     const plan = planOffsite({ EJE_BACKUP_OFFSITE_DIR: '/mnt/offsite/eje' }, '/var/backups/eje');
-    expect(plan.destinations).toEqual([{ kind: 'directory', target: '/mnt/offsite/eje' }]);
+    // `resolve`: the same path on the Linux server, and this machine's spelling of it elsewhere.
+    expect(plan.destinations).toEqual([{ kind: 'directory', target: resolve('/mnt/offsite/eje') }]);
     expect(plan.notes).toEqual([]);
   });
 

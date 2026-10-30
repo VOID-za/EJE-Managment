@@ -95,6 +95,29 @@ function PublicHealth {
   } catch { return "ERROR: $($_.Exception.Message)" }
 }
 
+# THE UPDATE NOTICE, FROM OUTSIDE. REL-UPD-1 (30 October 2026). An installed
+# EJE notices a release by comparing the build in the page it is running with
+# the build /api/health reports, and installs the worker registered under that
+# build. So a release is only finished when a freshly served page carries the
+# new build and the worker answers for it - otherwise tablets would keep the
+# old version with no notice. Read only.
+function PublicGet([string]$Path) {
+  $url = $HealthUrl -replace '/api/health$', $Path
+  if ($ProbeScript) { return [string](& $ProbeScript get $url) }
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    return (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 -Uri $url).Content
+  } catch { return "ERROR: $($_.Exception.Message)" }
+}
+function UpdateNoticeReady([string]$Build) {
+  $page = PublicGet '/dashboard'
+  $worker = PublicGet "/eje-sw.js?build=$Build"
+  $pageOk = $page -match "name=`"eje-build-commit`" content=`"$Build`""
+  $workerOk = $worker -match 'EJE_SKIP_WAITING'
+  Log "update notice: page carries build $(if ($pageOk) { $Build } else { 'NOT ' + $Build }); worker for $Build $(if ($workerOk) { 'served' } else { 'NOT served' })"
+  return ($pageOk -and $workerOk)
+}
+
 # ---- 1. local verification, before any connection --------------------------------
 if (-not $Rollback) {
   if ($Sha -notmatch '^[0-9a-f]{40}$') { Stop-Stage "Give the FULL 40-character commit hash, not '$Sha'. Nothing was contacted." }
@@ -173,7 +196,10 @@ switch ($mode) {
     if ($out -match "RELEASED: serving $short") {
       $public = PublicHealth
       Log "public health: $($public.Trim())"
-      if ($public -match "`"commit`":`"$short`"" -and $public -match '"database":"reachable"') { Log "`nRELEASED $short - confirmed from outside."; exit 0 }
+      if ($public -match "`"commit`":`"$short`"" -and $public -match '"database":"reachable"') {
+        if (UpdateNoticeReady $short) { Log "`nRELEASED $short - confirmed from outside; installed apps will be offered the update."; exit 0 }
+        Stop-Stage "$short is serving and healthy, but the page or the worker does not present the new build (above), so installed apps would not be offered the update. Read before acting." 2
+      }
       Stop-Stage "The server reports $short released, but the public health endpoint does not confirm it (above). Read before acting." 2
     }
     if ($out -match 'ROLLBACK NOT VERIFIED') { Stop-Stage 'THE ROLLBACK COULD NOT BE VERIFIED. Do not retry; read the server output and decide by hand.' 2 }

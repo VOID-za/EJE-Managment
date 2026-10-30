@@ -4159,6 +4159,150 @@ await step('the technician asks to correct the sent timesheet; the office accept
 });
 
 /*
+ * PAY-01, PAY-02 ON THE ATTENDANCE PAGE (30 October 2026). The owner found the
+ * Attendance page without the Time Sheet's controls. Every one is exercised
+ * here, on the real PDF: Preview shows the form, Print asks the browser once,
+ * Download PDF saves a ONE-page file under the rule name, Export PDF hands that
+ * same file to the share sheet, and Send to office submits the month once —
+ * after which nothing offers it again and a second request is refused. The
+ * office sees the status, opens the form, and is not offered Send.
+ */
+await step('the Attendance page previews, prints, downloads, exports and sends the monthly attendance form; the office reviews it (PAY-01, PAY-02)', async () => {
+  const pdfPages = (bytes) => (Buffer.from(bytes).toString('latin1').match(/\/Type\s*\/Page(?!s)/gu) ?? []).length;
+  await signInAs(page, 'Naledi Molefe');
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const section = page.getByTestId('monthly-attendance-section');
+  await section.waitFor({ timeout: 15000 });
+  const card = section.getByTestId('monthly-forms');
+  await card.waitFor({ timeout: 15000 });
+  if ((await card.getByTestId('monthly-timesheet').count()) !== 0) throw new Error('the Attendance page shows the timesheet form too');
+  const fileName = (await card.getByTestId('monthly-attendance-file').innerText()).split(' · ')[0];
+  if (!/^NALEDI ATTEN [A-Z]+\.pdf$/u.test(fileName)) throw new Error(`attendance file name: ${fileName}`);
+
+  // Preview: the form itself, in the application.
+  await card.getByTestId('monthly-attendance-preview').click();
+  const preview = page.getByTestId('document-preview');
+  await preview.waitFor({ timeout: 20000 });
+  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
+    await page.getByTestId('attendance-document').waitFor({ timeout: 15000 });
+    if (!(await page.getByTestId('attendance-document-technician').innerText()).includes('Naledi')) throw new Error('the preview is another person’s form');
+  }
+  await page.getByTestId('preview-close').click();
+  await preview.waitFor({ state: 'detached', timeout: 10000 });
+
+  // Print: the browser's print, asked once — on the TABLET's path (no PDF
+  // viewer: the form is printed from the page), which is what the rugged
+  // tablets run and what CI's headless shell reports. A browser WITH a viewer
+  // prints from the PDF frame instead, a real print this stub cannot catch
+  // (headless Chrome can hang on it); that path is tablet-pdf-check's desktop
+  // case. The stub ends the print the way a real one does, with `afterprint`.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'pdfViewerEnabled', { value: false, configurable: true });
+    window.__ejePrints = 0;
+    window.print = () => {
+      window.__ejePrints += 1;
+      window.dispatchEvent(new Event('afterprint'));
+    };
+  });
+  await card.getByTestId('monthly-attendance-print').click();
+  await preview.waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => window.__ejePrints >= 1, null, { timeout: 20000 });
+  await page.waitForTimeout(500);
+  const prints = await page.evaluate(() => window.__ejePrints);
+  if (prints !== 1) throw new Error(`Print asked the browser ${prints} times`);
+  await page.getByTestId('preview-close').click();
+  await preview.waitFor({ state: 'detached', timeout: 10000 });
+
+  // Download PDF: a real file, one page, the rule's name.
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), card.getByTestId('monthly-attendance-download').click()]);
+  if (download.suggestedFilename() !== fileName) throw new Error(`downloaded as ${download.suggestedFilename()}, expected ${fileName}`);
+  const downloaded = await readFile(await download.path());
+  if (downloaded.subarray(0, 5).toString('latin1') !== '%PDF-' || pdfPages(downloaded) !== 1) throw new Error(`the downloaded PDF has ${pdfPages(downloaded)} pages`);
+
+  // Export PDF: the same file, handed to the share sheet (stubbed: a headless browser has none).
+  await page.evaluate(() => {
+    window.__ejeShared = null;
+    navigator.canShare = () => true;
+    navigator.share = async (data) => {
+      const file = data.files[0];
+      window.__ejeShared = { name: file.name, type: file.type, text: new TextDecoder('latin1').decode(await file.arrayBuffer()) };
+    };
+  });
+  await card.getByTestId('monthly-attendance-export').click();
+  await page.waitForFunction(() => window.__ejeShared !== null, null, { timeout: 20000 });
+  const shared = await page.evaluate(() => window.__ejeShared);
+  if (shared.name !== fileName || shared.type !== 'application/pdf') throw new Error(`exported ${shared.name} (${shared.type})`);
+  if ((shared.text.match(/\/Type\s*\/Page(?!s)/gu) ?? []).length !== 1) throw new Error('the exported PDF is not one page');
+
+  // Send to office: once, and it says the timesheet goes with it.
+  await card.getByTestId('monthly-forms-together').waitFor({ timeout: 5000 });
+  const acknowledge = card.getByTestId('monthly-forms-acknowledge');
+  if ((await acknowledge.count()) > 0) await acknowledge.check();
+  const send = card.getByTestId('monthly-forms-submit');
+  if (!(await send.innerText()).startsWith('Send ')) throw new Error(`the button reads "${await send.innerText()}"`);
+  await send.click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
+  await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  await card.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
+  if ((await card.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('a sent month still offers Send to office');
+  const month = await section.getByTestId('monthly-attendance-month').inputValue();
+  const again = await page.evaluate(async ({ base, month }) => {
+    const me = await (await fetch(`${base}/api/auth/me`)).json().catch(() => null);
+    const id = me?.data?.user?.id;
+    const response = await fetch(`${base}/api/payroll/${id}/${month}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `smoke-again-${Date.now()}` },
+      body: JSON.stringify({ confirmUnrecorded: true }),
+    });
+    return { id, status: response.status };
+  }, { base: BASE, month });
+  if (typeof again.id !== 'string') throw new Error('could not read the signed-in technician');
+  if (again.status < 400) throw new Error(`a second submission answered ${again.status}`);
+
+  // The office: the month's status, the form opened, and no Send for another person's month.
+  await signInAsMasterIfNeeded();
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const office = page.getByTestId('monthly-attendance-section');
+  await office.waitFor({ timeout: 15000 });
+  await office.getByTestId('monthly-attendance-month').fill(month);
+  const row = office.getByTestId('monthly-attendance-row').filter({ hasText: 'Naledi' });
+  await row.waitFor({ timeout: 15000 });
+  if ((await row.getAttribute('data-status')) !== 'ready') throw new Error(`Naledi's month is ${await row.getAttribute('data-status')} to the office`);
+  await row.getByTestId('monthly-attendance-open').click();
+  const officeCard = office.getByTestId('monthly-forms');
+  await officeCard.getByTestId('monthly-forms-submitted').waitFor({ timeout: 15000 });
+  await officeCard.getByTestId('monthly-attendance-download').waitFor({ timeout: 5000 });
+  if ((await officeCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the office was offered Send for a technician');
+
+  // The Coordinator: the same office view, the same form, and no Send either.
+  await signInAs(page, 'Christene van Niekerk');
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const coordinator = page.getByTestId('monthly-attendance-section');
+  await coordinator.getByTestId('monthly-attendance-month').fill(month);
+  const coordinatorRow = coordinator.getByTestId('monthly-attendance-row').filter({ hasText: 'Naledi' });
+  await coordinatorRow.waitFor({ timeout: 15000 });
+  await coordinatorRow.getByTestId('monthly-attendance-open').click();
+  const coordinatorCard = coordinator.getByTestId('monthly-forms');
+  await coordinatorCard.getByTestId('monthly-attendance-preview').waitFor({ timeout: 15000 });
+  if ((await coordinatorCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the Coordinator was offered Send for a technician');
+
+  // Another technician sees only their own month, and is refused Naledi's.
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const own = page.getByTestId('monthly-attendance-section');
+  await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
+  if ((await own.getByTestId('monthly-attendance-status').count()) !== 0) throw new Error('a technician was shown the office month list');
+  if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('SIPHO ATTEN ')) throw new Error('a technician was shown another person’s form');
+  const refused = await page.evaluate(async ({ base, id, month }) => {
+    const forms = await fetch(`${base}/api/payroll/${id}/${month}`);
+    const pdf = await fetch(`${base}/api/payroll/${id}/${month}/attendance/pdf`);
+    const officeMonth = await fetch(`${base}/api/payroll/months/${month}`);
+    return [forms.status, pdf.status, officeMonth.status];
+  }, { base: BASE, id: again.id, month });
+  if (refused.join() !== '403,403,403') throw new Error(`another technician's forms, PDF and the office month answered ${refused.join(', ')}`);
+});
+
+/*
  * PAY-01…PAY-08: MONTHLY FORMS. The technician previews last month's timesheet
  * and attendance (the actual documents, one page each, named by the rule) and
  * submits both together; the office sees the month, prepares the Finance

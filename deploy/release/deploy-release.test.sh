@@ -232,6 +232,27 @@ sandbox
 EXPECT_PENDING='0031_test_repair_date_received,0030_library_page_coverage_unknown' run --check "$SHA" > /dev/null
 that "...and --check refuses it too, read only" "grep -q 'out of order or repeated' '$T/out' && [ \$(called systemd-run) = 0 ]"
 
+# ---- a CODE-ONLY release: EXPECT_PENDING=none (30 October 2026) --------------------
+# Every gate but the migration: built, backed up, verified, key-checked,
+# restore-tested; the preflight must show every shipped migration ALREADY
+# applied, and nothing is migrated.
+sandbox; touch "$T/nothing-pending"
+EXPECT_PENDING=none run --release "$SHA" > /dev/null
+that "a code-only release (EXPECT_PENDING=none) with nothing pending releases" "grep -q 'RELEASED: serving $SHORT' '$T/out' && [ \$(serving) = $SHORT ]"
+that "...every gate ran, in order, and the database was NOT migrated" \
+  "[ \"\$(grep -oE '^systemd-run (build|backup|verify|key-check|restore-test|preflight|migrate)|^systemctl restart' '$T/calls' | paste -sd,)\" = 'systemd-run build,systemd-run backup,systemd-run verify,systemd-run key-check,systemd-run restore-test,systemd-run preflight,systemctl restart' ]"
+that "...it said so, and recorded it" "grep -q '4/6 migrate: none' '$T/out' && grep -q '^migrated=none' '$T/state/release-$SHORT.state'"
+sandbox
+EXPECT_PENDING=none run --release "$SHA" > /dev/null
+that "a release declared code-only while migrations ARE pending stops — nothing migrated, nothing switched" \
+  "grep -q 'declared to carry no migration, but preflight does not show all 32' '$T/out' && untouched"
+sandbox; touch "$T/nothing-pending" "$T/extra-fail"
+EXPECT_PENDING=none run --release "$SHA" > /dev/null
+that "a code-only release still stops on a preflight FAIL that is not accepted" "grep -q 'preflight FAILs not accepted' '$T/out' && untouched"
+sandbox; touch "$T/nothing-pending"
+EXPECT_PENDING=none run --check "$SHA" > /dev/null
+that "--check accepts EXPECT_PENDING=none, read only" "grep -q 'CHECK PASSED' '$T/out' && [ \$(called systemd-run) = 0 ]"
+
 that "no single-migration assumption is left in the gate (static)" \
   "! grep -nE '\\+1 not applied|exactly one pending' '$SCRIPT'"
 

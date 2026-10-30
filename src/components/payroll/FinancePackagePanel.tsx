@@ -9,7 +9,7 @@ import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDateTime } from '@/lib/format';
 
-const STATUS: Record<PayrollMonthRow['status'], { label: string; tone: 'amber' | 'green' | 'red' | 'blue' | 'outline' }> = {
+export const PAYROLL_STATUS: Record<PayrollMonthRow['status'], { label: string; tone: 'amber' | 'green' | 'red' | 'blue' | 'outline' }> = {
   not_submitted: { label: 'Not submitted', tone: 'amber' },
   ready: { label: 'Ready', tone: 'green' },
   correction_pending: { label: 'Correction waiting', tone: 'red' },
@@ -131,7 +131,7 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                 </td>
                 <td className="py-1.5 pr-3 font-medium text-steel-900">{row.technician.name}</td>
                 <td className="py-1.5 pr-3">
-                  <Badge tone={STATUS[row.status].tone} size="sm">{STATUS[row.status].label}</Badge>
+                  <Badge tone={PAYROLL_STATUS[row.status].tone} size="sm">{PAYROLL_STATUS[row.status].label}</Badge>
                   <p className="mt-0.5 text-xs text-steel-500">{row.detail}</p>
                 </td>
                 <td className="py-1.5 pr-3 text-xs text-steel-600">

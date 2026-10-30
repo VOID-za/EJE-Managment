@@ -35,6 +35,7 @@
     "pdf-pixels": "vitest run --config vitest.browser.config.mts",
     "tablet-pdf-check": "node scripts/tablet-pdf-check.mjs",
     "responsive-check": "node scripts/responsive-check.mjs",
+    "update-check": "node scripts/update-check.mjs",
     "backup": "tsx src/db/backup/run.ts",
     "backup:verify": "tsx src/db/backup/verify.ts",
     "backup:key-check": "tsx src/db/backup/key-check.ts",

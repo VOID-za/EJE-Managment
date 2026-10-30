@@ -289,6 +289,16 @@ jobs:
       - name: Smoke suite
         run: npm run smoke
 
+      # REL-UPD-1: EVERY release must show installed apps "A new version of EJE
+      # is available" with Update now, and Update now must really move them to
+      # it. Proved across two real builds served on one address in turn — the
+      # build above (release A) and a second one stamped with another commit
+      # (release B) — in a tablet-sized browser, with no reload or cache clear
+      # before the notice. `src/ops/release/update-notification.test.ts` pins
+      # that this step stays here.
+      - name: Update notice across two releases
+        run: node scripts/update-check.mjs
+
       # The screenshots and the server log, for a failure somebody has to
       # diagnose from a transcript rather than a browser.
       #

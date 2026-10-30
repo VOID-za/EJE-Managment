@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join, normalize } from 'node:path';
+import { join, posix } from 'node:path';
 import { BackupRefused } from './plan';
 
 /**
@@ -170,7 +170,8 @@ export const assertSafeMembers = (
       );
     }
 
-    if (normalize(member.path).split('/').includes('..')) {
+    // A tar member name is a POSIX path on every platform, so it is read as one.
+    if (posix.normalize(member.path).split('/').includes('..')) {
       throw new BackupRefused(
         `the document archive contains "${member.path}", which climbs out of the directory it ` +
           'would be unpacked into. Nothing was extracted.',

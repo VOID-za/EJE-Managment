@@ -18,5 +18,12 @@ export default defineConfig({
     // `*.db.test.ts` and run under `npm run db:test`. Both are excluded here so
     // `npm test` needs nothing installed beyond the project itself.
     exclude: ['**/node_modules/**', 'src/**/*.browser.test.ts', 'src/**/*.db.test.ts'],
+    /*
+     * 15 s, not Vitest's 5 s. The API suites build the whole application per
+     * test; with every core busy (the suite in parallel, or a browser suite
+     * running beside it) eleven healthy tests crossed 5 s on 29 October 2026
+     * and passed alone, 96 of 96. A real hang still fails, three times later.
+     */
+    testTimeout: 15_000,
   },
 });

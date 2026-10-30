@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   backupStamp,
@@ -63,20 +64,20 @@ describe('planning a backup', () => {
 
   it('names the destination after the database and the moment', () => {
     const plan = planBackup(BASE, NOW, '/srv/eje');
-    expect(plan.destination).toBe('/var/backups/eje/eje-eje_production-2026-09-26T21-14-03Z');
+    expect(plan.destination).toBe(resolve('/var/backups/eje/eje-eje_production-2026-09-26T21-14-03Z'));
     expect(plan.databaseName).toBe('eje_production');
   });
 
   it('takes the document directory from the same variable the application uses', () => {
     const plan = planBackup({ ...BASE, EJE_STORAGE_DIR: '/var/lib/eje/storage' }, NOW, '/srv/eje');
-    expect(plan.storageRoot).toBe('/var/lib/eje/storage');
+    expect(plan.storageRoot).toBe(resolve('/var/lib/eje/storage'));
   });
 
   it('falls back to the same default the application falls back to', () => {
     // `readStorageConfiguration` resolves `.eje-storage` beside the app when
     // `EJE_STORAGE_DIR` is unset. A backup that guessed differently would
     // archive an empty directory and call it a success.
-    expect(planBackup(BASE, NOW, '/srv/eje').storageRoot).toBe('/srv/eje/.eje-storage');
+    expect(planBackup(BASE, NOW, '/srv/eje').storageRoot).toBe(resolve('/srv/eje/.eje-storage'));
   });
 
   it('does not treat an absent directory as permission to skip the documents', () => {
@@ -181,7 +182,7 @@ describe('the manifest', () => {
   it('records what was backed up, and from where', () => {
     expect(manifest.databaseName).toBe('eje_production');
     expect(manifest.storedFiles).toBe(42);
-    expect(manifest.storageRoot).toBe('/srv/eje/.eje-storage');
+    expect(manifest.storageRoot).toBe(resolve('/srv/eje/.eje-storage'));
     expect(manifest.appCommit).toBe('abc1234');
   });
 

@@ -76,6 +76,12 @@ const nextConfig: NextConfig = {
    * class of advisory to try first. It buys nobody anything.
    */
   poweredByHeader: false,
+  /*
+   * `.next` everywhere but one place: `scripts/update-check.mjs` builds a
+   * SECOND release beside the first (`EJE_DIST_DIR=.next-update`) so CI can
+   * prove the update notice across two real builds. REL-UPD-1.
+   */
+  distDir: process.env.EJE_DIST_DIR ?? '.next',
   env: {
     EJE_BUILD_COMMIT: buildCommit(),
     EJE_BUILD_TIME: new Date().toISOString(),

@@ -179,7 +179,9 @@ describe('what may be unpacked', () => {
   });
 });
 
-describe('unpacking a real archive', () => {
+// GNU tar, as on the server. On Windows it reads `C:…` as a remote host
+// ("Cannot connect to C: resolve failed"), so these run on Linux — CI — only.
+describe.skipIf(process.platform === 'win32')('unpacking a real archive', () => {
   it('unpacks an ordinary document archive and reports what landed', async () => {
     const root = workspace();
     const storage = join(root, 'storage');

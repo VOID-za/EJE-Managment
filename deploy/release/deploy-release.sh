@@ -1,7 +1,10 @@
 #!/bin/bash
 # EJE GUARDED RELEASE — build, back up, migrate, switch, prove; roll back where
 # that is safe. Release readiness for de0d9b6, 25 October 2026; a release may
-# carry several migrations (EXPECT_PENDING, in order) since the job-forms work.
+# carry several migrations (EXPECT_PENDING, in order) since the job-forms work,
+# or NONE (EXPECT_PENDING=none, 30 October 2026): a code-only release still
+# builds, backs up and restore-tests, and its preflight must show every shipped
+# migration ALREADY applied — the database is then not touched at all.
 #
 #   bash deploy-release.sh --check   <full-sha>   read-only: is this server ready for that release?
 #   bash deploy-release.sh --release <full-sha>   the whole release, every step gated
@@ -75,6 +78,8 @@ case "$MODE" in --check|--release|--rollback|--status) ;; *) stop "say --check <
 expected_pending_problem() {
   local previous='' tag
   [ -n "$EXPECT_PENDING" ] || { echo 'EXPECT_PENDING is empty'; return; }
+  # A code-only release, said in so many words — never inferred from an empty value.
+  [ "$EXPECT_PENDING" = none ] && return
   case "$EXPECT_PENDING" in *' '*|,*|*,|*,,*) echo "EXPECT_PENDING must be tags separated by single commas: $EXPECT_PENDING"; return;; esac
   for tag in ${EXPECT_PENDING//,/ }; do
     printf '%s' "$tag" | grep -qE '^[0-9]{4}_[a-z0-9_]+$' || { echo "not a migration tag: $tag"; return; }
@@ -264,6 +269,22 @@ journal_tags() {
 shipped_tags=$(journal_tags)
 shipped=$(printf '%s\n' "$shipped_tags" | grep -c .)
 [ "$shipped" -gt 0 ] || stop "the release's migration journal could not be read ($RELEASE/src/db/migrations/meta/_journal.json). Nothing was changed."
+
+if [ "$EXPECT_PENDING" = none ]; then
+  # A CODE-ONLY RELEASE. The operator said it carries no migration, so the
+  # database must already hold every one this release ships — exactly as many
+  # as its journal lists. A pending migration here is a release that was
+  # described wrongly: STOP, nothing changed. Nothing is migrated.
+  say "3/6 preflight: this release is declared to carry NO migration; expecting all $shipped shipped migrations already applied"
+  before=$(preflight)
+  printf '%s\n' "$before" > "$STATE_DIR/preflight-before-$SHORT.log"
+  printf '%s\n' "$before" | grep -qE "^\[ ok \] Migrations +all $shipped applied\." \
+    || stop "this release was declared to carry no migration, but preflight does not show all $shipped of its migrations applied — see $STATE_DIR/preflight-before-$SHORT.log. Nothing was changed."
+  extra=$(unexpected_fails "$before" '')
+  [ -z "$extra" ] || stop "preflight FAILs not accepted for this server: $(printf '%s' "$extra" | paste -sd,). Nothing was changed."
+  say "4/6 migrate: none — the database is not touched"
+  record "$SHORT" migrated none
+else
 expected_count=$(printf '%s\n' "${EXPECT_PENDING//,/ }" | wc -w | tr -d ' ')
 newest=$(printf '%s\n' "$shipped_tags" | tail -n "$expected_count" | paste -sd, -)
 [ "$newest" = "$EXPECT_PENDING" ] \
@@ -306,6 +327,7 @@ printf '%s\n' "$after" | grep -qE "^\[ ok \] Migrations +all $shipped applied\."
   || stop "after the migration, preflight does not show all $shipped migrations applied ($STATE_DIR/preflight-after-$SHORT.log). The live release is still serving. Do not switch."
 extra=$(unexpected_fails "$after" '')
 [ -z "$extra" ] || stop "after the migration, preflight FAILs not accepted: $(printf '%s' "$extra" | paste -sd,). The live release is still serving."
+fi
 
 # 5. SWITCH, ATOMICALLY, AND PROVE WHAT IS SERVING.
 say "5/6 switch: $LIVE -> $RELEASE"

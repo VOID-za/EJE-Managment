@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 
 /**
  * GETTING THE BACKUP OFF THIS MACHINE. BACKUP-2.
@@ -62,7 +62,7 @@ export const planOffsite = (
   if (directory.length > 0) {
     const absolute = resolve(directory);
     const backups = resolve(backupDirectory);
-    if (absolute === backups || absolute.startsWith(`${backups}/`)) {
+    if (absolute === backups || absolute.startsWith(`${backups}${sep}`)) {
       return {
         destinations: [],
         notes,

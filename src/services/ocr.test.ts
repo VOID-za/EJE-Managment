@@ -144,7 +144,9 @@ describe('the limits, and what happens when one bites', () => {
    */
   const present = { recogniser: '/bin/echo', rasteriser: '/bin/echo' } as const;
 
-  it('refuses a file larger than this machine will rasterise, and names the figure', async () => {
+  // These stand `/bin/echo` in for the engine, which exists on Linux (the
+  // server, and CI) and not on Windows, where the engine reads as unavailable.
+  it.skipIf(process.platform === 'win32')('refuses a file larger than this machine will rasterise, and names the figure', async () => {
     const engine = localOcr({ ...present, maxInputBytes: 1024 });
     const outcome = await engine.read(new Uint8Array(4096));
 
@@ -166,7 +168,7 @@ describe('the limits, and what happens when one bites', () => {
     expect(readdirSync(tmpdir()).filter((name) => name.startsWith('eje-ocr-'))).toEqual(before);
   });
 
-  it('accepts a file INSIDE the limit, so the refusal is about the size', async () => {
+  it.skipIf(process.platform === 'win32')('accepts a file INSIDE the limit, so the refusal is about the size', async () => {
     // The other half of the assertion above: with room, the read proceeds past
     // the size check and fails for a reason about the DOCUMENT instead —
     // `/bin/echo` is not a rasteriser, so no pages come out of it.

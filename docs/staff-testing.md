@@ -241,6 +241,38 @@ What these do NOT prove: real delivery to Finance (EJE's Microsoft 365
 credentials and an approved Finance address are needed — section 4 of
 `docs/delivery-register-2026-10-29.md`).
 
+## J. The Attendance page's monthly form, and the update notice (30 October 2026)
+
+In the release after `a46e767` (no migration; `docs/delivery-register-2026-10-30.md`).
+Fictional data only while the demonstration switcher is on.
+
+### What the automated checks already prove (no person needed)
+
+On the Attendance page a technician's monthly attendance form previews in the
+app, Print asks the browser exactly once, Download PDF saves ONE page under the
+rule's name (read back from the file), Export PDF hands that same one-page file
+to the share sheet, and Send to office submits the month once — afterwards
+nothing offers it and a second request is refused. The office sees the status,
+opens the form, and is not offered Send for a technician (smoke). Across two
+real builds served in turn on one address, an open tablet-sized page shows "A
+new version of EJE is available" WITHOUT a reload or a cache clear; Update now
+moves the page AND its service worker to the new build with exactly one reload,
+says "EJE has been updated" once, and never shows the notice again; with typed
+work on screen it asks first and Cancel keeps the typing (update-check).
+
+### Needs a person — in this order
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| J1 | Technician: **Attendance** | At the top, "Monthly attendance form" with a Month field (last month) and the card "… ATTEN <MONTH>.pdf · one page" |
+| J2 | **Preview**, **Print**, **Download PDF**, **Export PDF** | The form in the app; the print dialog once, showing only the form; a downloaded file with exactly that name, ONE page; Export opens the device's share sheet (on a desktop: the file downloads and the card says why) |
+| J3 | **Send {month} to the office** → confirm | The card says the timesheet goes with it; afterwards "Submitted …" and no Send button. Monthly forms shows the same month as submitted |
+| J4 | Master or Coordinator: **Attendance** → the month | Every technician with a status; **Open form** shows their card with Preview/Print/Download/Export and **no** Send |
+| J5 | Office: correct a day of that technician's submitted month in the register, then open their form again | "corrected by the office after submission (1)" |
+| J6 | On the **actual rugged tablet** (installed EJE): leave EJE open on any screen; after the next release, return to it | Within a few minutes (or on coming back to the screen) the amber bar "A new version of EJE is available" with Update now |
+| J7 | Type a timesheet comment without saving, then tap **Update now** | A dialog naming the unsaved comment; Cancel keeps it |
+| J8 | Save, tap **Update now** | EJE reloads once and shows "EJE has been updated. You are now on version …" (Administration → System shows the same commit); the bar does not come back |
+
 ## F. Documents
 
 | # | Do this | Pass looks like |

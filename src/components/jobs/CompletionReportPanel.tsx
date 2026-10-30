@@ -15,6 +15,7 @@ import {
   type ReportDraft,
 } from '@/lib/pwa/report-draft';
 import { useCaptureLock } from '@/hooks/useCaptureLock';
+import { useUnsavedWork } from '@/hooks/useUnsavedWork';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime, formatTime } from '@/lib/format';
 
@@ -274,14 +275,7 @@ export const CompletionReportPanel = ({
    * leaves one indefinitely. The prompt is the only thing between that and
    * losing it.
    */
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  useUnsavedWork(dirty, 'the completion write-up (not saved yet)');
 
   /*
    * Leaving the panel writes what is held.

@@ -1,125 +1,335 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { Button } from '@/components/ui';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Button, ConfirmDialog } from '@/components/ui';
 import {
   captureIdleOnServer,
   captureInProgress,
   subscribeToCapture,
 } from '@/lib/pwa/capture-lock';
+import { hasUnsavedWork, unsavedWork } from '@/lib/pwa/unsaved-work';
+import {
+  VERSION_POLL_MS,
+  WORKER_WAIT_MS,
+  buildOfWorkerUrl,
+  dismissRelease,
+  forgetAttempt,
+  isDismissed,
+  isNewRelease,
+  isKnownBuild,
+  mayActivateQuietly,
+  outcomeAfterReload,
+  recordAttempt,
+  serverBuildOf,
+  workerUrl,
+  type AttemptOutcome,
+} from '@/lib/pwa/app-version';
+
+/** The build this page was served from — stamped by `next.config.ts`, the same value as the page's meta tag. */
+const PAGE_BUILD = process.env.EJE_BUILD_COMMIT ?? 'unknown';
+
+/** A version check no more often than this, however many events ask for one. */
+const MIN_CHECK_GAP_MS = 10 * 1000;
+
+const session = (): Storage | null => {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
 
 /**
- * REGISTERS THE WORKER, AND OFFERS THE UPDATE. PWA-5, PWA-7.
+ * The new worker for `build`, once it has installed and is waiting — or null
+ * when there is nothing to wait for (already active, refused, or too slow).
+ */
+const waitForInstalled = (registration: ServiceWorkerRegistration, build: string, ms: number): Promise<ServiceWorker | null> =>
+  new Promise((resolve) => {
+    let settled = false;
+    const done = (worker: ServiceWorker | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(worker);
+    };
+    const timer = window.setTimeout(() => done(null), ms);
+    const follow = (worker: ServiceWorker | null) => {
+      if (worker === null || buildOfWorkerUrl(worker.scriptURL) !== build) return false;
+      if (worker.state === 'installed') {
+        done(worker);
+        return true;
+      }
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'installed') done(worker);
+        if (worker.state === 'redundant' || worker.state === 'activated') done(null);
+      });
+      return true;
+    };
+    if (follow(registration.waiting) || follow(registration.installing)) return;
+    if (buildOfWorkerUrl(registration.active?.scriptURL) === build && registration.waiting === null) {
+      done(null);
+      return;
+    }
+    registration.addEventListener('updatefound', () => void follow(registration.installing));
+  });
+
+/**
+ * REGISTERS THE WORKER, NOTICES EVERY NEW RELEASE, AND OFFERS THE UPDATE.
+ * PWA-5, PWA-7; every release since 30 October 2026 (REL-UPD-1).
+ *
+ * HOW A NEW RELEASE IS NOTICED — automatically, for every release, with
+ * nothing to remember at release time. See `app-version.ts`: the page knows
+ * its own build, asks `/api/health` which build the server runs (on start, on
+ * returning to the screen, when the connection comes back and every five
+ * minutes on screen), and registers the worker under its build so the browser
+ * installs a new worker for every release too. Either signal shows the bar.
  *
  * WHY THE UPDATE IS OFFERED AND NEVER TAKEN. A new build means new JavaScript
- * chunks. Activating a waiting worker and reloading swaps them underneath
- * whoever is using the application — and the person using this application is
- * a technician who may be half-way through a completion write-up with the
- * customer waiting. PWA-7 says a new version is applied "without the tablet
- * being reinstalled, and never mid-capture", so the worker installs quietly,
- * waits, and this bar asks. Nothing reloads until somebody taps.
+ * chunks. Swapping them under a technician half-way through a completion
+ * write-up with the customer waiting is the failure PWA-7 forbids, so nothing
+ * reloads until somebody taps Update now — once, and never on a timer, which
+ * is also why no reload loop is possible.
  *
- * WHY IT IS SAFE TO WAIT. The waiting worker changes nothing: the running one
- * keeps serving the build the page already has, and its cached chunks match
- * that build because Next content-hashes them. A technician can finish the job
- * card and update between jobs.
+ * WHAT UPDATE NOW DOES. If the screen holds typed work that is not saved
+ * (`useUnsavedWork`), it first says what would be lost and asks. Then it
+ * installs the new release's worker, tells it to take over, and reloads when
+ * it has; if the browser has no worker, or the worker is slow, it reloads
+ * anyway — the HTML is never cached, so a reload always gets the release the
+ * server runs. The page that comes back checks that it IS that release and
+ * says so once ("EJE has been updated"), or says the update did not take
+ * effect; it never retries by itself.
  *
- * AND THE OFFER ITSELF WAITS FOR A CAPTURE. *Amended for the tablet usability
- * pass.* Not applying the update mid-capture was never enough: this bar is
- * `sticky top-0` and APPEARING pushes everything below it down by its own
- * height. On a tablet that is the signature pad sliding out from under a
- * stylus mid-stroke, or *Confirm signature* moving under a thumb already on
- * its way to it — a mis-tap on the one screen where a mis-tap is a customer
- * signing the wrong thing. So while a capture holds the lock the bar renders
- * NOTHING, and it appears the moment the capture is finished. The waiting
- * worker is unaffected either way: it is already installed and still waiting.
+ * AND THE OFFER WAITS FOR A CAPTURE. *Amended for the tablet usability pass.*
+ * This bar is `sticky top-0` and APPEARING pushes everything below it down —
+ * on a tablet that is the signature pad sliding out from under a stylus. So
+ * while a capture holds the lock the bar renders nothing, and appears the
+ * moment the capture is finished.
  *
- * BROWSERS WITHOUT SERVICE WORKERS get nothing at all — no error, no bar, no
- * degraded screen. The application is online-first and works exactly as it did
- * before any of this existed; the worker is an addition, not a dependency.
+ * BROWSERS WITHOUT SERVICE WORKERS still get the bar (the version check is a
+ * plain request) and Update now is a reload; no error, no degraded screen.
  */
 export const ServiceWorkerManager = () => {
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [serverBuild, setServerBuild] = useState<string | null>(null);
+  // The release "Not now" was said to ('worker' for a waiting worker of an unstamped build).
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<AttemptOutcome>({ kind: 'none' });
+  const [confirming, setConfirming] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const lastCheck = useRef(0);
+  const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
 
-  useEffect(() => {
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-    // A worker is a production concern: in development the chunks change on
-    // every save and a cache between the two is only ever in the way.
-    if (process.env.NODE_ENV !== 'production') return;
+  const enabled = process.env.NODE_ENV === 'production' && typeof window !== 'undefined';
 
-    let cancelled = false;
-
-    const watch = (registration: ServiceWorkerRegistration) => {
-      if (cancelled) return;
-      if (registration.waiting !== null) setWaiting(registration.waiting);
-
-      registration.addEventListener('updatefound', () => {
-        const installing = registration.installing;
-        if (installing === null) return;
-        installing.addEventListener('statechange', () => {
-          // `controller` is null on the very first install — that is this page
-          // getting a worker for the first time, not an update to offer.
-          if (installing.state === 'installed' && navigator.serviceWorker.controller !== null) {
-            setWaiting(installing);
-          }
-        });
-      });
-    };
-
-    navigator.serviceWorker
-      .register('/eje-sw.js', { scope: '/', updateViaCache: 'none' })
-      .then(watch)
-      .catch(() => {
-        // A refused registration is not a fault the technician can act on, and
-        // the application works without it. It is left silent on purpose.
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  /** Switch on a waiting worker that belongs to the release already on screen; otherwise offer it. */
+  const consider = useCallback((worker: ServiceWorker | null) => {
+    if (worker === null) return;
+    if (mayActivateQuietly(PAGE_BUILD, worker.scriptURL) && !captureInProgress()) {
+      worker.postMessage({ type: 'EJE_SKIP_WAITING' });
+      return;
+    }
+    setWaiting(worker);
   }, []);
 
-  const update = useCallback(() => {
-    waiting?.postMessage({ type: 'EJE_SKIP_WAITING' });
-    // The new worker takes control, and the reload picks up its chunks.
-    navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), {
-      once: true,
-    });
-  }, [waiting]);
+  const check = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastCheck.current < MIN_CHECK_GAP_MS) return;
+    lastCheck.current = now;
+    try {
+      const response = await fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' });
+      const build = serverBuildOf(await response.json());
+      // A failed read (offline, mid-release restart) keeps what was known.
+      if (build !== null) setServerBuild(build);
+    } catch {
+      // Offline. The next check will ask again.
+    }
+    registrationRef.current?.update().catch(() => undefined);
+    // A "Not now" that has run out lets the bar back.
+    setDismissed((current) => (current !== null && current !== 'worker' && !isDismissed(session(), current, now) ? null : current));
+  }, []);
 
-  /*
-   * Is somebody in the middle of something? See `capture-lock.ts`.
-   *
-   * `useSyncExternalStore` rather than an effect and a state: the lock is read
-   * during render, so the bar cannot appear for one frame and then remove
-   * itself — one frame is enough to move the pad under a stylus.
-   */
-  const capturing = useSyncExternalStore(
-    subscribeToCapture,
-    captureInProgress,
-    captureIdleOnServer,
-  );
+  useEffect(() => {
+    if (!enabled) return;
+    // Read once, when the page starts: is this the release Update now asked for?
+    const after = outcomeAfterReload(session(), PAGE_BUILD);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from sessionStorage when the page starts
+    setOutcome(after);
 
-  if (waiting === null || dismissed || capturing) return null;
+    let cancelled = false;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register(workerUrl(PAGE_BUILD), { scope: '/', updateViaCache: 'none' })
+        .then((registration) => {
+          if (cancelled) return;
+          registrationRef.current = registration;
+          consider(registration.waiting);
+          registration.addEventListener('updatefound', () => {
+            const installing = registration.installing;
+            if (installing === null) return;
+            installing.addEventListener('statechange', () => {
+              // `controller` is null on the very first install — that is this
+              // page getting a worker for the first time, not an update.
+              if (installing.state === 'installed' && navigator.serviceWorker.controller !== null) consider(installing);
+            });
+          });
+        })
+        .catch(() => {
+          // A refused registration is not a fault the technician can act on;
+          // the version check below still offers updates.
+        });
+    }
+
+    void check(true);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void check();
+    };
+    const onOnline = () => void check();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void check(true);
+    }, VERSION_POLL_MS);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onVisible);
+      window.clearInterval(timer);
+    };
+  }, [enabled, check, consider]);
+
+  // The server went back to this page's build (a rollback): an attempt to leave it no longer applies.
+  useEffect(() => {
+    if (serverBuild === PAGE_BUILD && outcome.kind === 'not-applied') {
+      forgetAttempt(session());
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a notice the server's answer made obsolete
+      setOutcome({ kind: 'none' });
+    }
+  }, [serverBuild, outcome.kind]);
+
+  const waitingBuild = waiting === null ? null : buildOfWorkerUrl(waiting.scriptURL);
+  const target = isNewRelease(PAGE_BUILD, serverBuild) ? serverBuild : waiting !== null && waitingBuild !== PAGE_BUILD ? waitingBuild : null;
+  const offered = target !== null || (waiting !== null && waitingBuild === null);
+
+  // "Not now", said on another page of this tab within the hour, still holds.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading a dismissal kept in sessionStorage
+    if (target !== null && isDismissed(session(), target, Date.now())) setDismissed(target);
+  }, [target]);
+
+  const update = useCallback(async () => {
+    setConfirming(false);
+    setUpdating(true);
+    recordAttempt(session(), PAGE_BUILD, target ?? 'unknown', Date.now());
+    let reloaded = false;
+    const reload = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
+    try {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller !== null) {
+        let worker: ServiceWorker | null = waiting !== null && (target === null || waitingBuild === target) ? waiting : null;
+        if (worker === null && isKnownBuild(target)) {
+          const registration = await navigator.serviceWorker.register(workerUrl(target), { scope: '/', updateViaCache: 'none' });
+          worker = await waitForInstalled(registration, target, WORKER_WAIT_MS);
+        }
+        if (worker !== null) {
+          // The new worker takes control, and the reload picks up its release.
+          navigator.serviceWorker.addEventListener('controllerchange', reload, { once: true });
+          worker.postMessage({ type: 'EJE_SKIP_WAITING' });
+          window.setTimeout(reload, 5000);
+          return;
+        }
+      }
+    } catch {
+      // Whatever the worker did, the reload below still gets the new release.
+    }
+    reload();
+  }, [target, waiting, waitingBuild]);
+
+  const askToUpdate = useCallback(() => {
+    if (hasUnsavedWork()) setConfirming(true);
+    else void update();
+  }, [update]);
+
+  const capturing = useSyncExternalStore(subscribeToCapture, captureInProgress, captureIdleOnServer);
+
+  const notice =
+    outcome.kind === 'updated' ? (
+      <div
+        role="status"
+        className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b border-verdant-200 bg-verdant-50 px-4 py-2 text-sm text-verdant-700"
+        data-testid="app-updated"
+        data-build={PAGE_BUILD}
+      >
+        <p>
+          <strong className="font-semibold">EJE has been updated.</strong> You are now on version{' '}
+          <span className="font-mono">{PAGE_BUILD}</span>.
+        </p>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOutcome({ kind: 'none' })}>
+          OK
+        </Button>
+      </div>
+    ) : null;
+
+  const hidden = !offered || capturing || (dismissed !== null && dismissed === (target ?? 'worker'));
+  if (hidden) return notice;
 
   return (
-    <div
-      role="status"
-      className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
-    >
-      <p className="min-w-0">
-        <strong className="font-semibold">A new version of EJE is ready.</strong> It will be used
-        the next time the application starts — finish what you are capturing first.
-      </p>
-      <span className="flex shrink-0 gap-2">
-        <Button type="button" variant="secondary" onClick={() => setDismissed(true)}>
-          Not now
-        </Button>
-        <Button type="button" onClick={update}>
-          Update now
-        </Button>
-      </span>
-    </div>
+    <>
+      <div
+        role="alert"
+        className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b-2 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-100"
+        data-testid="app-update-available"
+        data-current={PAGE_BUILD}
+        data-target={target ?? ''}
+      >
+        <div className="min-w-0">
+          <p className="text-base font-semibold">A new version of EJE is available.</p>
+          <p>
+            {target !== null ? (
+              <>
+                Version <span className="font-mono">{target}</span> is live; this screen is still version{' '}
+                <span className="font-mono">{PAGE_BUILD}</span>.{' '}
+              </>
+            ) : null}
+            Update now reloads EJE on the new version. Anything already saved is kept.
+          </p>
+          {outcome.kind === 'not-applied' && outcome.to === target && (
+            <p className="mt-1 font-medium" data-testid="app-update-not-applied">
+              The last update did not take effect{outcome.tries > 1 ? ` (tried ${outcome.tries} times)` : ''}. If this keeps
+              happening, close EJE completely and open it again.
+            </p>
+          )}
+        </div>
+        <span className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              if (target !== null) dismissRelease(session(), target, Date.now());
+              setDismissed(target ?? 'worker');
+            }}
+            data-testid="app-update-later"
+          >
+            Not now
+          </Button>
+          <Button type="button" loading={updating} onClick={askToUpdate} data-testid="app-update-now">
+            Update now
+          </Button>
+        </span>
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        title="Update with unsaved work on this screen?"
+        message={`Updating reloads EJE, and this is not saved yet: ${unsavedWork().join('; ')}. Save or finish it first, or update anyway and lose it.`}
+        confirmLabel="Update anyway"
+        busy={updating}
+        onConfirm={() => void update()}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   );
 };

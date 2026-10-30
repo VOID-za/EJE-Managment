@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
+import { useUnsavedWork } from '@/hooks/useUnsavedWork';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { TimesheetCorrections } from '@/components/timesheets/TimesheetCorrections';
 import { reads, timesheets } from '@/api/endpoints';
@@ -159,16 +160,10 @@ const TimesheetsPage = () => {
 
   /*
    * NOTHING TYPED IS LOST BY LEAVING. A line half-typed, or a comment being
-   * written, warns before the page is closed or reloaded.
+   * written, warns before the page is closed or reloaded — and before Update
+   * now reloads it (REL-UPD-1).
    */
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  useUnsavedWork(dirty, 'a timesheet line or comment being typed');
 
   if (people.error !== null) {
     return <QueryFailure code={people.errorCode} message={people.error} onRetry={people.refetch} />;

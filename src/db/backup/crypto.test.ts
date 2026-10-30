@@ -146,7 +146,9 @@ describe('encrypting an artefact', () => {
     expect(a.sha256).not.toBe(b.sha256);
   });
 
-  it('writes the encrypted artefact 0600, like everything else in a backup', async () => {
+  // Unix permission bits: Windows has none to set (every file reads back 0666),
+  // and backups are made on the Linux server, where CI runs this.
+  it.skipIf(process.platform === 'win32')('writes the encrypted artefact 0600, like everything else in a backup', async () => {
     const root = workspace();
     const source = sampleOf(root, 'the signed job card');
     const encrypted = join(root, 'database.dump.enc');

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   FilesystemStorageService,
@@ -282,8 +282,9 @@ describe('where the bytes go', () => {
 
 describe('where this deployment keeps files', () => {
   it('uses EJE_STORAGE_DIR when it is set', () => {
+    // `resolve`: the server's path on Linux, and this machine's spelling of it elsewhere.
     expect(readStorageConfiguration({ EJE_STORAGE_DIR: '/srv/eje/files' }).root).toBe(
-      '/srv/eje/files',
+      resolve('/srv/eje/files'),
     );
   });
 
@@ -292,12 +293,12 @@ describe('where this deployment keeps files', () => {
     // having: refusing to store a document because nobody set a variable would
     // be worse than storing it somewhere sensible.
     const resolved = readStorageConfiguration({}, '/srv/eje').root;
-    expect(resolved).toBe('/srv/eje/.eje-storage');
+    expect(resolved).toBe(resolve('/srv/eje/.eje-storage'));
   });
 
   it('treats whitespace as unset', () => {
     expect(readStorageConfiguration({ EJE_STORAGE_DIR: '   ' }, '/srv/eje').root).toBe(
-      '/srv/eje/.eje-storage',
+      resolve('/srv/eje/.eje-storage'),
     );
   });
 });

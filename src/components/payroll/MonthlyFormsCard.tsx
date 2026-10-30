@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Card, ConfirmDialog, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
+import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { AttendanceDocumentView } from '@/components/payroll/AttendanceDocumentView';
 import { payroll } from '@/api/endpoints';
@@ -24,8 +25,24 @@ type Kind = 'timesheet' | 'attendance';
  * TIMESHEET OCT.pdf", "JC ATTEN OCTOBER.pdf"). The technician submits the two
  * TOGETHER, once; anything that stops it is said in plain words first. The
  * office opens the same card for any technician to read and print.
+ *
+ * `focus="attendance"` is the same card on the Attendance page (30 October
+ * 2026): the attendance form alone, and Send to office — which still sends the
+ * month's two forms together, because the office receives a month as one
+ * submission and no day may be sent twice. The button says so.
+ *
+ * Download PDF saves the file; Export PDF hands it to the device's share sheet
+ * (`share-file.ts`). Both are the one-page PDF under its file name.
  */
-export const MonthlyFormsCard = ({ userId, month }: { readonly userId: string; readonly month: string }) => {
+export const MonthlyFormsCard = ({
+  userId,
+  month,
+  focus,
+}: {
+  readonly userId: string;
+  readonly month: string;
+  readonly focus?: 'attendance';
+}) => {
   const operation = useOperation();
   const [previewing, setPreviewing] = useState<{ kind: Kind; print: boolean } | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -79,7 +96,8 @@ export const MonthlyFormsCard = ({ userId, month }: { readonly userId: string; r
           <Button size="sm" variant="secondary" onClick={() => setPreviewing({ kind, print: true })} data-testid={`monthly-${kind}-print`}>
             Print
           </Button>
-          <DownloadFileButton href={href} fallbackName={fileName} label="Export PDF" />
+          <DownloadFileButton href={href} fallbackName={fileName} label="Download PDF" testId={`monthly-${kind}-download`} />
+          <ExportPdfButton href={href} fallbackName={fileName} testId={`monthly-${kind}-export`} />
         </div>
       </div>
     );
@@ -108,10 +126,14 @@ export const MonthlyFormsCard = ({ userId, month }: { readonly userId: string; r
       <p className="mt-1 text-xs text-steel-500">
         Files are named by the name on documents “{state.technician.documentName}” (set by the office in Administration → Users).
       </p>
-      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-        {documentCard('timesheet')}
-        {documentCard('attendance')}
-      </div>
+      {focus === 'attendance' ? (
+        <div className="mt-3">{documentCard('attendance')}</div>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {documentCard('timesheet')}
+          {documentCard('attendance')}
+        </div>
+      )}
 
       {state.problems.length > 0 && state.submission === null && (
         <ul className="mt-3 list-disc space-y-0.5 pl-5 text-sm text-amber-eje-700" data-testid="monthly-forms-problems">
@@ -146,8 +168,14 @@ export const MonthlyFormsCard = ({ userId, month }: { readonly userId: string; r
             onClick={() => setConfirm(true)}
             data-testid="monthly-forms-submit"
           >
-            Submit {state.monthLabel} to the office
+            {focus === 'attendance' ? `Send ${state.monthLabel} to the office` : `Submit ${state.monthLabel} to the office`}
           </Button>
+          {focus === 'attendance' && (
+            <p className="text-xs text-steel-500" data-testid="monthly-forms-together">
+              Your timesheet for {state.monthLabel} ({state.fileNames.timesheet}) goes with it: the office receives the
+              month&apos;s attendance and timesheet together, once.
+            </p>
+          )}
         </div>
       )}
       {done !== null && <p role="status" className="mt-2 text-sm text-verdant-700" data-testid="monthly-forms-done">{done}</p>}
