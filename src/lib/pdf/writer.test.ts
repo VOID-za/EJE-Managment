@@ -207,3 +207,18 @@ describe('text measurement and wrapping', () => {
     expect(lines.join('')).toContain('LW-V40-70214');
   });
 });
+
+describe('character spacing does not leak from one run to the next', () => {
+  it('states Tc on every run, 0 included, so untracked text is not letter-spaced', () => {
+    // `Tc` is text state and outlives ET: a heading drawn with tracking used to
+    // letter-space every run after it on the page — an address, a declaration,
+    // a footer that then ran past the margin (UX-TAB-1).
+    const pdf = new PdfBuilder();
+    pdf.text(40, 800, 'CUSTOMER', { tracking: 1.35 });
+    pdf.text(40, 780, 'ABC Engineering (Pty) Ltd');
+    const runs = decode(pdf.toBytes()).match(/BT [^\n]*? Tj ET/gu) ?? [];
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toContain(' 1.35 Tc ');
+    expect(runs[1]).toContain(' 0 Tc ');
+  });
+});

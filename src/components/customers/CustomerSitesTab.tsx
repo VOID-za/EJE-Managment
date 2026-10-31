@@ -291,7 +291,7 @@ export const CustomerSitesTab = ({
                     href={siteMapUrl(site)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 inline-flex min-h-9 items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
+                    className="mt-1 inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
                   >
                     <Icon name="pin" className="size-3.5" />
                     Open in Google Maps

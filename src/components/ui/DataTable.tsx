@@ -10,7 +10,12 @@ export interface Column<T> {
   readonly render: (row: T) => ReactNode;
   readonly align?: 'left' | 'right' | 'center';
   readonly className?: string;
-  /** Hidden below the `lg` breakpoint so tables stay readable on a tablet. */
+  /**
+   * Below the `lg` breakpoint this column folds into the first one: its value
+   * is shown, labelled with its header, under the row's first cell. A portrait
+   * tablet keeps every piece of information the desktop shows, without a table
+   * that scrolls sideways — the column used to simply disappear there.
+   */
   readonly secondary?: boolean;
   readonly width?: string;
 }
@@ -43,6 +48,8 @@ export const DataTable = <T,>({
   if (rows.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
+
+  const folded = columns.filter((column, index) => index > 0 && column.secondary === true);
 
   return (
     <div
@@ -80,7 +87,7 @@ export const DataTable = <T,>({
                 onRowClick !== undefined && 'cursor-pointer transition-colors hover:bg-eje-50/50',
               )}
             >
-              {columns.map((column) => (
+              {columns.map((column, index) => (
                 <td
                   key={column.key}
                   className={cn(
@@ -91,6 +98,22 @@ export const DataTable = <T,>({
                   )}
                 >
                   {column.render(row)}
+                  {index === 0 && folded.length > 0 && (
+                    <dl className="mt-2 space-y-1.5 text-left lg:hidden" data-folded-columns>
+                      {folded.map((secondary) => (
+                        <div key={secondary.key} className="min-w-0">
+                          <dt className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
+                            {secondary.header}
+                          </dt>
+                          {/* A narrow first column: the value wraps rather than
+                              being cut short with an ellipsis. */}
+                          <dd className="min-w-0 text-steel-700 [&_.truncate]:overflow-visible [&_.truncate]:break-words [&_.truncate]:whitespace-normal [&_.whitespace-nowrap]:whitespace-normal">
+                            {secondary.render(row)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
                 </td>
               ))}
             </tr>

@@ -41,14 +41,26 @@ const BASE =
   process.env.EJE_SMOKE_BASE_URL ?? process.env.EJE_E2E_URL ?? 'http://localhost:3210';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM;
 const browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+/*
+ * The whole workflow on a tablet, too. EJE_E2E_VIEWPORT=1024x768 (or any
+ * WIDTHxHEIGHT) runs every step at that size with a touch screen, so a step
+ * that only a desktop can complete fails here (UX-TAB-1, parity).
+ */
+const shape = /^(\d+)x(\d+)$/u.exec(process.env.EJE_E2E_VIEWPORT ?? '');
+const page = await browser.newPage({
+  viewport: shape === null ? { width: 1440, height: 1100 } : { width: Number(shape[1]), height: Number(shape[2]) },
+  hasTouch: shape !== null,
+});
+if (shape !== null) console.log(`(tablet: ${shape[0]}, touch)`);
 const fails = [];
 const check = (ok, what) => { console.log(`${ok ? 'PASS ' : 'FAIL '} ${what}`); if (!ok) fails.push(what); };
 // The rendered DOM, not innerText: innerText drops content the layout has
 // pushed out of the visible box, which silently turns a real assertion into a
 // passing one.
 const body = async () => page.content();
-const ready = () => page.getByRole('link', { name: 'Jobs', exact: true }).first().waitFor({ timeout: 25000 });
+// The signed-in shell: the notifications link in the top bar is there at every
+// width. The sidebar's Jobs link is not — below 1024px it is in the drawer.
+const ready = () => page.locator('header a[href="/notifications"]').first().waitFor({ timeout: 25000 });
 
 // ---------- MASTER: create the job ----------
 await page.goto(BASE, { waitUntil: 'networkidle' });

@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Button, Card } from '@/components/ui';
+import { Button, ButtonLink, Card } from '@/components/ui';
 import { CachedJobList } from '@/components/pwa/CachedJobList';
 import { CacheStatusNotice } from '@/components/pwa/CacheStatusNotice';
 import { describeCacheStatus } from '@/lib/pwa/cache-state';
@@ -242,11 +241,7 @@ const OfflinePage = () => {
             server that just could not be reached. If the route payload cannot
             be fetched on the tap either, the navigation falls back to a full
             load, which the service worker answers — with this page again. */}
-        <Link href="/jobs" prefetch={false}>
-          <Button type="button" variant="secondary">
-            Go to jobs
-          </Button>
-        </Link>
+        <ButtonLink href="/jobs" prefetch={false} variant="secondary">Go to jobs</ButtonLink>
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">

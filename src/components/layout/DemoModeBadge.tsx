@@ -47,7 +47,7 @@ export const DemoModeBadge = ({ compact = false }: { readonly compact?: boolean 
           <span
             className={
               compact
-                ? 'mt-1.5 block text-[11px] leading-snug text-chrome-muted'
+                ? 'mt-1.5 block text-xs leading-snug text-chrome-muted'
                 : 'mt-1.5 block text-xs leading-snug text-steel-500'
             }
           >

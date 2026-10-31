@@ -51,7 +51,7 @@ export const SimulatedBadge = ({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.625rem] ' +
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ' +
           'font-bold tracking-wider uppercase',
         unrecorded
           ? 'border-steel-300 bg-steel-50 text-steel-700'

@@ -120,9 +120,15 @@ const measure = (value: string, size: number, font: PdfFont, tracking: number): 
 
 export const inspectPdf = (
   bytes: Uint8Array,
-  options: { readonly margin?: number; readonly tolerance?: number } = {},
+  options: {
+    readonly margin?: number;
+    readonly tolerance?: number;
+    /** How near the top or bottom edge text may sit; the one-page forms' footer is 18pt from it. */
+    readonly edge?: number;
+  } = {},
 ): PdfInspection => {
   const margin = options.margin ?? 40;
+  const edge = options.edge ?? 20;
   const tolerance = options.tolerance ?? 1.5;
   const text = pdfText(bytes);
   const streams = pageStreams(text);
@@ -164,7 +170,7 @@ export const inspectPdf = (
       if (run.x < margin - tolerance) {
         problems.push(`page ${page}: "${run.value.slice(0, 44)}" starts left of the margin`);
       }
-      if (run.y < 20 || run.y > A4_HEIGHT - 20) {
+      if (run.y < edge || run.y > A4_HEIGHT - edge) {
         problems.push(`page ${page}: "${run.value.slice(0, 44)}" sits off the page`);
       }
     }
@@ -196,6 +202,26 @@ export const inspectPdf = (
           problems.push(
             `page ${page}: "${current.value.slice(0, 30)}" overlaps "${next.value.slice(0, 30)}"`,
           );
+        }
+      }
+    }
+
+    /*
+     * A rule drawn THROUGH a line of text — between its baseline and the top
+     * of its capitals — strikes it out on paper. The job card's header rule
+     * did exactly that to the registration line, and nothing measured it.
+     */
+    for (const match of stream.matchAll(/([\d.-]+) ([\d.-]+) m ([\d.-]+) ([\d.-]+) l S/g)) {
+      const [x1, y1, x2, y2] = [match[1], match[2], match[3], match[4]].map(Number) as [number, number, number, number];
+      if (Math.abs(y1 - y2) > 0.1) continue;
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      for (const run of pageRuns) {
+        if (run.value.trim().length === 0) continue;
+        const through = y1 > run.y + 0.6 && y1 < run.y + run.size * 0.68;
+        const across = Math.min(right, run.x + run.width) - Math.max(left, run.x) > 1;
+        if (through && across) {
+          problems.push(`page ${page}: a rule is drawn through "${run.value.slice(0, 40)}"`);
         }
       }
     }

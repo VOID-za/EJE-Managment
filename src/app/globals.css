@@ -318,6 +318,44 @@
     color: var(--color-steel-900);
   }
 
+  /*
+   * A FINGERTIP ON A TOUCH SCREEN. UX-TAB-1.
+   *
+   * The design system's secondary controls are 36px (`h-9`) and its icon
+   * buttons 38–40px: right for a mouse, a mis-tap on a rugged tablet — where a
+   * mis-tap submits, signs or deletes. On a coarse pointer every control is
+   * held to the 44px platform minimum. `min-*` rather than `height`, so a
+   * larger control is untouched; in the base layer with `:where`, so a utility
+   * that sets its own minimum still wins; and an inline link in a sentence is
+   * unaffected, because `min-height` does not apply to inline boxes.
+   *
+   * The one exception is the month grid's bars: a month is five rows of seven
+   * days on one screen, the day cell around a bar is itself a 44px target, and
+   * the day it opens lists every entry. See `scripts/tablet-audit.mjs`. It is
+   * an override at the end rather than a `:not([data-calendar-bar] *)` on each
+   * rule, which keeps every selector simple.
+   */
+  @media (pointer: coarse) {
+    :where(button, [role='button'], [role='tab'], select, summary, a[href]) {
+      min-height: var(--touch-target);
+    }
+    :where(button, [role='button'], a[href]) {
+      min-width: var(--touch-target);
+    }
+    :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='hidden']), textarea) {
+      min-height: var(--touch-target);
+    }
+    /* The part of a file input that is tapped. */
+    :where(input[type='file'])::file-selector-button {
+      min-height: 2.25rem;
+    }
+    [data-calendar-bar],
+    [data-calendar-bar] * {
+      min-height: 0;
+      min-width: 0;
+    }
+  }
+
   /* A single, consistent focus treatment across every interactive element. */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid var(--color-eje-500);

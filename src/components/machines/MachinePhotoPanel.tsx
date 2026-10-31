@@ -80,7 +80,7 @@ export const MachinePhotoPanel = ({
                 */}
                 <SimulatedBadge provenance={photo.provenance} testId="machine-photo-simulated" />
               </p>
-              <p className="truncate text-[11px] text-steel-400">
+              <p className="truncate text-xs text-steel-400">
                 {photo.sizeBytes > 0 ? formatFileSize(photo.sizeBytes) : 'No stored image'}
               </p>
             </li>
@@ -193,7 +193,7 @@ const MachineThumbnail = ({
         data-testid="machine-photo-placeholder"
       >
         <Icon name="camera" className="size-6" />
-        <span className="text-[10px] font-semibold tracking-wide uppercase">
+        <span className="text-xs font-semibold tracking-wide uppercase">
           {photo.provenance === 'simulated'
             ? 'Simulated'
             : photo.provenance === 'unknown'

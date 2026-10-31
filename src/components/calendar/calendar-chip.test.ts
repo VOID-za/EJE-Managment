@@ -102,8 +102,9 @@ describe('absence is visually secondary to work', () => {
 
   it('is drawn shorter than a job bar', () => {
     // 15px against 18px. The difference reads as weight, not misalignment.
-    expect(source).toContain("'h-[15px] text-[10px] font-medium'");
-    expect(source).toContain("'h-[18px] text-[11px] font-semibold'");
+    // Both at the 12px legible floor (UX-TAB-1); weight carries the rest.
+    expect(source).toContain("'h-[15px] text-xs leading-none font-medium'");
+    expect(source).toContain("'h-[18px] text-xs leading-none font-semibold'");
   });
 
   it('never relies on colour alone — it keeps its icon and type label', () => {

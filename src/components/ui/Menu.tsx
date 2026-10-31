@@ -107,7 +107,7 @@ export const Menu = ({
         ) : (
           <span className="hidden min-w-0 text-left leading-tight sm:block">
             <span className="block truncate text-xs font-semibold text-steel-800">{label}</span>
-            <span className="block truncate text-[11px] font-medium text-steel-500">
+            <span className="block truncate text-xs font-medium text-steel-500">
               {sublabel}
             </span>
           </span>

@@ -40,7 +40,7 @@ const UsersPage = () => {
             {query.data.rows.map((row) => (
               <li key={row.id} className="flex flex-wrap items-center gap-3 px-5 py-3" data-testid="users-row" data-user={row.id} data-available={row.today === null ? 'yes' : 'no'}>
                 <div className="min-w-48 flex-1">
-                  <Link href={`/technicians/${row.id}`} className="font-medium text-steel-900 hover:underline">
+                  <Link href={`/technicians/${row.id}`} className="inline-flex items-center font-medium text-steel-900 hover:underline">
                     {row.name}
                   </Link>
                   <p className="text-xs text-steel-500">

@@ -2,7 +2,6 @@
 
 import { conversations } from '@/api/endpoints';
 import { useState } from 'react';
-import Link from 'next/link';
 import {
   isMessageRead,
   summariseAvailability,
@@ -12,7 +11,7 @@ import {
   type Conversation,
   type User,
 } from '@/domain';
-import { Avatar, Badge, Button, Icon, TextAreaField } from '@/components/ui';
+import { Avatar, Badge, Button, ButtonLink, Icon, TextAreaField } from '@/components/ui';
 import { AvailabilityDialog } from '@/components/availability/AvailabilityDialog';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
@@ -77,11 +76,7 @@ export const ConversationThread = ({
           </p>
         </div>
         {conversation.jobNumber !== null && (
-          <Link href={`/jobs/${conversation.jobNumber}`}>
-            <Button size="sm" variant="secondary" leadingIcon={<Icon name="jobs" className="size-4" />}>
-              {conversation.jobNumber}
-            </Button>
-          </Link>
+          <ButtonLink href={`/jobs/${conversation.jobNumber}`} size="sm" variant="secondary" leadingIcon={<Icon name="jobs" className="size-4" />}>{conversation.jobNumber}</ButtonLink>
         )}
       </div>
 
@@ -100,7 +95,7 @@ export const ConversationThread = ({
             <li key={message.id} className={cn('flex gap-2.5', mine && 'flex-row-reverse')}>
               <Avatar initials={sender?.initials ?? '??'} size="sm" />
               <div className={cn('min-w-0 max-w-[80%]', mine && 'text-right')}>
-                <p className="text-[11px] text-steel-400">
+                <p className="text-xs text-steel-400">
                   {sender === undefined ? 'Unknown' : userFullName(sender)} ·{' '}
                   {formatDateTime(message.sentAt)}
                   {!mine && !isMessageRead(message, currentUser.id) && ' · new'}
@@ -117,7 +112,7 @@ export const ConversationThread = ({
                 </p>
 
                 {linked !== undefined && (
-                  <p className="mt-1.5 text-[11px] text-verdant-700">
+                  <p className="mt-1.5 text-xs text-verdant-700">
                     <Icon name="check" className="mr-1 inline size-3" />
                     Availability recorded — {summariseAvailability(linked)}
                   </p>

@@ -148,11 +148,16 @@ const contentWidths = (spec: FormSpec, panelWidth: number, size: number, panels:
   const rows = spec.rows.map((row) => cellsOf(row, panels));
   const longestWord = (value: string, bold = false) =>
     Math.max(0, ...wordsOf(value).map((word) => Math.min(textWidth(word, size, bold ? 'bold' : 'regular'), panelWidth / 3)));
+  // The totals line is printed in these same columns, in bold, when the table
+  // is one panel, and a month's total is wider than any one day's value:
+  // without it a large km total ran into the column beside it ("3825.4" over
+  // "30615.6"). Two panels draw their totals on full-width columns of their own.
+  const total = (key: string) => (panels === 1 ? textWidth(spec.totals?.cells[key] ?? '', size, 'bold') : 0);
   const natural = columns.map((column) =>
-    Math.max(longestWord(column.header, true), ...rows.map((cells) => textWidth(cells[column.key] ?? '', size))) + PAD * 2 + 1,
+    Math.max(longestWord(column.header, true), total(column.key), ...rows.map((cells) => textWidth(cells[column.key] ?? '', size))) + PAD * 2 + 1,
   );
   const minimum = columns.map((column) =>
-    Math.max(longestWord(column.header, true), ...rows.map((cells) => longestWord(cells[column.key] ?? ''))) + PAD * 2 + 1,
+    Math.max(longestWord(column.header, true), total(column.key), ...rows.map((cells) => longestWord(cells[column.key] ?? ''))) + PAD * 2 + 1,
   );
   const sumNatural = natural.reduce((a, b) => a + b, 0);
   if (sumNatural <= panelWidth) {
@@ -284,7 +289,7 @@ export const renderOnePageForm = (spec: FormSpec): RenderedForm => {
 
   // Heading: the company, and the form's title on the right.
   pdf.text(MARGIN, y, spec.companyName, { font: 'bold', size: sizes.company, colour: INK });
-  const titleWidth = textWidth(spec.title, sizes.title, 'bold') + TRACK_TITLE * spec.title.length;
+  const titleWidth = textWidth(spec.title, sizes.title, 'bold', TRACK_TITLE);
   pdf.text(A4_WIDTH - MARGIN - titleWidth, y, spec.title, { font: 'bold', size: sizes.title, colour: INK, tracking: TRACK_TITLE });
   y -= sizes.gap + sizes.field * 0.4;
 
@@ -389,8 +394,13 @@ export const renderOnePageForm = (spec: FormSpec): RenderedForm => {
 
   // The footer.
   const footerSize = 6.5;
-  const footer = PdfBuilder.wrap(spec.footer, WIDTH - 50, footerSize)[0] ?? '';
-  pdf.text(MARGIN, MARGIN - 10, footer, { size: footerSize, colour: MUTED });
+  // Every line of it. Only the first was drawn, so a long name and period
+  // silently lost the "Generated" stamp at the end. A second line sits above
+  // the first, still below the body's lowest baseline (`footerTop`).
+  const footer = PdfBuilder.wrap(spec.footer, WIDTH - 50, footerSize);
+  footer.forEach((line, index) => {
+    pdf.text(MARGIN, MARGIN - 10 + (footer.length - 1 - index) * (footerSize + 1), line, { size: footerSize, colour: MUTED });
+  });
   pdf.text(A4_WIDTH - MARGIN - textWidth('Page 1 of 1', footerSize), MARGIN - 10, 'Page 1 of 1', { size: footerSize, colour: MUTED });
 
   return {

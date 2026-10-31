@@ -158,7 +158,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
                 <p className="whitespace-pre-line text-steel-700">
                   {note.body}
                 </p>
-                <p className="mt-0.5 text-[11px] text-steel-500">
+                <p className="mt-0.5 text-xs text-steel-500">
                   {note.byline}
                 </p>
               </li>
@@ -269,7 +269,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
                       </span>
                     </div>
                     {item.note.length > 0 && (
-                      <p className="mt-0.5 text-[11px] text-steel-500">
+                      <p className="mt-0.5 text-xs text-steel-500">
                         Note: {item.note}
                       </p>
                     )}
@@ -295,7 +295,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
                       ?.provenance === "simulated"
                   }
                 />
-                <p className="mt-1 text-[11px] text-steel-600">
+                <p className="mt-1 text-xs text-steel-600">
                   {photo.caption}
                 </p>
               </li>
@@ -315,7 +315,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
             <p className="text-sm font-bold tracking-wide text-steel-900 uppercase">
               {model.refusal.heading}
             </p>
-            <p className="mt-2 text-[11px] font-bold tracking-[0.12em] text-steel-500 uppercase">
+            <p className="mt-2 text-xs font-bold tracking-[0.12em] text-steel-500 uppercase">
               Reason
             </p>
             <p className="mt-0.5 whitespace-pre-wrap text-steel-800">{model.refusal.reason}</p>
@@ -341,7 +341,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
             </div>
             <div>
               <SignatureDisplay pathData={model.acceptance.signatureData} />
-              <p className="mt-1 border-t border-steel-300 pt-1 text-[11px] text-steel-500">
+              <p className="mt-1 border-t border-steel-300 pt-1 text-xs text-steel-500">
                 {model.acceptance.caption}
               </p>
             </div>
@@ -349,7 +349,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         )}
       </section>
 
-      <footer className="mt-8 border-t border-steel-200 pt-3 text-[11px] text-steel-400">
+      <footer className="mt-8 border-t border-steel-200 pt-3 text-xs text-steel-400">
         {model.footerLines.map((line) => (
           <span key={line} className="block">
             {line}

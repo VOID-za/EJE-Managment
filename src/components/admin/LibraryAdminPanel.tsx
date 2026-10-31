@@ -449,7 +449,7 @@ const DocumentDialog = ({
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
+                  <p className="mt-2 text-xs leading-relaxed text-steel-400">
                     {revisionFile === null
                       ? 'Without a PDF the revision is recorded as metadata only — it cannot be downloaded or searched.'
                       : 'The file is stored, measured and indexed; the page count comes from the file itself.'}

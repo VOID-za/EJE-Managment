@@ -182,11 +182,11 @@ export const JobCorrectionsPanel = ({
                       </Badge>
                     ))}
                   </p>
-                  <p className="mt-1.5 text-[11px] text-steel-400">
+                  <p className="mt-1.5 text-xs text-steel-400">
                     {nameOf(correction.raisedBy)} · {formatDateTime(correction.raisedAt)}
                   </p>
                   {correction.acknowledged !== null && (
-                    <p className="mt-1 text-[11px] text-steel-500">
+                    <p className="mt-1 text-xs text-steel-500">
                       Acknowledged by {correction.acknowledged.acknowledgedBy} (
                       {correction.acknowledged.method}),{' '}
                       {formatDateTime(correction.acknowledged.recordedAt)}
@@ -254,7 +254,7 @@ export const JobCorrectionsPanel = ({
                           Cancel
                         </Button>
                       </div>
-                      <p className="text-[11px] text-steel-400">
+                      <p className="text-xs text-steel-400">
                         This is recorded once and is not rewritten afterwards.
                       </p>
                     </div>
@@ -374,7 +374,7 @@ export const JobCorrectionsPanel = ({
                     No
                   </Button>
                 </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-steel-400">
+                <p className="mt-1 text-xs leading-relaxed text-steel-400">
                   {mustAcknowledge
                     ? 'Required: this correction changes a price, a quantity or the work described, and EJE require the customer to acknowledge those.'
                     : 'The addendum says which of these it is, either way. For these areas EJE leave it to your judgement, and it is recorded as such.'}

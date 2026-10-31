@@ -36,7 +36,7 @@ export const AttendanceDocumentView = ({ document }: { readonly document: Attend
         {document.versionLabel}
       </dd>
     </dl>
-    <table className="mt-4 w-full border-collapse text-[11px]">
+    <table className="mt-4 w-full border-collapse text-xs">
       <thead>
         <tr className="bg-steel-50 text-left" data-testid="attendance-document-header">
           {ATTENDANCE_PDF_COLUMNS.map((column) => (
@@ -55,6 +55,6 @@ export const AttendanceDocumentView = ({ document }: { readonly document: Attend
         ))}
       </tbody>
     </table>
-    <p className="mt-3 text-[10px] text-steel-500" data-testid="attendance-document-summary">{attendanceSummaryLine(document)}</p>
+    <p className="mt-3 text-xs text-steel-500" data-testid="attendance-document-summary">{attendanceSummaryLine(document)}</p>
   </article>
 );

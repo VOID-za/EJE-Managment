@@ -5,7 +5,7 @@ import { userFullName, type User } from '@/domain';
 import {
   Avatar,
   Badge,
-  Button,
+  ButtonLink,
   Card,
   CardHeader,
   EmptyState,
@@ -92,16 +92,10 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
         description="Live view of every open job, where each one stands and what needs attention today."
         actions={
           <>
-            <Link href="/calendar">
-              <Button variant="secondary" leadingIcon={<Icon name="calendar" className="size-4" />}>
-                Schedule
-              </Button>
-            </Link>
+            <ButtonLink href="/calendar" variant="secondary" leadingIcon={<Icon name="calendar" className="size-4" />}>Schedule</ButtonLink>
             {/* Raising a job belongs on the Jobs screen, which is where the
                 office goes to see what is already open before adding to it. */}
-            <Link href="/jobs">
-              <Button leadingIcon={<Icon name="jobs" className="size-4" />}>Jobs</Button>
-            </Link>
+            <ButtonLink href="/jobs" leadingIcon={<Icon name="jobs" className="size-4" />}>Jobs</ButtonLink>
           </>
         }
       />
@@ -169,11 +163,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
             }
             description="Scheduled before today and still not completed."
             action={
-              <Link href="/jobs?status=overdue">
-                <Button variant="secondary" size="sm">
-                  View all
-                </Button>
-              </Link>
+              <ButtonLink href="/jobs?status=overdue" variant="secondary" size="sm">View all</ButtonLink>
             }
           />
           <ul className="mt-4 space-y-2">
@@ -207,11 +197,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
               title="Today and upcoming"
               description="Scheduled work across all technicians."
               action={
-                <Link href="/calendar">
-                  <Button variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>
-                    Full schedule
-                  </Button>
-                </Link>
+                <ButtonLink href="/calendar" variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>Full schedule</ButtonLink>
               }
               className="mb-3"
             />
@@ -367,11 +353,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
               title="Notifications"
               description={`${notifications.length} unread`}
               action={
-                <Link href="/notifications">
-                  <Button variant="ghost" size="sm">
-                    View all
-                  </Button>
-                </Link>
+                <ButtonLink href="/notifications" variant="ghost" size="sm">View all</ButtonLink>
               }
             />
             {notifications.length === 0 ? (
@@ -400,11 +382,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
             <CardHeader
               title="Recent activity"
               action={
-                <Link href="/activity">
-                  <Button variant="ghost" size="sm">
-                    View all
-                  </Button>
-                </Link>
+                <ButtonLink href="/activity" variant="ghost" size="sm">View all</ButtonLink>
               }
             />
             <div className="mt-4">

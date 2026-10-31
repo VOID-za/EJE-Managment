@@ -111,7 +111,7 @@ export const UnsignedDeliveryPanel = ({
                     className="mt-1 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface px-3 py-2 text-sm placeholder:text-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
                     data-testid="unsigned-reason"
                   />
-                  <p className="mt-1 text-[11px] leading-relaxed text-steel-400">
+                  <p className="mt-1 text-xs leading-relaxed text-steel-400">
                     Recorded with your name and the time on the audit trail, against this exact
                     document. It goes to the contact person on the job and nowhere else.
                   </p>

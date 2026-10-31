@@ -73,7 +73,7 @@ const AttachmentThumb = ({ file }: { readonly file: File }) => {
     return <img src={url} alt="" className="size-10 shrink-0 rounded object-cover" />;
   }
   return (
-    <span className="flex size-10 shrink-0 items-center justify-center rounded bg-steel-100 text-[10px] font-semibold text-steel-600 uppercase">
+    <span className="flex size-10 shrink-0 items-center justify-center rounded bg-steel-100 text-xs font-semibold text-steel-600 uppercase">
       {file.type === 'application/pdf' ? 'PDF' : 'Photo'}
     </span>
   );
@@ -522,7 +522,7 @@ const NewJobPage = () => {
                     href={siteMapUrl(selectedSite)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-9 items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
+                    className="inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-1 text-xs font-medium text-eje-700 hover:underline"
                   >
                     <Icon name="pin" className="size-3.5" />
                     Open in Google Maps

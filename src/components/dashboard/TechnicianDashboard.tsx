@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { User } from '@/domain';
 import {
   Badge,
-  Button,
+  ButtonLink,
   Card,
   CardHeader,
   EmptyState,
@@ -79,11 +79,7 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
         description="Your jobs for today, and anything waiting on you."
         actions={
           unread.length > 0 ? (
-            <Link href="/notifications">
-              <Button variant="secondary" leadingIcon={<Icon name="bell" className="size-4" />}>
-                {unread.length} new
-              </Button>
-            </Link>
+            <ButtonLink href="/notifications" variant="secondary" leadingIcon={<Icon name="bell" className="size-4" />}>{unread.length} new</ButtonLink>
           ) : undefined
         }
       />
@@ -191,11 +187,7 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
               title="Notifications"
               description={unread.length === 0 ? 'All caught up' : `${unread.length} unread`}
               action={
-                <Link href="/notifications">
-                  <Button variant="ghost" size="sm">
-                    View all
-                  </Button>
-                </Link>
+                <ButtonLink href="/notifications" variant="ghost" size="sm">View all</ButtonLink>
               }
             />
             {unread.length === 0 ? (
@@ -214,7 +206,7 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
                       </Badge>
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs text-steel-500">{notification.body}</p>
-                    <p className="mt-1.5 text-[11px] text-steel-400">
+                    <p className="mt-1.5 text-xs text-steel-400">
                       {formatRelative(notification.createdAt)}
                     </p>
                   </li>

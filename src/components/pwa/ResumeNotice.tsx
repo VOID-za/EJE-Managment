@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Button, Icon } from '@/components/ui';
+import { Button, ButtonLink, Icon } from '@/components/ui';
 import { clearLastPlace, isJobCacheSupported, readLastPlace } from '@/lib/pwa/job-cache';
 import { useCurrentUser } from '@/providers/AppProvider';
 
@@ -94,11 +93,7 @@ export const ResumeNotice = ({
         <Button type="button" variant="ghost" onClick={dismiss}>
           Not now
         </Button>
-        <Link href={`/jobs/${jobNumber}`} prefetch={false}>
-          <Button type="button" onClick={dismiss}>
-            Resume {jobNumber}
-          </Button>
-        </Link>
+        <ButtonLink href={`/jobs/${jobNumber}`} prefetch={false} onClick={dismiss}>Resume {jobNumber}</ButtonLink>
       </span>
     </div>
   );

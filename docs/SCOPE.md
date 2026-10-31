@@ -1534,6 +1534,20 @@ The tester's three handwritten pages. Register: `docs/delivery-register-2026-10-
 | TST-ATT-1 | **The office's Attendance page** has the technician's layout first (own form and days), then the team register. | **TESTED — awaiting approval.** |
 | TST-MSG-1 | **Messages**: a usable chat with a visible Send — the existing chat, whose Send button was clipped by the card; fixed and tested at tablet size, both directions, with persistence and permissions. | **TESTED — awaiting approval.** |
 
+### The system-wide desktop and tablet audit — 31 October 2026 (NOT YET DEPLOYED; not approved)
+
+Asked for by the owner on 31 October 2026. Register and full audit report:
+`docs/delivery-register-2026-10-31.md`. No migration; no business rule changed.
+Nothing here is approved.
+
+| ID | Requirement | Status |
+|---|---|---|
+| UX-TAB-1 | **A tablet does everything the desktop does, for every role**: every page, tab, control, navigation destination and piece of information available on the desktop is available on a touch tablet at 1280×800, 1180×820, 1024×768, 1024×1366, 800×1280 and 768×1024 — measured, not looked at (`scripts/tablet-audit.mjs`), with the whole job workflow run on a tablet (`EJE_E2E_VIEWPORT`). Tables fold their secondary columns into the first column instead of hiding them; the job list names the technician at every width. | **TESTED — awaiting approval.** Emulated. Physical tablet: staff-testing L1–L2. |
+| UX-TAB-2 | **Touch targets of 44 px and text of 12 px** on a touch screen, everywhere; one link-styled element (`ButtonLink`) instead of a button inside a link; nothing hover-only. | **TESTED — awaiting approval.** Emulated. Physical tablet: staff-testing L3. |
+| UX-TAB-3 | **Forms survive the tablet**: turning it mid-form keeps what was typed and keeps Save reachable; dialogs fit the shortest screens with every button tappable; the on-screen keyboard resizes the page (`interactive-widget=resizes-content`, `dvh`). | **TESTED — awaiting approval** (rotation, dialogs). The keyboard behaviour needs the physical tablet: staff-testing L4. |
+| UX-TAB-4 | **Every PDF is complete and readable with the longest real content**: nothing past a margin, nothing printed over anything else, no rule through text, every value present, page numbering on every page, the footer whole — the job card, correction addendum, delivery note, timesheet and attendance form. Fixed: inherited letter-spacing (every PDF), the job card's header rule, the delivery note's separators, details and part numbers, the correction's machine line, the timesheet's totals, the monthly forms' footer, right-aligned titles. | **TESTED — awaiting approval.** Every page rendered and inspected. Printing on a real printer: staff-testing L5. |
+| UX-TAB-5 | **The tablet regression suite runs on every push**: the parity audit at the two hardest shapes, the job workflow on a portrait tablet and the interaction check are CI steps; the release audit runs all six shapes. | **TESTED.** |
+
 ### The Attendance page's monthly form, the update notice on every release — 30 October 2026 (DEPLOYED in `e54f7d3`; not yet approved)
 
 Asked for by the owner on 30 October 2026. Register: `docs/delivery-register-2026-10-30.md`.

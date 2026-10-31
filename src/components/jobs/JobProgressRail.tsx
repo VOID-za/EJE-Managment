@@ -57,7 +57,7 @@ export const JobProgressRail = ({
               >
                 <span
                   className={cn(
-                    'flex size-5 items-center justify-center rounded-full text-[10px] font-bold',
+                    'flex size-5 items-center justify-center rounded-full text-xs font-bold',
                     interrupted
                       ? 'bg-amber-eje-500 text-white'
                       : active

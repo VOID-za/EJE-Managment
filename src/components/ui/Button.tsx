@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import Link from 'next/link';
+import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
@@ -17,12 +18,32 @@ const VARIANTS: Record<ButtonVariant, string> = {
     'bg-success text-white shadow-sm hover:bg-success-hover active:bg-success-hover disabled:bg-steel-300 disabled:text-steel-500',
 };
 
-/** Sizes keep a minimum 44px target so the UI stays usable with gloves on a tablet. */
+/**
+ * `md` and `lg` are 44px and over. `sm` is 36px for a mouse and grows to 44px on
+ * a touch screen (globals.css, "A FINGERTIP ON A TOUCH SCREEN").
+ */
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'h-9 px-3 text-sm gap-1.5',
+  sm: 'h-9 pointer-coarse:h-11 px-3 text-sm gap-1.5',
   md: 'h-11 px-4 text-sm gap-2',
   lg: 'h-13 px-6 text-base gap-2.5',
 };
+
+/** The button's look, for the one element that should look like a button but navigate. */
+export const buttonClasses = (
+  variant: ButtonVariant = 'primary',
+  size: ButtonSize = 'md',
+  fullWidth = false,
+  className?: string,
+): string =>
+  cn(
+    'inline-flex items-center justify-center rounded-[var(--radius-control)] font-semibold',
+    'transition-colors duration-150 select-none',
+    'disabled:cursor-not-allowed',
+    VARIANTS[variant],
+    SIZES[size],
+    fullWidth && 'w-full',
+    className,
+  );
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly variant?: ButtonVariant;
@@ -50,21 +71,43 @@ export const Button = ({
     type={type}
     disabled={disabled === true || loading}
     aria-busy={loading || undefined}
-    className={cn(
-      'inline-flex items-center justify-center rounded-[var(--radius-control)] font-semibold',
-      'transition-colors duration-150 select-none',
-      'disabled:cursor-not-allowed',
-      VARIANTS[variant],
-      SIZES[size],
-      fullWidth && 'w-full',
-      className,
-    )}
+    className={buttonClasses(variant, size, fullWidth, className)}
     {...rest}
   >
     {loading ? <Spinner /> : leadingIcon}
     {children}
     {!loading && trailingIcon}
   </button>
+);
+
+/**
+ * A link that looks like a button. UX-TAB-1.
+ *
+ * It replaces `<Link><Button/></Link>`, which put a button inside a link: two
+ * focus stops for one action, an inline link 20px tall around a 44px button,
+ * and invalid HTML. One element, one tab stop, the button's own size.
+ */
+export const ButtonLink = ({
+  variant = 'primary',
+  size = 'md',
+  fullWidth = false,
+  leadingIcon,
+  trailingIcon,
+  className,
+  children,
+  ...rest
+}: ComponentProps<typeof Link> & {
+  readonly variant?: ButtonVariant;
+  readonly size?: ButtonSize;
+  readonly fullWidth?: boolean;
+  readonly leadingIcon?: ReactNode;
+  readonly trailingIcon?: ReactNode;
+}) => (
+  <Link className={buttonClasses(variant, size, fullWidth, className)} {...rest}>
+    {leadingIcon}
+    {children}
+    {trailingIcon}
+  </Link>
 );
 
 const Spinner = () => (

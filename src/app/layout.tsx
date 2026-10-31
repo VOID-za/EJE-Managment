@@ -57,6 +57,11 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Rugged tablets are the primary field device; the layout is built for them.
   maximumScale: 5,
+  // The on-screen keyboard shrinks the page rather than covering it, so the
+  // field being typed into and a dialog's Save and Cancel stay above it
+  // (Android Chrome; UX-TAB-1). Verified on a physical tablet only — no
+  // emulator raises a real keyboard.
+  interactiveWidget: 'resizes-content',
   themeColor: EJE_THEME_COLOR,
 };
 

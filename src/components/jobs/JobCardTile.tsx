@@ -77,7 +77,7 @@ export const JobCardTile = ({ row }: { readonly row: JobListRow }) => {
           </span>
         )}
 
-        <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-eje-600 opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-eje-600 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
           Open job
           <Icon name="chevronRight" className="size-3.5" />
         </span>

@@ -61,7 +61,18 @@ const failures = [];
 /** The first downloaded final document, so later steps can compare against it. */
 let downloadedBytes = null;
 const browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+/*
+ * The whole workflow on a tablet, too. EJE_E2E_VIEWPORT=1024x768 (or any
+ * WIDTHxHEIGHT) runs every step at that size with a touch screen, so a step
+ * that only a desktop can complete fails here (UX-TAB-1, parity).
+ */
+const shape = /^(\d+)x(\d+)$/u.exec(process.env.EJE_E2E_VIEWPORT ?? '');
+const page = await browser.newPage({
+  viewport: shape === null ? { width: 1440, height: 1000 } : { width: Number(shape[1]), height: Number(shape[2]) },
+  hasTouch: shape !== null,
+  acceptDownloads: true,
+});
+if (shape !== null) console.log(`(tablet: ${shape[0]}, touch)`);
 
 const pageErrors = [];
 /**
@@ -725,14 +736,18 @@ await step('the closed job is read-only, and its signature survived', async () =
 await step('viewing the closed job card twice does not duplicate the document event', async () => {
   await visit('/jobs/EJE-1065');
   await page.getByRole('tab', { name: /Activity/ }).click();
-  await page.getByText('Activity', { exact: false }).first().waitFor({ timeout: 10000 });
+  // In the page, not the first match anywhere: below 1024px that is the closed
+  // navigation drawer's Activity link, which is hidden by design.
+  await page.locator('main').getByText('Activity', { exact: false }).first().waitFor({ timeout: 10000 });
   const before = await page.getByText('document generated', { exact: false }).count();
 
   await visit('/jobs/EJE-1065/review');
   await page.getByText('Issued and invoiced').waitFor({ timeout: 15000 });
   await visit('/jobs/EJE-1065');
   await page.getByRole('tab', { name: /Activity/ }).click();
-  await page.getByText('Activity', { exact: false }).first().waitFor({ timeout: 10000 });
+  // In the page, not the first match anywhere: below 1024px that is the closed
+  // navigation drawer's Activity link, which is hidden by design.
+  await page.locator('main').getByText('Activity', { exact: false }).first().waitFor({ timeout: 10000 });
   const after = await page.getByText('document generated', { exact: false }).count();
 
   if (after !== before) {

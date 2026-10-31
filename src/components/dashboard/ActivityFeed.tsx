@@ -96,7 +96,7 @@ export const ActivityFeed = ({
                   */
                   <Link
                     href={`/jobs/${jobNumber}`}
-                    className="-my-2 inline-flex min-h-9 items-center px-1 py-2 font-mono text-xs font-semibold text-eje-600 hover:underline"
+                    className="-my-2 inline-flex min-h-9 pointer-coarse:min-h-11 items-center px-1 py-2 font-mono text-xs font-semibold text-eje-600 hover:underline"
                   >
                     {jobNumber}
                   </Link>

@@ -110,7 +110,7 @@ const CapturesPage = () => {
                           ? 'Applied to the job'
                           : 'No action'}
                     </Badge>
-                    <Link href={`/jobs/${row.jobNumber}`} className="font-mono text-sm font-semibold hover:underline">
+                    <Link href={`/jobs/${row.jobNumber}`} className="inline-flex items-center font-mono text-sm font-semibold hover:underline">
                       {row.jobNumber}
                     </Link>
                     <span className="text-sm text-steel-700">{row.referral.summary}</span>
@@ -201,7 +201,7 @@ const CapturesPage = () => {
                             </Badge>
                             <Link
                               href={`/jobs/${row.jobNumber}`}
-                              className="font-mono text-sm font-semibold hover:underline"
+                              className="inline-flex items-center font-mono text-sm font-semibold hover:underline"
                             >
                               {row.jobNumber}
                             </Link>

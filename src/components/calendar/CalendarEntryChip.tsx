@@ -66,8 +66,8 @@ export const CalendarEntryChip = ({
         // and absence sits shorter still than work — the difference reads as
         // weight rather than as misalignment.
         isAvailability
-          ? 'h-[15px] text-[10px] font-medium'
-          : 'h-[18px] text-[11px] font-semibold',
+          ? 'h-[15px] text-xs leading-none font-medium'
+          : 'h-[18px] text-xs leading-none font-semibold',
         isAvailability ? 'px-1' : 'px-1.5',
         compact ? 'rounded-sm' : 'rounded-[5px]',
         continuesBefore ? 'rounded-l-none' : '',
@@ -102,7 +102,7 @@ export const CalendarEntryChip = ({
           {/* A part-day absence is a different planning problem from a whole
               day, so the window shows on the bar outside the month grid. */}
           {!entry.allDay && !compact && (
-            <span className="ml-auto shrink-0 text-[10px] font-normal opacity-80">
+            <span className="ml-auto shrink-0 text-xs font-normal opacity-80">
               {entry.timeLabel}
             </span>
           )}

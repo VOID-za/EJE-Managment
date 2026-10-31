@@ -251,7 +251,7 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
               </tr>
             </tfoot>
           </table>
-          <p className="mt-2 text-[11px] text-steel-500 italic">{model.collection.priceNote}</p>
+          <p className="mt-2 text-xs text-steel-500 italic">{model.collection.priceNote}</p>
         </section>
       ) : null}
 
@@ -309,7 +309,7 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
             </div>
             <div>
               <SignatureDisplay pathData={model.acceptance.signatureData} />
-              <p className="mt-1 border-t border-steel-300 pt-1 text-[11px] text-steel-500">
+              <p className="mt-1 border-t border-steel-300 pt-1 text-xs text-steel-500">
                 {model.acceptance.caption}
               </p>
             </div>
@@ -317,7 +317,7 @@ export const PartsCollectionNote = ({ view }: { readonly view: JobView }) => {
         )}
       </section>
 
-      <footer className="mt-8 border-t border-steel-200 pt-3 text-[11px] text-steel-400">
+      <footer className="mt-8 border-t border-steel-200 pt-3 text-xs text-steel-400">
         {model.footerLines.map((line) => (
           <p key={line}>{line}</p>
         ))}

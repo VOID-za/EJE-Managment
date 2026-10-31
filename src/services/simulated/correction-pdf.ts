@@ -239,11 +239,10 @@ export const renderCorrectionPdf = (
   standing(sheet, source);
 
   sheet.sectionTitle('Customer');
-  sheet.text(MARGIN, source.customerName, { size: SIZE.body, colour: BODY });
-  sheet.move(GAP.line);
+  // Wrapped: a long machine description ran past the right margin.
+  sheet.paragraph(source.customerName, { size: SIZE.body, colour: BODY, leading: GAP.line });
   if (source.machineDescription.length > 0) {
-    sheet.text(MARGIN, source.machineDescription, { size: SIZE.body, colour: MUTED });
-    sheet.move(GAP.line);
+    sheet.paragraph(source.machineDescription, { size: SIZE.body, colour: MUTED, leading: GAP.line });
   }
   sheet.move(GAP.tight);
 

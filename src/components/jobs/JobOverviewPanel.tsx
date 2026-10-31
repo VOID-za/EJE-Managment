@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import {
   can,
@@ -19,7 +18,7 @@ import type { JobView } from '@/application/job-view';
 import {
   Avatar,
   Badge,
-  Button,
+  Button, ButtonLink,
   Card,
   CardHeader,
   DefinitionGrid,
@@ -234,11 +233,7 @@ export const JobOverviewPanel = ({
             <CardHeader
               title="Customer"
               action={
-                <Link href={`/customers/${customer.id}`}>
-                  <Button variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>
-                    Open
-                  </Button>
-                </Link>
+                <ButtonLink href={`/customers/${customer.id}`} variant="ghost" size="sm" trailingIcon={<Icon name="chevronRight" className="size-4" />}>Open</ButtonLink>
               }
             />
             <div className="mt-4 space-y-3 text-sm">
@@ -344,15 +339,10 @@ export const JobOverviewPanel = ({
               <CardHeader
                 title="Machine"
                 action={
-                  <Link href={`/machines/${machine.id}`}>
-                    <Button
+                  <ButtonLink href={`/machines/${machine.id}`}
                       variant="ghost"
                       size="sm"
-                      trailingIcon={<Icon name="chevronRight" className="size-4" />}
-                    >
-                      Open
-                    </Button>
-                  </Link>
+                      trailingIcon={<Icon name="chevronRight" className="size-4" />}>Open</ButtonLink>
                 }
               />
               <p className="mt-4 text-sm font-semibold text-steel-900">

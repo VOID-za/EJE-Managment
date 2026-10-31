@@ -85,6 +85,7 @@ const AppLayout = ({ children }: { readonly children: React.ReactNode }) => {
         still reach — which is worse than either.
       */}
       <div
+        data-mobile-nav
         aria-hidden={!menuOpen}
         inert={!menuOpen}
         className={cn(

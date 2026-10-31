@@ -529,6 +529,21 @@ Fictional data only while the demonstration switcher is on.
 | K8 | Technician on the tablet: Messages → write → Send; the office replies | Send is visible without hunting; both messages stay in the conversation |
 | K9 | On the **actual rugged tablet**: K1 and K8 | Record the result |
 
+## L. The tablet audit — on the actual rugged tablet (31 October 2026)
+
+`docs/delivery-register-2026-10-31.md`. Everything in it was measured on an
+**emulated** tablet; these are the checks only the real device can answer.
+Fictional data only while the demonstration switcher is on.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| L1 | Each role, landscape then portrait: open every item in the menu, and every tab on a job card, a customer, Administration and Notifications | Nothing is cut off, nothing scrolls sideways, every button the desktop has is there; tables show every column's information (below the first column in portrait) |
+| L2 | Technician: accept a job, complete it, capture the signature, submit — on the tablet only | Every step can be done without a desktop |
+| L3 | With a gloved finger: the top bar (menu, theme, notifications), the Jobs filter chips, the calendar's Day/Week/Month/Year, a calendar day, a dialog's buttons | Each is hit first time; no mis-taps on neighbours; all text readable without zooming |
+| L4 | Type in a dialog near the bottom of the screen (Mark unavailable, a timesheet line, a message) with the on-screen keyboard up | The field being typed in and the dialog's Save/Cancel stay above the keyboard |
+| L5 | Print a job card and a monthly form from the preview to a real printer | The printout is the document only, complete, nothing cut at the edges |
+| L6 | Install the app from Chrome, open it from the home screen, turn it, put it in the background and come back, turn Wi-Fi off and on | It opens on EJE, survives each, and the connection banner says what is true |
+
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
 Run from outside the server against `https://eje.syncza.co.za`, signed in only

@@ -40,7 +40,7 @@ export const Logo = ({
       </span>
       <span
         className={cn(
-          'text-[11px] font-medium tracking-wide uppercase',
+          'text-xs font-medium tracking-wide uppercase',
           variant === 'dark' ? 'text-chrome-dim' : 'text-chrome-faint',
         )}
       >

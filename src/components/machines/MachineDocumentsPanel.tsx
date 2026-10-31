@@ -136,7 +136,7 @@ export const MachineDocumentsPanel = ({
                 {document.caption.length > 0 && (
                   <p className="mt-0.5 truncate text-xs text-steel-600">{document.caption}</p>
                 )}
-                <p className="mt-0.5 text-[11px] text-steel-400">
+                <p className="mt-0.5 text-xs text-steel-400">
                   {formatFileSize(document.sizeBytes)} · {nameOf(document.uploadedBy)} ·{' '}
                   {formatDate(document.uploadedAt)}
                 </p>
@@ -256,7 +256,7 @@ export const MachineDocumentsPanel = ({
             Choose a document
           </Button>
 
-          <p className="mt-2 text-[11px] leading-relaxed text-steel-400">
+          <p className="mt-2 text-xs leading-relaxed text-steel-400">
             {DOCUMENT_TYPES_SENTENCE} The server checks the file itself rather than its name, and
             records the size and checksum of what it stored. A document nobody classifies stays
             office-only.

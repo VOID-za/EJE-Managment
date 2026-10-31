@@ -1958,7 +1958,7 @@ await step('the notification opens the job it is about', async () => {
     .locator('main li')
     .filter({ hasText: `${REFUSED_JOB} — customer refused to sign` })
     .first()
-    .getByRole('button', { name: /Open/ })
+    .getByRole('link', { name: /Open/ })
     .first()
     .click();
   await page.waitForURL(`**/jobs/${REFUSED_JOB}`, { timeout: 10000 });
@@ -5635,7 +5635,7 @@ await step('an availability bar opens its own detail, which a job page cannot sh
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 8000 });
   await dialog.getByText('Unavailable').first().waitFor({ timeout: 5000 });
-  await dialog.getByRole('button', { name: 'Open technician' }).waitFor({ timeout: 5000 });
+  await dialog.getByRole('link', { name: 'Open technician' }).waitFor({ timeout: 5000 });
   await page.keyboard.press('Escape');
   await showEverything();
 });
@@ -5858,7 +5858,7 @@ await step('the header carries the profile, and no global New Job', async () => 
 
 await step('New Job lives on the Jobs screen, and still works', async () => {
   await page.goto(`${BASE}/jobs`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'New Job' }).first().click();
+  await page.getByRole('link', { name: 'New Job' }).first().click();
   await page.waitForURL('**/jobs/new', { timeout: 10000 });
   await page.getByRole('heading', { name: 'New job' }).waitFor({ timeout: 8000 });
 });

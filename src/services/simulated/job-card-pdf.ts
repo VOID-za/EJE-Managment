@@ -123,7 +123,9 @@ const header = (sheet: Sheet, model: JobCardModel): void => {
    * has no idea what Review means and no reason to. The job type and priority
    * are the job's own details and are printed with the rest of them.
    */
-  sheet.move(48);
+  // Below the registration line's descenders (its baseline is top - 50): at
+  // 48 the rule was drawn THROUGH it (UX-TAB-1, seen on the rendered page).
+  sheet.move(56);
   sheet.rule(INK, 1.4);
   sheet.move(GAP.section);
 };

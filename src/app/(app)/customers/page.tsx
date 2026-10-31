@@ -158,7 +158,7 @@ const CustomersPage = () => {
           />
         </div>
         {canManage && legacyCount > 0 && (
-          <label className="mt-3 flex min-h-9 items-center gap-2 text-sm text-steel-700">
+          <label className="mt-3 flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 text-sm text-steel-700">
             <input
               type="checkbox"
               checked={legacyOnly}

@@ -13,8 +13,8 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
     <header className="flex items-start justify-between gap-4">
       <div>
         <p className="text-base font-bold">{model.company.name}</p>
-        <p className="text-[11px] text-steel-500">{model.company.address}</p>
-        <p className="text-[11px] text-steel-500">{model.company.contactLine}</p>
+        <p className="text-xs text-steel-500">{model.company.address}</p>
+        <p className="text-xs text-steel-500">{model.company.contactLine}</p>
       </div>
       <div className="text-right">
         <p className="text-xl font-bold tracking-[0.15em]">DELIVERY NOTE</p>
@@ -22,7 +22,7 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
       </div>
     </header>
     <section className="mt-5">
-      <p className="text-[10px] font-bold tracking-wide text-steel-500 uppercase">Deliver to</p>
+      <p className="text-xs font-bold tracking-wide text-steel-500 uppercase">Deliver to</p>
       {model.deliverTo.map((line) => (
         <p key={line}>{line}</p>
       ))}
@@ -59,10 +59,10 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
         </tr>
       </tbody>
     </table>
-    <p className="mt-3 text-[11px] text-steel-500">{model.priceNote}</p>
+    <p className="mt-3 text-xs text-steel-500">{model.priceNote}</p>
     {model.signature !== null ? (
       <section className="mt-6" data-testid="delivery-note-signature">
-        <p className="text-[10px] font-bold tracking-wide text-steel-500 uppercase">Courier acceptance</p>
+        <p className="text-xs font-bold tracking-wide text-steel-500 uppercase">Courier acceptance</p>
         <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <p>{model.signature.declaration}</p>
@@ -72,12 +72,12 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
           </div>
           <div>
             <SignatureDisplay pathData={model.signature.signatureData} />
-            <p className="mt-1 text-[10px] text-steel-500">Courier signature — the same signature is on the priced job card</p>
+            <p className="mt-1 text-xs text-steel-500">Courier signature — the same signature is on the priced job card</p>
           </div>
         </div>
       </section>
     ) : (
-      <div className="mt-10 grid grid-cols-2 gap-8 text-[11px] text-steel-500">
+      <div className="mt-10 grid grid-cols-2 gap-8 text-xs text-steel-500">
         <p className="border-t border-steel-300 pt-1">Collected by (courier) — name, signature, date</p>
         <p className="border-t border-steel-300 pt-1">Released by (EJE) — name, signature, date</p>
       </div>

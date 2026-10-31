@@ -72,7 +72,7 @@ export const MonthView = ({
         {WEEKDAY_NAMES.map((name) => (
           <div
             key={name}
-            className="px-2 py-2 text-center text-[11px] font-semibold tracking-wide text-steel-500 uppercase"
+            className="px-2 py-2 text-center text-xs font-semibold tracking-wide text-steel-500 uppercase"
           >
             {name}
           </div>
@@ -98,7 +98,9 @@ export const MonthView = ({
                     type="button"
                     onClick={() => onSelectDay(day)}
                     style={{
-                      minHeight: `${36 + lanes * LANE_HEIGHT + (hasHidden ? MORE_ROW_HEIGHT : 6)}px`,
+                      // Never under 44px: an inline style beats the touch
+                      // minimum in globals.css, and an empty week was 42px.
+                      minHeight: `${Math.max(44, 36 + lanes * LANE_HEIGHT + (hasHidden ? MORE_ROW_HEIGHT : 6))}px`,
                     }}
                     className={cn(
                       // `items-start` matters: a button centres its content, which
@@ -165,7 +167,7 @@ export const MonthView = ({
                     // held to the same floor by the responsive audit — the day
                     // cell is the larger target. See `responsive-check.mjs`.
                     data-calendar-bar=""
-                    className="pointer-events-auto absolute flex min-h-[20px] items-center justify-start rounded px-1 text-[10px] font-semibold text-steel-500 transition-colors hover:bg-steel-100 hover:text-steel-800"
+                    className="pointer-events-auto absolute flex min-h-[20px] items-center justify-start rounded px-1 text-xs font-semibold text-steel-500 transition-colors hover:bg-steel-100 hover:text-steel-800"
                     style={{
                       left: `calc(${(column / 7) * 100}% + 3px)`,
                       width: `calc(${(1 / 7) * 100}% - 6px)`,
@@ -214,7 +216,7 @@ export const WeekView = ({
               isWeekend(day) && 'bg-steel-100/60',
             )}
           >
-            <span className="block text-[11px] font-semibold tracking-wide text-steel-500 uppercase">
+            <span className="block text-xs font-semibold tracking-wide text-steel-500 uppercase">
               {WEEKDAY_NAMES[(fromIso(day).getDay() + 6) % 7]}
             </span>
             <span
@@ -370,13 +372,13 @@ export const DayView = ({ entries, anchor }: ViewProps) => {
                 >
                   <Avatar initials={entry.userInitials} size="md" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-steel-900">
+                    <p className="text-sm font-semibold break-words text-steel-900">
                       {entry.userName}
                     </p>
                     <p className="text-xs text-steel-600">
                       {availabilityTypeLabel(entry.availabilityType)} · {entry.timeLabel}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-steel-400">
+                    <p className="mt-0.5 text-xs text-steel-400">
                       {formatDate(entry.start)}
                       {entry.days > 1 && ` – ${formatDate(entry.end)}`}
                     </p>
@@ -407,8 +409,9 @@ export const DayView = ({ entries, anchor }: ViewProps) => {
 export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => {
   const year = anchor.slice(0, 4);
 
+  // Two months a row on a touch screen, so a day is a 44px target.
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pointer-fine:lg:grid-cols-3 pointer-fine:xl:grid-cols-4">
       {MONTH_NAMES.map((name, monthIndex) => {
         const monthKey = `${year}-${`${monthIndex + 1}`.padStart(2, '0')}`;
         const firstRow = startOfWeek(`${monthKey}-01`);
@@ -425,11 +428,11 @@ export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
               {name}
             </p>
 
-            <div className="grid grid-cols-7 gap-0.5">
+            <div className="grid grid-cols-7 gap-0.5 pointer-coarse:gap-0">
               {WEEKDAY_NAMES.map((weekday) => (
                 <span
                   key={weekday}
-                  className="text-center text-[9px] font-semibold text-steel-400"
+                  className="text-center text-xs font-semibold text-steel-400"
                 >
                   {weekday.slice(0, 1)}
                 </span>
@@ -456,7 +459,7 @@ export const YearView = ({ entries, anchor, today, onSelectDay }: ViewProps) => 
                           : `${formatDate(day)} — ${jobCount} ${jobCount === 1 ? 'job' : 'jobs'}`
                       }
                       className={cn(
-                        'tabular relative aspect-square rounded-[3px] text-[10px] font-medium transition-colors',
+                        'tabular relative aspect-square rounded-[3px] text-xs font-medium transition-colors',
                         outside && 'invisible',
                         day === today
                           ? 'bg-action font-bold text-white'

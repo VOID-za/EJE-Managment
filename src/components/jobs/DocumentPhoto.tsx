@@ -34,7 +34,7 @@ export const DocumentPhoto = ({
       data-photo-state={missing ? 'unavailable' : 'image'}
     >
       {missing ? (
-        <div className="px-2 text-center text-[10px] text-steel-500">
+        <div className="px-2 text-center text-xs text-steel-500">
           <p className="font-semibold">Photograph not shown</p>
           <p className="mt-0.5 text-steel-400">
             {simulated

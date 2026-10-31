@@ -77,7 +77,7 @@ export const PriorityBadge = ({
       <span
         className={cn(
           'inline-flex items-center gap-1.5 rounded-full bg-danger font-bold tracking-wide text-white uppercase',
-          size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',
+          size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs',
         )}
       >
         <svg viewBox="0 0 12 12" className="size-3" fill="currentColor" aria-hidden="true">

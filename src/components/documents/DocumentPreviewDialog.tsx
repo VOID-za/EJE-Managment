@@ -177,7 +177,7 @@ const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPri
           <div
             data-testid="document-preview"
             data-preview-kind="document"
-            className="eje-scrollbar max-h-[70vh] overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2"
+            className="eje-scrollbar max-h-[70dvh] overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2"
           >
             {renderHtml()}
           </div>

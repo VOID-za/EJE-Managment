@@ -28,7 +28,7 @@ const JobHeading = ({ row }: { readonly row: OfficeQueueRow }) => (
   <div className="min-w-0">
     <Link
       href={`/jobs/${row.jobNumber}`}
-      className="font-semibold text-eje-700 underline-offset-2 hover:underline"
+      className="inline-flex items-center font-semibold text-eje-700 underline-offset-2 hover:underline"
     >
       {row.jobNumber}
     </Link>

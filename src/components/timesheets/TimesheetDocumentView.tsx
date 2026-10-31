@@ -43,7 +43,7 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
       )}
     </dl>
 
-    <table className="mt-4 w-full border-collapse text-[11px]">
+    <table className="mt-4 w-full border-collapse text-xs">
       <thead>
         <tr className="bg-steel-50 text-left" data-testid="timesheet-document-header">
           {TIMESHEET_PDF_COLUMNS.map((column) => (
@@ -85,7 +85,7 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
       </tbody>
     </table>
 
-    <div className="mt-3 space-y-0.5 text-[10px] text-steel-500">
+    <div className="mt-3 space-y-0.5 text-xs text-steel-500">
       {document.rows.some((row) => row.calloutShared) && (
         <p>(sh) — a shared call-out: the amount is this technician’s own share, as they entered it; nothing is divided.</p>
       )}
@@ -105,7 +105,7 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
     </div>
 
     <section className="mt-4 min-h-24 rounded border border-steel-300 p-3" data-testid="timesheet-document-comments">
-      <p className="text-[10px] font-bold tracking-wide text-steel-500 uppercase">Comments</p>
+      <p className="text-xs font-bold tracking-wide text-steel-500 uppercase">Comments</p>
       <p className="mt-1 whitespace-pre-wrap">{document.comment}</p>
     </section>
   </article>

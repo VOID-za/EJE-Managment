@@ -192,7 +192,7 @@ const CalendarPage = () => {
                 aria-selected={view === option.id}
                 onClick={() => setView(option.id)}
                 className={cn(
-                  'min-h-9 rounded-[0.45rem] px-3.5 text-sm font-semibold transition-colors',
+                  'min-h-9 pointer-coarse:min-h-11 rounded-[0.45rem] px-3.5 text-sm font-semibold transition-colors',
                   view === option.id
                     ? 'bg-surface text-steel-900 shadow-sm'
                     : 'text-steel-600 hover:text-steel-900',
@@ -223,7 +223,7 @@ const CalendarPage = () => {
                     aria-pressed={show === option.id}
                     onClick={() => setShow(option.id)}
                     className={cn(
-                      'min-h-9 rounded-[0.45rem] px-3 text-sm font-semibold transition-colors',
+                      'min-h-9 pointer-coarse:min-h-11 rounded-[0.45rem] px-3 text-sm font-semibold transition-colors',
                       show === option.id
                         ? 'bg-surface text-steel-900 shadow-sm'
                         : 'text-steel-600 hover:text-steel-900',

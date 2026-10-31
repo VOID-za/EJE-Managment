@@ -89,7 +89,7 @@ export const TopBar = ({ onOpenMenu, unreadCount }: TopBarProps) => {
         >
           <Icon name="bell" />
           {unreadCount > 0 && (
-            <span className="tabular absolute top-1 right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-signal-500 px-1 text-[10px] font-bold text-white">
+            <span className="tabular absolute top-1 right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-signal-500 px-1 text-xs font-bold text-white">
               {unreadCount}
             </span>
           )}

@@ -252,9 +252,14 @@ export class PdfBuilder {
     const size = options.size ?? 10;
     this.usedFonts.add(font);
     const tracking = options.tracking ?? 0;
+    // `Tc` is ALWAYS stated, 0 included. Character spacing is text STATE: it
+    // outlives `ET`, so a run that said nothing inherited the letter-spacing of
+    // the last tracked heading — an address block, a declaration and the page
+    // footer printed wider than they were laid out, and the footer ran past the
+    // right margin (UX-TAB-1, found by looking at the rendered pages).
     this.page().operations.push(
       `BT ${colourOperands(options.colour)} rg /${FONT_RESOURCE[font]} ${round(size)} Tf ` +
-        (tracking === 0 ? '' : `${round(tracking)} Tc `) +
+        `${round(tracking)} Tc ` +
         `1 0 0 1 ${round(x)} ${round(y)} Tm (${escapeLiteral(value)}) Tj ET`,
     );
   }

@@ -59,7 +59,7 @@ export const CachedJobDetailCard = ({ detail }: { readonly detail: CachedDetail 
       <p className="shrink-0 text-xs text-steel-500 dark:text-slate-400">
         As the server had it {formatRelative(detail.capturedAt)}
         <br />
-        <span className="text-[11px]">{formatDateTime(detail.capturedAt)}</span>
+        <span className="text-xs">{formatDateTime(detail.capturedAt)}</span>
       </p>
     </div>
 

@@ -26,3 +26,5 @@ next-env.d.ts
 .pdf-check/
 
 .eje-storage/
+.tablet-audit/
+.pdf-audit/

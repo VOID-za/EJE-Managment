@@ -1,13 +1,12 @@
 'use client';
 
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
 import { deliveryStateLabel } from '@/domain';
 import {
   Badge,
-  Button,
+  Button, ButtonLink,
   Card,
   CardHeader,
   EmptyState,
@@ -355,8 +354,9 @@ const NotificationRow = ({
           <div className="mt-2.5 flex flex-wrap items-center gap-3 text-xs text-steel-400">
             <span>{TYPE_LABELS[notification.type]}</span>
             <span aria-hidden="true">·</span>
+            {/* The exact time on the page, not only in a tooltip a tablet cannot hover. */}
             <time dateTime={notification.createdAt} title={formatDateTime(notification.createdAt)}>
-              {formatRelative(notification.createdAt)}
+              {formatRelative(notification.createdAt)} ({formatDateTime(notification.createdAt)})
             </time>
             <span aria-hidden="true">·</span>
             <span className="flex items-center gap-1.5">
@@ -364,7 +364,7 @@ const NotificationRow = ({
               {notification.channels.map((channel) => (
                 <span
                   key={channel}
-                  className="inline-flex items-center gap-1 rounded-full bg-steel-100 px-2 py-0.5 text-[11px] font-medium text-steel-600"
+                  className="inline-flex items-center gap-1 rounded-full bg-steel-100 px-2 py-0.5 text-xs font-medium text-steel-600"
                   title={
                     channel === 'in_app'
                       ? 'In-app notification'
@@ -392,11 +392,7 @@ const NotificationRow = ({
                 screen would strand the ones that are not about a job. */}
             {/* Opening a notification reads it (NOTIF-AUDIT-1). */}
             {destination !== null && (
-              <Link href={destination.href} onClick={unread ? onRead : undefined}>
-                <Button size="sm" variant="secondary">
-                  {destination.label}
-                </Button>
-              </Link>
+              <ButtonLink href={destination.href} onClick={unread ? onRead : undefined} size="sm" variant="secondary">{destination.label}</ButtonLink>
             )}
             {unread && (
               <Button size="sm" variant="ghost" onClick={onRead}>

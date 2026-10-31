@@ -43,7 +43,7 @@ export const PageHeader = ({
                 */
                 <Link
                   href={crumb.href}
-                  className="inline-flex min-h-9 items-center px-1 py-2 hover:text-eje-600 hover:underline"
+                  className="inline-flex min-h-9 pointer-coarse:min-h-11 items-center px-1 py-2 hover:text-eje-600 hover:underline"
                 >
                   {crumb.label}
                 </Link>

@@ -175,9 +175,9 @@ export const JobListTable = ({
                 ) : (
                   <>
                     <Avatar initials={row.technicianInitials} size="sm" />
-                    <span className="hidden truncate text-sm text-steel-700 xl:inline">
-                      {row.technicianName}
-                    </span>
+                    {/* The name at every width: below 1280px it used to be the
+                        initials alone, which a tablet cannot hover to read. */}
+                    <span className="min-w-0 text-sm text-steel-700">{row.technicianName}</span>
                   </>
                 )}
               </div>

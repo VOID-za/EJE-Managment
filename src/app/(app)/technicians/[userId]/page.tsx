@@ -134,7 +134,7 @@ const TechnicianProfilePage = ({
                 {record.description.length > 0 && (
                   <p className="mt-1 text-sm text-steel-600">{record.description}</p>
                 )}
-                <p className="mt-1 text-[11px] text-steel-400">
+                <p className="mt-1 text-xs text-steel-400">
                   Recorded by {authorName(record.createdBy)} ·{' '}
                   {formatDateTime(record.createdAt)}
                   {record.cancelledBy !== null &&

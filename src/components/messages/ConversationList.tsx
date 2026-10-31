@@ -77,7 +77,7 @@ export const ConversationList = ({
                 </span>
 
                 {summary.conversation.jobNumber !== null && (
-                  <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-steel-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-steel-600">
+                  <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-steel-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-steel-600">
                     {summary.conversation.jobNumber}
                   </span>
                 )}
@@ -90,7 +90,7 @@ export const ConversationList = ({
                 >
                   {summary.lastMessage?.body ?? 'No messages yet'}
                 </span>
-                <span className="mt-0.5 block text-[11px] text-steel-400">
+                <span className="mt-0.5 block text-xs text-steel-400">
                   {formatRelative(summary.conversation.lastMessageAt)}
                 </span>
               </span>

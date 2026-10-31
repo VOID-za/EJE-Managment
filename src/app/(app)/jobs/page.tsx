@@ -20,7 +20,7 @@ import {
   matchesJobListStatus,
   type JobListStatusFilter,
 } from '@/application/job-list-filters';
-import { Button, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
+import { Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure, SelectField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AcceptJobFlow } from '@/components/jobs/AcceptJobFlow';
 import { JobListTable } from '@/components/jobs/JobListTable';
@@ -210,9 +210,7 @@ const JobsPageContent = () => {
         breadcrumbs={[{ label: 'Jobs' }]}
         actions={
           canCreate ? (
-            <Link href="/jobs/new">
-              <Button leadingIcon={<Icon name="plus" className="size-4" />}>New Job</Button>
-            </Link>
+            <ButtonLink href="/jobs/new" leadingIcon={<Icon name="plus" className="size-4" />}>New Job</ButtonLink>
           ) : undefined
         }
       />
@@ -246,7 +244,7 @@ const JobsPageContent = () => {
             onClick={() => setRefusalsOnly((current) => !current)}
             aria-pressed={refusalsOnly}
             className={cn(
-              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+              'inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
               refusalsOnly
                 ? 'border-signal-500 bg-signal-600 text-white'
                 : 'border-signal-300 bg-signal-50 text-signal-700 hover:border-signal-400',
@@ -272,7 +270,7 @@ const JobsPageContent = () => {
             aria-pressed={mineOnly}
             data-testid="jobs-my-jobs"
             className={cn(
-              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+              'inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
               mineOnly ? 'border-eje-500 bg-eje-600 text-white' : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
             )}
           >
@@ -295,7 +293,7 @@ const JobsPageContent = () => {
               aria-pressed={!refusalsOnly && status === filter.value}
               data-testid={`jobs-filter-${filter.value}`}
               className={cn(
-                'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
+                'inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-colors',
                 !refusalsOnly && status === filter.value
                   ? 'border-eje-500 bg-eje-600 text-white'
                   : 'border-steel-300 bg-surface text-steel-700 hover:border-steel-400',
@@ -321,7 +319,7 @@ const JobsPageContent = () => {
         {isMaster && (
           <Link
             href="/jobs/closed"
-            className="inline-flex min-h-9 items-center gap-2 rounded-full border border-steel-300 bg-surface px-3.5 text-sm font-medium text-steel-700 transition-colors hover:border-steel-400"
+            className="inline-flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-full border border-steel-300 bg-surface px-3.5 text-sm font-medium text-steel-700 transition-colors hover:border-steel-400"
           >
             <Icon name="document" className="size-4 text-steel-400" />
             Closed Jobs

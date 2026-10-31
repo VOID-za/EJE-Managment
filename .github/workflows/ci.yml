@@ -286,6 +286,32 @@ jobs:
       - name: Tablet and phone layout
         run: npm run responsive-check
 
+      # UX-TAB-1: TABLET FUNCTIONALITY MUST MATCH DESKTOP. Every role, every page
+      # and every tab, measured on a desktop and on a touch tablet at the two
+      # hardest shapes — 1024×768 landscape (the sidebar is shown) and 768×1024
+      # portrait (it is a drawer) — and compared: every desktop control, every
+      # navigation destination and every word of information must be on the
+      # tablet, with 44px touch targets, 12px text, nothing clipped, overlapping
+      # or off the screen. The release audit runs all six shapes
+      # (`npm run tablet-audit`); this keeps a layout change from breaking a
+      # tablet silently between releases.
+      - name: Tablet parity audit
+        env:
+          EJE_AUDIT_URL: http://127.0.0.1:3210
+          EJE_AUDIT_SHAPES: 1024x768,768x1024
+        run: npm run tablet-audit
+
+      # The whole job workflow, creation to signed card, on a touch tablet in
+      # portrait, so a step only a desktop can complete fails here.
+      - name: End-to-end workflow on a tablet
+        env:
+          EJE_E2E_VIEWPORT: 768x1024
+        run: npm run e2e
+
+      # Turning the tablet mid-form, and dialogs on the shortest screens.
+      - name: Tablet interaction check
+        run: npm run tablet-interaction-check
+
       - name: Smoke suite
         run: npm run smoke
 
@@ -314,6 +340,8 @@ jobs:
           name: browser-gate-evidence
           path: |
             .smoke/
+            .tablet-audit/checklist.md
+            .tablet-audit/report.json
             /tmp/eje-server.log
           if-no-files-found: ignore
           include-hidden-files: true

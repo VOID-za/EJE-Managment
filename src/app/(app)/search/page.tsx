@@ -127,7 +127,7 @@ const SearchPageContent = () => {
                 them; the type scale is unchanged and the pill simply holds its
                 text at a height a thumb can hit.
               */
-              className="inline-flex min-h-9 items-center rounded-full bg-steel-100 px-3 font-mono text-xs text-steel-600 transition-colors hover:bg-steel-200"
+              className="inline-flex min-h-9 pointer-coarse:min-h-11 items-center rounded-full bg-steel-100 px-3 font-mono text-xs text-steel-600 transition-colors hover:bg-steel-200"
             >
               {example}
             </button>
@@ -211,7 +211,7 @@ const FilterChip = ({
     onClick={onClick}
     aria-pressed={active}
     className={cn(
-      'min-h-9 rounded-full px-3.5 text-sm font-semibold transition-colors',
+      'min-h-9 pointer-coarse:min-h-11 rounded-full px-3.5 text-sm font-semibold transition-colors',
       active
         ? 'bg-steel-900 text-white'
         : 'bg-surface text-steel-600 ring-1 ring-steel-300 ring-inset hover:bg-steel-50',

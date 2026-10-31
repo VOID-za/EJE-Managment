@@ -29,7 +29,7 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
   const sheet = new Sheet();
   sheet.text(MARGIN, model.company.name, { font: 'bold', size: SIZE.companyName, colour: INK });
   const title = 'DELIVERY NOTE';
-  sheet.pdf.text(RIGHT - textWidth(title, SIZE.jobNumber, 'bold') - TRACK_TITLE * 12, sheet.cursor, title, {
+  sheet.pdf.text(RIGHT - textWidth(title, SIZE.jobNumber, 'bold', TRACK_TITLE), sheet.cursor, title, {
     font: 'bold',
     size: SIZE.jobNumber,
     colour: INK,
@@ -48,9 +48,14 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
 
   sheet.sectionTitle('Details');
   for (const row of model.details) {
-    sheet.need(GAP.line);
+    // Wrapped in its column: a long site or reference ran off the page.
+    const lines = PdfBuilder.wrap(row.value, RIGHT - MARGIN - 170, SIZE.body);
+    sheet.need(GAP.line * lines.length);
     sheet.text(MARGIN, row.label, { size: SIZE.body, colour: MUTED });
-    sheet.text(MARGIN + 170, row.value, { size: SIZE.body, colour: BODY });
+    for (const [index, line] of lines.entries()) {
+      if (index > 0) sheet.move(GAP.line);
+      sheet.text(MARGIN + 170, line, { size: SIZE.body, colour: BODY });
+    }
     sheet.move(GAP.line);
   }
   sheet.move(GAP.tight);
@@ -72,17 +77,23 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
   }
   for (const item of model.items) {
     const lines = PdfBuilder.wrap(item.description, QTY - 60 - DESC, SIZE.body);
-    sheet.need(GAP.line * Math.max(1, lines.length) + 4);
+    // A FANUC-style part number (A06B-6114-H208#H580) is wider than its
+    // column; it wraps there instead of printing over the description.
+    const part = PdfBuilder.wrap(item.partNumber, DESC - PART - 8, SIZE.body);
+    const height = Math.max(1, lines.length, part.length);
+    sheet.need(GAP.line * height + 4);
     sheet.text(KIND + 3, item.kind, { size: SIZE.body, colour: MUTED });
-    sheet.text(PART, item.partNumber, { size: SIZE.body, colour: INK });
     sheet.textRight(QTY - 3, item.quantity, { size: SIZE.body, colour: INK });
-    for (const [index, line] of lines.entries()) {
+    for (let index = 0; index < height; index += 1) {
       if (index > 0) sheet.move(GAP.line);
-      sheet.text(DESC, line, { size: SIZE.body, colour: BODY });
+      if (part[index] !== undefined) sheet.text(PART, part[index]!, { size: SIZE.body, colour: INK });
+      if (lines[index] !== undefined) sheet.text(DESC, lines[index]!, { size: SIZE.body, colour: BODY });
     }
     sheet.move(GAP.line - 3);
     sheet.rule(RULE_SOFT, 0.4);
-    sheet.move(3 + 2);
+    // The next row's capitals stand ~6.3pt above its baseline (9pt type): 5pt
+    // below the rule put the rule through them.
+    sheet.move(3 + 5);
   }
   sheet.need(GAP.line + 4);
   sheet.rule(RULE, 0.8);

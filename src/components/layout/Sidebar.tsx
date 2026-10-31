@@ -52,7 +52,7 @@ export const Sidebar = ({
 
           return (
             <div key={group} className="mb-5">
-              <p className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-chrome-faint uppercase">
+              <p className="px-3 pb-2 text-xs font-semibold tracking-wider text-chrome-faint uppercase">
                 {NAV_GROUP_LABELS[group]}
               </p>
               <ul className="space-y-0.5">
@@ -74,12 +74,12 @@ export const Sidebar = ({
                         <Icon name={item.icon as IconName} className="size-[18px]" />
                         <span className="flex-1 truncate">{item.label}</span>
                         {item.href === '/messages' && unreadMessages > 0 && (
-                          <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-action px-1.5 py-0.5 text-[11px] font-bold text-white">
+                          <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-action px-1.5 py-0.5 text-xs font-bold text-white">
                             {unreadMessages}
                           </span>
                         )}
                         {item.href === '/notifications' && unreadCount > 0 && (
-                          <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-signal-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                          <span className="tabular inline-flex min-w-5 items-center justify-center rounded-full bg-signal-500 px-1.5 py-0.5 text-xs font-bold text-white">
                             {unreadCount}
                           </span>
                         )}

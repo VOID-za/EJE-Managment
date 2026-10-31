@@ -13,7 +13,7 @@ const PALETTE = [
 ] as const;
 
 const SIZES = {
-  sm: 'size-7 text-[11px]',
+  sm: 'size-7 text-xs',
   md: 'size-9 text-xs',
   lg: 'size-12 text-sm',
 } as const;

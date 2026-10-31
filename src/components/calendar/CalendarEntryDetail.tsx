@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { availabilityTypeLabel } from '@/domain';
 import {
   Badge,
-  Button,
+  Button, ButtonLink,
   DefinitionGrid,
   Modal,
   PriorityBadge,
@@ -51,9 +50,7 @@ export const CalendarEntryDetail = ({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
-            <Link href={`/jobs/${entry.jobNumber}`}>
-              <Button>Open job card</Button>
-            </Link>
+            <ButtonLink href={`/jobs/${entry.jobNumber}`}>Open job card</ButtonLink>
           </>
         }
       >
@@ -98,9 +95,7 @@ export const CalendarEntryDetail = ({
           <Button variant="secondary" onClick={onClose}>
             Close
           </Button>
-          <Link href={`/technicians/${entry.userId}`}>
-            <Button>Open technician</Button>
-          </Link>
+          <ButtonLink href={`/technicians/${entry.userId}`}>Open technician</ButtonLink>
         </>
       }
     >

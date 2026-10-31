@@ -576,7 +576,7 @@ const MediaGrid = ({
                   job card is signed, not one item at a time.
                 */}
                 {item.visibility === 'internal' && (
-                  <span className="absolute bottom-1.5 left-1.5 rounded bg-steel-900/80 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+                  <span className="absolute bottom-1.5 left-1.5 rounded bg-steel-900/80 px-1.5 py-0.5 text-xs font-semibold tracking-wide text-white uppercase">
                     Internal
                   </span>
                 )}
@@ -599,12 +599,12 @@ const MediaGrid = ({
                       item.visibility === 'internal' ? 'customer_facing' : 'internal',
                     )
                   }
-                  className="mt-1.5 flex h-11 w-full items-center justify-center rounded-[var(--radius-control)] border border-steel-200 px-2 text-[11px] font-semibold text-steel-700 transition-colors hover:bg-steel-50"
+                  className="mt-1.5 flex h-11 w-full items-center justify-center rounded-[var(--radius-control)] border border-steel-200 px-2 text-xs font-semibold text-steel-700 transition-colors hover:bg-steel-50"
                 >
                   {item.visibility === 'internal' ? 'Show to customer' : 'Mark internal'}
                 </button>
               )}
-              <p className="truncate text-[11px] text-steel-400">
+              <p className="truncate text-xs text-steel-400">
                 {uploader?.initials ?? '—'} · {formatRelative(item.uploadedAt)} ·{' '}
                 {formatFileSize(item.sizeBytes)}
               </p>
@@ -643,7 +643,7 @@ const MediaThumbnail = ({
     return (
       <>
         <Icon name="camera" className="size-7" />
-        <span className="mt-1 text-[10px] font-medium tracking-wide uppercase">
+        <span className="mt-1 text-xs font-medium tracking-wide uppercase">
           {item.kind === 'video' ? 'video missing' : 'no file'}
         </span>
       </>

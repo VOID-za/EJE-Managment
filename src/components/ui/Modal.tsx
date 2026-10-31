@@ -87,7 +87,8 @@ export const Modal = ({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          'relative flex max-h-[92vh] w-full flex-col overflow-hidden bg-surface shadow-[var(--shadow-overlay)]',
+          // dvh: the height left once an on-screen keyboard is up, so the footer stays on screen.
+          'relative flex max-h-[92dvh] w-full flex-col overflow-hidden bg-surface shadow-[var(--shadow-overlay)]',
           'rounded-t-2xl sm:rounded-[var(--radius-card)]',
           SIZES[size],
         )}
