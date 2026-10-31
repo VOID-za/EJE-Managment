@@ -1534,7 +1534,7 @@ The tester's three handwritten pages. Register: `docs/delivery-register-2026-10-
 | TST-ATT-1 | **The office's Attendance page** has the technician's layout first (own form and days), then the team register. | **TESTED — awaiting approval.** |
 | TST-MSG-1 | **Messages**: a usable chat with a visible Send — the existing chat, whose Send button was clipped by the card; fixed and tested at tablet size, both directions, with persistence and permissions. | **TESTED — awaiting approval.** |
 
-### The system-wide desktop and tablet audit — 31 October 2026 (NOT YET DEPLOYED; not approved)
+### The system-wide desktop and tablet audit — 31 October 2026 (DEPLOYED in `316544f`; not yet approved)
 
 Asked for by the owner on 31 October 2026. Register and full audit report:
 `docs/delivery-register-2026-10-31.md`. No migration; no business rule changed.

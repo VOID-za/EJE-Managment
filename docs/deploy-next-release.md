@@ -52,7 +52,19 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
-### DEPLOYED — 30 October 2026: `42cd3d3` — the tester's changes and the timesheet freeze
+### DEPLOYED — 31 October 2026: `316544f` — the system-wide desktop and tablet audit
+
+**DEPLOYED — 31 October 2026: `316544f` is live** (full SHA
+`316544fd28e0bf60809b98f87d65891ed0b2876e`; CI run 41172590800 completed, success, every
+job and step green). Guarded release tool, `-ExpectPending none`; no migration or schema
+change since `42cd3d3`. Backup proven `/var/backups/eje/eje-eje_production-2026-10-31T05-52-24Z`;
+all 41 migrations already applied; migrate: none; switch at 05:52:32Z, health at 05:52:34Z;
+from outside `316544f`, ok, PostgreSQL reachable. **Rollback target: `42cd3d3`.** Verified
+afterwards, read-only: the tablet audit on production 9/9; tester's changes 22/22; API, PDFs
+and records 36/36; Attendance 17/17; update mechanism 8/8; records and four issued job cards
+unchanged. Detail: `docs/delivery-register-2026-10-31.md` (Release).
+
+### DEPLOYED — 30 October 2026: `42cd3d3` — the tester's changes and the timesheet freeze (superseded by `316544f` on 31 October, above)
 
 **DEPLOYED — 30 October 2026: `42cd3d3` is live** (full SHA
 `42cd3d3b9bd71f93d71f6f2ec87c3adbb72a296a`; CI run 41128358488 completed, success, every

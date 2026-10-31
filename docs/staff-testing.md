@@ -531,6 +531,7 @@ Fictional data only while the demonstration switcher is on.
 
 ## L. The tablet audit — on the actual rugged tablet (31 October 2026)
 
+**LIVE since 31 October 2026** in `316544f` (no migration).
 `docs/delivery-register-2026-10-31.md`. Everything in it was measured on an
 **emulated** tablet; these are the checks only the real device can answer.
 Fictional data only while the demonstration switcher is on.

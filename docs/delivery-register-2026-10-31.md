@@ -91,7 +91,8 @@ shows two months a row on touch; controls are 44 px on touch.
 |---|---|---|---|
 | Unit and application (`vitest`) | 3355 | 0 | 19 (Windows-only, reasons recorded) |
 | Typecheck, lint, production build | clean | — | — |
-| **Tablet parity audit**, all roles, desktop + six tablet shapes | 1216 of 1222 page views on the first full run; the 6 were one defect (the Users page's name links, 20 px tall) — fixed. Final run: see the release record below | | |
+| **Tablet parity audit**, all roles, desktop + six tablet shapes — **final run on the released build** | **1222 of 1222 page views** (Master 440 · Coordinator 440 · Technician 342; 24 pages, 39 tab views; 467 screenshots) | 0 | 3 N/A (`/schedule` redirects to the calendar) |
+| Tablet parity audit, the run before | 1216 | 6 — one defect, the Users page's name links (20 px tall); fixed | — |
 | Tablet interaction check (rotation mid-form, dialogs, the freeze by touch) | 7 | 0 | — |
 | Workflow end-to-end — desktop, 1024×768, 768×1024 (also 800×1280 and 1280×800 on the previous build) | 65 each | 0 | — |
 | Job workflow check — desktop, 1024×768, 768×1024 | 44 each | 0 | — |
@@ -122,3 +123,40 @@ report as an artifact.
   exactly once and to isolate the document; no printer was attached.
 - **Chrome on Android's PDF behaviour** is emulated by `pdfViewerEnabled =
   false` (the HTML document path), as CI's headless shell reports.
+
+## Release
+
+**DEPLOYED — 31 October 2026: `316544f` is live** (full SHA
+`316544fd28e0bf60809b98f87d65891ed0b2876e`). Guarded release tool,
+`-ExpectPending none`; no migration or schema file changed since `42cd3d3`
+(journal: 41 entries, last `0040_monthly_payroll`).
+
+- **CI** run 41172590800 on `316544f`: completed, success — every job and every
+  step green, including the new **Tablet parity audit** (1024×768 and 768×1024,
+  all roles, 468 s), **End-to-end workflow on a tablet** and **Tablet interaction
+  check**.
+- **Read-only check**: `srv2000625`; `42cd3d3` serving, healthy;
+  `/opt/eje/releases/316544f` new; 183 223 MB free; script SHA-256
+  `5ab56162…b3c6` matched; `pdftotext` and `pdfinfo` present. CHECK PASSED.
+- **Release**: 1/6 build; 2/6 **backup proven** —
+  `/var/backups/eje/eje-eje_production-2026-10-31T05-52-24Z`, verified,
+  key-checked, restore-tested; 3/6 all 41 migrations already applied; 4/6
+  **migrate: none**; 5/6 switch `42cd3d3` → `316544f` at 05:52:32Z; 6/6 health at
+  05:52:34Z. From outside: health `316544f`, ok, PostgreSQL reachable, email
+  `refuse`; page and worker carry `316544f` (installed apps are offered the
+  update). **Rollback target: `42cd3d3`.**
+- **Verified afterwards, read-only** (nothing saved, sent, submitted or
+  recorded; every non-GET request other than the demonstration sign-in counted,
+  and none):
+  - **the tablet audit's own measurement on production: 9 of 9** — every role,
+    every sidebar page and a job card, every tab, desktop against a touch tablet
+    at 1024×768 and 768×1024 (212 tablet views): every desktop control and word
+    on the tablet; 44 px targets; 12 px text; nothing clipped, overlapping or off
+    the screen; no page errors;
+  - the tester's changes **22 of 22**; API, PDFs and records **36 of 36** (one
+    informational: email not configured); Attendance controls **17 of 17**;
+    update mechanism **8 of 8**;
+  - **records unchanged**: 62 open-list, 15 closed, 37 signed, 25 issued — the
+    same as just before the release; issued job cards EJE-2050, EJE-2046,
+    EJE-2041 and EJE-2001 **byte-identical** (the PDF writer change affects only
+    documents generated from now on).
