@@ -85,7 +85,7 @@ export const RepairItemsEditor = ({
                   label="Description"
                   value={draft.description}
                   maxLength={500}
-                  error={unnamed ? 'Say what the part is, or remove the row.' : undefined}
+                  hint={unnamed ? 'Say what the part is when it is known.' : undefined}
                   onChange={(event) => update(draft.key, { description: event.target.value })}
                   data-testid="repair-item-description"
                 />
@@ -124,13 +124,9 @@ export const RepairItemsEditor = ({
   );
 };
 
-/** Whether the drafts can be saved: every quantity a whole number, every row with a quantity named. */
+/** Whether the drafts can be saved: every quantity a whole number (or blank). */
 export const repairDraftsValid = (drafts: readonly RepairItemDraft[]): boolean =>
-  drafts.every(
-    (draft) =>
-      quantityProblem(draft.quantity) === undefined &&
-      !(draft.description.trim().length === 0 && draft.partNumber.trim().length === 0 && draft.quantity.trim().length > 0),
-  );
+  drafts.every((draft) => quantityProblem(draft.quantity) === undefined);
 
 /**
  * CHANGES THE PARTS ON A TEST & REPAIR JOB. The office's, while the job is

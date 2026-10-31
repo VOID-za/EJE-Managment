@@ -373,16 +373,30 @@ const PdfPageView = ({
         const natural = page.getViewport({ scale: 1 });
         setOwn((previous) => (previous?.width === natural.width && previous.height === natural.height ? previous : { width: natural.width, height: natural.height }));
         const density = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)));
-        const target = canvas.current;
-        target.width = Math.floor(viewport.width * density);
-        target.height = Math.floor(viewport.height * density);
-        target.style.width = `${Math.floor(viewport.width)}px`;
-        target.style.height = `${Math.floor(viewport.height)}px`;
-        const context = target.getContext('2d');
+        /*
+         * DRAWN OFF SCREEN, THEN SWAPPED IN. Resizing the visible canvas wipes
+         * it, so drawing straight into it left the page blank for as long as a
+         * new zoom took to render — a flash on every zoom and rotation, long on
+         * a slow tablet (found by the forms regression on CI's browser). The
+         * page keeps what it shows until the new drawing is complete.
+         */
+        const off = window.document.createElement('canvas');
+        off.width = Math.floor(viewport.width * density);
+        off.height = Math.floor(viewport.height * density);
+        const context = off.getContext('2d');
         if (context === null) return;
         task = page.render({ canvasContext: context, viewport, ...(density === 1 ? {} : { transform: [density, 0, 0, density, 0, 0] }) });
         await task.promise;
-        if (!cancelled) setDrawn(true);
+        const target = canvas.current;
+        if (cancelled || target === null) return;
+        target.width = off.width;
+        target.height = off.height;
+        target.style.width = `${Math.floor(viewport.width)}px`;
+        target.style.height = `${Math.floor(viewport.height)}px`;
+        target.getContext('2d')?.drawImage(off, 0, 0);
+        off.width = 0;
+        off.height = 0;
+        setDrawn(true);
       } catch {
         // A cancelled render (zoom changed, page scrolled away) is not a failure.
       }

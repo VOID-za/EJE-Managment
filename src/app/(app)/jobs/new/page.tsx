@@ -221,7 +221,7 @@ const NewJobPage = () => {
      * so the person is told here rather than by a 400.
      */
     if (definition.capturesRepairItem && !repairDraftsValid(repairDrafts)) {
-      next.repairQuantity = 'Each part needs a whole-number quantity (or none), and a description or part number.';
+      next.repairQuantity = 'Each quantity must be a whole number of parts, or blank.';
     }
 
     // A date received is optional, and when given must be a real day that has

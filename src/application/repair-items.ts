@@ -58,9 +58,12 @@ export const normaliseRepairItems = (items: readonly RepairItem[]): RepairItem[]
     if (part.quantity !== null && (!Number.isInteger(part.quantity) || part.quantity <= 0 || part.quantity > REPAIR_QUANTITY_LIMIT)) {
       throw refuse(`${row}: the quantity must be a whole number.`, 'invalid_quantity', 'Enter how many came in, or leave it blank if nobody has counted them yet.');
     }
-    if (part.description.length === 0 && part.partNumber.length === 0) {
-      throw refuse(`${row}: say what the part is.`, 'repair_item_unnamed', 'Give it a description or a part number, or remove the row.');
-    }
+    /*
+     * A row with only a quantity is KEPT, as the single booked-in item always
+     * allowed ("three of them came in; the part number is still being found").
+     * Refusing it broke creation requests that were valid before (found by the
+     * PostgreSQL suite in CI, 31 October 2026). The form hints; it does not refuse.
+     */
     kept.push(part);
   }
   if (kept.length > REPAIR_ITEMS_MAX) {

@@ -45,10 +45,10 @@ describe('the rules for one part', () => {
     ]);
   });
 
-  it('refuses a quantity that is not a positive whole number, and a part with only a quantity', () => {
+  it('refuses a quantity that is not a positive whole number; keeps a part with only a quantity, as before', () => {
     expect(() => normaliseRepairItems([{ description: 'Bearing', partNumber: '', quantity: 0 }])).toThrow(WorkflowError);
     expect(() => normaliseRepairItems([{ description: 'Bearing', partNumber: '', quantity: 1.5 }])).toThrow(WorkflowError);
-    expect(() => normaliseRepairItems([{ description: '', partNumber: '', quantity: 3 }])).toThrow(WorkflowError);
+    expect(normaliseRepairItems([{ description: '', partNumber: '', quantity: 3 }])).toEqual([{ description: '', partNumber: '', quantity: 3 }]);
     expect(() => normaliseRepairItems(Array.from({ length: REPAIR_ITEMS_MAX + 1 }, (_, i) => ({ description: `P${i}`, partNumber: '', quantity: 1 })))).toThrow(WorkflowError);
   });
 
