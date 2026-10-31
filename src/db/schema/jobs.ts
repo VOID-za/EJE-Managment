@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -115,6 +116,15 @@ export const jobs = pgTable(
     repairPartNumber: text('repair_part_number').notNull().default(''),
     repairDescription: text('repair_description').notNull().default(''),
     repairQuantity: integer('repair_quantity'),
+    /*
+     * THE REST OF THE PARTS BOOKED IN (TR-PARTS-1, migration 0041): a list of
+     * { partNumber, description, quantity } after the first, which stays in
+     * the three columns above so the release before this one still reads it.
+     */
+    moreRepairItems: jsonb('more_repair_items')
+      .$type<readonly { partNumber: string; description: string; quantity: number | null }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     quoteNumber: text('quote_number').notNull().default(''),
     /** When the unit arrived on the counter. Test & Repair; optional. 0031. */
     dateReceived: date('date_received'),

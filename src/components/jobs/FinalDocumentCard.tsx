@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { getJobTypeDefinition, userFullName, type Job, type User } from '@/domain';
 import { Badge, Button, Card, CardHeader, DefinitionGrid, Icon } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
@@ -23,7 +24,11 @@ import { useOperation } from '@/hooks/useOperation';
  *
  * View and Download are deliberately DIFFERENT actions:
  *
- * - View opens the document on screen, in the review page's viewer.
+ * - View opens THE STORED FILE on screen, in the application's PDF viewer
+ *   (PDF-VIEW-1, 31 October 2026) — the very bytes Download saves. It used to
+ *   go to the review page, which draws the job card again from the job as it
+ *   is now: the same content in every case EJE have met, but not, provably,
+ *   the document that was issued.
  * - Download retrieves the stored file and writes it to the device. It does not
  *   print, does not open a print dialog and does not render a new document: it
  *   reads back the bytes written when the Master issued the job card.
@@ -38,6 +43,7 @@ export const FinalDocumentCard = ({
   const router = useRouter();
   const operation = useOperation();
   const [downloaded, setDownloaded] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const document = job.finalDocument;
   const label = getJobTypeDefinition(job.jobType).label;
 
@@ -139,11 +145,8 @@ export const FinalDocumentCard = ({
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-verdant-200 pt-4">
-        {/* View: show it on screen. */}
-        <Button
-          leadingIcon={<Icon name="document" className="size-5" />}
-          onClick={() => router.push(`/jobs/${job.jobNumber}/review`)}
-        >
+        {/* View: the stored file, on screen. */}
+        <Button leadingIcon={<Icon name="document" className="size-5" />} onClick={() => setViewing(true)} data-testid="final-document-view">
           View Final PDF
         </Button>
         {/* Download: write the stored file to the device. Never prints. */}
@@ -162,6 +165,17 @@ export const FinalDocumentCard = ({
           </span>
         )}
       </div>
+
+      <DocumentPreviewDialog
+        open={viewing}
+        title={`${job.jobNumber} — final ${label.toLowerCase()} job card`}
+        description="The document as it was issued and stored. Looking at it changes nothing."
+        loadPdf={async () => {
+          const file = await jobs.finalDocument(job.jobNumber);
+          return { bytes: file.bytes, fileName: file.fileName };
+        }}
+        onClose={() => setViewing(false)}
+      />
 
       {/*
         WHERE IT WAS RENDERED, AND WHAT THAT DOES NOT MEAN. AUD-8.

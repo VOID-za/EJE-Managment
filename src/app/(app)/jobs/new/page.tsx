@@ -40,6 +40,7 @@ import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { useOperation } from '@/hooks/useOperation';
+import { RepairItemsEditor, emptyRepairItemDraft, repairDraftsValid, repairItemsFromDrafts, type RepairItemDraft } from '@/components/jobs/RepairItemsEditor';
 import {
   JOB_ATTACHMENT_ACCEPT_ATTRIBUTE,
   JOB_ATTACHMENT_TYPES_SENTENCE,
@@ -119,9 +120,8 @@ const NewJobPage = () => {
    * because "" has to stay distinguishable from 0 — blank means nobody
    * counted, and the server is sent null rather than a number nobody chose.
    */
-  const [repairPartNumber, setRepairPartNumber] = useState('');
-  const [repairDescription, setRepairDescription] = useState('');
-  const [repairQuantity, setRepairQuantity] = useState('');
+  // TR-PARTS-1: any number of parts booked in, each with its own quantity.
+  const [repairDrafts, setRepairDrafts] = useState<RepairItemDraft[]>(() => [emptyRepairItemDraft()]);
   const [quoteNumber, setQuoteNumber] = useState('');
   /** The day the unit arrived; '' means nobody recorded it. Never defaulted. */
   const [dateReceived, setDateReceived] = useState('');
@@ -220,11 +220,8 @@ const NewJobPage = () => {
      * number above zero, which is what the schema and the database both say —
      * so the person is told here rather than by a 400.
      */
-    if (repairQuantity.trim() !== '') {
-      const parsed = Number(repairQuantity);
-      if (!Number.isInteger(parsed) || parsed < 1) {
-        next.repairQuantity = 'Enter a whole number of units, or leave it blank.';
-      }
+    if (definition.capturesRepairItem && !repairDraftsValid(repairDrafts)) {
+      next.repairQuantity = 'Each part needs a whole-number quantity (or none), and a description or part number.';
     }
 
     // A date received is optional, and when given must be a real day that has
@@ -289,9 +286,8 @@ const NewJobPage = () => {
          * capture them. A blank quantity is sent as NULL rather than as 0,
          * because nobody counted.
          */
-        repairPartNumber,
-        repairDescription,
-        repairQuantity: repairQuantity.trim() === '' ? null : Number(repairQuantity),
+        // Every part booked in (TR-PARTS-1); the server clears them on a job type that books in none.
+        repairItems: definition.capturesRepairItem ? repairItemsFromDrafts(repairDrafts) : [],
         quoteNumber,
         // Null when blank or when the job type books in no unit: never a guess.
         dateReceived: definition.capturesRepairItem && dateReceived.length > 0 ? dateReceived : null,
@@ -594,12 +590,11 @@ const NewJobPage = () => {
                      * THE DEFAULT IS OFFERED ONLY WHERE A PRIORITY IS REQUIRED.
                      * Create New Job §3B / §4.
                      *
-                     * Switching to an installation or a service pre-selects the
-                     * type's usual grading, which is a convenience on planned
-                     * work the office grades as it books it. Switching to a
-                     * breakdown or a test-and-repair job clears it instead, so
-                     * the field says "Not graded yet" rather than quietly
-                     * carrying "Urgent" from the default.
+                     * A type that REQUIRES a priority pre-selects its usual
+                     * grading. Since 31 October 2026 none does — Priority is
+                     * optional on an installation and a service too (the
+                     * tester) — so switching clears it and the field says "Not
+                     * graded yet" rather than quietly carrying a default.
                      */
                     const chosen = getJobTypeDefinition(code);
                     setPriority(chosen.requiresPriority ? chosen.defaultPriority : null);
@@ -621,9 +616,7 @@ const NewJobPage = () => {
                      * filled in.
                      */
                     if (!chosen.capturesRepairItem) {
-                      setRepairPartNumber('');
-                      setRepairDescription('');
-                      setRepairQuantity('');
+                      setRepairDrafts([emptyRepairItemDraft()]);
                       setDateReceived('');
                     }
                     if (!chosen.capturesQuoteNumber) setQuoteNumber('');
@@ -773,7 +766,7 @@ const NewJobPage = () => {
               {definition.capturesRepairItem && (
                 <div className="mt-4 rounded-[var(--radius-control)] border border-violet-eje-200 bg-violet-eje-50 p-4">
                   <p className="text-sm font-semibold text-violet-eje-700">
-                    Unit booked in for test &amp; repair
+                    Booked in for test &amp; repair
                   </p>
                   <p className="mt-1 text-sm text-steel-700">
                     What arrived on the counter. Optional — fill in what is known now.
@@ -788,30 +781,16 @@ const NewJobPage = () => {
                       hint="The day the unit arrived. Optional — leave blank if not known."
                       data-testid="date-received"
                     />
-                    <TextField
-                      label="Part number"
-                      value={repairPartNumber}
-                      onChange={(event) => setRepairPartNumber(event.target.value)}
-                      placeholder="As it reads on the unit"
-                    />
-                    <TextField
-                      label="Description"
-                      value={repairDescription}
-                      onChange={(event) => setRepairDescription(event.target.value)}
-                      placeholder="e.g. Proximity sensor assembly"
-                    />
-                    <TextField
-                      label="Quantity"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={repairQuantity}
-                      error={errors.repairQuantity}
-                      onChange={(event) => setRepairQuantity(event.target.value)}
-                      placeholder="e.g. 3"
-                      hint="Leave blank if nobody has counted."
-                    />
                   </div>
+                  <p className="mt-4 mb-2 text-sm font-semibold text-steel-800">Parts booked in</p>
+                  <p className="mb-3 text-xs text-steel-600">
+                    Every part that came in, each with its own quantity — they are all listed on the job&apos;s one delivery note.
+                    Leave a quantity blank if nobody has counted.
+                  </p>
+                  <RepairItemsEditor drafts={repairDrafts} onChange={setRepairDrafts} />
+                  {errors.repairQuantity !== undefined && (
+                    <p role="alert" className="mt-2 text-sm font-medium text-signal-600">{errors.repairQuantity}</p>
+                  )}
                 </div>
               )}
 

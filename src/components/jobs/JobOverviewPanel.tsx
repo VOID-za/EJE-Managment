@@ -5,7 +5,7 @@ import {
   can,
   contactFullName,
   getJobTypeDefinition,
-  hasRepairItem,
+  repairItemsOf,
   jobDetailLabel,
   jobScheduleWindow,
   machineDisplayName,
@@ -30,6 +30,7 @@ import {
 import { MachinePhotoFromJob } from '@/components/machines/MachinePhotoFromJob';
 import { JobCostSummary } from './JobCostSummary';
 import { JobDetailsEditDialog } from './JobDetailsEditDialog';
+import { RepairItemsDialog } from './RepairItemsEditor';
 import { RuleViolationNotice } from './RuleViolationNotice';
 import { jobs } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
@@ -72,6 +73,7 @@ export const JobOverviewPanel = ({
    */
   const canEditDetails = can(currentUser.role, 'jobs.editDetails') && editable;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [partsOpen, setPartsOpen] = useState(false);
   const technicians = users.filter((user) => user.role === 'technician' && user.active);
 
   const overdue =
@@ -121,15 +123,28 @@ export const JobOverviewPanel = ({
             title="Job details"
             action={
               canEditDetails ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  leadingIcon={<Icon name="edit" className="size-4" />}
-                  onClick={() => setDetailsOpen(true)}
-                  data-testid="edit-job-details"
-                >
-                  Edit details
-                </Button>
+                <span className="flex flex-wrap justify-end gap-1">
+                  {definition.capturesRepairItem && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={<Icon name="box" className="size-4" />}
+                      onClick={() => setPartsOpen(true)}
+                      data-testid="edit-repair-items"
+                    >
+                      Edit parts
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leadingIcon={<Icon name="edit" className="size-4" />}
+                    onClick={() => setDetailsOpen(true)}
+                    data-testid="edit-job-details"
+                  >
+                    Edit details
+                  </Button>
+                </span>
               ) : undefined
             }
           />
@@ -206,18 +221,22 @@ export const JobOverviewPanel = ({
                       value: job.dateReceived ?? '—',
                     },
                     {
-                      label: 'Unit booked in',
-                      value: hasRepairItem(job.repairItem)
-                        ? [
-                            job.repairItem.partNumber,
-                            job.repairItem.description,
-                            job.repairItem.quantity === null
-                              ? ''
-                              : `× ${job.repairItem.quantity}`,
-                          ]
-                            .filter((part) => part.length > 0)
-                            .join(' · ')
-                        : '—',
+                      // TR-PARTS-1: every part booked in, each with its quantity.
+                      label: repairItemsOf(job).length > 1 ? `Parts booked in (${repairItemsOf(job).length})` : 'Parts booked in',
+                      value:
+                        repairItemsOf(job).length === 0 ? (
+                          '—'
+                        ) : (
+                          <ol className="list-decimal space-y-0.5 pl-5" data-testid="repair-items-list">
+                            {repairItemsOf(job).map((item, index) => (
+                              <li key={index} data-testid="repair-items-list-row">
+                                {[item.description, item.partNumber, item.quantity === null ? '' : `× ${item.quantity}`]
+                                  .filter((part) => part.length > 0)
+                                  .join(' · ')}
+                              </li>
+                            ))}
+                          </ol>
+                        ),
                     },
                   ]
                 : []),
@@ -549,6 +568,8 @@ export const JobOverviewPanel = ({
           </ul>
         </Card>
       </div>
+
+      {partsOpen && <RepairItemsDialog job={job} onClose={() => setPartsOpen(false)} onSaved={onChanged} />}
 
       {detailsOpen && (
         <JobDetailsEditDialog

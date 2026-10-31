@@ -1279,17 +1279,26 @@ export const exportTimesheet = async (
 };
 
 /**
- * Whose timesheets this person may open: every technician for the office, and
- * only themselves for anybody else. The screen's picker is built from this,
- * and `loadTimesheet` asks again for every sheet.
+ * Whose timesheets this person may open, THEIR OWN FIRST: for the office, then
+ * every other active user, whose sheets it reads (`timesheets.viewAll`) but
+ * never writes (`assertOwner`); for anybody else, only themselves. The
+ * screen's picker is built from this and opens on the first entry, and
+ * `loadTimesheet` asks again for every sheet.
+ *
+ * TST-TS-2 #5 (the tester, 31 October 2026). This used to offer the office
+ * technicians only, so a Master or a Coordinator could not fill in the
+ * timesheet My Monthly Forms asks them to submit. Every user is listed after
+ * them because EJE Monthly Forms covers every user's month, not only the
+ * technicians'.
  */
 export const listTimesheetPeople = async (
   context: OperationContext,
 ): Promise<readonly TimesheetPerson[]> => {
   if (!can(context.actor.role, 'timesheets.viewAll')) return [personOf(context.actor)];
   const users = await context.repos.users.list();
-  return users
-    .filter((user) => user.active && user.role === 'technician')
+  const others = users
+    .filter((user) => user.active && user.id !== context.actor.id)
     .sort((a, b) => a.firstName.localeCompare(b.firstName) || a.lastName.localeCompare(b.lastName))
     .map(personOf);
+  return [personOf(context.actor), ...others];
 };

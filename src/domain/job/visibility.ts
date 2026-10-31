@@ -242,6 +242,8 @@ export type JobSummary = Pick<
   | 'quoteNumber'
   | 'dateReceived'
   | 'repairItem'
+  // TR-PARTS-1: the rest of the parts booked in, so the archive lists them all.
+  | 'moreRepairItems'
   // The office lifecycle (issue #73): the Notifications tabs and the archive
   // list jobs by these, and neither is a price.
   | 'officeHandling'
@@ -305,6 +307,7 @@ export const toJobSummary = (job: JobSummary): JobSummary => ({
   quoteNumber: job.quoteNumber,
   dateReceived: job.dateReceived,
   repairItem: job.repairItem,
+  moreRepairItems: job.moreRepairItems,
   officeHandling: job.officeHandling,
   invoice: job.invoice,
   customerId: job.customerId,

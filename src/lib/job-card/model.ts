@@ -1,4 +1,5 @@
 import {
+  repairItemsOf,
   requiresDeliveryNote,
   buildPartsDocument,
   jobDetailLabel,
@@ -423,14 +424,27 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       ...(definition.capturesRepairItem && job.dateReceived !== null
         ? [{ label: 'Date received', value: job.dateReceived }]
         : []),
-      ...(definition.capturesRepairItem && job.repairItem.partNumber.length > 0
+      /*
+       * ONE PART BOOKED IN reads exactly as it always has (Part number, Unit,
+       * Quantity received), so every job card already issued or previewed is
+       * unchanged. SEVERAL (TR-PARTS-1) are listed one row each, in order.
+       */
+      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.partNumber.length > 0
         ? [{ label: 'Part number', value: job.repairItem.partNumber }]
         : []),
-      ...(definition.capturesRepairItem && job.repairItem.description.length > 0
+      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.description.length > 0
         ? [{ label: 'Unit', value: job.repairItem.description }]
         : []),
-      ...(definition.capturesRepairItem && job.repairItem.quantity !== null
+      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.quantity !== null
         ? [{ label: 'Quantity received', value: String(job.repairItem.quantity) }]
+        : []),
+      ...(definition.capturesRepairItem && repairItemsOf(job).length > 1
+        ? repairItemsOf(job).map((item, index) => ({
+            label: `Part ${index + 1} received`,
+            value: [item.description, item.partNumber.length > 0 ? `(${item.partNumber})` : '', `× ${item.quantity ?? 1}`]
+              .filter((part) => part.length > 0)
+              .join(' '),
+          }))
         : []),
       ...(definition.collectedOnCompletion
         ? [

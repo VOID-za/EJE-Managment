@@ -124,11 +124,14 @@ export interface JobTypeDefinition {
   /**
    * A PRIORITY HAS TO BE CHOSEN ON THIS JOB TYPE. Create New Job §3B / §4.
    *
-   * False on the two types the owner asked for, where the office raises the
-   * job before the urgency is known, and on a parts collection, which has no
-   * priority at all (`officeProcessed` already turns the field off). Where it
-   * is false the job carries NO priority — not a quietly defaulted one, which
-   * would put "Urgent" on a breakdown nobody had graded.
+   * False on EVERY job type since 31 October 2026: the tester made Priority
+   * optional on an Installation and a Service too — the Machine stays
+   * mandatory there (`requiresMachine`). A breakdown and a Test & Repair were
+   * already optional, because the office raises them before the urgency is
+   * known, and a parts collection has no priority at all (`officeProcessed`
+   * turns the field off). Where it is false the job carries NO priority unless
+   * somebody chooses one — never a quietly defaulted one. Kept as a flag so a
+   * type can require it again without touching the rule.
    */
   readonly requiresPriority: boolean;
   /**
@@ -227,7 +230,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     collectedOnCompletion: false,
     requiresFaultDescription: true,
     requiresMachine: true,
-    requiresPriority: true,
+    requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: true,
@@ -252,7 +255,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     collectedOnCompletion: false,
     requiresFaultDescription: true,
     requiresMachine: true,
-    requiresPriority: true,
+    requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
     acceptsVideoAttachments: true,

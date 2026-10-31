@@ -30,6 +30,7 @@ import {
   toDomainJob,
   toJobRow,
   vatBasisPointsFromPercent,
+  repairItemsFromColumn,
   type JobRowSet,
 } from './job-mapper';
 import { SignedJobCardAltered } from './transaction';
@@ -261,6 +262,7 @@ export class PostgresJobRepository implements JobRepository {
         repairPartNumber: schema.jobs.repairPartNumber,
         repairDescription: schema.jobs.repairDescription,
         repairQuantity: schema.jobs.repairQuantity,
+        moreRepairItems: schema.jobs.moreRepairItems,
         customerId: schema.jobs.customerId,
         siteId: schema.jobs.siteId,
         machineId: schema.jobs.machineId,
@@ -335,6 +337,7 @@ export class PostgresJobRepository implements JobRepository {
         description: row.repairDescription ?? '',
         quantity: row.repairQuantity,
       },
+      moreRepairItems: repairItemsFromColumn(row.moreRepairItems),
       customerId: asCustomerId(row.customerId),
       siteId: asSiteId(row.siteId),
       machineId: row.machineId === null ? null : asMachineId(row.machineId),

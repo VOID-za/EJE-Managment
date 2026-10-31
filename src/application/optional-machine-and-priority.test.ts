@@ -133,8 +133,9 @@ describe('which job types require a machine and a priority', () => {
     const requiring = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).requiresMachine);
     expect([...requiring].sort()).toEqual(['installation', 'service']);
 
+    // 31 October 2026 (the tester): Priority is optional on every job type.
     const grading = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).requiresPriority);
-    expect([...grading].sort()).toEqual(['installation', 'service']);
+    expect(grading).toEqual([]);
   });
 });
 
@@ -204,14 +205,28 @@ describe('the types that still require them', () => {
       expect((error as WorkflowError).violations.map((v) => v.code)).toContain('machine_required');
     });
 
-    it(`refuses a ${jobType} with no priority`, async () => {
+    it(`refuses a ${jobType} with no machine even when it has no priority either`, async () => {
       const error = await createJob(
         harness.as(master),
-        await input(harness, { jobType, priority: null }),
+        await input(harness, { jobType, machineId: null, priority: null }),
       ).catch((cause: unknown) => cause);
 
       expect(error).toBeInstanceOf(WorkflowError);
-      expect((error as WorkflowError).violations.map((v) => v.code)).toContain('priority_required');
+      const codes = (error as WorkflowError).violations.map((v) => v.code);
+      expect(codes).toContain('machine_required');
+      expect(codes).not.toContain('priority_required');
+    });
+
+    it(`raises a ${jobType} with a machine and NO priority (Priority optional, 31 October 2026)`, async () => {
+      const job = await createJob(harness.as(master), await input(harness, { jobType, priority: null }));
+      expect(job.status).toBe('open');
+      expect(job.machineId).not.toBeNull();
+      expect(job.priority).toBeNull();
+    });
+
+    it(`keeps the priority a ${jobType} WAS given`, async () => {
+      const job = await createJob(harness.as(master), await input(harness, { jobType, priority: 'high' }));
+      expect(job.priority).toBe('high');
     });
   }
 });

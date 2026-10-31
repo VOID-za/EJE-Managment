@@ -170,16 +170,27 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
    * is the one job shape only this release writes; phase 2 has the live code
    * read it and write a job of its own beside it.
    */
-  it('writes a Test & Repair job carrying a date received (0031)', async () => {
+  it('writes a Test & Repair job carrying a date received (0031) and FOUR parts booked in (0041)', async () => {
     const jobs = new PostgresJobRepository(db);
     // A number from the sequence, as every saved job has: the repository keeps
     // the sequence value beside it, so an invented number cannot be stored.
     // Phase 2 finds this job as the only Test & Repair on the database.
     const allocated = await jobs.allocateJobNumber();
     const saved = await jobs.save(
-      jobFixture(allocated.jobNumber, { jobType: 'test_and_repair', dateReceived: '2026-10-20' }),
+      jobFixture(allocated.jobNumber, {
+        jobType: 'test_and_repair',
+        dateReceived: '2026-10-20',
+        // TR-PARTS-1 (0041): the first part in the old columns, three more in more_repair_items.
+        repairItem: { partNumber: 'BRG-001', description: 'Bearing', quantity: 2 },
+        moreRepairItems: [
+          { partNumber: 'SK-010', description: 'Seal kit', quantity: 1 },
+          { partNumber: 'SNS-004', description: 'Sensor', quantity: 3 },
+          { partNumber: 'CPL-002', description: 'Coupling', quantity: 1 },
+        ],
+      }),
     );
     expect(saved.dateReceived).toBe('2026-10-20');
+    expect(saved.moreRepairItems).toHaveLength(3);
     expect((await jobs.list()).filter((job) => job.jobType === 'test_and_repair')).toHaveLength(1);
   });
 

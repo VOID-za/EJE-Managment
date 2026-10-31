@@ -14,6 +14,7 @@ import {
   type CustomerId,
   type Job,
   emptyRepairItem,
+  storedRepairItems,
   type JobPriority,
   type RepairItem,
   type JobTypeCode,
@@ -32,6 +33,7 @@ import {
   type AssignmentOccasion,
 } from './assignment-notice';
 import { WorkflowError } from './errors';
+import { normaliseRepairItems } from './repair-items';
 
 /**
  * Raising a job.
@@ -72,6 +74,12 @@ export interface NewJobInput {
    * empty item — so there is no reason to make every call site spell it out.
    */
   readonly repairItem?: RepairItem;
+  /**
+   * EVERY PART BOOKED IN, in order (TR-PARTS-1). When given it is the whole
+   * list and `repairItem` is ignored; a caller that knows only one part may
+   * still send `repairItem` alone, exactly as before.
+   */
+  readonly repairItems?: readonly RepairItem[];
   /** The customer's quote reference, where the job type takes one. */
   readonly quoteNumber?: string;
   /**
@@ -571,14 +579,10 @@ export const createJob = async (
      * show. Nothing is required: a unit can be booked in while somebody is
      * still looking for the part number on the casting.
      */
-    repairItem:
-      definition.capturesRepairItem && input.repairItem !== undefined
-        ? {
-            partNumber: input.repairItem.partNumber.trim(),
-            description: input.repairItem.description.trim(),
-            quantity: input.repairItem.quantity,
-          }
-        : emptyRepairItem(),
+    // TR-PARTS-1: any number of parts, each with its own quantity, checked by one rule.
+    ...(definition.capturesRepairItem
+      ? storedRepairItems(normaliseRepairItems(input.repairItems ?? (input.repairItem === undefined ? [] : [input.repairItem])))
+      : { repairItem: emptyRepairItem(), moreRepairItems: [] }),
     quoteNumber: definition.capturesQuoteNumber ? (input.quoteNumber ?? '').trim() : '',
     dateReceived,
     faultDescription,

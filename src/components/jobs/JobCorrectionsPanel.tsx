@@ -15,6 +15,7 @@ import {
 } from '@/domain';
 import { Badge, Button, Card, CardHeader, Icon } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { jobs as api } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -109,6 +110,9 @@ export const JobCorrectionsPanel = ({
     onChanged();
   };
 
+  // The correction whose stored PDF is open in the viewer (PDF-VIEW-1).
+  const [previewing, setPreviewing] = useState<{ readonly id: string; readonly label: string } | null>(null);
+
   const download = async (correctionId: string): Promise<void> => {
     await operation.run(async () => {
       const file = await api.correctionDocument(job.jobNumber, correctionId);
@@ -193,16 +197,27 @@ export const JobCorrectionsPanel = ({
                     </p>
                   )}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="shrink-0"
-                  onClick={() => void download(correction.id)}
-                  data-testid="job-correction-download"
-                >
-                  Download
-                </Button>
+                <span className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    leadingIcon={<Icon name="document" className="size-4" />}
+                    onClick={() => setPreviewing({ id: correction.id, label: `Correction ${correction.sequence}` })}
+                    data-testid="job-correction-preview"
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void download(correction.id)}
+                    data-testid="job-correction-download"
+                  >
+                    Download
+                  </Button>
+                </span>
               </div>
 
               {/* The office records what the customer said. Once. */}
@@ -417,6 +432,17 @@ export const JobCorrectionsPanel = ({
         </div>
       )}
       </div>
+      {/* The correction's stored PDF, in the application's viewer (PDF-VIEW-1). */}
+      <DocumentPreviewDialog
+        open={previewing !== null}
+        title={`${job.jobNumber} — ${previewing?.label ?? 'Correction'}`}
+        description="The correction document as it was stored. Looking at it changes nothing."
+        loadPdf={async () => {
+          const file = await api.correctionDocument(job.jobNumber, previewing?.id ?? '');
+          return { bytes: file.bytes, fileName: file.fileName };
+        }}
+        onClose={() => setPreviewing(null)}
+      />
     </Card>
   );
 };

@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import type { TechnicalDocument } from '@/domain';
-import { Icon, LoadingPanel, ProvenanceNotice } from '@/components/ui';
+import { LoadingPanel, ProvenanceNotice } from '@/components/ui';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { ApiRequestError, apiDownload } from '@/api/client';
 import { library } from '@/api/endpoints';
-import { canDisplayPdfInline } from '@/lib/pdf-support';
+import { PdfViewer } from '@/components/documents/PdfViewer';
 import { formatFileSize } from '@/lib/format';
 
 /**
@@ -51,14 +51,12 @@ import { formatFileSize } from '@/lib/format';
  *   unavailable  — no file is stored against this record, or the server refused
  *                  it. The server's own words are shown.
  */
-const subscribeToNothing = (): (() => void) => () => {};
-const unknownOnServer = (): boolean | null => null;
 
 type PreviewState =
   | { readonly kind: 'loading' }
   | {
       readonly kind: 'ready';
-      readonly url: string;
+      readonly file: Uint8Array;
       readonly bytes: number;
       readonly version: string;
     }
@@ -78,17 +76,6 @@ const looksLikePdf = (bytes: Uint8Array): boolean =>
 export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalDocument }) => {
   const [state, setState] = useState<PreviewState>({ kind: 'loading' });
 
-  /*
-   * CAN THIS BROWSER SHOW A PDF AT ALL? MASTER SCOPE PDF-3, BROWSER-1.
-   *
-   * The same question the signed job card asks, and the same reason: Chrome on
-   * Android paints its own "couldn't display this PDF" block with an Open
-   * button that cannot act on a `blob:` URL, so handing it a frame would show
-   * the technician an error on the screen that is supposed to show them the
-   * manual. `null` until it has been asked, which can only happen in a browser.
-   */
-  const inlinePdf = useSyncExternalStore(subscribeToNothing, canDisplayPdfInline, unknownOnServer);
-
   /**
    * WHETHER THERE IS A FILE TO FETCH AT ALL. October mandate §1.2.
    *
@@ -107,7 +94,6 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
     // change that would cascade a render for a panel that needs no data.
     if (nothingStored) return;
     let cancelled = false;
-    let objectUrl: string | null = null;
 
     void (async () => {
       setState({ kind: 'loading' });
@@ -127,12 +113,9 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
           return;
         }
 
-        // A copy, because the Blob must own its buffer.
-        const blob = new Blob([new Uint8Array(file.bytes)], { type: 'application/pdf' });
-        objectUrl = URL.createObjectURL(blob);
         setState({
           kind: 'ready',
-          url: objectUrl,
+          file: file.bytes,
           bytes: file.bytes.byteLength,
           version: file.headers.get('x-eje-document-version') ?? document.version,
         });
@@ -154,7 +137,6 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
 
     return () => {
       cancelled = true;
-      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
   }, [document.id, document.fileName, document.version, nothingStored]);
 
@@ -218,13 +200,15 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
   }
 
   /*
-   * THE FRAME IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1.
-   *
-   * A4's own proportions, capped so the box never grows taller than the
-   * viewport — the same geometry the signed job card's preview uses, for the
-   * same reason: a portrait page in a letterbox is a squeezed strip nobody can
-   * read without zooming. A manual may be landscape; the viewer fits the page
-   * inside the box either way.
+   * THE MANUAL ITSELF, ON EVERY DEVICE. PDF-VIEW-1 (the tester, 31 October
+   * 2026). This used to be the browser's own viewer in a frame — and on the EJE
+   * tablets, which have none, NOTHING: a notice to download the file. The
+   * stored bytes are now drawn by `PdfViewer` on a phone, a tablet and a
+   * desktop alike, every page, with page navigation and zoom; a 1 200-page
+   * manual opens at once because pages are drawn as they come into view.
+   * Nothing is drawn that is not the stored file — there is no HTML stand-in
+   * for a document EJE did not write — so if this device cannot draw it, the
+   * viewer says so and offers the file itself.
    */
   return (
     <div
@@ -233,59 +217,26 @@ export const DocumentPdfPreview = ({ document }: { readonly document: TechnicalD
       data-preview-version={state.version}
       /*
         HOW MANY BYTES ARRIVED, stated on the element.
-        
+
         It is set only after the bytes have been checked for a PDF header, so a
         browser test can assert that the file the server stored is the file this
         screen is showing — which is the claim a facsimile could never make. It
         is a length, not a key or a path.
       */
       data-preview-bytes={state.bytes}
-      data-preview-kind={inlinePdf === true ? 'pdf-viewer' : 'download-only'}
+      data-preview-kind="pdf-viewer"
     >
       <p className="mb-2 text-xs text-steel-500">
         {document.fileName} · version {state.version} · {formatFileSize(state.bytes)} · the stored
         file, served for this revision
       </p>
-
-      {inlinePdf === true ? (
-        <div className="mx-auto w-full max-w-[calc(80vh*595.28/841.89)]">
-          <iframe
-            data-testid="library-pdf-frame"
-            data-preview-kind="pdf-viewer"
-            title={`${document.name} (version ${state.version})`}
-            src={state.url}
-            className="aspect-[595.28/841.89] w-full rounded-[var(--radius-control)] border border-steel-200 bg-white"
-          />
-        </div>
-      ) : (
-        /*
-         * NO VIEWER, AND NO SUBSTITUTE. MASTER SCOPE PDF-3.
-         *
-         * The job card has a second renderer to fall back on, because this
-         * system wrote it and can draw it again from the same model. A
-         * machine builder's manual has nothing of the sort: the only honest
-         * things to do are to say so and to hand over the file, which the
-         * tablet opens in a reader that can display it. Drawing a facsimile
-         * here is exactly what this component exists to remove.
-         */
-        <div
-          data-testid="library-pdf-no-viewer"
-          data-preview-kind="download-only"
-          className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-4 py-4 text-sm text-amber-eje-800"
-        >
-          <p className="flex items-center gap-2 font-semibold">
-            <Icon name="document" className="size-4" />
-            This browser cannot display a PDF inside the page
-          </p>
-          <p className="mt-1.5">
-            Chrome on Android has no built-in PDF viewer, so there is nothing here that could show
-            you the document — and nothing is drawn in its place. Use{' '}
-            <span className="font-semibold">Download the document</span> below: the tablet opens it
-            in a reader that can, and it is the same {formatFileSize(state.bytes)} the server holds
-            for version {state.version}.
-          </p>
-        </div>
-      )}
+      <PdfViewer
+        bytes={state.file}
+        fileName={document.fileName}
+        title={`${document.name} (version ${state.version})`}
+        testId="library-pdf-viewer"
+        className="h-[min(80dvh,1100px)] overflow-hidden rounded-[var(--radius-control)] border border-steel-200"
+      />
     </div>
   );
 };

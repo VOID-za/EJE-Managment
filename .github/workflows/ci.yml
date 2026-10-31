@@ -186,13 +186,14 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (1a34d1c) against a database at 0040
+      - name: Rollback compatibility — the live release (316544f) against a database at 0041
         run: bash scripts/release/rollback-compat.sh
 
   browser:
     name: Routes, workflow and smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 75: the forms regression below runs three times (desktop, tablet, phone).
+    timeout-minutes: 75
     env:
       EJE_CHECK_URL: http://127.0.0.1:3210
       EJE_E2E_URL: http://127.0.0.1:3210
@@ -314,6 +315,30 @@ jobs:
 
       - name: Smoke suite
         run: npm run smoke
+
+      # THE TESTER'S CRITICAL FIXES (31 October 2026), through the screen, on a
+      # desktop, a portrait tablet by touch and a phone by touch: the whole
+      # month of a timesheet, attendance that saves itself (offline, a failed
+      # save, leaving the page, a slow connection), My Monthly Forms as each
+      # role's OWN forms with the server refusing anybody else's, every PDF type
+      # drawn by the in-app viewer (pages, zoom, close, reopen, download = what
+      # is shown, print), Installation and Service validation, Test & Repair
+      # with many parts on one delivery note, and Closed Jobs with no CSV. The
+      # release runs all eleven shapes (`npm run forms-regression` per shape).
+      - name: Forms regression — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run forms-regression
+
+      - name: Forms regression — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run forms-regression
+
+      - name: Forms regression — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run forms-regression
 
       # REL-UPD-1: EVERY release must show installed apps "A new version of EJE
       # is available" with Update now, and Update now must really move them to

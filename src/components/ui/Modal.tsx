@@ -12,7 +12,13 @@ export interface ModalProps {
   readonly onClose: () => void;
   readonly children?: ReactNode;
   readonly footer?: ReactNode;
-  readonly size?: 'sm' | 'md' | 'lg' | 'xl';
+  /**
+   * `document` is a PDF preview (PDF-VIEW-1): the whole screen on a phone, and
+   * nearly all of it on a tablet or a desktop, with the document — not the
+   * dialog — doing the scrolling, so there is one scrollbar and the page is as
+   * large as the screen allows.
+   */
+  readonly size?: 'sm' | 'md' | 'lg' | 'xl' | 'document';
 }
 
 const SIZES = {
@@ -20,6 +26,7 @@ const SIZES = {
   md: 'max-w-lg',
   lg: 'max-w-3xl',
   xl: 'max-w-5xl',
+  document: 'h-[100dvh] max-h-[100dvh] max-w-6xl sm:h-[94dvh] sm:max-h-[94dvh]',
 } as const;
 
 export const Modal = ({
@@ -73,7 +80,7 @@ export const Modal = ({
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+    <div className={cn('fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center', size === 'document' ? 'sm:p-3' : 'sm:p-6')}>
       <button
         type="button"
         aria-label="Close dialog"
@@ -88,14 +95,14 @@ export const Modal = ({
         tabIndex={-1}
         className={cn(
           // dvh: the height left once an on-screen keyboard is up, so the footer stays on screen.
-          'relative flex max-h-[92dvh] w-full flex-col overflow-hidden bg-surface shadow-[var(--shadow-overlay)]',
-          'rounded-t-2xl sm:rounded-[var(--radius-card)]',
+          'relative flex w-full flex-col overflow-hidden bg-surface shadow-[var(--shadow-overlay)]',
+          size === 'document' ? 'sm:rounded-[var(--radius-card)]' : 'max-h-[92dvh] rounded-t-2xl sm:rounded-[var(--radius-card)]',
           SIZES[size],
         )}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-steel-200 px-6 py-4">
+        <header className={cn('flex items-start justify-between gap-4 border-b border-steel-200', size === 'document' ? 'px-4 py-3' : 'px-6 py-4')}>
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-steel-900">{title}</h2>
+            <h2 className={cn('font-semibold text-steel-900', size === 'document' ? 'text-base' : 'text-lg')}>{title}</h2>
             {description !== undefined && (
               <div className="mt-1 text-sm text-steel-500">{description}</div>
             )}
@@ -118,11 +125,17 @@ export const Modal = ({
         </header>
 
         {children !== undefined && (
-          <div className="eje-scrollbar flex-1 overflow-y-auto px-6 py-5">{children}</div>
+          <div className={size === 'document' ? 'flex min-h-0 flex-1 flex-col' : 'eje-scrollbar flex-1 overflow-y-auto px-6 py-5'}>{children}</div>
         )}
 
         {footer !== undefined && (
-          <footer className="flex flex-col-reverse gap-2 border-t border-steel-200 bg-steel-50 px-6 py-4 sm:flex-row sm:justify-end">
+          <footer
+            className={cn(
+              'flex gap-2 border-t border-steel-200 bg-steel-50 sm:flex-row sm:justify-end',
+              // A document's three actions sit in one row even on a phone, so the page keeps the height.
+              size === 'document' ? 'flex-row flex-wrap justify-end px-4 py-2.5' : 'flex-col-reverse px-6 py-4',
+            )}
+          >
             {footer}
           </footer>
         )}

@@ -36,6 +36,8 @@ export const POST = writeRoute({
       // ATT-01. Its value is the operation's rule (four reasons, absent only).
       absenceReason: z.string().max(40).nullable().optional(),
       note: z.string().max(ATTENDANCE_NOTE_LIMIT).default(''),
+      // ATT-AUTO-1: the record the screen was looking at, so a stale autosave is refused.
+      expectedRecordedAt: z.string().max(40).nullable().optional(),
     })
     .strict(),
   handler: (context) => recordAttendance(context.operation, context.input),

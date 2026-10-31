@@ -9,15 +9,20 @@
  * reached the last step of the job and was shown an error instead of the
  * customer's document.
  *
- * WHAT THIS PROVES. The same journey, run twice against the real application:
+ * WHAT THIS PROVES (PDF-VIEW-1, 31 October 2026: every preview is now the
+ * application's own viewer, `PdfViewer`, which draws the PDF's pages itself).
+ * The same journey, run twice against the real application:
  *
  *   TABLET  — `navigator.pdfViewerEnabled` forced false before any script runs,
- *             which is what Chrome on Android reports. The document must be
- *             drawn in the page, at A4 proportions, with no iframe and no dead
- *             Open button.
- *   DESKTOP — the same signal forced true, which is what a desktop browser
- *             with its viewer available reports. The iframe must still be
- *             there, still at A4 proportions. PDF-4: no regression.
+ *             which is what Chrome on Android reports. The PDF ITSELF must be
+ *             drawn in the page — pages with ink on them, at A4 proportions —
+ *             with no iframe, no embed and so no dead Open button.
+ *   DESKTOP — the same signal forced true. Exactly the same viewer: nothing
+ *             about a preview depends on the browser's own PDF plugin.
+ *
+ * What a page SAYS is read from the PDF the preview's Download hands over —
+ * the very bytes the viewer draws — with the same engine, in the page
+ * (`pdfTextIn`), because a canvas has no text to read.
  *
  * BOTH SIDES SET THE SIGNAL, and neither is left to the binary. Playwright
  * launches `chrome-headless-shell` by default, and that build reports
@@ -108,6 +113,59 @@ const frameRatio = async (locator) => {
   return { ratio: box.height / box.width, box };
 };
 
+/** The viewer has opened the document and drawn page `number` with real ink on it. */
+const viewerDrew = async (page, testId, number = 1) => {
+  await page.waitForFunction(
+    (id) => document.querySelector(`[data-testid="${id}"]`)?.getAttribute('data-viewer-state') === 'ready',
+    testId,
+    { timeout: 30000 },
+  );
+  const viewer = page.getByTestId(testId);
+  await viewer.locator(`[data-page="${number}"][data-drawn="yes"]`).waitFor({ timeout: 30000 });
+  const ink = await viewer.locator(`[data-page="${number}"] canvas`).evaluate((canvas) => {
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let dark = 0;
+    for (let index = 0; index < data.length; index += 4) if (data[index] < 230) dark += 1;
+    return { dark, width: canvas.width, height: canvas.height };
+  });
+  if (ink.dark < 100) throw new Error(`page ${number} was drawn blank (${ink.dark} dark pixels on ${ink.width}×${ink.height})`);
+  return { pages: Number(await viewer.getAttribute('data-pages')), ink };
+};
+
+/** The text of a PDF, read with the same engine the viewer draws with, in the page. */
+const pdfTextIn = (page, bytes) =>
+  page.evaluate(async (base64) => {
+    const pdfjs = await import('/vendor/pdfjs-4.10.38/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-4.10.38/pdf.worker.min.mjs';
+    const data = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const pdf = await pdfjs.getDocument({ data, isEvalSupported: false, standardFontDataUrl: '/vendor/pdfjs-4.10.38/standard_fonts/' }).promise;
+    const pages = [];
+    for (let number = 1; number <= pdf.numPages; number += 1) {
+      const content = await (await pdf.getPage(number)).getTextContent();
+      pages.push(content.items.map((item) => item.str).join(' '));
+    }
+    const count = pdf.numPages;
+    await pdf.destroy();
+    return { pages: count, text: pages.join('\n') };
+  }, Buffer.from(bytes).toString('base64'));
+
+/** Saves what a Download button hands over. */
+const downloadOf = async (page, button) => {
+  const started = page.waitForEvent('download', { timeout: 20000 });
+  await button.click();
+  const file = await started;
+  const { readFile } = await import('node:fs/promises');
+  return { name: file.suggestedFilename(), bytes: await readFile(await file.path()) };
+};
+
+/** No embedded browser viewer anywhere in `scope` — no frame for a dead Open button to live in. */
+const noEmbeddedViewer = async (page, scope) => {
+  for (const tag of ['iframe', 'embed', 'object']) {
+    const count = await page.locator(`${scope} ${tag}`).count();
+    if (count !== 0) throw new Error(`${count} <${tag}> in ${scope}`);
+  }
+};
+
 /* -------------------------------------------------------------------------- */
 /* TABLET — a browser with no PDF viewer of its own                           */
 /* -------------------------------------------------------------------------- */
@@ -132,71 +190,45 @@ await step('TABLET: the browser reports no inline PDF viewer', async () => {
   if (enabled !== false) throw new Error(`navigator.pdfViewerEnabled is ${String(enabled)}`);
 });
 
-await step('TABLET: the Signed step shows the document, not a PDF error block', async () => {
+await step('TABLET: the Signed step shows the PDF itself, drawn in the app — not an error block', async () => {
   const signed = tabletPage.getByText('Signed', { exact: true }).first();
   await signed.waitFor({ timeout: 20000 });
-  // The document itself: the job number and the company, drawn in the page.
-  await tabletPage.getByText('EJE-1061').first().waitFor({ timeout: 20000 });
-  const body = await tabletPage.locator('main').innerText();
-  for (const fragment of ['EJE Industrial Electronics', 'Marlene', 'du Toit']) {
-    if (!body.includes(fragment)) {
-      throw new Error(`the signed document does not show ${fragment}`);
-    }
+  const drawn = await viewerDrew(tabletPage, 'job-card-preview');
+  if ((await tabletPage.getByTestId('job-card-preview').getAttribute('data-preview-kind')) !== 'pdf-viewer') {
+    throw new Error('the preview is not the PDF viewer');
   }
+  console.log(`      ${drawn.pages} page(s); page 1 drawn with ${drawn.ink.dark} dark pixels`);
 });
 
-await step('TABLET: no PDF iframe is handed to a browser that cannot render one', async () => {
-  const frames = await tabletPage.locator('[data-preview-kind="pdf-viewer"]').count();
-  if (frames !== 0) throw new Error(`${frames} PDF iframe(s) on a browser with no viewer`);
-  const drawn = await tabletPage.getByTestId('job-card-preview').getAttribute('data-preview-kind');
-  if (drawn !== 'document') throw new Error(`the preview drew "${drawn}", not the document`);
-});
-
-await step('TABLET: the frame keeps A4 proportions', async () => {
-  const { ratio, box } = await frameRatio(tabletPage.getByTestId('job-card-preview'));
-  if (Math.abs(ratio - A4_RATIO) > 0.02) {
-    throw new Error(`frame is ${box.width}×${box.height} (ratio ${ratio.toFixed(4)}), not A4`);
-  }
-  console.log(`      frame ${box.width.toFixed(2)} × ${box.height.toFixed(2)} px, ratio ${ratio.toFixed(4)}`);
-});
-
-await step('TABLET: there is no dead "Open" action, because there is nothing to be dead', async () => {
+await step('TABLET: no embedded browser viewer, so no dead "Open" action can exist', async () => {
   /*
-   * WHERE THE DEAD BUTTON CAME FROM.
-   *
-   * It was never ours. A browser with no PDF viewer paints its own "couldn't
-   * display this PDF / Open" block INSIDE the iframe's own document, which is
-   * why nothing in the application could disable it and why its Open did
-   * nothing: a `blob:` URL exists only inside the page that made it and cannot
-   * be handed to another application.
-   *
-   * So the assertion is that no such embedded viewer is handed to this browser
-   * at all — no iframe, no embed, no object — which is what removes the block
-   * and its button together. What replaces it is the document itself, and the
-   * one action offered with it is Download, which is exercised below and
-   * really downloads.
+   * The dead Open button was never ours: a browser with no PDF viewer paints
+   * its own "couldn't display this PDF / Open" block INSIDE an iframe holding
+   * a `blob:`. No iframe, embed or object is handed to the browser at all now
+   * — the pages are canvases drawn by the application — so there is nowhere
+   * for that block to appear.
    */
-  for (const tag of ['iframe', 'embed', 'object']) {
-    const count = await tabletPage.locator(`main ${tag}`).count();
-    if (count !== 0) {
-      throw new Error(`${count} <${tag}> on the Signed step of a browser with no PDF viewer`);
-    }
-  }
-
-  // And the frame itself holds a document, not controls that might not work.
-  const controls = await tabletPage.getByTestId('job-card-preview').locator('button').count();
-  if (controls !== 0) throw new Error(`${controls} button(s) inside the document frame`);
+  await noEmbeddedViewer(tabletPage, 'main');
 });
 
-await step('TABLET: the PDF itself is still offered, and downloads', async () => {
-  const download = tabletPage.getByRole('button', { name: 'Download preview' });
-  await download.waitFor({ timeout: 10000 });
-  const started = tabletPage.waitForEvent('download', { timeout: 20000 });
-  await download.click();
-  const file = await started;
-  const name = file.suggestedFilename();
-  if (!name.endsWith('.pdf')) throw new Error(`downloaded ${name}, which is not a PDF`);
-  console.log(`      downloaded ${name}`);
+await step('TABLET: the page keeps A4 proportions', async () => {
+  const { ratio, box } = await frameRatio(tabletPage.getByTestId('job-card-preview').locator('[data-page="1"]'));
+  if (Math.abs(ratio - A4_RATIO) > 0.02) {
+    throw new Error(`page is ${box.width}×${box.height} (ratio ${ratio.toFixed(4)}), not A4`);
+  }
+  console.log(`      page ${box.width.toFixed(2)} × ${box.height.toFixed(2)} px, ratio ${ratio.toFixed(4)}`);
+});
+
+await step('TABLET: the PDF downloads, and it is the signed job card the viewer drew', async () => {
+  const file = await downloadOf(tabletPage, tabletPage.getByRole('button', { name: 'Download preview' }));
+  if (!file.name.endsWith('.pdf')) throw new Error(`downloaded ${file.name}, which is not a PDF`);
+  const read = await pdfTextIn(tabletPage, file.bytes);
+  for (const fragment of ['EJE-1061', 'Marlene', 'du Toit']) {
+    if (!read.text.includes(fragment)) throw new Error(`the signed PDF does not say ${fragment}`);
+  }
+  const shown = Number(await tabletPage.getByTestId('job-card-preview').getAttribute('data-pages'));
+  if (shown !== read.pages) throw new Error(`the viewer shows ${shown} page(s); the PDF has ${read.pages}`);
+  console.log(`      downloaded ${file.name}: ${read.pages} page(s), the same the viewer shows`);
 });
 
 await tablet.close();
@@ -227,16 +259,12 @@ await step('DESKTOP: the browser has its own PDF viewer', async () => {
   if (enabled !== true) throw new Error(`navigator.pdfViewerEnabled is ${String(enabled)}`);
 });
 
-await step('DESKTOP: the signed PDF is still shown in the frame, at A4', async () => {
-  const frame = desktopPage.locator('iframe[title*="job card preview"]').first();
-  await frame.waitFor({ timeout: 25000 });
-  const drawn = await desktopPage.getByTestId('job-card-preview').getAttribute('data-preview-kind');
-  if (drawn !== 'pdf-viewer') throw new Error(`the preview drew "${drawn}", not the PDF frame`);
-  const { ratio, box } = await frameRatio(frame);
-  if (Math.abs(ratio - A4_RATIO) > 0.02) {
-    throw new Error(`frame is ${box.width}×${box.height} (ratio ${ratio.toFixed(4)}), not A4`);
-  }
-  console.log(`      frame ${box.width.toFixed(2)} × ${box.height.toFixed(2)} px, ratio ${ratio.toFixed(4)}`);
+await step('DESKTOP: the SAME in-app viewer draws the signed PDF — no browser plugin frame', async () => {
+  const drawn = await viewerDrew(desktopPage, 'job-card-preview');
+  await noEmbeddedViewer(desktopPage, 'main');
+  const { ratio, box } = await frameRatio(desktopPage.getByTestId('job-card-preview').locator('[data-page="1"]'));
+  if (Math.abs(ratio - A4_RATIO) > 0.02) throw new Error(`page is ${box.width}×${box.height}, not A4`);
+  console.log(`      ${drawn.pages} page(s), page 1 ${box.width.toFixed(0)} × ${box.height.toFixed(0)} px`);
 });
 
 /* -------------------------------------------------------------------------- */
@@ -397,40 +425,15 @@ await step('DESKTOP: the library preview shows the stored PDF, byte for byte', a
     throw new Error('the preview is not showing the revision that was opened');
   }
   if ((await preview.getAttribute('data-preview-kind')) !== 'pdf-viewer') {
-    throw new Error('a browser with a PDF viewer was not given the frame');
+    throw new Error('the library preview is not the PDF viewer');
   }
-
-  const frame = desktopPage.getByTestId('library-pdf-frame');
-  await frame.waitFor({ timeout: 20000 });
-  const src = await frame.getAttribute('src');
-  if (src === null || !src.startsWith('blob:')) {
-    throw new Error(`the frame's source is "${src}", not a blob of the stored file`);
-  }
-
-  /*
-   * THE BYTES, READ BACK FROM THE BLOB THE FRAME IS RENDERING.
-   *
-   * This is the assertion a facsimile could never pass: the header and the
-   * exact length of the file that was uploaded a moment ago.
-   */
-  const actual = await desktopPage.evaluate(async (url) => {
-    const response = await fetch(url);
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    return {
-      head: new TextDecoder().decode(buffer.subarray(0, 5)),
-      length: buffer.byteLength,
-      type: response.headers.get('content-type'),
-    };
-  }, src);
-
-  if (actual.head !== '%PDF-') throw new Error(`the frame is rendering "${actual.head}", not a PDF`);
-  if (actual.length !== uploaded.bytes) {
-    throw new Error(`the frame holds ${actual.length} bytes; ${uploaded.bytes} were uploaded`);
-  }
-  if (actual.type !== 'application/pdf') {
-    throw new Error(`the blob's type is ${actual.type}`);
-  }
-  console.log(`      ${actual.length} bytes of real PDF in the frame`);
+  // The stored bytes, checked for a PDF header before anything is drawn, then drawn.
+  const held = Number(await preview.getAttribute('data-preview-bytes'));
+  if (held !== uploaded.bytes) throw new Error(`the preview holds ${held} bytes; ${uploaded.bytes} were uploaded`);
+  const drawn = await viewerDrew(desktopPage, 'library-pdf-viewer');
+  if (drawn.pages !== 1) throw new Error(`the viewer shows ${drawn.pages} pages of a one-page PDF`);
+  await noEmbeddedViewer(desktopPage, '[role="dialog"]');
+  console.log(`      ${held} bytes of the stored PDF, drawn`);
 
   // And no facsimile anywhere: the old preview's caption is gone for good.
   const body = await desktopPage.locator('[role="dialog"]').innerText();
@@ -515,40 +518,30 @@ await tabletLibrary.addInitScript(() => {
 const tabletLibraryPage = await tabletLibrary.newPage();
 await signInAs(tabletLibraryPage, 'Elmarie Coetzee', { base: BASE, greeting: /Elmarie/ });
 
-await step('TABLET: the library preview offers the file instead of faking the page', async () => {
+await step('TABLET: the library preview DRAWS the stored PDF — where it used to offer only a download', async () => {
   const preview = await openLibraryDocument(tabletLibraryPage, 'Preview proof manual');
-
-  if ((await preview.getAttribute('data-preview-kind')) !== 'download-only') {
-    throw new Error('a browser with no PDF viewer was handed a frame');
-  }
-  if ((await tabletLibraryPage.getByTestId('library-pdf-frame').count()) !== 0) {
-    throw new Error('a PDF frame was drawn for a browser that cannot render one');
-  }
-  await tabletLibraryPage.getByTestId('library-pdf-no-viewer').waitFor({ timeout: 10000 });
-
-  // The bytes were still fetched and checked — the panel is drawn after that.
+  if ((await preview.getAttribute('data-preview-kind')) !== 'pdf-viewer') throw new Error('not the PDF viewer');
   const held = Number(await preview.getAttribute('data-preview-bytes'));
-  if (held !== uploaded.bytes) {
-    throw new Error(`the preview holds ${held} bytes; ${uploaded.bytes} were uploaded`);
-  }
-
-  // No embedded viewer of any kind, and no facsimile.
-  for (const tag of ['iframe', 'embed', 'object']) {
-    const count = await tabletLibraryPage.locator(`[role="dialog"] ${tag}`).count();
-    if (count !== 0) throw new Error(`${count} <${tag}> in the preview on a browser with no viewer`);
-  }
+  if (held !== uploaded.bytes) throw new Error(`the preview holds ${held} bytes; ${uploaded.bytes} were uploaded`);
+  const drawn = await viewerDrew(tabletLibraryPage, 'library-pdf-viewer');
+  if (drawn.pages !== 1) throw new Error(`${drawn.pages} pages shown`);
+  await noEmbeddedViewer(tabletLibraryPage, '[role="dialog"]');
   const body = await tabletLibraryPage.locator('[role="dialog"]').innerText();
-  if (/preview is simulated/i.test(body)) {
-    throw new Error('the simulated-preview caption is still on screen');
-  }
-  if (!/cannot display a PDF inside the page/i.test(body)) {
-    throw new Error('the panel does not say why the document is not shown');
-  }
+  if (/preview is simulated/i.test(body)) throw new Error('the simulated-preview caption is still on screen');
+  await tabletLibraryPage.keyboard.press('Escape');
+});
 
-  // And the real file is still offered.
-  await tabletLibraryPage.getByRole('button', { name: 'Download the document' }).waitFor({
-    timeout: 10000,
-  });
+await step('TABLET: a 1 200-page manual opens at once, and its page 1 100 is reached and drawn', async () => {
+  const preview = await openLibraryDocument(tabletLibraryPage, 'Long manual proof');
+  const drawn = await viewerDrew(tabletLibraryPage, 'library-pdf-viewer');
+  if (drawn.pages !== 1200) throw new Error(`the viewer shows ${drawn.pages} pages`);
+  const input = preview.getByTestId('pdf-page-input');
+  await input.fill('1100');
+  await input.press('Enter');
+  await viewerDrew(tabletLibraryPage, 'library-pdf-viewer', 1100);
+  const counted = await preview.locator('canvas').evaluateAll((canvases) => canvases.filter((canvas) => canvas.width > 0).length);
+  if (counted > 12) throw new Error(`${counted} pages hold pixels at once — far pages are not released`);
+  console.log(`      1 200 pages; page 1 100 drawn; ${counted} canvases holding pixels`);
 });
 
 await tabletLibrary.close();
@@ -566,6 +559,8 @@ await previews.addInitScript(() => {
   window.__printCalls = [];
   window.print = () => {
     window.__printCalls.push(document.documentElement.classList.contains('eje-print-isolate'));
+    // The PDF's own pages, drawn for printing (`printPdf`), are what is on the page.
+    window.__printPages = document.querySelectorAll('.eje-print-root img').length;
     window.dispatchEvent(new Event('afterprint'));
   };
 });
@@ -584,10 +579,7 @@ await step('TABLET: Job card PDF opens the job card INSIDE the app — no silent
   await previewPage.goto(`${BASE}/jobs/EJE-1067/review`, { waitUntil: 'networkidle' });
   writes.length = 0;
   await previewPage.getByTestId('job-card-pdf-button').click();
-  const preview = previewPage.getByTestId('document-preview');
-  await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) !== 'document') throw new Error('not drawn as the document');
-  if (!(await preview.innerText()).includes('EJE-1067')) throw new Error('the preview is not this job card');
+  await viewerDrew(previewPage, 'document-preview');
   if (silentDownloads !== 0) throw new Error(`${silentDownloads} silent download(s)`);
 });
 
@@ -597,6 +589,8 @@ await step('TABLET: Print prints the document alone, once, and writes nothing', 
   const calls = await previewPage.evaluate(() => window.__printCalls);
   if (calls.length !== 1) throw new Error(`print was asked for ${calls.length} times`);
   if (calls[0] !== true) throw new Error('the application was still on the page when printing');
+  const printed = await previewPage.evaluate(() => window.__printPages);
+  if (!(printed > 0)) throw new Error("the PDF's own pages were not what was printed");
   if (await previewPage.evaluate(() => document.documentElement.classList.contains('eje-print-isolate'))) {
     throw new Error('the page stayed in print mode after printing');
   }
@@ -618,6 +612,10 @@ await step('TABLET: Download PDF saves the same PDF each time, separately from P
   if (!first.name.endsWith('.pdf')) throw new Error(`downloaded ${first.name}`);
   if (first.bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('the download is not a PDF');
   if (!first.bytes.equals(second.bytes)) throw new Error('two downloads of the same preview differ');
+  const read = await pdfTextIn(previewPage, first.bytes);
+  if (!read.text.includes('EJE-1067')) throw new Error('the downloaded PDF is not this job card');
+  const shown = Number(await previewPage.getByTestId('document-preview').getAttribute('data-pages'));
+  if (shown !== read.pages) throw new Error(`the viewer shows ${shown} page(s); the download has ${read.pages}`);
   if (writes.length !== 0) throw new Error(`downloading sent ${writes.join(', ')}`);
   await previewPage.getByTestId('preview-close').click();
 });
@@ -625,9 +623,10 @@ await step('TABLET: Download PDF saves the same PDF each time, separately from P
 await step('TABLET: a courier collection offers its price-less Delivery Note, in the app (PARTS-03)', async () => {
   await previewPage.goto(`${BASE}/jobs/EJE-1063`, { waitUntil: 'networkidle' });
   await previewPage.getByTestId('delivery-note-button').click();
-  const preview = previewPage.getByTestId('document-preview');
-  await preview.waitFor({ timeout: 20000 });
-  const text = await preview.innerText();
+  await viewerDrew(previewPage, 'document-preview');
+  const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
+  silentDownloads = 0; // asked for
+  const text = (await pdfTextIn(previewPage, file.bytes)).text;
   if (!text.includes('DSV-4471882')) throw new Error('the waybill is not on the Delivery Note');
   if (/R[\s\u00a0]\d/u.test(text) || text.includes('Subtotal')) throw new Error('the Delivery Note shows a price');
   if (silentDownloads !== 0) throw new Error('the Delivery Note was downloaded silently');
@@ -639,11 +638,13 @@ await step('TABLET: the Time Sheet preview has exactly Date, Customer, OT, D/T, 
   await previewPage.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   writes.length = 0;
   await previewPage.getByTestId('timesheet-preview').click();
-  await previewPage.getByTestId('timesheet-document').waitFor({ timeout: 20000 });
-  const header = (await previewPage.getByTestId('timesheet-document-header').innerText())
-    .split(/\s*\n\s*|\t+/u).map((cell) => cell.trim()).filter(Boolean);
-  const expected = ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km'];
-  if (JSON.stringify(header) !== JSON.stringify(expected)) throw new Error(`the columns are ${JSON.stringify(header)}`);
+  await viewerDrew(previewPage, 'document-preview');
+  const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
+  silentDownloads = 0; // asked for
+  const text = (await pdfTextIn(previewPage, file.bytes)).text;
+  for (const column of ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']) {
+    if (!text.includes(column)) throw new Error(`the Time Sheet has no ${column} column`);
+  }
   if (writes.length !== 0) throw new Error(`previewing sent ${writes.join(', ')}`);
   if (silentDownloads !== 0) throw new Error('the Time Sheet was downloaded silently');
   await previewPage.getByTestId('preview-close').click();
@@ -653,9 +654,11 @@ await step('TABLET: the monthly attendance form shows in the app, as its own doc
   await previewPage.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
   writes.length = 0;
   await previewPage.getByTestId('monthly-attendance-preview').click();
-  await previewPage.getByTestId('attendance-document').waitFor({ timeout: 20000 });
-  const header = await previewPage.getByTestId('attendance-document-header').innerText();
-  if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(header)) throw new Error(`the columns are ${header}`);
+  await viewerDrew(previewPage, 'document-preview');
+  const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
+  silentDownloads = 0; // asked for
+  const text = (await pdfTextIn(previewPage, file.bytes)).text;
+  if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(text)) throw new Error('the attendance columns are missing');
   if (writes.length !== 0) throw new Error(`previewing sent ${writes.join(', ')}`);
   if (silentDownloads !== 0) throw new Error('the attendance form was downloaded silently');
   await previewPage.getByTestId('preview-close').click();
@@ -666,7 +669,7 @@ await browser.close();
 
 console.log('\n=== SUMMARY ===');
 if (failures.length === 0) {
-  console.log('THE SIGNED DOCUMENT AND THE LIBRARY PREVIEW RENDER ON BOTH, with no dead action');
+  console.log('EVERY PREVIEW DRAWS THE PDF ITSELF, ON BOTH, with no embedded browser viewer and no dead action');
   process.exit(0);
 }
 for (const failure of failures) console.log(` - ${failure}`);

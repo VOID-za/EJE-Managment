@@ -3,6 +3,7 @@ import {
   jobStatusLabel,
   jobTypeLabel,
   priorityLabelOrUngraded,
+  repairItemsOf,
   type User,
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
@@ -159,14 +160,14 @@ const CLOSED_JOB_COLUMNS: readonly CsvColumn<ClosedJobRow>[] = [
   { header: 'Quote number', value: (row) => row.job.quoteNumber },
   // Empty when nobody recorded it, like the quantity below.
   { header: 'Date received', value: (row) => row.job.dateReceived ?? '' },
-  { header: 'Part number', value: (row) => row.job.repairItem.partNumber },
-  { header: 'Part description', value: (row) => row.job.repairItem.description },
+  // TR-PARTS-1: every part booked in, in order, one per "; " — the same column for one part as before.
+  { header: 'Part number', value: (row) => repairItemsOf(row.job).map((item) => item.partNumber).join('; ') },
+  { header: 'Part description', value: (row) => repairItemsOf(row.job).map((item) => item.description).join('; ') },
   {
     header: 'Quantity',
     // Empty rather than 0: nobody recorded a quantity, which is not the same
     // as recording none of them.
-    value: (row) =>
-      row.job.repairItem.quantity === null ? '' : String(row.job.repairItem.quantity),
+    value: (row) => repairItemsOf(row.job).map((item) => (item.quantity === null ? '' : String(item.quantity))).join('; '),
   },
   /*
    * WHETHER the document exists, which is what the screen's icon says. Not

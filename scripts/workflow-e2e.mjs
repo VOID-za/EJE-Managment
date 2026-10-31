@@ -330,27 +330,30 @@ await step('the customer signs, and the signature is captured', async () => {
    * assumed. `tablet-pdf-check` is what pins each branch to its own capability;
    * this step's business is that the signed document is on screen, at A4.
    */
+  /*
+   * PDF-VIEW-1 (31 October 2026): every preview is the application's own
+   * viewer, which draws the PDF's pages itself on every browser — so the kind
+   * is the same whatever `navigator.pdfViewerEnabled` says, and the page drawn
+   * must have ink on it.
+   */
   const preview = page.getByTestId('job-card-preview');
   await preview.waitFor({ timeout: 25000 });
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="job-card-preview"]')?.getAttribute('data-viewer-state') === 'ready',
+    null,
+    { timeout: 30000 },
+  );
   const previewKind = await preview.getAttribute('data-preview-kind');
-  const viewerEnabled = await page.evaluate(() => navigator.pdfViewerEnabled === true);
-  if (previewKind !== (viewerEnabled ? 'pdf-viewer' : 'document')) {
-    throw new Error(
-      `the preview drew "${previewKind}" on a browser whose pdfViewerEnabled is ${String(viewerEnabled)}`,
-    );
-  }
-  console.log(`      signed preview drawn as "${previewKind}"`);
+  if (previewKind !== 'pdf-viewer') throw new Error(`the preview drew "${previewKind}", not the PDF viewer`);
+  const firstPage = preview.locator('[data-page="1"]');
+  await preview.locator('[data-page="1"][data-drawn="yes"]').waitFor({ timeout: 30000 });
+  console.log(`      signed preview drawn by the PDF viewer, ${await preview.getAttribute('data-pages')} page(s)`);
 
   /*
-   * THE PREVIEW IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1.
-   *
-   * It was a 60vh letterbox holding a portrait A4 document, so the viewer
-   * shrank the page into a squeezed strip. The frame now carries A4's own
-   * proportions and is capped so it never outgrows the viewport. Measured
-   * rather than described: a ratio is the only honest way to assert "not
-   * squeezed".
+   * THE PAGE IS THE SHAPE OF THE PAGE. MASTER SCOPE PDF-1. Measured on the
+   * drawn page, not the viewer around it (which carries its own toolbar).
    */
-  const box = await preview.boundingBox();
+  const box = await firstPage.boundingBox();
   if (box === null) throw new Error('the signed preview is not on screen');
   const ratio = box.height / box.width;
   const a4 = 841.89 / 595.28;
@@ -360,8 +363,9 @@ await step('the customer signs, and the signature is captured', async () => {
     );
   }
   const viewport = page.viewportSize();
-  if (box.height > viewport.height) {
-    throw new Error(`the signed preview is ${box.height}px tall in a ${viewport.height}px viewport`);
+  const viewerBox = await preview.boundingBox();
+  if (viewerBox.height > viewport.height) {
+    throw new Error(`the signed preview is ${viewerBox.height}px tall in a ${viewport.height}px viewport`);
   }
 
   /*
@@ -602,12 +606,23 @@ await step('the closed job carries its final job card, with both actions', async
   await page.getByRole('button', { name: 'Download Final PDF' }).waitFor({ timeout: 10000 });
 });
 
-await step('View Final PDF loads the stored document, not a 404', async () => {
+await step('View Final PDF shows the STORED document in the viewer, not a 404', async () => {
+  /*
+   * PDF-VIEW-1 (31 October 2026): View Final PDF opens the stored file itself
+   * in the application's PDF viewer — the bytes Download saves — where it used
+   * to go to the review page, which draws the job card again from the job.
+   */
   await page.getByRole('button', { name: 'View Final PDF' }).click();
-  await page.waitForURL('**/jobs/EJE-1065/review', { timeout: 20000 });
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="document-preview"]')?.getAttribute('data-viewer-state') === 'ready',
+    null,
+    { timeout: 30000 },
+  );
+  await page.getByTestId('preview-file-name').getByText('EJE-1065-Final-Job-Card.pdf').waitFor({ timeout: 15000 });
+  await page.locator('[data-testid="document-preview"] [data-page="1"][data-drawn="yes"]').waitFor({ timeout: 30000 });
   await assertNot404('View Final PDF');
-  await page.getByText('EJE-1065-Final-Job-Card.pdf').first().waitFor({ timeout: 15000 });
-  await page.getByText('Issued and invoiced').waitFor({ timeout: 10000 });
+  await page.getByTestId('preview-close').click();
+  await page.getByTestId('document-preview').waitFor({ state: 'detached', timeout: 10000 });
 });
 
 await step('Download Final PDF downloads a real PDF, and never opens a print dialog', async () => {
@@ -1403,13 +1418,14 @@ await step('JOB-EDIT-1: the edit panel fits a tablet without sideways scrolling'
 
 await step('JOB-EDIT-1: a quantity that is not a whole number cannot be sent as a silent “clear”', async () => {
   // EJE-1067 is a Test & Repair job, so the unit booked in is editable on it.
+  // TR-PARTS-1: the parts booked in are edited as a list, in their own dialog.
   await visit('/jobs/EJE-1067');
-  await page.getByTestId('edit-job-details').click();
-  const quantity = page.getByTestId('job-detail-repairQuantity');
+  await page.getByTestId('edit-repair-items').click();
+  const quantity = page.getByTestId('repair-item-quantity').first();
   await quantity.waitFor({ timeout: 15000 });
   await quantity.fill('abc');
-  await page.getByText('Enter a whole number of units, or leave it blank.').waitFor({ timeout: 15000 });
-  if (!(await page.getByTestId('save-job-details').isDisabled())) {
+  await page.getByText('A whole number of parts, or blank.').first().waitFor({ timeout: 15000 });
+  if (!(await page.getByTestId('save-repair-items').isDisabled())) {
     throw new Error('Save stayed enabled with a quantity of “abc”, which would be sent as null');
   }
   await page.getByRole('button', { name: 'Cancel' }).click();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
@@ -21,133 +21,126 @@ import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDia
 import { useUnsavedWork } from '@/hooks/useUnsavedWork';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { TimesheetCorrections } from '@/components/timesheets/TimesheetCorrections';
+import { TimesheetLineForm } from '@/components/timesheets/TimesheetLineForm';
 import { reads, timesheets } from '@/api/endpoints';
 import { TIMESHEET_MAX_DAYS, type TimesheetDay, type TimesheetDocument } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
-import { useCurrentUser } from '@/providers/AppProvider';
+import { useApp, useCurrentUser } from '@/providers/AppProvider';
+import { ApiRequestError } from '@/api/client';
 import { businessToday } from '@/lib/business-time';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import {
   defaultTimesheetRange,
   formatDayAndDate,
   formatPeriod,
+  isCalendarDay,
   lineDateProblem,
   timesheetRangeProblem,
 } from '@/lib/timesheet-dates';
+import {
+  WORKSHOP_PICK,
+  emptyTimesheetDraft,
+  keepTimesheetDraft,
+  keptTimesheetDraft,
+  parseTyped,
+  randToCents,
+  timesheetDraftKey,
+  timesheetDraftOf,
+  type TimesheetDraft,
+} from '@/lib/timesheet-line';
 
 const hours = (value: number): string => value.toFixed(2);
 const kilometres = (value: number): string => value.toFixed(1);
 
-/** The customer picker's value for Workshop: not a customer id, never sent as one. */
-const WORKSHOP = '__workshop__';
-
-/** A line being typed: strings, exactly as the technician typed them. */
-interface Draft {
-  readonly entryId?: string;
-  /**
-   * The day the form was OPENED on, and where it stays while it is open.
-   *
-   * THE 30 OCTOBER 2026 FREEZE. The form used to be drawn under whichever day
-   * equalled `date` — the value being TYPED. A date field reports an empty
-   * value whenever part of the date is cleared or retyped, and in-between dates
-   * as digits arrive, so one keystroke in Date matched no day: the form, with
-   * the field the technician was typing in, was removed from the page, and
-   * every key after that went nowhere. The typed values were still held, but
-   * nothing on screen could reach them. Drawn under `anchor` instead, the form
-   * never moves while it is open; the typed date is validated where it is
-   * typed (`lineDateProblem`) and the line lands on its date when saved.
-   */
-  readonly anchor: string;
-  readonly date: string;
-  /** A customer id, WORKSHOP, or '' for a typed name. */
-  readonly pick: string;
-  readonly customerName: string;
-  readonly overtime: string;
-  readonly double: string;
-  /** Rand, as typed ("450" or "450.00"). */
-  readonly callout: string;
-  readonly calloutShared: boolean;
-  readonly internalKm: string;
-  readonly customerKm: string;
-  /** An older line's NT and call-out count, carried back unchanged (TS-07/08). */
-  readonly keepNormal?: number;
-  readonly keepCallouts?: number;
-}
-
-const emptyDraft = (date: string): Draft => ({
-  anchor: date,
-  date,
-  pick: '',
-  customerName: '',
-  overtime: '0',
-  double: '0',
-  callout: '0',
-  calloutShared: false,
-  internalKm: '0',
-  customerKm: '0',
-});
-
-const draftOf = (entry: TimesheetEntry): Draft => ({
-  entryId: entry.id,
-  anchor: entry.date,
-  date: entry.date,
-  pick: entry.workshop ? WORKSHOP : entry.customerId ?? '',
-  customerName: entry.workshop ? '' : entry.customerName,
-  overtime: String(entry.overtimeHours),
-  double: String(entry.doubleHours),
-  callout: (entry.calloutAmount / 100).toFixed(2),
-  calloutShared: entry.calloutShared,
-  internalKm: String(entry.internalKm),
-  customerKm: String(entry.customerKm),
-  keepNormal: entry.normalHours,
-  keepCallouts: entry.callouts,
-});
-
-const parse = (value: string): number => Number.parseFloat(value.replace(',', '.'));
-/** Rand as typed, to whole cents. NaN stays NaN so the server refuses it. */
-const toCents = (value: string): number => Math.round(parse(value) * 100);
+/**
+ * The period the page opens on: the 1st of this month to today — or the
+ * From/To in the address, which is how My Monthly Forms' "Edit timesheet"
+ * opens exactly its month. Read once, in the browser; the page renders a
+ * loading panel on the server, so nothing here can disagree with hydration.
+ */
+const initialRange = (today: string): { readonly from: string; readonly to: string } => {
+  const fallback = defaultTimesheetRange(today);
+  if (typeof window === 'undefined') return fallback;
+  const params = new URLSearchParams(window.location.search);
+  const from = params.get('from') ?? '';
+  const to = params.get('to') ?? '';
+  if (!isCalendarDay(from) || !isCalendarDay(to) || timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS) !== null) return fallback;
+  return { from, to: to > today ? today : to };
+};
 
 /**
  * TECHNICIAN TIMESHEETS. TIMESHEET-2 (27 October 2026), reshaped by the
  * real-world reviewer on 28 October 2026 (TS-01 … TS-14).
  *
- * Each technician keeps their own: for each day, the customer — or Workshop —
+ * Each person keeps their own: for each day, the customer — or Workshop —
  * overtime (OT), double time (DT), the call-out as a rand amount (marked shared
  * when several jobs share it), internal and customer kilometres. NT is no
  * longer entered; older lines keep theirs, shown as historical.
  *
  * THE FROM AND TO DATES ARE THE TIMESHEET PERIOD (the owner, 28 October 2026).
- * The page opens on the 1st of this month to today, OLDEST DAY FIRST — the two
- * boxes reset on every visit; saved lines are never touched by that. The
+ * The page opens on the 1st of this month to today, OLDEST DAY FIRST. The
  * period's one comment, Preview, Save, Print and Send to office act on exactly
  * those dates: Send to office makes that period read-only, the office is
  * notified and reads the version that was sent. A period that shares a day
  * with one already sent cannot be sent, so no work is sent twice.
  *
- * A SENT TIMESHEET IS CORRECTED, NOT EDITED (TS-16): its technician asks for a
- * correction; the office accepts or rejects it. The office sees the
- * corrections waiting for it at the top of this page.
+ * A SENT TIMESHEET IS CORRECTED, NOT EDITED (TS-16).
+ *
+ * TST-TS-2 (the tester, 31 October 2026 — "still broken when users fill it
+ * in"), found by reproducing it through the screen on desktop, tablet and
+ * phone:
+ *
+ *  1. TYPING FROZE. The open line was state of this whole page, so each key
+ *     re-rendered every day of the period: ~100 ms a key on a desktop and
+ *     450–580 ms on a slow tablet once a month was entered. The line now lives
+ *     in `TimesheetLineForm` (its own state; the page holds it in a ref) and
+ *     the days are memoised, so a key re-renders the form alone. The comment
+ *     box is its own component for the same reason.
+ *  2. A LINE COULD BE STRANDED. With a line open, changing From or To so its
+ *     day left the list removed the form AND every Add line / Edit button
+ *     (they wait for no line to be open) — nothing on the page could continue
+ *     it. An open line whose day is not shown is now drawn above the list.
+ *  3. A REFUSAL WAS OFF SCREEN. It was printed in the period card at the top;
+ *     a few days down, Save line seemed to do nothing. It is said at the line.
+ *  4. A RELOAD LOST THE LINE. Android drops background tabs; the open line is
+ *     kept on the device as it is typed and offered back (`timesheet-line.ts`).
+ *  5. THE OFFICE HAD NO TIMESHEET OF ITS OWN. The list offered a Master or a
+ *     Coordinator technicians only, so their own month — which My Monthly
+ *     Forms asks them to submit — could not be filled in. Their own timesheet
+ *     is now first, and opens by default; anybody else's is read-only, as the
+ *     server has always enforced.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
   const operation = useOperation();
+  const { invalidate, reportConnectionError } = useApp();
+  // Why the open line was not saved when Save or Send to office saved it first.
+  const [lineRefusal, setLineRefusal] = useState<string | null>(null);
   const today = businessToday();
   // Reset on every visit (TS-04): plain state, deliberately not remembered.
-  const initial = defaultTimesheetRange(today);
-  const [from, setFrom] = useState(initial.from);
-  const [to, setTo] = useState(initial.to);
+  const [{ from: firstFrom, to: firstTo }] = useState(() => initialRange(today));
+  const [from, setFrom] = useState(firstFrom);
+  const [to, setTo] = useState(firstTo);
   const [chosen, setChosen] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // The open line: which opening of it (`key` remounts the form), and its values in `draft`.
+  const [open, setOpen] = useState<{ readonly key: number; readonly anchor: string; readonly correcting: boolean } | null>(null);
+  const draft = useRef<TimesheetDraft | null>(null);
+  const openings = useRef(0);
+  const [lineDirty, setLineDirty] = useState(false);
+  const [restored, setRestored] = useState<string | null>(null);
+  const restoredFor = useRef<string | null>(null);
+  // The period comment being typed (null: untouched), held in a ref like the line.
+  const comment = useRef<string | null>(null);
+  const [commentDirty, setCommentDirty] = useState(false);
   const [removing, setRemoving] = useState<TimesheetEntry | null>(null);
-  const [comment, setComment] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
   const [confirmSend, setConfirmSend] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
   const rangeProblem = timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS);
   const people = useQuery(`timesheets:people:${currentUser.id}`, () => timesheets.people());
+  // Your own timesheet first (TST-TS-2 #5): the list puts you first when you are on it.
   const personId = chosen ?? people.data?.[0]?.id ?? null;
   const sheet = useQuery(`timesheets:${personId ?? 'none'}:${from}:${to}`, () =>
     personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
@@ -171,16 +164,127 @@ const TimesheetsPage = () => {
   // day with one that was. The server asks the same questions.
   const periodOpen = editable && sentAt === null && overlapsSent.length === 0 && to <= today;
   const savedComment = period?.comment ?? '';
-  const commentValue = comment ?? savedComment;
   const showHistoricalNt = days.some((day) => day.normalHours > 0);
   const showHistoricalCount = days.some((day) => day.callouts > 0);
+  const storageKey = personId !== null && personId === currentUser.id ? timesheetDraftKey(currentUser.id, personId) : null;
 
   /*
    * NOTHING TYPED IS LOST BY LEAVING. A line half-typed, or a comment being
    * written, warns before the page is closed or reloaded — and before Update
    * now reloads it (REL-UPD-1).
    */
-  useUnsavedWork(dirty, 'a timesheet line or comment being typed');
+  useUnsavedWork(lineDirty || commentDirty, 'a timesheet line or comment being typed');
+
+  /*
+   * A LINE KEPT ON THIS DEVICE IS OFFERED BACK (TST-TS-2 #4), once per visit,
+   * when the person's own sheet has loaded and no line is open.
+   */
+  useEffect(() => {
+    if (storageKey === null || !editable || restoredFor.current === storageKey) return;
+    restoredFor.current = storageKey;
+    const kept = keptTimesheetDraft(storageKey);
+    if (kept === null) return;
+    draft.current = kept.draft;
+    openings.current += 1;
+    setOpen({ key: openings.current, anchor: kept.draft.anchor, correcting: kept.draft.entryId !== undefined });
+    setLineDirty(true);
+    setRestored(`A line you had not saved (kept on this device at ${formatDateTime(kept.keptAt)}) has been put back. Save it or cancel it.`);
+  }, [storageKey, editable]);
+
+  const refresh = useCallback(() => {
+    sheet.refetch();
+    periodDocument.refetch();
+    pendingCorrections.refetch();
+    // The refetch functions are stable; the queries are named for clarity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const closeLine = useCallback(() => {
+    draft.current = null;
+    setOpen(null);
+    setLineDirty(false);
+    setRestored(null);
+    setLineRefusal(null);
+    if (storageKey !== null) keepTimesheetDraft(storageKey, null);
+  }, [storageKey]);
+
+  const openLine = useCallback((next: TimesheetDraft) => {
+    draft.current = next;
+    openings.current += 1;
+    setOpen({ key: openings.current, anchor: next.anchor, correcting: next.entryId !== undefined });
+    setLineDirty(false);
+    setRestored(null);
+    setSaved(null);
+    if (storageKey !== null) keepTimesheetDraft(storageKey, next);
+  }, [storageKey]);
+
+  // The form's copy of the open line, kept where typing costs the page nothing.
+  const currentDraft = useCallback(() => draft.current ?? emptyTimesheetDraft(today), [today]);
+  const keepDraft = useCallback((next: TimesheetDraft) => {
+    draft.current = next;
+  }, []);
+  const keepComment = useCallback((value: string) => {
+    comment.current = value;
+  }, []);
+
+  const addLine = useCallback((date: string) => openLine(emptyTimesheetDraft(date)), [openLine]);
+  const editLine = useCallback((entry: TimesheetEntry) => openLine(timesheetDraftOf(entry)), [openLine]);
+
+  /**
+   * Sends the line; the refusal's own words, or null when it was saved (and
+   * the form closed). Called straight rather than through `useOperation`, so
+   * the words come back to the form that pressed Save line instead of to a
+   * notice at the top of the page.
+   */
+  const sendLine = async (line: TimesheetDraft): Promise<string | null> => {
+    if (personId === null) return 'Choose whose timesheet this is.';
+    const dateProblem = lineDateProblem(line.date, from, to, today);
+    if (dateProblem !== null) return dateProblem;
+    const workshop = line.pick === WORKSHOP_PICK;
+    try {
+      await timesheets.saveEntry(personId, {
+        ...(line.entryId === undefined ? {} : { entryId: line.entryId }),
+        date: line.date,
+        customerId: workshop || line.pick.length === 0 ? null : line.pick,
+        customerName: workshop ? '' : line.customerName,
+        workshop,
+        ...(line.keepNormal === undefined ? {} : { normalHours: line.keepNormal }),
+        ...(line.keepCallouts === undefined ? {} : { callouts: line.keepCallouts }),
+        overtimeHours: parseTyped(line.overtime),
+        doubleHours: parseTyped(line.double),
+        calloutAmount: randToCents(line.callout),
+        calloutShared: line.calloutShared,
+        internalKm: parseTyped(line.internalKm),
+        customerKm: parseTyped(line.customerKm),
+      });
+    } catch (cause: unknown) {
+      if (cause instanceof ApiRequestError) {
+        if (cause.code === 'network') reportConnectionError(cause.message);
+        const detail = cause.violations.map((violation) => violation.message).join(' ');
+        return `${cause.message}${detail.length > 0 ? ` ${detail}` : ''}${cause.code === 'network' ? ' Nothing was lost: the line is still here — press Save line again when there is signal.' : ''}`;
+      }
+      return cause instanceof Error ? cause.message : 'The line could not be saved.';
+    }
+    reportConnectionError(null);
+    // Something changed on the server, so everything on screen is stale.
+    invalidate();
+    closeLine();
+    setSaved(`Line for ${formatDayAndDate(line.date)} saved ${formatDateTime(new Date().toISOString())}. Not sent to the office.`);
+    refresh();
+    return null;
+  };
+
+  /** The open line, if any, saved first — Save and Send to office both begin here. */
+  const saveOpenLine = async (): Promise<boolean> => {
+    if (draft.current === null || open === null) return true;
+    const refused = await sendLine(draft.current);
+    if (refused !== null) {
+      setSaved(null);
+      setLineRefusal(refused);
+      return false;
+    }
+    return true;
+  };
 
   if (people.error !== null) {
     return <QueryFailure code={people.errorCode} message={people.error} onRetry={people.refetch} />;
@@ -198,62 +302,19 @@ const TimesheetsPage = () => {
     );
   }
 
-  const refresh = () => {
-    sheet.refetch();
-    periodDocument.refetch();
-    pendingCorrections.refetch();
-  };
-
-  const edit = (next: Draft | null) => {
-    setDraft(next);
-    setDirty(next !== null || comment !== null);
-    setSaved(null);
-    operation.clearError();
-  };
-
-  const saveLine = async (): Promise<boolean> => {
-    if (personId === null || draft === null) return true;
-    // A date still being typed is not sent; the form says what is wrong.
-    if (lineDateProblem(draft.date, from, to, today) !== null) return false;
-    const workshop = draft.pick === WORKSHOP;
-    const ok = await operation.run(async () => {
-      await timesheets.saveEntry(personId, {
-        ...(draft.entryId === undefined ? {} : { entryId: draft.entryId }),
-        date: draft.date,
-        customerId: workshop || draft.pick.length === 0 ? null : draft.pick,
-        customerName: workshop ? '' : draft.customerName,
-        workshop,
-        ...(draft.keepNormal === undefined ? {} : { normalHours: draft.keepNormal }),
-        ...(draft.keepCallouts === undefined ? {} : { callouts: draft.keepCallouts }),
-        overtimeHours: parse(draft.overtime),
-        doubleHours: parse(draft.double),
-        calloutAmount: toCents(draft.callout),
-        calloutShared: draft.calloutShared,
-        internalKm: parse(draft.internalKm),
-        customerKm: parse(draft.customerKm),
-      });
-    });
-    // On a refusal the form stays open with every value as typed (TS-12).
-    if (ok) {
-      setDraft(null);
-      setDirty(comment !== null);
-    }
-    return ok;
-  };
-
   /** SAVE (TS-12): the open line, if any, and the period's comment. Never a submission. */
   const save = async (): Promise<void> => {
     if (personId === null) return;
-    const lineOk = await saveLine();
-    if (!lineOk) return;
-    if (comment !== null && comment !== savedComment) {
+    if (!(await saveOpenLine())) return;
+    const typed = comment.current;
+    if (typed !== null && typed !== savedComment) {
       const ok = await operation.run(async () => {
-        await timesheets.savePeriodComment(personId, from, to, comment);
+        await timesheets.savePeriodComment(personId, from, to, typed);
       });
       if (!ok) return;
     }
-    setComment(null);
-    setDirty(false);
+    comment.current = null;
+    setCommentDirty(false);
     setSaved(`Saved ${formatDateTime(new Date().toISOString())}. Not sent to the office.`);
     refresh();
   };
@@ -271,204 +332,56 @@ const TimesheetsPage = () => {
   const send = async (): Promise<void> => {
     if (personId === null) return;
     setConfirmSend(false);
-    const lineOk = await saveLine();
-    if (!lineOk) return;
+    if (!(await saveOpenLine())) return;
+    const typed = comment.current;
     const ok = await operation.run(async () => {
-      if (comment !== null && comment !== savedComment) await timesheets.savePeriodComment(personId, from, to, comment);
+      if (typed !== null && typed !== savedComment) await timesheets.savePeriodComment(personId, from, to, typed);
       await timesheets.submit(personId, from, to);
     });
     if (ok) {
-      setComment(null);
-      setDirty(false);
+      comment.current = null;
+      setCommentDirty(false);
       setSaved(null);
     }
     refresh();
   };
 
-  const customerOptions = [
-    { value: '', label: 'Type the customer below…' },
-    { value: WORKSHOP, label: WORKSHOP_LABEL },
-    ...(customers.data ?? []).map((customer) => ({ value: customer.id, label: customer.name })),
-  ];
-
-  const lineForm = (current: Draft) => {
-    const dateProblem = lineDateProblem(current.date, from, to, today);
-    return (
-    <div className="mt-2 space-y-3 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50/40 p-3" data-testid="timesheet-line-form">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <TextField
-          label="Date"
-          type="date"
-          value={current.date}
-          min={from}
-          max={to < today ? to : today}
-          error={dateProblem ?? undefined}
-          onChange={(event) => edit({ ...current, date: event.target.value })}
-          data-testid="timesheet-line-date"
-        />
-        <SelectField
-          label="Customer or Workshop"
-          value={current.pick}
-          options={customerOptions}
-          data-testid="timesheet-customer-pick"
-          onChange={(event) => {
-            const value = event.target.value;
-            const picked = (customers.data ?? []).find((customer) => customer.id === value);
-            edit({
-              ...current,
-              pick: value,
-              customerName: value === WORKSHOP ? '' : picked?.name ?? (current.pick === WORKSHOP ? '' : current.customerName),
-            });
-          }}
-        />
-        {current.pick !== WORKSHOP && (
-          <TextField
-            label="Customer"
-            value={current.customerName}
-            maxLength={200}
-            hint="Required when there are hours, a call-out or kilometres — or choose Workshop."
-            onChange={(event) => edit({ ...current, customerName: event.target.value })}
-          />
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <TextField label="OT (hours)" inputMode="decimal" value={current.overtime} onChange={(event) => edit({ ...current, overtime: event.target.value })} />
-        <TextField label="D/T (hours)" inputMode="decimal" value={current.double} onChange={(event) => edit({ ...current, double: event.target.value })} />
-        <TextField label="Callout (R)" inputMode="decimal" value={current.callout} onChange={(event) => edit({ ...current, callout: event.target.value })} data-testid="timesheet-callout" />
-        <TextField label="Int Km" inputMode="decimal" value={current.internalKm} onChange={(event) => edit({ ...current, internalKm: event.target.value })} />
-        <TextField label="Cust Km" inputMode="decimal" value={current.customerKm} onChange={(event) => edit({ ...current, customerKm: event.target.value })} />
-      </div>
-      <label className="flex items-center gap-2 text-sm text-steel-700">
-        <input
-          type="checkbox"
-          checked={current.calloutShared}
-          onChange={(event) => edit({ ...current, calloutShared: event.target.checked })}
-          className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-          data-testid="timesheet-callout-shared"
-        />
-        Shared call-out — enter only YOUR share (e.g. R500 of a R1 000 call-out shared by two). Nothing is divided for you.
-      </label>
-      {(current.keepNormal ?? 0) > 0 && (
-        <p className="text-xs text-steel-500">
-          This line was entered before 28 October 2026 with NT {hours(current.keepNormal ?? 0)} h. NT is no longer recorded; it is kept as it was.
-        </p>
-      )}
-      <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). Kilometres to one decimal.</p>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" loading={operation.running} disabled={dateProblem !== null} onClick={() => void saveLine().then((ok) => ok && refresh())} data-testid="save-timesheet-line">
-          Save line
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => edit(null)}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-    );
+  /** A change of person or period starts its comment afresh; an open line stays open. */
+  const changePeriod = (nextFrom: string, nextTo: string) => {
+    setFrom(nextFrom);
+    setTo(nextTo);
+    comment.current = null;
+    setCommentDirty(false);
   };
 
-  const dayRow = (day: TimesheetDay) => (
-    <li
-      key={day.date}
-      className="py-3"
-      data-testid="timesheet-day"
-      data-date={day.date}
-      data-recorded={day.recorded ? 'yes' : 'no'}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-steel-900" data-testid="timesheet-day-label">
-            {formatDayAndDate(day.date)}
-          </span>
-          {day.recorded ? (
-            <Badge tone="green" size="sm">Recorded</Badge>
-          ) : (
-            <Badge tone="amber" size="sm">Not recorded</Badge>
-          )}
-          {day.locked && (
-            <span data-testid="timesheet-day-sent-version">
-              <Badge tone="outline" size="sm">{day.sentVersion || 'Sent to office'}</Badge>
-            </span>
-          )}
-          {day.attendance !== null && (
-            <Badge tone="outline" size="sm">
-              {day.attendance === 'present'
-                ? 'Present'
-                : day.absenceReason === null
-                  ? 'Absent'
-                  : `Absent — ${ABSENCE_REASON_LABELS[day.absenceReason]}`}
-            </Badge>
-          )}
-        </div>
-        {editable && !day.locked && draft === null && (
-          <Button size="sm" variant="secondary" onClick={() => edit(emptyDraft(day.date))} data-testid="add-timesheet-line">
-            <Icon name="plus" className="size-4" /> Add line
-          </Button>
-        )}
-      </div>
-
-      {day.entries.length > 0 && (
-        <div className="eje-scrollbar mt-2 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-steel-500 uppercase">
-                <th className="py-1 pr-3">Customer</th>
-                <th className="py-1 pr-3 text-right">OT</th>
-                <th className="py-1 pr-3 text-right">D/T</th>
-                <th className="py-1 pr-3 text-right">Callout</th>
-                <th className="py-1 pr-3 text-right">Int Km</th>
-                <th className="py-1 pr-3 text-right">Cust Km</th>
-                {showHistoricalNt && <th className="py-1 pr-3 text-right">NT (historical)</th>}
-                {showHistoricalCount && <th className="py-1 pr-3 text-right">Call-outs (historical)</th>}
-                {editable && !day.locked && <th className="py-1" />}
-              </tr>
-            </thead>
-            <tbody>
-              {day.entries.map((entry) => (
-                <tr key={entry.id} className="border-t border-steel-100" data-testid="timesheet-line">
-                  <td className="py-1.5 pr-3">{entry.workshop ? WORKSHOP_LABEL : entry.customerName || '—'}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.overtimeHours)}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.doubleHours)}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {formatCurrency(entry.calloutAmount)}
-                    {entry.calloutShared && ' (shared)'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.internalKm)}</td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.customerKm)}</td>
-                  {showHistoricalNt && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.normalHours > 0 ? hours(entry.normalHours) : ''}</td>}
-                  {showHistoricalCount && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.callouts > 0 ? entry.callouts : ''}</td>}
-                  {editable && !day.locked && (
-                    <td className="py-1.5 text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" disabled={draft !== null} onClick={() => edit(draftOf(entry))}>
-                        Edit
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={draft !== null} onClick={() => setRemoving(entry)}>
-                        Remove
-                      </Button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {draft !== null && draft.anchor === day.date && lineForm(draft)}
-
-      {day.comment.length > 0 && (
-        <p className="mt-2 text-sm whitespace-pre-wrap text-steel-600" data-testid="timesheet-day-comment">
-          <span className="text-xs font-semibold text-steel-500">Day comment (written before one comment per timesheet): </span>
-          {day.comment}
-        </p>
-      )}
-    </li>
-  );
+  const listShown = rangeProblem === null && sheet.error === null && !sheet.loading && sheet.data !== null && sheet.data !== undefined;
+  const anchorShown = open !== null && listShown && days.some((day) => day.date === open.anchor);
+  const lineForm: ReactNode =
+    open === null ? null : (
+      <TimesheetLineForm
+        // Drawn somewhere else (its day left the list, or came back): it starts again from the page's copy.
+        key={`${open.key}:${anchorShown ? 'day' : 'elsewhere'}`}
+        initial={currentDraft}
+        onChange={keepDraft}
+        storageKey={storageKey}
+        from={from}
+        to={to}
+        today={today}
+        customers={customers.data ?? []}
+        customersLoading={customers.loading}
+        onSave={sendLine}
+        onCancel={closeLine}
+        onDirtyChange={setLineDirty}
+      />
+    );
+  const viewingOther = personId !== null && personId !== currentUser.id;
+  const personName = userFullName(people.data.find((person) => person.id === personId) ?? people.data[0]!);
 
   return (
     <>
       <PageHeader
         title="Timesheets"
-        description="Each technician keeps their own timesheet: the customer or Workshop, OT, D/T, the call-out amount and Int Km / Cust Km, entered by hand for each day — as you go, or all at once later."
+        description="Each person keeps their own timesheet: the customer or Workshop, OT, D/T, the call-out amount and Int Km / Cust Km, entered by hand for each day — as you go, or all at once later."
       />
 
       <ConfirmDialog
@@ -522,9 +435,7 @@ const TimesheetsPage = () => {
                   variant="secondary"
                   onClick={() => {
                     setChosen(pending.technicianId);
-                    setFrom(pending.from);
-                    setTo(pending.to);
-                    setComment(null);
+                    changePeriod(pending.from, pending.to);
                   }}
                   data-testid="timesheet-pending-open"
                 >
@@ -540,15 +451,22 @@ const TimesheetsPage = () => {
         <div className="flex flex-wrap items-end gap-4">
           {people.data.length > 1 ? (
             <SelectField
-              label="Technician"
+              label="Whose timesheet"
               value={personId ?? ''}
+              disabled={open !== null}
+              hint={open !== null ? 'Save or cancel the open line first.' : undefined}
               onChange={(event) => {
                 setChosen(event.target.value);
                 // A comment being typed belongs to the sheet it was typed on.
-                setComment(null);
+                comment.current = null;
+                setCommentDirty(false);
               }}
-              options={people.data.map((person) => ({ value: person.id, label: userFullName(person) }))}
-              containerClassName="w-64"
+              options={people.data.map((person) => ({
+                value: person.id,
+                label: person.id === currentUser.id ? `${userFullName(person)} (me)` : userFullName(person),
+              }))}
+              containerClassName="w-full sm:w-72"
+              data-testid="timesheet-person"
             />
           ) : (
             <div className="text-sm">
@@ -556,8 +474,8 @@ const TimesheetsPage = () => {
               <p className="font-semibold text-steel-900">{userFullName(people.data[0]!)}</p>
             </div>
           )}
-          <TextField label="From" type="date" value={from} onChange={(event) => setFrom(event.target.value)} containerClassName="w-44" data-testid="timesheet-from" />
-          <TextField label="To" type="date" value={to} onChange={(event) => setTo(event.target.value)} containerClassName="w-44" data-testid="timesheet-to" />
+          <TextField label="From" type="date" value={from} onChange={(event) => changePeriod(event.target.value, to)} containerClassName="w-44" data-testid="timesheet-from" />
+          <TextField label="To" type="date" value={to} onChange={(event) => changePeriod(from, event.target.value)} containerClassName="w-44" data-testid="timesheet-to" />
           {personId !== null && rangeProblem === null && sheet.data !== null && sheet.data !== undefined && (
             <DownloadFileButton href={timesheets.exportUrl(personId, from, to)} fallbackName={`timesheet-${from}-${to}.csv`} label="Export CSV" />
           )}
@@ -567,12 +485,37 @@ const TimesheetsPage = () => {
             {rangeProblem}
           </p>
         )}
+        {viewingOther && sheet.data !== null && sheet.data !== undefined && (
+          <p role="status" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-steel-700" data-testid="timesheet-read-only">
+            <Badge tone="outline" size="sm">Read-only</Badge>
+            {personName}&apos;s own timesheet. Only they enter it; you can read, preview, print and export it.
+          </p>
+        )}
         <p className="mt-3 text-xs text-steel-500">
           {editable
             ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines until a period holding that day is sent to the office; every change is recorded.'
-            : 'This is the technician’s own timesheet. Only they enter it; the office reads it, previews and prints it, and exports it.'}
+            : 'This is the person’s own timesheet. Only they enter it; the office reads it, previews and prints it, and exports it.'}
         </p>
       </Card>
+
+      {restored !== null && (
+        <p role="status" className="mb-3 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3 py-2 text-sm text-amber-eje-700" data-testid="timesheet-line-restored">
+          {restored}
+        </p>
+      )}
+
+      {/* An open line whose day is not on screen is never stranded (TST-TS-2 #2). */}
+      {open !== null && !anchorShown && (
+        <Card className="mb-5" data-testid="timesheet-line-elsewhere">
+          <p className="text-sm font-semibold text-steel-900">
+            Line being {open.correcting ? 'corrected' : 'entered'} for {isCalendarDay(open.anchor) ? formatDayAndDate(open.anchor) : open.anchor}
+          </p>
+          <p className="text-xs text-steel-500">
+            Its day is not in the dates chosen above. Save it with a date inside them, change the dates back, or cancel it.
+          </p>
+          {lineForm}
+        </Card>
+      )}
 
       {rangeProblem === null && period !== null && (
       <Card className="mb-5" data-testid="timesheet-period">
@@ -599,18 +542,15 @@ const TimesheetsPage = () => {
         )}
         <div className="mt-3">
           {periodOpen ? (
-            <TextAreaField
+            <PeriodComment
+              key={`${personId}:${from}:${to}:${savedComment}`}
               label={`Comments for ${period.label}`}
-              value={commentValue}
-              maxLength={2000}
-              rows={3}
-              hint="One comment for the whole timesheet. It is printed in the Comments box."
-              onChange={(event) => {
-                setComment(event.target.value);
-                setDirty(true);
+              saved={savedComment}
+              onChange={keepComment}
+              onDirty={() => {
+                setCommentDirty(true);
                 setSaved(null);
               }}
-              data-testid="timesheet-period-comment"
             />
           ) : (
             <div className="text-sm">
@@ -649,6 +589,11 @@ const TimesheetsPage = () => {
             {operation.error}
           </p>
         )}
+        {open !== null && lineRefusal !== null && (
+          <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="timesheet-open-line-refused">
+            The open line was not saved: {lineRefusal} It is still open{anchorShown ? ' on its day below' : ' above'}.
+          </p>
+        )}
         <p className="mt-2 text-xs text-steel-500">
           Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. Send to office is once per period; after that its days are read-only, and a mistake is put right by a correction the office accepts.
         </p>
@@ -673,7 +618,7 @@ const TimesheetsPage = () => {
       ) : (
         <>
           <Card className="mb-5">
-            <div className="flex flex-wrap gap-6 text-sm" data-testid="timesheet-totals">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm" data-testid="timesheet-totals">
               <span>OT <strong className="tabular-nums">{hours(sheet.data.totals.overtimeHours)}</strong></span>
               <span>D/T <strong className="tabular-nums">{hours(sheet.data.totals.doubleHours)}</strong></span>
               <span>Callout <strong className="tabular-nums">{formatCurrency(sheet.data.totals.calloutAmount)}</strong></span>
@@ -690,12 +635,183 @@ const TimesheetsPage = () => {
           </Card>
           <Card>
             <ul className="divide-y divide-steel-100" data-testid="timesheet-table">
-              {days.map(dayRow)}
+              {days.map((day) => (
+                <DayRow
+                  key={day.date}
+                  day={day}
+                  today={today}
+                  editable={editable}
+                  lineOpen={open !== null}
+                  showHistoricalNt={showHistoricalNt}
+                  showHistoricalCount={showHistoricalCount}
+                  form={anchorShown && open?.anchor === day.date ? lineForm : null}
+                  onAdd={addLine}
+                  onEdit={editLine}
+                  onRemove={setRemoving}
+                />
+              ))}
             </ul>
           </Card>
         </>
       )}
     </>
+  );
+};
+
+/**
+ * One day of the period. MEMOISED (TST-TS-2 #1): with no line open on it, it
+ * re-renders only when its own day changes — never because a key was pressed
+ * somewhere else on the page.
+ */
+const DayRow = memo(function DayRow({
+  day,
+  today,
+  editable,
+  lineOpen,
+  showHistoricalNt,
+  showHistoricalCount,
+  form,
+  onAdd,
+  onEdit,
+  onRemove,
+}: {
+  readonly day: TimesheetDay;
+  readonly today: string;
+  readonly editable: boolean;
+  readonly lineOpen: boolean;
+  readonly showHistoricalNt: boolean;
+  readonly showHistoricalCount: boolean;
+  readonly form: ReactNode;
+  readonly onAdd: (date: string) => void;
+  readonly onEdit: (entry: TimesheetEntry) => void;
+  readonly onRemove: (entry: TimesheetEntry) => void;
+}) {
+  const writable = editable && !day.locked;
+  return (
+    <li className="py-3" data-testid="timesheet-day" data-date={day.date} data-recorded={day.recorded ? 'yes' : 'no'}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-steel-900" data-testid="timesheet-day-label">
+            {formatDayAndDate(day.date)}
+          </span>
+          {day.recorded ? <Badge tone="green" size="sm">Recorded</Badge> : <Badge tone="amber" size="sm">Not recorded</Badge>}
+          {day.locked && (
+            <span data-testid="timesheet-day-sent-version">
+              <Badge tone="outline" size="sm">{day.sentVersion || 'Sent to office'}</Badge>
+            </span>
+          )}
+          {day.attendance !== null && (
+            <Badge tone="outline" size="sm">
+              {day.attendance === 'present'
+                ? 'Present'
+                : day.absenceReason === null
+                  ? 'Absent'
+                  : `Absent — ${ABSENCE_REASON_LABELS[day.absenceReason]}`}
+            </Badge>
+          )}
+        </div>
+        {/* A day that has not happened cannot hold a line, so it offers none. */}
+        {writable && !lineOpen && day.date <= today && (
+          <Button size="sm" variant="secondary" onClick={() => onAdd(day.date)} data-testid="add-timesheet-line">
+            <Icon name="plus" className="size-4" /> Add line
+          </Button>
+        )}
+      </div>
+
+      {day.entries.length > 0 && (
+        <div className="eje-scrollbar mt-2 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-steel-500 uppercase">
+                <th className="py-1 pr-3">Customer</th>
+                <th className="py-1 pr-3 text-right">OT</th>
+                <th className="py-1 pr-3 text-right">D/T</th>
+                <th className="py-1 pr-3 text-right">Callout</th>
+                <th className="py-1 pr-3 text-right">Int Km</th>
+                <th className="py-1 pr-3 text-right">Cust Km</th>
+                {showHistoricalNt && <th className="py-1 pr-3 text-right">NT (historical)</th>}
+                {showHistoricalCount && <th className="py-1 pr-3 text-right">Call-outs (historical)</th>}
+                {writable && <th className="py-1" />}
+              </tr>
+            </thead>
+            <tbody>
+              {day.entries.map((entry) => (
+                <tr key={entry.id} className="border-t border-steel-100" data-testid="timesheet-line">
+                  <td className="py-1.5 pr-3">{entry.workshop ? WORKSHOP_LABEL : entry.customerName || '—'}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.overtimeHours)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{hours(entry.doubleHours)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {formatCurrency(entry.calloutAmount)}
+                    {entry.calloutShared && ' (shared)'}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.internalKm)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{kilometres(entry.customerKm)}</td>
+                  {showHistoricalNt && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.normalHours > 0 ? hours(entry.normalHours) : ''}</td>}
+                  {showHistoricalCount && <td className="py-1.5 pr-3 text-right tabular-nums text-steel-500">{entry.callouts > 0 ? entry.callouts : ''}</td>}
+                  {writable && (
+                    <td className="py-1.5 text-right whitespace-nowrap">
+                      <Button size="sm" variant="ghost" disabled={lineOpen} onClick={() => onEdit(entry)}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={lineOpen} onClick={() => onRemove(entry)}>
+                        Remove
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {form}
+
+      {day.comment.length > 0 && (
+        <p className="mt-2 text-sm whitespace-pre-wrap text-steel-600" data-testid="timesheet-day-comment">
+          <span className="text-xs font-semibold text-steel-500">Day comment (written before one comment per timesheet): </span>
+          {day.comment}
+        </p>
+      )}
+    </li>
+  );
+});
+
+/**
+ * The period's one comment, typed in its own state so a key re-renders this
+ * box alone (TST-TS-2 #1). The page keeps the typed value (`onChange`) for
+ * when it saves or sends.
+ */
+const PeriodComment = ({
+  label,
+  saved,
+  onChange,
+  onDirty,
+}: {
+  readonly label: string;
+  readonly saved: string;
+  readonly onChange: (value: string) => void;
+  readonly onDirty: () => void;
+}) => {
+  const [value, setValue] = useState(saved);
+  const told = useRef(false);
+  return (
+    <TextAreaField
+      label={label}
+      value={value}
+      maxLength={2000}
+      rows={3}
+      hint="One comment for the whole timesheet. It is printed in the Comments box."
+      onChange={(event) => {
+        setValue(event.target.value);
+        onChange(event.target.value);
+        if (!told.current) {
+          told.current = true;
+          onDirty();
+        }
+      }}
+      data-testid="timesheet-period-comment"
+    />
   );
 };
 

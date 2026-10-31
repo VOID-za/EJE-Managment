@@ -103,6 +103,15 @@ export interface AttendanceInput {
    */
   readonly absenceReason?: string | null | undefined;
   readonly note: string;
+  /**
+   * WHAT THE SCREEN BELIEVED THE DAY SAID, for a save made without anybody
+   * pressing a button (ATT-AUTO-1, the tester, 31 October 2026): the
+   * `recordedAt` of the record it was looking at, or null for "no record".
+   * When given and the day has since been recorded by somebody else, the save
+   * is refused (`attendance_changed`) instead of overwriting the newer answer
+   * with the screen's stale one. Left out, a save behaves as it always has.
+   */
+  readonly expectedRecordedAt?: string | null | undefined;
 }
 
 /**
@@ -196,6 +205,21 @@ export const recordAttendance = async (
     existing.note === note
   ) {
     return existing;
+  }
+
+  /*
+   * A STALE SCREEN NEVER OVERWRITES A NEWER ANSWER (ATT-AUTO-1). Asked only
+   * when the screen said what it expected, and only once the answer differs —
+   * repeating what the day already says is never a conflict.
+   */
+  if (input.expectedRecordedAt !== undefined && (existing?.recordedAt ?? null) !== input.expectedRecordedAt) {
+    throw refuse(
+      `${userFullName(person)}'s attendance for ${input.date} was changed by somebody else.`,
+      'attendance_changed',
+      existing === null
+        ? 'The day was cleared since you opened it. Reload and choose again.'
+        : `It now says ${statusLabel(existing.status)}${existing.absenceReason === null ? '' : ` — ${reasonLabel(existing.absenceReason)}`}. The latest answer is shown; choose again if it is wrong.`,
+    );
   }
 
   const now = context.services.clock.now();

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button, Card, ConfirmDialog, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, ConfirmDialog, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
@@ -14,6 +14,7 @@ import { useQuery } from '@/hooks/useQuery';
 import { useOperation } from '@/hooks/useOperation';
 import { formatDateTime } from '@/lib/format';
 import { formatDayAndDate } from '@/lib/timesheet-dates';
+import { monthBounds } from '@/lib/payroll-files';
 
 type Kind = 'timesheet' | 'attendance';
 
@@ -143,6 +144,28 @@ export const MonthlyFormsCard = ({
         <ul className="mt-3 list-disc space-y-0.5 pl-5 text-sm text-amber-eje-700" data-testid="monthly-forms-problems">
           {state.problems.map((problem) => <li key={problem}>{problem}</li>)}
         </ul>
+      )}
+
+      {/*
+        EDIT YOUR OWN FORMS FROM HERE (TST-MMF-1, the tester, 31 October 2026):
+        every role's own month opens its own timesheet and attendance for
+        editing. Only the OWNER is offered these — the office reading somebody
+        else's card is not, and the server refuses their writes regardless.
+      */}
+      {state.owner && state.submission === null && (
+        <div className="mt-3 flex flex-wrap gap-2" data-testid="monthly-forms-edit">
+          <ButtonLink
+            href={`/timesheets?from=${monthBounds(month).from}&to=${monthBounds(month).to}`}
+            size="sm"
+            variant="secondary"
+            data-testid="monthly-forms-edit-timesheet"
+          >
+            Edit my timesheet for {state.monthLabel}
+          </ButtonLink>
+          <ButtonLink href={`/attendance?from=${monthBounds(month).from}`} size="sm" variant="secondary" data-testid="monthly-forms-edit-attendance">
+            Edit my attendance for {state.monthLabel}
+          </ButtonLink>
+        </div>
       )}
 
       {state.owner && state.submission === null && (

@@ -4,3 +4,7 @@
 # misreads, and core.autocrlf=true on a Windows checkout produces exactly that.
 *.sh        text eol=lf
 deploy/**   text eol=lf
+
+# Third-party code vendored unchanged (pdf.js, PDF-VIEW-1): kept byte-for-byte as
+# published, so it still matches the registry checksum in its README.
+public/vendor/** -text

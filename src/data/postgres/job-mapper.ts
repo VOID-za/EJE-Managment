@@ -17,6 +17,7 @@ import {
   type DeliveryRecord,
   type FinalDocument,
   type Job,
+  type RepairItem,
   type JobCancellation,
   type JobInvoice,
   type JobOfficeHandling,
@@ -32,6 +33,24 @@ import {
   isDeliveryFailureKind,
 } from '@/domain';
 import type * as schema from '@/db/schema';
+
+/**
+ * The parts booked in after the first (TR-PARTS-1, 0041), read defensively: a
+ * column written by hand, or by a future release, never puts a malformed part
+ * on screen — anything that is not a part is left out.
+ */
+export const repairItemsFromColumn = (value: unknown): RepairItem[] =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .map((item) => ({
+          partNumber: typeof item.partNumber === 'string' ? item.partNumber : '',
+          description: typeof item.description === 'string' ? item.description : '',
+          quantity: typeof item.quantity === 'number' && Number.isInteger(item.quantity) && item.quantity > 0 ? item.quantity : null,
+        }))
+        .filter((item) => item.partNumber.length > 0 || item.description.length > 0 || item.quantity !== null)
+    : [];
+
 
 /**
  * Rows to the domain, and back.
@@ -363,6 +382,8 @@ export const toDomainJob = (rows: JobRowSet): Job => {
       description: rows.job.repairDescription,
       quantity: rows.job.repairQuantity,
     },
+    // TR-PARTS-1, 0041: the rest of the parts booked in.
+    moreRepairItems: repairItemsFromColumn(rows.job.moreRepairItems),
     quoteNumber: rows.job.quoteNumber,
     dateReceived: rows.job.dateReceived,
     faultDescription: rows.job.faultDescription,
@@ -464,6 +485,7 @@ export const toJobRow = (
   repairPartNumber: job.repairItem.partNumber,
   repairDescription: job.repairItem.description,
   repairQuantity: job.repairItem.quantity,
+  moreRepairItems: job.moreRepairItems.map((item) => ({ partNumber: item.partNumber, description: item.description, quantity: item.quantity })),
   quoteNumber: job.quoteNumber,
   dateReceived: job.dateReceived,
   faultDescription: job.faultDescription,

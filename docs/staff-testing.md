@@ -545,6 +545,21 @@ Fictional data only while the demonstration switcher is on.
 | L5 | Print a job card and a monthly form from the preview to a real printer | The printout is the document only, complete, nothing cut at the edges |
 | L6 | Install the app from Chrome, open it from the home screen, turn it, put it in the background and come back, turn Wi-Fi off and on | It opens on EJE, survives each, and the connection banner says what is true |
 
+## M. The tester's critical fixes — on a real tablet and a real phone (31 October 2026)
+
+**Not yet deployed.** `docs/delivery-register-2026-10-31-critical.md`. Tested in
+desktop Chrome and in Chrome emulating a touch tablet and a phone at eleven
+sizes; these are the checks only real devices and a real printer can answer.
+Fictional data only while the demonstration switcher is on.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| M1 | On the Android tablet AND an Android phone: open each preview — a job card, a delivery note, the time sheet, the monthly timesheet and attendance, a final job card, a correction, a library manual — page through it, zoom in and out, pinch, turn the device, close and reopen | The PDF itself is shown every time (not a "couldn't display" block), every page, readable when zoomed, nothing cut at the edges, Close always reachable |
+| M2 | Print each of those from the preview to a real printer, from the tablet and from a desktop | The printout is the PDF only, complete, page for page, nothing cut |
+| M3 | Technician, on the tablet with the on-screen keyboard: fill in a timesheet line for every day of a month, correct one, reopen the page | Typing never lags or freezes; every line is there after reopening |
+| M4 | Mark attendance for a month on the tablet, with Wi-Fi switched off halfway and on again, and the app put in the background once | The status says what is true (kept offline, then saved); every day is saved afterwards |
+| M5 | As a Master and as a Coordinator: My Monthly Forms → Edit my timesheet; then EJE Monthly Forms → View forms for a technician | Your own timesheet opens for editing; a technician's forms open read-only, with no Edit or Submit |
+
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
 Run from outside the server against `https://eje.syncza.co.za`, signed in only

@@ -2,6 +2,7 @@ import 'server-only';
 import { generateDeliveryNote } from '@/application/delivery-note';
 import { z } from 'zod';
 import {
+  REPAIR_ITEMS_MAX,
   asContactId,
   asCustomerId,
   asJobId,
@@ -27,6 +28,7 @@ import { WorkflowError } from '@/application/errors';
 import { createJob, releaseDraft } from '@/application/job-creation';
 import { handleJobCard, recordInvoiceNumber } from '@/application/office-lifecycle';
 import { editJobDetails } from '@/application/job-details';
+import { setRepairItems } from '@/application/repair-items';
 import { forbidden, notFound } from '../errors';
 import { command, type CommandContext, type CommandRegistry, type ErasedCommand } from './types';
 
@@ -161,6 +163,15 @@ const detailExpected = z
     dateReceived: isoDate.nullable(),
   })
   .partial()
+  .strict();
+
+/** One part booked in (TR-PARTS-1): the lengths creation allows for the single item. */
+const repairItemSchema = z
+  .object({
+    partNumber: z.string().max(120),
+    description: z.string().max(500),
+    quantity: z.number().int().positive().max(100_000).nullable(),
+  })
   .strict();
 
 const editDetailsSchema = z
@@ -469,6 +480,22 @@ export const JOB_COMMANDS: CommandRegistry = {
    */
   edit_details: withInput(editDetailsSchema, (context, job, input) =>
     editJobDetails(context.operation, job, input),
+  ),
+
+  /*
+   * THE PARTS BOOKED IN, AS A WHOLE LIST (TR-PARTS-1). The office's, while the
+   * job is editable, on a Test & Repair job — every rule is `setRepairItems`'s;
+   * the schema only bounds the request. `expected` is the list the editor
+   * opened, so two people editing at once cannot overwrite each other.
+   */
+  set_repair_items: withInput(
+    z
+      .object({
+        items: z.array(repairItemSchema).max(REPAIR_ITEMS_MAX),
+        expected: z.array(repairItemSchema).max(REPAIR_ITEMS_MAX),
+      })
+      .strict(),
+    (context, job, input) => setRepairItems(context.operation, job, input),
   ),
 
   remove_line: withInput(
@@ -1051,6 +1078,12 @@ export const createJobSchema = z
     repairPartNumber: text(120).optional(),
     repairDescription: text(500).optional(),
     repairQuantity: z.number().int().positive().max(100_000).nullable().optional(),
+    /*
+     * EVERY PART BOOKED IN (TR-PARTS-1). When sent it is the whole list and the
+     * three single-part fields above are ignored; a client that sends only
+     * those still books in one part, exactly as before.
+     */
+    repairItems: z.array(repairItemSchema).max(REPAIR_ITEMS_MAX).optional(),
     quoteNumber: text(120).optional(),
     /** When the unit arrived. A calendar date or null; the rules are `createJob`'s. */
     dateReceived: isoDate.nullable().optional(),
@@ -1107,6 +1140,7 @@ export const runCreateJob = async (
     repairPartNumber,
     repairDescription,
     repairQuantity,
+    repairItems,
     quoteNumber,
     ...job
   } = input;
@@ -1128,6 +1162,7 @@ export const runCreateJob = async (
         description: repairDescription ?? '',
         quantity: repairQuantity ?? null,
       },
+      ...(repairItems === undefined ? {} : { repairItems }),
       quoteNumber: quoteNumber ?? '',
       customerId: asCustomerId(input.customerId),
       siteId: asSiteId(input.siteId),

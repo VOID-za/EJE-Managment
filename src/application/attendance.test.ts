@@ -118,6 +118,54 @@ describe('recording attendance', () => {
   });
 });
 
+/*
+ * ATT-AUTO-1 (the tester, 31 October 2026): attendance saves itself as it is
+ * filled in, so a screen may be saving a day another person has since
+ * recorded. It says which record it was looking at; a newer one is never
+ * overwritten by it.
+ */
+describe('an autosave that says what it expected', () => {
+  let harness: Harness;
+  let today: string;
+  beforeEach(() => {
+    harness = buildHarness();
+    today = businessToday();
+  });
+  const later = () => new Promise((resolve) => setTimeout(resolve, 3));
+
+  it('saves when the day is as the screen saw it — no record, then its own record', async () => {
+    const own = harness.as(technician);
+    const first = await recordAttendance(own, { userId: 'user-tech-sipho', date: today, status: 'present', note: '', expectedRecordedAt: null });
+    await later();
+    const second = await recordAttendance(own, {
+      userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'sick_leave', note: '', expectedRecordedAt: first.recordedAt,
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.status).toBe('absent');
+  });
+
+  it('refuses a stale screen instead of overwriting the office’s newer answer', async () => {
+    const seen = await recordAttendance(harness.as(technician), { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
+    await later();
+    await recordAttendance(harness.as(master), { userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'leave', note: 'Booked' });
+    expect(
+      await refusal(recordAttendance(harness.as(technician), { userId: 'user-tech-sipho', date: today, status: 'present', note: '', expectedRecordedAt: seen.recordedAt })),
+    ).toEqual(['attendance_changed']);
+    // A screen that thought there was no record is refused the same way.
+    expect(
+      await refusal(recordAttendance(harness.as(technician), { userId: 'user-tech-sipho', date: today, status: 'present', note: '', expectedRecordedAt: null })),
+    ).toEqual(['attendance_changed']);
+    const [kept] = await harness.repos.attendance.listRecords(today, today).then((rows) => rows.filter((row) => row.userId === 'user-tech-sipho'));
+    expect(kept).toMatchObject({ status: 'absent', absenceReason: 'leave', note: 'Booked' });
+  });
+
+  it('never calls repeating the current answer a conflict, and writes nothing for it', async () => {
+    const current = await recordAttendance(harness.as(master), { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
+    const again = await recordAttendance(harness.as(technician), { userId: 'user-tech-sipho', date: today, status: 'present', note: '', expectedRecordedAt: 'an old screen' });
+    expect(again).toEqual(current);
+  });
+});
+
 describe('the register, and what it keeps apart', () => {
   it('shows planned leave beside the person, and recording attendance leaves the leave alone', async () => {
     const harness = buildHarness();

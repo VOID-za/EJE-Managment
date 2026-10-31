@@ -1,5 +1,6 @@
 import {
   getJobTypeDefinition,
+  repairItemsOf,
   requiresDeliveryNote,
   type Contact,
   type Customer,
@@ -96,15 +97,17 @@ export const deliveryNoteFileName = (job: Pick<Job, 'jobNumber'>): string => `${
 export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: string): DeliveryNoteModel => {
   const { job, customer, site, contact, settings } = input;
   const definition = getJobTypeDefinition(job.jobType);
-  const repairItem =
-    definition.capturesRepairItem && (job.repairItem.partNumber.length > 0 || job.repairItem.description.length > 0)
-      ? [{
+  // TR-PARTS-1: EVERY part booked in, each with its own quantity, on this one note.
+  const repairItem = definition.capturesRepairItem
+    ? repairItemsOf(job)
+        .filter((item) => item.partNumber.length > 0 || item.description.length > 0)
+        .map((item) => ({
           kind: 'Repaired unit' as const,
-          partNumber: job.repairItem.partNumber,
-          description: job.repairItem.description,
-          quantity: String(job.repairItem.quantity ?? 1),
-        }]
-      : [];
+          partNumber: item.partNumber,
+          description: item.description,
+          quantity: String(item.quantity ?? 1),
+        }))
+    : [];
   const parts = job.parts.map((part) => ({
     kind: 'Part' as const,
     partNumber: part.partNumber,

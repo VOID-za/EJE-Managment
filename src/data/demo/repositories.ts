@@ -199,6 +199,7 @@ class DemoJobRepository implements JobRepository {
       quoteNumber: job.quoteNumber,
       dateReceived: job.dateReceived,
       repairItem: job.repairItem,
+      moreRepairItems: job.moreRepairItems,
       officeHandling: job.officeHandling,
       invoice: job.invoice,
       customerId: job.customerId,

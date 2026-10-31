@@ -100,6 +100,12 @@ export interface RequestOptions {
    */
   readonly captureTransport?: boolean;
   readonly signal?: AbortSignal;
+  /**
+   * Lets the request finish after the page is left (ATT-AUTO-1): an autosave
+   * still waiting when the person closes the tab or goes elsewhere is sent
+   * this way, so the browser completes it instead of cancelling it.
+   */
+  readonly keepalive?: boolean;
 }
 
 const request = async <T>(path: string, options: RequestOptions = {}): Promise<T> => {
@@ -119,6 +125,7 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.keepalive === true ? { keepalive: true } : {}),
     });
   } catch (cause) {
     /*
@@ -262,13 +269,14 @@ export const apiPost = <T>(
   path: string,
   body: unknown = {},
   idempotencyKey?: string,
-  options: { readonly captureTransport?: boolean } = {},
+  options: { readonly captureTransport?: boolean; readonly keepalive?: boolean } = {},
 ): Promise<T> =>
   request<T>(path, {
     method: 'POST',
     body,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(options.captureTransport === true ? { captureTransport: true } : {}),
+    ...(options.keepalive === true ? { keepalive: true } : {}),
   });
 
 export const apiPatch = <T>(path: string, body: unknown = {}): Promise<T> =>

@@ -17,18 +17,18 @@ import { PostgresSettingsRepository } from '@/data/postgres/settings-repository'
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (1a34d1c), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (316544f), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 1a34d1c, and it does: each of these was checked against that commit.
+ * in 316544f, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0040)
+ * The database was migrated to the newest migration THIS release ships (0041)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
- * library, jobs, attendance, timesheets and corrections (0037–0039, which it
- * knows), beside monthly submissions, Finance packages, a name on documents
- * and a Finance recipient (0040) that it has never heard of?
+ * library, jobs, attendance, timesheets, corrections, monthly submissions and
+ * Finance packages (0037–0040, which it knows), beside the extra parts booked
+ * in on a Test & Repair job (0041) that it has never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -73,7 +73,7 @@ const TIMESHEET = {
 
 const id = (value: string): DocumentId => asDocumentId(value);
 
-describePhase('rollback compatibility — phase 2: the live release (1a34d1c) against a database at 0040', () => {
+describePhase('rollback compatibility — phase 2: the live release (316544f) against a database at 0041', () => {
   let db: Database;
   let repository: PostgresDocumentRepository;
 
@@ -91,14 +91,14 @@ describePhase('rollback compatibility — phase 2: the live release (1a34d1c) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    expect(shipped).toHaveLength(40);
-    expect(shipped.at(-1)).toBe('0039_timesheet_corrections');
-    expect(shipped).not.toContain('0040_monthly_payroll');
+    expect(shipped).toHaveLength(41);
+    expect(shipped.at(-1)).toBe('0040_monthly_payroll');
+    expect(shipped).not.toContain('0041_repair_items');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0040 applied beyond what the live release ships.
-    expect(applied).toBe(41);
+    // 0041 applied beyond what the live release ships.
+    expect(applied).toBe(42);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -209,12 +209,31 @@ describePhase('rollback compatibility — phase 2: the live release (1a34d1c) ag
    * column: it must still read a job this release wrote WITH one, and still
    * write a job of its own — leaving the column NULL, which is "not recorded".
    */
-  it('still reads and writes JOBS on a database with 0031 applied', async () => {
+  it('still reads and writes JOBS on a database with 0031 and 0041 applied', async () => {
     const jobs = new PostgresJobRepository(db);
     // Phase 1's job: the only Test & Repair, written WITH a date received.
     const written = (await jobs.list()).filter((job) => job.jobType === 'test_and_repair');
     expect(written).toHaveLength(1);
-    expect((await jobs.findByJobNumber(written[0]!.jobNumber))?.jobType).toBe('test_and_repair');
+    const found = await jobs.findByJobNumber(written[0]!.jobNumber);
+    expect(found?.jobType).toBe('test_and_repair');
+
+    /*
+     * 0041: the job carries FOUR parts booked in. The live code reads the first
+     * exactly as it always did — it is in the three columns it knows — and
+     * saving the job through the live code leaves the other three untouched,
+     * so they are all still there when this release returns.
+     */
+    expect(found?.repairItem).toEqual({ partNumber: 'BRG-001', description: 'Bearing', quantity: 2 });
+    await jobs.save({ ...found!, referenceNumber: 'REF-ROLLED-BACK' });
+    const [parts] = await db.execute<{ more: unknown; reference: string }>(
+      sql`select more_repair_items as more, reference_number as reference from jobs where job_number = ${written[0]!.jobNumber}`,
+    );
+    expect(parts?.reference).toBe('REF-ROLLED-BACK');
+    expect(parts?.more).toEqual([
+      { partNumber: 'SK-010', description: 'Seal kit', quantity: 1 },
+      { partNumber: 'SNS-004', description: 'Sensor', quantity: 3 },
+      { partNumber: 'CPL-002', description: 'Coupling', quantity: 1 },
+    ]);
 
     // And one of its own, numbered from the sequence as the live code numbers jobs.
     const allocated = await jobs.allocateJobNumber();

@@ -147,6 +147,33 @@ describe('a technician’s own manual timesheet', () => {
     expect((await listTimesheetPeople(harness.as(sipho))).map((person) => person.id)).toEqual([SIPHO]);
   });
 
+  /*
+   * TST-TS-2 #5 (the tester, 31 October 2026): a Master or a Coordinator keeps
+   * their OWN timesheet exactly as a technician does — it is first in their
+   * list and theirs alone to write — and reads, never writes, anybody else's.
+   */
+  it('gives the office its OWN timesheet first, writable by them alone', async () => {
+    const people = await listTimesheetPeople(harness.as(master));
+    expect(people[0]?.id).toBe(master.id);
+    expect(people.map((person) => person.id)).toContain(SIPHO);
+    expect(new Set(people.map((person) => person.id)).size).toBe(people.length);
+
+    const own = await saveTimesheetEntry(harness.as(master), master.id, line(day(0)));
+    expect(own.userId).toBe(master.id);
+    const sheet = await loadTimesheet(harness.as(master), master.id, day(0), day(0));
+    expect(sheet.editable).toBe(true);
+    expect(sheet.days[0]?.entries.map((entry) => entry.id)).toEqual([own.id]);
+
+    // Nobody else writes the Master's sheet, the other office role included.
+    const coordinator = seedUser('user-coord-christene');
+    await expect(saveTimesheetEntry(harness.as(coordinator), master.id, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(
+      saveTimesheetEntry(harness.as(coordinator), coordinator.id, { ...line(day(0)), entryId: own.id }),
+    ).rejects.toMatchObject({ violations: [{ code: 'entry_not_found' }] });
+    await expect(removeTimesheetEntry(harness.as(coordinator), master.id, own.id)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    expect((await loadTimesheet(harness.as(coordinator), master.id, day(0), day(0))).editable).toBe(false);
+  });
+
   it('keeps the day comment and shows the manual attendance for reference', async () => {
     await saveTimesheetComment(harness.as(sipho), SIPHO, day(0), 'Waited for the crane');
     await recordAttendance(harness.as(master), { userId: SIPHO, date: day(0), status: 'present', note: '' });

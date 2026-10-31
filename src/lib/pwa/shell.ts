@@ -25,6 +25,10 @@
  *     never be the WRONG chunk. This is what makes the shell render without a
  *     network round trip.
  *   - `/icons/…` and the manifest — the installed application's own furniture.
+ *   - `/vendor/pdfjs-4.10.38/…` — the PDF engine every preview draws with
+ *     (PDF-VIEW-1), unmodified third-party code in a VERSIONED folder, so a
+ *     given URL's bytes never change. Precached, so the signing wizard can
+ *     still show the customer the PDF itself with no signal.
  *   - `/offline` — a page with no server data in it at all, which is why it is
  *     safe to keep and why it is what a failed navigation gets.
  *
@@ -43,7 +47,8 @@
  * change to what is cached cannot leave a browser serving yesterday's policy.
  */
 // v2 (29 October 2026): the icons changed to the application's own EJE mark (PWA-1).
-export const CACHE_VERSION = 'v2';
+// v3 (31 October 2026): the PDF engine is kept for offline previews (PDF-VIEW-1).
+export const CACHE_VERSION = 'v3';
 
 export const SHELL_CACHE = `eje-shell-${CACHE_VERSION}`;
 export const ASSET_CACHE = `eje-assets-${CACHE_VERSION}`;
@@ -66,10 +71,12 @@ export const PRECACHE_PATHS: readonly string[] = [
   OFFLINE_PATH,
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/vendor/pdfjs-4.10.38/pdf.min.mjs',
+  '/vendor/pdfjs-4.10.38/pdf.worker.min.mjs',
 ];
 
 /** Prefixes whose GET responses may be stored. Nothing else qualifies. */
-export const CACHEABLE_PREFIXES: readonly string[] = ['/_next/static/', '/icons/'];
+export const CACHEABLE_PREFIXES: readonly string[] = ['/_next/static/', '/icons/', '/vendor/pdfjs-4.10.38/'];
 
 /** Exact paths that may be stored, beyond the prefixes above. */
 export const CACHEABLE_PATHS: readonly string[] = [OFFLINE_PATH, '/manifest.webmanifest'];

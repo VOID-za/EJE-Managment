@@ -594,6 +594,35 @@ export const emptyRepairItem = (): RepairItem => ({
 export const hasRepairItem = (item: RepairItem): boolean =>
   item.partNumber.length > 0 || item.description.length > 0 || item.quantity !== null;
 
+/**
+ * THE MOST PARTS ONE TEST & REPAIR JOB HOLDS. TR-PARTS-1. A ceiling against a
+ * runaway request, not a business number: the delivery note continues onto as
+ * many pages as the list needs.
+ */
+export const REPAIR_ITEMS_MAX = 200;
+
+/**
+ * EVERY PART BOOKED IN, IN ORDER. TR-PARTS-1 (the tester, 31 October 2026):
+ * one Test & Repair job — and its one delivery note — carries any number of
+ * parts, each with its own part number and quantity.
+ *
+ * The first is `repairItem` (the three columns it has always had) and the rest
+ * are `moreRepairItems`. Kept that way round so the release before this one,
+ * if it is ever rolled back to, still reads the first part exactly as it did;
+ * the rest stay stored, untouched, until this release returns. Everything that
+ * shows or prints the parts asks this, never the two fields.
+ */
+export const repairItemsOf = (job: Pick<Job, 'repairItem' | 'moreRepairItems'>): readonly RepairItem[] =>
+  [job.repairItem, ...(job.moreRepairItems ?? [])].filter(hasRepairItem);
+
+/** A list of parts as the job stores it: the first in `repairItem`, the rest after it. Empty rows are dropped. */
+export const storedRepairItems = (
+  items: readonly RepairItem[],
+): { readonly repairItem: RepairItem; readonly moreRepairItems: readonly RepairItem[] } => {
+  const kept = items.filter(hasRepairItem);
+  return { repairItem: kept[0] ?? emptyRepairItem(), moreRepairItems: kept.slice(1) };
+};
+
 export interface Job {
   readonly id: JobId;
   readonly jobNumber: string;
@@ -750,6 +779,13 @@ export interface Job {
    * still looking for the part number on the casting.
    */
   readonly repairItem: RepairItem;
+
+  /**
+   * THE REST OF THE PARTS BOOKED IN, after `repairItem`. TR-PARTS-1. Read the
+   * whole list through `repairItemsOf`; written through `storedRepairItems`.
+   * Empty on every job type that does not capture a repair item.
+   */
+  readonly moreRepairItems: readonly RepairItem[];
 
   /**
    * The customer's quote number, where they work by one. Test & Repair §4.

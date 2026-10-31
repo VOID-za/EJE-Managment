@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Badge, Button, Card, ConfirmDialog, LoadingPanel, QueryFailure } from '@/components/ui';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
+import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
+import { apiDownload } from '@/api/client';
 import { payroll } from '@/api/endpoints';
 import type { FinancePackageView, PayrollMonthRow } from '@/application/finance-packages';
 import { useQuery } from '@/hooks/useQuery';
@@ -42,6 +44,8 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [confirmSend, setConfirmSend] = useState<FinancePackageView | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  // A package attachment open in the application's PDF viewer (PDF-VIEW-1): the stored file itself.
+  const [previewing, setPreviewing] = useState<{ readonly packageId: string; readonly fileName: string } | null>(null);
   const view = useQuery(`payroll:month:${month}`, () => payroll.month(month));
 
   if (view.error !== null) return <QueryFailure code={view.errorCode} message={view.error} onRetry={view.refetch} />;
@@ -225,7 +229,15 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                         <td className="py-0.5 pr-3">{attachment.versionLabel}</td>
                         <td className="py-0.5 pr-3 text-right tabular-nums" data-testid="finance-attachment-pages">{attachment.pageCount}</td>
                         <td className="py-0.5 pr-3 text-right tabular-nums">{kb(attachment.sizeBytes)}</td>
-                        <td className="py-0.5 text-right">
+                        <td className="py-0.5 text-right whitespace-nowrap">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setPreviewing({ packageId: financePackage.id, fileName: attachment.fileName })}
+                            data-testid="finance-attachment-preview"
+                          >
+                            Preview
+                          </Button>
                           <DownloadFileButton href={payroll.fileUrl(financePackage.id, attachment.fileName)} fallbackName={attachment.fileName} label="Open" />
                         </td>
                       </tr>
@@ -265,6 +277,17 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
         busy={operation.running}
         onConfirm={() => confirmSend !== null && void send(confirmSend)}
         onCancel={() => setConfirmSend(null)}
+      />
+
+      <DocumentPreviewDialog
+        open={previewing !== null}
+        title={previewing?.fileName ?? 'Package attachment'}
+        description="The file exactly as it is stored in this package and attached to the Finance email. Looking at it changes nothing."
+        loadPdf={async () => {
+          const file = await apiDownload(payroll.fileUrl(previewing?.packageId ?? '', previewing?.fileName ?? ''), previewing?.fileName ?? 'attachment.pdf');
+          return { bytes: file.bytes, fileName: file.fileName };
+        }}
+        onClose={() => setPreviewing(null)}
       />
     </Card>
   );

@@ -17,6 +17,7 @@ import type {
   Customer,
   Job,
   JobDetailValues,
+  RepairItem,
   CaptureReferral,
   CorrectedArea,
   DeliveryRecord,
@@ -579,6 +580,9 @@ export const jobs = {
     changes: Partial<JobDetailValues>,
     expected: Partial<JobDetailValues>,
   ) => jobAction(jobId, 'edit_details', { changes, expected }),
+  /** TR-PARTS-1: the whole list of parts booked in, and the list the editor opened with. */
+  setRepairItems: (jobId: string, items: readonly RepairItem[], expected: readonly RepairItem[]) =>
+    jobAction(jobId, 'set_repair_items', { items, expected }),
   // COST-5. A charge that is neither labour, travel nor a part.
   addAdditionalCharge: (jobId: string, input: unknown) =>
     jobAction(jobId, 'add_additional_charge', input),
@@ -1145,8 +1149,10 @@ export const attendance = {
     /** ATT-01: required for absent, omitted or null for present. */
     absenceReason?: string | null;
     note: string;
-  }) =>
-    command<AttendanceRecord>('/api/attendance', input),
+    /** ATT-AUTO-1: the `recordedAt` the screen was looking at (null: no record). */
+    expectedRecordedAt?: string | null;
+  }, options: { readonly keepalive?: boolean } = {}) =>
+    apiPost<AttendanceRecord>('/api/attendance', input, newIdempotencyKey(), options),
   exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
 };
 

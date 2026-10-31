@@ -4,7 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'rea
 import { createPortal } from 'react-dom';
 import { Button, Icon, Modal } from '@/components/ui';
 import { downloadBytes } from '@/lib/download';
-import { canDisplayPdfInline } from '@/lib/pdf-support';
+import { PdfViewer, printPdf } from './PdfViewer';
 
 export interface PreviewPdf {
   readonly bytes: Uint8Array;
@@ -15,96 +15,88 @@ interface PreviewProps {
   readonly title: string;
   readonly description?: string;
   readonly loadPdf: () => Promise<PreviewPdf>;
-  readonly renderHtml: () => ReactNode;
+  /**
+   * The same document drawn as HTML — shown only if this device cannot draw
+   * the PDF. Left out for a STORED document (an issued job card, a correction)
+   * that has no HTML twin: the viewer then says so and offers the file.
+   */
+  readonly renderHtml?: () => ReactNode;
   readonly onClose: () => void;
   /** Print as soon as the document is ready — the Print button's own action. */
   readonly autoPrint?: boolean;
 }
 
 /**
- * A DOCUMENT PREVIEW THAT WORKS ON THE TABLETS. TS-11, TS-13, TR-02 (the
- * real-world reviewer, 28 October 2026).
+ * EVERY DOCUMENT PREVIEW IN THE APPLICATION. TS-11, TS-13, TR-02 (28 October
+ * 2026); rebuilt on one viewer for PDF-VIEW-1 (the tester, 31 October 2026).
  *
- * WHY IT EXISTS. The job card's "Job card PDF" button opened the PDF in a new
- * tab — on a desktop. On the EJE tablets (Chrome on Android, which has no
- * built-in PDF viewer) the same button silently DOWNLOADED the file instead:
- * nothing appeared on screen, which reads as "Preview does not work"
- * (reproduced in a browser with no PDF viewer on 28 October 2026).
+ * The time sheet, the monthly timesheet and attendance forms, the issued job
+ * card, a correction and the delivery note all open here, from the same bytes
+ * Download saves — fetched from the server, which authorises them, and handed
+ * to `PdfViewer`, which draws the PDF's own pages on every device (see there
+ * for what was wrong before). Nothing about a preview depends on the browser
+ * having a PDF viewer.
  *
- * So the preview is shown IN the application, always:
- *   - where the browser can display a PDF, the actual PDF in a frame;
- *   - where it cannot, the same document drawn as HTML by the component built
- *     from the same model the PDF is (`renderHtml`), never a lookalike.
- * Print prints the PDF where it can be displayed, and otherwise the HTML
- * document alone — never the application around it. Download hands over the
- * PDF bytes unchanged. Opening the preview reads; it never submits, signs,
- * locks or stores anything.
+ * The dialog fills a phone's screen and nearly all of a tablet's or a
+ * desktop's, above the application's navigation (it is a modal in its own
+ * layer, opened last, so it is never behind another dialog). Close, Download
+ * PDF and Print are always in its footer. Print prints the PDF's pages
+ * (`printPdf`); only if this device cannot draw the PDF at all does it print
+ * the same document drawn as HTML. Opening a preview reads; it never submits,
+ * signs, locks or stores anything.
  */
 export const DocumentPreviewDialog = ({ open, ...props }: PreviewProps & { readonly open: boolean }) =>
   // Mounted only while open, so every opening starts from nothing.
   open ? <OpenPreview {...props} /> : null;
 
 const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPrint = false }: PreviewProps) => {
-  const [inline] = useState(() => canDisplayPdfInline());
   const [pdf, setPdf] = useState<PreviewPdf | null>(null);
-  const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [pages, setPages] = useState<number | null>(null);
+  const [printing, setPrinting] = useState<string | null>(null);
   const [printingHtml, setPrintingHtml] = useState(false);
-  const frame = useRef<HTMLIFrameElement | null>(null);
   const printed = useRef(false);
 
   const load = useEffectEvent(() => loadPdf());
 
   useEffect(() => {
     let cancelled = false;
-    let created: string | null = null;
     load()
       .then((loaded) => {
-        if (cancelled) return;
-        setPdf(loaded);
-        created = URL.createObjectURL(new Blob([new Uint8Array(loaded.bytes)], { type: 'application/pdf' }));
-        setUrl(created);
+        if (!cancelled) setPdf(loaded);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : 'The document could not be produced.');
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
       });
     return () => {
       cancelled = true;
-      if (created !== null) URL.revokeObjectURL(created);
     };
   }, []);
 
-  const print = () => {
-    const target = frame.current?.contentWindow;
-    if (inline && target) {
-      try {
-        target.focus();
-        target.print();
-        return;
-      } catch {
-        // A viewer that refuses scripted printing: print the HTML instead.
-      }
+  const print = async () => {
+    if (pdf === null) return;
+    setPrinting('Preparing the pages for printing…');
+    try {
+      await printPdf(pdf.bytes, (done, total) => setPrinting(total > 3 ? `Preparing page ${done} of ${total} for printing…` : 'Preparing the pages for printing…'));
+    } catch {
+      // This device cannot draw the PDF: print the same document drawn as HTML, where there is one.
+      if (renderHtml !== undefined) setPrintingHtml(true);
+      else setError('This device could not prepare the document for printing. Download it and print it from there.');
+    } finally {
+      setPrinting(null);
     }
-    setPrintingHtml(true);
   };
 
   // The Print button's action: print once the document is ready.
-  const printWhenReady = useEffectEvent(() => print());
-  const ready = inline ? url !== null : !busy;
+  const printWhenReady = useEffectEvent(() => void print());
   useEffect(() => {
-    if (!autoPrint || !ready || printed.current) return;
+    if (!autoPrint || pdf === null || printed.current) return;
     printed.current = true;
-    // After the frame has had a moment to load the PDF.
-    const timer = window.setTimeout(() => printWhenReady(), inline ? 600 : 50);
+    const timer = window.setTimeout(() => printWhenReady(), 50);
     return () => window.clearTimeout(timer);
-  }, [autoPrint, ready, inline]);
+  }, [autoPrint, pdf]);
 
-  // Printing the HTML document: it is rendered alone at the top of the page
-  // (see `.eje-print-root` in globals.css), printed, then removed.
+  // Printing the HTML document: rendered alone at the top of the page (`.eje-print-root`), printed, then removed.
   useEffect(() => {
     if (!printingHtml) return;
     const root = document.documentElement;
@@ -127,11 +119,26 @@ const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPri
       <Modal
         open
         title={title}
-        description={description}
+        description={
+          <span className="block">
+            {description}
+            {pdf !== null && (
+              <span className="mt-0.5 block font-mono text-xs text-steel-500" data-testid="preview-file-name">
+                {pdf.fileName}
+                {pages === null ? '' : ` · ${pages} ${pages === 1 ? 'page' : 'pages'}`}
+              </span>
+            )}
+          </span>
+        }
         onClose={onClose}
-        size="xl"
+        size="document"
         footer={
           <>
+            {printing !== null && (
+              <span role="status" className="mr-auto self-center text-sm text-steel-600" data-testid="preview-printing">
+                {printing}
+              </span>
+            )}
             <Button variant="ghost" onClick={onClose} data-testid="preview-close">
               Close
             </Button>
@@ -145,9 +152,10 @@ const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPri
               Download PDF
             </Button>
             <Button
-              disabled={inline && url === null}
+              disabled={pdf === null}
+              loading={printing !== null}
               leadingIcon={<Icon name="document" className="size-4" />}
-              onClick={print}
+              onClick={() => void print()}
               data-testid="preview-print"
             >
               Print
@@ -155,35 +163,29 @@ const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPri
           </>
         }
       >
-        {error !== null && (
-          <p role="alert" className="mb-3 text-sm font-medium text-signal-600">
-            {error}
-          </p>
-        )}
-        {inline ? (
-          url === null ? (
-            <p className="py-10 text-center text-sm text-steel-500">{busy ? 'Preparing the document…' : ''}</p>
-          ) : (
-            <iframe
-              ref={frame}
-              src={url}
-              title={title}
-              data-testid="document-preview"
-              data-preview-kind="pdf-viewer"
-              className="aspect-[595.28/841.89] w-full rounded-[var(--radius-control)] border border-steel-200 bg-white"
-            />
-          )
-        ) : (
-          <div
-            data-testid="document-preview"
-            data-preview-kind="document"
-            className="eje-scrollbar max-h-[70dvh] overflow-y-auto rounded-[var(--radius-control)] border border-steel-200 bg-steel-200/60 p-2"
-          >
-            {renderHtml()}
+        {error !== null ? (
+          <div className="p-4" data-testid="document-preview" data-preview-kind="error">
+            <p role="alert" className="text-sm font-medium text-signal-600">
+              {error}
+            </p>
           </div>
+        ) : pdf === null ? (
+          <p className="py-10 text-center text-sm text-steel-500" data-testid="document-preview" data-preview-kind="loading">
+            Preparing the document…
+          </p>
+        ) : (
+          <PdfViewer
+            bytes={pdf.bytes}
+            fileName={pdf.fileName}
+            title={title}
+            {...(renderHtml === undefined ? {} : { fallback: renderHtml })}
+            onPages={setPages}
+            className="min-h-0 flex-1"
+            testId="document-preview"
+          />
         )}
       </Modal>
-      {printingHtml && typeof document !== 'undefined'
+      {printingHtml && renderHtml !== undefined && typeof document !== 'undefined'
         ? createPortal(<div className="eje-print-root">{renderHtml()}</div>, document.body)
         : null}
     </>

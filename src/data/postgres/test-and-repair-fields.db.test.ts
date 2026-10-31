@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '@/db/schema';
 import type { Database } from '@/db/client';
 import { jobFixture, seedBaseline } from './test-fixtures';
@@ -118,6 +118,47 @@ describeDb('a Test & Repair job’s own fields, on PostgreSQL', () => {
       ),
     );
     expect(message).toContain('jobs_repair_quantity_positive');
+  });
+
+  /*
+   * TR-PARTS-1, MIGRATION 0041: any number of parts. The first stays in the
+   * three columns above — so the release before this one still reads it — and
+   * the rest are `more_repair_items`, a JSON array.
+   */
+  it('round trips FOUR parts with their own quantities, the first in the old columns', async () => {
+    const parts = [
+      { partNumber: 'BRG-001', description: 'Bearing', quantity: 2 },
+      { partNumber: 'SK-010', description: 'Seal kit', quantity: 1 },
+      { partNumber: 'SNS-004', description: 'Sensor', quantity: 3 },
+      { partNumber: 'CPL-002', description: 'Coupling', quantity: 1 },
+    ];
+    const saved = await repairJob({ repairItem: parts[0], moreRepairItems: parts.slice(1) });
+    const reloaded = await jobs.findById(saved.id);
+    expect(reloaded?.repairItem).toEqual(parts[0]);
+    expect(reloaded?.moreRepairItems).toEqual(parts.slice(1));
+
+    const [row] = await db
+      .select({ partNumber: schema.jobs.repairPartNumber, more: schema.jobs.moreRepairItems })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, saved.id));
+    expect(row?.partNumber).toBe('BRG-001');
+    expect(row?.more).toEqual(parts.slice(1));
+
+    // The archive's summary rows carry them too.
+    const summaries = await jobs.listSummaries();
+    expect(summaries.find((summary) => summary.id === saved.id)?.moreRepairItems).toEqual(parts.slice(1));
+  });
+
+  it('gives a job saved without the list an empty one — what every job before 0041 has', async () => {
+    const saved = await repairJob();
+    await db.execute(sql`update jobs set more_repair_items = default where id = ${saved.id}`);
+    expect((await jobs.findById(saved.id))?.moreRepairItems).toEqual([]);
+  });
+
+  it('REFUSES a value that is not a list', async () => {
+    const saved = await repairJob();
+    const message = await messageOf(db.execute(sql`update jobs set more_repair_items = '{"partNumber":"X"}'::jsonb where id = ${saved.id}`));
+    expect(message).toContain('jobs_more_repair_items_array');
   });
 
   it('leaves a job of another type carrying the empty defaults', async () => {

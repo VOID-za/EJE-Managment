@@ -42,6 +42,7 @@ const buildJob = (overrides: Partial<Job> = {}, jobType: JobTypeCode = 'breakdow
   orderNumber: 'PO-88123',
   referenceNumber: 'REF-2291',
   repairItem: emptyRepairItem(),
+  moreRepairItems: [],
   quoteNumber: '',
   dateReceived: null,
   faultDescription: 'Machine stopped during operation. Spindle fault reported.',

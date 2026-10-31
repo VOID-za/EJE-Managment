@@ -9,7 +9,8 @@ import nextTypescript from 'eslint-config-next/typescript';
  * variables treated as errors.
  */
 const config = [
-  { ignores: ['.next/**', '.next-update/**', 'node_modules/**', 'out/**', 'next-env.d.ts'] },
+  // public/vendor holds third-party code vendored unchanged (pdf.js, PDF-VIEW-1): not ours to lint.
+  { ignores: ['.next/**', '.next-update/**', 'node_modules/**', 'out/**', 'next-env.d.ts', 'public/vendor/**'] },
   ...coreWebVitals,
   ...nextTypescript,
   {

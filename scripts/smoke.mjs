@@ -211,6 +211,32 @@ const attachPhoto = async (caption, visibility) => {
   await page.getByText(caption).first().waitFor({ timeout: 15000 });
 };
 
+/**
+ * A PREVIEW DREW THE PDF ITSELF (PDF-VIEW-1, 31 October 2026): the in-app viewer
+ * opened the document and page 1 has real ink on it. Every preview is that
+ * viewer now, on every browser, so this replaces the checks that used to read
+ * the HTML stand-in a browser without a PDF viewer was shown.
+ */
+const viewerDrew = async (testId) => {
+  await page.waitForFunction(
+    (id) => document.querySelector(`[data-testid="${id}"]`)?.getAttribute('data-viewer-state') === 'ready',
+    testId,
+    { timeout: 30000 },
+  );
+  const viewer = page.getByTestId(testId);
+  if ((await viewer.getAttribute('data-preview-kind')) !== 'pdf-viewer') throw new Error(`${testId} is not the PDF viewer`);
+  await viewer.locator('[data-page="1"][data-drawn="yes"]').waitFor({ timeout: 30000 });
+  const dark = await viewer.locator('[data-page="1"] canvas').evaluate((canvas) => {
+    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let count = 0;
+    for (let index = 0; index < data.length; index += 4) if (data[index] < 230) count += 1;
+    return count;
+  });
+  if (dark < 100) throw new Error(`${testId}: page 1 was drawn blank`);
+  if ((await viewer.locator('iframe, embed, object').count()) !== 0) throw new Error(`${testId} embeds a browser viewer`);
+  return Number(await viewer.getAttribute('data-pages'));
+};
+
 const signInAsMasterIfNeeded = async () => {
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   const heading = await page.locator('h1').first().innerText().catch(() => '');
@@ -1180,6 +1206,7 @@ await step('the signed document is shown before anything is submitted', async ()
    * `tablet-pdf-check` is what pins each branch to its own capability.
    */
   await page.getByTestId('job-card-preview').waitFor({ timeout: 20000 });
+  await viewerDrew('job-card-preview');
   // There is no way back past a signature.
   if ((await page.getByRole('button', { name: 'Back' }).count()) !== 0) {
     throw new Error('the wizard offered to go back behind a captured signature');
@@ -2774,10 +2801,8 @@ const previewShows = async (jobNumber, failure) => {
   await button.click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
-  const kind = await preview.getAttribute('data-preview-kind');
-  if (kind === 'document') {
-    await preview.getByText(jobNumber).first().waitFor({ timeout: 10000 });
-  }
+  await viewerDrew('document-preview');
+  await page.getByTestId('preview-file-name').getByText(jobNumber).first().waitFor({ timeout: 10000 });
   await page.getByTestId('preview-print').waitFor({ timeout: 5000 });
   await page.getByTestId('preview-download').waitFor({ timeout: 5000 });
   page.off('download', onDownload);
@@ -3992,11 +4017,14 @@ await step('the office records attendance, and a correction keeps one record (AT
   for (const expected of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)']) {
     if (!reasons.includes(expected)) throw new Error(`the absence reasons did not offer ${expected}: ${reasons.join(', ')}`);
   }
+  // ATT-AUTO-1 (the tester, 31 October 2026): choosing the reason SAVES it —
+  // there is no Record absent button to press. The row says when it is saved.
+  if ((await row.getByTestId('absence-reason-confirm').count()) !== 0) throw new Error('the register still asks for a separate Record absent press');
   await row.getByLabel('Reason for absence').selectOption('sick_leave');
-  await row.getByTestId('absence-reason-confirm').click();
-  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"]')
+  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"][data-saved="yes"]')
     .waitFor({ timeout: 10000 });
-  await row.getByText('Sick Leave', { exact: true }).waitFor({ timeout: 5000 });
+  await row.getByText('Sick Leave', { exact: true }).first().waitFor({ timeout: 5000 });
+  await page.locator('[data-testid="autosave-status"][data-state="saved"]').first().waitFor({ timeout: 10000 });
 
   // Read back after a reload: the server's record, not the screen's.
   await page.reload({ waitUntil: 'networkidle' });
@@ -4009,6 +4037,8 @@ await step('the office records attendance, and a correction keeps one record (AT
     return (body?.data?.rows ?? []).filter((r) => r.user.id === 'user-tech-sipho' && r.record !== null).length;
   }, BASE);
   if (records !== 1) throw new Error(`${records} attendance records for one person and day`);
+  const note = await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"]').getByLabel('Note').inputValue();
+  if (note !== 'Phoned in sick at 07:10') throw new Error(`the note typed before choosing Absent was not saved: "${note}"`);
 
   // Planned leave is shown beside the person, never applied: Thabo is booked sick.
   await page.locator('[data-testid="attendance-row"][data-user="user-tech-thabo"]')
@@ -4017,7 +4047,7 @@ await step('the office records attendance, and a correction keeps one record (AT
 
 await step('a timesheet is manual: unrecorded days say so, the office reads it, takes a comment, exports it (TIMESHEET-2)', async () => {
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByLabel('Technician').selectOption('user-tech-sipho');
+  await page.getByTestId('timesheet-person').selectOption('user-tech-sipho');
   await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
   await page.getByTestId('timesheet-totals').waitFor({ timeout: 5000 });
   if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) {
@@ -4198,9 +4228,7 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   await page.getByTestId('timesheet-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
-    await preview.getByText('Workshop rebuilds all week.').waitFor({ timeout: 10000 });
-  }
+  await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
@@ -4249,9 +4277,7 @@ await step('the technician asks to correct the sent timesheet; the office accept
   await page.getByTestId('timesheet-preview-original').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
-    await page.getByTestId('timesheet-document-version').getByText(/Original submission/u).waitFor({ timeout: 10000 });
-  }
+  await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
 });
 
@@ -4446,10 +4472,8 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   await card.getByTestId('monthly-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
-    await page.getByTestId('attendance-document').waitFor({ timeout: 15000 });
-    if (!(await page.getByTestId('attendance-document-technician').innerText()).includes('Naledi')) throw new Error('the preview is another person’s form');
-  }
+  await viewerDrew('document-preview');
+  if (!(await page.getByTestId('preview-file-name').innerText()).includes('NALEDI')) throw new Error('the preview is another person’s form');
   await page.getByTestId('preview-close').click();
   await preview.waitFor({ state: 'detached', timeout: 10000 });
 
@@ -4585,17 +4609,11 @@ await step('a technician previews and submits last month’s timesheet and atten
   await page.getByTestId('monthly-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
-    await page.getByTestId('attendance-document').waitFor({ timeout: 15000 });
-    const header = await page.getByTestId('attendance-document-header').innerText();
-    if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(header)) throw new Error(`attendance columns: ${header}`);
-  }
+  await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
   await page.getByTestId('monthly-timesheet-preview').click();
   await preview.waitFor({ timeout: 20000 });
-  if ((await preview.getAttribute('data-preview-kind')) === 'document') {
-    await page.getByTestId('timesheet-document').waitFor({ timeout: 15000 });
-  }
+  await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
 
   // Weekdays without attendance must be confirmed before the month can go.
@@ -5111,7 +5129,7 @@ await step('the archive filters by the date the job was closed', async () => {
 /* SEARCH-4 — the archive, downloaded as a spreadsheet                        */
 /* -------------------------------------------------------------------------- */
 
-await step('SEARCH-4: the archive downloads as a CSV, built by the server', async () => {
+await step('SEARCH-4: Closed Jobs has no Download CSV; the server file is unchanged', async () => {
   /*
    * THE FILE, NOT A SCREENSHOT OF A BUTTON. The download is caught and read:
    * the header row, a job the screen is showing, and the proof that the CSV is
@@ -5129,17 +5147,22 @@ await step('SEARCH-4: the archive downloads as a CSV, built by the server', asyn
     { timeout: 10000 },
   );
 
-  const started = page.waitForEvent('download', { timeout: 25000 });
-  await page.getByTestId('export-csv').click();
-  const file = await started;
-  if (!/^eje-closed-jobs-\d{4}-\d{2}-\d{2}\.csv$/.test(file.suggestedFilename())) {
-    throw new Error(`the archive export is named ${file.suggestedFilename()}`);
+  /*
+   * NO DOWNLOAD CSV ON CLOSED JOBS (the tester, 31 October 2026). The control
+   * is gone for every role that opens the page; the server's own file, which
+   * other tooling still reads, is checked here by asking for it directly.
+   */
+  if ((await page.getByRole('button', { name: 'Download CSV' }).count()) !== 0 || (await page.getByTestId('export-csv').count()) !== 0) {
+    throw new Error('Closed Jobs still offers Download CSV');
   }
-
-  const stream = await file.createReadStream();
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  const csv = Buffer.concat(chunks).toString('utf8');
+  const answer = await page.evaluate(async (base) => {
+    const response = await fetch(`${base}/api/jobs/closed/export`);
+    return { disposition: response.headers.get('content-disposition') ?? '', csv: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await response.arrayBuffer()) };
+  }, BASE);
+  if (!/eje-closed-jobs-\d{4}-\d{2}-\d{2}\.csv/.test(answer.disposition)) {
+    throw new Error(`the archive export is named ${answer.disposition}`);
+  }
+  const csv = answer.csv;
 
   if (!csv.startsWith('\uFEFF')) throw new Error('the CSV has no BOM, so Excel will mis-read it');
   const [header, ...rows] = csv.replace('\uFEFF', '').trimEnd().split('\r\n');
@@ -5253,18 +5276,25 @@ await step('a closed job carries its final signed document', async () => {
 });
 
 await step('"View Final PDF" opens the stored document, and does not re-make it', async () => {
-  await page.getByRole('button', { name: 'View Final PDF' }).click();
-  // "Job card", not "Review job card": the job is CLOSED, so there is nothing
-  // to review and nobody to submit it. MASTER SCOPE CR-07.
-  await page.getByRole('heading', { name: 'Job card', exact: true }).waitFor({ timeout: 10000 });
-  await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
-  await page.getByText('Issued and closed').waitFor({ timeout: 8000 });
-  await page.getByText('Final document on file').waitFor({ timeout: 8000 });
-
   // Merely looking at an old job card must not append a new document event.
-  await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: /Activity/ }).click();
   const before = await page.getByText('document generated', { exact: false }).count();
+  await page.getByRole('tab', { name: 'Overview' }).click().catch(() => {});
+
+  /*
+   * PDF-VIEW-1 (31 October 2026): View Final PDF opens the STORED file in the
+   * application's PDF viewer — the bytes Download saves — on the job itself.
+   */
+  await page.getByRole('button', { name: 'View Final PDF' }).click();
+  await viewerDrew('document-preview');
+  await page.getByTestId('preview-file-name').getByText('EJE-1044-Final-Job-Card.pdf').waitFor({ timeout: 8000 });
+  await page.getByTestId('preview-close').click();
+
+  // The review page still shows the job card as issued and closed.
+  await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Job card', exact: true }).waitFor({ timeout: 10000 });
+  await page.getByText('Issued and closed').waitFor({ timeout: 8000 });
+  await page.getByText('Final document on file').waitFor({ timeout: 8000 });
   await page.goto(`${BASE}/jobs/EJE-1044/review`, { waitUntil: 'networkidle' });
   await page.getByText('EJE-1044-Final-Job-Card.pdf').first().waitFor({ timeout: 8000 });
   await page.goto(`${BASE}/jobs/EJE-1044`, { waitUntil: 'networkidle' });

@@ -65,13 +65,25 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
   const KIND = MARGIN;
   const PART = MARGIN + 80;
   const DESC = MARGIN + 210;
+  /*
+   * THE HEADINGS, ON EVERY PAGE THE TABLE REACHES (TR-PARTS-1): a delivery
+   * note with many parts continues onto further pages, and a page of rows
+   * without its headings is a page nobody can read on its own.
+   */
+  const headings = (continued: boolean) => {
+    if (continued) {
+      sheet.text(MARGIN, 'Goods (continued)', { font: 'bold', size: SIZE.small, colour: MUTED });
+      sheet.move(GAP.line);
+    }
+    sheet.pdf.rect(MARGIN, sheet.cursor - 4, CONTENT_WIDTH, GAP.line + 2, BAND);
+    sheet.text(KIND + 3, 'Item', { font: 'bold', size: SIZE.small, colour: INK });
+    sheet.text(PART, 'Part number', { font: 'bold', size: SIZE.small, colour: INK });
+    sheet.text(DESC, 'Description', { font: 'bold', size: SIZE.small, colour: INK });
+    sheet.textRight(QTY - 3, 'Quantity', { font: 'bold', size: SIZE.small, colour: INK });
+    sheet.move(GAP.line + 2);
+  };
   sheet.need(GAP.line * 2);
-  sheet.pdf.rect(MARGIN, sheet.cursor - 4, CONTENT_WIDTH, GAP.line + 2, BAND);
-  sheet.text(KIND + 3, 'Item', { font: 'bold', size: SIZE.small, colour: INK });
-  sheet.text(PART, 'Part number', { font: 'bold', size: SIZE.small, colour: INK });
-  sheet.text(DESC, 'Description', { font: 'bold', size: SIZE.small, colour: INK });
-  sheet.textRight(QTY - 3, 'Quantity', { font: 'bold', size: SIZE.small, colour: INK });
-  sheet.move(GAP.line + 2);
+  headings(false);
   if (model.items.length === 0) {
     sheet.paragraph('No goods are listed on this job.', { size: SIZE.body, colour: MUTED });
   }
@@ -81,7 +93,10 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
     // column; it wraps there instead of printing over the description.
     const part = PdfBuilder.wrap(item.partNumber, DESC - PART - 8, SIZE.body);
     const height = Math.max(1, lines.length, part.length);
-    sheet.need(GAP.line * height + 4);
+    if (sheet.wouldOverflow(GAP.line * height + 4)) {
+      sheet.need(GAP.line * height + 4);
+      headings(true);
+    }
     sheet.text(KIND + 3, item.kind, { size: SIZE.body, colour: MUTED });
     sheet.textRight(QTY - 3, item.quantity, { size: SIZE.body, colour: INK });
     for (let index = 0; index < height; index += 1) {

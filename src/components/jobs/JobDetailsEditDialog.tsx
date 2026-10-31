@@ -29,6 +29,9 @@ import { useOperation } from '@/hooks/useOperation';
  * Fields this job type does not carry are not offered at all
  * (`editableDetailFields`), which is the same list the server checks against.
  */
+/** Edited as a list in `RepairItemsDialog` (TR-PARTS-1), not field by field here. */
+const LISTED_ELSEWHERE: readonly JobDetailField[] = ['repairPartNumber', 'repairDescription', 'repairQuantity'];
+
 type FormValues = Record<JobDetailField, string>;
 
 const toForm = (values: JobDetailValues): FormValues => ({
@@ -76,7 +79,13 @@ export const JobDetailsEditDialog = ({
   readonly onSaved: () => void;
 }) => {
   const operation = useOperation();
-  const fields = editableDetailFields(job.jobType);
+  /*
+   * The parts booked in are edited as a LIST, in their own dialog (TR-PARTS-1,
+   * `RepairItemsDialog`); the three single-part fields are not offered here,
+   * so nobody edits the first part in two places. The server still accepts
+   * them from an older client.
+   */
+  const fields = editableDetailFields(job.jobType).filter((field) => !LISTED_ELSEWHERE.includes(field));
   /*
    * What the job said when the dialog opened: the edit's "expected" values.
    * The caller MOUNTS this only while it is open, so every opening reads the

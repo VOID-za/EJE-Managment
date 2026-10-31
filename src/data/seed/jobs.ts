@@ -163,6 +163,7 @@ const baseJob = (jobNumber: string): Job => ({
   orderNumber: '',
   referenceNumber: '',
   repairItem: emptyRepairItem(),
+  moreRepairItems: [],
   quoteNumber: '',
   dateReceived: null,
   faultDescription: '',

@@ -109,10 +109,21 @@ describe('the job types that still require them', () => {
     expect(raised.status).toBe(422);
   });
 
-  it('refuses an installation with no priority — also 422', async () => {
-    const raised = await raise(master, { jobType: 'installation', priority: null });
+  it('refuses a SERVICE with no machine — 422', async () => {
+    const raised = await raise(master, { jobType: 'service', machineId: null, priority: null });
     expect(raised.status).toBe(422);
+    expect(JSON.stringify(raised.error)).toContain('machine_required');
   });
+
+  // 31 October 2026 (the tester): Priority is optional on an installation and a service.
+  for (const jobType of ['installation', 'service'] as const) {
+    it(`accepts a ${jobType} with a machine and NO priority — 200`, async () => {
+      const raised = await raise(master, { jobType, priority: null });
+      expect(raised.status, JSON.stringify(raised.error)).toBe(200);
+      expect(raised.job!.machineId).not.toBeNull();
+      expect(raised.job!.priority).toBeNull();
+    });
+  }
 
   it('refuses a priority that is not one of the four — 400, the SCHEMA', async () => {
     const raised = await raise(master, { machineId: null, priority: 'whenever' });

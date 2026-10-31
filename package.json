@@ -34,6 +34,7 @@
     "pdf-check": "node scripts/pdf-visual-check.mjs",
     "pdf-pixels": "vitest run --config vitest.browser.config.mts",
     "tablet-pdf-check": "node scripts/tablet-pdf-check.mjs",
+    "forms-regression": "node scripts/forms-regression.mjs",
     "responsive-check": "node scripts/responsive-check.mjs",
     "tablet-audit": "node scripts/tablet-audit.mjs",
     "tablet-interaction-check": "node scripts/tablet-interaction-check.mjs",

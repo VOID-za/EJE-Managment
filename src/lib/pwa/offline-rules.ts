@@ -198,6 +198,12 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
    */
   edit_details:
     'Correcting a job’s details replaces values on the job, and is checked against the job as the server has it, so it needs a connection.',
+  /*
+   * TR-PARTS-1. Office work, never held, for the same reason as edit_details:
+   * the list carries the list it replaces and is refused if that moved.
+   */
+  set_repair_items:
+    'Changing the parts booked in replaces the job’s list of parts, and is checked against the list the server has, so it needs a connection.',
   add_additional_charge:
     'A charge is added by the office against what it is being charged for, so it needs a connection.',
   update_additional_charge:
