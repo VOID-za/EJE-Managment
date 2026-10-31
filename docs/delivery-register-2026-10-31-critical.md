@@ -58,3 +58,50 @@ release (`316544f`) against a database at 0041: CI only (no local PostgreSQL).
 Real Android tablet and phone, a real printer, the on-screen keyboard, workshop
 Wi-Fi loss — staff-testing M1–M5. Printing was proved up to the browser's print
 call (stubbed in tests).
+
+## Fixed after the first CI run (commit `c68b3c3`)
+
+CI on `6004be0` failed two steps, both real:
+
+- PostgreSQL suite: a booked-in part with only a quantity — always allowed —
+  was refused by the new list rule (422). It is kept again; the form hints.
+- Forms regression on a phone (CI's headless Chromium): a zoom resized the
+  visible canvas before the new drawing finished, so the page went blank for
+  the length of the render. Pages are now drawn off screen and swapped in.
+
+Reproduced locally on Playwright's headless shell, fixed, and re-proved there
+(390×844, 360×800, 1440×900: 42/42 each; tablet PDF check 18/18).
+
+## Release record — DEPLOYED 31 October 2026: `c68b3c3`
+
+- CI run 41242461859 on `c68b3c3`: success — every job and step green,
+  including the PostgreSQL tests and rollback compatibility (live `316544f`
+  against a database at 0041).
+- Read-only check passed (`srv2000625`, release script SHA-256
+  `5ab56162…b3c6`, 182 165 MB free).
+- Release: `-ExpectPending 0041_repair_items` (NOT `none`). Backup proven
+  `/var/backups/eje/eje-eje_production-2026-10-31T21-41-26Z`; preflight
+  expected exactly 0041; migrated; switched 21:41:38Z; healthy 21:41:41Z.
+  Rollback target `316544f` (it reads a database at 0041 — proven in CI).
+- Public health: `c68b3c3`, ok, PostgreSQL reachable, email `refuse`; the
+  update notice is served.
+
+## Live verification (read-only)
+
+| Check | Result |
+|---|---|
+| Critical workflows, desktop / tablet 768×1024 / phone 390×844 (`live-critical`) | 45 of 45 functional checks passed. Closed Jobs without CSV; the Master's own timesheet editable, a line kept across a From change and cancelled; another person's timesheet read-only and the server's 403 to forged writes; Installation/Service labels; PDFs — the stored final job card, a job card preview, the monthly timesheet, monthly attendance and time sheet — drawn, paged, zoomed, downloaded, printed (stubbed), closed and reopened; My Monthly Forms as each role's own; Attendance's autosave status |
+| Test & Repair on EJE-2078, three sizes | Parts booked in shown; Edit parts opens and closes unsaved; `moreRepairItems` present (0041) |
+| Tablet parity, every role, 1024×768 and 768×1024 | 6 of 6, no page errors |
+| Issued job cards EJE-2050, EJE-2046, EJE-2041, EJE-2001 | byte-identical to before the release |
+| Records | closed 15, signed 37, issued 25 — unchanged. Open list 63 (was 62): EJE-2078, a Test & Repair job created on the live site at 13:45Z on 31 October, before the release, not by this work. Timesheet people 5 (was 3): the office now sees its own timesheet and every user's — the intended change |
+
+What the verification itself recorded on the live site: viewing a stored final
+job card and a review page are AUDITED reads in this application, so the
+checks added "document opened" entries on EJE-2050 and three "PDF generated"
+entries on EJE-2078's activity trail. No job, timesheet, attendance or other
+record was created or changed; the forged writes were refused (403).
+
+Not verified: a live multi-part delivery note (no courier Test & Repair job
+exists live, and making one would be writing test data — proven locally and in
+CI), and everything in staff-testing M1–M5 (real devices, a real printer).

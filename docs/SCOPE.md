@@ -1534,7 +1534,7 @@ The tester's three handwritten pages. Register: `docs/delivery-register-2026-10-
 | TST-ATT-1 | **The office's Attendance page** has the technician's layout first (own form and days), then the team register. | **TESTED — awaiting approval.** |
 | TST-MSG-1 | **Messages**: a usable chat with a visible Send — the existing chat, whose Send button was clipped by the card; fixed and tested at tablet size, both directions, with persistence and permissions. | **TESTED — awaiting approval.** |
 
-### The tester's critical fixes — 31 October 2026 (NOT YET DEPLOYED; not approved)
+### The tester's critical fixes — 31 October 2026 (DEPLOYED in `c68b3c3` with migration 0041; not yet approved)
 
 Asked for by the owner on 31 October 2026 ("EJE — CRITICAL FINAL FIXES"). Register:
 `docs/delivery-register-2026-10-31-critical.md`. One migration (0041, additive).

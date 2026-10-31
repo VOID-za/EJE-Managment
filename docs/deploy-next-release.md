@@ -52,6 +52,17 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### DEPLOYED — 31 October 2026: `c68b3c3` — the tester's critical fixes, with migration 0041
+
+**DEPLOYED — 31 October 2026: `c68b3c3` is live** (full SHA
+`c68b3c3e4023dff4ad2bb836e9231aa3bbf1dc5f`; CI run 41242461859 completed, success, every
+job and step green, including rollback compatibility of `316544f` against 0041).
+Guarded release tool with `-ExpectPending 0041_repair_items`. Backup proven
+`/var/backups/eje/eje-eje_production-2026-10-31T21-41-26Z`; 0041 applied (additive:
+`jobs.more_repair_items`); switched 21:41:38Z, healthy 21:41:41Z. Rollback target
+`316544f` (`stage-release.ps1 -Rollback`), which reads a database at 0041 and keeps
+the extra parts intact. Register: `docs/delivery-register-2026-10-31-critical.md`.
+
 ### DEPLOYED — 31 October 2026: `316544f` — the system-wide desktop and tablet audit
 
 **DEPLOYED — 31 October 2026: `316544f` is live** (full SHA

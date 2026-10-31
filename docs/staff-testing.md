@@ -547,7 +547,7 @@ Fictional data only while the demonstration switcher is on.
 
 ## M. The tester's critical fixes — on a real tablet and a real phone (31 October 2026)
 
-**Not yet deployed.** `docs/delivery-register-2026-10-31-critical.md`. Tested in
+**LIVE since 31 October 2026** in `c68b3c3` (migration 0041). `docs/delivery-register-2026-10-31-critical.md`. Tested in
 desktop Chrome and in Chrome emulating a touch tablet and a phone at eleven
 sizes; these are the checks only real devices and a real printer can answer.
 Fictional data only while the demonstration switcher is on.
