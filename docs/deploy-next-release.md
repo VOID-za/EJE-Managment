@@ -52,6 +52,30 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### DEPLOYED — 1 November 2026: `7c0ca94` — own attendance only; no Coordinator timesheet; no technician CSV export; PDFs list recorded days (migration 0043)
+
+**`7c0ca94` is live** (full SHA `7c0ca948ddd8a996517e68a9d9f83ad8c24c7ea9`; CI run
+41342400983 completed, success, every job and step green, including the
+PostgreSQL tests and rollback compatibility of `b946fd3` against 0043). Read-only
+check passed (`srv2000625`, script SHA-256 `5ab56162…b3c6`, 178 902 MB free).
+Released with `-ExpectPending 0043_coordinator_attendance_only`: backup proven
+`/var/backups/eje/eje-eje_production-2026-11-01T20-06-56Z`; 0043 applied; switched
+20:07:10Z, healthy 20:07:13Z. Rollback target: `/opt/eje/releases/b946fd3` (it reads
+a database at 0043 — proved by the rollback probe).
+
+Verified afterwards from outside (46/46): health `7c0ca94`, ok, PostgreSQL
+reachable; a Master, a Coordinator and a Technician each refused (403) recording
+another user's day; the register read gone; a Coordinator refused a timesheet
+line and their own sheet (403 `timesheet_not_required`) yet still reads a
+technician's; a technician refused the CSV export; the Coordinator's October
+attendance only, her September (submitted with a timesheet) unchanged; September
+forms list recorded days only and both PDFs render; screens at 1440, 768 and 390
+for all three roles — own days, no Team register, no technician Export CSV, no
+Coordinator timesheet, the export on EJE Monthly Forms — no page errors. Every
+user's attendance and timesheet lines and the September/October submissions
+identical before and after (and after the refused requests); job counts unchanged
+(64/16/39/26); EJE-2050/2046/2041/2001 job cards byte-identical.
+
 ### DEPLOYED — 1 November 2026: `b946fd3` — dedicated EJE WhatsApp number; Google-compliant pin retention (no migration)
 
 **`b946fd3` is live** (full SHA `b946fd3b531d7049be592ec9c9390e8065abfa0f`; CI run
