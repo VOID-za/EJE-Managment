@@ -31,7 +31,7 @@ const classify = (cause: unknown): SendFailure => {
  *
  * Null until it starts in the browser — the server renders no autosaver.
  */
-export const useAttendanceAutosave = (scope: 'mine' | 'register') => {
+export const useAttendanceAutosave = (scope: 'mine') => {
   const user = useCurrentUser();
   const { invalidate } = useApp();
   const [saver, setSaver] = useState<AttendanceAutosaver | null>(null);

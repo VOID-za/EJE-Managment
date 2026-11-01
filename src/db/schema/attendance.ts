@@ -274,7 +274,8 @@ export const timesheetCorrections = pgTable(
 /**
  * A TECHNICIAN'S MONTH SENT TO THE OFFICE. PAY-02, migration 0040. The sent
  * timesheet period covering exactly the month, and the month's attendance
- * frozen as it stood. One per technician per month; write-once.
+ * frozen as it stood. One per technician per month; write-once. A Coordinator's
+ * month carries no timesheet (migration 0043).
  */
 export const monthlySubmissions = pgTable(
   'monthly_submissions',
@@ -284,8 +285,8 @@ export const monthlySubmissions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     month: text('month').notNull(),
+    // Null: attendance only — a Coordinator's month (TS-ROLE-1, migration 0043).
     timesheetPeriodId: uuid('timesheet_period_id')
-      .notNull()
       .references(() => timesheetPeriods.id, { onDelete: 'restrict' }),
     attendanceSnapshot: jsonb('attendance_snapshot').notNull(),
     submittedAt: instant('submitted_at').notNull(),
@@ -340,7 +341,7 @@ export const financePackages = pgTable(
     index('finance_packages_month_idx').on(table.month),
     check('finance_packages_month_format', sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
     check('finance_packages_status_known', sql`${table.status} in ('prepared', 'sending', 'sent', 'failed', 'discarded')`),
-    check('finance_packages_has_attachments', sql`${table.attachmentCount} >= 2 and ${table.totalBytes} > 0`),
+    check('finance_packages_has_attachments', sql`${table.attachmentCount} >= 1 and ${table.totalBytes} > 0`),
     check(
       'finance_packages_sent_whole',
       sql`(${table.status} = 'sent') = (${table.sentAt} is not null and ${table.sentBy} is not null and ${table.providerMessageId} is not null)`,

@@ -1,30 +1,19 @@
 import { z } from 'zod';
 import { ATTENDANCE_NOTE_LIMIT } from '@/domain';
-import { loadAttendanceRegister, recordAttendance } from '@/application/attendance-operations';
-import { parseWith, readRoute, writeRoute } from '@/server/api/handler';
+import { recordAttendance } from '@/application/attendance-operations';
+import { writeRoute } from '@/server/api/handler';
 
 /**
- * THE ATTENDANCE REGISTER. ATTEND-1.
+ * `POST /api/attendance` — record or correct ONE OF YOUR OWN days. ATTEND-2,
+ * ATT-OWN-1 (1 November 2026).
  *
- * `GET /api/attendance?date=YYYY-MM-DD` — everybody on the system and what is
- * recorded for them that day, with any planned leave beside them.
- * `POST /api/attendance` — record or correct one person's day.
- *
- * Both are the office's (`attendance.manage`); the operation decides, so a
- * technician calling either directly is refused there.
+ * Every role records its own days and nobody else's; the operation refuses
+ * another person's `userId`, whoever asks. The office's Team register — the
+ * `GET` that listed everybody for a day so it could record them — was
+ * withdrawn with it; the office reads everybody's attendance on EJE Monthly
+ * Forms.
  */
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD');
-
-export const GET = readRoute('attendance', (context) => {
-  const { date } = parseWith(
-    z.object({ date: day }).strict(),
-    Object.fromEntries(context.request.nextUrl.searchParams),
-  );
-  return loadAttendanceRegister(
-    { repos: context.repos, services: context.services, actor: context.actor.user },
-    date,
-  );
-});
 
 export const POST = writeRoute({
   operation: 'attendance.record',

@@ -60,7 +60,7 @@ export const MyMonthlyForms = () => {
                   Submitted {formatDateTime(entry.submittedAt)}
                 </Badge>
                 <span className="text-xs text-steel-500">
-                  {entry.fileNames.timesheet} · {entry.fileNames.attendance}
+                  {entry.timesheetIncluded ? `${entry.fileNames.timesheet} · ${entry.fileNames.attendance}` : entry.fileNames.attendance}
                 </span>
                 <Button size="sm" variant={entry.month === month ? 'primary' : 'secondary'} onClick={() => setMonth(entry.month)}>
                   Open

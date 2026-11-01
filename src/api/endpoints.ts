@@ -86,7 +86,7 @@ import type { ClosedJobFilters, ClosedJobsPage } from '@/application/closed-jobs
 import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
-import type { AttendanceRegister, MyAttendance } from '@/application/attendance-operations';
+import type { MyAttendance } from '@/application/attendance-operations';
 import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
 import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
 import type { MonthlyFormsState, MonthlyHistoryEntry } from '@/application/monthly-submissions';
@@ -1222,9 +1222,8 @@ export const outbox = {
     }),
 };
 
-/** The attendance register. ATTEND-1. The office's. */
+/** Attendance: everybody records their own days (ATT-OWN-1); the office exports everybody's. */
 export const attendance = {
-  register: (date: string) => query<AttendanceRegister>(`/api/attendance${search({ date })}`),
   /** ATTEND-2: the signed-in person's own days, recorded or not. */
   mine: (from: string, to: string) => query<MyAttendance>(`/api/attendance/mine${search({ from, to })}`),
   record: (input: {

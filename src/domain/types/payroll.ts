@@ -32,8 +32,11 @@ export interface MonthlySubmission {
   readonly id: string;
   readonly userId: UserId;
   readonly month: PayrollMonth;
-  /** The sent timesheet period covering exactly the month. */
-  readonly timesheetPeriodId: string;
+  /**
+   * The sent timesheet period covering exactly the month. Null for a month
+   * submitted as attendance only — a Coordinator's (TS-ROLE-1, migration 0043).
+   */
+  readonly timesheetPeriodId: string | null;
   readonly attendance: AttendanceSnapshot;
   readonly submittedAt: IsoDateTime;
   readonly submittedBy: UserId;

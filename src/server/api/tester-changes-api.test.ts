@@ -84,12 +84,13 @@ describe('the tester’s changes over HTTP', () => {
     expect(hers?.status).toBe('ready');
     expect(hers?.selectable).toBe(true);
 
-    // And the Master may include her in a package: two one-page PDFs for her.
+    // And the Master may include her in a package: ONE one-page PDF — her
+    // attendance; a Coordinator keeps no timesheet (TS-ROLE-1, 1 November 2026).
     const prepared = await master.post<{ package: { attachments: readonly { technicianId: string; pageCount: number }[] } }>(
       '/api/payroll/packages', { month: MONTH, technicianIds: [me] }, { idempotencyKey: 'tester-prepare-coordinator' },
     );
     expect(prepared.status, JSON.stringify(prepared.error)).toBe(200);
-    expect(prepared.data.package.attachments.filter((attachment) => attachment.technicianId === me)).toHaveLength(2);
+    expect(prepared.data.package.attachments.filter((attachment) => attachment.technicianId === me)).toHaveLength(1);
     expect(prepared.data.package.attachments.every((attachment) => attachment.pageCount === 1)).toBe(true);
   });
 

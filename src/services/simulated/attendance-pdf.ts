@@ -30,11 +30,19 @@ export interface RenderedAttendance {
   readonly layout: FormLayout;
 }
 
-/** The month's count, in one sentence. Pure; what the PDF and the screen print. */
-export const attendanceSummaryLine = (doc: Pick<AttendanceDocument, 'summary'>): string => {
-  const { present, absent, byReason, notRecorded, weekdaysNotRecorded } = doc.summary;
+/**
+ * The month's count, in one sentence. Pure; what the PDF and the screen print.
+ *
+ * RECORDED DAYS ONLY (PDF-UNREC-1, the tester, 1 November 2026): the form lists
+ * and counts the days somebody recorded; a day nobody recorded is neither a
+ * row nor a number on it, and the sentence says so, so a missing day is not
+ * read as an absence.
+ */
+export const attendanceSummaryLine = (doc: Pick<AttendanceDocument, 'summary' | 'rows'>): string => {
+  const { present, absent, byReason } = doc.summary;
+  if (doc.rows.length === 0) return 'No day of this month has been recorded.';
   const reasons = byReason.length === 0 ? '' : ` (${byReason.map((entry) => `${entry.label} ${entry.count}`).join(', ')})`;
-  return `Present ${present} · Absent ${absent}${reasons} · Not recorded ${notRecorded}${weekdaysNotRecorded > 0 ? ` (${weekdaysNotRecorded} weekday${weekdaysNotRecorded === 1 ? '' : 's'})` : ''}`;
+  return `Present ${present} · Absent ${absent}${reasons} · Only recorded days are listed; a day not recorded is left out.`;
 };
 
 export const renderAttendancePdf = (doc: AttendanceDocument, options: { readonly generatedAt: string }): RenderedAttendance => {

@@ -117,11 +117,14 @@ describe('ATT-01 — absence reasons', () => {
     expect(corrected?.changes).toEqual([{ field: 'Absence reason', from: 'Leave', to: 'IOD (Injury on Duty)' }]);
   });
 
-  it('the office records an absence with a reason too', async () => {
+  it('the office records its OWN absence with a reason too — and nobody else’s (ATT-OWN-1)', async () => {
     const saved = await recordAttendance(harness.as(coordinator), {
-      userId: SIPHO, date: day(1), status: 'absent', absenceReason: 'sick_leave', note: '',
+      userId: coordinator.id, date: day(1), status: 'absent', absenceReason: 'sick_leave', note: '',
     });
     expect(saved.absenceReason).toBe('sick_leave');
+    await expect(
+      recordAttendance(harness.as(coordinator), { userId: SIPHO, date: day(1), status: 'absent', absenceReason: 'sick_leave', note: '' }),
+    ).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
   });
 });
 
@@ -390,10 +393,9 @@ describe('TS-11 / PDF-01…03 — Preview and the PDF Layout', () => {
     expect(text).not.toMatch(/\bNT\b/u);
     // The header, in order, is exactly the seven columns.
     expect(TIMESHEET_PDF_COLUMNS.map((column) => column.header)).toEqual(['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']);
-    // Every day of the period is on it, oldest first, boundaries included.
-    expect(document.rows[0]?.date).toBe(FROM);
-    expect(document.rows.at(-1)?.date).toBe(TO);
-    expect(new Set(document.rows.map((row) => row.date)).size).toBe(5);
+    // PDF-UNREC-1: only the recorded day is on it — the other four days of the period are not.
+    expect(document.rows.map((row) => row.date)).toEqual([day(4)]);
+    expect(text).not.toContain('NOT RECORDED');
     // The row's cells align with the columns.
     const row = document.rows.find((candidate) => candidate.recorded)!;
     expect(timesheetPdfCells(row, true)).toEqual({

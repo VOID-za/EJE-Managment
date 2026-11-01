@@ -185,11 +185,13 @@ export type Capability =
   /** WRITE the calendar: record, change or cancel an absence. The office. */
   | 'availability.manage'
   /**
-   * RECORD AND CORRECT THE ATTENDANCE REGISTER. ATTEND-1. The office — Master
-   * and Coordinator. A technician does not mark themselves present: the
-   * register is the office's record of who was at work, not a self-report.
+   * READ EVERYBODY'S ATTENDANCE — through EJE Monthly Forms — and export it.
+   * The office: Master and Coordinator. It records NOTHING: since the tester's
+   * changes of 1 November 2026 (ATT-OWN-1) every person records only their own
+   * days, and nobody — the office included — creates, edits or submits another
+   * person's attendance. Was `attendance.manage` (the Team register).
    */
-  | 'attendance.manage'
+  | 'attendance.viewAll'
   /**
    * READ EVERY TECHNICIAN'S TIMESHEET, export it, and write its daily
    * comments. TIMESHEET-1. The office. A technician reads — and comments on —
@@ -404,8 +406,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'library.manage',
   'calendar.view',
   'availability.manage',
-  // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
-  'attendance.manage',
+  // Everybody's attendance (read only) and every technician's timesheet. ATT-OWN-1, TIMESHEET-1.
+  'attendance.viewAll',
   'timesheets.viewAll',
   'timesheets.reviewCorrections',
   'payroll.finance',
@@ -475,8 +477,8 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'library.manage',
   'calendar.view',
   'availability.manage',
-  // The attendance register and every technician's timesheet. ATTEND-1, TIMESHEET-1.
-  'attendance.manage',
+  // Everybody's attendance (read only) and every technician's timesheet. ATT-OWN-1, TIMESHEET-1.
+  'attendance.viewAll',
   'timesheets.viewAll',
   'timesheets.reviewCorrections',
   'payroll.finance',
@@ -556,3 +558,14 @@ const NO_CAPABILITIES: readonly Capability[] = [];
 
 export const can = (role: UserRole, capability: Capability): boolean =>
   capabilitiesFor(role).includes(capability);
+
+/**
+ * WHETHER THIS ROLE KEEPS A TIMESHEET. TS-ROLE-1 (the tester, 1 November
+ * 2026): a Coordinator works no overtime and completes no timesheet; a Master
+ * and a Technician complete both their timesheet and their attendance. Not a
+ * capability, because it is about the person's OWN sheet — the Coordinator
+ * still reads every technician's (`timesheets.viewAll`) and decides their
+ * corrections. The server asks this before every write to a timesheet, before
+ * the person opens their own, and when a month is submitted.
+ */
+export const completesTimesheet = (role: UserRole): boolean => role === 'master' || role === 'technician';

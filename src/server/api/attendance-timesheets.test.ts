@@ -3,15 +3,14 @@ import { businessToday } from '@/lib/business-time';
 import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
 
 /**
- * ATTEND-1 AND TIMESHEET-1 THROUGH THE REAL ROUTES.
+ * ATTENDANCE AND TIMESHEETS THROUGH THE REAL ROUTES.
  *
  * The permissions are decided on the server, so they are proved here against
- * the HTTP surface: the register and every other person's timesheet are the
- * office's, a technician's own timesheet is theirs, and an export is audited.
+ * the HTTP surface: every person records only their OWN attendance (ATT-OWN-1,
+ * 1 November 2026 — the office included; there is no register to record
+ * anybody else's), every other person's timesheet is the office's to read,
+ * a technician's own timesheet is theirs, and an export is audited.
  */
-interface Register {
-  readonly rows: readonly { user: { id: string }; record: { status: string } | null }[];
-}
 interface Sheet {
   readonly technician: { id: string };
   readonly editable: boolean;
@@ -23,24 +22,46 @@ interface Sheet {
   }[];
 }
 
-describe('the attendance register over HTTP', () => {
+describe('attendance over HTTP — everybody’s own, nobody else’s (ATT-OWN-1)', () => {
   beforeEach(() => {
     startTestServer();
   });
 
-  it('the office records a day and reads it back; a technician records only their OWN day and cannot read the register', async () => {
-    const today = businessToday();
-    const office = await signedInAs(DEMO_USERS.coordinator);
-    const recorded = await office.post('/api/attendance', {
-      userId: 'user-tech-sipho', date: today, status: 'present', note: '',
-    });
-    expect(recorded.status).toBe(200);
-    const register = await office.get<Register>(`/api/attendance?date=${today}`);
-    expect(register.status).toBe(200);
-    expect(register.data.rows.find((row) => row.user.id === 'user-tech-sipho')?.record?.status).toBe('present');
+  for (const [label, email, ownId] of [
+    ['a Master', DEMO_USERS.master, 'user-master-elmarie'],
+    ['a Coordinator', DEMO_USERS.coordinator, 'user-coord-christene'],
+  ] as const) {
+    it(`${label} records their own day, and is refused (403) creating or correcting a technician’s`, async () => {
+      const today = businessToday();
+      const office = await signedInAs(email);
+      const own = await office.post('/api/attendance', { userId: ownId, date: today, status: 'present', note: '' });
+      expect(own.status).toBe(200);
+      const corrected = await office.post('/api/attendance', { userId: ownId, date: today, status: 'absent', absenceReason: 'leave', note: '' });
+      expect(corrected.status).toBe(200);
 
+      const technician = await signedInAs(DEMO_USERS.technician);
+      expect((await technician.post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' })).status).toBe(200);
+      const refused = await office.post('/api/attendance', {
+        userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'sick_leave', note: 'Overwritten?',
+      });
+      expect(refused.status).toBe(403);
+      const created = await office.post('/api/attendance', { userId: 'user-tech-riaan', date: today, status: 'present', note: '' });
+      expect(created.status).toBe(403);
+      const mine = await technician.get<{ days: readonly { record: { status: string; recordedBy: string } | null }[] }>(
+        `/api/attendance/mine?from=${today}&to=${today}`,
+      );
+      expect(mine.data.days[0]?.record).toMatchObject({ status: 'present', recordedBy: 'user-tech-sipho' });
+    });
+  }
+
+  it('there is no Team register to read: the route answers POST only', async () => {
+    const office = await signedInAs(DEMO_USERS.master);
+    await expect(office.get(`/api/attendance?date=${businessToday()}`)).rejects.toThrow(/exports no GET/u);
+  });
+
+  it('a technician records only their OWN day', async () => {
+    const today = businessToday();
     const technician = await signedInAs(DEMO_USERS.technician);
-    expect((await technician.get(`/api/attendance?date=${today}`)).status).toBe(403);
     // ATTEND-2: their own day, yes; somebody else's, no.
     const own = await technician.post('/api/attendance', {
       userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'sick_leave', note: '',
@@ -60,7 +81,7 @@ describe('the attendance register over HTTP', () => {
   it('the office exports a range as a CSV, audited; a technician is refused', async () => {
     const today = businessToday();
     const office = await signedInAs(DEMO_USERS.master);
-    await office.post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
+    await (await signedInAs(DEMO_USERS.technician)).post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
     const file = await office.download(`/api/attendance/export?from=${today}&to=${today}`);
     expect(file.status).toBe(200);
     const lines = file.text.replace(/^﻿/u, '').trim().split('\r\n');
@@ -76,7 +97,7 @@ describe('the attendance register over HTTP', () => {
   it('a status that is not present or absent never reaches the operation', async () => {
     const office = await signedInAs(DEMO_USERS.master);
     const response = await office.post('/api/attendance', {
-      userId: 'user-tech-sipho', date: businessToday(), status: 'late', note: '',
+      userId: 'user-master-elmarie', date: businessToday(), status: 'late', note: '',
     });
     expect(response.status).toBe(400);
   });

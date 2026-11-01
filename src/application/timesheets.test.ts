@@ -148,11 +148,12 @@ describe('a technician’s own manual timesheet', () => {
   });
 
   /*
-   * TST-TS-2 #5 (the tester, 31 October 2026): a Master or a Coordinator keeps
-   * their OWN timesheet exactly as a technician does — it is first in their
-   * list and theirs alone to write — and reads, never writes, anybody else's.
+   * TST-TS-2 #5 (the tester, 31 October 2026): a Master keeps their OWN
+   * timesheet exactly as a technician does — it is first in their list and
+   * theirs alone to write — and reads, never writes, anybody else's. A
+   * Coordinator keeps none (TS-ROLE-1, 1 November 2026).
    */
-  it('gives the office its OWN timesheet first, writable by them alone', async () => {
+  it('gives a Master their OWN timesheet first, writable by them alone; a Coordinator has none', async () => {
     const people = await listTimesheetPeople(harness.as(master));
     expect(people[0]?.id).toBe(master.id);
     expect(people.map((person) => person.id)).toContain(SIPHO);
@@ -169,14 +170,30 @@ describe('a technician’s own manual timesheet', () => {
     await expect(saveTimesheetEntry(harness.as(coordinator), master.id, line(day(0)))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
     await expect(
       saveTimesheetEntry(harness.as(coordinator), coordinator.id, { ...line(day(0)), entryId: own.id }),
-    ).rejects.toMatchObject({ violations: [{ code: 'entry_not_found' }] });
+    ).rejects.toMatchObject({ violations: [{ code: 'timesheet_not_required' }] });
     await expect(removeTimesheetEntry(harness.as(coordinator), master.id, own.id)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
     expect((await loadTimesheet(harness.as(coordinator), master.id, day(0), day(0))).editable).toBe(false);
+
+    // TS-ROLE-1: the Coordinator's list has no sheet of their own and no Coordinator's; the Master's has no Coordinator.
+    const theirs = await listTimesheetPeople(harness.as(coordinator));
+    expect(theirs.some((person) => person.role === 'coordinator')).toBe(false);
+    expect(theirs.map((person) => person.id)).toContain(master.id);
+    expect(people.some((person) => person.role === 'coordinator')).toBe(false);
+    await expect(loadTimesheet(harness.as(coordinator), coordinator.id, day(0), day(0))).rejects.toMatchObject({ violations: [{ code: 'timesheet_not_required' }] });
+    await expect(saveTimesheetComment(harness.as(coordinator), coordinator.id, day(0), 'x')).rejects.toMatchObject({ violations: [{ code: 'timesheet_not_required' }] });
+  });
+
+  it('exports a spreadsheet for the office only — a technician has no CSV export of their own sheet (TS-CSV-OFF-1)', async () => {
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0)));
+    await expect(exportTimesheet(harness.as(sipho), SIPHO, day(0), day(0))).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    await expect(exportTimesheet(harness.as(master), master.id, day(0), day(0))).resolves.toMatchObject({ rowCount: 1 });
+    // The lines themselves are untouched by the refusal.
+    expect((await loadTimesheet(harness.as(sipho), SIPHO, day(0), day(0))).days[0]?.entries).toHaveLength(1);
   });
 
   it('keeps the day comment and shows the manual attendance for reference', async () => {
     await saveTimesheetComment(harness.as(sipho), SIPHO, day(0), 'Waited for the crane');
-    await recordAttendance(harness.as(master), { userId: SIPHO, date: day(0), status: 'present', note: '' });
+    await recordAttendance(harness.as(sipho), { userId: SIPHO, date: day(0), status: 'present', note: '' });
     const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(0), day(0));
     expect(sheet.days[0]).toMatchObject({ comment: 'Waited for the crane', attendance: 'present', recorded: false });
   });

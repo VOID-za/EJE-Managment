@@ -15,25 +15,27 @@ import { PostgresUserRepository } from '@/data/postgres/user-repository';
 import { PostgresSettingsRepository } from '@/data/postgres/settings-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
+import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (42e71fc), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (b946fd3), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 42e71fc, and it does: each of these was checked against that commit.
+ * in b946fd3, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0042)
+ * The database was migrated to the newest migration THIS release ships (0043)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
  * library, jobs, attendance, timesheets, corrections, monthly submissions and
  * Finance packages (0037–0040) and the extra parts booked in on a Test & Repair
  * job (0041), which it knows — beside the email templates, the customer email
- * outbox, WhatsApp delivery statuses and automatic site pins (0042) that it has
- * never heard of?
+ * outbox, WhatsApp delivery statuses and automatic site pins (0042) that it
+ * knows — beside a Coordinator's month submitted WITHOUT a timesheet and a
+ * one-file Finance package (0043), which it has never seen?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -104,13 +106,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 42e71fc shipped 0042 itself; this release adds no migration.
+    // b946fd3 shipped up to 0042; this release adds 0043.
     expect(shipped).toHaveLength(43);
     expect(shipped.at(-1)).toBe('0042_integrations');
+    expect(shipped).not.toContain('0043_coordinator_attendance_only');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    expect(applied).toBe(43);
+    // 0043 applied beyond what the live release ships.
+    expect(applied).toBe(44);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -364,5 +368,20 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect(submission?.n).toBe('1');
     const [financePackage] = await db.execute<{ status: string }>(sql`select status from finance_packages where id = ${TIMESHEET.financePackage}`);
     expect(financePackage?.status).toBe('sent');
+  });
+
+  /*
+   * 0043. The live release reads a month that has NO timesheet period (a
+   * Coordinator's) and a package with ONE attachment, through its own payroll
+   * repository, without error — and still writes a submission of its own kind.
+   */
+  it('still reads monthly submissions and packages after 0043 — a Coordinator’s attendance-only month included', async () => {
+    const payroll = new PostgresPayrollRepository(db);
+    const september = await payroll.listSubmissions('2026-09');
+    expect(september).toHaveLength(2);
+    expect(september.find((submission) => submission.userId === IDS.coordinator)?.timesheetPeriodId).toBeNull();
+    expect(september.find((submission) => submission.userId === IDS.technician)?.timesheetPeriodId).toBe(TIMESHEET.monthPeriod);
+    const august = await payroll.listPackages('2026-08');
+    expect(august.map((financePackage) => financePackage.attachments.length)).toEqual([1]);
   });
 });

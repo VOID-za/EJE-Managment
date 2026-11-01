@@ -1,7 +1,7 @@
 import type { TimesheetDocument } from '@/application/timesheets';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { formatDayAndDate } from '@/lib/timesheet-dates';
-import { TIMESHEET_PDF_COLUMNS, timesheetPdfCells } from '@/services/simulated/timesheet-pdf';
+import { TIMESHEET_PDF_COLUMNS, timesheetPdfCells, timesheetRecordedOnlyNote } from '@/services/simulated/timesheet-pdf';
 
 /**
  * THE TIMESHEET PDF LAYOUT, DRAWN BY THE BROWSER. TS-11, TS-13, PDF-01.
@@ -86,6 +86,9 @@ export const TimesheetDocumentView = ({ document }: { readonly document: Timeshe
     </table>
 
     <div className="mt-3 space-y-0.5 text-xs text-steel-500">
+      {timesheetRecordedOnlyNote(document) !== null && (
+        <p data-testid="timesheet-document-recorded-only">{timesheetRecordedOnlyNote(document)}</p>
+      )}
       {document.rows.some((row) => row.calloutShared) && (
         <p>(sh) — a shared call-out: the amount is this technician’s own share, as they entered it; nothing is divided.</p>
       )}

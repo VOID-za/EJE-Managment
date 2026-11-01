@@ -158,8 +158,14 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                   <p className="mt-0.5 text-xs text-steel-500">{row.detail}</p>
                 </td>
                 <td className="py-1.5 pr-3 text-xs text-steel-600">
-                  {row.fileNames.timesheet}
-                  <br />
+                  {row.timesheetRequired ? (
+                    <>
+                      {row.fileNames.timesheet}
+                      <br />
+                    </>
+                  ) : (
+                    <span className="block text-steel-500" data-testid="payroll-attendance-only">Attendance only — no timesheet</span>
+                  )}
                   {row.fileNames.attendance}
                 </td>
                 <td className="py-1.5 text-right">

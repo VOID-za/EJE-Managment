@@ -6,6 +6,9 @@ import { pdfPageTexts } from '@/lib/pdf/inspect';
 import { renderTimesheetPdf } from './timesheet-pdf';
 import { renderAttendancePdf } from './attendance-pdf';
 import { MIN_BODY_PT, OnePageOverflow, renderOnePageForm } from './one-page-form';
+import { buildTimesheetDocumentRows } from '@/application/timesheets';
+import { formatDayAndDate } from '@/lib/timesheet-dates';
+import type { TimesheetEntry } from '@/domain';
 
 /**
  * PAY-04: EVERY TIMESHEET AND ATTENDANCE PDF IS EXACTLY ONE PAGE — proved on
@@ -143,14 +146,83 @@ describe('PAY-04 — the attendance PDF is exactly one page', () => {
       expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
       const text = flat(read[0]!);
       for (const header of ['ATTENDANCE', 'Technician Name', 'Month', 'October 2026', 'Date', 'Attendance', 'Absence reason', 'Note']) expect(text).toContain(header);
-      for (const label of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)', 'NOT RECORDED']) expect(text).toContain(label);
-      // Every day is on the page.
-      expect((text.match(/Oct 2026/gu) ?? []).length).toBeGreaterThanOrEqual(31);
+      for (const label of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)']) expect(text).toContain(label);
+      // Every RECORDED day is on the page, and no other (PDF-UNREC-1).
+      expect(doc.rows.length).toBeLessThan(31);
+      for (const day of doc.rows) expect(text).toContain(formatDayAndDate(day.date));
+      expect(text).not.toContain('NOT RECORDED');
       expect(text).toContain('Present');
       expect(text).toContain('Corrected by the office after submission');
       expect(text).not.toContain('…');
     });
   }
+});
+
+/*
+ * PDF-UNREC-1 (the tester, 1 November 2026): a day that has not been recorded
+ * is not on the PDF — no blank row, no "NOT RECORDED", no zero hours, no
+ * absence — and everything recorded, and its totals, is exactly as before.
+ */
+describe('PDF-UNREC-1 — unrecorded days are left off both PDFs', () => {
+  const entry = (date: string, id: string, overtimeHours: number, calloutAmount: number): TimesheetEntry => ({
+    id, userId: 'user-tech-sipho', date, workshop: false, customerId: null, customerName: 'ABC Engineering',
+    overtimeHours, doubleHours: 0.5, calloutAmount, calloutShared: false, internalKm: 10, customerKm: 20,
+    normalHours: 0, callouts: 0, comment: '', updatedBy: 'user-tech-sipho', updatedAt: `${date}T10:00:00.000Z`,
+  } as unknown as TimesheetEntry);
+
+  it('the timesheet lists only days with lines; its totals add up the same lines', () => {
+    const entries = [entry('2026-10-05', 'a', 2, 45000), entry('2026-10-05', 'b', 1, 0), entry('2026-10-19', 'c', 1.5, 30000)];
+    const rows = buildTimesheetDocumentRows('2026-10-01', '2026-10-31', entries);
+    expect(rows.map((r) => r.date)).toEqual(['2026-10-05', '2026-10-05', '2026-10-19']);
+    expect(rows.every((r) => r.recorded)).toBe(true);
+    const doc = { ...timesheet([...rows], 'Two days worked.'), totals: { overtimeHours: 4.5, doubleHours: 1.5, calloutAmount: 75000, internalKm: 30, customerKm: 60, historicalNormalHours: 0, historicalCallouts: 0 } };
+    const rendered = renderTimesheetPdf(doc, { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(rendered.pageCount).toBe(1);
+    const text = flat(pages(rendered.bytes)[0]!);
+    expect(text).toContain(formatDayAndDate('2026-10-05'));
+    expect(text).toContain(formatDayAndDate('2026-10-19'));
+    for (const absent of ['2026-10-02', '2026-10-06', '2026-10-18', '2026-10-30']) expect(text).not.toContain(formatDayAndDate(absent));
+    expect(text).not.toContain('NOT RECORDED');
+    expect(text).toContain('4.50');
+    expect(text).toContain('Only days with a recorded line are listed');
+    expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
+  });
+
+  it('a timesheet with nothing recorded renders one page with its totals at zero and says so', () => {
+    const doc = { ...timesheet([], ''), totals: { overtimeHours: 0, doubleHours: 0, calloutAmount: 0, internalKm: 0, customerKm: 0, historicalNormalHours: 0, historicalCallouts: 0 } };
+    const rendered = renderTimesheetPdf(doc, { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(rendered.pageCount).toBe(1);
+    const text = flat(pages(rendered.bytes)[0]!);
+    expect(text).toContain('TIME SHEET');
+    expect(text).toContain('No day in this period has a recorded line.');
+    expect(text).not.toContain('NOT RECORDED');
+  });
+
+  it('the attendance form lists only recorded days; the counts are of those days', () => {
+    const month = days('2026-10', 31).map((date) => ({ date, status: null as 'present' | 'absent' | null, absenceReason: null as null | 'leave', note: '' }));
+    month[13] = { date: '2026-10-14', status: 'present', absenceReason: null, note: 'On site' };
+    month[11] = { date: '2026-10-12', status: 'absent', absenceReason: 'leave', note: '' };
+    const built = buildAttendanceRows(month, '2026-10-31');
+    expect(built.rows.map((r) => r.date)).toEqual(['2026-10-12', '2026-10-14']);
+    const doc: AttendanceDocument = { ...attendance('x'), ...built };
+    const rendered = renderAttendancePdf(doc, { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(rendered.pageCount).toBe(1);
+    const text = flat(pages(rendered.bytes)[0]!);
+    expect(text).toContain('Present 1 · Absent 1 (Leave 1)');
+    expect(text).toContain(formatDayAndDate('2026-10-12'));
+    for (const absent of ['2026-10-01', '2026-10-07', '2026-10-30']) expect(text).not.toContain(formatDayAndDate(absent));
+    expect(text).not.toContain('NOT RECORDED');
+    expect(text).not.toMatch(/Not recorded \d/u);
+  });
+
+  it('an attendance month with nothing recorded renders one page and says so', () => {
+    const empty = days('2026-10', 31).map((date) => ({ date, status: null, absenceReason: null, note: '' }));
+    const doc: AttendanceDocument = { ...attendance('x'), ...buildAttendanceRows(empty, '2026-10-31') };
+    expect(doc.rows).toHaveLength(0);
+    const rendered = renderAttendancePdf(doc, { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(rendered.pageCount).toBe(1);
+    expect(flat(pages(rendered.bytes)[0]!)).toContain('No day of this month has been recorded.');
+  });
 });
 
 describe('PAY-04 — what cannot fit on one page is refused, not cut', () => {

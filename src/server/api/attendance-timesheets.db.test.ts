@@ -70,10 +70,11 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
 
   it('a recorded day is corrected in place: one row, the later answer, a higher version', async () => {
     const today = businessToday();
+    // ATT-OWN-1: the Coordinator records — and corrects — her OWN day.
     const office = await signIn('christene@example-test.co.za');
     for (const status of ['present', 'absent']) {
       const response = await office.post('/api/attendance', {
-        userId: IDS.technician, date: today, status, note: status === 'absent' ? 'Phoned in' : '',
+        userId: IDS.coordinator, date: today, status, note: status === 'absent' ? 'Phoned in' : '',
         // ATT-01: an absent day says why.
         ...(status === 'absent' ? { absenceReason: 'sick_leave' } : {}),
       });
@@ -82,9 +83,59 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     const rows = await db
       .select()
       .from(schema.attendance)
-      .where(and(eq(schema.attendance.userId, IDS.technician), eq(schema.attendance.workDate, today)));
+      .where(and(eq(schema.attendance.userId, IDS.coordinator), eq(schema.attendance.workDate, today)));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: 'absent', absenceReason: 'sick_leave', note: 'Phoned in', recordedBy: IDS.coordinator, version: 2 });
+  });
+
+  it('nobody records another person’s day — not a Master, not a Coordinator (ATT-OWN-1); nothing is written', async () => {
+    const today = businessToday();
+    for (const email of ['elmarie@example-test.co.za', 'christene@example-test.co.za']) {
+      const office = await signIn(email);
+      const refused = await office.post('/api/attendance', { userId: IDS.technician, date: today, status: 'present', note: '' });
+      expect(refused.status).toBe(403);
+    }
+    expect(await db.select().from(schema.attendance).where(eq(schema.attendance.userId, IDS.technician))).toHaveLength(0);
+  });
+
+  it('a Coordinator’s month is attendance only — and only a Coordinator’s (TS-ROLE-1, migration 0043)', async () => {
+    const today = businessToday();
+    const month = (() => {
+      const [y, m] = today.slice(0, 7).split('-').map(Number) as [number, number];
+      return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    })();
+    const coordinator = await signIn('christene@example-test.co.za');
+    expect((await coordinator.post(`/api/timesheets/${IDS.coordinator}/entries`, {
+      date: today, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0,
+    })).status).toBe(403);
+    expect((await coordinator.post('/api/attendance', { userId: IDS.coordinator, date: `${month}-07`, status: 'present', note: '' })).status).toBe(200);
+    const submitted = await coordinator.post(`/api/payroll/${IDS.coordinator}/${month}/submit`, { confirmUnrecorded: true });
+    expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
+    const [row] = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.coordinator));
+    expect(row?.timesheetPeriodId).toBeNull();
+    expect(await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.coordinator))).toHaveLength(0);
+
+    // The database itself refuses an attendance-only month for anybody else.
+    expect(await postgresMessage(
+      db.insert(schema.monthlySubmissions).values({
+        id: crypto.randomUUID(), userId: IDS.technician, month, timesheetPeriodId: null,
+        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
+      }),
+    )).toContain('without a timesheet is a Coordinator');
+
+    // A package of her month alone: ONE attachment, which 0043 allows.
+    await db.update(schema.systemSettings).set({ financeEmail: 'payroll@finance.example.test' });
+    const prepared = await coordinator.post<{ package: { attachments: readonly { kind: string; pageCount: number }[] } }>(
+      '/api/payroll/packages', { month, technicianIds: [IDS.coordinator] },
+    );
+    expect(prepared.status, JSON.stringify(prepared.error)).toBe(200);
+    expect(prepared.data.package.attachments.map((attachment) => attachment.kind)).toEqual(['attendance']);
+    expect(await postgresMessage(
+      db.insert(schema.financePackages).values({
+        id: crypto.randomUUID(), month: '2026-01', status: 'prepared', recipient: 'x@example.test', manifest: [], attachmentCount: 0, totalBytes: 10,
+        preparedBy: IDS.master, preparedAt: new Date().toISOString(),
+      }),
+    )).toContain('finance_packages_has_attachments');
   });
 
   it('the database refuses a second row for a day, an unknown status and a blank comment', async () => {
@@ -372,10 +423,10 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       }),
     )).toContain('sent timesheet for exactly');
 
-    // The technician's own attendance for that month is frozen; the office can still correct it.
+    // The technician's own attendance for that month is frozen; the office cannot change it either (ATT-OWN-1).
     expect((await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' })).status).toBe(422);
     const master = await signIn('elmarie@example-test.co.za');
-    expect((await master.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: 'office' })).status).toBe(200);
+    expect((await master.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: 'office' })).status).toBe(403);
 
     // The Finance recipient: a Master's to set; then the package is prepared and stored.
     const coordinator = await signIn('christene@example-test.co.za');

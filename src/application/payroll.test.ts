@@ -122,17 +122,24 @@ describe('PAY-03 — file names', () => {
 });
 
 describe('PAY-01/04 — the monthly attendance form', () => {
-  it('is the actual attendance document, one PDF page, every day of the month, reasons included', async () => {
+  it('is the actual attendance document, one PDF page, its RECORDED days only, reasons included', async () => {
     await recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-07`, status: 'absent', absenceReason: 'iod', note: 'Hand injury' });
     await recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-08`, status: 'present', note: '' });
     const doc = await loadAttendanceDocument(harness.as(sipho), SIPHO, MONTH);
-    expect(doc.rows).toHaveLength(Number(TO.slice(8, 10)));
+    // PDF-UNREC-1: the two recorded days, in order — no row for any other day.
+    expect(doc.rows.map((row) => row.date)).toEqual([`${MONTH}-07`, `${MONTH}-08`]);
     expect(doc.rows.find((row) => row.date === `${MONTH}-07`)).toMatchObject({ status: 'Absent', reason: 'IOD (Injury on Duty)', note: 'Hand injury' });
+    expect(doc.summary).toMatchObject({ present: 1, absent: 1 });
     expect(doc.versionLabel).toBe('Draft — not submitted');
     const rendered = renderAttendancePdf(doc, { generatedAt: '2026-10-29T08:00:00.000Z' });
     expect(rendered.pageCount).toBe(1);
     expect(pdfPageTexts(rendered.bytes)).toHaveLength(1);
-    expect(pdfPageTexts(rendered.bytes)[0]).toContain('Hand injury');
+    const text = pdfPageTexts(rendered.bytes)[0]!;
+    expect(text).toContain('Hand injury');
+    expect(text).toContain('Present 1 · Absent 1');
+    expect(text).not.toContain('NOT RECORDED');
+    expect(text).not.toMatch(/Not recorded \d/u);
+    expect(text).toContain('Only recorded days are listed');
   });
   it('a technician reads only their own; the office reads anybody’s', async () => {
     await expect(loadAttendanceDocument(harness.as(riaan), SIPHO, MONTH)).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
@@ -201,17 +208,83 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect(submission.timesheetPeriodId).toBe(period.id);
   });
 
-  it('after submission the technician cannot change that month’s attendance; the office can, and the form says so', async () => {
+  it('after submission nobody changes that month’s attendance — not the person, not the office (ATT-OWN-1)', async () => {
     await submitFor(sipho);
     await expect(
       recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' }),
     ).rejects.toMatchObject({ violations: [{ code: 'attendance_month_submitted' }] });
-    await recordAttendance(harness.as(coordinator), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: 'Office correction' });
+    for (const office of [coordinator, master]) {
+      await expect(
+        recordAttendance(harness.as(office), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: 'Office correction' }),
+      ).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    }
     const current = await loadAttendanceDocument(harness.as(master), SIPHO, MONTH);
-    expect(current.versionLabel).toMatch(/^Corrected by the office after submission \(1 day/u);
+    expect(current.versionLabel).toBe('As submitted');
     const submitted = await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted');
-    expect(submitted.rows.find((row) => row.date === `${MONTH}-14`)?.status).toBe('NOT RECORDED');
-    expect(submitted.inForce).toBe(false);
+    // The submitted record is unchanged; the unrecorded 14th is simply not on the form.
+    expect(submitted.rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
+    expect(submitted.inForce).toBe(true);
+    expect((await harness.repos.payroll.findSubmission(SIPHO, MONTH))?.attendance.days).toHaveLength(Number(TO.slice(8, 10)));
+  });
+});
+
+/*
+ * TS-ROLE-1 (the tester, 1 November 2026): a Coordinator works no overtime and
+ * keeps no timesheet — only attendance. A Master keeps both, like a technician.
+ */
+describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
+  const COORD = coordinator.id;
+
+  it('a Coordinator submits their attendance alone; no timesheet period is created or needed', async () => {
+    await recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-07`, status: 'present', note: '' });
+    const forms = await loadMonthlyForms(harness.as(coordinator), COORD, MONTH);
+    expect(forms.timesheetRequired).toBe(false);
+    expect(forms.timesheet.versionInForce).toMatch(/^Not required/u);
+    const submission = await submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true });
+    expect(submission.timesheetPeriodId).toBeNull();
+    expect(await harness.repos.attendance.findPeriod(COORD, FROM, TO)).toBeNull();
+    const [notice] = (await harness.repos.notifications.list(master.id)).filter((n) => n.type === 'timesheet_submitted');
+    expect(notice?.title).toMatch(/: attendance$/u);
+    // Frozen like anybody's.
+    await expect(
+      recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' }),
+    ).rejects.toMatchObject({ violations: [{ code: 'attendance_month_submitted' }] });
+  });
+
+  it('a Coordinator cannot enter, open, send or correct a timesheet of their own', async () => {
+    const refusedWith = async (work: Promise<unknown>) =>
+      expect(work).rejects.toMatchObject({ violations: [{ code: 'timesheet_not_required' }] });
+    await refusedWith(saveTimesheetEntry(harness.as(coordinator), COORD, line(`${MONTH}-03`)));
+    await refusedWith(loadTimesheetDocument(harness.as(coordinator), COORD, FROM, TO));
+    await refusedWith(submitTimesheetPeriod(harness.as(coordinator), COORD, FROM, TO));
+    await refusedWith(
+      requestTimesheetCorrection(harness.as(coordinator), COORD, { from: FROM, to: TO, reason: 'x', comment: '', lines: [] }),
+    );
+    expect(await harness.repos.attendance.listEntries(COORD, FROM, TO)).toHaveLength(0);
+    // Still the office: reads a technician's sheet.
+    await expect(loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO)).resolves.toBeDefined();
+  });
+
+  it('a Master submits both, like a technician', async () => {
+    const submission = await submitFor(master);
+    expect(submission.timesheetPeriodId).not.toBeNull();
+    expect((await loadMonthlyForms(harness.as(master), master.id, MONTH)).timesheetRequired).toBe(true);
+  });
+
+  it('the Finance package carries one PDF — the attendance — for a Coordinator, and two for the others', async () => {
+    await recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-07`, status: 'present', note: '' });
+    await submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true });
+    await submitFor(sipho);
+    const view = await loadPayrollMonth(harness.as(master), MONTH);
+    expect(view.rows.find((row) => row.technician.id === COORD)).toMatchObject({ status: 'ready', timesheetRequired: false });
+    expect(view.rows.find((row) => row.technician.id === SIPHO)).toMatchObject({ timesheetRequired: true });
+    const alone = await prepareFinancePackage(harness.as(master), MONTH, [COORD]);
+    expect(alone.attachments.map((attachment) => attachment.kind)).toEqual(['attendance']);
+    await discardFinancePackage(harness.as(master), alone.id);
+    const both = await prepareFinancePackage(harness.as(master), MONTH, [COORD, SIPHO]);
+    expect(both.attachments.map((attachment) => `${attachment.technicianId}:${attachment.kind}`)).toEqual([
+      `${COORD}:attendance`, `${SIPHO}:timesheet`, `${SIPHO}:attendance`,
+    ]);
   });
 });
 

@@ -312,4 +312,31 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     });
     expect(done?.status).toBe('sent');
   });
+
+  /*
+   * 0043 (TS-ROLE-1, 1 November 2026): the rows only this release can write —
+   * a Coordinator's month submitted as attendance ONLY (no timesheet period),
+   * and a Finance package carrying that one PDF.
+   */
+  it('writes a Coordinator’s attendance-only month and a one-file package (0043)', async () => {
+    const coordinator = asUserId(IDS.coordinator);
+    const payroll = new PostgresPayrollRepository(db);
+    const submission = await payroll.createSubmission({
+      id: '00000000-0000-4000-8000-0000000004f1', userId: coordinator, month: '2026-09', timesheetPeriodId: null,
+      attendance: { technicianName: 'Christene', month: '2026-09', days: [] },
+      submittedAt: '2026-10-01T09:00:00.000Z', submittedBy: coordinator,
+    });
+    expect(submission?.timesheetPeriodId).toBeNull();
+    const prepared = await payroll.createPackage({
+      id: '00000000-0000-4000-8000-0000000004f2', month: '2026-08', status: 'prepared', recipient: 'payroll@finance.example.test',
+      attachments: [{
+        technicianId: coordinator, technicianName: 'Christene', kind: 'attendance', fileName: 'CB ATTEN AUGUST.pdf',
+        storageKey: 'finance-packages/00000000-0000-4000-8000-0000000004f2/01-attendance.pdf',
+        sha256: 'c'.repeat(64), sizeBytes: 900, pageCount: 1, versionLabel: 'As submitted', correctedResend: false,
+      }],
+      totalBytes: 900, preparedBy: asUserId(IDS.master), preparedAt: '2026-10-02T09:00:00.000Z',
+      sentBy: null, sendStartedAt: null, sentAt: null, providerMessageId: null, providerState: null, failureReason: '', failureKind: null, attempts: 0,
+    });
+    expect(prepared?.attachments).toHaveLength(1);
+  });
 });

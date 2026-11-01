@@ -1523,19 +1523,26 @@ class DemoPayrollRepository implements PayrollRepository {
   async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {
     let saved: MonthlySubmission | null = null;
     this.context.commit((draft) => {
-      const period = draft.timesheetPeriods.find((row) => row.id === submission.timesheetPeriodId);
       const [year, month] = submission.month.split('-').map(Number) as [number, number];
       const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-      if (
-        period === undefined || period.userId !== submission.userId || period.submittedAt === null ||
-        period.from !== `${submission.month}-01` || period.to !== last
-      ) {
-        throw new Error(`a monthly submission needs the same technician's sent timesheet for exactly ${submission.month}`);
+      if (submission.timesheetPeriodId === null) {
+        // Attendance only: a Coordinator's month (TS-ROLE-1), as migration 0043's guard.
+        if (draft.users.find((user) => user.id === submission.userId)?.role !== 'coordinator') {
+          throw new Error(`a monthly submission without a timesheet is a Coordinator's only (${submission.month})`);
+        }
+      } else {
+        const period = draft.timesheetPeriods.find((row) => row.id === submission.timesheetPeriodId);
+        if (
+          period === undefined || period.userId !== submission.userId || period.submittedAt === null ||
+          period.from !== `${submission.month}-01` || period.to !== last
+        ) {
+          throw new Error(`a monthly submission needs the same technician's sent timesheet for exactly ${submission.month}`);
+        }
       }
       const taken = draft.monthlySubmissions.some(
         (row) =>
           (row.userId === submission.userId && row.month === submission.month) ||
-          row.timesheetPeriodId === submission.timesheetPeriodId,
+          (submission.timesheetPeriodId !== null && row.timesheetPeriodId === submission.timesheetPeriodId),
       );
       if (taken) return;
       saved = submission;

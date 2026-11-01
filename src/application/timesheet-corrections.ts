@@ -19,6 +19,7 @@ import { audit, notify, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
 import { isCalendarDate } from './attendance-operations';
 import {
+  assertKeepsTimesheet,
   correctionView,
   describeCorrectionChanges,
   normaliseTimesheetLine,
@@ -125,6 +126,7 @@ export const requestTimesheetCorrection = async (
       'The technician whose timesheet it is asks for its correction; the office decides.',
     );
   }
+  assertKeepsTimesheet(context);
   const period = await findSentPeriod(context, id, input.from, input.to);
   const reason = input.reason.trim();
   if (reason.length === 0) {

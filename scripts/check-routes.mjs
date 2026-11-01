@@ -48,7 +48,7 @@ const MATRIX = [
   { url: '/library', role: 'Master / Technician', status: 'any', purpose: 'Technical Library' },
   { url: '/search?q=LW-V40-70214', role: 'Master / Technician', status: 'any', purpose: 'Global search' },
   { url: '/admin', role: 'Master', status: 'any', purpose: 'Administration' },
-  { url: '/attendance', role: 'Master / Coordinator', status: 'any', purpose: 'Attendance register (ATTEND-1)' },
+  { url: '/attendance', role: 'Everybody', status: 'any', purpose: 'Own attendance only (ATTEND-2, ATT-OWN-1)' },
   { url: '/timesheets', role: 'Office / self', status: 'any', purpose: 'Technician timesheets (TIMESHEET-1)' },
   { url: '/payroll', role: 'Master / Coordinator', status: 'any', purpose: 'EJE Monthly Forms — every user, the Finance package' },
   { url: '/payroll/mine', role: 'any', status: 'any', purpose: 'My Monthly Forms — own month and history' },

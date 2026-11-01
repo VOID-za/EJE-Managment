@@ -123,6 +123,11 @@ const PERMISSION_CODES = new Set([
   'role_not_assignable',
   'own_role',
   'self_disable',
+  /*
+   * TS-ROLE-1 (1 November 2026). A Coordinator reaching for a timesheet of
+   * their own: they keep none, and no amount of finishing work changes that.
+   */
+  'timesheet_not_required',
 ]);
 
 const fromWorkflowError = (error: WorkflowError): ApiError =>

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { MonthlyFormsCard } from '@/components/payroll/MonthlyFormsCard';
 import { FinancePackagePanel } from '@/components/payroll/FinancePackagePanel';
 import { MyMonthlyForms } from '@/components/payroll/MyMonthlyForms';
+import { AttendanceExportCard } from '@/components/payroll/AttendanceExportCard';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 import { isPayrollMonth, monthOfDate, previousMonth } from '@/lib/payroll-files';
@@ -20,6 +21,11 @@ import { isPayrollMonth, monthOfDate, previousMonth } from '@/lib/payroll-files'
  * read and print, and the Finance package: the selected users' two PDFs each in
  * ONE email, with the duplicate, integrity, correction and audit rules it has
  * always had. Their OWN month is on My Monthly Forms.
+ *
+ * WHERE THE OFFICE READS EVERYBODY'S ATTENDANCE (ATT-OWN-1, 1 November 2026):
+ * "Open forms" shows any user's attendance form, read only, and the range
+ * export is here. Nobody records another person's days — not here, not
+ * anywhere; the server refuses it.
  *
  * Anybody else who opens this address (an old link, a bookmark) gets their own
  * forms, as before — the server refuses them the office's month regardless.
@@ -66,6 +72,7 @@ const PayrollPage = () => {
 
       {valid && <FinancePackagePanel month={month} onOpenForms={(id) => setViewing(id)} />}
       {valid && viewing !== null && <MonthlyFormsCard key={`${viewing}:${month}`} userId={viewing} month={month} />}
+      <AttendanceExportCard />
     </>
   );
 };

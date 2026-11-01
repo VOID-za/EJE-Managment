@@ -61,6 +61,19 @@ export const timesheetPdfCells = (
   custKm: km(row.customerKm),
 });
 
+/**
+ * PDF-UNREC-1 (the tester, 1 November 2026): only days with a recorded line
+ * are printed. Said under the table — on the PDF and the screen alike — so a
+ * day that is not there is not read as a day off or as zero hours.
+ */
+export const timesheetRecordedOnlyNote = (doc: Pick<TimesheetDocument, 'rows' | 'from' | 'to'>): string | null => {
+  if (doc.rows.length === 0) return 'No day in this period has a recorded line.';
+  const days = (Date.parse(`${doc.to}T00:00:00Z`) - Date.parse(`${doc.from}T00:00:00Z`)) / 86_400_000 + 1;
+  // Every day recorded: nothing is left out, and the line would only cost a busy month its room.
+  if (new Set(doc.rows.map((row) => row.date)).size >= days) return null;
+  return 'Only days with a recorded line are listed; a day not recorded is left out.';
+};
+
 export interface TimesheetPdfOptions {
   readonly generatedAt: string;
 }
@@ -83,7 +96,8 @@ export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdf
     return { cells, compact: { date: cells.date.replace(/ \d{4}$/u, '') }, muted: !row.recorded, groupStart: showDate };
   });
 
-  const notes: string[] = [];
+  const recordedOnly = timesheetRecordedOnlyNote(doc);
+  const notes: string[] = recordedOnly === null ? [] : [recordedOnly];
   if (doc.rows.some((row) => row.calloutShared)) {
     notes.push('(sh) — a shared call-out: the amount is this technician’s own share, as they entered it; nothing is divided.');
   }

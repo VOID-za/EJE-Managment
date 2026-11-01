@@ -47,6 +47,8 @@ import { loadTimesheetDocument } from './timesheets';
  *     what the PROVIDER said (accepted for delivery is not "delivered"). A
  *     failure is recorded as failed, with its reason, and may be sent again;
  *     a sent package never changes.
+ *   A COORDINATOR'S MONTH (TS-ROLE-1, 1 November 2026) carries ONE PDF, the
+ *     attendance: Coordinators keep no timesheet.
  *   AFTER A CORRECTION. A sent package is never altered or re-sent. A
  *     technician whose month was corrected after their package was sent (an
  *     accepted timesheet correction, or the office correcting the register)
@@ -81,6 +83,8 @@ export interface PayrollMonthRow {
   readonly detail: string;
   readonly submittedAt: IsoDateTime | null;
   readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+  /** False for a month that is attendance only — a Coordinator's (TS-ROLE-1). */
+  readonly timesheetRequired: boolean;
   readonly timesheetVersion: string;
   readonly attendanceChangedAfterSubmission: number;
   readonly unrecordedWeekdays: number;
@@ -187,6 +191,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       detail,
       submittedAt: submission?.submittedAt ?? null,
       fileNames: forms.fileNames,
+      timesheetRequired: forms.timesheetRequired,
       timesheetVersion: forms.timesheet.versionInForce,
       attendanceChangedAfterSubmission: forms.attendance.changedAfterSubmission.length,
       unrecordedWeekdays: submission === null ? forms.attendance.unrecordedWeekdays.length : submission.attendance.days.filter((day) => day.status === null).length,
@@ -244,11 +249,13 @@ export const prepareFinancePackage = async (
     }
     const { from, to } = monthBounds(month);
     const correctedResend = row.status === 'corrected_after_sent';
-    let timesheet;
+    let timesheet = null;
     let attendance;
     try {
-      const timesheetDocument = await loadTimesheetDocument(context, technicianId, from, to);
-      timesheet = { document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) };
+      if (row.timesheetRequired) {
+        const timesheetDocument = await loadTimesheetDocument(context, technicianId, from, to);
+        timesheet = { document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) };
+      }
       const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
       attendance = { document: attendanceDocument, rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }) };
     } catch (cause) {
@@ -258,9 +265,9 @@ export const prepareFinancePackage = async (
       throw cause;
     }
     for (const [kind, rendered, versionLabel] of [
-      ['timesheet', timesheet.rendered, timesheet.document.versionLabel || 'Original submission'],
-      ['attendance', attendance.rendered, attendance.document.versionLabel],
-    ] as const) {
+      ...(timesheet === null ? [] : [['timesheet', timesheet.rendered, timesheet.document.versionLabel || 'Original submission'] as const]),
+      ['attendance', attendance.rendered, attendance.document.versionLabel] as const,
+    ]) {
       if (rendered.pageCount !== 1) {
         throw refuse(`${row.technician.name}’s ${kind} is not one page.`, 'form_not_one_page', 'Every payroll form must be exactly one page.');
       }

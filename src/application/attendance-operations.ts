@@ -10,7 +10,6 @@ import {
   type AbsenceReason,
   type AttendanceRecord,
   type AttendanceStatus,
-  type AvailabilityType,
   type IsoDate,
   type User,
   type UserId,
@@ -21,16 +20,19 @@ import { audit } from './audit';
 import { WorkflowError } from './errors';
 
 /**
- * THE ATTENDANCE REGISTER. ATTEND-1.
+ * ATTENDANCE. ATTEND-1, ATTEND-2; OWNERSHIP SINCE 1 NOVEMBER 2026 (ATT-OWN-1).
  *
- * Who was at work on a day: present or absent, one record per person per day,
- * recorded and corrected by the office (`attendance.manage`). A correction
- * updates the day's record and the audit trail keeps what it said before.
+ * Who was at work on a day: present or absent, one record per person per day.
+ * EVERY PERSON RECORDS ONLY THEIR OWN DAYS — Technician, Coordinator and Master
+ * alike. The office's Team register, where a Master or a Coordinator recorded
+ * anybody's day, was withdrawn by the tester on 1 November 2026: nobody
+ * creates, edits or submits another person's attendance, and that is refused
+ * here, against the session, whatever the screen sends. The office READS
+ * everybody's attendance (`attendance.viewAll`) on EJE Monthly Forms, and
+ * exports it.
  *
- * Kept apart from planned leave and from jobs. The register SHOWS the leave
- * booked for a day beside each person, because that is what the office checks
- * against, but recording attendance never changes the leave record — and
- * neither of them touches a job.
+ * A correction updates the day's record and the audit trail keeps what it said
+ * before. Kept apart from planned leave and from jobs: neither is touched.
  */
 
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
@@ -60,30 +62,29 @@ export const assertRecordableDate = (date: string, today: IsoDate): void => {
   }
 };
 
-const assertManages = (context: OperationContext): void => {
-  if (can(context.actor.role, 'attendance.manage')) return;
+/** Reading everybody's attendance — the export. The office's; it records nothing. */
+const assertViewsAll = (context: OperationContext): void => {
+  if (can(context.actor.role, 'attendance.viewAll')) return;
   throw refuse(
-    'Only the office records attendance.',
+    'Only the office reads everybody’s attendance.',
     'not_permitted',
-    'A Master or a Coordinator records who was at work.',
+    'A Master or a Coordinator does; everybody reads their own.',
   );
 };
 
 /**
- * WHO MAY RECORD A DAY. ATTEND-2, the owner's instruction of 27 October 2026:
- * attendance is entirely manual and each technician marks THEMSELVES present or
- * absent, daily or catching up later (payday). The office may still record or
- * correct anybody's day (`attendance.manage`). Nobody else may touch another
- * person's attendance — the person is checked against the session, never
- * taken on trust from the request.
+ * WHO MAY RECORD A DAY: THE PERSON THEMSELVES, AND NOBODY ELSE. ATT-OWN-1 (the
+ * tester, 1 November 2026), replacing the office's right to record or correct
+ * anybody's day (ATTEND-1, ATTEND-2). No role is exempt — a Master or a
+ * Coordinator is refused another person's day exactly as a technician is. The
+ * person is checked against the session, never taken on trust from the request.
  */
 const assertMayRecordFor = (context: OperationContext, userId: string): void => {
-  if (can(context.actor.role, 'attendance.manage')) return;
   if (context.actor.id === userId) return;
   throw refuse(
     'You can only record your own attendance.',
     'not_permitted',
-    'Each person marks their own days; the office records or corrects anybody’s.',
+    'Each person records their own days. The office reads everybody’s on EJE Monthly Forms but cannot change them.',
   );
 };
 
@@ -127,18 +128,17 @@ export const recordAttendance = async (
   assertMayRecordFor(context, input.userId);
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
   /*
-   * PAY-02. A MONTH SUBMITTED TO THE OFFICE IS FROZEN FOR THE TECHNICIAN: their
-   * own days in it can no longer be changed by them. The office still records
-   * and corrects its register (ATTEND-1) — audited, and shown on the monthly
-   * attendance form as a correction after submission.
+   * PAY-02. A MONTH SUBMITTED TO THE OFFICE IS FROZEN: the person's own days in
+   * it can no longer be changed. Since ATT-OWN-1 nobody else may change them
+   * either, so this holds for every role.
    */
-  if (!can(context.actor.role, 'attendance.manage') && isCalendarDate(input.date)) {
+  if (isCalendarDate(input.date)) {
     const submitted = await context.repos.payroll.findSubmission(asUserId(input.userId), input.date.slice(0, 7));
     if (submitted !== null) {
       throw refuse(
         'This month has been submitted to the office.',
         'attendance_month_submitted',
-        'Your attendance for a submitted month can no longer be changed by you. Ask the office to correct it.',
+        'Attendance for a submitted month can no longer be changed.',
       );
     }
   }
@@ -268,90 +268,6 @@ export const recordAttendance = async (
   return saved;
 };
 
-export interface RegisterRow {
-  readonly user: Pick<User, 'id' | 'firstName' | 'lastName' | 'role' | 'jobTitle'>;
-  readonly record: AttendanceRecord | null;
-  /** Who recorded it, by name — the register says who answered for the day. */
-  readonly recordedByName: string | null;
-  /** Planned leave booked over this day, for reference only. Never changed here. */
-  readonly plannedLeave: readonly { readonly type: AvailabilityType; readonly label: string }[];
-}
-
-export interface AttendanceRegister {
-  readonly date: IsoDate;
-  readonly today: IsoDate;
-  readonly rows: readonly RegisterRow[];
-  readonly present: number;
-  readonly absent: number;
-  readonly unrecorded: number;
-}
-
-const ROLE_ORDER: Record<User['role'], number> = { technician: 0, coordinator: 1, master: 2 };
-
-/** The register for one day: everybody on the system, and what is recorded for them. */
-export const loadAttendanceRegister = async (
-  context: OperationContext,
-  date: string,
-): Promise<AttendanceRegister> => {
-  assertManages(context);
-  const today = businessToday(new Date(context.services.clock.now()));
-  if (!isCalendarDate(date)) {
-    throw refuse('That is not a date.', 'invalid_date', 'Give the day as YYYY-MM-DD.');
-  }
-  const [users, records, availability] = await Promise.all([
-    context.repos.users.list(),
-    context.repos.attendance.listRecords(date, date),
-    context.repos.availability.list(date, date),
-  ]);
-  const byId = new Map<UserId, User>(users.map((user) => [user.id, user]));
-  const recorded = new Map(records.map((record) => [record.userId, record]));
-
-  const rows: RegisterRow[] = users
-    // Everybody on the system, plus anybody since disabled who has a record
-    // for this day — history must still read.
-    .filter((user) => user.active || recorded.has(user.id))
-    .sort(
-      (a, b) =>
-        ROLE_ORDER[a.role] - ROLE_ORDER[b.role] ||
-        a.firstName.localeCompare(b.firstName) ||
-        a.lastName.localeCompare(b.lastName),
-    )
-    .map((user) => {
-      const record = recorded.get(user.id) ?? null;
-      const recorder = record === null ? undefined : byId.get(record.recordedBy);
-      return {
-        user: {
-          id: user.id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          jobTitle: user.jobTitle,
-        },
-        record,
-        recordedByName: recorder === undefined ? null : userFullName(recorder),
-        plannedLeave: availability
-          .filter(
-            (entry) =>
-              entry.userId === user.id &&
-              entry.status === 'active' &&
-              entry.startDate <= date &&
-              entry.endDate >= date,
-          )
-          .map((entry) => ({ type: entry.type, label: availabilityTypeLabel(entry.type) })),
-      };
-    });
-
-  return {
-    date,
-    today,
-    rows,
-    present: rows.filter((row) => row.record?.status === 'present').length,
-    absent: rows.filter((row) => row.record?.status === 'absent').length,
-    unrecorded: rows.filter((row) => row.record === null).length,
-  };
-};
-
-/** The longest range one attendance export covers: a quarter, as a timesheet. */
 /** One of the person's own days: recorded (present or absent), or not yet. ATTEND-2. */
 export interface MyAttendanceDay {
   readonly date: IsoDate;
@@ -416,19 +332,20 @@ export interface AttendanceExportRow {
 }
 
 /**
- * THE REGISTER AS A SPREADSHEET, for a date range. ATTEND-1, reporting.
+ * EVERYBODY'S ATTENDANCE AS A SPREADSHEET, for a date range. ATTEND-1,
+ * reporting; offered on EJE Monthly Forms since the Team register went.
  *
  * One row per RECORDED person-day — what was recorded, by whom and when, and
  * any planned leave booked over that day beside it for reference. A day nobody
  * recorded is not invented as "absent": it is simply not in the file, which is
- * the truth about it. The office's, like the register itself.
+ * the truth about it. The office's: reading, never recording.
  */
 export const loadAttendanceExport = async (
   context: OperationContext,
   from: string,
   to: string,
 ): Promise<readonly AttendanceExportRow[]> => {
-  assertManages(context);
+  assertViewsAll(context);
   if (!isCalendarDate(from) || !isCalendarDate(to)) {
     throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
   }

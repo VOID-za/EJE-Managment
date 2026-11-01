@@ -10,6 +10,7 @@ import {
   asCustomerId,
   asUserId,
   can,
+  completesTimesheet,
   userFullName,
   type AbsenceReason,
   type AttendanceRecord,
@@ -240,8 +241,26 @@ export const buildTimesheetDays = (input: {
   };
 };
 
+/**
+ * A COORDINATOR KEEPS NO TIMESHEET. TS-ROLE-1 (the tester, 1 November 2026):
+ * refused before anything is read or written — entering a line, removing one,
+ * a comment, sending a period, asking for a correction, opening their own
+ * sheet — so no route or old screen can reach it. Their earlier lines, if any,
+ * stay in the record untouched; the office can still read them.
+ */
+export const assertKeepsTimesheet = (context: OperationContext): void => {
+  if (completesTimesheet(context.actor.role)) return;
+  throw refuse(
+    'A Coordinator does not complete a timesheet.',
+    'timesheet_not_required',
+    'Coordinators work no overtime and keep no timesheet; only attendance. Masters and Technicians complete both.',
+  );
+};
+
 /** Office: anybody's timesheet. Everybody else: their own and nobody else's. */
 const assertMayRead = (context: OperationContext, technicianId: UserId): void => {
+  // Their own sheet is only for a role that keeps one (TS-ROLE-1).
+  if (context.actor.id === technicianId) assertKeepsTimesheet(context);
   if (can(context.actor.role, 'timesheets.viewAll')) return;
   if (context.actor.id === technicianId) return;
   throw refuse(
@@ -251,9 +270,12 @@ const assertMayRead = (context: OperationContext, technicianId: UserId): void =>
   );
 };
 
-/** Only the technician whose timesheet it is enters or corrects it. */
+/** Only the technician whose timesheet it is enters or corrects it — and only a role that keeps one. */
 const assertOwner = (context: OperationContext, technicianId: UserId): void => {
-  if (context.actor.id === technicianId) return;
+  if (context.actor.id === technicianId) {
+    assertKeepsTimesheet(context);
+    return;
+  }
   throw refuse(
     'You can only enter your own timesheet.',
     'not_permitted',
@@ -1029,7 +1051,10 @@ export interface TimesheetDocument {
   readonly to: IsoDate;
   /** "Thu 1 Oct 2026 – Wed 28 Oct 2026". */
   readonly periodLabel: string;
-  /** Every day of the period, oldest first; several rows for a day of several lines. */
+  /**
+   * The RECORDED days of the period, oldest first; several rows for a day of
+   * several lines. A day with no line is not printed (PDF-UNREC-1).
+   */
   readonly rows: readonly TimesheetDocumentRow[];
   readonly comment: string;
   readonly totals: {
@@ -1055,7 +1080,14 @@ export interface TimesheetDocument {
   readonly absences: readonly { readonly date: IsoDate; readonly reason: string }[];
 }
 
-/** The document's rows from a period's lines. Pure. */
+/**
+ * The document's rows from a period's lines. Pure.
+ *
+ * ONLY RECORDED DAYS (PDF-UNREC-1, the tester, 1 November 2026): a day with no
+ * line is left off the document — no blank row, no "NOT RECORDED", no zero
+ * hours. The totals are the sum of the lines, so they are unchanged; what was
+ * sent (the snapshot) is unchanged; only what is printed for an empty day is.
+ */
 export const buildTimesheetDocumentRows = (
   from: IsoDate,
   to: IsoDate,
@@ -1066,13 +1098,6 @@ export const buildTimesheetDocumentRows = (
       .filter((entry) => entry.date === date)
       .slice()
       .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-    if (lines.length === 0) {
-      return [{
-        date, weekday: weekdayOf(date), customer: 'NOT RECORDED', recorded: false,
-        overtimeHours: null, doubleHours: null, calloutAmount: null, calloutShared: false,
-        internalKm: null, customerKm: null, historicalNormalHours: 0, historicalCallouts: 0,
-      }];
-    }
     return lines.map((entry) => ({
       date,
       weekday: weekdayOf(date),
@@ -1258,13 +1283,25 @@ export const timesheetExportRows = (sheet: Pick<Timesheet, 'days'>): readonly Ex
     }));
   });
 
-/** The same sheet as a spreadsheet, for the office's records. */
+/**
+ * The same sheet as a spreadsheet, for the office's records — the OFFICE'S
+ * ONLY since 1 November 2026: the tester removed Export CSV from the
+ * technician's Timesheet page (TS-CSV-OFF-1), and the server agrees, so the
+ * export exists only where the office reads somebody's sheet.
+ */
 export const exportTimesheet = async (
   context: OperationContext,
   technicianId: string,
   from: string,
   to: string,
 ): Promise<{ fileName: string; csv: string; rowCount: number; columns: readonly string[] }> => {
+  if (!can(context.actor.role, 'timesheets.viewAll')) {
+    throw refuse(
+      'Only the office exports a timesheet as a spreadsheet.',
+      'not_permitted',
+      'Your timesheet can be previewed, printed and downloaded as its PDF.',
+    );
+  }
   const sheet = await loadTimesheet(context, technicianId, from, to);
   const stem = `eje-timesheet-${sheet.technician.firstName}-${sheet.technician.lastName}-${from}-to`
     .toLowerCase()
@@ -1294,11 +1331,14 @@ export const exportTimesheet = async (
 export const listTimesheetPeople = async (
   context: OperationContext,
 ): Promise<readonly TimesheetPerson[]> => {
-  if (!can(context.actor.role, 'timesheets.viewAll')) return [personOf(context.actor)];
+  // TS-ROLE-1: nobody lists a Coordinator's sheet — they keep none — and a
+  // Coordinator is offered only the technicians' and Masters' sheets, to read.
+  const own = completesTimesheet(context.actor.role) ? [personOf(context.actor)] : [];
+  if (!can(context.actor.role, 'timesheets.viewAll')) return own;
   const users = await context.repos.users.list();
   const others = users
-    .filter((user) => user.active && user.id !== context.actor.id)
+    .filter((user) => user.active && user.id !== context.actor.id && completesTimesheet(user.role))
     .sort((a, b) => a.firstName.localeCompare(b.firstName) || a.lastName.localeCompare(b.lastName))
     .map(personOf);
-  return [personOf(context.actor), ...others];
+  return [...own, ...others];
 };

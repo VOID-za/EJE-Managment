@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, userFullName, type TimesheetEntry } from '@/domain';
+import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, completesTimesheet, userFullName, type TimesheetEntry } from '@/domain';
 import {
   Badge,
   Button,
@@ -110,6 +110,18 @@ const initialRange = (today: string): { readonly from: string; readonly to: stri
  *     Forms asks them to submit — could not be filled in. Their own timesheet
  *     is now first, and opens by default; anybody else's is read-only, as the
  *     server has always enforced.
+ *
+ * THE TESTER'S CHANGES OF 1 NOVEMBER 2026:
+ *
+ *  - NO EXPORT CSV ON ONE'S OWN SHEET (TS-CSV-OFF-1). A technician's Timesheet
+ *    page has Preview, Print and the PDF, and no spreadsheet; the server
+ *    refuses the export to anybody but the office, which still exports a sheet
+ *    it is READING (someone else's) for its records.
+ *  - A COORDINATOR KEEPS NO TIMESHEET (TS-ROLE-1). Not in their sidebar, not in
+ *    the list of sheets, and every write and their own sheet refused by the
+ *    server. A Coordinator who opens this address — a correction's
+ *    notification links here — reads the technicians' sheets, and decides
+ *    their corrections, and nothing else.
  */
 const TimesheetsPage = () => {
   const currentUser = useCurrentUser();
@@ -383,6 +395,11 @@ const TimesheetsPage = () => {
         title="Timesheets"
         description="Each person keeps their own timesheet: the customer or Workshop, OT, D/T, the call-out amount and Int Km / Cust Km, entered by hand for each day — as you go, or all at once later."
       />
+      {!completesTimesheet(currentUser.role) && (
+        <p role="status" className="mb-4 text-sm text-steel-600" data-testid="timesheet-not-required">
+          Coordinators do not complete a timesheet — only their attendance. You can read the technicians’ and Masters’ timesheets here.
+        </p>
+      )}
 
       <ConfirmDialog
         open={removing !== null}
@@ -476,7 +493,7 @@ const TimesheetsPage = () => {
           )}
           <TextField label="From" type="date" value={from} onChange={(event) => changePeriod(event.target.value, to)} containerClassName="w-44" data-testid="timesheet-from" />
           <TextField label="To" type="date" value={to} onChange={(event) => changePeriod(from, event.target.value)} containerClassName="w-44" data-testid="timesheet-to" />
-          {personId !== null && rangeProblem === null && sheet.data !== null && sheet.data !== undefined && (
+          {viewingOther && rangeProblem === null && sheet.data !== null && sheet.data !== undefined && (
             <DownloadFileButton href={timesheets.exportUrl(personId, from, to)} fallbackName={`timesheet-${from}-${to}.csv`} label="Export CSV" />
           )}
         </div>

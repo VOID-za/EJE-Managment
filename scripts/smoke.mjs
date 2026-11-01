@@ -4001,48 +4001,61 @@ await step('choosing a customer on a new job fills in its one site and shows the
 
 /* ---- ATTEND-1 and TIMESHEET-1 ------------------------------------------ */
 
-await step('the office records attendance, and a correction keeps one record (ATTEND-1)', async () => {
+/*
+ * ATT-OWN-1 (the tester, 1 November 2026): every person records their OWN
+ * attendance — the office included — and nobody else's. The Team register is
+ * gone from the page, and the server refuses a save for another person.
+ */
+await step('the office records its OWN attendance; there is no Team register and another person’s day is refused (ATT-OWN-1)', async () => {
+  await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const row = page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"]');
-  await row.waitFor({ timeout: 10000 });
-  await row.getByRole('button', { name: 'Present', exact: true }).click();
-  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="present"]')
-    .waitFor({ timeout: 10000 });
+  await page.getByTestId('my-attendance').waitFor({ timeout: 15000 });
+  for (const gone of ['team-register-heading', 'attendance-register', 'attendance-row', 'attendance-date', 'monthly-attendance-section']) {
+    if ((await page.getByTestId(gone).count()) !== 0) throw new Error(`the Attendance page still shows the Team register (${gone})`);
+  }
+  if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error('the Attendance page still offers the register export');
 
-  // Corrected the same day: the record changes, it does not multiply.
-  await row.getByLabel('Note').fill('Phoned in sick at 07:10');
-  await row.getByRole('button', { name: 'Absent', exact: true }).click();
-  // ATT-01: an absent day says why — one of exactly four reasons.
-  const reasons = await row.getByLabel('Reason for absence').locator('option').allInnerTexts();
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  const day = page.locator(`[data-testid="my-attendance-day"][data-date="${today}"]`);
+  await day.getByTestId('my-attendance-present').click();
+  await page.locator(`[data-testid="my-attendance-day"][data-date="${today}"][data-status="present"][data-saved="yes"]`).waitFor({ timeout: 10000 });
+
+  // The server: another person's day is refused, and nothing is written for them.
+  const answers = await page.evaluate(async ({ base, today }) => {
+    const post = (body) => fetch(`${base}/api/attendance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `smoke-att-${Math.random()}` },
+      body: JSON.stringify(body),
+    }).then((response) => response.status);
+    const other = await post({ userId: 'user-tech-sipho', date: today, status: 'present', note: 'Not mine to record' });
+    return { other };
+  }, { base: BASE, today });
+  if (answers.other !== 403) throw new Error(`the office recording a technician's day answered ${answers.other}`);
+});
+
+await step('a technician records their own absence with its reason; their timesheet offers no Export CSV (ATT-01, TS-CSV-OFF-1)', async () => {
+  await signInAs(page, 'Sipho Mahlangu');
+  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  const day = page.locator(`[data-testid="my-attendance-day"][data-date="${today}"]`);
+  await day.waitFor({ timeout: 15000 });
+  if ((await day.getAttribute('data-status')) !== 'unrecorded') throw new Error('Sipho’s day was recorded by somebody else');
+  await day.getByTestId('my-attendance-absent').click();
+  // ATT-01: an absent day says why — one of exactly four reasons — and choosing it saves it.
+  const reasons = await day.getByLabel('Reason for absence').locator('option').allInnerTexts();
   for (const expected of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)']) {
     if (!reasons.includes(expected)) throw new Error(`the absence reasons did not offer ${expected}: ${reasons.join(', ')}`);
   }
-  // ATT-AUTO-1 (the tester, 31 October 2026): choosing the reason SAVES it —
-  // there is no Record absent button to press. The row says when it is saved.
-  if ((await row.getByTestId('absence-reason-confirm').count()) !== 0) throw new Error('the register still asks for a separate Record absent press');
-  await row.getByLabel('Reason for absence').selectOption('sick_leave');
-  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"][data-saved="yes"]')
-    .waitFor({ timeout: 10000 });
-  await row.getByText('Sick Leave', { exact: true }).first().waitFor({ timeout: 5000 });
-  await page.locator('[data-testid="autosave-status"][data-state="saved"]').first().waitFor({ timeout: 10000 });
-
-  // Read back after a reload: the server's record, not the screen's.
+  await day.getByLabel('Reason for absence').selectOption('sick_leave');
+  await page.locator(`[data-testid="my-attendance-day"][data-date="${today}"][data-status="absent"][data-saved="yes"]`).waitFor({ timeout: 10000 });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"][data-status="absent"]')
-    .waitFor({ timeout: 10000 });
-  const records = await page.evaluate(async (base) => {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-    const response = await fetch(`${base}/api/attendance?date=${today}`);
-    const body = await response.json();
-    return (body?.data?.rows ?? []).filter((r) => r.user.id === 'user-tech-sipho' && r.record !== null).length;
-  }, BASE);
-  if (records !== 1) throw new Error(`${records} attendance records for one person and day`);
-  const note = await page.locator('[data-testid="attendance-row"][data-user="user-tech-sipho"]').getByLabel('Note').inputValue();
-  if (note !== 'Phoned in sick at 07:10') throw new Error(`the note typed before choosing Absent was not saved: "${note}"`);
+  await page.locator(`[data-testid="my-attendance-day"][data-date="${today}"][data-status="absent"]`).getByText('Absent — Sick Leave').waitFor({ timeout: 10000 });
 
-  // Planned leave is shown beside the person, never applied: Thabo is booked sick.
-  await page.locator('[data-testid="attendance-row"][data-user="user-tech-thabo"]')
-    .getByText('Planned: Sick leave').waitFor({ timeout: 5000 });
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
+  if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error('a technician’s own timesheet still offers Export CSV');
+  await page.getByTestId('timesheet-preview').waitFor({ timeout: 5000 });
+  await signInAsMasterIfNeeded();
 });
 
 await step('a timesheet is manual: unrecorded days say so, the office reads it, takes a comment, exports it (TIMESHEET-2)', async () => {
@@ -4397,15 +4410,20 @@ await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, 
   await page.getByRole('link', { name: /^Closed Jobs/ }).first().click();
   await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
 
-  // Her Attendance: the technician's layout first — her own form and days — then the team register.
+  // Her Attendance: her own form and days, and no Team register (ATT-OWN-1).
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
   const own = page.getByTestId('monthly-attendance-own');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
   if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('CHRISTENE ATTEN ')) throw new Error('the Coordinator’s own form is not hers');
   for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-attendance-export']) await own.getByTestId(id).waitFor({ timeout: 5000 });
   await page.getByTestId('my-attendance').waitFor({ timeout: 10000 });
-  await page.getByTestId('team-register-heading').waitFor({ timeout: 5000 });
-  await page.getByTestId('attendance-register').waitFor({ timeout: 10000 });
+  if ((await page.getByTestId('team-register-heading').count()) !== 0 || (await page.getByTestId('attendance-register').count()) !== 0) {
+    throw new Error('the Coordinator still has the Team register');
+  }
+  // TS-ROLE-1: her month is attendance only — no timesheet half, no timesheet link.
+  if ((await own.getByTestId('monthly-forms-edit-timesheet').count()) !== 0) throw new Error('the Coordinator was offered her own timesheet');
+  if ((await own.getByTestId('monthly-forms-together').count()) !== 0) throw new Error('the Coordinator was told a timesheet goes with her attendance');
+  if ((await page.locator('nav a[href="/timesheets"]').count()) !== 0) throw new Error('the Coordinator’s sidebar offers Timesheets');
 });
 
 await step('the Coordinator’s Users screen: everybody’s availability, and the way to record it — no account controls (tester)', async () => {
@@ -4552,32 +4570,24 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   if (typeof again.id !== 'string') throw new Error('could not read the signed-in technician');
   if (again.status < 400) throw new Error(`a second submission answered ${again.status}`);
 
-  // The office: the month's status, the form opened, and no Send for another person's month.
-  await signInAsMasterIfNeeded();
-  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const office = page.getByTestId('monthly-attendance-section');
-  await office.waitFor({ timeout: 15000 });
-  await office.getByTestId('monthly-attendance-month').fill(month);
-  const row = office.getByTestId('monthly-attendance-row').filter({ hasText: 'Naledi' });
-  await row.waitFor({ timeout: 15000 });
-  if ((await row.getAttribute('data-status')) !== 'ready') throw new Error(`Naledi's month is ${await row.getAttribute('data-status')} to the office`);
-  await row.getByTestId('monthly-attendance-open').click();
-  const officeCard = office.getByTestId('monthly-forms');
-  await officeCard.getByTestId('monthly-forms-submitted').waitFor({ timeout: 15000 });
-  await officeCard.getByTestId('monthly-attendance-download').waitFor({ timeout: 5000 });
-  if ((await officeCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the office was offered Send for a technician');
-
-  // The Coordinator: the same office view, the same form, and no Send either.
-  await signInAs(page, 'Christene van Niekerk');
-  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const coordinator = page.getByTestId('monthly-attendance-section');
-  await coordinator.getByTestId('monthly-attendance-month').fill(month);
-  const coordinatorRow = coordinator.getByTestId('monthly-attendance-row').filter({ hasText: 'Naledi' });
-  await coordinatorRow.waitFor({ timeout: 15000 });
-  await coordinatorRow.getByTestId('monthly-attendance-open').click();
-  const coordinatorCard = coordinator.getByTestId('monthly-forms');
-  await coordinatorCard.getByTestId('monthly-attendance-preview').waitFor({ timeout: 15000 });
-  if ((await coordinatorCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the Coordinator was offered Send for a technician');
+  // The office reads the month on EJE Monthly Forms (ATT-OWN-1): the status, the
+  // form opened read-only, and no Send for another person's month.
+  for (const [who, signIn] of [['the Master', () => signInAsMasterIfNeeded()], ['the Coordinator', () => signInAs(page, 'Christene van Niekerk')]]) {
+    await signIn();
+    await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+    await page.getByTestId('payroll-month').fill(month);
+    const row = page.getByTestId('finance-row').filter({ hasText: 'Naledi' });
+    await row.waitFor({ timeout: 15000 });
+    if ((await row.getAttribute('data-status')) !== 'ready') throw new Error(`Naledi's month is ${await row.getAttribute('data-status')} to ${who}`);
+    await row.getByRole('button', { name: 'View forms' }).click();
+    const officeCard = page.getByTestId('monthly-forms');
+    await officeCard.getByTestId('monthly-forms-submitted').waitFor({ timeout: 15000 });
+    await officeCard.getByTestId('monthly-attendance-preview').waitFor({ timeout: 5000 });
+    await officeCard.getByTestId('monthly-attendance-download').waitFor({ timeout: 5000 });
+    if ((await officeCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error(`${who} was offered Send for a technician`);
+    if ((await officeCard.getByTestId('monthly-forms-edit').count()) !== 0) throw new Error(`${who} was offered editing a technician’s forms`);
+    await page.getByTestId('attendance-export').waitFor({ timeout: 5000 });
+  }
 
   // Another technician sees only their own month, and is refused Naledi's.
   await signInAs(page, 'Sipho Mahlangu');

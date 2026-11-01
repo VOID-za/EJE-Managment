@@ -580,6 +580,18 @@ an EJE mailbox as a test contact). Never a real customer's job.
 | N7 | Create a test customer with a real address; then change the address | A pin is found within a minute and shown on the customer's card with the date Google's coordinates will be refreshed or deleted; after the change it is looked up again; a pin you marked correct is kept, marked Re-check, and a suggestion is offered |
 | N8 | **The office WhatsApp number** (decision recorded: a dedicated EJE number is used) | The office's WhatsApp Business app keeps working on the office phones throughout, with its chats and linked devices |
 | N9 | On the test customer's location card, Edit location → **Use this device's location**, standing at the site | The coordinates fill in; saved, the card says "Entered by the office: kept" |
+## O. Attendance and timesheets — the tester's changes (1 November 2026)
+
+Automated on desktop (1440), tablet (768) and phone (390) — `scripts/forms-regression.mjs`, `scripts/smoke.mjs`. These are the checks a person makes on the real devices.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| O1 | As a **Coordinator**, look at the menu; open My Monthly Forms | No Timesheets item; the month shows the attendance form only — no timesheet, no "Edit my timesheet"; Send to office sends the attendance alone |
+| O2 | As a **Coordinator**, open the Attendance page | Your own monthly form and your own days only; no Team register; Present/Absent save by themselves |
+| O3 | As a **Master**, open the Attendance page | The same page as everybody: your own form and days; no Team register, no other person listed |
+| O4 | As a **Master** or **Coordinator**, open EJE Monthly Forms, choose last month, **View forms** for a technician | Their attendance (and timesheet) open read only — Preview, Print, Download — with no Send, no edit; "Everybody's attendance as a spreadsheet" is under the list |
+| O5 | As a **Technician**, open Timesheets | No Export CSV button; Preview, Print and the PDF are there |
+| O6 | Record only three days of a month, then Preview the monthly attendance and timesheet PDFs | Only the recorded days appear, in order; no blank rows, no "NOT RECORDED"; the totals add up the lines shown; the note says only recorded days are listed |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

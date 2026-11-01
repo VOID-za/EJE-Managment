@@ -34,6 +34,11 @@ type Kind = 'timesheet' | 'attendance';
  *
  * Download PDF saves the file; Export PDF hands it to the device's share sheet
  * (`share-file.ts`). Both are the one-page PDF under its file name.
+ *
+ * A COORDINATOR'S MONTH IS ATTENDANCE ONLY (TS-ROLE-1, 1 November 2026): no
+ * timesheet half, no timesheet link, and the submission sends the attendance
+ * alone. The timesheet is not even fetched — the server refuses a
+ * Coordinator's own sheet.
  */
 export const MonthlyFormsCard = ({
   userId,
@@ -53,7 +58,11 @@ export const MonthlyFormsCard = ({
   const [acknowledged, setAcknowledged] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const forms = useQuery(`payroll:forms:${userId}:${month}`, () => payroll.forms(userId, month));
-  const timesheet = useQuery(`payroll:timesheet:${userId}:${month}`, () => payroll.timesheet(userId, month));
+  const timesheetRequired = forms.data?.timesheetRequired === true;
+  // Asked only once the month is known to have a timesheet (TS-ROLE-1).
+  const timesheet = useQuery(`payroll:timesheet:${userId}:${month}:${timesheetRequired ? 'yes' : 'no'}`, () =>
+    timesheetRequired ? payroll.timesheet(userId, month) : Promise.resolve(null),
+  );
   const attendance = useQuery(`payroll:attendance:${userId}:${month}`, () => payroll.attendance(userId, month));
 
   if (forms.error !== null) return <QueryFailure code={forms.errorCode} message={forms.error} onRetry={forms.refetch} />;
@@ -67,7 +76,11 @@ export const MonthlyFormsCard = ({
       await payroll.submit(userId, month, unrecorded.length > 0 && acknowledged);
     });
     if (ok) {
-      setDone(`${state.monthLabel} submitted to the office: ${state.fileNames.timesheet} and ${state.fileNames.attendance}.`);
+      setDone(
+        state.timesheetRequired
+          ? `${state.monthLabel} submitted to the office: ${state.fileNames.timesheet} and ${state.fileNames.attendance}.`
+          : `${state.monthLabel} submitted to the office: ${state.fileNames.attendance}.`,
+      );
       forms.refetch();
       timesheet.refetch();
       attendance.refetch();
@@ -131,7 +144,7 @@ export const MonthlyFormsCard = ({
       <p className="mt-1 text-xs text-steel-500">
         Files are named by the name on documents “{state.technician.documentName}” (set by the office in Administration → Users).
       </p>
-      {focus === 'attendance' ? (
+      {focus === 'attendance' || !state.timesheetRequired ? (
         <div className="mt-3">{documentCard('attendance')}</div>
       ) : (
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -154,14 +167,16 @@ export const MonthlyFormsCard = ({
       */}
       {state.owner && state.submission === null && (
         <div className="mt-3 flex flex-wrap gap-2" data-testid="monthly-forms-edit">
-          <ButtonLink
-            href={`/timesheets?from=${monthBounds(month).from}&to=${monthBounds(month).to}`}
-            size="sm"
-            variant="secondary"
-            data-testid="monthly-forms-edit-timesheet"
-          >
-            Edit my timesheet for {state.monthLabel}
-          </ButtonLink>
+          {state.timesheetRequired && (
+            <ButtonLink
+              href={`/timesheets?from=${monthBounds(month).from}&to=${monthBounds(month).to}`}
+              size="sm"
+              variant="secondary"
+              data-testid="monthly-forms-edit-timesheet"
+            >
+              Edit my timesheet for {state.monthLabel}
+            </ButtonLink>
+          )}
           <ButtonLink href={`/attendance?from=${monthBounds(month).from}`} size="sm" variant="secondary" data-testid="monthly-forms-edit-attendance">
             Edit my attendance for {state.monthLabel}
           </ButtonLink>
@@ -197,7 +212,7 @@ export const MonthlyFormsCard = ({
           >
             {focus === 'attendance' ? `Send ${state.monthLabel} to the office` : `Submit ${state.monthLabel} to the office`}
           </Button>
-          {focus === 'attendance' && (
+          {focus === 'attendance' && state.timesheetRequired && (
             <p className="text-xs text-steel-500" data-testid="monthly-forms-together">
               Your timesheet for {state.monthLabel} ({state.fileNames.timesheet}) goes with it: the office receives the
               month&apos;s attendance and timesheet together, once.
@@ -211,8 +226,12 @@ export const MonthlyFormsCard = ({
       <ConfirmDialog
         open={confirm}
         title={`Submit ${state.monthLabel} to the office?`}
-        message={`Your timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) go together, once. Afterwards you can no longer change that month's lines or attendance; a timesheet mistake is put right by a correction the office accepts.`}
-        confirmLabel="Submit both"
+        message={
+          state.timesheetRequired
+            ? `Your timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) go together, once. Afterwards you can no longer change that month's lines or attendance; a timesheet mistake is put right by a correction the office accepts.`
+            : `Your attendance (${state.fileNames.attendance}) goes to the office, once. Afterwards you can no longer change that month's attendance.`
+        }
+        confirmLabel={state.timesheetRequired ? 'Submit both' : 'Submit attendance'}
         busy={operation.running}
         onConfirm={() => void submit()}
         onCancel={() => setConfirm(false)}

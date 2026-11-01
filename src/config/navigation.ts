@@ -69,17 +69,12 @@ export const NAVIGATION: readonly NavigationItem[] = [
    */
   { href: '/captures', label: 'Field Captures', icon: 'clock', group: 'work' },
   /*
-   * ATTEND-1 and TIMESHEET-1. The register is the office's; the timesheet is
-   * everybody's, because a technician opens their own (the server shows them
-   * nobody else's).
-   */
-  /*
-   * ATTEND-2 (27 October 2026): everybody marks their own attendance, so the
-   * item is everybody's. The page shows a technician their own days and the
-   * office the register; the server enforces both.
+   * ATTEND-2, ATT-OWN-1 (1 November 2026): everybody records their own
+   * attendance and nobody else's, so the item is everybody's and the page is
+   * the same for every role. The office reads everybody's on EJE Monthly Forms.
    */
   { href: '/attendance', label: 'Attendance', icon: 'user', group: 'work' },
-  // Not the Coordinator's: she does not complete technician timesheets (the tester, 30 October 2026).
+  // TS-ROLE-1: a Coordinator keeps no timesheet (the tester, 30 October and 1 November 2026); the server refuses it too.
   { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work', roles: ['master', 'technician'] },
   /*
    * PAY-01…08, split on 30 October 2026 (the tester): EVERYBODY has their own

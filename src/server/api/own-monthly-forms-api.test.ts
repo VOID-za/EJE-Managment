@@ -39,8 +39,9 @@ describe('the office keeps its OWN forms, and only its own', () => {
   let coordinator: ApiTestClient;
   let people: readonly Person[];
   let me: Person;
-  let coordinatorPerson: Person;
   let technician: Person;
+  // TS-ROLE-1: a Coordinator keeps no timesheet, so is on nobody's list of sheets.
+  const COORDINATOR = 'user-coord-christene';
 
   beforeEach(async () => {
     startTestServer();
@@ -48,7 +49,6 @@ describe('the office keeps its OWN forms, and only its own', () => {
     coordinator = await signedInAs(DEMO_USERS.coordinator);
     people = await peopleOf(master);
     me = people[0]!;
-    coordinatorPerson = people.find((person) => person.firstName === 'Christene')!;
     technician = people.find((person) => person.firstName === 'Sipho')!;
   });
 
@@ -62,8 +62,27 @@ describe('the office keeps its OWN forms, and only its own', () => {
     expect(sheet.status).toBe(200);
     expect(sheet.data.editable).toBe(true);
     expect(sheet.data.days[0]?.entries).toHaveLength(1);
-    // And the Coordinator's list starts with the Coordinator.
-    expect((await peopleOf(coordinator))[0]?.firstName).toBe('Christene');
+    // TS-ROLE-1: the Coordinator's list has no sheet of their own, and the Master's no Coordinator.
+    expect((await peopleOf(coordinator)).some((person) => person.id === COORDINATOR)).toBe(false);
+    expect(people.some((person) => person.id === COORDINATOR)).toBe(false);
+  });
+
+  it('refuses a Coordinator every timesheet of their own — entering, opening, sending (TS-ROLE-1)', async () => {
+    for (const answer of [
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/entries`, line),
+      await coordinator.get(`/api/timesheets/${COORDINATOR}?from=${today}&to=${today}`),
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/period/submit`, { from: `${month}-01`, to: `${month}-01` }),
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/period/comment`, { from: `${month}-01`, to: `${month}-01`, comment: 'x' }),
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/comment`, { date: today, comment: 'x' }),
+    ]) {
+      expect(answer.status, JSON.stringify(answer.error)).toBe(403);
+    }
+    // Still reads a technician's sheet — the office's review.
+    expect((await coordinator.get(`/api/timesheets/${technician.id}?from=${today}&to=${today}`)).status).toBe(200);
+    // And a technician cannot export a CSV of their own sheet (TS-CSV-OFF-1); the office can.
+    const sipho = await signedInAs(DEMO_USERS.technician);
+    expect((await sipho.download(`/api/timesheets/${technician.id}/export?from=${today}&to=${today}`)).status).toBe(403);
+    expect((await master.download(`/api/timesheets/${technician.id}/export?from=${today}&to=${today}`)).status).toBe(200);
   });
 
   it('refuses every write to a technician’s timesheet, with the technician’s id in the path', async () => {
@@ -75,11 +94,11 @@ describe('the office keeps its OWN forms, and only its own', () => {
 
   it('refuses one office user writing the other’s timesheet', async () => {
     refused(await coordinator.post(`/api/timesheets/${me.id}/entries`, line));
-    refused(await master.post(`/api/timesheets/${coordinatorPerson.id}/entries`, line));
+    refused(await master.post(`/api/timesheets/${COORDINATOR}/entries`, line));
     const own = await master.post<{ readonly entry: { readonly id: string } }>(`/api/timesheets/${me.id}/entries`, line);
     expect(own.status).toBe(200);
     // Not by correcting it through their own sheet, and not by removing it.
-    refused(await coordinator.post(`/api/timesheets/${coordinatorPerson.id}/entries`, { ...line, entryId: own.data.entry.id }));
+    refused(await coordinator.post(`/api/timesheets/${COORDINATOR}/entries`, { ...line, entryId: own.data.entry.id }));
     refused(await coordinator.post(`/api/timesheets/${me.id}/entries/${own.data.entry.id}/remove`, {}));
   });
 

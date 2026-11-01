@@ -1,4 +1,4 @@
-import { asUserId, userFullName, type IsoDate, type IsoDateTime, type MonthlySubmission } from '@/domain';
+import { asUserId, completesTimesheet, userFullName, type IsoDate, type IsoDateTime, type MonthlySubmission } from '@/domain';
 import { businessToday } from '@/lib/business-time';
 import {
   attendanceMonthFileName,
@@ -45,6 +45,12 @@ import { submitTimesheetPeriod, versionInForce } from './timesheets';
  * have none — a public holiday — but it is never sent unnoticed). Submitted
  * once: a retry, a double tap or a second tab gets one submission and one
  * refusal. The office is notified, once, after it is saved; it is audited.
+ *
+ * A COORDINATOR'S MONTH IS ATTENDANCE ONLY (TS-ROLE-1, the tester, 1 November
+ * 2026): Coordinators keep no timesheet, so their submission carries the
+ * attendance alone (`timesheetPeriodId` null — migration 0043 allows that for
+ * a Coordinator only). A month a Coordinator already submitted WITH a
+ * timesheet keeps it: history is never rewritten.
  */
 
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
@@ -58,6 +64,11 @@ export interface MonthlyFormsState {
   readonly to: IsoDate;
   readonly monthEnded: boolean;
   readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+  /**
+   * TS-ROLE-1. False for a Coordinator's month (attendance only) — unless that
+   * month was already submitted with a timesheet, which it then still shows.
+   */
+  readonly timesheetRequired: boolean;
   readonly submission: { readonly submittedAt: IsoDateTime; readonly submittedByName: string | null } | null;
   readonly timesheet: {
     /** The exact month period was already sent (alone, or with the submission). */
@@ -97,9 +108,10 @@ export const loadMonthlyForms = async (
     context.repos.attendance.listRecords(from, to, person.id),
   ]);
   const days = attendanceSnapshotDays(month, records);
-  const exactSent = period !== null && period.submittedAt !== null ? period : null;
+  const timesheetRequired = submission === null ? completesTimesheet(person.role) : submission.timesheetPeriodId !== null;
+  const exactSent = timesheetRequired && period !== null && period.submittedAt !== null ? period : null;
   const corrections = exactSent === null ? [] : await context.repos.attendance.listCorrections(exactSent.id);
-  const blocking = sent.filter((other) => exactSent === null || other.id !== exactSent.id);
+  const blocking = timesheetRequired ? sent.filter((other) => exactSent === null || other.id !== exactSent.id) : [];
   const submitter = submission === null ? null : await context.repos.users.findById(submission.submittedBy);
   const missingReasons = days.filter((day) => day.status === 'absent' && day.absenceReason === null).map((day) => day.date);
   const unrecorded = unrecordedWeekdays(days, today);
@@ -127,10 +139,12 @@ export const loadMonthlyForms = async (
       timesheet: timesheetMonthFileName(documentNameOf(person), month),
       attendance: attendanceMonthFileName(documentNameOf(person), month),
     },
+    timesheetRequired,
     submission: submission === null ? null : { submittedAt: submission.submittedAt, submittedByName: submitter === null ? null : userFullName(submitter) },
     timesheet: {
       sent: exactSent !== null,
       versionInForce:
+        !timesheetRequired ? 'Not required — Coordinators keep no timesheet' :
         exactSent === null ? 'Not sent yet' : versionInForce(exactSent, corrections).correction === null ? 'Original submission' : `Correction ${versionInForce(exactSent, corrections).correction!.sequence} accepted`,
       correctionPending: corrections.some((correction) => correction.status === 'pending'),
       blockingPeriods: blocking.map((other) => formatPeriod(other.from, other.to)),
@@ -147,7 +161,8 @@ export const loadMonthlyForms = async (
 };
 
 /**
- * SUBMIT THE MONTH: the timesheet and the attendance together, once.
+ * SUBMIT THE MONTH: the timesheet and the attendance together, once — or, for
+ * a Coordinator, the attendance alone (TS-ROLE-1).
  * `confirmUnrecorded` must be true when weekdays have no attendance answer.
  */
 export const submitMonth = async (
@@ -158,7 +173,7 @@ export const submitMonth = async (
 ): Promise<MonthlySubmission> => {
   const id = asUserId(technicianId);
   if (context.actor.id !== id) {
-    throw refuse('You can only submit your own month.', 'not_permitted', 'Each technician submits their own timesheet and attendance.');
+    throw refuse('You can only submit your own month.', 'not_permitted', 'Each person submits their own month; nobody submits another person’s attendance or timesheet.');
   }
   const state = await loadMonthlyForms(context, technicianId, month);
   if (state.submission !== null) {
@@ -190,9 +205,10 @@ export const submitMonth = async (
   }
 
   const person = await findPayrollPerson(context, technicianId);
-  // The timesheet half: the exact month period, sent now unless it already was.
-  let period = await context.repos.attendance.findPeriod(person.id, state.from, state.to);
-  if (period === null || period.submittedAt === null) {
+  // The timesheet half: the exact month period, sent now unless it already
+  // was. None for a Coordinator (TS-ROLE-1).
+  let period = state.timesheetRequired ? await context.repos.attendance.findPeriod(person.id, state.from, state.to) : null;
+  if (state.timesheetRequired && (period === null || period.submittedAt === null)) {
     period = await submitTimesheetPeriod(context, technicianId, state.from, state.to, { notify: false });
   }
   const now = context.services.clock.now();
@@ -200,7 +216,7 @@ export const submitMonth = async (
     id: context.services.ids.next('msb'),
     userId: person.id,
     month,
-    timesheetPeriodId: period.id,
+    timesheetPeriodId: period?.id ?? null,
     attendance: await attendanceSnapshotFor(context, person, month),
     submittedAt: now,
     submittedBy: context.actor.id,
@@ -209,20 +225,25 @@ export const submitMonth = async (
     throw refuse(`${state.monthLabel} has already been submitted to the office.`, 'month_submitted', 'It was submitted once; the office has it.');
   }
   const name = userFullName(person);
+  const documents = state.timesheetRequired
+    ? `Timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance})`
+    : `Attendance (${state.fileNames.attendance}) — no timesheet: Coordinators keep none —`;
   await audit(context, {
     jobId: null,
     type: 'monthly_forms_submitted',
     summary: `Monthly forms submitted: ${name}, ${state.monthLabel}`,
     detail:
-      `Timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) sent to the office by ${userFullName(context.actor)}.` +
+      `${documents} sent to the office by ${userFullName(context.actor)}.` +
       (state.attendance.unrecordedWeekdays.length > 0
         ? ` Confirmed with ${state.attendance.unrecordedWeekdays.length} weekday(s) without attendance: ${state.attendance.unrecordedWeekdays.join(', ')}.`
         : ''),
   });
   await notifyOffice(context, {
     type: 'timesheet_submitted',
-    title: `${name} submitted ${state.monthLabel}: timesheet and attendance`,
-    body: `${state.fileNames.timesheet} and ${state.fileNames.attendance}. Open Monthly payroll to include them in the Finance package.`,
+    title: `${name} submitted ${state.monthLabel}: ${state.timesheetRequired ? 'timesheet and attendance' : 'attendance'}`,
+    body: state.timesheetRequired
+      ? `${state.fileNames.timesheet} and ${state.fileNames.attendance}. Open Monthly payroll to include them in the Finance package.`
+      : `${state.fileNames.attendance}. Open Monthly payroll to include it in the Finance package.`,
     link: '/payroll',
   });
   return saved;
@@ -239,6 +260,8 @@ export interface MonthlyHistoryEntry {
   readonly submittedAt: IsoDateTime;
   readonly submittedByName: string | null;
   readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+  /** False for a month submitted as attendance only (a Coordinator's, TS-ROLE-1). */
+  readonly timesheetIncluded: boolean;
 }
 
 /**
@@ -266,5 +289,6 @@ export const loadMonthlyHistory = async (context: OperationContext, userId: stri
       timesheet: timesheetMonthFileName(documentNameOf(person), submission.month),
       attendance: attendanceMonthFileName(documentNameOf(person), submission.month),
     },
+    timesheetIncluded: submission.timesheetPeriodId !== null,
   }));
 };

@@ -22,8 +22,11 @@ import { WorkflowError } from './errors';
  * preview, print and PDF as the timesheet — the actual attendance document,
  * never a print of a screen.
  *
- * One row per day of the month: Present, Absent with its reason (ATT-01: Leave,
- * Sick Leave, Family Responsibility, IOD), or NOT RECORDED — nothing inferred.
+ * One row per RECORDED day of the month: Present, or Absent with its reason
+ * (ATT-01: Leave, Sick Leave, Family Responsibility, IOD). A day nobody
+ * recorded is left off the form (PDF-UNREC-1, the tester, 1 November 2026) —
+ * not shown as absent, not as "not recorded", nothing inferred. The snapshot a
+ * submission froze still holds every day of the month exactly as it was.
  *
  * VERSIONS. Before the month is submitted it is the register as it stands.
  * Once submitted, the month as it stood is frozen in the submission; the
@@ -40,7 +43,7 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
 export interface AttendanceDocumentRow {
   readonly date: IsoDate;
   readonly weekday: string;
-  /** Present, Absent, NOT RECORDED, or — for a day still to come — empty. */
+  /** Present or Absent — the form lists recorded days only. */
   readonly status: string;
   readonly reason: string;
   readonly note: string;
@@ -120,12 +123,12 @@ export const unrecordedWeekdays = (days: readonly AttendanceSnapshotDay[], today
   days.filter((day) => day.status === null && day.date <= today && isWeekday(day.date)).map((day) => day.date);
 
 export const assertMayReadAttendanceOf = (context: OperationContext, technicianId: string): void => {
-  if (can(context.actor.role, 'attendance.manage') || can(context.actor.role, 'timesheets.viewAll')) return;
+  if (can(context.actor.role, 'attendance.viewAll') || can(context.actor.role, 'timesheets.viewAll')) return;
   if (context.actor.id === technicianId) return;
   throw refuse(
     'You can only open your own attendance.',
     'not_permitted',
-    'The office reads every technician’s attendance; a technician reads their own.',
+    'The office reads everybody’s attendance on EJE Monthly Forms; everybody else reads their own.',
   );
 };
 
@@ -139,12 +142,12 @@ export const assertPayrollMonth = (month: string): void => {
   if (!isPayrollMonth(month)) throw refuse('That is not a month.', 'invalid_month', 'Give the month as YYYY-MM.');
 };
 
-/** The form's rows and summary from snapshot days. Pure. */
+/** The form's rows (recorded days only, PDF-UNREC-1) and summary from snapshot days. Pure. */
 export const buildAttendanceRows = (
   days: readonly AttendanceSnapshotDay[],
   today: IsoDate,
 ): Pick<AttendanceDocument, 'rows' | 'summary'> => {
-  const rows = days.map((day): AttendanceDocumentRow => {
+  const rows = days.filter((day) => day.status !== null).map((day): AttendanceDocumentRow => {
     const future = day.date > today;
     return {
       date: day.date,

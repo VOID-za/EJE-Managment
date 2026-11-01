@@ -302,6 +302,13 @@
       "when": 1793816067482,
       "tag": "0042_integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793902467482,
+      "tag": "0043_coordinator_attendance_only",
+      "breakpoints": true
     }
   ]
 }

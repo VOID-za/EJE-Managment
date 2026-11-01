@@ -603,7 +603,24 @@ await check('Attendance: a slow connection still saves every change', async () =
 });
 
 /* ---- 7. My Monthly Forms: own forms only ------------------------------- */
-for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Christene van Niekerk', 'Christene'], ['Sipho Mahlangu', 'Sipho']]) {
+// TS-ROLE-1 (1 November 2026): the Coordinator's month is attendance only.
+await check('My Monthly Forms: Christene (Coordinator) has her OWN attendance only — no timesheet anywhere', async () => {
+  await as('Christene van Niekerk');
+  await go('/payroll/mine');
+  const title = await page.getByTestId('monthly-forms-title').innerText();
+  if (!title.includes('Christene')) fail(`the forms are "${title}"`);
+  for (const id of ['monthly-attendance-preview', 'monthly-forms-edit-attendance']) if ((await page.getByTestId(id).count()) === 0) fail(`no ${id}`);
+  for (const id of ['monthly-timesheet', 'monthly-timesheet-preview', 'monthly-forms-edit-timesheet']) if ((await page.getByTestId(id).count()) !== 0) fail(`a Coordinator is offered ${id}`);
+  if ((await page.locator('nav a[href="/timesheets"]').count()) !== 0) fail('the sidebar offers Timesheets');
+  const me = (await get('/api/auth/me')).json.data.user.id;
+  const now = await today();
+  for (const [what, answer] of Object.entries({
+    'own timesheet line': await post(`/api/timesheets/${me}/entries`, { date: now, customerName: 'X', workshop: false, overtimeHours: 1, doubleHours: 0, calloutAmount: 0, internalKm: 0, customerKm: 0 }),
+    'own timesheet read': await get(`/api/timesheets/${me}?from=${now}&to=${now}`),
+  })) if (answer.status !== 403) fail(`${what} answered ${answer.status}`);
+  await noPageOverflow('My Monthly Forms (Coordinator)');
+});
+for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Sipho Mahlangu', 'Sipho']]) {
   await check(`My Monthly Forms: ${first} sees and edits their OWN forms only`, async () => {
     await as(who);
     await go('/payroll/mine');
@@ -684,7 +701,17 @@ await check('PDF: a Finance package attachment (stored file)', async () => {
 });
 
 /* ---- 8. The office's own timesheet ------------------------------------- */
-for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Christene van Niekerk', 'Christene']]) {
+await check('Timesheets: Christene (Coordinator) keeps none — she reads the technicians’ sheets only (TS-ROLE-1)', async () => {
+  await as('Christene van Niekerk');
+  await go('/timesheets');
+  await page.getByTestId('timesheet-not-required').waitFor({ timeout: 20000 });
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
+  const options = await page.getByTestId('timesheet-person').locator('option').allInnerTexts();
+  if (options.some((option) => option.includes('Christene') || option.includes('(me)'))) fail(`her own sheet is offered: ${options.join(', ')}`);
+  if ((await page.getByTestId('add-timesheet-line').count()) !== 0) fail('a Coordinator is offered Add line');
+  await noPageOverflow('Timesheets (Coordinator)');
+});
+for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
   await check(`Timesheets: ${first} opens and fills in their OWN timesheet; a technician's is read-only`, async () => {
     await as(who);
     await go('/timesheets');
@@ -699,8 +726,35 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Christene van Niek
     await page.getByTestId('timesheet-person').selectOption('user-tech-sipho');
     await page.getByTestId('timesheet-read-only').waitFor({ timeout: 15000 });
     if ((await page.getByTestId('add-timesheet-line').count()) !== 0) fail('a technician’s timesheet offers Add line to the office');
+    // The office still exports a sheet it READS; never on its own (TS-CSV-OFF-1).
+    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) fail('the office lost the export of a technician’s sheet');
   });
 }
+await check('Timesheets: a technician’s own sheet has no Export CSV, and the server refuses the export (TS-CSV-OFF-1)', async () => {
+  await as('Sipho Mahlangu');
+  await go('/timesheets');
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
+  if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) fail('Export CSV is still on the technician’s Timesheet page');
+  for (const id of ['timesheet-preview']) if ((await page.getByTestId(id).count()) === 0) fail(`no ${id}`);
+  const me = (await get('/api/auth/me')).json.data.user.id;
+  const now = await today();
+  const answer = await get(`/api/timesheets/${me}/export?from=${now}&to=${now}`);
+  if (answer.status !== 403) fail(`the export answered ${answer.status}`);
+  await noPageOverflow('Timesheets (technician)');
+});
+await check('Attendance: every role has its own days only — no Team register, another person’s day refused (ATT-OWN-1)', async () => {
+  const now = await today();
+  for (const who of ['Elmarie Coetzee', 'Christene van Niekerk', 'Sipho Mahlangu']) {
+    await as(who);
+    await go('/attendance');
+    await page.getByTestId('my-attendance').waitFor({ timeout: 20000 });
+    for (const gone of ['team-register-heading', 'attendance-register', 'attendance-row']) if ((await page.getByTestId(gone).count()) !== 0) fail(`${who}: ${gone} is still on the page`);
+    const other = who === 'Sipho Mahlangu' ? 'user-tech-riaan' : 'user-tech-sipho';
+    const answer = await post('/api/attendance', { userId: other, date: now, status: 'present', note: '' });
+    if (answer.status !== 403) fail(`${who} recording ${other} answered ${answer.status}`);
+    await noPageOverflow(`Attendance (${who})`);
+  }
+});
 
 await check('no page errors anywhere in the run', async () => {
   if (pageErrors.length > 0) fail(pageErrors.slice(0, 3).join(' | '));
