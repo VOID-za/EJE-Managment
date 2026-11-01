@@ -1,4 +1,5 @@
 import type { Site } from '../types/customer';
+import { siteNavigationTarget } from './location';
 
 /**
  * Navigation links for a site.
@@ -23,15 +24,11 @@ export const siteAddressLine = (site: Site): string =>
 
 /**
  * A turn-by-turn navigation link, opening in whichever maps app the technician
- * has installed. Uses the documented, stable Google Maps URL format.
+ * has installed. Uses the documented, stable Google Maps URL format. The pin
+ * only when it is trusted — verified, or one confident automatic match
+ * (INT-MAP-3); otherwise the address, which the caller labels as unverified.
  */
-export const siteNavigationUrl = (site: Site): string => {
-  const destination = siteHasPinnedLocation(site)
-    ? `${site.latitude},${site.longitude}`
-    : siteAddressLine(site);
-
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
-};
+export const siteNavigationUrl = (site: Site): string => siteNavigationTarget(site).url;
 
 /**
  * The site on a map, for the customer profile. SITE-3.

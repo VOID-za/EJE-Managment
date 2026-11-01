@@ -28,6 +28,14 @@ export interface WhatsAppConfiguration {
   readonly accessToken: string;
   readonly apiVersion: string;
   readonly baseUrl: string;
+  /**
+   * The language the templates were APPROVED in (WHATSAPP_TEMPLATE_LANGUAGE,
+   * default `en`). Meta looks a template up by name AND language, so a
+   * mismatch is refused as "template does not exist".
+   */
+  readonly templateLanguage: string;
+  /** How long one request to Meta may take. WHATSAPP_TIMEOUT_MS, default 20 s. */
+  readonly timeoutMs: number;
 }
 
 const DEFAULT_BASE_URL = 'https://graph.facebook.com';
@@ -52,6 +60,11 @@ export const readWhatsAppConfiguration = (
     accessToken,
     apiVersion: (env.WHATSAPP_API_VERSION ?? '').trim() || DEFAULT_API_VERSION,
     baseUrl: ((env.WHATSAPP_API_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/u, ''),
+    templateLanguage: (env.WHATSAPP_TEMPLATE_LANGUAGE ?? '').trim() || 'en',
+    timeoutMs: (() => {
+      const value = Number((env.WHATSAPP_TIMEOUT_MS ?? '').trim());
+      return Number.isFinite(value) && value >= 1000 && value <= 120_000 ? value : 20_000;
+    })(),
   };
 };
 
@@ -61,6 +74,12 @@ export class WhatsAppSendFailed extends Error {
     message: string,
     /** The provider's own code, where it gave one. For the audit trail. */
     readonly providerCode: string = '',
+    /**
+     * TRYING AGAIN WILL NOT HELP (INT-WA-3): a refused token, a template Meta
+     * does not have, a number that is not on WhatsApp. The outbox gives up on
+     * such a message at once instead of spending its remaining attempts.
+     */
+    readonly permanent: boolean = false,
   ) {
     super(message);
     this.name = 'WhatsAppSendFailed';
@@ -92,6 +111,26 @@ export const toE164 = (raw: string): string => {
   // Already international, for a number outside South Africa.
   if (digits.length >= 11 && digits.length <= 15 && !digits.startsWith('0')) return digits;
   throw new WhatsAppSendFailed(`"${raw}" is not a mobile number this can send to.`);
+};
+
+/**
+ * Which refusals a retry cannot fix. Meta's error codes (Cloud API reference,
+ * "Error codes"): 190 an expired or invalid token, 10/200/299 permissions,
+ * 100 an invalid parameter, 131008/131009 a missing or invalid parameter,
+ * 131026 a number that cannot receive the message, 131030 a recipient not on
+ * the test allow-list, 131051 an unsupported type, 132000-132069 template
+ * problems (missing, paused, disabled, wrong parameter count), 133010 a phone
+ * number that is not registered. Throttling (4, 80007, 130429, 131048, 131056)
+ * and 5xx are temporary.
+ */
+export const isPermanentWhatsAppFailure = (status: number, code: number | undefined): boolean => {
+  if (code !== undefined) {
+    if ([4, 80007, 130429, 131048, 131056, 131000, 1, 2].includes(code)) return false;
+    if ([10, 100, 190, 200, 299, 131008, 131009, 131026, 131030, 131031, 131051, 133010].includes(code)) return true;
+    if (code >= 132000 && code < 133000) return true;
+  }
+  if (status === 401 || status === 403 || status === 404) return true;
+  return false;
 };
 
 interface CloudApiResponse {
@@ -145,7 +184,7 @@ export class CloudApiWhatsAppService implements WhatsAppService {
       type: 'template',
       template: {
         name: message.templateName,
-        language: { code: 'en' },
+        language: { code: this.config.templateLanguage },
         components: [
           {
             type: 'body',
@@ -164,6 +203,7 @@ export class CloudApiWhatsAppService implements WhatsAppService {
           'content-type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.config.timeoutMs),
       });
     } catch (cause) {
       throw new WhatsAppSendFailed(
@@ -178,6 +218,7 @@ export class CloudApiWhatsAppService implements WhatsAppService {
           payload.error?.message ?? `WhatsApp refused the message (HTTP ${response.status}).`,
         ),
         payload.error?.code === undefined ? '' : String(payload.error.code),
+        isPermanentWhatsAppFailure(response.status, payload.error?.code),
       );
     }
 

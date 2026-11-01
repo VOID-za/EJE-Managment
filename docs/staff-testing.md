@@ -560,6 +560,26 @@ Fictional data only while the demonstration switcher is on.
 | M4 | Mark attendance for a month on the tablet, with Wi-Fi switched off halfway and on again, and the app put in the background once | The status says what is true (kept offline, then saved); every day is saved afterwards |
 | M5 | As a Master and as a Coordinator: My Monthly Forms → Edit my timesheet; then EJE Monthly Forms → View forms for a technician | Your own timesheet opens for editing; a technician's forms open read-only, with no Edit or Submit |
 
+## N. WhatsApp, Google Maps and email — with the REAL accounts (1 November 2026)
+
+**NOT YET POSSIBLE**: these need the Microsoft 365, Meta and Google setup in
+`docs/integrations-setup.md`. Until then each integration says "Not configured"
+in Administration → Integrations, signed job cards are stored with their email
+queued (not sent), and nothing reaches a customer or a technician's phone.
+Use ONLY internal recipients (EMAIL_TEST_RECIPIENTS, WHATSAPP_TEST_RECIPIENTS,
+an EJE mailbox as a test contact). Never a real customer's job.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| N1 | Administration → Integrations → Email → Send test email | It arrives from sales@ejeie.co.za; it is in sales@'s Sent Items; the card says Connected |
+| N2 | A test job whose contact is an EJE mailbox: complete it and have it signed on the tablet | The customer email arrives by itself within a minute, from sales@, with the template's words and ONLY the signed job card PDF (open it: it is the signed one); the job's email history says Sent, with the template version |
+| N3 | Edit the Breakdown template, sign a second test job | The new wording arrives; the first job's history still shows the old wording |
+| N4 | Administration → Integrations → WhatsApp → Send test message (only after Meta approves the templates) | The message arrives on the test phone; the job shows Delivered, then Read |
+| N5 | Assign a test job to a technician with a test phone; transfer it to another; return one to Open Jobs | The assigned, then the receiving, technician gets a message; Open Jobs sends nothing |
+| N6 | Accept a test job on the tablet → Send Location | The site location arrives on the technician's phone; the Google Maps link opens on the site's pin |
+| N7 | Create a test customer with a real address; then change the address | A pin is found within a minute and shown on the customer's card; after the change it is looked up again; a pin you marked correct is kept and a suggestion is offered |
+| N8 | **The office WhatsApp number**: before anything is connected, the owner's decision on `docs/integrations-setup.md` §1 is recorded | The existing office number keeps working on the office phones throughout |
+
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
 Run from outside the server against `https://eje.syncza.co.za`, signed in only

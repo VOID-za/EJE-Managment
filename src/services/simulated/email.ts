@@ -25,6 +25,9 @@ import type { SimulatedOutbox } from './outbox';
  * pending and failed paths are exercised.
  */
 export class SimulatedEmailService implements EmailService {
+  /** The demonstration sends nothing; this is the mailbox it says it would send from. */
+  readonly sender = (process.env.EMAIL_SENDER ?? '').trim() || 'sales@ejeie.co.za';
+
   constructor(
     private readonly outbox: SimulatedOutbox,
     private readonly clock: Clock,

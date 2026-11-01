@@ -15,6 +15,11 @@ import { PostgresNotificationRepository } from './notification-repository';
 import { PostgresCaptureReferralRepository } from './capture-referral-repository';
 import { PostgresChangeRequestRepository } from './change-request-repository';
 import { PostgresOutboxRepository } from './outbox-repository';
+import {
+  PostgresCustomerEmailRepository,
+  PostgresEmailTemplateRepository,
+  PostgresIntegrationRepository,
+} from './integration-repositories';
 import { PostgresSettingsRepository } from './settings-repository';
 import { PostgresUserRepository } from './user-repository';
 
@@ -47,6 +52,9 @@ export const createPostgresRepositories = (db: DatabaseExecutor): RepositoryBund
   attendance: new PostgresAttendanceRepository(db),
   chat: new PostgresChatRepository(db),
   outbox: new PostgresOutboxRepository(db),
+  emailTemplates: new PostgresEmailTemplateRepository(db),
+  customerEmails: new PostgresCustomerEmailRepository(db),
+  integrations: new PostgresIntegrationRepository(db),
   captureReferrals: new PostgresCaptureReferralRepository(db),
   changeRequests: new PostgresChangeRequestRepository(db),
   deliveryNotes: new PostgresDeliveryNoteRepository(db),

@@ -1,3 +1,4 @@
+import { retryWhatsAppMessage } from '@/application/whatsapp-messages';
 import 'server-only';
 import { generateDeliveryNote } from '@/application/delivery-note';
 import { z } from 'zod';
@@ -869,12 +870,30 @@ export const JOB_COMMANDS: CommandRegistry = {
     },
   }),
 
+  /*
+   * THE CUSTOMER'S COPY, AGAIN — through the outbox (INT-EMAIL-4). The body may
+   * carry `confirmNotSent`: the office's statement that Sent Items was checked,
+   * required only after an attempt whose outcome is uncertain.
+   */
   retry_delivery: command({
-    schema: z.object({}).strict(),
-    async run(context, _input: Record<string, never>, target) {
+    schema: z.object({ confirmNotSent: z.boolean().optional() }).strict(),
+    async run(context, input: { confirmNotSent?: boolean }, target) {
       const job = await loadVisibleJob(context, target);
       const recipient = await resolveRecipient(context, job);
-      return jobs.retryJobCardDelivery(context.operation, job, recipient.displayName);
+      return jobs.retryJobCardDelivery(context.operation, job, recipient.displayName, {
+        confirmNotSent: input.confirmNotSent === true,
+      });
+    },
+  }),
+
+  /** A failed WhatsApp message about this job, sent again. INT-WA-3. Office only. */
+  retry_whatsapp: command({
+    schema: z.object({ messageId: z.string().min(1).max(100) }).strict(),
+    async run(context, input: { messageId: string }, target) {
+      const job = await loadVisibleJob(context, target);
+      const message = await context.repos.outbox.findById(input.messageId);
+      if (message === null || message.jobId !== job.id) throw notFound('That message is not about this job.');
+      return retryWhatsAppMessage(context.operation, input.messageId);
     },
   }),
 

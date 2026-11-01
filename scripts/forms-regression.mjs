@@ -429,7 +429,16 @@ const day = (date) => page.locator(`[data-testid="timesheet-day"][data-date="${d
 const lineForm = () => page.getByTestId('timesheet-line-form');
 let openDays = [];
 await check('Timesheets: every day of the month entered through the screen, and all reopen', async () => {
-  await go('/timesheets');
+  /*
+   * THE WHOLE PREVIOUS MONTH, named in the address — the month a technician
+   * completes at month end. The default period is the current month, which
+   * on the 1st has one day (this check failed on 1 November 2026).
+   */
+  const now = await today();
+  const [year, month] = now.split('-').map(Number);
+  const first = new Date(Date.UTC(month === 1 ? year - 1 : year, month === 1 ? 11 : month - 2, 1));
+  const last = new Date(Date.UTC(year, month - 1, 0));
+  await go(`/timesheets?from=${first.toISOString().slice(0, 10)}&to=${last.toISOString().slice(0, 10)}`);
   await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
   openDays = await page.locator('[data-testid="timesheet-day"]').evaluateAll((elements) => elements.filter((element) => element.querySelector('[data-testid="add-timesheet-line"]')).map((element) => element.dataset.date));
   if (openDays.length < 20) fail(`only ${openDays.length} days can take a line`);
@@ -529,7 +538,9 @@ const attendanceDay = (date) => page.locator(`[data-testid="my-attendance-day"][
 let attendanceDays = [];
 await check('Attendance: no Save button; every tap through the month saves itself', async () => {
   const now = await today();
-  await go(`/attendance?from=${now.slice(0, 8)}01`);
+  // From the 1st of the PREVIOUS month: on the 1st of a month the current one has one day.
+  const [y, m] = now.split('-').map(Number);
+  await go(`/attendance?from=${new Date(Date.UTC(m === 1 ? y - 1 : y, m === 1 ? 11 : m - 2, 1)).toISOString().slice(0, 10)}`);
   await page.getByTestId('my-attendance').waitFor({ timeout: 20000 });
   if ((await page.getByTestId('absence-reason-confirm').count()) !== 0) fail('a Record absent button is still there');
   attendanceDays = await page.locator('[data-testid="my-attendance-day"]').evaluateAll((elements) => elements.map((element) => element.dataset.date));

@@ -1,3 +1,5 @@
+import type { CustomerEmail, EmailTemplate, EmailTemplateVersion } from '@/domain';
+import type { GeocodeCacheEntry, WhatsAppWebhookEvent } from '../repositories';
 import type {
   CustomerDocument,
   ActivityEvent,
@@ -88,6 +90,15 @@ export interface DemoDatabase {
   notifications: AppNotification[];
   /** Messages waiting to leave the building. See `types/outbox.ts`. */
   outbox: OutboxMessage[];
+  /** Customer email templates, their versions, and the email outbox. INT-EMAIL, v36. */
+  emailTemplates: EmailTemplate[];
+  emailTemplateVersions: EmailTemplateVersion[];
+  customerEmails: CustomerEmail[];
+  /** WhatsApp webhook statuses already applied, geocoder answers, usage. v36. */
+  whatsappWebhookEvents: WhatsAppWebhookEvent[];
+  geocodeCache: GeocodeCacheEntry[];
+  integrationUsage: { day: string; service: string; requests: number }[];
+  integrationState: { service: string; fingerprint: string; summary: string; updatedAt: string }[];
   /**
    * Captures a tablet held that the server refused, waiting for the office.
    * BD-15. See `types/capture.ts`.
@@ -239,7 +250,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -274,6 +285,14 @@ export const createSeededDatabase = (): DemoDatabase => ({
   // Nothing outstanding in a fresh demonstration: the seed's notifications
   // describe messages that already happened, not ones still to be sent.
   outbox: [],
+  // Created on first use from SYSTEM_EMAIL_TEMPLATES, as on PostgreSQL.
+  emailTemplates: [],
+  emailTemplateVersions: [],
+  customerEmails: [],
+  whatsappWebhookEvents: [],
+  geocodeCache: [],
+  integrationUsage: [],
+  integrationState: [],
   captureReferrals: [],
   changeRequests: [],
   // Derived from the seed's own crews: a seeded job's technicians have been on

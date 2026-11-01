@@ -200,6 +200,10 @@ const expect = (reply: string, codes: readonly string[], what: string): void => 
 };
 
 export class SmtpEmailService implements EmailService {
+  get sender(): string {
+    return this.config.sender;
+  }
+
   constructor(
     private readonly config: SmtpEmailConfiguration,
     private readonly storage: StorageService,

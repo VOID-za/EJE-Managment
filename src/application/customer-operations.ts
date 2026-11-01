@@ -15,12 +15,14 @@ import {
   type PostalAddress,
   type Site,
   type SiteId,
+  locationAfterSave,
 } from '@/domain';
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
 import type { RemovalResult } from './removal';
 import { updateMachine } from './machine-operations';
+import { geocodeAfterSave } from './site-geocoding';
 
 /**
  * Customer register operations.
@@ -396,7 +398,10 @@ export const createSite = async (
     archivedAt: null,
   };
 
-  const saved = await context.repos.customers.saveSite(site);
+  // INT-MAP-1: a new site with an address is queued for its automatic pin.
+  const saved = await context.repos.customers.saveSite(
+    locationAfterSave(null, site, context.actor.id, context.services.clock.now()),
+  );
   if (options.silent !== true) {
     await audit(context, {
       jobId: null,
@@ -405,7 +410,7 @@ export const createSite = async (
       detail: `${saved.addressLine1}, ${saved.city}.`,
     });
   }
-  return saved;
+  return geocodeAfterSave(context, saved);
 };
 
 /**
@@ -552,7 +557,14 @@ export const updateSite = async (context: OperationContext, site: Site): Promise
     latitude: location.latitude,
     longitude: location.longitude,
   };
-  const saved = await context.repos.customers.saveSite(next);
+  /*
+   * INT-MAP-1: coordinates the office typed are its verified pin; a changed
+   * address is geocoded again — and a verified pin is kept, marked for
+   * re-checking, rather than replaced.
+   */
+  const saved = await context.repos.customers.saveSite(
+    locationAfterSave(previous, next, context.actor.id, context.services.clock.now()),
+  );
 
   const pin = (value: Site): string =>
     value.latitude === null || value.longitude === null
@@ -567,7 +579,7 @@ export const updateSite = async (context: OperationContext, site: Site): Promise
       ? {}
       : { changes: [{ field: 'Location', from: pin(previous), to: pin(saved) }] }),
   });
-  return saved;
+  return geocodeAfterSave(context, saved);
 };
 
 export interface ConsolidationResult {

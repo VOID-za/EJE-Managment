@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_DOCUMENTS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
 import { PostgresDeliveryNoteRepository } from '@/data/postgres/delivery-note-repository';
 import { asCustomerId, asJobId, type TimesheetEntry } from '@/domain';
@@ -249,6 +249,29 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
    * September period with its monthly submission, and a SENT Finance package.
    * Phase 2 has the live code (1a34d1c) meet them.
    */
+  it('writes the integration rows only this release can (0042)', async () => {
+    const I = ROLLBACK_INTEGRATIONS;
+    const job = (await new PostgresJobRepository(db).list()).find((candidate) => candidate.jobType === 'test_and_repair')!;
+    await db.execute(sql`
+      update sites set latitude = -26.2745, longitude = 28.198, location_status = 'resolved', location_source = 'geocoded',
+        geocode_query = '3 Wadeville Boulevard, Germiston, South Africa', geocoded_address = '3 Wadeville Blvd, Germiston (rollback fixture)',
+        geocode_provider = 'google', geocode_precision = 'ROOFTOP', geocoded_at = now(), suggested_latitude = -26.27, suggested_longitude = 28.19
+       where id = ${IDS.site}`);
+    await db.execute(sql`insert into email_templates (id, event, job_type, name, active, is_default, current_version, system_key)
+      values (${I.template}, 'signed_job_card', 'test_and_repair', 'Rollback template', true, true, 1, 'signed_job_card:test_and_repair')`);
+    await db.execute(sql`insert into email_template_versions (id, template_id, version, subject, body)
+      values (${I.templateVersion}, ${I.template}, 1, '{{job_number}} — {{document_title}} — Test & Repair', 'Good day {{customer_name}}')`);
+    await db.execute(sql`insert into email_messages (id, idempotency_key, event, job_id, template_id, template_version_id, template_name, template_version,
+        sender, recipient, subject, body, state, attempts, sent_at, provider_request_id, created_at, updated_at)
+      values (${I.email}, 'signed_job_card:rollback', 'signed_job_card', ${job.id}, ${I.template}, ${I.templateVersion}, 'Rollback template', 1,
+        'sales@ejeie.co.za', 'customer@example.test', 'EJE-ROLLBACK — Signed Job Card — Test & Repair', 'Good day', 'sent', 1, now(), 'graph-request:rollback', now(), now())`);
+    await db.execute(sql`insert into outbox_messages (id, channel, template, recipient, parameters, preview, job_id, state, attempts, provider_message_id,
+        created_at, purpose, delivery_status, delivered_at)
+      values (${I.outbox}, 'whatsapp', 'eje_job_assigned', '27820000000', '[]'::jsonb, '', ${job.id}, 'sent', 1, 'wamid.rollback', now(), 'assignment', 'delivered', now())`);
+    // The guard holds: a sent email cannot be changed.
+    await expect(db.execute(sql`update email_messages set subject = 'changed' where id = ${I.email}`)).rejects.toThrow();
+  });
+
   it('writes the monthly payroll rows only this release can (0040)', async () => {
     const T = ROLLBACK_TIMESHEET;
     const tech = asUserId(IDS.technician);

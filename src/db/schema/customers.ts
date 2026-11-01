@@ -4,6 +4,7 @@ import {
   check,
   customType,
   index,
+  integer,
   numeric,
   pgTable,
   text,
@@ -190,6 +191,27 @@ export const sites = pgTable(
     /** For the site-location message a technician may send after accepting. */
     latitude: numeric('latitude', { precision: 9, scale: 6 }),
     longitude: numeric('longitude', { precision: 9, scale: 6 }),
+    /*
+     * THE AUTOMATIC PIN. Migration 0042, INT-MAP-1. `latitude`/`longitude`
+     * above stay THE pin; these say where it came from and how far to trust
+     * it. A pin the office verified is never replaced by a geocoding result —
+     * a new result for a changed address waits in `suggested_*` instead.
+     */
+    locationStatus: text('location_status').notNull().default('not_requested'),
+    locationSource: text('location_source'),
+    locationVerifiedAt: instant('location_verified_at'),
+    locationVerifiedBy: uuid('location_verified_by').references(() => users.id, { onDelete: 'restrict' }),
+    geocodeQuery: text('geocode_query').notNull().default(''),
+    geocodedAddress: text('geocoded_address').notNull().default(''),
+    geocodePlaceId: text('geocode_place_id'),
+    geocodePrecision: text('geocode_precision'),
+    geocodeProvider: text('geocode_provider'),
+    geocodedAt: instant('geocoded_at'),
+    geocodeError: text('geocode_error').notNull().default(''),
+    geocodeAttempts: integer('geocode_attempts').notNull().default(0),
+    geocodeNextAttemptAt: instant('geocode_next_attempt_at'),
+    suggestedLatitude: numeric('suggested_latitude', { precision: 9, scale: 6 }),
+    suggestedLongitude: numeric('suggested_longitude', { precision: 9, scale: 6 }),
 
     archivedAt: archivedAt(),
     createdAt: createdAt(),

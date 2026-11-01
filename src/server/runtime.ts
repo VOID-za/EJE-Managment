@@ -1,3 +1,10 @@
+import {
+  GoogleGeocodingService,
+  SimulatedGeocodingService,
+  UnconfiguredGeocodingService,
+  readGoogleGeocodingConfiguration,
+} from '@/services/production/geocoding';
+import type { GeocodingService } from '@/services/ports';
 import 'server-only';
 import type { RepositoryBundle } from '@/data/repositories';
 import { selectPersistenceBackend, type PersistenceBackend } from '@/data/backend';
@@ -151,6 +158,18 @@ const buildWhatsApp = (
  * whether SMTP, a development transport, may be used at all; `next build` and
  * `next start` set it, `next dev` and the test runner do not.
  */
+/**
+ * Which geocoder this deployment has. INT-MAP-1. The same three answers as
+ * WhatsApp: Google with a key; the demonstration's labelled simulator with no
+ * database; and, for a real deployment with no key, an adapter that asks
+ * nothing, pays nothing and says automatic pins are not set up.
+ */
+const buildGeocoding = (backend: PersistenceBackend): GeocodingService => {
+  const configured = readGoogleGeocodingConfiguration();
+  if (configured !== null) return new GoogleGeocodingService(configured);
+  return backend === 'demo' ? new SimulatedGeocodingService() : new UnconfiguredGeocodingService();
+};
+
 const buildEmail = (
   backend: PersistenceBackend,
   outbox: SimulatedOutbox,
@@ -271,6 +290,7 @@ const buildServices = (backend: PersistenceBackend, store: DemoStore | null): Bu
      */
     email: buildEmail(backend, outbox, clock, ids, storage),
     whatsapp: buildWhatsApp(backend, outbox, clock, ids),
+    geocoding: buildGeocoding(backend),
     pdf: new SimulatedPdfService(clock),
     // LIB-TEXT-1: `pdftotext` where poppler is installed, the byte reader
     // where it is not. See `buildPdfText` for why the better engine needs no

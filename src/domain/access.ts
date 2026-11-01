@@ -367,7 +367,14 @@ export type Capability =
    * FILE BYTES and the refused ones against the bytes too — a column list that
    * drifted from the writer would pass a cheaper assertion and leak the money.
    */
-  | 'jobs.exportPrices';
+  | 'jobs.exportPrices'
+  /**
+   * THE CUSTOMER EMAIL TEMPLATES, shared by the office. INT-EMAIL-1 (the owner,
+   * 1 November 2026: "Both Master and Coordinator roles must be able to"
+   * view, create, edit, preview, activate and restore them). Enforced by the
+   * operations, not by the screen.
+   */
+  | 'emailTemplates.manage';
 
 const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.viewAll',
@@ -421,6 +428,7 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'jobs.manageDrafts',
   // Correcting a job's recorded details before signature: JOB-EDIT-1 (#72).
   'jobs.editDetails',
+  'emailTemplates.manage',
 ];
 
 /**
@@ -502,6 +510,7 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
    * in once somebody finds it.
    */
   'jobs.editDetails',
+  'emailTemplates.manage',
 ];
 
 /**

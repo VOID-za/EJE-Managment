@@ -57,7 +57,39 @@ export interface OutboxMessage {
   readonly failureReason: string;
   readonly createdAt: IsoDateTime;
   readonly lastAttemptAt: IsoDateTime | null;
+  /**
+   * INT-WA-2, migration 0042. What it was for: 'assignment', 'transfer',
+   * 'site_location' or 'test'. Optional so rows from before read as before.
+   */
+  readonly purpose?: string;
+  /** What Meta's verified webhooks reported. Null until one has. */
+  readonly deliveryStatus?: OutboxDeliveryStatus | null;
+  readonly deliveredAt?: IsoDateTime | null;
+  readonly readAt?: IsoDateTime | null;
+  /** Meta's own error, e.g. "131026 Message undeliverable". */
+  readonly providerError?: string;
+  /** The failed message this one re-sends, when the office retried. */
+  readonly retryOf?: string | null;
 }
+
+export type OutboxDeliveryStatus = 'sent' | 'delivered' | 'read' | 'failed';
+
+const DELIVERY_RANK: Record<OutboxDeliveryStatus, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+
+/**
+ * Does a webhook status move the message on? Webhooks arrive out of order and
+ * more than once: a status only ever moves forward (sent, delivered, read),
+ * `failed` is final, and a late `failed` cannot undo a delivery.
+ */
+export const advancesDeliveryStatus = (
+  current: OutboxDeliveryStatus | null | undefined,
+  next: OutboxDeliveryStatus,
+): boolean => {
+  if (current === null || current === undefined) return true;
+  if (current === 'failed') return false;
+  if (next === 'failed') return current === 'sent';
+  return DELIVERY_RANK[next] > DELIVERY_RANK[current];
+};
 
 /**
  * How many times a message is tried before it is left alone.

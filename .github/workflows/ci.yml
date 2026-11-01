@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (316544f) against a database at 0041
+      - name: Rollback compatibility — the live release (c68b3c3) against a database at 0042
         run: bash scripts/release/rollback-compat.sh
 
   browser:
@@ -339,6 +339,21 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run forms-regression
+
+      - name: Integrations regression — desktop (simulated providers)
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run integrations-regression
+
+      - name: Integrations regression — tablet portrait, by touch (simulated providers)
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run integrations-regression
+
+      - name: Integrations regression — phone, by touch (simulated providers)
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run integrations-regression
 
       # REL-UPD-1: EVERY release must show installed apps "A new version of EJE
       # is available" with Update now, and Update now must really move them to

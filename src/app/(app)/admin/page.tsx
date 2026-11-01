@@ -30,6 +30,8 @@ import { ChecklistAdminPanel } from '@/components/admin/ChecklistAdminPanel';
 import { LibraryAdminPanel } from '@/components/admin/LibraryAdminPanel';
 import { UsersPanel } from '@/components/admin/UsersPanel';
 import { FinanceRecipientCard } from '@/components/admin/FinanceRecipientCard';
+import { EmailTemplatesPanel } from '@/components/admin/EmailTemplatesPanel';
+import { IntegrationsPanel } from '@/components/admin/IntegrationsPanel';
 import { SIMULATED_CAPABILITIES } from '@/config/demo';
 import { useOperation } from '@/hooks/useOperation';
 import { demo, reads, settings as settingsApi } from '@/api/endpoints';
@@ -43,6 +45,8 @@ type TabId =
   | 'rates'
   | 'checklists'
   | 'library'
+  | 'emailTemplates'
+  | 'integrations'
   | 'system';
 
 /**
@@ -95,6 +99,9 @@ const AdminPage = () => {
     ...(can(user.role, 'settings.rates') ? [{ id: 'rates', label: 'Rates & VAT' }] : []),
     ...(can(user.role, 'settings.checklists') ? [{ id: 'checklists', label: 'Checklists' }] : []),
     ...(can(user.role, 'library.manage') ? [{ id: 'library', label: 'Technical Library' }] : []),
+    // INT-EMAIL-1 / INT-ADMIN-1: the Master and the Coordinator alike.
+    ...(can(user.role, 'emailTemplates.manage') ? [{ id: 'emailTemplates', label: 'Email Templates' }] : []),
+    { id: 'integrations', label: 'Integrations' },
     { id: 'system', label: 'System' },
   ];
 
@@ -132,6 +139,8 @@ const AdminPage = () => {
           {tab === 'library' && can(user.role, 'library.manage') && (
             <LibraryAdminPanel documents={data.documents} onChanged={query.refetch} />
           )}
+          {tab === 'emailTemplates' && can(user.role, 'emailTemplates.manage') && <EmailTemplatesPanel />}
+          {tab === 'integrations' && <IntegrationsPanel />}
           {tab === 'system' && can(user.role, 'payroll.finance') && (
             <div className="mb-5">
               <FinanceRecipientCard user={user} settings={data.settings} onSaved={query.refetch} />

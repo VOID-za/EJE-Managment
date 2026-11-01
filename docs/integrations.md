@@ -11,7 +11,12 @@ that nobody has to read an adapter to find out whether a message was sent.
 |---|---|---|
 | WhatsApp | `CloudApiWhatsAppService` **when configured**, otherwise `SimulatedWhatsAppService` (demonstration) or `UnconfiguredWhatsAppService` (real deployment) | **Yes, when configured** |
 | Email (Microsoft 365) | `GraphEmailService` **when configured**, otherwise `SmtpEmailService` (development only), `SimulatedEmailService` (demonstration) or `UnconfiguredEmailService` (real deployment) | **Yes, when configured** |
+| Google geocoding (site pins) | `GoogleGeocodingService` **when configured**, otherwise `SimulatedGeocodingService` (demonstration) or `UnconfiguredGeocodingService` (real deployment) | **Yes, when configured** |
 | PDF rendering | `SimulatedPdfService` | n/a — rendered in the browser |
+
+**Setting the three up** (Meta, Microsoft 365, Google Cloud), step by step for
+the owner, is `docs/integrations-setup.md`. This page is the engineering
+reference: what each adapter does and how the application uses it.
 | File storage | `FilesystemStorageService` on PostgreSQL, `DemoStorageService` in the demonstration | **Bytes are on disk in production** |
 
 ---
@@ -34,12 +39,14 @@ message arrive instead of trusting a simulation.
 |---|---|---|
 | `EMAIL_GRAPH_TENANT_ID` | yes | — |
 | `EMAIL_GRAPH_CLIENT_ID` | yes | — |
-| `EMAIL_GRAPH_CLIENT_SECRET` | yes | — |
+| `EMAIL_GRAPH_CERTIFICATE_PATH` + `EMAIL_GRAPH_CERTIFICATE_THUMBPRINT` | one credential is required — the certificate is preferred | — |
+| `EMAIL_GRAPH_CLIENT_SECRET` | …or this | — |
 | `EMAIL_SENDER` | yes | — |
 | `EMAIL_REPLY_TO` | no | none — replies go to `EMAIL_SENDER` |
 | `EMAIL_GRAPH_BASE_URL` | no | `https://graph.microsoft.com/v1.0` |
 | `EMAIL_GRAPH_LOGIN_URL` | no | `https://login.microsoftonline.com` |
 | `EMAIL_GRAPH_TIMEOUT_MS` | no | `20000` — how long one Graph request may take |
+| `EMAIL_TEST_RECIPIENTS` | no | none — the only addresses Administration's "Send test email" may use |
 
 **What each absence does.** Any one of the four required variables missing means
 *no Graph configuration*, and a real-database deployment then **refuses to send
@@ -48,36 +55,32 @@ in-memory demonstration keeps its visible outbox. Two out
 of four is treated as none: guessing which half was meant is how a system ends up
 sending nothing quietly.
 
-**In Entra ID** the app registration needs THREE **application** permissions
-on Microsoft Graph, each with admin consent granted, and `EMAIL_SENDER` must be
-a real licensed mailbox in the tenant:
+**One permission: `Mail.Send`, scoped to one mailbox (INT-EMAIL-5, 1 November
+2026).** The adapter sends with ONE call, `POST /users/{sender}/sendMail` with
+`saveToSentItems: true`, which needs the **application** permission
+`Mail.Send` and nothing else. Grant it through **Exchange Online RBAC for
+Applications**, scoped to `sales@ejeie.co.za` — not tenant-wide in Entra,
+because permissions granted in Entra and in Exchange ADD UP, and a tenant-wide
+Entra grant would make the Exchange scope meaningless. The exact commands are
+in `docs/integrations-setup.md` §3.
 
-| Permission | Why — the Graph call that needs it |
-|---|---|
-| `Mail.ReadWrite` | `POST /users/{sender}/messages` — creating the draft (see "create-then-send" below) |
-| `Mail.Send` | `POST /users/{sender}/messages/{id}/send` |
-| `Mail.ReadBasic.All` | `GET /users/{sender}/messages/{id}` — reading back what became of a message |
+The message is saved to the mailbox's Sent Items, so the office sees every
+system email beside its own; the mailbox stays the office's, used as before.
 
-**An earlier version of this section named only `Mail.Send`.** A registration
-built from it is refused with 403 on the first job card, because creating the
-draft needs `Mail.ReadWrite` (Microsoft Graph reference, "Create message",
-checked 24 October 2026). The 403 advice in `email.ts` and
-`integrations:check` now names all three.
+**An earlier version of this adapter created a draft and then sent it**, which
+needed `Mail.ReadWrite` and `Mail.ReadBasic.All` as well, so that Graph's
+message id could be recorded. `sendMail` answers 202 with no body: the adapter
+records Microsoft's `request-id` as the reference (`graph-request:…`), and sends
+EJE's own outbox id as an `X-EJE-Reference` header. With `Mail.Send` alone
+nothing can be read back, so `deliveryState` answers "unknown" for these and
+nothing is ever assumed — `sent` means accepted by Microsoft 365.
 
-**All three are tenant-wide until they are scoped**, which matters more for
-`Mail.ReadWrite` than it ever did for `Mail.Send`: unscoped, the registration
-could read and write every mailbox in the organisation. Limit it to the one
-sending mailbox with Exchange Online's [RBAC for
-Applications](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac)
-(or the older [application access
-policy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access)), and
-use a dedicated mailbox such as `service@…` rather than a person's.
-
-**Why create-then-send.** Graph's `sendMail` returns 202 with no body and no
-message id. This adapter instead creates a draft (`POST
-/users/{sender}/messages`), which returns Graph's own id, then sends it. That id
-becomes the outbox entry's id, and it is the only thing that makes the entry
-reconcilable against a delivery report later.
+**A certificate is preferred over a secret.** With
+`EMAIL_GRAPH_CERTIFICATE_PATH` (a PEM holding the private key, readable only
+by the service) and `EMAIL_GRAPH_CERTIFICATE_THUMBPRINT` (the SHA-1 thumbprint
+Entra shows), the adapter signs a client assertion (RS256, `x5t`) for every
+token request; no secret exists to leak or expire. An unreadable key file is
+reported as a refused credential, not as an outage.
 
 **Every request carries a deadline.** There was none: `fetch` with no signal
 waits as long as the socket stays open, and these calls sit inside the request
@@ -110,6 +113,38 @@ from one with none, as far as *"customer email is not configured"* goes. So:
   not an address, a tenant id that looks like a mailbox, a nonsense timeout.
   Each of those selects a working transport that cannot send.
 
+#### The customer email outbox — the signed job card, automatically (INT-EMAIL-3)
+
+Issuing a job card stores the signed PDF and, in the SAME transaction, writes
+one `email_messages` row: the recipient (the contact on the job), the active
+default template for the job type with every placeholder filled, the sender,
+and the stored PDF's key and SHA-256. The transaction commits; then the API's
+drain hands it to Graph, and the worker started by `src/instrumentation.ts`
+retries whatever is due every minute (which also resumes after a restart).
+
+| State | Means |
+|---|---|
+| `queued` | written; waiting its turn, or a back-off after a temporary failure (1, 5, 15, 60, 180 minutes; six attempts) |
+| `sending` | with Microsoft now |
+| `sent` | Microsoft 365 ACCEPTED it — never "delivered" |
+| `failed` | a permanent refusal, the last attempt used, or UNCERTAIN (see below) |
+| `attention` | not sent: no valid address on the contact, or no active template for the job type. The office is notified |
+
+- **No duplicates.** The idempotency key is the job and the stored document;
+  the database also allows one queued, sending or sent email per job, event
+  and document. A replayed signature finds the row that exists.
+- **Uncertain is never re-sent automatically.** A timeout while the message
+  request was out, or an email left in `sending` for ten minutes (a crash),
+  may have reached Microsoft. It is marked failed with that explanation; the
+  office checks Sent Items and confirms before a retry is allowed.
+- **The attachment is the exact signed PDF.** Before sending, the stored bytes
+  are checked against the checksum the email was written with.
+- **History is immutable.** A sent row cannot be changed or deleted (trigger),
+  and no row's content can change after it is written: a retry — after the
+  address is corrected — is a NEW row that names the one it retries.
+- Templates: Administration → Email Templates (`email_templates`,
+  `email_template_versions`; one active default per event and job type).
+
 #### `npm run integrations:check` — is this deployment ready, without messaging anybody
 
 ```bash
@@ -121,8 +156,10 @@ npm run integrations:check -- --probe   # ask the providers. SENDS NOTHING
 transport works, which is a different question and the one that decides whether
 a customer receives their job card.
 
-`--probe` acquires a client-credentials token from Microsoft and reads **the
-sender's own mailbox** (`GET /users/<EMAIL_SENDER>`); for Meta it reads the
+`--probe` acquires a client-credentials token from Microsoft (with the
+certificate or the secret) and reads NOTHING — with `Mail.Send` alone the app
+cannot read any mailbox, so the token proves the credential and only a test
+email from Administration → Integrations proves the permission; for Meta it reads the
 configured phone number's own metadata, and — when
 `WHATSAPP_BUSINESS_ACCOUNT_ID` is set — whether the templates this build sends
 are approved. No message is sent, and no customer record is read: the only
@@ -147,8 +184,9 @@ the office would press send, Meta would drop the message, and the customer
 would get nothing.
 
 **The template names come from the application, not from configuration.** This
-build sends `eje_job_assigned` and `eje_site_location`, and EJE must have
-templates approved in Meta Business Manager under exactly those names.
+build sends `eje_job_assigned`, `eje_job_transferred` and `eje_site_location`,
+and EJE must have templates approved in Meta Business Manager under exactly
+those names, in WHATSAPP_TEMPLATE_LANGUAGE (default `en`).
 
 #### What a failure means, and whether to press *Send again*
 
@@ -157,8 +195,8 @@ that wording, because the office has one button and nine situations:
 
 | What happened | Retry? |
 |---|---|
-| 401 — the credential was refused | **No.** `EMAIL_GRAPH_CLIENT_SECRET` or the registration |
-| 403 — authenticated, not allowed | **No.** The registration needs `Mail.ReadWrite`, `Mail.Send` and `Mail.ReadBasic.All` |
+| 401 — the credential was refused | **No.** The certificate, `EMAIL_GRAPH_CLIENT_SECRET` or the registration |
+| 403 — authenticated, not allowed | **No.** `Mail.Send` for the sending mailbox, through Exchange RBAC for Applications |
 | 429 / 503 — throttled | **Yes**, after the wait Microsoft names in `Retry-After` |
 | 5xx — Exchange is unavailable | **Yes** |
 | An address Graph will not accept | **No.** Correct the customer's record first |
@@ -270,6 +308,19 @@ Business Platform Cloud API.
 | `WHATSAPP_ACCESS_TOKEN` | yes | — |
 | `WHATSAPP_API_VERSION` | no | `v21.0` |
 | `WHATSAPP_API_BASE_URL` | no | `https://graph.facebook.com` |
+| `WHATSAPP_BUSINESS_ACCOUNT_ID` | no | none — needed to check template approval |
+| `WHATSAPP_APP_SECRET` | for webhooks | none — every webhook POST is refused without it |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | for webhooks | none — Meta's verification is refused without it |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | no | `en` — the language the templates were approved in |
+| `WHATSAPP_TEST_RECIPIENTS` | no | none — the only numbers Administration's "Send test message" may use |
+| `EJE_PUBLIC_URL` | no | `https://eje.syncza.co.za` — the job link in a message |
+
+**The existing office number is never touched by this code.** The adapter has
+one call, `POST /{phone-number-id}/messages` with a template; there is no
+register, deregister, migrate or settings call anywhere (a test pins this).
+Connecting a number — and whether the office's existing one can keep its
+WhatsApp Business App through coexistence — is the owner's decision, made with
+`docs/integrations-setup.md` §1.
 
 The token must be a **permanent System User token**, not a temporary one from
 the dashboard.
@@ -323,9 +374,17 @@ means **Meta has the message**, not that a handset has it. The adapter records
 `pending_delivery` and nothing in this system may set `delivered` without a
 provider confirmation.
 
-**Still required for production:** a delivery-status webhook. Until one exists,
-no WhatsApp message can ever move past `pending_delivery`, and the screens say
-so rather than implying receipt.
+**The delivery-status webhook (INT-WA-2).** `/api/integrations/whatsapp/webhook`:
+the GET verification echoes Meta's challenge only for WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+every POST is refused unless its `X-Hub-Signature-256` HMAC of the raw body
+verifies with WHATSAPP_APP_SECRET. Statuses (sent, delivered, read, failed,
+with Meta's error code) are recorded once each (`whatsapp_webhook_events`) and
+only ever move a message forward; a failure goes on the job's trail. Template
+review results (approved, rejected, paused) go on the trail and a rejection
+notifies the office. Inbound messages are counted and NOT stored. A permanent
+refusal (a bad token, a missing template, a number not on WhatsApp) is failed
+at once instead of spending the remaining attempts; the office can retry a
+failed message from the job (a new message; the failed one is kept).
 
 ### Message templates
 
@@ -335,8 +394,53 @@ EJE's WhatsApp Business account, by exactly these names:
 
 | Template | Placeholders, in order | Sent when |
 |---|---|---|
-| `eje_job_assigned` | job number, customer, site, machine or subject | A technician is assigned a job |
-| `eje_site_location` | job number, customer, machine, site, navigation link | A technician asks for the site location after accepting |
+| `eje_job_assigned` | job number, job type, customer, site, machine, job link | A technician is assigned (or added to) a job |
+| `eje_job_transferred` | job number, job type, customer, site, machine, job link | A job is transferred to a technician |
+| `eje_site_location` | job number, customer, machine, site, address, navigation link | A technician asks for the site location after accepting |
+
+Nothing is sent for Open Jobs, a submission or Awaiting Spares. The variables
+carry nothing a locked screen should not show: no fault description, no
+contact name or number. The navigation link is the site's pin when it is
+trusted (verified, or one confident automatic match) and otherwise an address
+search, which the technician's screen labels as unverified.
+
+---
+
+## Google geocoding — the automatic site pin (INT-MAP-1..3)
+
+`src/services/production/geocoding.ts` calls the server-side Geocoding API
+(GOOGLE_MAPS_GEOCODING_API_KEY; region GOOGLE_GEOCODING_REGION, default `za`,
+with `components=country:ZA`). The key never reaches a browser or a message.
+
+- **When:** a site is geocoded when its address is written or changed — never
+  when a job is opened. The same address is answered from `geocode_cache`
+  for 30 days (the Maps Platform terms' limit for caching coordinates); the
+  application stops at GOOGLE_GEOCODING_DAILY_LIMIT requests a day (default 500).
+- **What it does with the answer** (`domain/site/location.ts`): one precise
+  match sets the pin (`resolved`, unverified); several matches, a partial
+  match or an approximate place are only a SUGGESTION (`ambiguous`); no match
+  is `not_found`; an outage or quota backs off and retries (five attempts); a
+  refused key fails at once. The office's address is never replaced — the
+  provider's formatted address is kept beside it.
+- **The office decides:** "The pin is correct", "Use the suggested pin", or
+  coordinates typed in the site dialog — each makes the pin `verified`, and a
+  verified pin is NEVER replaced automatically. When its address changes it
+  becomes `stale`: kept, not trusted for navigation, with a new suggestion.
+- **Before 0042:** pins the office had entered are marked verified, manual.
+  Sites without one are not geocoded in bulk on deploy; Administration →
+  Integrations → "Find pins for unpinned sites" asks for up to 25 at a time.
+- **No key:** nothing is asked or paid for; sites say "Automatic pins are not
+  set up", and technicians get the address search.
+
+| Variable | Required | Default |
+|---|---|---|
+| `GOOGLE_MAPS_GEOCODING_API_KEY` | to geocode | none |
+| `GOOGLE_GEOCODING_REGION` | no | `za` |
+| `GOOGLE_GEOCODING_DAILY_LIMIT` | no | `500` |
+
+**Terms note for the owner:** keeping office-verified coordinates permanently
+is a question for the Maps Platform terms (§6.3); see
+`docs/integrations-setup.md` §4.6.
 
 An unapproved or renamed template is refused by the Cloud API and surfaces as a
 recorded failure, not a silent one.
@@ -425,15 +529,6 @@ PostgreSQL deployment gets.
 S3-compatible object storage, if EJE ever run more than one application server —
 a directory is durable but local. It is the same swap in `buildServices`:
 implement `StorageService` against the bucket and no caller changes.
-
----
-
-## Email — not yet real
-
-`SimulatedEmailService` records what would have been sent into the outbox.
-Microsoft Graph is its own phase. The delivery model is already honest about
-itself: `send` returns what the provider said, `pending_delivery` is the normal
-answer, and a job is not closed until something confirms delivery.
 
 ---
 

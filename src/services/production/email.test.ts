@@ -29,6 +29,8 @@ const config: GraphEmailConfiguration = {
   tenantId: 'tenant-1',
   clientId: 'client-1',
   clientSecret: 'super-secret-value',
+  certificatePath: '',
+  certificateThumbprint: '',
   sender: 'jobcards@eje.example',
   replyTo: 'office@eje.example',
   baseUrl: 'https://graph.microsoft.com/v1.0',
@@ -122,6 +124,8 @@ describe('reading the configuration', () => {
       tenantId: 't',
       clientId: 'c',
       clientSecret: 's',
+      certificatePath: '',
+      certificateThumbprint: '',
       sender: 'jobcards@eje.example',
       replyTo: '',
       baseUrl: 'https://graph.microsoft.com/v1.0',
@@ -133,38 +137,28 @@ describe('reading the configuration', () => {
 });
 
 describe('sending', () => {
-  it('creates the message, sends it, and reports ACCEPTED not delivered', async () => {
+  it('sends with ONE sendMail call (Mail.Send only), and reports ACCEPTED not delivered', async () => {
     const calls: Call[] = [];
-    const adapter = adapterWith(
-      graphFetch([{ status: 201, body: { id: 'AAMkAGI2' } }, { status: 202, body: {} }], calls),
-    );
+    const adapter = adapterWith(graphFetch([{ status: 202, body: {} }], calls));
 
     const receipt = await adapter.send(message);
 
     expect(receipt.state).toBe('pending_delivery');
-    expect(receipt.messageId).toBe('AAMkAGI2');
+    expect(receipt.messageId).toMatch(/^graph-request:/u);
     expect(receipt.entry?.simulated).toBe(false);
-    expect(receipt.entry?.id).toBe('AAMkAGI2');
     expect(receipt.entry?.attachments).toEqual(['EJE-1103-Final-Job-Card.pdf']);
 
-    // A token, then create, then send — the id comes from Graph, not from us.
-    expect(calls).toHaveLength(3);
-    expect(calls[1]?.url).toBe(
-      'https://graph.microsoft.com/v1.0/users/jobcards%40eje.example/messages',
-    );
-    expect(calls[2]?.url).toBe(
-      'https://graph.microsoft.com/v1.0/users/jobcards%40eje.example/messages/AAMkAGI2/send',
-    );
+    // A token, then sendMail: no draft is created, so Mail.ReadWrite is not needed.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.url).toBe('https://graph.microsoft.com/v1.0/users/jobcards%40eje.example/sendMail');
   });
 
   it('attaches the STORED document bytes, base64, with its own content type', async () => {
     const calls: Call[] = [];
-    const adapter = adapterWith(
-      graphFetch([{ status: 201, body: { id: 'id-1' } }, { status: 202, body: {} }], calls),
-    );
+    const adapter = adapterWith(graphFetch([{ status: 202, body: {} }], calls));
     await adapter.send(message);
 
-    const draft = JSON.parse(String(calls[1]?.init?.body)) as {
+    const draft = (JSON.parse(String(calls[1]?.init?.body)) as { message: unknown }).message as {
       attachments: { name: string; contentType: string; contentBytes: string }[];
       toRecipients: { emailAddress: { address: string } }[];
       replyTo: { emailAddress: { address: string } }[];
@@ -443,10 +437,10 @@ describe('telling the failures apart', () => {
     expect(failure.kind).toBe('permission_denied');
     expect(failure.retryable).toBe(false);
     expect(failure.message).toMatch(/Mail\.Send/u);
-    // The adapter CREATES a draft before sending it, and Graph's create-message
-    // call needs Mail.ReadWrite — naming only Mail.Send sent operators to grant
-    // the one permission that was already there.
-    expect(failure.message).toMatch(/Mail\.ReadWrite/u);
+    // INT-EMAIL-5: sendMail needs Mail.Send alone, scoped by Exchange RBAC —
+    // the advice must not send an operator to grant Mail.ReadWrite any more.
+    expect(failure.message).not.toMatch(/Mail\.ReadWrite/u);
+    expect(failure.message).toMatch(/RBAC/u);
   });
 
   it('throttling carries the wait Microsoft asked for', async () => {
@@ -527,10 +521,10 @@ describe('telling the failures apart', () => {
 
   it('EVERY request carries a deadline, so nothing can hang a submission', async () => {
     const calls: Call[] = [];
-    const impl = graphFetch([{ status: 201, body: { id: 'graph-1' } }, { status: 202, body: {} }], calls);
+    const impl = graphFetch([{ status: 202, body: {} }], calls);
     await adapterWith(impl).send(message);
 
-    expect(calls).toHaveLength(3); // token, create, send
+    expect(calls).toHaveLength(2); // token, sendMail
     for (const call of calls) {
       expect(call.init?.signal, `${call.url} had no deadline`).toBeInstanceOf(AbortSignal);
     }
@@ -660,10 +654,12 @@ describe('diagnosing the configuration', () => {
       EMAIL_GRAPH_CLIENT_ID: 'client-1',
     });
     expect(report.configured).toBe(false);
-    expect(report.missing).toEqual(['EMAIL_GRAPH_CLIENT_SECRET', 'EMAIL_SENDER']);
-    expect(emailConfigurationSummary(report)).toMatch(
-      /EMAIL_GRAPH_CLIENT_SECRET, EMAIL_SENDER are not set/u,
-    );
+    expect(report.missing).toEqual([
+      'EMAIL_SENDER',
+      'EMAIL_GRAPH_CERTIFICATE_PATH and EMAIL_GRAPH_CERTIFICATE_THUMBPRINT (or EMAIL_GRAPH_CLIENT_SECRET)',
+    ]);
+    expect(emailConfigurationSummary(report)).toMatch(/EMAIL_SENDER/u);
+    expect(emailConfigurationSummary(report)).toMatch(/EMAIL_GRAPH_CLIENT_SECRET/u);
   });
 
   it('NEVER reports a secret, not even its length', () => {

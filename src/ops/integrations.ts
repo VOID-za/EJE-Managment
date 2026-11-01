@@ -1,10 +1,12 @@
 import { loadEnvFiles } from '@/db/seed/env';
 import {
   describeEmailConfiguration,
+  graphClientAssertion,
   readGraphEmailConfiguration,
 } from '@/services/production/email';
+import { readFileSync } from 'node:fs';
 import { readWhatsAppConfiguration } from '@/services/production/whatsapp';
-import { ASSIGNMENT_TEMPLATE } from '@/application/assignment-notice';
+import { ASSIGNMENT_TEMPLATE, TRANSFER_TEMPLATE } from '@/application/assignment-notice';
 import { SITE_LOCATION_TEMPLATE } from '@/application/job-operations';
 import {
   checkEmailReadiness,
@@ -23,7 +25,7 @@ import {
  *   npm run integrations:check -- --probe   ask the providers, SEND NOTHING
  *
  * WHAT `--probe` DOES. For Microsoft 365: acquires a client-credentials token
- * and reads the SENDER'S OWN mailbox (`GET /users/<sender>`). For Meta: reads
+ * and nothing more (Mail.Send alone cannot read a mailbox). For Meta: reads
  * the configured phone number's own metadata. Both prove the credential and the
  * sender exist. NEITHER SENDS A MESSAGE, and no customer record is read — the
  * only address involved is EJE's own.
@@ -87,7 +89,12 @@ const probeGraph = async (
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
             client_id: config.clientId,
-            client_secret: config.clientSecret,
+            ...(config.certificatePath.length > 0
+              ? {
+                  client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+                  client_assertion: graphClientAssertion(config, readFileSync(config.certificatePath, 'utf8')),
+                }
+              : { client_secret: config.clientSecret }),
             scope: 'https://graph.microsoft.com/.default',
             grant_type: 'client_credentials',
           }).toString(),
@@ -115,28 +122,18 @@ const probeGraph = async (
       };
     }
 
-    const mailbox = await withTimeout(
-      (signal) =>
-        fetch(`${config.baseUrl}/users/${encodeURIComponent(config.sender)}`, {
-          headers: { authorization: `Bearer ${bearer}` },
-          signal,
-        }),
-      config.timeoutMs,
-    );
-
-    if (!mailbox.ok) {
-      const body = redactor([config.clientSecret, bearer])((await mailbox.text()).slice(0, 400));
-      return {
-        ok: false,
-        detail:
-          `a token was issued and reading the sender mailbox answered ${mailbox.status}: ${body}`,
-        credentialRefused: isCredentialRefusal(mailbox.status),
-      };
-    }
-
+    /*
+     * NOTHING IS READ FROM THE MAILBOX. INT-EMAIL-5: the app holds Mail.Send
+     * and nothing else (scoped to the sending mailbox by Exchange RBAC), so
+     * reading even the sender's own profile would be refused — reporting a
+     * correctly least-privileged setup as broken. A token proves the
+     * credential; only a real send (Administration → Integrations → Send test
+     * email, to a configured test recipient) proves the permission and scope.
+     */
+    void bearer;
     return {
       ok: true,
-      detail: `A token was issued and ${config.sender} is readable. No message was sent.`,
+      detail: `A token was issued for the app registration (${config.certificatePath.length > 0 ? 'certificate' : 'client secret'}). Whether it may send as ${config.sender} is proved only by a test email from Administration → Integrations. No message was sent.`,
       credentialRefused: false,
     };
   } catch (cause) {
@@ -243,7 +240,7 @@ const main = async (): Promise<void> => {
    * environment instead would let a deployment claim readiness for templates
    * the application never sends.
    */
-  const templates = [ASSIGNMENT_TEMPLATE, SITE_LOCATION_TEMPLATE];
+  const templates = [ASSIGNMENT_TEMPLATE, TRANSFER_TEMPLATE, SITE_LOCATION_TEMPLATE];
 
   const checks: IntegrationCheck[] = [
     checkEmailReadiness({

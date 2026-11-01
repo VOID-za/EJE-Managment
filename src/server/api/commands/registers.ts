@@ -1,3 +1,4 @@
+import { requeueSiteGeocode, verifySiteLocation, type PinChoice } from '@/application/site-geocoding';
 import 'server-only';
 import { z } from 'zod';
 import {
@@ -274,6 +275,32 @@ export const SITE_COMMANDS: CommandRegistry = {
     async run(context, _input: Record<string, never>, target) {
       const stored = await loadSite(context, target);
       return customers.removeSite(context.operation, stored);
+    },
+  }),
+
+  /**
+   * THE OFFICE CHECKS THE PIN. INT-MAP-2. The current pin, the geocoder's
+   * suggestion, or coordinates typed in; whichever becomes the verified pin,
+   * never replaced automatically. `verifySiteLocation` authorises.
+   */
+  verify_location: command({
+    schema: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('current') }).strict(),
+      z.object({ kind: z.literal('suggested') }).strict(),
+      z.object({ kind: z.literal('manual'), latitude: z.number().finite(), longitude: z.number().finite() }).strict(),
+    ]),
+    async run(context, input: PinChoice, target) {
+      const stored = await loadSite(context, target);
+      return verifySiteLocation(context.operation, stored.id, input);
+    },
+  }),
+
+  /** Look the pin up again from the saved address. INT-MAP-1. */
+  find_location: command({
+    schema: z.object({}).strict(),
+    async run(context, _input: Record<string, never>, target) {
+      const stored = await loadSite(context, target);
+      return requeueSiteGeocode(context.operation, stored.id);
     },
   }),
 };

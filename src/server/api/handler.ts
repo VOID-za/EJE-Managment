@@ -9,6 +9,7 @@ import { assertSameOrigin } from './csrf';
 import { ApiError, errorResponse, logUnexpected, toApiError } from './errors';
 import { hashRequest, type IdempotencyScope } from './idempotency';
 import { drainOutboxQuietly } from './outbox-dispatch';
+import { drainIntegrationsQuietly } from './integration-dispatch';
 
 /**
  * The shape every API route has.
@@ -225,6 +226,7 @@ export const writeRoute =
               services: unit.services,
               // THE ACTOR COMES FROM THE SESSION. Nothing in `input` reaches it.
               actor: actor.user,
+              deferDelivery: true,
             },
           });
 
@@ -256,6 +258,8 @@ export const writeRoute =
        * between requests is how a message quietly never goes.
        */
       await drainOutboxQuietly(runtime);
+      // INT-EMAIL-3, INT-MAP-1: the customer email outbox and site pins, the same way.
+      await drainIntegrationsQuietly(runtime);
 
       return NextResponse.json(
         { data: result.data },
@@ -419,6 +423,7 @@ export const uploadRoute =
               services: unit.services,
               // THE ACTOR COMES FROM THE SESSION, here as everywhere else.
               actor: actor.user,
+              deferDelivery: true,
             },
           });
           if (scope !== null) await unit.idempotency.complete(scope, data ?? null);

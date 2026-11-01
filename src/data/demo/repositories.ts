@@ -1,3 +1,5 @@
+import { siteLocationOf, type OutboxDeliveryStatus } from '@/domain';
+import { DemoCustomerEmailRepository, DemoEmailTemplateRepository, DemoIntegrationRepository } from './integration-repositories';
 import type {
   IssuedTotals,
   CustomerDocument,
@@ -467,6 +469,29 @@ class DemoCustomerRepository implements CustomerRepository {
             );
     });
     return Promise.resolve(customer);
+  }
+
+  saveSiteLocation(site: Site, query: string): Promise<boolean> {
+    const current = this.context.read().sites.find((candidate) => candidate.id === site.id);
+    if (current === undefined || siteLocationOf(current).query !== query) return Promise.resolve(false);
+    this.context.commit((draft) => {
+      draft.sites = draft.sites.map((candidate) =>
+        candidate.id === site.id
+          ? { ...candidate, latitude: site.latitude, longitude: site.longitude, geocode: site.geocode }
+          : candidate,
+      );
+    });
+    return Promise.resolve(true);
+  }
+
+  listSitesDueForGeocode(now: IsoDateTime, limit: number): Promise<readonly Site[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .sites.filter((site) => site.archivedAt === null && site.geocode?.nextAttemptAt != null && site.geocode.nextAttemptAt <= now)
+        .sort((a, b) => (a.geocode?.nextAttemptAt ?? '').localeCompare(b.geocode?.nextAttemptAt ?? ''))
+        .slice(0, limit),
+    );
   }
 
   saveSite(site: Site): Promise<Site> {
@@ -1009,7 +1034,7 @@ class DemoOutboxRepository implements OutboxRepository {
     return Promise.resolve();
   }
 
-  markFailed(id: string, reason: string, now: IsoDateTime): Promise<void> {
+  markFailed(id: string, reason: string, now: IsoDateTime, permanent = false): Promise<void> {
     this.context.commit((draft) => {
       draft.outbox = draft.outbox.map((message) =>
         message.id === id
@@ -1017,9 +1042,43 @@ class DemoOutboxRepository implements OutboxRepository {
               ...message,
               // Still pending while there are attempts left: a failure is not
               // the end of an obligation, only of one try at it.
-              state: message.attempts >= MAX_OUTBOX_ATTEMPTS ? 'failed' : 'pending',
+              state: permanent || message.attempts >= MAX_OUTBOX_ATTEMPTS ? 'failed' : 'pending',
               failureReason: reason,
               lastAttemptAt: now,
+            }
+          : message,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  listForJob(jobId: JobId): Promise<readonly OutboxMessage[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .outbox.filter((message) => message.jobId === jobId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    );
+  }
+
+  findById(id: string): Promise<OutboxMessage | null> {
+    return Promise.resolve(this.context.read().outbox.find((message) => message.id === id) ?? null);
+  }
+
+  findByProviderMessageId(providerMessageId: string): Promise<OutboxMessage | null> {
+    return Promise.resolve(this.context.read().outbox.find((message) => message.providerMessageId === providerMessageId) ?? null);
+  }
+
+  recordDeliveryStatus(id: string, status: OutboxDeliveryStatus, at: IsoDateTime, error: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.outbox = draft.outbox.map((message) =>
+        message.id === id
+          ? {
+              ...message,
+              deliveryStatus: status,
+              ...(status === 'delivered' ? { deliveredAt: at } : {}),
+              ...(status === 'read' ? { readAt: at, deliveredAt: message.deliveredAt ?? at } : {}),
+              ...(status === 'failed' ? { providerError: error } : {}),
             }
           : message,
       );
@@ -1824,6 +1883,9 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   checklistTemplates: new DemoChecklistTemplateRepository(context),
   activity: new DemoActivityRepository(context),
   outbox: new DemoOutboxRepository(context),
+  emailTemplates: new DemoEmailTemplateRepository(context),
+  customerEmails: new DemoCustomerEmailRepository(context),
+  integrations: new DemoIntegrationRepository(context),
   captureReferrals: new DemoCaptureReferralRepository(context),
   changeRequests: new DemoChangeRequestRepository(context),
   deliveryNotes: new DemoDeliveryNoteRepository(context),

@@ -348,9 +348,23 @@ describe('re-sending a customer’s copy is a wider question', () => {
       expect(canResendCustomerCopy(role), role).toBe(true);
     }
 
+    // A provider that refuses every send, so each person's retry is a real
+    // attempt and the job stays retryable for the next (INT-EMAIL-4).
     for (const person of [technician, master, coordinator]) {
-      const again = await retryJobCardDelivery(harness.as(person), issued, RECIPIENT);
+      const context = harness.as(person);
+      const refusing = {
+        ...context,
+        services: {
+          ...context.services,
+          email: {
+            send: () => Promise.reject(Object.assign(new Error('Refused.'), { kind: 'provider_refused' })),
+            deliveryState: () => Promise.resolve(null),
+          },
+        },
+      };
+      const again = await retryJobCardDelivery(refusing, (await harness.repos.jobs.findById(issued.id)) ?? issued, RECIPIENT);
       expect(again.job.status, person.id).toBe('office_handling');
+      expect(again.delivery.state, person.id).toBe('failed');
     }
   });
 

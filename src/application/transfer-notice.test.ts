@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { acceptJob, transferJobToTechnician } from './job-operations';
-import { ASSIGNMENT_TEMPLATE } from './assignment-notice';
+import { TRANSFER_TEMPLATE } from './assignment-notice';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
 /**
@@ -25,7 +25,7 @@ describe('the WhatsApp notice on a transfer', () => {
   const accepted = async () =>
     acceptJob(harness.as(sipho), (await harness.repos.jobs.findByJobNumber('EJE-1048'))!);
 
-  it('queues the approved assignment template to the receiving technician’s own number', async () => {
+  it('queues the transfer template (INT-WA-1) to the receiving technician’s own number', async () => {
     const job = await accepted();
     const before = (await harness.repos.outbox.list()).filter((m) => m.jobId === job.id).length;
 
@@ -36,11 +36,15 @@ describe('the WhatsApp notice on a transfer', () => {
     const message = queued.at(-1)!;
     expect(message).toMatchObject({
       channel: 'whatsapp',
-      template: ASSIGNMENT_TEMPLATE,
+      template: TRANSFER_TEMPLATE,
+      purpose: 'transfer',
       recipient: riaan.mobile,
       state: 'pending',
     });
     expect(message.parameters[0]).toBe('EJE-1048');
+    // Six variables: job number, job type, customer, site, machine, link.
+    expect(message.parameters).toHaveLength(6);
+    expect(message.parameters[5]?.endsWith('/jobs/EJE-1048')).toBe(true);
     expect(message.preview).toContain('transferred to you');
 
     const trail = (await harness.repos.activity.list(job.id)).map((event) => event.summary);

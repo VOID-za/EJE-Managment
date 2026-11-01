@@ -6,6 +6,7 @@ import {
   assignPrimaryTechnician,
   captureSignature,
   issueJobCard,
+  retryJobCardDelivery,
   saveCompletionReport,
   startCompletion,
   startSignature,
@@ -68,23 +69,48 @@ describe('the job card goes to a contact, never to a company mailbox', () => {
     harness = buildHarness();
   });
 
-  it('refuses to issue when the contact on the job has no email', async () => {
+  /*
+   * INVERTED BY THE OWNER, 1 NOVEMBER 2026 (INT-EMAIL-3): "If no valid
+   * recipient exists: do not guess, do not send, record a clear
+   * failure/attention status, notify the appropriate office users, allow the
+   * address to be corrected and the email to be retried." This used to refuse
+   * the issue, leaving a technician on site with a signed job card they could
+   * not submit. Now the job card is issued and stored, NOTHING is sent, the
+   * office is told, and a retry after the address is corrected sends it.
+   */
+  it('issues the signed job card but sends nothing when the contact on the job has no email, and tells the office', async () => {
     const opened = await harness.repos.jobs.findByJobNumber('EJE-1048');
     // Take the address off the contact this job names.
     const contact = await harness.repos.customers.findContactById(opened!.contactId);
     await harness.repos.customers.saveContact({ ...contact!, email: '' });
 
     const signed = await workAndSign(harness);
-    await expect(issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel')).rejects.toThrow(
-      /nobody to send the job card to/i,
-    );
+    const issued = await issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel');
 
-    // Refused BEFORE anything was produced: the job is still editable, so the
-    // office can capture the address and issue normally.
-    const reread = await harness.repos.jobs.findByJobNumber('EJE-1048');
-    expect(reread!.status).toBe('review');
-    expect(reread!.finalDocument).toBeNull();
-    expect(reread!.delivery).toBeNull();
+    expect(issued.job.status).toBe('office_handling');
+    expect(issued.job.finalDocument).not.toBeNull();
+    expect(issued.delivery.state).toBe('failed');
+    expect(issued.delivery.failureReason).toMatch(/no email address/i);
+    // Not guessed, not sent.
+    expect(harness.outbox.listSync().filter((entry) => entry.channel === 'email')).toHaveLength(0);
+
+    const [email] = await harness.repos.customerEmails.listForJob(issued.job.id);
+    expect(email?.state).toBe('attention');
+    expect(email?.failureKind).toBe('no_recipient');
+    expect(email?.attachment?.storageKey).toBe(issued.job.finalDocument!.storageKey);
+
+    // The office is told.
+    const notes = await harness.repos.notifications.list(master.id);
+    expect(notes.some((note) => /not emailed/i.test(note.title))).toBe(true);
+
+    // The address is corrected, and the retry sends it — the same document.
+    await harness.repos.customers.saveContact({ ...contact!, email: 'pieter@abc-engineering.example' });
+    const retried = await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel');
+    expect(retried.delivery.state).toBe('pending_delivery');
+    expect(retried.delivery.to).toBe('pieter@abc-engineering.example');
+    const sent = harness.outbox.listSync().filter((entry) => entry.channel === 'email');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.attachments).toEqual([issued.job.finalDocument!.fileName]);
   });
 
   it('never falls back to the company address the customer record still carries', async () => {
@@ -98,12 +124,11 @@ describe('the job card goes to a contact, never to a company mailbox', () => {
 
     const signed = await workAndSign(harness);
 
-    // …and a fully worked, signed job with no contact address is refused rather
-    // than quietly redirected to it. Nothing was sent.
-    await expect(issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel')).rejects.toThrow(
-      /nobody to send the job card to/i,
-    );
-    expect(await harness.outbox.list()).toHaveLength(0);
+    // …and a fully worked, signed job with no contact address is NOT quietly
+    // redirected to it: it is issued, flagged for the office, and nothing is sent.
+    const issued = await issueJobCard(harness.as(sipho), signed, '', 'Pieter Nel');
+    expect(issued.delivery.to).toBe('');
+    expect((await harness.outbox.list()).filter((entry) => entry.channel === 'email')).toHaveLength(0);
   });
 });
 

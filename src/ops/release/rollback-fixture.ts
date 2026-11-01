@@ -25,6 +25,18 @@ export const ROLLBACK_TIMESHEET = {
   financePackage: '00000000-0000-4000-8000-0000000005e3',
 } as const;
 
+/**
+ * The integration rows only the release after c68b3c3 can write (migration
+ * 0042): an email template and version, a SENT customer email, a WhatsApp
+ * message with a delivery status. Copied into the probe as `INTEGRATIONS`.
+ */
+export const ROLLBACK_INTEGRATIONS = {
+  template: '00000000-0000-4000-8000-0000000006a1',
+  templateVersion: '00000000-0000-4000-8000-0000000006a2',
+  email: '00000000-0000-4000-8000-0000000006b1',
+  outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
 export const ROLLBACK_DOCUMENTS = {
   indexed: '00000000-0000-4000-8000-0000000004a1',
   partial: '00000000-0000-4000-8000-0000000004a2',

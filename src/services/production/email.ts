@@ -1,3 +1,5 @@
+import { createSign, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
   isRetryableDeliveryFailure,
   type DeliveryFailureKind,
@@ -44,8 +46,17 @@ export interface GraphEmailConfiguration {
   /** The Entra ID tenant that owns the mailbox. */
   readonly tenantId: string;
   readonly clientId: string;
-  /** A client secret or certificate credential for the app registration. */
+  /**
+   * The app registration's client secret — empty when a certificate is used,
+   * which is the preferred credential (INT-EMAIL-5): a secret is a password
+   * that expires and can be copied; a certificate's private key never leaves
+   * the server and only its public half is uploaded to Entra.
+   */
   readonly clientSecret: string;
+  /** Path to a PEM file holding the certificate's PRIVATE key. Empty with a secret. */
+  readonly certificatePath: string;
+  /** The uploaded certificate's SHA-1 thumbprint, hex, as Entra shows it. */
+  readonly certificateThumbprint: string;
   /** The mailbox that sends, e.g. "jobcards@eje.example". Graph's `{sender}`. */
   readonly sender: string;
   /** Where replies should go, when it is not the sending mailbox. */
@@ -97,11 +108,14 @@ export const readGraphEmailConfiguration = (
   const tenantId = (env.EMAIL_GRAPH_TENANT_ID ?? '').trim();
   const clientId = (env.EMAIL_GRAPH_CLIENT_ID ?? '').trim();
   const clientSecret = (env.EMAIL_GRAPH_CLIENT_SECRET ?? '').trim();
+  const certificatePath = (env.EMAIL_GRAPH_CERTIFICATE_PATH ?? '').trim();
+  const certificateThumbprint = (env.EMAIL_GRAPH_CERTIFICATE_THUMBPRINT ?? '').replace(/[\s:]/g, '').trim();
   const sender = (env.EMAIL_SENDER ?? '').trim();
+  const certificate = certificatePath.length > 0 && /^[0-9a-f]{40}$/i.test(certificateThumbprint);
   if (
     tenantId.length === 0 ||
     clientId.length === 0 ||
-    clientSecret.length === 0 ||
+    (clientSecret.length === 0 && !certificate) ||
     sender.length === 0
   ) {
     return null;
@@ -112,7 +126,10 @@ export const readGraphEmailConfiguration = (
   return {
     tenantId,
     clientId,
-    clientSecret,
+    // A certificate wins when both are set: it is the stronger credential.
+    clientSecret: certificate ? '' : clientSecret,
+    certificatePath: certificate ? certificatePath : '',
+    certificateThumbprint: certificate ? certificateThumbprint.toLowerCase() : '',
     sender,
     replyTo: (env.EMAIL_REPLY_TO ?? '').trim(),
     baseUrl: ((env.EMAIL_GRAPH_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/u, ''),
@@ -157,15 +174,22 @@ export const describeEmailConfiguration = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): EmailConfigurationReport => {
   const value = (name: string): string => (env[name] ?? '').trim();
-  const required = [
-    'EMAIL_GRAPH_TENANT_ID',
-    'EMAIL_GRAPH_CLIENT_ID',
-    'EMAIL_GRAPH_CLIENT_SECRET',
-    'EMAIL_SENDER',
-  ] as const;
+  const required = ['EMAIL_GRAPH_TENANT_ID', 'EMAIL_GRAPH_CLIENT_ID', 'EMAIL_SENDER'] as const;
 
-  const missing = required.filter((name) => value(name).length === 0);
+  const missing: string[] = required.filter((name) => value(name).length === 0);
   const problems: string[] = [];
+  const certificatePath = value('EMAIL_GRAPH_CERTIFICATE_PATH');
+  const thumbprint = value('EMAIL_GRAPH_CERTIFICATE_THUMBPRINT').replace(/[\s:]/g, '');
+  if (value('EMAIL_GRAPH_CLIENT_SECRET').length === 0 && certificatePath.length === 0 && thumbprint.length === 0) {
+    missing.push('EMAIL_GRAPH_CERTIFICATE_PATH and EMAIL_GRAPH_CERTIFICATE_THUMBPRINT (or EMAIL_GRAPH_CLIENT_SECRET)');
+  } else if ((certificatePath.length > 0) !== (thumbprint.length > 0)) {
+    problems.push(
+      'Only half of the certificate credential is set: EMAIL_GRAPH_CERTIFICATE_PATH and ' +
+        'EMAIL_GRAPH_CERTIFICATE_THUMBPRINT are needed together.',
+    );
+  } else if (thumbprint.length > 0 && !/^[0-9a-f]{40}$/i.test(thumbprint)) {
+    problems.push('EMAIL_GRAPH_CERTIFICATE_THUMBPRINT is not a 40-character SHA-1 thumbprint as Entra shows it.');
+  }
 
   const sender = value('EMAIL_SENDER');
   if (sender.length > 0 && !sender.includes('@')) {
@@ -298,6 +322,13 @@ export class EmailSendFailed extends Error {
     readonly kind: EmailFailureKind = 'provider_refused',
     /** From `Retry-After`, when the provider said how long to wait. */
     readonly retryAfterSeconds: number | null = null,
+    /**
+     * THE MESSAGE MAY HAVE GONE (INT-EMAIL-3). The request carrying the
+     * message was sent and no answer came back in time: Microsoft may have
+     * accepted it. The outbox never re-sends such an email by itself — the
+     * office checks Sent Items first.
+     */
+    readonly uncertain: boolean = false,
   ) {
     super(message);
     this.name = 'EmailSendFailed';
@@ -360,8 +391,8 @@ const ADVICE: Readonly<Record<EmailFailureKind, string>> = {
     'same way. EMAIL_GRAPH_CLIENT_SECRET or the app registration needs attention.',
   permission_denied:
     ' Microsoft 365 authenticated this deployment and would not let it send. The app ' +
-    'registration needs Mail.ReadWrite (to create the draft), Mail.Send and ' +
-    'Mail.ReadBasic.All for the sending mailbox; a retry cannot grant them.',
+    'needs the Mail.Send application permission for the sending mailbox, granted through ' +
+    'Exchange Online RBAC for Applications; a retry cannot grant it.',
   throttled: ' Microsoft 365 is asking for fewer requests.',
   provider_unavailable: ' Microsoft 365 is unavailable rather than refusing. Worth trying again.',
   invalid_recipient:
@@ -417,6 +448,39 @@ interface GraphTokenResponse {
   readonly error?: string;
 }
 
+/**
+ * A client assertion for the certificate credential: a JWT signed with the
+ * certificate's private key (RS256), `x5t` naming the certificate by its
+ * SHA-1 thumbprint. Microsoft identity platform, "certificate credentials".
+ */
+export const graphClientAssertion = (
+  config: Pick<GraphEmailConfiguration, 'tenantId' | 'clientId' | 'loginUrl' | 'certificateThumbprint'>,
+  privateKeyPem: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): string => {
+  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT',
+    x5t: Buffer.from(config.certificateThumbprint, 'hex').toString('base64url'),
+  };
+  const claims = {
+    aud: `${config.loginUrl}/${config.tenantId}/oauth2/v2.0/token`,
+    iss: config.clientId,
+    sub: config.clientId,
+    jti: randomUUID(),
+    nbf: nowSeconds,
+    iat: nowSeconds,
+    exp: nowSeconds + 600,
+  };
+  const unsigned = `${encode(header)}.${encode(claims)}`;
+  const signature = createSign('RSA-SHA256').update(unsigned).sign(privateKeyPem).toString('base64url');
+  return `${unsigned}.${signature}`;
+};
+
+/** Ids this adapter records for a sendMail: Microsoft's request id, prefixed. */
+export const GRAPH_REQUEST_PREFIX = 'graph-request:';
+
 interface GraphMessageResponse {
   readonly id?: string;
   readonly error?: { readonly code?: string; readonly message?: string };
@@ -424,6 +488,11 @@ interface GraphMessageResponse {
 
 export class GraphEmailService implements EmailService {
   private token: { value: string; expiresAt: number } | null = null;
+
+  /** The mailbox every message is sent from. */
+  get sender(): string {
+    return this.config.sender;
+  }
 
   constructor(
     private readonly config: GraphEmailConfiguration,
@@ -462,6 +531,8 @@ export class GraphEmailService implements EmailService {
     if (this.token !== null && this.token.expiresAt > now) return this.token.value;
 
     const url = `${this.config.loginUrl}/${this.config.tenantId}/oauth2/v2.0/token`;
+    // Before the request, so an unreadable key is a credential problem, not "unreachable".
+    const credential = this.credential();
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
@@ -469,7 +540,7 @@ export class GraphEmailService implements EmailService {
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: this.config.clientId,
-          client_secret: this.config.clientSecret,
+          ...credential,
           scope: 'https://graph.microsoft.com/.default',
           grant_type: 'client_credentials',
         }).toString(),
@@ -509,6 +580,33 @@ export class GraphEmailService implements EmailService {
   }
 
   /** A deadline for one request. See `timeoutMs`. */
+  /** The secret, or a fresh signed assertion from the certificate's private key. */
+  private credential(): Record<string, string> {
+    if (this.config.certificatePath.length === 0) return { client_secret: this.config.clientSecret };
+    let pem: string;
+    try {
+      pem = readFileSync(this.config.certificatePath, 'utf8');
+    } catch {
+      throw new EmailSendFailed(
+        'The Microsoft 365 certificate file (EMAIL_GRAPH_CERTIFICATE_PATH) could not be read by the application.',
+        '',
+        'credentials_rejected',
+      );
+    }
+    try {
+      return {
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: graphClientAssertion(this.config, pem),
+      };
+    } catch {
+      throw new EmailSendFailed(
+        'The Microsoft 365 certificate file does not hold a usable private key (PEM).',
+        '',
+        'credentials_rejected',
+      );
+    }
+  }
+
   private deadline(): AbortSignal {
     return AbortSignal.timeout(this.config.timeoutMs);
   }
@@ -527,6 +625,8 @@ export class GraphEmailService implements EmailService {
           `asked for ${what}. Nothing was sent, and the job stays open.`,
         '',
         'timed_out',
+        null,
+        what === 'the message',
       );
     }
     return new EmailSendFailed(
@@ -537,6 +637,8 @@ export class GraphEmailService implements EmailService {
       'unreachable',
     );
   }
+
+  private lastRequestId = '';
 
   private async call(path: string, body: unknown): Promise<GraphMessageResponse> {
     const token = await this.accessToken();
@@ -552,6 +654,7 @@ export class GraphEmailService implements EmailService {
       throw this.unreachable('the message', cause);
     }
 
+    this.lastRequestId = response.headers.get('request-id') ?? response.headers.get('client-request-id') ?? '';
     if (response.status === 202 || response.status === 204) return {};
 
     const payload = (await response.json().catch(() => ({}))) as GraphMessageResponse;
@@ -639,14 +742,28 @@ export class GraphEmailService implements EmailService {
       attachments: await this.attachmentsFor(message),
     };
 
+    /*
+     * ONE CALL, ONE PERMISSION. INT-EMAIL-5 (the owner, 1 November 2026:
+     * "Microsoft Graph application permission Mail.Send", least privilege).
+     * This used to create a draft and then send it — which needed
+     * Mail.ReadWrite on the mailbox as well — so that Graph's message id could
+     * be recorded. `sendMail` needs Mail.Send alone, and saves the message to
+     * the mailbox's Sent Items, where the office sees what the system sent.
+     * What it returns is Microsoft's request id (202, no body), recorded as
+     * the reference; an `X-EJE-Reference` header carries EJE's own.
+     */
     const sender = encodeURIComponent(this.config.sender);
-    const created = await this.call(`/users/${sender}/messages`, draft);
-    const messageId = created.id ?? '';
-    if (messageId.length === 0) {
-      throw new EmailSendFailed('Microsoft 365 created the message without returning an id.');
-    }
-
-    await this.call(`/users/${sender}/messages/${encodeURIComponent(messageId)}/send`, {});
+    this.lastRequestId = '';
+    await this.call(`/users/${sender}/sendMail`, {
+      message: {
+        ...draft,
+        ...(message.reference === undefined || message.reference.length === 0
+          ? {}
+          : { internetMessageHeaders: [{ name: 'X-EJE-Reference', value: message.reference.slice(0, 200) }] }),
+      },
+      saveToSentItems: true,
+    });
+    const messageId = `${GRAPH_REQUEST_PREFIX}${this.lastRequestId.length > 0 ? this.lastRequestId : randomUUID()}`;
 
     const entry: OutboxEntry = {
       id: messageId,
@@ -680,6 +797,9 @@ export class GraphEmailService implements EmailService {
    * being moved on a shrug.
    */
   async deliveryState(messageId: string): Promise<DeliveryReceipt | null> {
+    // A sendMail reference is a request id, not a message the app may read:
+    // with Mail.Send alone there is nothing to ask, and nothing is assumed.
+    if (messageId.startsWith(GRAPH_REQUEST_PREFIX)) return null;
     if (messageId.length === 0) return null;
     const token = await this.accessToken();
     const sender = encodeURIComponent(this.config.sender);

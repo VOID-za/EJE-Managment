@@ -4096,7 +4096,13 @@ await step('a timesheet is manual: unrecorded days say so, the office reads it, 
  */
 await step('a technician types a whole timesheet line, clearing and retyping the date, and it is saved exactly as typed (the timesheet freeze)', async () => {
   await signInAs(page, 'Deon Botha');
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  /*
+   * TEN DAYS ENDING TODAY, named in the address. The default period is the
+   * current month, which on the 1st has one day and this step needs six — the
+   * step failed every first of the month (found 1 November 2026).
+   */
+  const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-day').first().waitFor({ timeout: 15000 });
   const days = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
   if (days.length < 6) throw new Error(`the period has ${days.length} days; the step needs six`);
@@ -4166,7 +4172,7 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   };
   await check('after saving');
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
   await check('after leaving and coming back');
 
   // And the server holds exactly that.

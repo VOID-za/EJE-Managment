@@ -6,6 +6,7 @@ import type {
   IdGenerator,
   PdfService,
   StorageService,
+  GeocodingService,
   WhatsAppService,
 } from '@/services/ports';
 import type { PdfTextService } from '@/services/pdf-text';
@@ -33,6 +34,11 @@ export interface AppServices {
    */
   readonly pdfText: PdfTextService;
   readonly storage: StorageService;
+  /**
+   * The site-address geocoder (INT-MAP-1). Optional: a context without one
+   * behaves as a deployment with no geocoder configured.
+   */
+  readonly geocoding?: GeocodingService;
   readonly clock: Clock;
   readonly ids: IdGenerator;
 }
@@ -42,6 +48,14 @@ export interface OperationContext {
   readonly services: AppServices;
   /** The signed-in user performing the operation. */
   readonly actor: User;
+  /**
+   * SEND AFTER COMMIT. INT-EMAIL-3. Set by the API, whose handler drains the
+   * customer email outbox once the transaction has committed — an email is
+   * never handed to Microsoft from inside a transaction that could still roll
+   * back. Unset (tests, scripts), queued email is dispatched inline at the end
+   * of the operation, through the same claim → send → record path.
+   */
+  readonly deferDelivery?: boolean;
 }
 
 export interface AuditInput {

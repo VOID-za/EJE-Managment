@@ -81,8 +81,65 @@ export interface Site {
    */
   readonly latitude: number | null;
   readonly longitude: number | null;
+  /**
+   * WHERE THE PIN CAME FROM, AND HOW FAR TO TRUST IT. INT-MAP-1, migration
+   * 0042. Absent on a site written before the automatic pin existed, and
+   * read then by `siteLocationOf`: coordinates somebody entered are the
+   * office's own (verified, manual), and no coordinates is "not requested".
+   */
+  readonly geocode?: SiteGeocode;
   /** See `Contact.archivedAt`. A site with job history is archived, not deleted. */
   readonly archivedAt: IsoDateTime | null;
+}
+
+/**
+ * The state of a site's pin. INT-MAP-1.
+ *
+ *   not_requested  — nothing asked yet (no address, or a site from before)
+ *   pending        — waiting for the geocoder
+ *   resolved       — the geocoder found one confident match; the pin is set,
+ *                    the office has not checked it
+ *   ambiguous      — several or imprecise matches; the best one is only a
+ *                    SUGGESTION and the pin is not set from it
+ *   not_found      — the geocoder found nothing for this address
+ *   failed         — the geocoder refused or kept failing; says why
+ *   not_configured — this deployment has no geocoder
+ *   verified       — the office checked the pin (or entered it by hand)
+ *   stale          — the address changed after the pin was verified; the old
+ *                    pin is kept but no longer trusted until re-checked
+ */
+export type SiteLocationStatus =
+  | 'not_requested'
+  | 'pending'
+  | 'resolved'
+  | 'ambiguous'
+  | 'not_found'
+  | 'failed'
+  | 'not_configured'
+  | 'verified'
+  | 'stale';
+
+export interface SiteGeocode {
+  readonly status: SiteLocationStatus;
+  /** Who set the CURRENT pin: the office by hand, or the geocoder. */
+  readonly source: 'manual' | 'geocoded' | null;
+  readonly verifiedAt: IsoDateTime | null;
+  readonly verifiedBy: string | null;
+  /** The address, as one normalised line, that was last sent to the geocoder. */
+  readonly query: string;
+  /** What the geocoder said the address is. Never replaces the office's address. */
+  readonly formattedAddress: string;
+  readonly placeId: string | null;
+  /** The provider's precision for the match, e.g. ROOFTOP or APPROXIMATE. */
+  readonly precision: string | null;
+  readonly provider: string | null;
+  readonly geocodedAt: IsoDateTime | null;
+  readonly error: string;
+  readonly attempts: number;
+  readonly nextAttemptAt: IsoDateTime | null;
+  /** A geocoder result held back, because the pin is verified or the match unsure. */
+  readonly suggestedLatitude: number | null;
+  readonly suggestedLongitude: number | null;
 }
 
 export interface CustomerNote {

@@ -677,6 +677,18 @@ const v34ToV35 = (data: Loose): Loose => ({
   financePackages: Array.isArray(data.financePackages) ? data.financePackages : [],
 });
 
+/** v36: integrations (INT-EMAIL, INT-WA, INT-MAP). Empty collections; nothing existing changes. */
+const v35ToV36 = (data: Loose): Loose => ({
+  ...data,
+  emailTemplates: Array.isArray(data.emailTemplates) ? data.emailTemplates : [],
+  emailTemplateVersions: Array.isArray(data.emailTemplateVersions) ? data.emailTemplateVersions : [],
+  customerEmails: Array.isArray(data.customerEmails) ? data.customerEmails : [],
+  whatsappWebhookEvents: Array.isArray(data.whatsappWebhookEvents) ? data.whatsappWebhookEvents : [],
+  geocodeCache: Array.isArray(data.geocodeCache) ? data.geocodeCache : [],
+  integrationUsage: Array.isArray(data.integrationUsage) ? data.integrationUsage : [],
+  integrationState: Array.isArray(data.integrationState) ? data.integrationState : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -705,6 +717,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   32: v32ToV33,
   33: v33ToV34,
   34: v34ToV35,
+  35: v35ToV36,
 };
 
 /**

@@ -1,6 +1,14 @@
 'use client';
 
 import type {
+  CustomerEmail,
+  EmailEventDefinition,
+  EmailTemplateVersion,
+  EmailTemplateWithVersion,
+  GeocodeAnswer,
+  OutboxMessage,
+  PlaceholderDefinition,
+  TemplateProblem,
   AttendanceRecord,
   StaffAvailabilityRow,
   TimesheetComment,
@@ -552,6 +560,7 @@ export const jobs = {
     command<{
       queued: boolean;
       navigationUrl: string;
+      navigationNote: string;
       configured: boolean;
       failureReason: string | null;
     }>(`/api/jobs/${segment(jobId)}/send_site_location`, {}),
@@ -708,8 +717,13 @@ export const jobs = {
   takeOverSubmission: (jobId: string) =>
     command<SubmitResult>(`/api/jobs/${segment(jobId)}/take_over_submission`),
 
-  retryDelivery: (jobId: string) =>
-    command<SubmitResult>(`/api/jobs/${segment(jobId)}/retry_delivery`),
+  retryDelivery: (jobId: string, input: { confirmNotSent?: boolean } = {}) =>
+    command<SubmitResult>(`/api/jobs/${segment(jobId)}/retry_delivery`, input),
+  /** The job's email history and WhatsApp messages. Office only. INT-EMAIL-4. */
+  messages: (jobId: string) =>
+    query<{ emails: readonly CustomerEmail[]; whatsapp: readonly OutboxMessage[] }>(`/api/jobs/${segment(jobId)}/emails`),
+  retryWhatsApp: (jobId: string, messageId: string) =>
+    command<OutboxMessage>(`/api/jobs/${segment(jobId)}/retry_whatsapp`, { messageId }),
   transferToOpen: (jobId: string, input: unknown) => jobAction(jobId, 'transfer_to_open', input),
   transferToTechnician: (jobId: string, input: unknown) =>
     jobAction(jobId, 'transfer_to_technician', input),
@@ -825,6 +839,12 @@ export const customers = {
     command<Customer>(`/api/customers/${segment(customerId)}/edit_note`, { noteId, body }),
   updateSite: (siteId: string, input: unknown) =>
     command<Site>(`/api/sites/${segment(siteId)}/update`, input),
+  /** INT-MAP-2: the office verifies the pin, takes the suggestion, or types it. */
+  verifySiteLocation: (
+    siteId: string,
+    input: { kind: 'current' } | { kind: 'suggested' } | { kind: 'manual'; latitude: number; longitude: number },
+  ) => command<Site>(`/api/sites/${segment(siteId)}/verify_location`, input),
+  findSiteLocation: (siteId: string) => command<Site>(`/api/sites/${segment(siteId)}/find_location`, {}),
   removeSite: (siteId: string) =>
     command<RemovalOutcome>(`/api/sites/${segment(siteId)}/remove`),
   updateContact: (contactId: string, input: unknown) =>
@@ -1096,6 +1116,71 @@ export const checklists = {
     command<ChecklistTemplate>(`/api/checklists/${segment(templateId)}/start_version`, { version }),
   archive: (templateId: string, version: string) =>
     command<ChecklistTemplate>(`/api/checklists/${segment(templateId)}/archive`, { version }),
+};
+
+/** Administration → Email templates. INT-EMAIL-1. */
+export const emailTemplates = {
+  list: () =>
+    query<{
+      templates: readonly EmailTemplateWithVersion[];
+      coverage: readonly { event: string; jobType: string; defaultTemplateId: string | null }[];
+      events: readonly EmailEventDefinition[];
+      placeholders: readonly PlaceholderDefinition[];
+    }>('/api/admin/email-templates'),
+  get: (id: string) =>
+    query<{ template: EmailTemplateWithVersion; versions: readonly EmailTemplateVersion[] }>(`/api/admin/email-templates/${segment(id)}`),
+  create: (input: { event: string; jobType: string; name: string; description: string; subject: string; body: string }) =>
+    command<EmailTemplateWithVersion>('/api/admin/email-templates', { op: 'create', ...input }),
+  preview: (input: { name: string; subject: string; body: string }) =>
+    command<{ subject: string; body: string; problems: readonly TemplateProblem[] }>('/api/admin/email-templates', { op: 'preview', ...input }),
+  restore: (event: string, jobType: string) =>
+    command<EmailTemplateWithVersion>('/api/admin/email-templates', { op: 'restore', event, jobType }),
+  save: (
+    id: string,
+    input: { name: string; description: string; subject: string; body: string; changeNote: string; expectedVersion: number },
+  ) => apiPatch<EmailTemplateWithVersion>(`/api/admin/email-templates/${segment(id)}`, input),
+  setState: (id: string, op: 'activate' | 'make_default' | 'deactivate') =>
+    command<EmailTemplateWithVersion>(`/api/admin/email-templates/${segment(id)}`, { op }),
+};
+
+export interface IntegrationStatusView {
+  readonly service: 'email' | 'whatsapp' | 'maps';
+  readonly title: string;
+  readonly state: string;
+  readonly summary: string;
+  readonly checks: readonly { label: string; ok: boolean; detail: string }[];
+  readonly missing: readonly string[];
+  readonly testRecipients: number;
+}
+
+/** Administration → Integrations. INT-ADMIN-1. */
+export const integrations = {
+  status: () =>
+    query<{
+      statuses: readonly IntegrationStatusView[];
+      testRecipients: { email: readonly string[]; whatsapp: readonly string[] };
+      recentEmails: readonly {
+        id: string;
+        jobId: string | null;
+        recipient: string;
+        subject: string;
+        state: string;
+        attempts: number;
+        createdAt: string;
+        sentAt: string | null;
+        failureReason: string;
+        templateName: string;
+        templateVersion: number | null;
+      }[];
+      sites: readonly { site: Site; customerName: string }[];
+    }>('/api/admin/integrations'),
+  action: (
+    input:
+      | { action: 'test_email'; recipientIndex: number }
+      | { action: 'test_whatsapp'; recipientIndex: number }
+      | { action: 'test_geocode'; address: string }
+      | { action: 'find_unpinned' },
+  ) => command<{ ok: boolean; detail?: string; answer?: GeocodeAnswer }>('/api/admin/integrations', input),
 };
 
 export const settings = {

@@ -5,7 +5,6 @@ import {
   asAttachmentId,
   asLineItemId,
   canTransition,
-  deliveryStateLabel,
   emptyDelivery,
   checkCollectionDetails,
   checkReadyForSignature,
@@ -40,6 +39,7 @@ import {
   partsLockedAfterCompletion,
   labourRateLabel,
   siteAddressLine,
+  siteNavigationTarget,
   siteNavigationUrl,
   pricingInputsFrom,
   roleLabel,
@@ -72,14 +72,13 @@ import {
   type DeliveryRecord,
   type UserId,
   type MediaVisibility,
-  deliveryRetryAdvice,
 } from '@/domain';
 import { businessDateOf } from '@/lib/business-time';
 import { formatCurrency, formatHours, formatKilometres } from '@/lib/format';
-import { deliveryFailureKindOf } from '@/services/ports';
 import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment, queueAssignmentWhatsApp } from './assignment-notice';
+import { emailIssuedJobCard, retryCustomerEmail } from './customer-email';
 import { issueDeliveryNote, issuesDeliveryNote } from './delivery-note';
 import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
@@ -488,6 +487,8 @@ export interface SiteLocationResult {
    */
   readonly queued: boolean;
   readonly navigationUrl: string;
+  /** How far to trust the link: a verified pin, an automatic one, or an address search. INT-MAP-3. */
+  readonly navigationNote: string;
   /** False when this deployment has no WhatsApp credentials at all. */
   readonly configured: boolean;
   /** Set when nothing was queued. The job is unaffected either way. */
@@ -566,7 +567,7 @@ export const sendSiteLocation = async (
       summary: 'Site location could not be sent',
       detail: `${detail} The job remains accepted and in progress.`,
     });
-    return { queued: false, navigationUrl, configured, failureReason };
+    return { queued: false, navigationUrl, navigationNote: siteNavigationTarget(input.site).note, configured, failureReason };
   };
 
   if (!configured) {
@@ -595,14 +596,19 @@ export const sendSiteLocation = async (
     id: context.services.ids.next('outbox'),
     channel: 'whatsapp',
     template: SITE_LOCATION_TEMPLATE,
+    purpose: 'site_location',
     recipient,
+    /*
+     * SIX VARIABLES, Meta's order (docs/integrations-setup.md, INT-WA-1): job
+     * number, customer, machine, site, address, navigation link — the pin when
+     * it is trusted, otherwise an address search (INT-MAP-3).
+     */
     parameters: [
       job.jobNumber,
       input.customerName,
-      input.machine === null
-        ? input.site.name
-        : `${input.machine.manufacturer} ${input.machine.model}`,
+      input.machine === null ? 'Not specified' : `${input.machine.manufacturer} ${input.machine.model}`,
       input.site.name,
+      siteAddressLine(input.site).length > 0 ? siteAddressLine(input.site) : 'Not recorded',
       navigationUrl,
     ],
     preview: buildSiteLocationMessage(input, job.jobNumber),
@@ -624,7 +630,7 @@ export const sendSiteLocation = async (
       'Queued is not sent and sent is not delivered — the outbox records what the provider actually says.',
   });
 
-  return { queued: true, navigationUrl, configured, failureReason: null };
+  return { queued: true, navigationUrl, navigationNote: siteNavigationTarget(input.site).note, configured, failureReason: null };
 };
 
 /** Records that the technician was offered the site location and declined it. */
@@ -3327,23 +3333,16 @@ const performIssue = async (
   }
 
   /*
-   * Refused BEFORE anything is generated or stored.
+   * NO ADDRESS NO LONGER STOPS THE SIGNATURE. INT-EMAIL-3 (the owner,
+   * 1 November 2026: "If no valid recipient exists: do not guess, do not send,
+   * record a clear failure/attention status, notify the appropriate office
+   * users, allow the address to be corrected and the email to be retried").
    *
-   * A job card issued to nowhere cannot be delivered and cannot be retried —
-   * the recipient is frozen onto the document — so the job would be locked
-   * read-only awaiting a delivery that could never arrive. Checking here, while
-   * the job is still editable, means the office adds the contact's address and
-   * issues normally.
+   * This used to refuse the issue, which left a technician on site with a
+   * signed job card they could not submit. The job card is now issued and
+   * stored; the email is written in the attention state, the office is told,
+   * and a retry after the contact's address is corrected reads it afresh.
    */
-  if (customerEmail.trim().length === 0) {
-    throw new WorkflowError(`${job.jobNumber} has nobody to send the job card to.`, [
-      {
-        code: 'recipient_required',
-        message:
-          'No email address is recorded for the contact on this job. Capture one on the customer’s contact, then issue the job card.',
-      },
-    ]);
-  }
 
   /*
    * INTO THE OFFICE'S HANDS. Issue #73, Batch 1.
@@ -3442,7 +3441,7 @@ const performIssue = async (
       generatedAt: document.generatedAt,
       generatedBy: context.actor.id,
       renderedLocally: document.renderedLocally,
-      issuedTo: customerEmail,
+      issuedTo: customerEmail.trim(),
       // Measured off the readback above, for the reason given in
       // `renderAndStoreFinalDocument`.
       sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
@@ -3450,14 +3449,14 @@ const performIssue = async (
       renderer: stored.renderer ?? null,
       provenance: 'genuine',
     },
-    delivery: emptyDelivery(customerEmail, now),
+    delivery: emptyDelivery(customerEmail.trim(), now),
   });
 
   await audit(context, {
     jobId: job.id,
     type: 'job_submitted',
     summary: 'Job card submitted and issued',
-    detail: `Submitted by ${userFullName(context.actor)}. The signed job card was generated and sent to ${customerEmail}.`,
+    detail: `Submitted by ${userFullName(context.actor)}. The signed job card was generated and stored, and is emailed to the customer automatically${customerEmail.trim().length > 0 ? ` (${customerEmail.trim()})` : ''} — the job's email history records what was sent.`,
   });
 
   /*
@@ -3475,125 +3474,25 @@ const performIssue = async (
     title: `${job.jobNumber} — job card submitted`,
     body:
       `${userFullName(context.actor)} submitted the signed job card for ${job.jobNumber}. ` +
-      `The customer's copy was sent to ${customerEmail}. ` +
+      `The customer's copy is emailed automatically${customerEmail.trim().length > 0 ? ` to ${customerEmail.trim()}` : ''}. ` +
       'It is waiting for the office to handle it and raise the invoice.',
     jobId: job.id,
     link: `/jobs/${job.jobNumber}`,
   });
 
-  return sendFinalDocument(context, issued, customerDisplayName);
-};
-
-/** The subject and body of a customer's copy. One place, so retries match. */
-const finalDocumentMail = (job: Job, customerDisplayName: string) => ({
-  subject:
-    job.jobType === 'parts'
-      ? `${job.jobNumber} — ${job.courierCollection ? 'Delivery Note' : 'Parts Collection Note'}`
-      : `${job.jobNumber} — Signed Job Card — ${getJobTypeDefinition(job.jobType).label}`,
-  body:
-    `Good day ${customerDisplayName},\n\n` +
-    (job.jobType === 'parts'
-      ? `Please find attached the signed collection note for ${job.jobNumber}.\n\n`
-      : `Please find attached the signed job card for ${job.jobNumber}.\n\n`) +
-    `Kind regards\nEJE Industrial Electronics`,
-});
-
-/**
- * Sends the STORED final document and records what the provider said.
- *
- * Used by the first issue and by every retry, so a retry re-sends the document
- * that was issued rather than making a new one — the customer must never
- * receive two different job cards for the same job.
- */
-const sendFinalDocument = async (
-  context: OperationContext,
-  job: Job,
-  customerDisplayName: string,
-): Promise<SubmitResult> => {
-  const document = job.finalDocument;
-  if (document === null) {
-    throw new WorkflowError(`${job.jobNumber} has no final job card to send.`, []);
-  }
-
-  const now = context.services.clock.now();
-  const attempts = (job.delivery?.attempts ?? 0) + 1;
-  const mail = finalDocumentMail(job, customerDisplayName);
-
-  const sending = await context.repos.jobs.save({
-    ...job,
-    delivery: {
-      ...emptyDelivery(document.issuedTo, now),
-      state: 'sending',
-      attempts,
-    },
-  });
-
-  let receipt;
-  try {
-    receipt = await context.services.email.send({
-      to: [document.issuedTo],
-      subject: mail.subject,
-      body: mail.body,
-      attachments: [{ fileName: document.fileName, storageKey: document.storageKey }],
-    });
-  } catch (error) {
-    receipt = {
-      messageId: '',
-      state: 'failed' as const,
-      failureReason: error instanceof Error ? error.message : 'The provider could not be reached.',
-      /*
-       * WHICH KIND, so the office is not left with one button and nine
-       * situations. Read off the thrown error through the PORT's own guard —
-       * the application does not know which transport this deployment has, and
-       * an adapter that says nothing is recorded as unclassified rather than
-       * guessed at.
-       */
-      failureKind: deliveryFailureKindOf(error),
-      entry: null,
-    };
-  }
-
-  const delivery: DeliveryRecord = {
-    messageId: receipt.messageId,
-    state: receipt.state,
-    to: document.issuedTo,
-    acceptedAt: receipt.state === 'failed' ? null : now,
-    confirmedAt: receipt.state === 'delivered' ? now : null,
-    updatedAt: now,
-    attempts,
-    failureReason: receipt.failureReason,
-    // Only a failure carries a kind, which is also what the table's CHECK says.
-    failureKind: receipt.state === 'failed' ? (receipt.failureKind ?? null) : null,
-  };
-
-  await audit(context, {
-    jobId: job.id,
-    type: 'delivery_state_changed',
-    summary: `Customer copy ${deliveryStateLabel(delivery.state).toLowerCase()}`,
-    detail:
-      delivery.state === 'failed'
-        ? `Attempt ${attempts} to ${document.issuedTo} failed: ${delivery.failureReason}${
-            deliveryRetryAdvice(delivery.failureKind).length === 0
-              ? ''
-              : ` ${deliveryRetryAdvice(delivery.failureKind)}`
-          }`
-        : `Attempt ${attempts}: the provider accepted ${document.fileName} for ${document.issuedTo}. Delivery is ${deliveryStateLabel(delivery.state).toLowerCase()}.`,
-  });
-
   /*
-   * THE DELIVERY RECORD, AND NOTHING ELSE. Issue #73, Batch 1.
-   *
-   * A delivered copy used to close the job here. Delivery is now tracked on its
-   * own: the job stays wherever the office lifecycle has it, whatever the
-   * provider reports.
+   * THE CUSTOMER'S COPY GOES THROUGH THE OUTBOX. INT-EMAIL-3. Written in this
+   * transaction; handed to Microsoft after it commits. See `customer-email.ts`.
    */
-  const saved = await context.repos.jobs.save({ ...sending, delivery });
-
+  const emailed = await emailIssuedJobCard(context, issued, {
+    email: customerEmail.trim(),
+    displayName: customerDisplayName,
+  });
   return {
-    job: saved,
+    job: emailed,
     documentFileName: document.fileName,
-    emailedTo: document.issuedTo,
-    delivery,
+    emailedTo: customerEmail.trim(),
+    delivery: emailed.delivery ?? emptyDelivery(customerEmail.trim(), now),
   };
 };
 
@@ -3696,6 +3595,7 @@ export const retryJobCardDelivery = async (
   context: OperationContext,
   job: Job,
   customerDisplayName: string,
+  options: { readonly confirmNotSent?: boolean } = {},
 ): Promise<SubmitResult> => {
   /*
    * WIDER THAN SUBMITTING, AND ON PURPOSE. CR-07.
@@ -3758,7 +3658,15 @@ export const retryJobCardDelivery = async (
     }
   }
 
-  return sendFinalDocument(context, job, customerDisplayName);
+  void customerDisplayName; // the recipient is read afresh by the retry
+  await retryCustomerEmail(context, job, { confirmNotSent: options.confirmNotSent === true });
+  const after = (await context.repos.jobs.findById(job.id)) ?? job;
+  return {
+    job: after,
+    documentFileName: after.finalDocument?.fileName ?? '',
+    emailedTo: after.delivery?.to ?? '',
+    delivery: after.delivery ?? emptyDelivery('', context.services.clock.now()),
+  };
 };
 
 /**

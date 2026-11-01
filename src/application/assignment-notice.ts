@@ -1,4 +1,4 @@
-import { userFullName, type Job, type User } from '@/domain';
+import { getJobTypeDefinition, userFullName, type Job, type User } from '@/domain';
 import type { OperationContext } from './context';
 import { audit, notify } from './audit';
 
@@ -71,7 +71,40 @@ const NOUN: Record<AssignmentOccasion, string> = {
  */
 export const ASSIGNMENT_TEMPLATE = 'eje_job_assigned';
 
+/**
+ * A TRANSFER HAS ITS OWN TEMPLATE. INT-WA-1 (the owner, 1 November 2026: "Job
+ * transfer — notify receiving technician"). It used to reuse the assignment
+ * template, so the receiving technician read "has been assigned to you" for a
+ * job somebody handed over mid-way. Same six variables, its own words.
+ */
+export const TRANSFER_TEMPLATE = 'eje_job_transferred';
+
+/**
+ * Where a job is opened in EJE, for the message's link. The link opens the
+ * sign-in page for anybody without a session: it carries no token and no
+ * customer detail, only the job number (EJE_PUBLIC_URL, default the live site).
+ */
+export const jobLink = (jobNumber: string): string =>
+  `${((process.env.EJE_PUBLIC_URL ?? '').trim() || 'https://eje.syncza.co.za').replace(/\/+$/u, '')}/jobs/${encodeURIComponent(jobNumber)}`;
+
+/**
+ * THE TEMPLATE'S SIX VARIABLES, in Meta's order (docs/integrations-setup.md):
+ * job number, job type, customer, site, machine, link. Nothing else — not the
+ * fault description, not a contact's name or number, not the street address —
+ * because the message can be read on a locked phone's screen.
+ */
+export const assignmentParameters = (job: Job, details: AssignmentContext): readonly string[] => [
+  job.jobNumber,
+  getJobTypeDefinition(job.jobType).label,
+  details.customerName,
+  details.siteName,
+  details.machineName.length > 0 ? details.machineName : 'Not specified',
+  jobLink(job.jobNumber),
+];
+
 export interface AssignmentContext {
+  /** The machine as "Manufacturer Model", or empty. INT-WA-1. */
+  readonly machineName: string;
   readonly customerName: string;
   readonly siteName: string;
   /** The machine's description, or the job type where there is no machine. */
@@ -176,9 +209,10 @@ export const queueAssignmentWhatsApp = async (
   await context.repos.outbox.enqueue({
     id: context.services.ids.next('outbox'),
     channel: 'whatsapp',
-    template: ASSIGNMENT_TEMPLATE,
+    template: occasion === 'transfer' ? TRANSFER_TEMPLATE : ASSIGNMENT_TEMPLATE,
+    purpose: occasion === 'transfer' ? 'transfer' : 'assignment',
     recipient: technician.mobile,
-    parameters: [job.jobNumber, details.customerName, details.siteName, details.subject],
+    parameters: [...assignmentParameters(job, details)],
     preview: buildAssignmentMessage(job, details, occasion),
     jobId: job.id,
     state: 'pending',
@@ -220,6 +254,7 @@ export const assignmentDetails = async (
   ]);
 
   return {
+    machineName: machine === null ? '' : `${machine.manufacturer} ${machine.model}`.trim(),
     customerName: customer?.name ?? 'Customer',
     siteName: site?.name ?? 'Site',
     subject:

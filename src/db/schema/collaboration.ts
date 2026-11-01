@@ -181,8 +181,23 @@ export const outboxMessages = pgTable(
     failureReason: text('failure_reason').notNull().default(''),
     createdAt: instant('created_at').notNull(),
     lastAttemptAt: instant('last_attempt_at'),
+    /*
+     * Migration 0042 (INT-WA-2). What the message was for, and what Meta's
+     * webhooks later said about it. `state` stays what the SENDER knows
+     * (pending, sent, failed); `delivery_status` is what the handset side
+     * reported, and only a verified webhook sets it.
+     */
+    purpose: text('purpose').notNull().default(''),
+    deliveryStatus: text('delivery_status'),
+    deliveredAt: instant('delivered_at'),
+    readAt: instant('read_at'),
+    providerError: text('provider_error').notNull().default(''),
+    retryOf: uuid('retry_of'),
   },
   (table) => [
+    index('outbox_messages_provider_idx')
+      .on(table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
     // Only the outstanding ones are ever queried, so only they are indexed.
     index('outbox_messages_pending_idx')
       .on(table.createdAt)

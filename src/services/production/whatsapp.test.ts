@@ -23,6 +23,8 @@ const config: WhatsAppConfiguration = {
   accessToken: 'test-token',
   apiVersion: 'v21.0',
   baseUrl: 'https://graph.facebook.com',
+  templateLanguage: 'en',
+  timeoutMs: 20_000,
 };
 
 const message = {

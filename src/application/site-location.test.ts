@@ -184,7 +184,10 @@ describe('choosing "Send Location"', () => {
     expect(body).toContain('https://www.google.com/maps/dir/?api=1&destination=');
     // The template's placeholders, in the order the approved template expects.
     expect(row?.parameters[0]).toBe('EJE-1048');
-    expect(row?.parameters[4]).toContain('google.com/maps');
+    // INT-WA-1: six — job number, customer, machine, site, address, link.
+    expect(row?.parameters).toHaveLength(6);
+    expect(row?.parameters[4]).toContain('Johannesburg');
+    expect(row?.parameters[5]).toContain('google.com/maps');
   });
 
   it('keeps the message short, to limit notifications and messaging cost', async () => {

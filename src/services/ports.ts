@@ -15,6 +15,28 @@ import type {
 export type { DeliveryFailureKind, DeliveryState } from '@/domain';
 import { isDeliveryFailureKind } from '@/domain';
 import type { PreparedPhoto } from '@/lib/pdf/image';
+import type { GeocodeAnswer } from '@/domain';
+
+/**
+ * TURNING A SITE ADDRESS INTO A PIN. INT-MAP-1.
+ *
+ * One question, one answer: the address as one line, and what the provider
+ * made of it (`GeocodeAnswer`). The adapter classifies the provider's reply
+ * (a match, several, none, try later, give up, not set up) and never throws
+ * for an answer the provider gave; the rules for what a site does with the
+ * answer are in `domain/site/location.ts`.
+ */
+export interface GeocodingService {
+  /** False on a deployment with no geocoder: nothing is asked, and nothing is paid for. */
+  readonly configured: boolean;
+  /** Short provider name recorded on the site, e.g. `google`. */
+  readonly provider: string;
+  /** The region bias, e.g. `za`. Part of the cache key. */
+  readonly region: string;
+  /** Requests a day the application allows itself, where the adapter has a cap. */
+  readonly dailyLimit?: number;
+  geocode(query: string): Promise<GeocodeAnswer>;
+}
 
 /**
  * Integration ports.
@@ -76,6 +98,8 @@ export interface EmailMessage {
   readonly subject: string;
   readonly body: string;
   readonly attachments?: readonly { readonly fileName: string; readonly storageKey: string }[];
+  /** EJE's own reference for the message (the outbox id), sent as a header. */
+  readonly reference?: string;
 }
 
 /**
@@ -122,6 +146,8 @@ export const deliveryFailureKindOf = (error: unknown): DeliveryFailureKind | nul
 };
 
 export interface EmailService {
+  /** The mailbox system email is sent FROM (EMAIL_SENDER). Recorded on every email. */
+  readonly sender?: string;
   /**
    * Hands the message to the provider.
    *

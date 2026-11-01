@@ -71,7 +71,8 @@ const sendOne = async (
      * mechanism exists for: before it, a failed send left nothing behind but a
      * sentence on the audit trail.
      */
-    await runtime.write(({ repos }) => repos.outbox.markFailed(message.id, reason, now));
+    const permanent = (cause as { permanent?: unknown } | null)?.permanent === true;
+    await runtime.write(({ repos }) => repos.outbox.markFailed(message.id, reason, now, permanent));
     return 'failed';
   }
 };

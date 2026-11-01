@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import {
   asProvenance,
   asContactId,
@@ -12,6 +12,9 @@ import {
   type CustomerId,
   type Site,
   type SiteId,
+  type IsoDateTime,
+  type SiteGeocode,
+  type SiteLocationStatus,
 } from '@/domain';
 import type { CustomerRepository, RegisterFilter } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
@@ -63,8 +66,56 @@ const toDomainSite = (row: SiteRow): Site => ({
   accessNotes: row.accessNotes,
   latitude: coordinate(row.latitude),
   longitude: coordinate(row.longitude),
+  geocode: {
+    status: row.locationStatus as SiteLocationStatus,
+    source: row.locationSource as SiteGeocode['source'],
+    verifiedAt: row.locationVerifiedAt as IsoDateTime | null,
+    verifiedBy: row.locationVerifiedBy,
+    query: row.geocodeQuery,
+    formattedAddress: row.geocodedAddress,
+    placeId: row.geocodePlaceId,
+    precision: row.geocodePrecision,
+    provider: row.geocodeProvider,
+    geocodedAt: row.geocodedAt as IsoDateTime | null,
+    error: row.geocodeError,
+    attempts: row.geocodeAttempts,
+    nextAttemptAt: row.geocodeNextAttemptAt as IsoDateTime | null,
+    suggestedLatitude: coordinate(row.suggestedLatitude),
+    suggestedLongitude: coordinate(row.suggestedLongitude),
+  },
   archivedAt: row.archivedAt,
 });
+
+/**
+ * The pin columns of a site (migration 0042), or nothing when the site carries
+ * no geocode record — a caller that never read one must not erase it.
+ */
+const locationColumns = (site: Site) => {
+  const columns = {
+    latitude: site.latitude === null ? null : String(site.latitude),
+    longitude: site.longitude === null ? null : String(site.longitude),
+  };
+  const geocode = site.geocode;
+  if (geocode === undefined) return columns;
+  return {
+    ...columns,
+    locationStatus: geocode.status,
+    locationSource: geocode.source,
+    locationVerifiedAt: geocode.verifiedAt,
+    locationVerifiedBy: geocode.verifiedBy,
+    geocodeQuery: geocode.query,
+    geocodedAddress: geocode.formattedAddress,
+    geocodePlaceId: geocode.placeId,
+    geocodePrecision: geocode.precision,
+    geocodeProvider: geocode.provider,
+    geocodedAt: geocode.geocodedAt,
+    geocodeError: geocode.error.slice(0, 1000),
+    geocodeAttempts: geocode.attempts,
+    geocodeNextAttemptAt: geocode.nextAttemptAt,
+    suggestedLatitude: geocode.suggestedLatitude === null ? null : String(geocode.suggestedLatitude),
+    suggestedLongitude: geocode.suggestedLongitude === null ? null : String(geocode.suggestedLongitude),
+  };
+};
 
 const toDomainContact = (row: ContactRow): Contact => ({
   id: asContactId(row.id),
@@ -230,6 +281,34 @@ export class PostgresCustomerRepository implements CustomerRepository {
     return saved;
   }
 
+  async saveSiteLocation(site: Site, query: string): Promise<boolean> {
+    // Bumps the version, so an edit dialog opened before the pin was found
+    // is refused as stale rather than saving its old, empty pin over it.
+    const updated = await this.db
+      .update(schema.sites)
+      .set({ ...locationColumns(site), updatedAt: sql`now()`, version: sql`${schema.sites.version} + 1` })
+      .where(and(eq(schema.sites.id, site.id), eq(schema.sites.geocodeQuery, query)))
+      .returning({ id: schema.sites.id, version: schema.sites.version });
+    for (const row of updated) this.siteVersions.remember(row.id, row.version);
+    return updated.length > 0;
+  }
+
+  async listSitesDueForGeocode(now: IsoDateTime, limit: number): Promise<readonly Site[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.sites)
+      .where(
+        and(
+          isNotNull(schema.sites.geocodeNextAttemptAt),
+          lte(schema.sites.geocodeNextAttemptAt, now),
+          isNull(schema.sites.archivedAt),
+        ),
+      )
+      .orderBy(asc(schema.sites.geocodeNextAttemptAt))
+      .limit(limit);
+    return rows.map(toDomainSite);
+  }
+
   async saveSite(site: Site): Promise<Site> {
     const values = {
       customerId: site.customerId as string,
@@ -240,8 +319,7 @@ export class PostgresCustomerRepository implements CustomerRepository {
       province: site.province,
       postalCode: site.postalCode,
       accessNotes: site.accessNotes,
-      latitude: site.latitude === null ? null : String(site.latitude),
-      longitude: site.longitude === null ? null : String(site.longitude),
+      ...locationColumns(site),
       archivedAt: site.archivedAt,
     } as const;
 

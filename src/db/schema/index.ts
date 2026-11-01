@@ -31,3 +31,4 @@ export * from './library';
 export * from './audit';
 export * from './captures';
 export * from './api';
+export * from './integrations';

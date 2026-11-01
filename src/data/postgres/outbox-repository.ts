@@ -3,6 +3,7 @@ import {
   MAX_OUTBOX_ATTEMPTS,
   type IsoDateTime,
   type JobId,
+  type OutboxDeliveryStatus,
   type OutboxMessage,
   type OutboxState,
 } from '@/domain';
@@ -26,6 +27,12 @@ const toMessage = (row: Row): OutboxMessage => ({
   failureReason: row.failureReason,
   createdAt: row.createdAt as IsoDateTime,
   lastAttemptAt: row.lastAttemptAt === null ? null : (row.lastAttemptAt as IsoDateTime),
+  purpose: row.purpose,
+  deliveryStatus: row.deliveryStatus as OutboxDeliveryStatus | null,
+  deliveredAt: row.deliveredAt as IsoDateTime | null,
+  readAt: row.readAt as IsoDateTime | null,
+  providerError: row.providerError,
+  retryOf: row.retryOf,
 });
 
 /**
@@ -55,6 +62,8 @@ export class PostgresOutboxRepository implements OutboxRepository {
       failureReason: message.failureReason,
       createdAt: message.createdAt,
       lastAttemptAt: message.lastAttemptAt,
+      purpose: message.purpose ?? '',
+      retryOf: message.retryOf ?? null,
     });
     return message;
   }
@@ -101,13 +110,52 @@ export class PostgresOutboxRepository implements OutboxRepository {
    * `attempts` has already been counted by the claim, so the comparison is
    * against what has been spent rather than what is about to be.
    */
-  async markFailed(id: string, reason: string, now: IsoDateTime): Promise<void> {
+  async markFailed(id: string, reason: string, now: IsoDateTime, permanent = false): Promise<void> {
     await this.db
       .update(schema.outboxMessages)
       .set({
-        state: sql`case when ${schema.outboxMessages.attempts} >= ${MAX_OUTBOX_ATTEMPTS} then 'failed' else 'pending' end`,
+        // A permanent refusal (INT-WA-3) is final at once; anything else waits for its attempts.
+        state: permanent
+          ? 'failed'
+          : sql`case when ${schema.outboxMessages.attempts} >= ${MAX_OUTBOX_ATTEMPTS} then 'failed' else 'pending' end`,
         failureReason: reason.slice(0, 2000),
         lastAttemptAt: now,
+      })
+      .where(eq(schema.outboxMessages.id, id));
+  }
+
+  async listForJob(jobId: JobId): Promise<readonly OutboxMessage[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.outboxMessages)
+      .where(eq(schema.outboxMessages.jobId, jobId))
+      .orderBy(desc(schema.outboxMessages.createdAt))
+      .limit(200);
+    return rows.map(toMessage);
+  }
+
+  async findById(id: string): Promise<OutboxMessage | null> {
+    const rows = await this.db.select().from(schema.outboxMessages).where(eq(schema.outboxMessages.id, id)).limit(1);
+    return rows[0] === undefined ? null : toMessage(rows[0]);
+  }
+
+  async findByProviderMessageId(providerMessageId: string): Promise<OutboxMessage | null> {
+    const rows = await this.db
+      .select()
+      .from(schema.outboxMessages)
+      .where(eq(schema.outboxMessages.providerMessageId, providerMessageId))
+      .limit(1);
+    return rows[0] === undefined ? null : toMessage(rows[0]);
+  }
+
+  async recordDeliveryStatus(id: string, status: OutboxDeliveryStatus, at: IsoDateTime, error: string): Promise<void> {
+    await this.db
+      .update(schema.outboxMessages)
+      .set({
+        deliveryStatus: status,
+        ...(status === 'delivered' ? { deliveredAt: at } : {}),
+        ...(status === 'read' ? { readAt: at, deliveredAt: sql`coalesce(${schema.outboxMessages.deliveredAt}, ${at})` } : {}),
+        ...(status === 'failed' ? { providerError: error.slice(0, 1000) } : {}),
       })
       .where(eq(schema.outboxMessages.id, id));
   }

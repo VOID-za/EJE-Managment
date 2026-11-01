@@ -13,22 +13,27 @@ import { asDocumentId, asUserId, type DocumentId, type TechnicalDocument } from 
 import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
 import { PostgresUserRepository } from '@/data/postgres/user-repository';
 import { PostgresSettingsRepository } from '@/data/postgres/settings-repository';
+import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
+import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
+import { asSiteId } from '@/domain';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (316544f), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (c68b3c3), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 316544f, and it does: each of these was checked against that commit.
+ * in c68b3c3, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0041)
+ * The database was migrated to the newest migration THIS release ships (0042)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
  * library, jobs, attendance, timesheets, corrections, monthly submissions and
- * Finance packages (0037–0040, which it knows), beside the extra parts booked
- * in on a Test & Repair job (0041) that it has never heard of?
+ * Finance packages (0037–0040) and the extra parts booked in on a Test & Repair
+ * job (0041), which it knows — beside the email templates, the customer email
+ * outbox, WhatsApp delivery statuses and automatic site pins (0042) that it has
+ * never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -71,9 +76,17 @@ const TIMESHEET = {
   financePackage: '00000000-0000-4000-8000-0000000005e3',
 } as const;
 
+// A copy of ROLLBACK_INTEGRATIONS in `src/ops/release/rollback-fixture.ts`.
+const INTEGRATIONS = {
+  template: '00000000-0000-4000-8000-0000000006a1',
+  templateVersion: '00000000-0000-4000-8000-0000000006a2',
+  email: '00000000-0000-4000-8000-0000000006b1',
+  outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
 const id = (value: string): DocumentId => asDocumentId(value);
 
-describePhase('rollback compatibility — phase 2: the live release (316544f) against a database at 0041', () => {
+describePhase('rollback compatibility — phase 2: the live release (c68b3c3) against a database at 0042', () => {
   let db: Database;
   let repository: PostgresDocumentRepository;
 
@@ -91,14 +104,14 @@ describePhase('rollback compatibility — phase 2: the live release (316544f) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    expect(shipped).toHaveLength(41);
-    expect(shipped.at(-1)).toBe('0040_monthly_payroll');
-    expect(shipped).not.toContain('0041_repair_items');
+    expect(shipped).toHaveLength(42);
+    expect(shipped.at(-1)).toBe('0041_repair_items');
+    expect(shipped).not.toContain('0042_integrations');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0041 applied beyond what the live release ships.
-    expect(applied).toBe(42);
+    // 0042 applied beyond what the live release ships.
+    expect(applied).toBe(43);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -209,6 +222,32 @@ describePhase('rollback compatibility — phase 2: the live release (316544f) ag
    * column: it must still read a job this release wrote WITH one, and still
    * write a job of its own — leaving the column NULL, which is "not recorded".
    */
+  /*
+   * 0042. The live release has never heard of a site's automatic pin, the
+   * email templates, the customer email outbox or a WhatsApp delivery status.
+   * After a rollback it must still read and save the site — its own save
+   * leaving the pin's record alone — read the WhatsApp outbox, and leave the
+   * email history exactly as it was.
+   */
+  it('still reads and saves SITES, reads the WhatsApp outbox, and leaves the email history alone, at 0042', async () => {
+    const customers = new PostgresCustomerRepository(db);
+    const site = await customers.findSiteById(asSiteId(IDS.site));
+    expect(site?.latitude).toBe(-26.2745);
+    await customers.saveSite({ ...site!, accessNotes: 'Saved by the live release' });
+    const [pin] = await db.execute<{ status: string; formatted: string; notes: string }>(
+      sql`select location_status as status, geocoded_address as formatted, access_notes as notes from sites where id = ${IDS.site}`,
+    );
+    expect(pin).toEqual({ status: 'resolved', formatted: '3 Wadeville Blvd, Germiston (rollback fixture)', notes: 'Saved by the live release' });
+
+    const outbox = await new PostgresOutboxRepository(db).list(10);
+    expect(outbox.find((message) => message.id === INTEGRATIONS.outbox)?.state).toBe('sent');
+
+    const [email] = await db.execute<{ state: string; subject: string }>(
+      sql`select state, subject from email_messages where id = ${INTEGRATIONS.email}`,
+    );
+    expect(email).toEqual({ state: 'sent', subject: 'EJE-ROLLBACK — Signed Job Card — Test & Repair' });
+  });
+
   it('still reads and writes JOBS on a database with 0031 and 0041 applied', async () => {
     const jobs = new PostgresJobRepository(db);
     // Phase 1's job: the only Test & Repair, written WITH a date received.

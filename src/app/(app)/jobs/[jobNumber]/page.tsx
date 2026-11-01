@@ -1,8 +1,10 @@
 'use client';
 
+import { JobMessagesPanel } from '@/components/jobs/JobMessagesPanel';
 import { Suspense, use, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
+  can,
   getJobTypeDefinition,
   canEditJobRecord,
   cancellationReasonLabel,
@@ -321,6 +323,9 @@ const JobDetailPage = ({
       {(job.status === 'closed' || isIssuedStatus(job.status)) && job.finalDocument !== null && (
         <FinalDocumentCard job={job} users={users} />
       )}
+
+      {/* INT-EMAIL-4 / INT-WA-2: exactly what was sent, for the office. */}
+      {can(currentUser.role, 'jobs.officeHandling') && <JobMessagesPanel job={job} onChanged={refresh} />}
 
       {/*
         AND THEN WHAT EJE HAVE SAID ABOUT IT SINCE. BD-06 before BD-02,

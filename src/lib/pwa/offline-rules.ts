@@ -223,6 +223,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   accept: 'Accepting a job moves it through the workflow, which the server decides.',
   decline_site_location: 'Telling the office you do not need the site location needs a connection.',
   send_site_location: 'The site location goes out through WhatsApp, which needs a connection.',
+  retry_whatsapp: 'Retrying a WhatsApp message asks Meta to send it, which needs a connection.',
   start_completion: 'Moving the job on is a workflow step the server decides.',
   cancel_completion: 'Going back to In Progress is a workflow step the server decides.',
   return_to_progress: 'Reopening the job is a workflow step the server decides.',

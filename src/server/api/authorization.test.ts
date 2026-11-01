@@ -53,6 +53,15 @@ describe('authentication is required', () => {
     'GET /api/dev/demo-users',
     'POST /api/dev/demo-users',
     'GET /api/health',
+    /*
+     * META'S WEBHOOK (INT-WA-2). Public because Meta has no EJE session; it
+     * authenticates the REQUEST instead — the GET by the verify token, every
+     * POST by Meta's HMAC signature — and refuses anything unverified before
+     * reading it (`server/api/integrations-api.test.ts`). It returns no
+     * business data either way.
+     */
+    'GET /api/integrations/whatsapp/webhook',
+    'POST /api/integrations/whatsapp/webhook',
   ]);
 
   it('lets the health check say only what a proxy needs', async () => {
@@ -144,7 +153,10 @@ describe('authentication is required', () => {
        * clear the same bar.
        */
       expect(
-        path.startsWith('/api/auth/') || path.startsWith('/api/dev/') || path === '/api/health',
+        path.startsWith('/api/auth/') ||
+          path.startsWith('/api/dev/') ||
+          path === '/api/health' ||
+          path === '/api/integrations/whatsapp/webhook',
         path,
       ).toBe(true);
     }

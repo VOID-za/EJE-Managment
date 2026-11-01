@@ -13,6 +13,7 @@ import {
 import { Badge, Button, Card, CardHeader, Icon } from '@/components/ui';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { SiteLocationDialog } from './SiteLocationDialog';
+import { SitePinStatus } from './SitePinStatus';
 
 /**
  * WHERE THE CUSTOMER IS. SITE-3.
@@ -85,6 +86,7 @@ export const CustomerLocationCard = ({
                   'No pinned location — the map searches the address.'
                 )}
               </p>
+              <SitePinStatus site={site} canManage={canManage} onChanged={onChanged} />
               <div className="mt-2 flex flex-wrap gap-2">
                 <a
                   href={siteMapUrl(site)}

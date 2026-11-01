@@ -12,6 +12,24 @@ export type ActivityEventType =
   | 'site_location_sent'
   | 'site_location_declined'
   | 'site_location_failed'
+  /** INT-EMAIL-1: a customer email template created, edited, (de)activated or restored. */
+  | 'email_template_changed'
+  /** INT-EMAIL-3: the signed job card email — queued, sent, failed, flagged, retried. */
+  | 'customer_email_queued'
+  | 'customer_email_sent'
+  | 'customer_email_failed'
+  | 'customer_email_attention'
+  | 'customer_email_retried'
+  /** INT-WA-2: what Meta reported about a WhatsApp message, and a retry of one. */
+  | 'whatsapp_delivery_failed'
+  | 'whatsapp_retried'
+  | 'whatsapp_template_status'
+  /** INT-MAP-1: a site pin found, verified, corrected or re-requested. */
+  | 'site_location_geocoded'
+  | 'site_location_verified'
+  /** INT-ADMIN-1: an integration configuration changed, or a test was sent. */
+  | 'integration_configuration_changed'
+  | 'integration_test_sent'
   /**
    * The assignment notification reached the technician's channels.
    *

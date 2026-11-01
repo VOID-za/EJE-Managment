@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { can, offersSiteLocation, type Job } from '@/domain';
+import { can, offersSiteLocation, siteNavigationTarget, type Job } from '@/domain';
 import { buildSiteLocationMessage } from '@/application/job-operations';
 import type { JobView } from '@/application/job-view';
 import { jobs as api, reads } from '@/api/endpoints';
@@ -268,13 +268,29 @@ export const AcceptJobFlow = ({
               <span className="text-xs font-semibold tracking-wide text-steel-500 uppercase">
                 Message preview
               </span>
-              <Badge tone="amber" size="sm">
-                Simulated
+              <Badge tone="neutral" size="sm">
+                Preview
               </Badge>
             </div>
             <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-steel-700">
               {buildSiteLocationMessage(siteLocationInput, job.jobNumber)}
             </pre>
+          </div>
+
+          {/* INT-MAP-3: the link now, and how far to trust it. */}
+          <div className="space-y-1" data-testid="accept-location-link">
+            <a
+              href={siteNavigationTarget(siteLocationInput.site).url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-[var(--radius-control)] border border-steel-200 px-3 text-sm font-medium text-eje-700 hover:bg-eje-50"
+            >
+              <Icon name="pin" className="size-4" />
+              Open in Google Maps
+            </a>
+            <p className="text-xs text-steel-500" data-testid="accept-location-note">
+              {siteNavigationTarget(siteLocationInput.site).note}
+            </p>
           </div>
 
           <p className="text-xs text-steel-500">

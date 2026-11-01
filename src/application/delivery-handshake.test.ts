@@ -197,15 +197,25 @@ describe('a failed delivery', () => {
     expect(message.toLowerCase()).toContain('not');
   });
 
+  /*
+   * INT-EMAIL-3: an address that is not an address is no longer handed to the
+   * provider at all (see "is reported as a failure" above). A provider that
+   * REFUSES a plausible address is what these cases now use to fail a send.
+   */
+  const refusing = <C extends { services: AppServices }>(context: C): C => ({
+    ...context,
+    services: { ...context.services, email: failingEmail('invalid_recipient', 'The mail provider refused the address.') },
+  });
+
   it('can be retried, and the retry sends the SAME document', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(refusing(harness.as(technician)), signed, 'pieter@example-demo.co.za', 'Pieter Nel');
     expect(issued.delivery.state).toBe('failed');
 
     // Re-sending puts EJE's document in the customer's hands again, so it is
     // the same Master-only act as sending it. §3.1, §15.
     const retried = await retryJobCardDelivery(
-      harness.as(master),
+      refusing(harness.as(master)),
       issued.job,
       'Pieter Nel',
     );
@@ -233,7 +243,7 @@ describe('a failed delivery', () => {
    */
   it('REFUSES a re-send while an attempt is still with the provider', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(refusing(harness.as(technician)), signed, 'pieter@example-demo.co.za', 'Pieter Nel');
 
     const inFlight = await harness.repos.jobs.save({
       ...issued.job,
@@ -267,7 +277,7 @@ describe('a failed delivery', () => {
    */
   it('lets the office re-send once a stuck attempt is plainly stale', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
+    const issued = await issueJobCard(refusing(harness.as(technician)), signed, 'pieter@example-demo.co.za', 'Pieter Nel');
 
     const abandoned = await harness.repos.jobs.save({
       ...issued.job,
@@ -280,7 +290,7 @@ describe('a failed delivery', () => {
       },
     });
 
-    const retried = await retryJobCardDelivery(harness.as(master), abandoned, 'Pieter Nel');
+    const retried = await retryJobCardDelivery(refusing(harness.as(master)), abandoned, 'Pieter Nel');
     expect(retried.delivery.attempts).toBe(2);
   });
 
@@ -323,7 +333,7 @@ describe('a failed delivery', () => {
 
     // And the trail says what has to change, rather than only what happened.
     const events = await harness.repos.activity.list(issued.job.id);
-    const failure = events.find((event) => event.type === 'delivery_state_changed');
+    const failure = events.find((event) => event.type === 'customer_email_failed');
     expect(failure?.detail).toMatch(/refused the credentials/u);
     expect(failure?.detail).toMatch(/until it is corrected/u);
   });
@@ -433,11 +443,11 @@ describe('a failed delivery', () => {
 
   it('records every attempt on the audit trail', async () => {
     const signed = await workAndSign(harness, 'EJE-1048');
-    const issued = await issueJobCard(harness.as(technician), signed, 'not-an-address', 'Pieter Nel');
-    await retryJobCardDelivery(harness.as(master), issued.job, 'Pieter Nel');
+    const issued = await issueJobCard(refusing(harness.as(technician)), signed, 'pieter@example-demo.co.za', 'Pieter Nel');
+    await retryJobCardDelivery(refusing(harness.as(master)), issued.job, 'Pieter Nel');
 
     const events = await harness.repos.activity.list(issued.job.id);
-    const deliveryEvents = events.filter((event) => event.type === 'delivery_state_changed');
+    const deliveryEvents = events.filter((event) => event.type === 'customer_email_failed');
     expect(deliveryEvents.length).toBeGreaterThanOrEqual(2);
   });
 

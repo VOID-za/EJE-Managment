@@ -52,6 +52,13 @@ import type {
   UserId,
   JobSummary,
   PricingSnapshot,
+  CustomerEmail,
+  EmailEvent,
+  EmailTemplate,
+  EmailTemplateVersion,
+  EmailTemplateWithVersion,
+  JobTypeCode,
+  OutboxDeliveryStatus,
 } from '@/domain';
 
 /**
@@ -248,6 +255,15 @@ export interface CustomerRepository {
   findContactById(id: ContactId): Promise<Contact | null>;
   save(customer: Customer): Promise<Customer>;
   saveSite(site: Site): Promise<Site>;
+  /**
+   * Writes ONLY the pin and its geocoding record (INT-MAP-1), and only while
+   * the site still has the address that was geocoded (`query`). False when
+   * the address changed meanwhile: the answer was for an address the site no
+   * longer has, and is dropped.
+   */
+  saveSiteLocation(site: Site, query: string): Promise<boolean>;
+  /** Sites whose pin is due to be looked up, oldest due first. */
+  listSitesDueForGeocode(now: IsoDateTime, limit: number): Promise<readonly Site[]>;
   saveContact(contact: Contact): Promise<Contact>;
   /**
    * The customer's own files. October mandate §4.
@@ -616,9 +632,111 @@ export interface OutboxRepository {
    * Stays `pending` while attempts remain, so the next drain picks it up; goes
    * `failed` once there is no point trying again.
    */
-  markFailed(id: string, reason: string, now: IsoDateTime): Promise<void>;
+  markFailed(id: string, reason: string, now: IsoDateTime, permanent?: boolean): Promise<void>;
   /** For the outbox screen and for tests. */
   list(limit?: number): Promise<readonly OutboxMessage[]>;
+  /** The messages about one job, newest first. */
+  listForJob(jobId: JobId): Promise<readonly OutboxMessage[]>;
+  findById(id: string): Promise<OutboxMessage | null>;
+  findByProviderMessageId(providerMessageId: string): Promise<OutboxMessage | null>;
+  /**
+   * What a verified webhook said. The caller has already checked that it
+   * moves the status forward (`advancesDeliveryStatus`).
+   */
+  recordDeliveryStatus(id: string, status: OutboxDeliveryStatus, at: IsoDateTime, error: string): Promise<void>;
+}
+
+/**
+ * The office's customer email templates. INT-EMAIL-1, migration 0042.
+ * Versions are appended and never changed.
+ */
+export interface EmailTemplateRepository {
+  list(): Promise<readonly EmailTemplateWithVersion[]>;
+  findById(id: string): Promise<EmailTemplateWithVersion | null>;
+  findDefault(event: EmailEvent, jobType: JobTypeCode): Promise<EmailTemplateWithVersion | null>;
+  versions(templateId: string): Promise<readonly EmailTemplateVersion[]>;
+  findVersion(templateId: string, version: number): Promise<EmailTemplateVersion | null>;
+  /**
+   * Creates a template with its first version. False, and nothing written,
+   * when a template with the same system key exists already, or when it would
+   * be a second default — which is what makes creating the shipped templates
+   * safe to run any number of times, from any number of requests.
+   */
+  insert(template: EmailTemplate, first: EmailTemplateVersion): Promise<boolean>;
+  addVersion(version: EmailTemplateVersion): Promise<void>;
+  /** Name, description, active, default, current version, who and when. */
+  update(template: EmailTemplate): Promise<void>;
+}
+
+/**
+ * The customer email outbox and its history. INT-EMAIL-3/4, migration 0042.
+ * What an email says is fixed when it is inserted; only its delivery fields
+ * move afterwards, and a sent email never changes.
+ */
+export interface CustomerEmailRepository {
+  /**
+   * Records an email. `duplicate` (and nothing written) when the same
+   * idempotency key exists, or when the job already has a queued, sending or
+   * sent email for the same event and document.
+   */
+  insert(email: CustomerEmail): Promise<'inserted' | 'duplicate'>;
+  findById(id: string): Promise<CustomerEmail | null>;
+  findByIdempotencyKey(key: string): Promise<CustomerEmail | null>;
+  listForJob(jobId: JobId): Promise<readonly CustomerEmail[]>;
+  /** Newest first, for Administration. */
+  list(limit: number): Promise<readonly CustomerEmail[]>;
+  /**
+   * Takes due emails for sending: queued with `nextAttemptAt` at or before
+   * `now`, moved to `sending` with the attempt counted. Two workers never
+   * take the same email (a locking update on PostgreSQL).
+   */
+  claimDue(now: IsoDateTime, limit: number): Promise<readonly CustomerEmail[]>;
+  /** Emails that have sat in `sending` since before `before`. */
+  listStuckSending(before: IsoDateTime): Promise<readonly CustomerEmail[]>;
+  /** Moves an email on after an attempt. Refused by the store once it is sent. */
+  recordOutcome(
+    id: string,
+    outcome: Pick<
+      CustomerEmail,
+      'state' | 'nextAttemptAt' | 'sentAt' | 'providerRequestId' | 'failureKind' | 'failureReason' | 'updatedAt'
+    >,
+  ): Promise<void>;
+}
+
+/** One WhatsApp status from Meta, as recorded for de-duplication. */
+export interface WhatsAppWebhookEvent {
+  readonly id: string;
+  readonly providerMessageId: string;
+  readonly status: string;
+  readonly errorCode: string;
+  readonly errorTitle: string;
+  readonly occurredAt: IsoDateTime | null;
+  readonly receivedAt: IsoDateTime;
+  readonly matched: boolean;
+}
+
+export interface GeocodeCacheEntry {
+  readonly queryKey: string;
+  readonly provider: string;
+  readonly outcome: string;
+  readonly result: Readonly<Record<string, unknown>>;
+  readonly createdAt: IsoDateTime;
+  readonly expiresAt: IsoDateTime;
+}
+
+/** Bookkeeping the integrations need. Migration 0042. */
+export interface IntegrationRepository {
+  /** False when this event was recorded before: Meta delivers webhooks at least once. */
+  recordWebhookEvent(event: WhatsAppWebhookEvent): Promise<boolean>;
+  listWebhookEvents(limit: number): Promise<readonly WhatsAppWebhookEvent[]>;
+  findGeocode(queryKey: string, now: IsoDateTime): Promise<GeocodeCacheEntry | null>;
+  saveGeocode(entry: GeocodeCacheEntry): Promise<void>;
+  /** Counts one request and returns the day's total including it. */
+  countRequest(day: string, service: string): Promise<number>;
+  requestsOn(day: string, service: string): Promise<number>;
+  /** The last configuration fingerprint recorded for a service, if any. */
+  findState(service: string): Promise<{ readonly fingerprint: string; readonly summary: string } | null>;
+  saveState(service: string, fingerprint: string, summary: string, at: IsoDateTime): Promise<void>;
 }
 
 /**
@@ -745,6 +863,10 @@ export interface RepositoryBundle {
   readonly attendance: AttendanceRepository;
   readonly chat: ChatRepository;
   readonly outbox: OutboxRepository;
+  /** Customer email templates, the email outbox, integration bookkeeping. 0042. */
+  readonly emailTemplates: EmailTemplateRepository;
+  readonly customerEmails: CustomerEmailRepository;
+  readonly integrations: IntegrationRepository;
   /** Work a tablet held that the server refused. BD-15. */
   readonly captureReferrals: CaptureReferralRepository;
   /** Reports that the register is wrong, raised by people who cannot edit it. */

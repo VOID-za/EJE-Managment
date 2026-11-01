@@ -230,10 +230,12 @@ describe('the close-out the wizard drives, end to end', () => {
     const signatureBefore = issued.job.signature;
     const retried = await retryJobCardDelivery(harness.as(technician), issued.job, 'Pieter Nel');
 
-    // Same document, same signature, one more attempt.
+    // Same document, same signature, one more attempt. INT-EMAIL-3: the bad
+    // address was never handed to the provider (no attempt); the retry reads
+    // the contact's address afresh, which is how a corrected address is used.
     expect(retried.job.finalDocument?.storageKey).toBe(issued.job.finalDocument?.storageKey);
     expect(retried.job.signature).toEqual(signatureBefore);
-    expect(retried.delivery.attempts).toBe(2);
+    expect(retried.delivery.attempts).toBe(issued.delivery.attempts + 1);
     expect(retried.job.status).toBe('office_handling');
   });
 });
