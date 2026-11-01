@@ -254,6 +254,15 @@ for (const type of ['installation', 'service']) {
     if (job?.jobType !== type || job?.machineId !== null) fail(`raised as ${JSON.stringify({ type: job?.jobType, machine: job?.machineId })}`);
   });
   await check(`${type}: raised with a Machine and NO Priority`, async () => {
+    // A fresh form: the check above raised its job and left the page.
+    await go('/jobs/new');
+    await page.getByLabel('Job type').selectOption(type);
+    await selectFirst('Customer');
+    await page.waitForTimeout(300);
+    await selectFirst('Site');
+    await page.waitForTimeout(300);
+    await selectFirst('Customer email recipient');
+    await page.getByLabel('Fault', { exact: false }).first().fill(`Forms regression ${type}: with a machine.`);
     await selectFirst('Machine');
     const priority = page.getByLabel(/^Priority/u).first();
     if ((await priority.inputValue()) !== '') fail('Priority was pre-filled');
