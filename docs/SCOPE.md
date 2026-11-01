@@ -1534,7 +1534,7 @@ The tester's three handwritten pages. Register: `docs/delivery-register-2026-10-
 | TST-ATT-1 | **The office's Attendance page** has the technician's layout first (own form and days), then the team register. | **TESTED — awaiting approval.** |
 | TST-MSG-1 | **Messages**: a usable chat with a visible Send — the existing chat, whose Send button was clipped by the card; fixed and tested at tablet size, both directions, with persistence and permissions. | **TESTED — awaiting approval.** |
 
-### WhatsApp, Google Maps and email integration — 1 November 2026 (NOT YET DEPLOYED; migration 0042; not yet approved)
+### WhatsApp, Google Maps and email integration — 1 November 2026 (DEPLOYED in `42e71fc` with migration 0042; integrations NOT configured; not yet approved)
 
 Asked for by the owner on 1 November 2026 ("FULL WHATSAPP, GOOGLE MAPS & EMAIL
 INTEGRATION"). Register: `docs/delivery-register-2026-11-01-integrations.md`.

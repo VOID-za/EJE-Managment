@@ -52,6 +52,20 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### DEPLOYED — 1 November 2026: `42e71fc` — WhatsApp, Google Maps and email integration, with migration 0042
+
+**DEPLOYED — 1 November 2026: `42e71fc` is live** (full SHA
+`42e71fc08f2175d51d5e037455004dfa88edfa49`; CI run 41290579780 completed, success, every
+job and step green, including rollback compatibility of `c68b3c3` against 0042).
+Read-only check passed (`srv2000625`, script SHA-256 `5ab56162…b3c6`, 181 072 MB free).
+Guarded release tool with `-ExpectPending 0042_integrations`. Backup proven
+`/var/backups/eje/eje-eje_production-2026-11-01T09-21-08Z`; 0042 applied (additive);
+switched 09:21:21Z, healthy 09:21:23Z. Rollback target `c68b3c3` (`stage-release.ps1 -Rollback`).
+Email, WhatsApp and Google Maps are NOT configured on the server: each says so in
+Administration → Integrations, and nothing is sent. Configuring them is
+`docs/integrations-setup.md`; it needs a restart of `eje`, not a release.
+Register: `docs/delivery-register-2026-11-01-integrations.md`.
+
 ### DEPLOYED — 31 October 2026: `c68b3c3` — the tester's critical fixes, with migration 0041
 
 **DEPLOYED — 31 October 2026: `c68b3c3` is live** (full SHA

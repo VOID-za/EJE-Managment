@@ -77,3 +77,56 @@ compatibility: CI only (no local PostgreSQL).
   terms question for the owner (`docs/integrations-setup.md` §4.6).
 - Unsigned delivery (BD-06) and the Finance package still send directly, as
   before; only the signed job card moved to the outbox.
+
+## Fixed after the first CI runs (commits `93be012`, `42e71fc`)
+
+The PostgreSQL suite (CI only) found, on `19e4356`:
+
+- **A real defect.** PostgreSQL keeps one delivery-attempt row per attempt, so
+  an email that was only queued, or held for the office, read back on the job
+  as "not sent yet". An attempt is now counted when it begins (queuing starts
+  attempt n+1; the first send's outcome updates it; later automatic attempts
+  are new rows), which also keeps the attempts of jobs issued before the outbox.
+- Two retries at the same moment: the second is now refused (it returned the
+  first one's email as its own).
+- Test fixtures: the shared site inserts named the 0042 columns on a database
+  deliberately held at 0029 (the upgrade test) — two inserts, fixed in two
+  commits; one 0042 test used a site with no address.
+
+## Release record — DEPLOYED 1 November 2026: `42e71fc`
+
+- CI run 41290579780 on `42e71fc`: success, every job and step green,
+  including the PostgreSQL tests and rollback compatibility (live `c68b3c3`
+  against a database at 0042).
+- Read-only check passed (`srv2000625`, 181 072 MB free, script SHA-256
+  `5ab56162…b3c6`).
+- Release `-ExpectPending 0042_integrations`. Backup proven
+  `/var/backups/eje/eje-eje_production-2026-11-01T09-21-08Z`; 0042 applied;
+  switched 09:21:21Z; healthy 09:21:23Z. Rollback target `c68b3c3`.
+- Public health: `42e71fc`, ok, PostgreSQL reachable, email `refuse`; the
+  update notice is served.
+
+## Live verification (read-only)
+
+| Check | Result |
+|---|---|
+| Integrations (`live-integrations`), API + screens at 1440×900, 768×1024, 390×844 | 32 of 32. All three integrations say Not configured; no credential-shaped value in the status; technician refused (status, templates, history); the Coordinator sees the Master's five templates; preview fills sample values; webhook refuses a wrong token (403) and an unsigned POST (503); pins entered before 0042 read as verified; the new screens render with no sideways scroll and no page errors |
+| Critical workflows from 31 October (`live-critical`), three sizes | 46 of 48: every functional check passed. The two other lines: the script's expected-commit variable was not set (the health it printed is `42e71fc`, ok), and the audited reads it lists (see below) |
+| Records | open list 64, closed 16, signed 39, issued 26 — identical before and after the release (the live site had moved on since 31 October; this is the new baseline) |
+| Issued job cards EJE-2050, EJE-2046, EJE-2041, EJE-2001 | byte-identical before and after, and to 31 October |
+
+What the verification itself left on the live site: the five shipped email
+templates were created by the first template listing (system configuration,
+as designed; they would have been created by the first signed job card);
+viewing EJE-2050's stored job card and previewing EJE-2078's job card added
+audited view entries to their activity trails. No job, customer, site,
+timesheet, attendance or user record was created or changed; no email or
+WhatsApp message was sent (none can be: nothing is configured).
+
+Two live-check selectors were corrected (an exact "Cancel" — EJE-2078 had moved
+to completion on the live site, which shows "Cancel completion"; and a named
+timesheet range, for the 1st of the month).
+
+Not verified live: the server's journal was not read (no credential exists on
+the server to leak); the background worker's start was proven locally, not
+observed on the server.
