@@ -264,6 +264,12 @@ export interface CustomerRepository {
   saveSiteLocation(site: Site, query: string): Promise<boolean>;
   /** Sites whose pin is due to be looked up, oldest due first. */
   listSitesDueForGeocode(now: IsoDateTime, limit: number): Promise<readonly Site[]>;
+  /**
+   * Sites, archived ones too, that hold coordinates (or wording) from the
+   * geocoder obtained at or before `obtainedBefore` — for the renewal and the
+   * 30-day deletion of rule 5 (`domain/site/location.ts`). Oldest first.
+   */
+  listSitesWithProviderContent(obtainedBefore: IsoDateTime, limit: number): Promise<readonly Site[]>;
   saveContact(contact: Contact): Promise<Contact>;
   /**
    * The customer's own files. October mandate §4.
@@ -731,6 +737,8 @@ export interface IntegrationRepository {
   listWebhookEvents(limit: number): Promise<readonly WhatsAppWebhookEvent[]>;
   findGeocode(queryKey: string, now: IsoDateTime): Promise<GeocodeCacheEntry | null>;
   saveGeocode(entry: GeocodeCacheEntry): Promise<void>;
+  /** Deletes cached answers whose 30 days are up; returns how many. */
+  purgeExpiredGeocodes(now: IsoDateTime): Promise<number>;
   /** Counts one request and returns the day's total including it. */
   countRequest(day: string, service: string): Promise<number>;
   requestsOn(day: string, service: string): Promise<number>;

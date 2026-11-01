@@ -105,10 +105,11 @@ describe('what an answer does', () => {
     const found = geocoded();
     expect(found.latitude).toBe(-26.274512);
     expect(found.longitude).toBe(28.198046);
-    expect(siteLocationOf(found)).toMatchObject({ status: 'resolved', source: 'geocoded', placeId: 'place-1', precision: 'ROOFTOP', nextAttemptAt: null });
-    // The office's address is untouched; the provider's wording is kept beside it.
+    expect(siteLocationOf(found)).toMatchObject({ status: 'resolved', source: 'geocoded', placeId: 'place-1', nextAttemptAt: null });
+    // The office's address is untouched. Rule 5: the provider's wording and
+    // precision are not stored (only coordinates for 30 days, and the place ID).
     expect(found.addressLine1).toBe('3 Wadeville Boulevard');
-    expect(siteLocationOf(found).formattedAddress).toContain('Wadeville Blvd');
+    expect(siteLocationOf(found)).toMatchObject({ formattedAddress: '', precision: null });
   });
 
   it('an ambiguous answer is only a SUGGESTION — the pin is not set from it', () => {
@@ -183,10 +184,18 @@ describe('the office verifies', () => {
 });
 
 describe('where the technician is sent', () => {
-  it('to the verified pin', () => {
+  it('to the verified Google pin by its PLACE, never by coordinates a stored link would outlive (rule 5)', () => {
     const target = siteNavigationTarget(locationAfterVerify(geocoded(), { kind: 'current' }, 'u', NOW));
     expect(target.kind).toBe('verified_pin');
-    expect(target.url).toBe('https://www.google.com/maps/dir/?api=1&destination=-26.274512%2C28.198046');
+    expect(target.url).toBe(
+      'https://www.google.com/maps/dir/?api=1&destination=3%20Wadeville%20Boulevard%2C%20Germiston%2C%201428&destination_place_id=place-1',
+    );
+  });
+
+  it('to a pin the office entered by hand, by its coordinates', () => {
+    const target = siteNavigationTarget(locationAfterVerify(geocoded(), { kind: 'manual', latitude: -26.5, longitude: 28.5 }, 'u', NOW));
+    expect(target.kind).toBe('verified_pin');
+    expect(target.url).toBe('https://www.google.com/maps/dir/?api=1&destination=-26.5%2C28.5');
   });
 
   it('to a confident automatic pin, saying the office has not checked it', () => {

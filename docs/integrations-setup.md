@@ -30,19 +30,26 @@ restarted with **`sudo systemctl restart eje`**.
 
 ## 1. WhatsApp: choosing the phone number (read this first)
 
-### 1.1 The decision
+### 1.1 The decision: a new, dedicated EJE number (confirmed 1 November 2026)
 
-The office already has a WhatsApp number that people use every day. **Do not
-connect that number to the API until the owner has decided to, in writing,
-after reading this section.** If it is done the wrong way, the office loses the
-use of that number in the WhatsApp app.
+**The owner has decided: EJE's system notifications use a new WhatsApp number
+of their own (option B below), through the Meta Cloud API directly.** The
+office's existing WhatsApp number is **not** connected, migrated, registered,
+deregistered or changed in any way. The office keeps its WhatsApp Business app,
+its linked devices and its chat history exactly as they are.
+
+The dedicated number is a **separate system integration**: in Administration
+→ Integrations it is shown as *WhatsApp — dedicated EJE number*, it has its own
+settings (`WHATSAPP_DEDICATED_NUMBER` and the Meta credentials for that
+number), and it says **Not configured** until those are set **and** a real test
+message to an internal number has been accepted by Meta (see 1.6).
 
 > **NEVER migrate, register or deregister the existing office WhatsApp number
-> on the Cloud API without the owner's explicit decision.** Neither the
-> developer, the IT person nor a Meta partner may do this on their own
-> judgement.
+> on the Cloud API.** Neither the developer, the IT person nor a Meta partner
+> may do this. Reversing the decision above needs a new written decision from
+> the owner.
 
-### 1.2 What the official documentation says (checked 1 November 2026)
+### 1.2 Why not the office number: what Meta's documentation says (checked 1 November 2026)
 
 **Registering a number on the Cloud API *without* coexistence.** Meta's phone
 number guide says: *"Numbers already in use with WhatsApp cannot be registered
@@ -90,10 +97,9 @@ The facts:
 | Risk of disrupting the office | Medium | **None** | High |
 | Reversible | Yes (Disconnect Account in the app) | Yes | Not documented, so assume not |
 
-### 1.4 Recommendation
+### 1.4 Why option B
 
-**Option B: a new, dedicated number for the system.** It is the safest
-supported setup. Nothing the office does today changes, EJE's own developer
+It is the safest supported setup. Nothing the office does today changes, EJE's own developer
 app can register it directly without a third-party partner, and it can be
 tested without risk. Technicians save it as "EJE Jobs". The messages EJE sends
 are notifications, so the number does not have to be the one customers know.
@@ -104,12 +110,11 @@ already be registered on any WhatsApp app (or the account on it must be
 deleted first). Short codes are not supported. Source: [Meta: Phone
 numbers](https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers).
 
-Choose option A only if the owner specifically wants the system's messages to
-come from the existing office number, **and** a Meta partner confirms in
-writing that +27 coexistence is available, **and** the office accepts the
-limits in 1.2. Option C is not recommended.
+Options A and C are **not** being used. Choosing one later would need a new
+written decision from the owner, a Meta partner's written confirmation that
++27 coexistence is available (option A), and the checklist in 1.5.
 
-### 1.5 Pre-flight checklist (only if option A or C is ever chosen)
+### 1.5 Pre-flight checklist (only if the owner ever reverses the decision)
 
 - [ ] The owner has decided, in writing, which option and which number.
 - [ ] Confirm the number is on the **WhatsApp Business app**, not the personal
@@ -127,9 +132,38 @@ limits in 1.2. Option C is not recommended.
 - [ ] Confirm the partner's process for **disconnecting** before you start.
 - [ ] The main phone must stay in use. Fourteen days of inactivity disconnects it.
 
-**What you will have at the end of section 1:** a written decision on which
-number the system will use (recommended: a new dedicated number), and that
-number ready to receive a verification SMS or call.
+### 1.6 How EJE keeps the office number out
+
+These protections are in the code, so a typing mistake cannot put the office
+number to work:
+
+1. **The dedicated number must be named.** Without `WHATSAPP_DEDICATED_NUMBER`
+   (a full number with the country code), WhatsApp counts as not configured
+   and nothing is sent.
+2. **Meta is asked before sending.** Before the first message (and again every
+   six hours) EJE asks Meta which number the configured phone number ID
+   belongs to. If it is not the dedicated number, nothing is sent and the
+   office sees why.
+3. **The office number can be protected by name.** List it in
+   `WHATSAPP_PROTECTED_NUMBERS`. EJE then refuses to start if it is set as the
+   dedicated number, and refuses to send if Meta reports it as the sender.
+4. **Read-only towards Meta's number settings.** EJE only ever *reads* the
+   number's details and *sends* approved template messages. It has no code to
+   register, deregister, migrate or change a number, and a test checks that.
+5. **Not in use until a real test passes.** Until a test message to a number
+   in `WHATSAPP_TEST_RECIPIENTS` is accepted by Meta *with the current
+   settings*, the status is **Not configured** and no job notification is sent
+   (assignments and transfers still work and notify in the app). A new access
+   token, phone number ID or dedicated number needs a new test.
+
+The notification rules do not change: a **direct assignment** notifies the
+assigned technician; a **transfer** notifies only the receiving technician;
+**Open Jobs** send nothing; on **acceptance** the technician can be sent the
+job's own customer site location.
+
+**What you will have at the end of section 1:** a new SIM or landline for the
+dedicated EJE number, able to receive a verification SMS or call, and **not**
+registered on any WhatsApp app.
 
 ---
 
@@ -182,7 +216,9 @@ utility bill or bank statement matching the business name and address.
    is in Dev mode."* A Live app needs a **Privacy Policy URL** in **App settings
    → Basic**. Ask the developer which URL to use (**verify at setup time**).
 
-### 2.3 Add and verify the real phone number
+### 2.3 Add and verify the dedicated EJE number
+
+Use the **new dedicated number** from section 1 — never the office number.
 
 1. In **WhatsApp → API Setup → Add phone number**. (Also available in Business
    Manager → WhatsApp Manager → Phone numbers.)
@@ -255,7 +291,9 @@ Source: [Meta: Access tokens](https://developers.facebook.com/docs/whatsapp/acce
 
 | What | Where to find it | Setting |
 |---|---|---|
-| Phone Number ID | App Dashboard → WhatsApp → **API Setup**, under the chosen "From" number. A long number, **not** the phone number itself | `WHATSAPP_PHONE_NUMBER_ID` |
+| The dedicated number itself | The new number from section 1, with the country code, e.g. `+27 82 …` | `WHATSAPP_DEDICATED_NUMBER` |
+| The office number (to protect it) | The office's existing WhatsApp number. Optional, recommended | `WHATSAPP_PROTECTED_NUMBERS` |
+| Phone Number ID | App Dashboard → WhatsApp → **API Setup**, under the **dedicated** "From" number. A long number, **not** the phone number itself | `WHATSAPP_PHONE_NUMBER_ID` |
 | WhatsApp Business Account ID | Same page, "WhatsApp Business Account ID". Also in WhatsApp Manager → account settings | `WHATSAPP_BUSINESS_ACCOUNT_ID` |
 | App Secret | App Dashboard → **App settings → Basic → App secret → Show** (asks for your password) | `WHATSAPP_APP_SECRET` |
 | Webhook verify token | **You invent it.** On any Linux or Mac terminal: `openssl rand -hex 32` | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` |
@@ -711,35 +749,77 @@ Use both layers:
 `GOOGLE_GEOCODING_REGION` (default `za`) tells Google to prefer South African
 results for ambiguous addresses.
 
-### 4.6 Terms: storing coordinates (a question for the owner)
+### 4.6 Terms: how long EJE keeps coordinates (decided 1 November 2026)
 
-The [Google Maps Platform Service Specific Terms](https://cloud.google.com/maps-platform/terms/maps-service-terms),
-Geocoding API section 6, last modified 28 October 2026, say:
+**The owner's decision:** keep office-verified pins, recheck unverified
+addresses, never replace an office-verified pin automatically with a new
+geocoding result, and flag a pin for office review when its address changes —
+**within what Google's terms allow**. The terms were read on 1 November 2026
+and they do **not** allow everything that decision would like, so EJE
+implements the closest compliant version, described below.
 
-- **6.2** Geocoding results must **not** be used with a **non-Google map**.
-  EJE links to Google Maps, so that is fine.
-- **6.3.1** Latitude/longitude from the Geocoding API may be **cached for up to
-  30 consecutive calendar days**, after which they must be deleted.
-- **6.3.2** They may be cached **indefinitely** only *"solely to support the
-  direct, End User facing functionality"* of the app, where *"the cache is not
-  used as a replacement for making an additional call"*, and where cached data
-  is *"logically isolated to the specific End User … and must not be used
-  across multiple End Users."*
-- **Place IDs** may be stored indefinitely
-  ([Geocoding policies](https://developers.google.com/maps/documentation/geocoding/policies)).
+**What the official sources say** (quoted, read 1 November 2026):
 
-**What this means for EJE.** EJE keeps a site's coordinates permanently and
-shares them across staff. It does this only after the office has **verified**
-the pin, i.e. confirmed the location as EJE's own business data, for example
-from a technician on site or the customer. A coordinate that came straight
-from Google and was **not** independently verified falls under the 30-day
-rule. Google's terms do not say when a Google result checked by a person
-stops being "Google Maps Content".
+| Source | What it says |
+|---|---|
+| [Google Maps Platform Service Specific Terms](https://cloud.google.com/maps-platform/terms/maps-service-terms) (last modified 28 October 2026), Geocoding API **6.3.1** | *"Customer may temporarily cache latitude (lat) and longitude (lng) values from the Geocoding API for up to 30 consecutive calendar days, after which Customer must delete the cached latitude and longitude values."* |
+| Same, **6.3.2** | Indefinite caching of lat/lng, formatted address and structured address is allowed *"solely to support the direct, End User facing functionality of the Customer Application that initiated the request … only where the cache is not used as a replacement for making an additional call to the Services. Cached data must be logically isolated to the specific End User it is associated with and must not be used across multiple End Users."* |
+| Same, **6.1 / 6.2** | Geocoding API content may be used without a map, but *"must not"* be used *"in conjunction with a non-Google map"*. |
+| [Google Maps Platform Terms of Service](https://cloud.google.com/maps-platform/terms) (last modified 26 August 2026), **3.2.3(a)–(b)** | *"No Scraping … Customer will not … pre-fetch, index, store, reshare, or rehost Google Maps Content outside the services"* and *"No Caching. Customer will not cache Google Maps Content except as expressly permitted under the Maps Service Specific Terms."* |
+| [Geocoding API policies](https://developers.google.com/maps/documentation/geocoding/policies) (updated 30 October 2026) | *"the place ID, used to uniquely identify a place, is exempt from the caching restrictions. You can therefore store place ID values indefinitely."* |
+| [Place IDs guide](https://developers.google.com/maps/documentation/places/web-service/place-id) | Place IDs are exempt from the caching restriction in 3.2.3(b); Google recommends refreshing a stored place ID that is more than 12 months old. |
+| [Google Maps End User Additional Terms](https://www.google.com/help/terms_maps/) (last modified 27 January 2026) | People using Google Maps may not *"copy the content"* unless permitted by Google's permissions page or by law. |
 
-> **Owner's decision needed:** confirm that EJE treats only office-verified
-> coordinates as its own data, and that unverified Google results are not kept
-> beyond 30 days. If in doubt, get advice or ask Google Maps Platform support.
-> The developer can also store the place ID, which may be kept indefinitely.
+**What follows for EJE.**
+
+1. A site pin is **shared by every office user and every technician** — it is
+   not "logically isolated to the specific End User". So 6.3.2 does **not**
+   apply, and coordinates that came from the Geocoding API fall under the
+   **30-day limit of 6.3.1**, whether or not the office has verified them.
+   Nothing in the terms says that a person checking a Google result turns it
+   into the customer's own data, so EJE does **not** assume it does.
+2. The **place ID** may be kept indefinitely.
+3. Coordinates the **office itself** obtained — taken at the site with the
+   phone's own GPS, given by the customer, or entered before Google was ever
+   connected — are EJE's own business data and are not Google Maps Content.
+   They may be kept. They must not be copied out of Google Maps (the End User
+   terms above), so EJE no longer suggests doing that.
+4. EJE uses Google results only with **Google Maps** links (6.2).
+
+**The retention policy EJE implements** (code: rule 5 in
+`src/domain/site/location.ts`, run by the worker every minute):
+
+| What | Kept for | What happens then |
+|---|---|---|
+| The customer's/site's own address | Always | Never replaced by Google's wording |
+| Coordinates the office entered (by hand, or "Use this device's location" at the site) | Always | Never replaced by a geocoding result. An address change marks the pin **Re-check the pin**; a new Google match waits beside it as a suggestion |
+| Pins existing before automatic pins (migration 0042 marked them office-entered) | Always | As above |
+| Google coordinates on an **office-verified** pin | At most 30 days from when Google returned them | From day 27 EJE asks Google again **for the same place ID**. If Google still puts the place within 30 m, the fresh coordinates are kept and the pin **stays verified**. If it moved, the pin becomes **Re-check the pin** with the new point only as a suggestion. If Google could not be asked, the coordinates are **deleted on day 30**; the verification record and the place ID stay, and technicians are navigated to the verified **place** |
+| Google coordinates on an **unverified** pin (found automatically, or an unsure match) | At most 30 days | From day 27 the address is looked up again and the new answer is used; if that cannot happen, the coordinates are deleted on day 30 and the site goes back to "find the pin from the address" |
+| Google suggestions | At most 30 days | Deleted on day 30 |
+| The geocoding cache | Answers used for 27 days, deleted at 30 | Deleted rows are gone from the database |
+| Google's formatted address and precision | **Not stored** | — |
+| The place ID | Indefinitely (exempt) | Used for navigation links and for the refresh |
+| Who verified a pin, when, and its source (office or Google) | Always | Shown on the customer's location card, with the date Google's coordinates will be refreshed or deleted |
+
+Two further consequences, both deliberate:
+
+- **Links never contain Google's coordinates.** A technician's navigation link
+  for a Google pin names the **place ID** (`destination_place_id`), so a
+  WhatsApp message or job record that is kept for years does not keep Google's
+  coordinates. An office-entered pin is linked by its coordinates.
+- **The audit trail never records Google's coordinates.** It is permanent, so
+  it says "pin from the geocoder (its coordinates are not kept in the log)".
+  Office-entered coordinates are recorded as before.
+
+**What this costs.** One extra Geocoding request per Google-derived pin every
+27 days (about 13 a year per site), within the free monthly allowance for a
+customer list of EJE's size, and capped by `GOOGLE_GEOCODING_DAILY_LIMIT`.
+
+**What would allow permanent retention of Google coordinates.** Only Google
+can grant it (a written agreement, or a change in the terms). The alternatives
+that need no permission are already built in: keep the place ID (permanent),
+or have the office record its own coordinates at the site.
 
 **What you will have at the end of section 4:**
 
@@ -747,7 +827,7 @@ stops being "Google Maps Content".
 - [ ] `GOOGLE_GEOCODING_REGION` (`za`, unless you want otherwise)
 - [ ] `GOOGLE_GEOCODING_DAILY_LIMIT` (e.g. `500`)
 - [ ] A Google daily quota cap and a budget alert in place
-- [ ] The owner's answer on the coordinate-storage question in 4.6
+- [ ] Staff told: coordinates typed into EJE come from the site (this device's location) or the customer — not copied out of Google Maps (4.6)
 
 ---
 
@@ -785,7 +865,7 @@ integration shows one of:
 
 | Status | Meaning | What to do |
 |---|---|---|
-| **Not configured** | None of its settings are present | Add the settings, restart |
+| **Not configured** | None of its settings are present — or, for WhatsApp, all are present but no real test has passed yet with them | Add the settings, restart; for WhatsApp then send the test (5.4) |
 | **Configuration incomplete** | Some settings are present, some are missing or malformed | The screen names the missing setting. Add it, restart |
 | **Connected** | The provider accepted the credentials | Run the test plan (5.4) |
 | **Authentication failed** | The provider refused the credentials | Wrong or expired token, secret, certificate or thumbprint, or a missing permission. Redo the relevant step |
@@ -833,11 +913,16 @@ listed in `EMAIL_TEST_RECIPIENTS` / `WHATSAPP_TEST_RECIPIENTS`.
    for a mailbox other than sales@.
 7. `journalctl -u eje -n 50` contains no secret, token or key.
 
-**WhatsApp**
-1. Administration → Integrations shows WhatsApp **Connected**, not *Action
-   required*. All three templates approved, webhook verified.
+**WhatsApp (the dedicated EJE number)**
+1. Administration → Integrations shows *WhatsApp — dedicated EJE number* as
+   **Not configured** with "the dedicated number and the Meta credentials are
+   set, but no real test has passed", the dedicated number's last four digits,
+   and the office number as *Not connected and never used*. All three
+   templates approved, webhook verified.
 2. Press **Send test** to a number in `WHATSAPP_TEST_RECIPIENTS`. That phone
-   receives the message from the EJE number with the right display name.
+   receives the message **from the dedicated number** with the right display
+   name, and the status changes to **Connected**. Only now are job
+   notifications sent.
 3. Within a minute or two the test shows **delivered** (and **read** once
    opened). This proves the webhook works.
 4. On a job assigned to an **internal test technician** whose phone is in the
@@ -845,17 +930,21 @@ listed in `EMAIL_TEST_RECIPIENTS` / `WHATSAPP_TEST_RECIPIENTS`.
    `eje_job_transferred` arrive and the job link opens the job.
 5. Request the site location. Confirm `eje_site_location` arrives and
    **Navigate** opens Google Maps at the right place.
-6. If option A was chosen: confirm the office app on that number still sends
-   and receives normally.
+6. Confirm the office's WhatsApp Business app on the **office** number still
+   sends and receives normally, with its chats and linked devices — EJE never
+   touched it.
 
 **Google Geocoding**
 1. Administration → Integrations shows Google **Connected**.
 2. On a **test** site, look up a known address (e.g. EJE's own premises).
    Coordinates are returned and the map link opens at the right spot.
-3. The pin is shown as **unverified** until the office confirms it.
-4. In Google Cloud → **APIs & Services → Geocoding API → Metrics**, the
+3. The pin is shown as **unverified** until the office confirms it, with the
+   date by which Google's coordinates will be refreshed or deleted (4.6).
+4. Confirm the pin on the test site. The technician's navigation link names
+   the Google **place**, not the coordinates.
+5. In Google Cloud → **APIs & Services → Geocoding API → Metrics**, the
    request appears.
-5. Optional: run one request from a computer that is **not** the VPS with the
+6. Optional: run one request from a computer that is **not** the VPS with the
    same key. Google must refuse it, which proves the IP restriction works.
 
 ---
@@ -875,7 +964,9 @@ All of these go in **`/etc/eje/eje.env`** on the VPS, followed by
 | `EMAIL_SENDER` | Yes, for email | `sales@ejeie.co.za` | The sending mailbox (3.1) |
 | `EMAIL_REPLY_TO` | No | `sales@ejeie.co.za` | Owner's choice |
 | `EMAIL_TEST_RECIPIENTS` | For the test button | `owner@ejeie.co.za,it@ejeie.co.za` | Owner's choice, internal addresses only |
-| `WHATSAPP_PHONE_NUMBER_ID` | Yes, to send | `123456789012345` | App Dashboard → WhatsApp → API Setup (2.6) |
+| `WHATSAPP_DEDICATED_NUMBER` | Yes, to send | `+27820000000` | The new dedicated EJE number (1.1, 2.6) |
+| `WHATSAPP_PROTECTED_NUMBERS` | No, recommended | `+27110000000` | The office's existing WhatsApp number(s), comma-separated: EJE refuses to send from them (1.6) |
+| `WHATSAPP_PHONE_NUMBER_ID` | Yes, to send | `123456789012345` | App Dashboard → WhatsApp → API Setup, the dedicated number (2.6) |
 | `WHATSAPP_ACCESS_TOKEN` | Yes, to send | `<system user token>` | Business Manager → System users → Generate token (2.5) |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | To check template approval | `234567890123456` | App Dashboard → WhatsApp → API Setup (2.6) |
 | `WHATSAPP_APP_SECRET` | Yes, for webhooks (refused without it) | `<app secret>` | App Dashboard → App settings → Basic (2.6) |
@@ -902,11 +993,9 @@ Fixed values, not settings:
 
 These could not be confirmed from official documentation on 1 November 2026:
 
-1. Whether **WhatsApp coexistence accepts +27 numbers** today. Meta's page no
-   longer lists exclusions, but earlier versions excluded South Africa. Get
-   written confirmation from the partner.
-2. Whether a partner imposes a **minimum age or activity period** on the
-   number for coexistence. Meta's own page sets none.
+1. ~~Whether WhatsApp coexistence accepts +27 numbers~~ — no longer needed:
+   the owner chose a dedicated number (1.1).
+2. ~~A partner's minimum age for coexistence~~ — no longer needed (1.1).
 3. The exact **expiry options** shown when generating a System User token.
 4. Whether Meta **accepts a URL as a body variable**, and a body that **ends
    with a variable**, in these utility templates.
@@ -916,4 +1005,7 @@ These could not be confirmed from official documentation on 1 November 2026:
    by the email test in 5.4.
 7. The exact Google Cloud screen for the **daily request quota**, and whether
    the VPS sends Google requests over **IPv6**.
-8. How Google's caching terms apply to **office-verified** coordinates (4.6).
+8. ~~How Google's caching terms apply to office-verified coordinates~~ —
+   answered from the terms in 4.6: Google's coordinates are kept for at most
+   30 days whether or not verified; the place ID and the office's own
+   coordinates are kept.

@@ -10,6 +10,7 @@ import {
   answerFor,
   applySiteGeocode,
   claimDueSites,
+  maintainSiteProviderContent,
   prepareSiteGeocode,
 } from '@/application/site-geocoding';
 import { siteLocationOf } from '@/domain';
@@ -79,12 +80,17 @@ export const dispatchCustomerEmails = async (runtime: ServerRuntime): Promise<Di
 };
 
 export const dispatchSiteGeocodes = async (runtime: ServerRuntime): Promise<number> => {
+  // Rule 5 first: what is 30 days old is deleted, configured or not.
+  await runtime.write((unit) => maintainSiteProviderContent(asSystem(unit)));
   const claimed = await runtime.write((unit) => claimDueSites(asSystem(unit)));
   for (const site of claimed) {
     const query = siteLocationOf(site).query;
     const plan = await runtime.write((unit) => prepareSiteGeocode(asSystem(unit), site));
-    const answer = plan.kind === 'answered' ? plan.answer : await runtime.read((unit) => answerFor(unit.services, plan.query));
-    await runtime.write((unit) => applySiteGeocode(asSystem(unit), site.id, query, answer, plan.kind === 'answered' && plan.fromCache));
+    const answer =
+      plan.kind === 'answered' ? plan.answer : await runtime.read((unit) => answerFor(unit.services, plan.query, plan.placeId));
+    await runtime.write((unit) =>
+      applySiteGeocode(asSystem(unit), site.id, query, answer, plan.kind === 'answered' && plan.fromCache, plan.refresh),
+    );
   }
   return claimed.length;
 };

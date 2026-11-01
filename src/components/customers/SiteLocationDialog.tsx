@@ -40,6 +40,29 @@ export const SiteLocationDialog = ({
   const [latitude, setLatitude] = useState(asText(site.latitude));
   const [longitude, setLongitude] = useState(asText(site.longitude));
   const [problem, setProblem] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+
+  // The device's own GPS: coordinates that are EJE's, not a map provider's.
+  const takeDeviceLocation = () => {
+    if (typeof navigator === 'undefined' || navigator.geolocation === undefined) {
+      setProblem('This device cannot share its location.');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocating(false);
+        setProblem(null);
+        setLatitude(position.coords.latitude.toFixed(6));
+        setLongitude(position.coords.longitude.toFixed(6));
+      },
+      () => {
+        setLocating(false);
+        setProblem('The location could not be read. Allow location for this site, or type the coordinates.');
+      },
+      { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
+    );
+  };
 
   // Mounted fresh each time it opens (see CustomerLocationCard), so the
   // initial state above is always the site as it stands.
@@ -148,9 +171,22 @@ export const SiteLocationDialog = ({
             placeholder="28.056700"
           />
         </div>
-        <p className="text-xs text-steel-500">
-          Tip: in Google Maps, right-click the gate and click the coordinates at the top of the
-          menu to copy them, then paste both into Latitude.
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="site-location-here"
+            disabled={locating}
+            onClick={takeDeviceLocation}
+          >
+            {locating ? 'Finding this device…' : 'Use this device’s location'}
+          </Button>
+          <span className="text-xs text-steel-500">Standing at the site gate.</span>
+        </div>
+        <p className="text-xs text-steel-500" data-testid="site-location-source-hint">
+          Coordinates typed here are the office’s own and are kept. Take them at the site (this
+          device’s location) or from the customer — not copied out of Google Maps, whose terms do
+          not allow its content to be copied.
         </p>
       </div>
     </Modal>

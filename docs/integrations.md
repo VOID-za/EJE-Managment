@@ -307,6 +307,8 @@ Business Platform Cloud API.
 | `WHATSAPP_PHONE_NUMBER_ID` | yes | — |
 | `WHATSAPP_ACCESS_TOKEN` | yes | — |
 | `WHATSAPP_API_VERSION` | no | `v21.0` |
+| `WHATSAPP_DEDICATED_NUMBER` | to send | none — the new, dedicated EJE number; nothing is sent without it |
+| `WHATSAPP_PROTECTED_NUMBERS` | no (recommended) | none — the office's WhatsApp number(s); EJE refuses to send from them |
 | `WHATSAPP_API_BASE_URL` | no | `https://graph.facebook.com` |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | no | none — needed to check template approval |
 | `WHATSAPP_APP_SECRET` | for webhooks | none — every webhook POST is refused without it |
@@ -315,19 +317,31 @@ Business Platform Cloud API.
 | `WHATSAPP_TEST_RECIPIENTS` | no | none — the only numbers Administration's "Send test message" may use |
 | `EJE_PUBLIC_URL` | no | `https://eje.syncza.co.za` — the job link in a message |
 
-**The existing office number is never touched by this code.** The adapter has
-one call, `POST /{phone-number-id}/messages` with a template; there is no
-register, deregister, migrate or settings call anywhere (a test pins this).
-Connecting a number — and whether the office's existing one can keep its
-WhatsApp Business App through coexistence — is the owner's decision, made with
-`docs/integrations-setup.md` §1.
+**A dedicated EJE number; the office number is never touched.** The owner
+decided (1 November 2026) that notifications go from a new number of EJE's own
+(`docs/integrations-setup.md` §1). The adapter makes two calls only: `GET
+/{phone-number-id}?fields=display_phone_number`, to confirm the sender IS the
+dedicated number (and none of `WHATSAPP_PROTECTED_NUMBERS`) before sending —
+refused permanently, nothing sent, if not — and `POST
+/{phone-number-id}/messages` with a template. There is no register,
+deregister, migrate or settings call anywhere (a test pins this).
+
+**Not in use until a real test passes.** `ActivationGatedWhatsAppService`
+reports itself unconfigured, so no job notification is queued, until a test
+from Administration → Integrations to a `WHATSAPP_TEST_RECIPIENTS` number has
+been accepted by Meta with the current sending configuration (a hash of the
+phone number id, token, dedicated number and template language, kept in
+`integration_state` as `whatsapp_activation` — no value stored). Until then
+Administration says **Not configured**.
 
 The token must be a **permanent System User token**, not a temporary one from
 the dashboard.
 
 ### Which adapter a deployment gets
 
-1. **Both credentials set** → `CloudApiWhatsAppService`. Messages go to Meta.
+1. **Both credentials and the dedicated number set** → `CloudApiWhatsAppService`,
+   behind `ActivationGatedWhatsAppService`. Messages go to Meta once a real
+   test has passed (above).
 2. **No credentials, no database** (the demonstration) → `SimulatedWhatsAppService`.
    Messages are recorded in the visible outbox and transmitted nowhere. A
    demonstration telling the truth about itself.
@@ -414,14 +428,22 @@ with `components=country:ZA`). The key never reaches a browser or a message.
 
 - **When:** a site is geocoded when its address is written or changed — never
   when a job is opened. The same address is answered from `geocode_cache`
-  for 30 days (the Maps Platform terms' limit for caching coordinates); the
-  application stops at GOOGLE_GEOCODING_DAILY_LIMIT requests a day (default 500).
+  while its answer is under 27 days old; the application stops at
+  GOOGLE_GEOCODING_DAILY_LIMIT requests a day (default 500).
+- **What is kept, and for how long** (rule 5; Service Specific Terms §6.3.1):
+  Google's coordinates — a pin or a suggestion, verified or not — for at most
+  30 days, then deleted by `maintainSiteProviderContent` (every minute in the
+  worker, configured or not; the cache too). From day 27 a verified Google pin
+  is re-asked by its place ID and stays verified if the place moved no more
+  than 30 m; an unverified one is looked up again by address. The place ID is
+  kept (exempt). The formatted address and precision are not stored. Office-
+  entered coordinates are kept. Google's coordinates never go into the audit
+  trail or a navigation link (links name the place ID).
 - **What it does with the answer** (`domain/site/location.ts`): one precise
   match sets the pin (`resolved`, unverified); several matches, a partial
   match or an approximate place are only a SUGGESTION (`ambiguous`); no match
   is `not_found`; an outage or quota backs off and retries (five attempts); a
-  refused key fails at once. The office's address is never replaced — the
-  provider's formatted address is kept beside it.
+  refused key fails at once. The office's address is never replaced.
 - **The office decides:** "The pin is correct", "Use the suggested pin", or
   coordinates typed in the site dialog — each makes the pin `verified`, and a
   verified pin is NEVER replaced automatically. When its address changes it
@@ -438,9 +460,9 @@ with `components=country:ZA`). The key never reaches a browser or a message.
 | `GOOGLE_GEOCODING_REGION` | no | `za` |
 | `GOOGLE_GEOCODING_DAILY_LIMIT` | no | `500` |
 
-**Terms note for the owner:** keeping office-verified coordinates permanently
-is a question for the Maps Platform terms (§6.3); see
-`docs/integrations-setup.md` §4.6.
+**Terms:** read on 1 November 2026, with the quotes and links, in
+`docs/integrations-setup.md` §4.6. Office verification does not make Google's
+coordinates EJE's own; only the office's own coordinates are kept indefinitely.
 
 An unapproved or renamed template is refused by the Cloud API and surfaces as a
 recorded failure, not a silent one.

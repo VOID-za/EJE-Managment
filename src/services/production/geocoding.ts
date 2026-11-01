@@ -153,6 +153,16 @@ export class GoogleGeocodingService implements GeocodingService {
     if (query.trim().length === 0) return answer('not_found', 'There is no address to look up.');
     const params = new URLSearchParams({ address: query, region: this.config.region, key: this.config.apiKey });
     if (this.config.region === 'za') params.set('components', 'country:ZA');
+    return this.request(params);
+  }
+
+  /** Place geocoding, `place_id=` (Geocoding API, "Place geocoding"): a verified pin renewed. */
+  async geocodePlace(placeId: string): Promise<GeocodeAnswer> {
+    if (placeId.trim().length === 0) return answer('not_found', 'There is no place to look up.');
+    return this.request(new URLSearchParams({ place_id: placeId, key: this.config.apiKey }));
+  }
+
+  private async request(params: URLSearchParams): Promise<GeocodeAnswer> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.config.baseUrl}/maps/api/geocode/json?${params.toString()}`, {
@@ -220,6 +230,24 @@ export class SimulatedGeocodingService implements GeocodingService {
       lower.includes('several')
         ? answer('ambiguous', 'Several possible places (simulated). Check the pin.', details)
         : answer('match', '', details),
+    );
+  }
+
+  /** The same simulated place again: its id carries the hash its point came from. */
+  geocodePlace(placeId: string): Promise<GeocodeAnswer> {
+    this.calls += 1;
+    const hash = Number.parseInt(placeId.replace(/^simulated-/u, ''), 16);
+    if (!placeId.startsWith('simulated-') || !Number.isFinite(hash)) {
+      return Promise.resolve(answer('not_found', 'No such place (simulated).', { provider: 'simulated' }));
+    }
+    return Promise.resolve(
+      answer('match', '', {
+        latitude: Math.round((-26.35 + (hash % 3000) / 10_000) * 1e6) / 1e6,
+        longitude: Math.round((27.9 + ((hash >>> 12) % 5000) / 10_000) * 1e6) / 1e6,
+        placeId,
+        precision: 'ROOFTOP',
+        provider: 'simulated',
+      }),
     );
   }
 }

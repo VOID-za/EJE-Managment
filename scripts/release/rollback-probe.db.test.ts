@@ -20,11 +20,11 @@ import { asSiteId } from '@/domain';
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (c68b3c3), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (42e71fc), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in c68b3c3, and it does: each of these was checked against that commit.
+ * in 42e71fc, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0042)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -86,7 +86,7 @@ const INTEGRATIONS = {
 
 const id = (value: string): DocumentId => asDocumentId(value);
 
-describePhase('rollback compatibility — phase 2: the live release (c68b3c3) against a database at 0042', () => {
+describePhase('rollback compatibility — phase 2: the live release (42e71fc) against a database at 0042', () => {
   let db: Database;
   let repository: PostgresDocumentRepository;
 
@@ -99,18 +99,17 @@ describePhase('rollback compatibility — phase 2: the live release (c68b3c3) ag
     await db.$client.end({ timeout: 5 });
   });
 
-  it("the live release's preflight does not refuse a database migrations ahead of it", async () => {
+  it("the live release's preflight does not refuse the database this release migrated", async () => {
     const journal = JSON.parse(
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    expect(shipped).toHaveLength(42);
-    expect(shipped.at(-1)).toBe('0041_repair_items');
-    expect(shipped).not.toContain('0042_integrations');
+    // 42e71fc shipped 0042 itself; this release adds no migration.
+    expect(shipped).toHaveLength(43);
+    expect(shipped.at(-1)).toBe('0042_integrations');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0042 applied beyond what the live release ships.
     expect(applied).toBe(43);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });

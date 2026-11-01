@@ -5,7 +5,7 @@ import {
   readGraphEmailConfiguration,
 } from '@/services/production/email';
 import { readFileSync } from 'node:fs';
-import { readWhatsAppConfiguration } from '@/services/production/whatsapp';
+import { numberDigits, readWhatsAppConfiguration } from '@/services/production/whatsapp';
 import { ASSIGNMENT_TEMPLATE, TRANSFER_TEMPLATE } from '@/application/assignment-notice';
 import { SITE_LOCATION_TEMPLATE } from '@/application/job-operations';
 import {
@@ -153,7 +153,7 @@ const probeWhatsApp = async (
   try {
     const response = await withTimeout(
       (signal) =>
-        fetch(`${config.baseUrl}/${config.apiVersion}/${config.phoneNumberId}`, {
+        fetch(`${config.baseUrl}/${config.apiVersion}/${config.phoneNumberId}?fields=display_phone_number,verified_name`, {
           headers: { authorization: `Bearer ${config.accessToken}` },
           signal,
         }),
@@ -169,9 +169,22 @@ const probeWhatsApp = async (
         credentialRefused: isCredentialRefusal(response.status),
       };
     }
+    // The dedicated EJE number, and never the office's (the owner's decision).
+    const body = (await response.json().catch(() => ({}))) as { display_phone_number?: string };
+    const actual = numberDigits(body.display_phone_number ?? '');
+    if (config.protectedNumbers.includes(actual)) {
+      return { ok: false, detail: `The phone number id belongs to a PROTECTED number (…${actual.slice(-4)}), the office's WhatsApp. Do not use it.`, credentialRefused: false };
+    }
+    if (actual !== config.dedicatedNumber) {
+      return {
+        ok: false,
+        detail: `The phone number id belongs to …${actual.slice(-4) || '????'}, not the dedicated EJE number (…${config.dedicatedNumber.slice(-4)}).`,
+        credentialRefused: false,
+      };
+    }
     return {
       ok: true,
-      detail: 'The phone number is readable. No message was sent.',
+      detail: `The phone number is readable and is the dedicated EJE number (…${actual.slice(-4)}). No message was sent.`,
       credentialRefused: false,
     };
   } catch (cause) {

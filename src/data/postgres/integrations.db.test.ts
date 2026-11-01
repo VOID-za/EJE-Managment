@@ -219,6 +219,31 @@ describeDb('migration 0042 on PostgreSQL', () => {
       expect(siteLocationOf(reread!)).toMatchObject({ status: 'verified', source: 'manual' });
     });
 
+    it('finds the sites holding Google’s coordinates by when they were obtained, and keeps an office pin out of it (rule 5)', async () => {
+      const customers = new PostgresCustomerRepository(db);
+      const site = (await customers.findSiteById(asSiteId(IDS.site)))!;
+      const geocoded = {
+        ...site,
+        addressLine1: '3 Wadeville Boulevard',
+        city: 'Germiston',
+        latitude: -26.2745,
+        longitude: 28.198,
+        geocode: { ...siteLocationOf(site), status: 'verified' as const, source: 'geocoded' as const, provider: 'google', placeId: 'ChIJ-x', geocodedAt: '2026-10-01T08:00:00.000Z' },
+      };
+      await customers.saveSite(geocoded);
+      expect((await customers.listSitesWithProviderContent(NOW, 10)).map((entry) => entry.id)).toEqual([site.id]);
+      // Obtained after the cut-off: not yet due.
+      expect(await customers.listSitesWithProviderContent('2026-09-30T08:00:00.000Z', 10)).toEqual([]);
+      // Its coordinates deleted, the place ID kept: nothing of Google's is held any more.
+      const deleted = { ...geocoded, latitude: null, longitude: null };
+      expect(await customers.saveSiteLocation(deleted, siteLocationOf(geocoded).query)).toBe(true);
+      expect(await customers.listSitesWithProviderContent(NOW, 10)).toEqual([]);
+      expect(siteLocationOf((await customers.findSiteById(site.id))!)).toMatchObject({ status: 'verified', placeId: 'ChIJ-x' });
+      // An office-entered pin is never listed, however old.
+      await customers.saveSite({ ...geocoded, geocode: { ...geocoded.geocode, source: 'manual' as const } });
+      expect(await customers.listSitesWithProviderContent(NOW, 10)).toEqual([]);
+    });
+
     it('refuses an unknown status and an impossible coordinate', async () => {
       expect(await refusal(db.execute(sql`update sites set location_status = 'guessed' where id = ${IDS.site}`))).toMatch(/location_status_known/u);
       expect(await refusal(db.execute(sql`update sites set latitude = 123 where id = ${IDS.site}`))).toMatch(/coordinates_in_range/u);
@@ -235,6 +260,11 @@ describeDb('migration 0042 on PostgreSQL', () => {
       await repo.saveGeocode({ queryKey: 'za|x', provider: 'google', outcome: 'match', result: { latitude: -26 }, createdAt: NOW, expiresAt: '2026-12-01T08:00:00.000Z' });
       expect((await repo.findGeocode('za|x', NOW))?.result).toEqual({ latitude: -26 });
       expect(await repo.findGeocode('za|x', '2026-12-02T08:00:00.000Z')).toBeNull();
+      // Expired answers are DELETED, not only ignored (Service Specific Terms §6.3.1).
+      expect(await repo.purgeExpiredGeocodes(NOW)).toBe(0);
+      expect(await repo.purgeExpiredGeocodes('2026-12-01T08:00:00.000Z')).toBe(1);
+      // Gone: not even a lookup "before" its expiry finds it.
+      expect(await repo.findGeocode('za|x', '2000-01-01T00:00:00.000Z')).toBeNull();
 
       expect(await repo.countRequest('2026-11-01', 'google_geocoding')).toBe(1);
       expect(await repo.countRequest('2026-11-01', 'google_geocoding')).toBe(2);

@@ -22,7 +22,7 @@ import { audit } from './audit';
 import { WorkflowError } from './errors';
 import type { RemovalResult } from './removal';
 import { updateMachine } from './machine-operations';
-import { geocodeAfterSave } from './site-geocoding';
+import { geocodeAfterSave, pinForLog } from './site-geocoding';
 
 /**
  * Customer register operations.
@@ -566,10 +566,8 @@ export const updateSite = async (context: OperationContext, site: Site): Promise
     locationAfterSave(previous, next, context.actor.id, context.services.clock.now()),
   );
 
-  const pin = (value: Site): string =>
-    value.latitude === null || value.longitude === null
-      ? 'Not pinned'
-      : `${value.latitude}, ${value.longitude}`;
+  // Never the geocoder's coordinates: the trail is permanent (rule 5, location.ts).
+  const pin = pinForLog;
   await audit(context, {
     jobId: null,
     type: 'site_updated',

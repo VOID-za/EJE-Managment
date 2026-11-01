@@ -1,7 +1,11 @@
 import 'server-only';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { can, isPlausibleEmailAddress } from '@/domain';
+import { can, isPlausibleEmailAddress, type IsoDateTime } from '@/domain';
+import { selectPersistenceBackend } from '@/data/backend';
+import { readWhatsAppConfiguration } from '@/services/production/whatsapp';
+import { readWhatsAppWebhookConfiguration } from '@/services/production/whatsapp-webhook';
+import { recordWhatsAppActivation } from '@/server/whatsapp-activation';
 import { audit } from '@/application/audit';
 import { requeueUnpinnedSites, listSitesNeedingAttention } from '@/application/site-geocoding';
 import { maskNumber } from '@/application/whatsapp-messages';
@@ -130,22 +134,41 @@ export const integrationsPost = async (request: NextRequest): Promise<NextRespon
             { code: 'not_a_test_recipient', message: 'Test messages go only to a number in WHATSAPP_TEST_RECIPIENTS on the server.' },
           ]);
         }
+        // Only a COMPLETE configuration is tested: a test that passes activates it.
+        const real = selectPersistenceBackend() !== 'demo';
+        const webhook = readWhatsAppWebhookConfiguration();
+        if (real && (readWhatsAppConfiguration() === null || webhook.appSecret.length === 0 || webhook.verifyToken.length === 0)) {
+          throw forbidden('WhatsApp is not completely configured.', [
+            {
+              code: 'whatsapp_incomplete',
+              message: 'Set the dedicated number, the phone number id, the access token, the app secret and the webhook verify token first (Administration → Integrations lists what is missing).',
+            },
+          ]);
+        }
         const result = await runtime.read(async ({ services }) => {
           try {
             // The assignment template, with sample values that say what it is.
+            // The adapter first asks Meta that the sender is the dedicated number.
             const entry = await services.whatsapp.send({
               to: recipient,
               templateName: 'eje_job_assigned',
               parameters: ['EJE-TEST', 'Test', 'EJE test message', 'Not a real job', 'Not specified', 'https://eje.syncza.co.za'],
               preview: 'EJE test message (assignment template, sample values).',
+              test: true,
             });
-            return { ok: true, detail: `Accepted by Meta (message ${entry.id}). Delivery is reported by webhook.` };
+            return { ok: true, simulated: entry.simulated, detail: `Accepted by Meta (message ${entry.id}). Delivery is reported by webhook.` };
           } catch (cause) {
-            return { ok: false, detail: cause instanceof Error ? cause.message : 'The message could not be sent.' };
+            return { ok: false, simulated: false, detail: cause instanceof Error ? cause.message : 'The message could not be sent.' };
           }
         });
-        await record('Test WhatsApp message', `${actor.user.firstName} ${actor.user.lastName} sent a test WhatsApp message to ${maskNumber(recipient)}: ${result.ok ? 'accepted' : 'failed'} — ${result.detail}`);
-        return NextResponse.json({ data: result });
+        const activated = result.ok && real && !result.simulated;
+        if (activated) await recordWhatsAppActivation(runtime, new Date().toISOString() as IsoDateTime);
+        await record(
+          'Test WhatsApp message',
+          `${actor.user.firstName} ${actor.user.lastName} sent a test WhatsApp message from the dedicated EJE number to ${maskNumber(recipient)}: ${result.ok ? 'accepted' : 'failed'} — ${result.detail}` +
+            (activated ? ' The dedicated number passed a real test with this configuration: job notifications are now sent.' : ''),
+        );
+        return NextResponse.json({ data: { ok: result.ok, detail: result.detail, activated } });
       }
       case 'test_geocode': {
         const answer = await runtime.read(async ({ services }) =>

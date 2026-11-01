@@ -242,6 +242,16 @@ export class DemoIntegrationRepository implements IntegrationRepository {
     );
   }
 
+  purgeExpiredGeocodes(now: IsoDateTime): Promise<number> {
+    const expired = this.context.read().geocodeCache.filter((entry) => entry.expiresAt <= now).length;
+    if (expired > 0) {
+      this.context.commit((draft) => {
+        draft.geocodeCache = draft.geocodeCache.filter((entry) => entry.expiresAt > now);
+      });
+    }
+    return Promise.resolve(expired);
+  }
+
   saveGeocode(entry: GeocodeCacheEntry): Promise<void> {
     this.context.commit((draft) => {
       draft.geocodeCache = [...draft.geocodeCache.filter((existing) => existing.queryKey !== entry.queryKey), entry];

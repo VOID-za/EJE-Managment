@@ -1,12 +1,18 @@
 import {
   can,
   geocodeCacheKey,
+  locationAfterExpiry,
   locationAfterGeocode,
+  locationAfterRefresh,
   locationAfterRequeue,
   locationAfterVerify,
   siteLocationLabel,
   siteLocationNeedsAttention,
   siteLocationOf,
+  siteDueForProviderRefresh,
+  siteNeedsPinRefresh,
+  PROVIDER_COORDINATE_RETENTION_DAYS,
+  PROVIDER_REFRESH_AFTER_DAYS,
   userFullName,
   type GeocodeAnswer,
   type IsoDateTime,
@@ -32,13 +38,22 @@ import { WorkflowError } from './errors';
  *
  * WHAT IT COSTS. A site is geocoded when its address is written or changed —
  * never when a job is opened. The same address is answered from the cache
- * for 30 days (the Google Maps Platform terms allow coordinates to be cached
- * for 30 days), and the application stops itself at a daily cap
- * (GOOGLE_GEOCODING_DAILY_LIMIT, default 500) before Google's own quota.
+ * while its answer is under 27 days old, and the application stops itself at
+ * a daily cap (GOOGLE_GEOCODING_DAILY_LIMIT, default 500) before Google's own
+ * quota.
+ *
+ * WHAT IT KEEPS (rule 5 in `domain/site/location.ts`; Google Maps Platform
+ * Service Specific Terms §6.3.1). Google's coordinates are held for at most
+ * 30 days — on a site and in the cache — then deleted by
+ * `maintainSiteProviderContent`, whether or not Google is still set up. A
+ * verified geocoded pin is refreshed by its place ID from day 27; an
+ * unverified one is looked up again from its address. Google's coordinates
+ * never go into the audit trail, and the formatted address is not stored.
  */
 
 export const GEOCODING_SERVICE_NAME = 'google_geocoding';
-const CACHE_DAYS = 30;
+const CACHE_DAYS = PROVIDER_COORDINATE_RETENTION_DAYS;
+const DAY_MS = 24 * 3600_000;
 const BATCH = 5;
 /** A claimed site is not taken again by another worker for this long. */
 const LEASE_MINUTES = 10;
@@ -82,18 +97,33 @@ export const claimDueSites = async (context: OperationContext, limit = BATCH): P
   return claimed;
 };
 
+/**
+ * `refresh`: the site is a verified geocoded pin being confirmed by its place
+ * (`locationAfterRefresh`), not an address look-up (`locationAfterGeocode`).
+ */
 export type GeocodePlan =
-  | { readonly kind: 'answered'; readonly answer: GeocodeAnswer; readonly fromCache: boolean }
-  | { readonly kind: 'ask'; readonly query: string };
+  | { readonly kind: 'answered'; readonly answer: GeocodeAnswer; readonly fromCache: boolean; readonly refresh: boolean }
+  | { readonly kind: 'ask'; readonly query: string; readonly placeId: string | null; readonly refresh: boolean };
 
 /** The cache, then the daily cap, then — only then — Google. */
 export const prepareSiteGeocode = async (context: OperationContext, site: Site): Promise<GeocodePlan> => {
-  const geocoder = geocoderOf(context.services);
-  if (geocoder === null) return { kind: 'answered', answer: NOT_CONFIGURED, fromCache: false };
-  const query = siteLocationOf(site).query;
   const now = context.services.clock.now();
-  const cached = await context.repos.integrations.findGeocode(geocodeCacheKey(query, geocoder.region), now);
-  if (cached !== null) return { kind: 'answered', answer: cached.result as unknown as GeocodeAnswer, fromCache: true };
+  const refresh = siteNeedsPinRefresh(site, now);
+  const geocoder = geocoderOf(context.services);
+  if (geocoder === null) return { kind: 'answered', answer: NOT_CONFIGURED, fromCache: false, refresh };
+  const geocode = siteLocationOf(site);
+  const query = geocode.query;
+  // A refresh asks Google again: that is what renews the 30 days. An answer in
+  // the cache is used only while it is under 27 days old.
+  const cached = refresh ? null : await context.repos.integrations.findGeocode(geocodeCacheKey(query, geocoder.region), now);
+  if (cached !== null && Date.parse(cached.createdAt) > Date.parse(now) - PROVIDER_REFRESH_AFTER_DAYS * DAY_MS) {
+    return {
+      kind: 'answered',
+      answer: { ...(cached.result as unknown as GeocodeAnswer), obtainedAt: cached.createdAt },
+      fromCache: true,
+      refresh,
+    };
+  }
 
   const day = now.slice(0, 10);
   const used = await context.repos.integrations.countRequest(day, GEOCODING_SERVICE_NAME);
@@ -103,6 +133,7 @@ export const prepareSiteGeocode = async (context: OperationContext, site: Site):
     return {
       kind: 'answered',
       fromCache: false,
+      refresh,
       answer: {
         ...NOT_CONFIGURED,
         outcome: 'temporary_failure',
@@ -112,15 +143,15 @@ export const prepareSiteGeocode = async (context: OperationContext, site: Site):
       },
     };
   }
-  return { kind: 'ask', query };
+  return { kind: 'ask', query, placeId: refresh ? geocode.placeId : null, refresh };
 };
 
 /** The call to the provider, outside any transaction. Never throws. */
-export const answerFor = async (services: AppServices, query: string): Promise<GeocodeAnswer> => {
+export const answerFor = async (services: AppServices, query: string, placeId: string | null = null): Promise<GeocodeAnswer> => {
   const geocoder = geocoderOf(services);
   if (geocoder === null) return NOT_CONFIGURED;
   try {
-    return await geocoder.geocode(query);
+    return placeId !== null && geocoder.geocodePlace !== undefined ? await geocoder.geocodePlace(placeId) : await geocoder.geocode(query);
   } catch {
     return { ...NOT_CONFIGURED, outcome: 'temporary_failure', provider: geocoder.provider, error: 'The geocoder could not be reached.' };
   }
@@ -133,36 +164,54 @@ export const applySiteGeocode = async (
   query: string,
   answer: GeocodeAnswer,
   fromCache: boolean,
+  refresh = false,
 ): Promise<Site | null> => {
   const now = context.services.clock.now();
   const geocoder = geocoderOf(context.services);
-  if (!fromCache && geocoder !== null && (answer.outcome === 'match' || answer.outcome === 'ambiguous' || answer.outcome === 'not_found')) {
+  if (!fromCache && !refresh && geocoder !== null && (answer.outcome === 'match' || answer.outcome === 'ambiguous' || answer.outcome === 'not_found')) {
+    // Rule 5: the coordinates, for 30 days; not the wording, not the precision.
     await context.repos.integrations.saveGeocode({
       queryKey: geocodeCacheKey(query, geocoder.region),
       provider: answer.provider,
       outcome: answer.outcome,
-      result: { ...answer },
+      result: { ...answer, formattedAddress: '', precision: null, obtainedAt: null },
       createdAt: now,
       expiresAt: plus(now, CACHE_DAYS * 24 * 60),
     });
   }
   const site = await context.repos.customers.findSiteById(siteId);
   if (site === null) return null;
-  const next = locationAfterGeocode(site, query, answer, now);
+  const before = siteLocationOf(site);
+  // A refresh applies only to the verified geocoded pin that was asked about.
+  if (refresh && (before.query !== query || !siteNeedsPinRefresh(site, now))) return null;
+  const next = refresh ? locationAfterRefresh(site, answer, now) : locationAfterGeocode(site, query, answer, now);
   if (next === null) return null; // the address changed while the question was out
   if (!(await context.repos.customers.saveSiteLocation(next, query))) return null;
 
-  const before = siteLocationOf(site);
   const after = siteLocationOf(next);
+  const provider = answer.provider === 'simulated' ? 'The demonstration geocoder (simulated)' : 'Google';
+  if (refresh) {
+    const kept = after.status === before.status && next.latitude !== null && after.geocodedAt !== before.geocodedAt;
+    if (kept || after.status !== before.status) {
+      await audit(context, {
+        jobId: null,
+        type: 'site_location_geocoded',
+        summary: `Site pin: ${next.name} — ${kept ? 'verified pin confirmed again' : siteLocationLabel(after.status)}`,
+        detail: kept
+          ? `${provider} still places the verified site where the office checked it; its coordinates are renewed for another ${PROVIDER_COORDINATE_RETENTION_DAYS} days.`
+          : after.error,
+        changes: [],
+      });
+    }
+    return next;
+  }
   if (after.status !== before.status || after.suggestedLatitude !== before.suggestedLatitude || next.latitude !== site.latitude) {
     await audit(context, {
       jobId: null,
       type: 'site_location_geocoded',
       summary: `Site pin: ${next.name} — ${siteLocationLabel(after.status)}`,
       detail:
-        (answer.outcome === 'match' || answer.outcome === 'ambiguous'
-          ? `${answer.provider === 'simulated' ? 'The demonstration geocoder (simulated)' : 'Google'} matched “${query}” to “${answer.formattedAddress}” (${answer.precision ?? 'precision not given'})${fromCache ? ', from the cache' : ''}. `
-          : '') +
+        (answer.outcome === 'match' || answer.outcome === 'ambiguous' ? `${provider} matched “${query}”${fromCache ? ', from the cache' : ''}. ` : '') +
         (after.status === 'resolved'
           ? 'The pin is set and is used for navigation; the office has not checked it yet.'
           : after.status === 'verified' || after.status === 'stale'
@@ -171,16 +220,68 @@ export const applySiteGeocode = async (
       changes:
         next.latitude === site.latitude && next.longitude === site.longitude
           ? []
-          : [
-              {
-                field: 'Location',
-                from: site.latitude === null ? 'Not pinned' : `${site.latitude}, ${site.longitude}`,
-                to: next.latitude === null ? 'Not pinned' : `${next.latitude}, ${next.longitude}`,
-              },
-            ],
+          : [{ field: 'Location', from: pinForLog(site), to: pinForLog(next) }],
     });
   }
   return next;
+};
+
+/**
+ * A pin as the audit trail may record it. The trail is permanent, so the
+ * geocoder's coordinates are never written to it (rule 5) — only the
+ * office's own.
+ */
+export const pinForLog = (site: Site): string => {
+  if (site.latitude === null || site.longitude === null) return 'Not pinned';
+  return siteLocationOf(site).source === 'geocoded'
+    ? 'Pin from the geocoder (its coordinates are not kept in the log)'
+    : `${site.latitude}, ${site.longitude}`;
+};
+
+/**
+ * RULE 5, ON TIME. Deletes the geocoder's coordinates once they have been held
+ * for 30 days — from sites (archived ones too) and from the cache — and queues
+ * the look-up that renews those that may be renewed (from day 27). Runs every
+ * minute in the worker WHETHER OR NOT a geocoder is configured: removing the
+ * key must not leave Google's data behind.
+ */
+export const maintainSiteProviderContent = async (
+  context: OperationContext,
+  limit = 50,
+): Promise<{ readonly expired: number; readonly queued: number; readonly cachePurged: number }> => {
+  const now = context.services.clock.now();
+  const cachePurged = await context.repos.integrations.purgeExpiredGeocodes(now);
+  const refreshFrom = new Date(Date.parse(now) - PROVIDER_REFRESH_AFTER_DAYS * DAY_MS).toISOString() as IsoDateTime;
+  const sites = await context.repos.customers.listSitesWithProviderContent(refreshFrom, limit);
+  const configured = geocoderOf(context.services) !== null;
+  let expired = 0;
+  let queued = 0;
+  for (const site of sites) {
+    const before = siteLocationOf(site);
+    const deleted = locationAfterExpiry(site, now);
+    if (deleted !== null) {
+      if (await context.repos.customers.saveSiteLocation(deleted, before.query)) {
+        expired += 1;
+        await audit(context, {
+          jobId: null,
+          type: 'site_location_geocoded',
+          summary: `Site pin: ${site.name} — the geocoder's coordinates deleted after ${PROVIDER_COORDINATE_RETENTION_DAYS} days`,
+          detail:
+            siteLocationOf(deleted).error.length > 0 && siteLocationOf(deleted).error !== before.error
+              ? siteLocationOf(deleted).error
+              : 'The geocoder’s suggestion was deleted, as the Google Maps Platform terms require.',
+          changes: [],
+        });
+      }
+      continue;
+    }
+    // Renewed once: a renewal that failed waits for the deletion.
+    if (!configured || site.archivedAt !== null || before.nextAttemptAt !== null || before.attempts > 0) continue;
+    if (!siteDueForProviderRefresh(site, now) || before.query.length === 0) continue;
+    const due: Site = { ...site, geocode: { ...before, nextAttemptAt: now } };
+    if (await context.repos.customers.saveSiteLocation(due, before.query)) queued += 1;
+  }
+  return { expired, queued, cachePurged };
 };
 
 /** All three steps in one context: the demonstration's and the tests' way. */
@@ -189,8 +290,8 @@ export const geocodeDueSitesInline = async (context: OperationContext, limit = B
   for (const site of claimed) {
     const query = siteLocationOf(site).query;
     const plan = await prepareSiteGeocode(context, site);
-    const answer = plan.kind === 'answered' ? plan.answer : await answerFor(context.services, plan.query);
-    await applySiteGeocode(context, site.id, query, answer, plan.kind === 'answered' && plan.fromCache);
+    const answer = plan.kind === 'answered' ? plan.answer : await answerFor(context.services, plan.query, plan.placeId);
+    await applySiteGeocode(context, site.id, query, answer, plan.kind === 'answered' && plan.fromCache, plan.refresh);
   }
   return claimed.length;
 };
@@ -248,8 +349,8 @@ export const verifySiteLocation = async (context: OperationContext, siteId: Site
     changes: [
       {
         field: 'Location',
-        from: site.latitude === null ? 'Not pinned' : `${site.latitude}, ${site.longitude} (${siteLocationLabel(before.status)})`,
-        to: `${next.latitude}, ${next.longitude} (verified)`,
+        from: site.latitude === null ? 'Not pinned' : `${pinForLog(site)} (${siteLocationLabel(before.status)})`,
+        to: `${pinForLog(next)} (verified)`,
       },
     ],
   });

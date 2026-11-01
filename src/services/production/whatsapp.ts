@@ -36,7 +36,49 @@ export interface WhatsAppConfiguration {
   readonly templateLanguage: string;
   /** How long one request to Meta may take. WHATSAPP_TIMEOUT_MS, default 20 s. */
   readonly timeoutMs: number;
+  /**
+   * THE DEDICATED EJE NUMBER (WHATSAPP_DEDICATED_NUMBER), in digits with the
+   * country code. The owner's decision (1 November 2026): EJE notifications go
+   * from a NEW number of their own, never from the office's WhatsApp. Before
+   * anything is sent, Meta is asked which number the phone number id belongs
+   * to, and nothing goes unless it is this one.
+   */
+  readonly dedicatedNumber: string;
+  /**
+   * Numbers EJE must never send from (WHATSAPP_PROTECTED_NUMBERS) — the
+   * office's existing WhatsApp. Optional; a phone number id that Meta says
+   * belongs to one of them is refused even if it were set as the dedicated one.
+   */
+  readonly protectedNumbers: readonly string[];
 }
+
+/** Digits only, a South African 0 turned into 27: how two numbers are compared. */
+export const numberDigits = (raw: string): string => {
+  const digits = raw.replace(/\D/gu, '');
+  return digits.startsWith('0') && digits.length === 10 ? `27${digits.slice(1)}` : digits;
+};
+
+const numberList = (raw: string | undefined): readonly string[] =>
+  (raw ?? '')
+    .split(/[,;]+/u)
+    .map(numberDigits)
+    .filter((digits) => digits.length >= 9);
+
+/**
+ * What is wrong with the WhatsApp configuration, in names and plain words —
+ * never a value. Empty when it is complete. Read by Administration.
+ */
+export const whatsAppConfigurationProblems = (env: Readonly<Record<string, string | undefined>> = process.env): readonly string[] => {
+  const dedicated = numberDigits(env.WHATSAPP_DEDICATED_NUMBER ?? '');
+  const problems: string[] = [];
+  if ((env.WHATSAPP_DEDICATED_NUMBER ?? '').trim().length > 0 && (dedicated.length < 11 || dedicated.length > 15)) {
+    problems.push('WHATSAPP_DEDICATED_NUMBER is not a full number with its country code (e.g. +27 …).');
+  }
+  if (dedicated.length > 0 && numberList(env.WHATSAPP_PROTECTED_NUMBERS).includes(dedicated)) {
+    problems.push('WHATSAPP_DEDICATED_NUMBER is one of WHATSAPP_PROTECTED_NUMBERS (the office number). EJE refuses to send from it.');
+  }
+  return problems;
+};
 
 const DEFAULT_BASE_URL = 'https://graph.facebook.com';
 const DEFAULT_API_VERSION = 'v21.0';
@@ -53,11 +95,17 @@ export const readWhatsAppConfiguration = (
 ): WhatsAppConfiguration | null => {
   const phoneNumberId = (env.WHATSAPP_PHONE_NUMBER_ID ?? '').trim();
   const accessToken = (env.WHATSAPP_ACCESS_TOKEN ?? '').trim();
+  const dedicatedNumber = numberDigits(env.WHATSAPP_DEDICATED_NUMBER ?? '');
   if (phoneNumberId.length === 0 || accessToken.length === 0) return null;
+  // Partly configured is not configured: without the dedicated number named
+  // (and not the office's), nothing is sent.
+  if (dedicatedNumber.length === 0 || whatsAppConfigurationProblems(env).length > 0) return null;
 
   return {
     phoneNumberId,
     accessToken,
+    dedicatedNumber,
+    protectedNumbers: numberList(env.WHATSAPP_PROTECTED_NUMBERS),
     apiVersion: (env.WHATSAPP_API_VERSION ?? '').trim() || DEFAULT_API_VERSION,
     baseUrl: ((env.WHATSAPP_API_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/u, ''),
     templateLanguage: (env.WHATSAPP_TEMPLATE_LANGUAGE ?? '').trim() || 'en',
@@ -90,9 +138,25 @@ export class WhatsAppSendFailed extends Error {
 export class WhatsAppNotConfigured extends Error {
   constructor() {
     super(
-      'WhatsApp is not configured on this deployment. Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN.',
+      'WhatsApp is not configured on this deployment. Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN and WHATSAPP_DEDICATED_NUMBER.',
     );
     this.name = 'WhatsAppNotConfigured';
+  }
+}
+
+/**
+ * Raised for a job notification while the dedicated number has not passed a
+ * real test (Administration → Integrations → send a test). Permanent: the
+ * message is not retried into the activation, which would send stale notices.
+ */
+export class WhatsAppNotActivated extends Error {
+  readonly permanent = true;
+  readonly providerCode = 'not_activated';
+  constructor() {
+    super(
+      'WhatsApp is not yet in use: the dedicated EJE number has not passed a real test. Send a test from Administration → Integrations.',
+    );
+    this.name = 'WhatsAppNotActivated';
   }
 }
 
@@ -166,8 +230,60 @@ export class CloudApiWhatsAppService implements WhatsAppService {
       : text.split(this.config.accessToken).join('[redacted]');
   }
 
+  /** When the sending number was last confirmed as the dedicated one. */
+  private numberConfirmedAt = 0;
+
+  /**
+   * ASKS META WHICH NUMBER WILL SEND, before anything is sent: the phone
+   * number id's `display_phone_number` must be the dedicated EJE number and
+   * none of the protected (office) numbers. A mistyped id that belongs to the
+   * office's number is refused here — permanently, and nothing is sent.
+   * Confirmed once every six hours; a failure to ask is temporary.
+   */
+  async confirmSendingNumber(): Promise<string> {
+    if (Date.now() - this.numberConfirmedAt < 6 * 3600_000) return this.config.dedicatedNumber;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.config.baseUrl}/${this.config.apiVersion}/${this.config.phoneNumberId}?fields=display_phone_number,verified_name`,
+        { method: 'GET', headers: { authorization: `Bearer ${this.config.accessToken}` }, signal: AbortSignal.timeout(this.config.timeoutMs) },
+      );
+    } catch (cause) {
+      throw new WhatsAppSendFailed(
+        `WhatsApp could not be reached to confirm the sending number: ${this.redact(cause instanceof Error ? cause.message : 'network error')}.`,
+      );
+    }
+    const payload = (await response.json().catch(() => ({}))) as { display_phone_number?: string; error?: { message?: string; code?: number } };
+    if (!response.ok) {
+      throw new WhatsAppSendFailed(
+        this.redact(payload.error?.message ?? `WhatsApp refused to describe the sending number (HTTP ${response.status}).`),
+        payload.error?.code === undefined ? '' : String(payload.error.code),
+        isPermanentWhatsAppFailure(response.status, payload.error?.code),
+      );
+    }
+    const actual = numberDigits(payload.display_phone_number ?? '');
+    const last4 = (digits: string) => `…${digits.slice(-4)}`;
+    if (actual.length > 0 && this.config.protectedNumbers.includes(actual)) {
+      throw new WhatsAppSendFailed(
+        `The configured phone number id belongs to a protected number (${last4(actual)}) — the office's WhatsApp. Nothing was sent.`,
+        'protected_number',
+        true,
+      );
+    }
+    if (actual !== this.config.dedicatedNumber) {
+      throw new WhatsAppSendFailed(
+        `The configured phone number id belongs to ${actual.length === 0 ? 'an unknown number' : last4(actual)}, not the dedicated EJE number (${last4(this.config.dedicatedNumber)}). Nothing was sent.`,
+        'wrong_number',
+        true,
+      );
+    }
+    this.numberConfirmedAt = Date.now();
+    return actual;
+  }
+
   async send(message: WhatsAppMessage): Promise<OutboxEntry> {
     const to = toE164(message.to);
+    await this.confirmSendingNumber();
     const url = `${this.config.baseUrl}/${this.config.apiVersion}/${this.config.phoneNumberId}/messages`;
 
     /*
@@ -257,6 +373,37 @@ export class CloudApiWhatsAppService implements WhatsAppService {
  * believing technicians had been messaged when nothing left the building, which
  * is the single worst outcome available to an integration.
  */
+export interface WhatsAppActivationGate {
+  /** The last known answer, for the synchronous `configured`. */
+  readonly active: boolean;
+  /** Asks the store again (the dedicated number passed a real test). */
+  confirm(): Promise<boolean>;
+}
+
+/**
+ * THE DEDICATED NUMBER IS NOT IN USE UNTIL A REAL TEST PASSED. The owner's
+ * decision: WhatsApp stays "Not configured" until the number and the Meta
+ * credentials are set AND a real API test succeeded. Until then the adapter
+ * says it is not configured, so no job notification is queued, and a send
+ * that is not a test is refused — only the test from Administration (to a
+ * configured internal number) goes through.
+ */
+export class ActivationGatedWhatsAppService implements WhatsAppService {
+  constructor(
+    private readonly inner: WhatsAppService,
+    private readonly gate: WhatsAppActivationGate,
+  ) {}
+
+  get configured(): boolean {
+    return this.gate.active;
+  }
+
+  async send(message: WhatsAppMessage): Promise<OutboxEntry> {
+    if (message.test !== true && !(await this.gate.confirm())) throw new WhatsAppNotActivated();
+    return this.inner.send(message);
+  }
+}
+
 export class UnconfiguredWhatsAppService implements WhatsAppService {
   readonly configured = false;
 

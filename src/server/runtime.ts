@@ -44,9 +44,11 @@ import {
   readStorageConfiguration,
 } from '@/services/production/file-storage';
 import { SequentialIdGenerator, SystemClock } from '@/services/simulated/system';
+import { whatsappActivationGate } from '@/server/whatsapp-activation';
 import { SimulatedWhatsAppService } from '@/services/simulated/whatsapp';
 import { UuidGenerator } from '@/services/production/ids';
 import {
+  ActivationGatedWhatsAppService,
   CloudApiWhatsAppService,
   readWhatsAppConfiguration,
   UnconfiguredWhatsAppService,
@@ -140,7 +142,13 @@ const buildWhatsApp = (
   ids: UuidGenerator | SequentialIdGenerator,
 ) => {
   const configured = readWhatsAppConfiguration();
-  if (configured !== null) return new CloudApiWhatsAppService(configured, clock, ids);
+  // The dedicated number, and only once a real test has proved it.
+  if (configured !== null) {
+    return new ActivationGatedWhatsAppService(
+      new CloudApiWhatsAppService(configured, clock, ids),
+      whatsappActivationGate(() => getServerRuntime()),
+    );
+  }
   return backend === 'demo'
     ? new SimulatedWhatsAppService(outbox, clock, ids)
     : new UnconfiguredWhatsAppService();

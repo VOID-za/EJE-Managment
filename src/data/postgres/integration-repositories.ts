@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, sql } from 'drizzle-orm';
 import type {
   CustomerEmail,
   CustomerEmailState,
@@ -416,6 +416,14 @@ export class PostgresIntegrationRepository implements IntegrationRepository {
     return row === undefined
       ? null
       : { ...row, createdAt: row.createdAt as IsoDateTime, expiresAt: row.expiresAt as IsoDateTime };
+  }
+
+  async purgeExpiredGeocodes(now: IsoDateTime): Promise<number> {
+    const deleted = await this.db
+      .delete(schema.geocodeCache)
+      .where(lte(schema.geocodeCache.expiresAt, now))
+      .returning({ queryKey: schema.geocodeCache.queryKey });
+    return deleted.length;
   }
 
   async saveGeocode(entry: GeocodeCacheEntry): Promise<void> {

@@ -162,6 +162,10 @@ await check('Integrations: three services, each saying what it is, and no test w
     if (!/Demonstration \(simulated\)/u.test(text)) fail(`${service} does not say it is simulated: ${text.slice(0, 80)}`);
   }
   if (!(await page.getByTestId('integration-email').innerText()).includes('EMAIL_TEST_RECIPIENTS')) fail('the email card does not say why no test can be sent');
+  // The owner's decision: a separate, dedicated EJE number; the office number not connected.
+  const whatsapp = await page.getByTestId('integration-whatsapp').innerText();
+  if (!whatsapp.includes('dedicated EJE number')) fail('the WhatsApp card does not name the dedicated EJE number');
+  if (!/Office WhatsApp number[\s\S]*Not connected and never used/u.test(whatsapp)) fail('the WhatsApp card does not say the office number is untouched');
   await noPageOverflow('Integrations');
 });
 
@@ -236,6 +240,14 @@ await check('Site pin: the office sees the status, looks the pin up again, and t
   const status = page.getByTestId('site-pin-status').first();
   await status.waitFor({ timeout: 20000 });
   if (!(await status.getByTestId('site-pin-label').innerText()).includes('Pin verified')) fail('the seeded pin is not shown as verified');
+  // Retention, shown: the office's own pin is kept.
+  if (!(await status.getByTestId('site-pin-retention').innerText()).includes('Entered by the office: kept')) fail('the office pin does not say it is kept');
+  // Coordinates come from the site or the customer, not copied from Google Maps.
+  await press(page.getByTestId('edit-site-location').first());
+  await page.getByTestId('site-location-here').waitFor({ timeout: 20000 });
+  if (!(await page.getByTestId('site-location-source-hint').innerText()).includes('not copied out of Google Maps')) fail('the dialog does not say where coordinates come from');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('site-location-here').waitFor({ state: 'detached', timeout: 20000 });
   await press(status.getByTestId('site-pin-find'));
   const suggestion = page.getByTestId('site-pin-suggestion').first();
   await suggestion.waitFor({ timeout: 20000 });
@@ -244,6 +256,9 @@ await check('Site pin: the office sees the status, looks the pin up again, and t
   await press(page.getByTestId('site-pin-use-suggestion').first());
   await page.getByTestId('site-pin-suggestion').first().waitFor({ state: 'detached', timeout: 20000 });
   if (!(await page.getByTestId('site-pin-status').first().innerText()).includes('Simulated geocoder')) fail('the simulated geocoder is not labelled');
+  // A geocoded pin says when its coordinates are refreshed or deleted (30 days).
+  const retention = await page.getByTestId('site-pin-retention').first().innerText();
+  if (!/coordinates: refreshed or deleted by \d{4}-\d{2}-\d{2}/u.test(retention)) fail(`the geocoded pin does not show its retention: ${retention}`);
   await noPageOverflow('customer location');
 });
 

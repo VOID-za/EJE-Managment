@@ -36,6 +36,12 @@ export interface GeocodingService {
   /** Requests a day the application allows itself, where the adapter has a cap. */
   readonly dailyLimit?: number;
   geocode(query: string): Promise<GeocodeAnswer>;
+  /**
+   * The same place again, by the place ID an earlier answer gave: how a
+   * verified pin's coordinates are renewed before the 30 days of the Google
+   * Maps Platform terms run out (rule 5, `domain/site/location.ts`).
+   */
+  geocodePlace?(placeId: string): Promise<GeocodeAnswer>;
 }
 
 /**
@@ -179,6 +185,11 @@ export interface WhatsAppMessage {
   readonly templateName: string;
   readonly parameters: readonly string[];
   readonly preview: string;
+  /**
+   * A test from Administration to a configured internal number: the one send
+   * allowed before the dedicated number has passed a real test.
+   */
+  readonly test?: boolean;
 }
 
 export interface WhatsAppService {

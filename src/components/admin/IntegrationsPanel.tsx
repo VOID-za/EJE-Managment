@@ -118,7 +118,7 @@ export const IntegrationsPanel = () => {
     <div className="space-y-5" data-testid="integrations-panel">
       <AdminNotice
         title="Integrations"
-        body="Credentials are set on the server, never here, and are never shown. Tests go only to the test recipients the server names. Setup steps: docs/integrations-setup.md."
+        body="Credentials are set on the server, never here, and are never shown. Tests go only to the test recipients the server names. WhatsApp uses a new, dedicated EJE number (WHATSAPP_DEDICATED_NUMBER) — never the office's WhatsApp — and sends job notifications only after a test from here has passed. Google's coordinates are kept at most 30 days, as its terms require; pins the office enters are kept. Setup steps: docs/integrations-setup.md."
       />
       {operation.error !== null && <RuleViolationNotice title="The test was not run" message={operation.error} violations={operation.violations} />}
 

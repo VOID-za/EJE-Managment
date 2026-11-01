@@ -309,6 +309,23 @@ export class PostgresCustomerRepository implements CustomerRepository {
     return rows.map(toDomainSite);
   }
 
+  async listSitesWithProviderContent(obtainedBefore: IsoDateTime, limit: number): Promise<readonly Site[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.sites)
+      .where(
+        sql`(${schema.sites.geocodedAt} is null or ${schema.sites.geocodedAt} <= ${obtainedBefore})
+          and ((${schema.sites.locationSource} = 'geocoded' and ${schema.sites.latitude} is not null)
+            or ${schema.sites.suggestedLatitude} is not null
+            or ${schema.sites.suggestedLongitude} is not null
+            or ${schema.sites.geocodedAddress} <> ''
+            or ${schema.sites.geocodePrecision} is not null)`,
+      )
+      .orderBy(asc(schema.sites.geocodedAt))
+      .limit(limit);
+    return rows.map(toDomainSite);
+  }
+
   async saveSite(site: Site): Promise<Site> {
     const values = {
       customerId: site.customerId as string,

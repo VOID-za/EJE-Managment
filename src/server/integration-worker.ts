@@ -3,6 +3,8 @@ import { getServerRuntime } from '@/server/runtime';
 import { drainOutboxQuietly } from '@/server/api/outbox-dispatch';
 import { drainIntegrationsQuietly } from '@/server/api/integration-dispatch';
 import { recordIntegrationConfiguration } from '@/server/integration-status';
+import { readWhatsAppActivation } from '@/server/whatsapp-activation';
+import { selectPersistenceBackend } from '@/data/backend';
 
 /**
  * THE BACKGROUND WORKER. INT-EMAIL-3, INT-WA-2, INT-MAP-1.
@@ -29,6 +31,8 @@ const tick = async (): Promise<void> => {
   running = true;
   try {
     const runtime = getServerRuntime();
+    // Whether the dedicated WhatsApp number has passed its real test (for `configured`).
+    if (selectPersistenceBackend() !== 'demo') await readWhatsAppActivation(runtime).catch(() => undefined);
     await drainOutboxQuietly(runtime);
     await drainIntegrationsQuietly(runtime);
   } catch (cause) {

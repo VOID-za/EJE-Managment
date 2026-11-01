@@ -100,30 +100,37 @@ describe('reading a verified body', () => {
 });
 
 describe('the existing office number is never touched', () => {
-  it('the adapter only ever POSTs template messages to /messages — never /register, /deregister or a number’s settings', async () => {
-    const calls: { url: string; body: unknown }[] = [];
+  it('the adapter only READS the dedicated number and POSTs template messages to /messages — never /register, /deregister or a number’s settings', async () => {
+    const calls: { url: string; method: string; body: unknown }[] = [];
     const fetchImpl = ((url: string, init?: RequestInit) => {
-      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
-      return Promise.resolve(new Response(JSON.stringify({ messages: [{ id: 'wamid.x' }] }), { status: 200 }));
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: JSON.parse(String(init?.body ?? '{}')) });
+      return Promise.resolve(
+        new Response(JSON.stringify(String(url).includes('?fields=') ? { display_phone_number: '+27 82 000 0001' } : { messages: [{ id: 'wamid.x' }] }), { status: 200 }),
+      );
     }) as typeof fetch;
-    const config = readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '123', WHATSAPP_ACCESS_TOKEN: 'token' })!;
+    const config = readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '123', WHATSAPP_ACCESS_TOKEN: 'token', WHATSAPP_DEDICATED_NUMBER: '+27820000001' })!;
     const service = new CloudApiWhatsAppService(config, new SystemClock(), new SequentialIdGenerator(), fetchImpl);
     await service.send({ to: '0821234567', templateName: 'eje_job_assigned', parameters: ['a'], preview: '' });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe('https://graph.facebook.com/v21.0/123/messages');
-    expect(calls[0]!.body).toMatchObject({ type: 'template', template: { name: 'eje_job_assigned', language: { code: 'en' } } });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'GET https://graph.facebook.com/v21.0/123?fields=display_phone_number,verified_name',
+      'POST https://graph.facebook.com/v21.0/123/messages',
+    ]);
+    expect(calls[1]!.body).toMatchObject({ type: 'template', template: { name: 'eje_job_assigned', language: { code: 'en' } } });
     // No method of the adapter can do anything else.
     const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(service)).filter((name) => name !== 'constructor');
-    expect(methods.sort()).toEqual(['redact', 'send']);
+    expect(methods.sort()).toEqual(['confirmSendingNumber', 'redact', 'send']);
   });
 
   it('uses the language the templates were approved in', async () => {
     const calls: unknown[] = [];
-    const fetchImpl = ((_url: string, init?: RequestInit) => {
+    const fetchImpl = ((url: string, init?: RequestInit) => {
+      if (String(url).includes('?fields=')) {
+        return Promise.resolve(new Response(JSON.stringify({ display_phone_number: '27820000001' }), { status: 200 }));
+      }
       calls.push(JSON.parse(String(init?.body)));
       return Promise.resolve(new Response(JSON.stringify({ messages: [{ id: 'wamid.x' }] }), { status: 200 }));
     }) as typeof fetch;
-    const config = readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '1', WHATSAPP_ACCESS_TOKEN: 't', WHATSAPP_TEMPLATE_LANGUAGE: 'en_GB' })!;
+    const config = readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '1', WHATSAPP_ACCESS_TOKEN: 't', WHATSAPP_DEDICATED_NUMBER: '0820000001', WHATSAPP_TEMPLATE_LANGUAGE: 'en_GB' })!;
     await new CloudApiWhatsAppService(config, new SystemClock(), new SequentialIdGenerator(), fetchImpl).send({ to: '27821234567', templateName: 't', parameters: [], preview: '' });
     expect(calls[0]).toMatchObject({ template: { language: { code: 'en_GB' } } });
   });

@@ -40,6 +40,7 @@ const CREDENTIALS = [
   'EMAIL_SENDER',
   'WHATSAPP_PHONE_NUMBER_ID',
   'WHATSAPP_ACCESS_TOKEN',
+  'WHATSAPP_DEDICATED_NUMBER',
 ] as const;
 
 describe('what the screens are told about delivery', () => {
@@ -91,6 +92,7 @@ describe('what the screens are told about delivery', () => {
     process.env.EMAIL_SENDER = 'office@example-test.co.za';
     process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890';
     process.env.WHATSAPP_ACCESS_TOKEN = 'a-token';
+    process.env.WHATSAPP_DEDICATED_NUMBER = '+27 82 000 0001';
     startTestServer();
     const configured = await signedInAs(DEMO_USERS.master);
 

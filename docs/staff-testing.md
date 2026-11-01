@@ -574,11 +574,12 @@ an EJE mailbox as a test contact). Never a real customer's job.
 | N1 | Administration → Integrations → Email → Send test email | It arrives from sales@ejeie.co.za; it is in sales@'s Sent Items; the card says Connected |
 | N2 | A test job whose contact is an EJE mailbox: complete it and have it signed on the tablet | The customer email arrives by itself within a minute, from sales@, with the template's words and ONLY the signed job card PDF (open it: it is the signed one); the job's email history says Sent, with the template version |
 | N3 | Edit the Breakdown template, sign a second test job | The new wording arrives; the first job's history still shows the old wording |
-| N4 | Administration → Integrations → WhatsApp → Send test message (only after Meta approves the templates) | The message arrives on the test phone; the job shows Delivered, then Read |
+| N4 | Administration → Integrations → WhatsApp — dedicated EJE number. Before the test it says **Not configured** (credentials set, no real test yet). Send test message (only after Meta approves the templates) | The message arrives on the test phone **from the dedicated number**; the status becomes Connected; Delivered, then Read |
 | N5 | Assign a test job to a technician with a test phone; transfer it to another; return one to Open Jobs | The assigned, then the receiving, technician gets a message; Open Jobs sends nothing |
 | N6 | Accept a test job on the tablet → Send Location | The site location arrives on the technician's phone; the Google Maps link opens on the site's pin |
-| N7 | Create a test customer with a real address; then change the address | A pin is found within a minute and shown on the customer's card; after the change it is looked up again; a pin you marked correct is kept and a suggestion is offered |
-| N8 | **The office WhatsApp number**: before anything is connected, the owner's decision on `docs/integrations-setup.md` §1 is recorded | The existing office number keeps working on the office phones throughout |
+| N7 | Create a test customer with a real address; then change the address | A pin is found within a minute and shown on the customer's card with the date Google's coordinates will be refreshed or deleted; after the change it is looked up again; a pin you marked correct is kept, marked Re-check, and a suggestion is offered |
+| N8 | **The office WhatsApp number** (decision recorded: a dedicated EJE number is used) | The office's WhatsApp Business app keeps working on the office phones throughout, with its chats and linked devices |
+| N9 | On the test customer's location card, Edit location → **Use this device's location**, standing at the site | The coordinates fill in; saved, the card says "Entered by the office: kept" |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

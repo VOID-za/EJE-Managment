@@ -25,6 +25,8 @@ const config: WhatsAppConfiguration = {
   baseUrl: 'https://graph.facebook.com',
   templateLanguage: 'en',
   timeoutMs: 20_000,
+  dedicatedNumber: '27820000001',
+  protectedNumbers: ['27115550100'],
 };
 
 const message = {
@@ -34,8 +36,15 @@ const message = {
   preview: 'EJE-1103 — assigned to you',
 };
 
+/** Meta's answer to "which number is this phone number id?" — the dedicated one. */
+const confirmsDedicated = (impl: typeof fetch, display = '+27 82 000 0001'): typeof fetch =>
+  ((url: string, init: RequestInit) =>
+    String(url).includes('?fields=display_phone_number')
+      ? Promise.resolve(new Response(JSON.stringify({ display_phone_number: display }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      : (impl as unknown as (u: string, i: RequestInit) => Promise<Response>)(url, init)) as unknown as typeof fetch;
+
 const adapterWith = (impl: typeof fetch) =>
-  new CloudApiWhatsAppService(config, new SystemClock(), new SequentialIdGenerator(), impl);
+  new CloudApiWhatsAppService(config, new SystemClock(), new SequentialIdGenerator(), confirmsDedicated(impl));
 
 const respondWith = (status: number, body: unknown): typeof fetch =>
   (() =>
@@ -51,6 +60,8 @@ describe('knowing whether WhatsApp is configured at all', () => {
     expect(readWhatsAppConfiguration({})).toBeNull();
     expect(readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '123' })).toBeNull();
     expect(readWhatsAppConfiguration({ WHATSAPP_ACCESS_TOKEN: 'abc' })).toBeNull();
+    // Both credentials but no dedicated number: partly configured is not configured.
+    expect(readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '123', WHATSAPP_ACCESS_TOKEN: 'abc' })).toBeNull();
     // Whitespace is not a credential.
     expect(
       readWhatsAppConfiguration({ WHATSAPP_PHONE_NUMBER_ID: '  ', WHATSAPP_ACCESS_TOKEN: 'abc' }),
@@ -61,7 +72,10 @@ describe('knowing whether WhatsApp is configured at all', () => {
     const resolved = readWhatsAppConfiguration({
       WHATSAPP_PHONE_NUMBER_ID: '123',
       WHATSAPP_ACCESS_TOKEN: 'abc',
+      WHATSAPP_DEDICATED_NUMBER: '+27 82 000 0001',
     });
+
+    expect(resolved?.dedicatedNumber).toBe('27820000001');
 
     expect(resolved?.apiVersion).toBe('v21.0');
     expect(resolved?.baseUrl).toBe('https://graph.facebook.com');

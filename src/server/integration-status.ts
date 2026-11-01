@@ -8,7 +8,8 @@ import {
   describeEmailConfiguration,
   readGraphEmailConfiguration,
 } from '@/services/production/email';
-import { readWhatsAppConfiguration } from '@/services/production/whatsapp';
+import { numberDigits, readWhatsAppConfiguration, whatsAppConfigurationProblems } from '@/services/production/whatsapp';
+import { readWhatsAppActivation } from '@/server/whatsapp-activation';
 import { readWhatsAppWebhookConfiguration } from '@/services/production/whatsapp-webhook';
 import { readGoogleGeocodingConfiguration } from '@/services/production/geocoding';
 import { ASSIGNMENT_TEMPLATE, TRANSFER_TEMPLATE } from '@/application/assignment-notice';
@@ -147,16 +148,38 @@ export const whatsappStatus = async (): Promise<IntegrationStatus> => {
     runtime.read((unit) => unit.repos.outbox.list(50)),
     runtime.read((unit) => unit.repos.integrations.listWebhookEvents(1)),
   ]);
+  const activation = backend === 'demo' ? { active: false, provenAt: null } : await readWhatsAppActivation(runtime);
   const whatsapp = messages.filter((message) => message.channel === 'whatsapp');
   const lastSent = whatsapp.find((message) => message.state === 'sent') ?? null;
-  const failed = whatsapp.filter((message) => message.state === 'failed' || message.deliveryStatus === 'failed').length;
+  // Refusals before activation are the gate working, not failures to act on.
+  const failed = whatsapp.filter(
+    (message) => (message.state === 'failed' || message.deliveryStatus === 'failed') && !message.failureReason.includes('not yet in use'),
+  ).length;
+  const problems = whatsAppConfigurationProblems();
+  const dedicated = numberDigits(env('WHATSAPP_DEDICATED_NUMBER'));
+  const protectedCount = env('WHATSAPP_PROTECTED_NUMBERS').split(/[,;]+/).filter((value) => value.trim().length > 0).length;
   const missing = [
+    ...(env('WHATSAPP_DEDICATED_NUMBER').length === 0 ? ['WHATSAPP_DEDICATED_NUMBER'] : []),
     ...(env('WHATSAPP_PHONE_NUMBER_ID').length === 0 ? ['WHATSAPP_PHONE_NUMBER_ID'] : []),
     ...(env('WHATSAPP_ACCESS_TOKEN').length === 0 ? ['WHATSAPP_ACCESS_TOKEN'] : []),
     ...(webhook.appSecret.length === 0 ? ['WHATSAPP_APP_SECRET'] : []),
     ...(webhook.verifyToken.length === 0 ? ['WHATSAPP_WEBHOOK_VERIFY_TOKEN'] : []),
   ];
   const checks: IntegrationCheck[] = [
+    {
+      label: 'Dedicated EJE number',
+      ok: dedicated.length > 0 && problems.length === 0,
+      detail:
+        dedicated.length === 0
+          ? 'WHATSAPP_DEDICATED_NUMBER is not set. EJE sends only from a new number of its own, named here.'
+          : `…${dedicated.slice(-4)} — a separate number used only for EJE notifications. Meta is asked before every send that the phone number id is this number.`,
+    },
+    {
+      label: 'Office WhatsApp number',
+      ok: true,
+      detail: `Not connected and never used: the office keeps its WhatsApp Business app and its chats. ${protectedCount > 0 ? `${protectedCount} protected number${protectedCount === 1 ? '' : 's'} (WHATSAPP_PROTECTED_NUMBERS): EJE refuses to send if Meta reports one of them.` : 'Optionally list it in WHATSAPP_PROTECTED_NUMBERS so EJE refuses it outright.'}`,
+    },
+    ...problems.map((problem) => ({ label: 'Configuration problem', ok: false, detail: problem })),
     { label: 'Phone number id', ok: env('WHATSAPP_PHONE_NUMBER_ID').length > 0, detail: env('WHATSAPP_PHONE_NUMBER_ID').length > 0 ? `Set (${tail(env('WHATSAPP_PHONE_NUMBER_ID'))})` : 'Not set.' },
     { label: 'Access token', ok: env('WHATSAPP_ACCESS_TOKEN').length > 0, detail: env('WHATSAPP_ACCESS_TOKEN').length > 0 ? 'Set (never shown).' : 'Not set.' },
     { label: 'Business account id', ok: env('WHATSAPP_BUSINESS_ACCOUNT_ID').length > 0, detail: env('WHATSAPP_BUSINESS_ACCOUNT_ID').length > 0 ? 'Set — template approval can be checked.' : 'Not set — template approval cannot be checked.' },
@@ -165,29 +188,44 @@ export const whatsappStatus = async (): Promise<IntegrationStatus> => {
     { label: 'Templates', ok: true, detail: `${ASSIGNMENT_TEMPLATE}, ${TRANSFER_TEMPLATE}, ${SITE_LOCATION_TEMPLATE} — language “${config?.templateLanguage ?? (env('WHATSAPP_TEMPLATE_LANGUAGE') || 'en')}”. Messages go only once Meta has approved them.` },
     { label: 'Last accepted by Meta', ok: lastSent !== null, detail: lastSent === null ? 'None yet.' : `${lastSent.lastAttemptAt ?? lastSent.createdAt}` },
     { label: 'Last webhook received', ok: events.length > 0, detail: events[0] === undefined ? 'None yet.' : events[0].receivedAt },
-    { label: 'Existing office number', ok: true, detail: 'EJE never registers, migrates or disconnects a phone number. See docs/integrations-setup.md before connecting one.' },
+    {
+      label: 'Real API test',
+      ok: activation.active,
+      detail: activation.active
+        ? `Passed ${activation.provenAt ?? ''} with this configuration. Job notifications are sent.`
+        : 'Not passed with this configuration. Until a test to an internal number is accepted by Meta, no job notification is sent.',
+    },
   ];
+  /*
+   * THE OWNER'S RULE: "Not configured" until the dedicated number and the Meta
+   * credentials are set AND a real API test succeeded. Complete but unproven
+   * is therefore still not configured — the summary says what is missing.
+   */
+  const complete = config !== null && webhook.appSecret.length > 0 && webhook.verifyToken.length > 0;
   let state: IntegrationState;
-  if (config === null) state = backend === 'demo' ? 'simulated' : missing.length === 4 ? 'not_configured' : 'incomplete';
-  else if (webhook.appSecret.length === 0 || webhook.verifyToken.length === 0) state = 'incomplete';
+  if (config === null && backend === 'demo' && missing.length === 5) state = 'simulated';
+  else if (!complete) state = missing.length === 5 && problems.length === 0 ? 'not_configured' : 'incomplete';
+  else if (!activation.active) state = 'not_configured';
   else if (failed > 0) state = 'action_required';
-  else state = lastSent !== null ? 'connected' : 'configured';
+  else state = 'connected';
   return {
     service: 'whatsapp',
-    title: 'WhatsApp (Meta Cloud API)',
+    title: 'WhatsApp — dedicated EJE number (Meta Cloud API)',
     state,
     summary:
       state === 'simulated'
         ? 'Demonstration: messages are recorded in the outbox and never sent.'
-        : state === 'not_configured'
-          ? 'Not configured. Assignments and transfers stand and notify in the app; no WhatsApp message is sent.'
-          : state === 'incomplete'
-            ? `Configuration incomplete: ${missing.join(', ')}.`
-            : state === 'action_required'
-              ? `${failed} WhatsApp message${failed === 1 ? '' : 's'} failed. See the job's messages.`
-              : state === 'connected'
-                ? 'Connected: Meta accepted the last message.'
-                : 'Configured, not yet verified: no message has been accepted by Meta yet. Send a test once the templates are approved.',
+        : state === 'not_configured' && !complete
+          ? 'Not configured. Assignments and transfers stand and notify in the app; no WhatsApp message is sent. The office WhatsApp number is not connected.'
+          : state === 'not_configured'
+            ? 'Not configured yet: the dedicated number and the Meta credentials are set, but no real test has passed. Send a test to an internal number; until Meta accepts it, no job notification is sent.'
+            : state === 'incomplete'
+              ? `Configuration incomplete: ${[...missing, ...problems].join(' ')}`
+              : state === 'action_required'
+                ? `${failed} WhatsApp message${failed === 1 ? '' : 's'} failed. See the job's messages.`
+                : lastSent !== null
+                  ? 'Connected: the dedicated number passed a real test, and Meta accepted the last message.'
+                  : 'Connected: the dedicated number passed a real test.',
     checks,
     missing,
     testRecipients: testRecipientsFor('whatsapp').length,
@@ -259,7 +297,7 @@ export const mapsStatus = async (): Promise<IntegrationStatus> => {
  */
 const CONFIG_NAMES: Record<'email' | 'whatsapp' | 'maps', readonly string[]> = {
   email: ['EMAIL_GRAPH_TENANT_ID', 'EMAIL_GRAPH_CLIENT_ID', 'EMAIL_GRAPH_CLIENT_SECRET', 'EMAIL_GRAPH_CERTIFICATE_PATH', 'EMAIL_GRAPH_CERTIFICATE_THUMBPRINT', 'EMAIL_SENDER', 'EMAIL_REPLY_TO', 'EMAIL_TEST_RECIPIENTS'],
-  whatsapp: ['WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_BUSINESS_ACCOUNT_ID', 'WHATSAPP_APP_SECRET', 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'WHATSAPP_TEMPLATE_LANGUAGE', 'WHATSAPP_TEST_RECIPIENTS'],
+  whatsapp: ['WHATSAPP_DEDICATED_NUMBER', 'WHATSAPP_PROTECTED_NUMBERS', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_BUSINESS_ACCOUNT_ID', 'WHATSAPP_APP_SECRET', 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'WHATSAPP_TEMPLATE_LANGUAGE', 'WHATSAPP_TEST_RECIPIENTS'],
   maps: ['GOOGLE_MAPS_GEOCODING_API_KEY', 'GOOGLE_GEOCODING_REGION', 'GOOGLE_GEOCODING_DAILY_LIMIT'],
 };
 

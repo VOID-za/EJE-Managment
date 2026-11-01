@@ -4,6 +4,8 @@ import {
   siteLocationLabel,
   siteLocationNeedsAttention,
   siteLocationOf,
+  siteLocationRetention,
+  sitePlaceReference,
   type Site,
   type SiteLocationStatus,
 } from '@/domain';
@@ -20,7 +22,9 @@ import { useOperation } from '@/hooks/useOperation';
  * again. Typing the coordinates is the existing "Edit location" dialog — what
  * is typed there is verified by definition. A pin is never replaced silently:
  * a verified one whose address changed is shown as "re-check", and a new match
- * waits as a suggestion beside it.
+ * waits as a suggestion beside it. How long the coordinates are kept is shown
+ * too: Google's for 30 days at most, the office's own for good (rule 5,
+ * `domain/site/location.ts`).
  */
 
 const TONE: Record<SiteLocationStatus, BadgeTone> = {
@@ -40,6 +44,7 @@ export const SitePinStatus = ({ site, canManage, onChanged }: { readonly site: S
   const location = siteLocationOf(site);
   const pinned = site.latitude !== null && site.longitude !== null;
   const suggestion = location.suggestedLatitude !== null && location.suggestedLongitude !== null;
+  const retention = siteLocationRetention(site);
 
   const act = async (work: () => Promise<unknown>) => {
     if (await operation.run(work)) onChanged();
@@ -53,12 +58,13 @@ export const SitePinStatus = ({ site, canManage, onChanged }: { readonly site: S
         </Badge>
         {location.provider === 'simulated' && <Badge tone="violet" size="sm">Simulated geocoder</Badge>}
         {location.source !== null && pinned && (
-          <span>{location.source === 'manual' ? 'Set by hand' : `Found from the address${location.precision === null ? '' : ` (${location.precision.toLowerCase().replace(/_/g, ' ')})`}`}</span>
+          <span>{location.source === 'manual' ? 'Set by hand' : 'Found from the address'}</span>
         )}
+        {location.status === 'verified' && !pinned && sitePlaceReference(site) !== null && <span>Verified Google place</span>}
       </p>
-      {location.formattedAddress.length > 0 && (
-        <p className="break-words text-xs text-steel-600" data-testid="site-pin-match">
-          Matched to: {location.formattedAddress}
+      {retention.length > 0 && (
+        <p className="break-words text-xs text-steel-500" data-testid="site-pin-retention">
+          {retention}
         </p>
       )}
       {suggestion && (
@@ -77,7 +83,7 @@ export const SitePinStatus = ({ site, canManage, onChanged }: { readonly site: S
       {location.error.length > 0 && siteLocationNeedsAttention(location.status) && (
         <p className="break-words text-xs text-signal-700" data-testid="site-pin-error">{location.error}</p>
       )}
-      {location.status === 'stale' && (
+      {location.status === 'stale' && location.error.length === 0 && (
         <p className="text-xs text-amber-eje-700">The address changed after this pin was verified. Technicians get an address search until it is checked again.</p>
       )}
       {operation.error !== null && <RuleViolationNotice title="The pin was not changed" message={operation.error} violations={operation.violations} />}

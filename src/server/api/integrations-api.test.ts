@@ -132,7 +132,18 @@ describe('the WhatsApp webhook', () => {
 
 describe('Administration → Integrations', () => {
   beforeEach(() => startTestServer());
-  afterEach(() => clearEnv([...Object.keys(SECRETS), 'EMAIL_GRAPH_TENANT_ID', 'EMAIL_GRAPH_CLIENT_ID', 'EMAIL_SENDER', 'WHATSAPP_PHONE_NUMBER_ID', 'EMAIL_TEST_RECIPIENTS']));
+  afterEach(() =>
+    clearEnv([
+      ...Object.keys(SECRETS),
+      'EMAIL_GRAPH_TENANT_ID',
+      'EMAIL_GRAPH_CLIENT_ID',
+      'EMAIL_SENDER',
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'WHATSAPP_DEDICATED_NUMBER',
+      'WHATSAPP_PROTECTED_NUMBERS',
+      'EMAIL_TEST_RECIPIENTS',
+    ]),
+  );
 
   it('NEVER shows a secret — not a value, not a fragment — even with everything configured', async () => {
     setEnv({
@@ -161,6 +172,48 @@ describe('Administration → Integrations', () => {
     // The test server is the demonstration backend: its adapters say so.
     expect(states).toEqual({ email: 'simulated', whatsapp: 'simulated', maps: 'simulated' });
     refused(await (await signedInAs(DEMO_USERS.technician)).get('/api/admin/integrations'));
+  });
+
+  it('WhatsApp is the DEDICATED EJE number, and stays Not configured until a real test passes', async () => {
+    type Status = { service: string; state: string; title: string; summary: string; checks: readonly { label: string; ok: boolean; detail: string }[] };
+    const master = await signedInAs(DEMO_USERS.master);
+    setEnv({
+      WHATSAPP_PHONE_NUMBER_ID: '1098765432',
+      WHATSAPP_ACCESS_TOKEN: SECRETS.WHATSAPP_ACCESS_TOKEN,
+      WHATSAPP_APP_SECRET: SECRETS.WHATSAPP_APP_SECRET,
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: SECRETS.WHATSAPP_WEBHOOK_VERIFY_TOKEN,
+      WHATSAPP_DEDICATED_NUMBER: '+27 82 000 0001',
+      WHATSAPP_PROTECTED_NUMBERS: '+27 11 555 0100',
+    });
+    const whatsapp = async () =>
+      (await master.get<{ statuses: readonly Status[] }>('/api/admin/integrations')).data.statuses.find((status) => status.service === 'whatsapp')!;
+
+    // Everything set, but no real test has passed: still "Not configured".
+    const complete = await whatsapp();
+    expect(complete.state).toBe('not_configured');
+    expect(complete.title).toContain('dedicated EJE number');
+    expect(complete.summary).toContain('no real test has passed');
+    const check = (label: string) => complete.checks.find((entry) => entry.label === label)!;
+    expect(check('Dedicated EJE number')).toMatchObject({ ok: true });
+    expect(check('Dedicated EJE number').detail).toContain('…0001');
+    expect(check('Office WhatsApp number').detail).toContain('Not connected and never used');
+    expect(check('Office WhatsApp number').detail).toContain('1 protected number');
+    expect(check('Real API test')).toMatchObject({ ok: false });
+    // Neither number is shown in full.
+    expect(JSON.stringify(complete)).not.toContain('820000001');
+    expect(JSON.stringify(complete)).not.toContain('115550100');
+
+    // The office number set as the dedicated one is refused outright.
+    setEnv({ WHATSAPP_DEDICATED_NUMBER: '011 555 0100' });
+    const office = await whatsapp();
+    expect(office.state).toBe('incomplete');
+    expect(office.summary).toContain('WHATSAPP_PROTECTED_NUMBERS');
+    clearEnv(['WHATSAPP_DEDICATED_NUMBER', 'WHATSAPP_PROTECTED_NUMBERS']);
+
+    // Without the dedicated number, the rest is not enough.
+    const without = await whatsapp();
+    expect(without.state).toBe('incomplete');
+    expect(without.summary).toContain('WHATSAPP_DEDICATED_NUMBER');
   });
 
   it('sends a test email ONLY to a configured test recipient', async () => {

@@ -108,7 +108,9 @@ describe('Workflow A — a new customer and site', () => {
     const jobSite = (await harness.repos.customers.findSiteById(job.siteId))!;
     const target = siteNavigationTarget(jobSite);
     expect(target.kind).toBe('verified_pin');
-    expect(target.url).toContain('-26.2745%2C28.198');
+    // A Google pin is linked by its place, never its coordinates (rule 5).
+    expect(target.url).toContain('destination_place_id=place-1');
+    expect(target.url).not.toContain('-26.2745');
     expect(asked).toHaveLength(1); // opening, assigning and navigating asked nothing
   });
 });

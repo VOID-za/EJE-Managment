@@ -1,4 +1,4 @@
-import { siteLocationOf, type OutboxDeliveryStatus } from '@/domain';
+import { siteHoldsProviderContent, siteLocationOf, type OutboxDeliveryStatus } from '@/domain';
 import { DemoCustomerEmailRepository, DemoEmailTemplateRepository, DemoIntegrationRepository } from './integration-repositories';
 import type {
   IssuedTotals,
@@ -490,6 +490,19 @@ class DemoCustomerRepository implements CustomerRepository {
         .read()
         .sites.filter((site) => site.archivedAt === null && site.geocode?.nextAttemptAt != null && site.geocode.nextAttemptAt <= now)
         .sort((a, b) => (a.geocode?.nextAttemptAt ?? '').localeCompare(b.geocode?.nextAttemptAt ?? ''))
+        .slice(0, limit),
+    );
+  }
+
+  listSitesWithProviderContent(obtainedBefore: IsoDateTime, limit: number): Promise<readonly Site[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .sites.filter((site) => {
+          const geocodedAt = site.geocode?.geocodedAt ?? null;
+          return siteHoldsProviderContent(site) && (geocodedAt === null || geocodedAt <= obtainedBefore);
+        })
+        .sort((a, b) => (a.geocode?.geocodedAt ?? '').localeCompare(b.geocode?.geocodedAt ?? ''))
         .slice(0, limit),
     );
   }
