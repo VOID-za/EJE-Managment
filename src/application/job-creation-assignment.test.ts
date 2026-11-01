@@ -207,16 +207,13 @@ describe('what a job must say', () => {
    * because the requirement was inferred from `capturesLabourAndTravel` — "this
    * type charges hours, so it is work on a machine". The owner has separated
    * the two: a breakdown is telephoned in before anybody knows which machine it
-   * is. So the refusal is asserted on an INSTALLATION, which is planned work
-   * booked against a known machine and still requires one, and the permission
-   * is asserted on the breakdown.
+   * is. It was then asserted on an INSTALLATION — until 1 November 2026, when
+   * the tester made the machine optional there too (JOB-MACH-OPT-1): a new
+   * machine is installed before it is on the register.
    */
-  it('refuses an INSTALLATION with no machine', async () => {
-    expect(
-      await codesFrom(() =>
-        createJob(harness.as(master), baseInput({ machineId: null, jobType: 'installation' })),
-      ),
-    ).toContain('machine_required');
+  it('ALLOWS an INSTALLATION with no machine (JOB-MACH-OPT-1)', async () => {
+    const job = await createJob(harness.as(master), baseInput({ machineId: null, jobType: 'installation' }));
+    expect(job.machineId).toBeNull();
   });
 
   it('ALLOWS a breakdown with no machine, and invents nothing in its place', async () => {

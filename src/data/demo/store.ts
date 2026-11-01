@@ -250,7 +250,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 interface PersistedEnvelope {
   readonly version: number;

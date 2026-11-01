@@ -561,6 +561,20 @@ export const WorkCapturePanel = ({
               Charge the test bench fee
             </label>
           </div>
+          {/* BENCH-QTY-1: how many, 1 by default; quantity × rate. */}
+          {job.testBenchApplied && (
+            <TestBenchQuantity
+              key={`${job.id}:${job.testBenchQuantity}`}
+              quantity={job.testBenchQuantity ?? 1}
+              rate={totals.pricing.testBenchFee ?? 0}
+              amount={totals.testBenchTotal}
+              disabled={!editable || operation.running}
+              onSave={async (quantity) => {
+                const ok = await operation.run(() => jobs.setTestBenchQuantity(job.id, quantity));
+                if (ok) onChanged();
+              }}
+            />
+          )}
         </Card>
       )}
 
@@ -1330,5 +1344,58 @@ const AdditionalChargeDialog = ({
         />
       </div>
     </Modal>
+  );
+};
+
+/**
+ * HOW MANY TEST BENCH FEES. BENCH-QTY-1 (the tester, 1 November 2026).
+ *
+ * A whole number from 1 to 99, saved when it is changed and left (or Enter is
+ * pressed); the line underneath says quantity × rate = amount, which is what
+ * the totals and the job card print. The server applies the same rule.
+ */
+const TestBenchQuantity = ({
+  quantity,
+  rate,
+  amount,
+  disabled,
+  onSave,
+}: {
+  readonly quantity: number;
+  readonly rate: number;
+  readonly amount: number;
+  readonly disabled: boolean;
+  readonly onSave: (quantity: number) => Promise<void>;
+}) => {
+  const [value, setValue] = useState(String(quantity));
+  const parsed = Number(value);
+  const valid = /^\d{1,2}$/u.test(value.trim()) && parsed >= 1 && parsed <= 99;
+  const save = () => {
+    if (valid && parsed !== quantity) void onSave(parsed);
+  };
+  return (
+    <div className="mt-3 flex flex-wrap items-end gap-4" data-testid="test-bench-quantity">
+      <TextField
+        label="Quantity"
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={99}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') save();
+        }}
+        error={valid ? undefined : 'Enter a whole number from 1 to 99.'}
+        containerClassName="w-32"
+        data-testid="test-bench-quantity-input"
+      />
+      <p className="pb-2 text-sm text-steel-600" data-testid="test-bench-quantity-amount">
+        {valid ? parsed : quantity} × {formatCurrency(rate)} = {formatCurrency(valid ? rate * parsed : amount)}
+      </p>
+    </div>
   );
 };

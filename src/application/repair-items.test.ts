@@ -4,6 +4,7 @@ import { buildDeliveryNoteModel } from '@/lib/job-card/delivery-note';
 import { buildJobCardModel } from '@/lib/job-card/model';
 import { inspectPdf, pdfPageTexts } from '@/lib/pdf/inspect';
 import { renderDeliveryNotePdf } from '@/services/simulated/delivery-note-pdf';
+import { renderJobCardPdf } from '@/services/simulated/job-card-pdf';
 import { loadJobView } from './job-view';
 import { normaliseRepairItems, setRepairItems } from './repair-items';
 import { WorkflowError } from './errors';
@@ -154,4 +155,53 @@ describe('the one delivery note carries every part', () => {
     expect(labels).not.toContain('Part 1 received');
   });
 
+/*
+ * PDF-RECV-1 (the tester, 1 November 2026): "Part 1 received … Part 2 received
+ * … Collection" were printed under JOB DETAILS. They belong in LABOUR, TRAVEL
+ * AND PARTS — moved there, not duplicated, descriptions and quantities intact.
+ */
+describe('parts received on the job card PDF (PDF-RECV-1)', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  const pdfText = async (items: readonly RepairItem[], courier = false) => {
+    const job = await testAndRepair(harness);
+    await harness.repos.jobs.save({ ...job, courierCollection: courier, waybillNumber: courier ? 'WB-7781' : '', ...storedRepairItems(items) });
+    const view = (await loadJobView(harness.repos, 'EJE-1067'))!;
+    const rendered = renderJobCardPdf({ ...view, photoImages: new Map() } as never, 'EJE-1067.pdf', '2026-11-01T10:00:00.000Z');
+    expect(inspectPdf(rendered.bytes, { margin: 40, edge: 12 }).problems).toEqual([]);
+    return { text: pdfPageTexts(rendered.bytes).join(' '), model: buildJobCardModel({ ...view, generatedAt: '2026-11-01T10:00:00.000Z' }) };
+  };
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it('prints every part received and the collection under Labour, travel and parts, once, and nothing of them under Job details', async () => {
+    const { text, model } = await pdfText(FOUR);
+    const details = text.indexOf('JOB DETAILS');
+    const section = text.indexOf('LABOUR, TRAVEL AND PARTS');
+    expect(details).toBeGreaterThanOrEqual(0);
+    expect(section).toBeGreaterThan(details);
+    for (const [index, item] of FOUR.entries()) {
+      const label = `Part ${index + 1} received`;
+      expect(count(text, label)).toBe(1);
+      expect(text.indexOf(label)).toBeGreaterThan(section);
+      expect(text).toContain(item.description);
+    }
+    expect(count(text, 'Customer collection')).toBe(1);
+    expect(text.indexOf('Customer collection')).toBeGreaterThan(section);
+    // The model agrees: nothing received under Job details, all of it in `received`.
+    expect(model.jobDetails.some((row) => /received$|^Collection$|^Waybill$/u.test(row.label))).toBe(false);
+    expect(model.received?.rows.map((row) => row.label)).toEqual(['Part 1 received', 'Part 2 received', 'Part 3 received', 'Part 4 received', 'Collection']);
+    expect(model.received?.rows[0]?.value).toBe('Bearing (BRG-001) × 2');
+  });
+
+  it('a courier collection carries its waybill there too', async () => {
+    const { text } = await pdfText(FOUR.slice(0, 2), true);
+    const section = text.indexOf('LABOUR, TRAVEL AND PARTS');
+    expect(count(text, 'Courier collection')).toBe(1);
+    expect(text.indexOf('Courier collection')).toBeGreaterThan(section);
+    expect(text.indexOf('WB-7781')).toBeGreaterThan(section);
+  });
+});
 });

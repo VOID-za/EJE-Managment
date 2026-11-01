@@ -100,20 +100,14 @@ describe('the job types that still require them', () => {
     master = await signedInAs(DEMO_USERS.master);
   });
 
-  it('refuses an installation with no machine — 422, the RULE rather than the schema', async () => {
-    const raised = await raise(master, {
-      jobType: 'installation',
-      machineId: null,
-      priority: 'normal',
+  // JOB-MACH-OPT-1 (the tester, 1 November 2026): no machine needed on an installation or a service.
+  for (const jobType of ['installation', 'service'] as const) {
+    it(`accepts a ${jobType} with NO machine — 200, stored without one`, async () => {
+      const raised = await raise(master, { jobType, machineId: null, priority: null });
+      expect(raised.status, JSON.stringify(raised.error)).toBe(200);
+      expect(raised.job!.machineId).toBeNull();
     });
-    expect(raised.status).toBe(422);
-  });
-
-  it('refuses a SERVICE with no machine — 422', async () => {
-    const raised = await raise(master, { jobType: 'service', machineId: null, priority: null });
-    expect(raised.status).toBe(422);
-    expect(JSON.stringify(raised.error)).toContain('machine_required');
-  });
+  }
 
   // 31 October 2026 (the tester): Priority is optional on an installation and a service.
   for (const jobType of ['installation', 'service'] as const) {

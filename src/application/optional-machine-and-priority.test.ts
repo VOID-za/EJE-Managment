@@ -130,8 +130,9 @@ const jobCardFor = async (harness: Harness, jobNumber: string) => {
 
 describe('which job types require a machine and a priority', () => {
   it('names them explicitly rather than inferring it from the charging flag', () => {
+    // 1 November 2026 (the tester, JOB-MACH-OPT-1): no job type requires a machine any more.
     const requiring = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).requiresMachine);
-    expect([...requiring].sort()).toEqual(['installation', 'service']);
+    expect(requiring).toEqual([]);
 
     // 31 October 2026 (the tester): Priority is optional on every job type.
     const grading = JOB_TYPE_CODES.filter((code) => getJobTypeDefinition(code).requiresPriority);
@@ -188,33 +189,45 @@ describe('a test & repair job with no machine and no priority', () => {
   });
 });
 
-describe('the types that still require them', () => {
+/*
+ * JOB-MACH-OPT-1 (the tester, 1 November 2026): an INSTALLATION may be raised
+ * before the new machine is on the register, and a SERVICE may be on a machine
+ * that is not registered or not the customer's. The machine stays choosable.
+ */
+describe('an installation and a service no longer require a machine', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = build();
   });
 
   for (const jobType of ['installation', 'service'] as const) {
-    it(`refuses a ${jobType} with no machine`, async () => {
-      const error = await createJob(
+    it(`raises a ${jobType} with NO machine, and invents none in its place`, async () => {
+      const job = await createJob(
         harness.as(master),
         await input(harness, { jobType, machineId: null, priority: 'normal' }),
-      ).catch((cause: unknown) => cause);
-
-      expect(error).toBeInstanceOf(WorkflowError);
-      expect((error as WorkflowError).violations.map((v) => v.code)).toContain('machine_required');
+      );
+      expect(job.status).toBe('open');
+      expect(job.machineId).toBeNull();
+      const stored = await harness.repos.jobs.findById(job.id);
+      expect(stored?.machineId).toBeNull();
     });
 
-    it(`refuses a ${jobType} with no machine even when it has no priority either`, async () => {
-      const error = await createJob(
+    it(`raises a ${jobType} with neither a machine nor a priority`, async () => {
+      const job = await createJob(
         harness.as(master),
         await input(harness, { jobType, machineId: null, priority: null }),
-      ).catch((cause: unknown) => cause);
+      );
+      expect(job.machineId).toBeNull();
+      expect(job.priority).toBeNull();
+    });
 
+    it(`still refuses a ${jobType} with no fault description — only the machine became optional`, async () => {
+      const error = await createJob(
+        harness.as(master),
+        await input(harness, { jobType, machineId: null, faultDescription: '' }),
+      ).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(WorkflowError);
-      const codes = (error as WorkflowError).violations.map((v) => v.code);
-      expect(codes).toContain('machine_required');
-      expect(codes).not.toContain('priority_required');
+      expect((error as WorkflowError).violations.map((v) => v.code)).toContain('fault_description_required');
     });
 
     it(`raises a ${jobType} with a machine and NO priority (Priority optional, 31 October 2026)`, async () => {

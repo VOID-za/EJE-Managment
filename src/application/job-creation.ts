@@ -343,7 +343,8 @@ const assertReadyForWork = (
    * than a rule, and the owner has separated the two. `requiresMachine` says it
    * directly, and it is false for a breakdown (called in before anybody knows
    * which machine) and for a test-and-repair unit (which may not be on the
-   * register at all). An installation and a service still require one.
+   * register at all). Since 1 November 2026 an installation and a service do
+   * not either (JOB-MACH-OPT-1); the check stays for any type that sets the flag.
    *
    * Nothing is invented where it is optional: no machine is fabricated and the
    * job is not attached to an arbitrary one to fill the column.
@@ -616,6 +617,7 @@ export const createJob = async (
     calloutApplied: false,
     // BENCH-1: optional and unticked until somebody ticks it.
     testBenchApplied: false,
+    testBenchQuantity: 1,
     // Offered on the job types whose work is collected from the counter; false
     // everywhere else, where nobody collects anything.
     /*

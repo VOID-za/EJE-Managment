@@ -128,7 +128,7 @@ export type CostedJob = Pick<
   | 'calloutApplied'
   | 'pricingSnapshot'
 > &
-  Partial<Pick<Job, 'testBenchApplied'>>;
+  Partial<Pick<Job, 'testBenchApplied' | 'testBenchQuantity'>>;
 
 export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): JobTotals => {
   // A signed job prices at its snapshot; everything else prices at current rates.
@@ -160,20 +160,25 @@ export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): Jo
     : [];
 
   /*
-   * BENCH-1. Once per job, from the rates in force — or, on a signed job, from
-   * its snapshot. A snapshot taken before the fee existed has no figure, and
-   * no job signed then carried the fee, so it reads as nothing.
+   * BENCH-1. From the rates in force — or, on a signed job, from its snapshot.
+   * A snapshot taken before the fee existed has no figure, and no job signed
+   * then carried the fee, so it reads as nothing.
+   *
+   * BENCH-QTY-1 (1 November 2026): QUANTITY × RATE. A job without a quantity
+   * (anything written before 0044) carried the fee once, so it reads as 1 and
+   * its amount is exactly what it always was.
    */
   const benchFee = pricing.testBenchFee ?? 0;
+  const benchQuantity = job.testBenchQuantity ?? 1;
   const testBenchLines: CostLine[] = job.testBenchApplied === true
     ? [
         {
           label: 'Test bench fee',
-          detail: 'Fixed test bench fee',
-          quantity: 1,
+          detail: benchQuantity === 1 ? 'Fixed test bench fee' : `${benchQuantity} × test bench fee`,
+          quantity: benchQuantity,
           unit: 'ea',
           unitPrice: benchFee,
-          total: benchFee,
+          total: benchFee * benchQuantity,
         },
       ]
     : [];

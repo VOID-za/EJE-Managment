@@ -172,6 +172,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
     'The completion report replaces what is on the server, so it cannot be written offline.',
   set_callout: 'The call-out flag replaces a value on the job, so it needs a connection.',
   set_test_bench: 'The test bench fee replaces a value on the job, so it needs a connection.',
+  set_test_bench_quantity: 'The test bench quantity replaces a value on the job, so it needs a connection.',
   /*
    * COST-5. CHARGES AND DISCOUNTS ARE OFFICE WORK, NOT FIELD CAPTURE.
    *

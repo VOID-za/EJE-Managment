@@ -125,7 +125,7 @@ export const JobCardPdfPreview = ({
     job.orderNumber,
     job.referenceNumber,
     job.calloutApplied ? 'callout' : 'no-callout',
-    job.testBenchApplied ? 'bench' : 'no-bench',
+    job.testBenchApplied ? `bench:${job.testBenchQuantity ?? 1}` : 'no-bench',
     JSON.stringify(job.completionReport),
     job.checklist?.completedAt ?? 'no-checklist',
     job.checklist?.responses.length ?? 0,

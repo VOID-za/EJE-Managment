@@ -165,15 +165,18 @@ describe('a customer collection', () => {
     expect(model.documentTitle).toBe('Parts Collection Note');
   });
 
-  it('carries the order number, the delivery note and the collection method', async () => {
+  it('carries the order number and the delivery note in Job details, and the collection method in Labour, travel and parts', async () => {
     const model = await modelFor(harness, job);
     const rows = new Map(model.jobDetails.map((row) => [row.label, row.value]));
+    const received = new Map((model.received?.rows ?? []).map((row) => [row.label, row.value]));
 
     expect(rows.get('Order number')).toBe(ORDER_NUMBER);
     expect(rows.get('Delivery note')).toBe(DELIVERY_NOTE);
-    expect(rows.get('Collection')).toBe('Customer collection');
+    // PDF-RECV-1 (1 November 2026): no longer under Job details — and not twice.
+    expect(rows.has('Collection')).toBe(false);
+    expect(received.get('Collection')).toBe('Customer collection');
     // No waybill on a customer collection: there is no consignment.
-    expect(rows.has('Waybill')).toBe(false);
+    expect(received.has('Waybill')).toBe(false);
   });
 
   it('shows its prices, in the charges block both renderers use', async () => {
@@ -219,9 +222,11 @@ describe('a courier collection', () => {
   it('carries the waybill, which the screen used to leave off', async () => {
     const model = await modelFor(harness, job);
     const rows = new Map(model.jobDetails.map((row) => [row.label, row.value]));
+    const received = new Map((model.received?.rows ?? []).map((row) => [row.label, row.value]));
 
-    expect(rows.get('Collection')).toBe('Courier collection');
-    expect(rows.get('Waybill')).toBe(WAYBILL);
+    expect(received.get('Collection')).toBe('Courier collection');
+    expect(received.get('Waybill')).toBe(WAYBILL);
+    expect(rows.has('Collection') || rows.has('Waybill')).toBe(false);
     expect(rows.get('Delivery note')).toBe(DELIVERY_NOTE);
   });
 

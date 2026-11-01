@@ -236,7 +236,8 @@ const selectFirst = async (labelText) => {
   await field.selectOption(values[0]);
 };
 for (const type of ['installation', 'service']) {
-  await check(`${type}: Machine is mandatory and marked; Priority is optional`, async () => {
+  // JOB-MACH-OPT-1 (the tester, 1 November 2026): the Machine is optional on an installation and a service.
+  await check(`${type}: Machine and Priority are both optional, and a job is raised with NO machine`, async () => {
     await go('/jobs/new');
     await page.getByLabel('Job type').selectOption(type);
     await selectFirst('Customer');
@@ -244,14 +245,13 @@ for (const type of ['installation', 'service']) {
     await selectFirst('Site');
     await page.waitForTimeout(300);
     await selectFirst('Customer email recipient');
-    const machineLabel = await page.locator('label', { hasText: /^Machine/u }).first().innerText();
-    if (!machineLabel.includes('*')) fail(`the Machine label is not marked required: "${machineLabel}"`);
+    if ((await page.getByText('Machine (optional)').count()) === 0) fail('Machine is not marked optional');
     if ((await page.getByText('Priority (optional)').count()) === 0) fail('Priority is not marked optional');
-    await page.getByLabel('Fault', { exact: false }).first().fill(`Forms regression ${type}: commissioning check.`);
-    // No machine: refused here, with the reason beside the field.
+    await page.getByLabel('Fault', { exact: false }).first().fill(`Forms regression ${type}: no machine yet.`);
     await press(page.getByRole('button', { name: 'Create job' }));
-    await page.getByText('Select the machine this job is for.').first().waitFor({ timeout: 10000 });
-    if (!page.url().endsWith('/jobs/new')) fail('a job was raised without a machine');
+    await page.waitForURL('**/jobs/EJE-**', { timeout: 25000 });
+    const job = (await get(`/api/jobs/${page.url().split('/').pop()}`)).json?.data?.view?.job;
+    if (job?.jobType !== type || job?.machineId !== null) fail(`raised as ${JSON.stringify({ type: job?.jobType, machine: job?.machineId })}`);
   });
   await check(`${type}: raised with a Machine and NO Priority`, async () => {
     await selectFirst('Machine');
@@ -265,7 +265,7 @@ for (const type of ['installation', 'service']) {
     if (job?.jobType !== type || job?.priority !== null || job?.machineId === null) fail(`raised as ${JSON.stringify({ type: job?.jobType, priority: job?.priority, machine: job?.machineId })}`);
     return number;
   });
-  await check(`${type}: the SERVER refuses one without a Machine (422 machine_required)`, async () => {
+  await check(`${type}: the SERVER accepts one without a Machine (200)`, async () => {
     const customers = await get('/api/customers');
     const customer = customers.json.data[0].id;
     const screen = (await get(`/api/customers/${customer}`)).json.data;
@@ -274,7 +274,7 @@ for (const type of ['installation', 'service']) {
       scheduledDate: null, scheduledEndDate: null, orderNumber: '', referenceNumber: '', faultDescription: 'Server check.',
       primaryTechnicianId: null, additionalTechnicianIds: [], courierCollection: false, deliveryNote: '',
     });
-    if (answer.status !== 422 || !JSON.stringify(answer.json).includes('machine_required')) fail(`answered ${answer.status} ${JSON.stringify(answer.json)?.slice(0, 160)}`);
+    if (answer.status !== 200) fail(`answered ${answer.status} ${JSON.stringify(answer.json)?.slice(0, 160)}`);
   });
 }
 

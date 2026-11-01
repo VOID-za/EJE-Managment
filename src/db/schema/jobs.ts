@@ -147,6 +147,8 @@ export const jobs = pgTable(
     calloutApplied: boolean('callout_applied').notNull().default(false),
     /** BENCH-1. Whether the test bench fee applies. Frozen once signed (0035). */
     testBenchApplied: boolean('test_bench_applied').notNull().default(false),
+    /** BENCH-QTY-1. How many test bench fees, 1–99; counts only while applied. Frozen once signed (0044). */
+    testBenchQuantity: integer('test_bench_quantity').notNull().default(1),
 
     /**
      * DECISION 3 / the Parts workflow.
@@ -267,6 +269,7 @@ export const jobs = pgTable(
      * the same thing about the parts CONSUMED, and this is the same rule for
      * the unit that came IN.
      */
+    check('jobs_test_bench_quantity_range', sql`${table.testBenchQuantity} between 1 and 99`),
     check(
       'jobs_repair_quantity_positive',
       sql`${table.repairQuantity} is null or ${table.repairQuantity} > 0`,

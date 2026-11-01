@@ -28,7 +28,7 @@ export const JobCostSummary = ({
       ? [{ label: 'Call-out', detail: 'Fixed fee', value: totals.calloutTotal }]
       : []),
     ...(job.testBenchApplied
-      ? [{ label: 'Test bench fee', detail: 'Fixed fee', value: totals.testBenchTotal }]
+      ? [{ label: 'Test bench fee', detail: `${job.testBenchQuantity ?? 1} × fixed fee`, value: totals.testBenchTotal }]
       : []),
     { label: 'Travel', detail: formatKilometres(totals.totalKilometres), value: totals.travelTotal },
     {

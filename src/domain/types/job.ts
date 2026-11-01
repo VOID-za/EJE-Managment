@@ -734,6 +734,14 @@ export interface Job {
   readonly testBenchApplied: boolean;
 
   /**
+   * HOW MANY TEST BENCH FEES. BENCH-QTY-1 (the tester, 1 November 2026):
+   * 1 by default, 1–99, set by whoever may tick the fee (the job's technician
+   * or the office). Counts only while `testBenchApplied`; quantity × the bench
+   * rate is the charge. Frozen with the flag once the customer signs.
+   */
+  readonly testBenchQuantity: number;
+
+  /**
    * Collection jobs only: a courier is collecting rather than the customer.
    *
    * A courier has no reason to see what the customer paid, so prices are

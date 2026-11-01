@@ -689,6 +689,14 @@ const v35ToV36 = (data: Loose): Loose => ({
   integrationState: Array.isArray(data.integrationState) ? data.integrationState : [],
 });
 
+/** v37: BENCH-QTY-1. Every job carried the bench fee at most once — quantity 1. */
+const v36ToV37 = (data: Loose): Loose => ({
+  ...data,
+  jobs: Array.isArray(data.jobs)
+    ? (data.jobs as Record<string, unknown>[]).map((job) => ({ testBenchQuantity: 1, ...job }))
+    : data.jobs,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -718,6 +726,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   33: v33ToV34,
   34: v34ToV35,
   35: v35ToV36,
+  36: v36ToV37,
 };
 
 /**

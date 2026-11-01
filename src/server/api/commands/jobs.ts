@@ -521,6 +521,12 @@ export const JOB_COMMANDS: CommandRegistry = {
     (context, job, input) => jobs.setTestBenchApplied(context.operation, job, input.applied),
   ),
 
+  /** BENCH-QTY-1: how many test bench fees. The operation applies the 1–99 rule. */
+  set_test_bench_quantity: withInput(
+    z.object({ quantity: z.number().int() }).strict(),
+    (context, job, input) => jobs.setTestBenchQuantity(context.operation, job, input.quantity),
+  ),
+
   add_note: withInput(
     z.object({ body: z.string().min(1).max(4000), internal: z.boolean() }).strict(),
     (context, job, input) => jobs.addNote(context.operation, job, input.body, input.internal),

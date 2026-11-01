@@ -349,10 +349,13 @@ describe('the customer’s document', () => {
 
     const rows = await cardFor(job.jobNumber);
     const details = new Map(rows.jobDetails.map((row) => [row.label, row.value]));
+    const received = new Map((rows.received?.rows ?? []).map((row) => [row.label, row.value]));
     expect(details.get('Quote number')).toBe('Q-20451');
-    expect(details.get('Part number')).toBe('ABC-123');
-    expect(details.get('Unit')).toBe('Servo motor');
-    expect(details.get('Quantity received')).toBe('2');
+    // PDF-RECV-1: what was booked in is printed in Labour, travel and parts, not under Job details.
+    expect(received.get('Part number')).toBe('ABC-123');
+    expect(received.get('Unit')).toBe('Servo motor');
+    expect(received.get('Quantity received')).toBe('2');
+    for (const label of ['Part number', 'Unit', 'Quantity received']) expect(details.has(label)).toBe(false);
   });
 
   it('OMITS each row nobody filled in, rather than printing a dash on a signed document', async () => {

@@ -198,8 +198,10 @@ const NewJobPage = () => {
      *
      * `requiresMachine` rather than `capturesLabourAndTravel`: a breakdown is
      * telephoned in before anybody knows which machine it is, and a
-     * test-and-repair unit may not be on the register at all. The SERVER
-     * applies the identical rule.
+     * test-and-repair unit may not be on the register at all — and since
+     * 1 November 2026 an installation or a service may be booked without one
+     * too (JOB-MACH-OPT-1), so no type requires it today. The SERVER applies
+     * the identical rule.
      */
     if (!asDraft && definition.requiresMachine && machineId.length === 0) {
       next.machineId = 'Select the machine this job is for.';

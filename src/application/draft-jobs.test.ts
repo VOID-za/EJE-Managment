@@ -308,9 +308,12 @@ describe('releasing a draft', () => {
    * the SAME rule creation would have applied, so the validation is deferred
    * rather than weakened.
    */
-  it('RE-ASKS for the machine on a job type that requires one', async () => {
+  // JOB-MACH-OPT-1 (1 November 2026): an installation needs no machine either, so its draft releases too.
+  it('releases an INSTALLATION draft with no machine, because none is required any more', async () => {
     const draft = await draftOf({ machineId: null, jobType: 'installation' });
-    await expect(releaseDraft(harness.as(master), draft)).rejects.toThrow(WorkflowError);
+    const released = await releaseDraft(harness.as(master), draft);
+    expect(released.status).toBe('open');
+    expect(released.machineId).toBeNull();
   });
 
   it('releases a BREAKDOWN draft with no machine, because none is required', async () => {

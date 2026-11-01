@@ -97,8 +97,11 @@ export interface JobTypeDefinition {
    * owner has since separated the two. A BREAKDOWN is called in before anybody
    * knows which machine it is ("the line is down"), and a TEST & REPAIR
    * arrives as a unit on the counter that may not be on the register at all.
-   * An INSTALLATION or a SERVICE is booked against a known machine and still
-   * requires one.
+   * An INSTALLATION or a SERVICE no longer requires one either (the tester,
+   * 1 November 2026, JOB-MACH-OPT-1): a new machine is installed before it is
+   * on EJE's register, and a technician services machines that are not
+   * registered or not the customer's. The flag is kept so a type can require a
+   * machine again without touching the rule; today no type does.
    *
    * Where it is false, the machine is OPTIONAL and not defaulted: nothing
    * invents one, and nothing attaches the job to an arbitrary machine to
@@ -125,9 +128,9 @@ export interface JobTypeDefinition {
    * A PRIORITY HAS TO BE CHOSEN ON THIS JOB TYPE. Create New Job §3B / §4.
    *
    * False on EVERY job type since 31 October 2026: the tester made Priority
-   * optional on an Installation and a Service too — the Machine stays
-   * mandatory there (`requiresMachine`). A breakdown and a Test & Repair were
-   * already optional, because the office raises them before the urgency is
+   * optional on an Installation and a Service too — and the Machine became
+   * optional there on 1 November 2026 (`requiresMachine`, JOB-MACH-OPT-1). A
+   * breakdown and a Test & Repair were already optional, because the office raises them before the urgency is
    * known, and a parts collection has no priority at all (`officeProcessed`
    * turns the field off). Where it is false the job carries NO priority unless
    * somebody chooses one — never a quietly defaulted one. Kept as a flag so a
@@ -229,7 +232,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
     requiresFaultDescription: true,
-    requiresMachine: true,
+    requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,
@@ -254,7 +257,7 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     capturesDeliveryNote: false,
     collectedOnCompletion: false,
     requiresFaultDescription: true,
-    requiresMachine: true,
+    requiresMachine: false,
     requiresPriority: false,
     capturesRepairItem: false,
     capturesQuoteNumber: false,

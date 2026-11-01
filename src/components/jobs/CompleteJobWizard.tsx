@@ -843,7 +843,9 @@ export const CompleteJobWizard = ({
           {/* Only when it is being charged. Its absence is the default and
               says nothing worth a line on a summary. */}
           {job.calloutApplied && <ReviewLines title="Call-out" lines={['Charged on this job']} />}
-          {job.testBenchApplied && <ReviewLines title="Test bench fee" lines={['Charged on this job']} />}
+          {job.testBenchApplied && (
+            <ReviewLines title="Test bench fee" lines={[`Charged on this job — quantity ${job.testBenchQuantity ?? 1}`]} />
+          )}
           {job.notes.length > 0 && (
             <ReviewLines
               title="Notes"

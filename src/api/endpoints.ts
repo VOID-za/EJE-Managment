@@ -606,6 +606,8 @@ export const jobs = {
   setCallout: (jobId: string, applied: boolean) => jobAction(jobId, 'set_callout', { applied }),
   /** BENCH-1. */
   setTestBench: (jobId: string, applied: boolean) => jobAction(jobId, 'set_test_bench', { applied }),
+  /** BENCH-QTY-1. */
+  setTestBenchQuantity: (jobId: string, quantity: number) => jobAction(jobId, 'set_test_bench_quantity', { quantity }),
   addNote: (jobId: string, body: string, internal: boolean) =>
     jobAction(jobId, 'add_note', { body, internal }),
   /**

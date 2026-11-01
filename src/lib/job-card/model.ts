@@ -95,6 +95,16 @@ export interface JobCardModel {
   readonly jobDetails: readonly LabelValue[];
 
   /**
+   * THE PARTS BOOKED IN, AND HOW THEY GO BACK. PDF-RECV-1 (the tester,
+   * 1 November 2026): printed in the LABOUR, TRAVEL AND PARTS section, not
+   * under Job details, where "Part 1 received … Collection" used to sit. One
+   * part reads Part number / Unit / Quantity received; several read one
+   * "Part N received" row each, in order; then Collection (and Waybill). Null
+   * when there is nothing to say. Descriptions and quantities are unchanged.
+   */
+  readonly received: { readonly rows: readonly LabelValue[] } | null;
+
+  /**
    * What the job was raised about, or NULL when the job type does not collect
    * one — a parts collection, where the goods listed below are the record.
    *
@@ -218,6 +228,42 @@ export interface JobCardModelInput {
   readonly generatedAt: IsoDateTime;
 }
 
+/**
+ * The parts booked in and how they go back, for the LABOUR, TRAVEL AND PARTS
+ * section (PDF-RECV-1). One part reads exactly as it always has (Part number,
+ * Unit, Quantity received); several (TR-PARTS-1) read one row each, in order.
+ */
+const receivedOf = (job: JobCardModelInput['job']): JobCardModel['received'] => {
+  const definition = getJobTypeDefinition(job.jobType);
+  const items = repairItemsOf(job);
+  const rows: LabelValue[] = [
+    ...(definition.capturesRepairItem && items.length <= 1 && job.repairItem.partNumber.length > 0
+      ? [{ label: 'Part number', value: job.repairItem.partNumber }]
+      : []),
+    ...(definition.capturesRepairItem && items.length <= 1 && job.repairItem.description.length > 0
+      ? [{ label: 'Unit', value: job.repairItem.description }]
+      : []),
+    ...(definition.capturesRepairItem && items.length <= 1 && job.repairItem.quantity !== null
+      ? [{ label: 'Quantity received', value: String(job.repairItem.quantity) }]
+      : []),
+    ...(definition.capturesRepairItem && items.length > 1
+      ? items.map((item, index) => ({
+          label: `Part ${index + 1} received`,
+          value: [item.description, item.partNumber.length > 0 ? `(${item.partNumber})` : '', `× ${item.quantity ?? 1}`]
+            .filter((part) => part.length > 0)
+            .join(' '),
+        }))
+      : []),
+    ...(definition.collectedOnCompletion
+      ? [
+          { label: 'Collection', value: job.courierCollection ? 'Courier collection' : 'Customer collection' },
+          ...(job.courierCollection && job.waybillNumber.length > 0 ? [{ label: 'Waybill', value: job.waybillNumber }] : []),
+        ]
+      : []),
+  ];
+  return rows.length === 0 ? null : { rows };
+};
+
 const answerFor = (item: ChecklistItem, response: ChecklistResponse | undefined): string => {
   if (response === undefined) return '—';
   switch (item.responseType) {
@@ -281,13 +327,13 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
           },
         ]
       : []),
-    // BENCH-1: once, priced from the rates in force or the job's snapshot.
+    // BENCH-1, BENCH-QTY-1: quantity × rate, from the rates in force or the job's snapshot.
     ...(job.testBenchApplied
       ? [
           {
             description: 'Test bench fee',
-            detail: 'fixed test bench fee',
-            quantity: '1',
+            detail: 'test bench fee',
+            quantity: String(totals.testBenchLines[0]?.quantity ?? 1),
             rate: formatCurrency(totals.pricing.testBenchFee ?? 0),
             amount: formatCurrency(totals.testBenchTotal),
           },
@@ -376,6 +422,8 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
               { label: 'Year', value: String(machine.year) },
             ],
           },
+    received: receivedOf(job),
+
     jobDetails: [
       {
         label: 'Scheduled',
@@ -424,39 +472,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
       ...(definition.capturesRepairItem && job.dateReceived !== null
         ? [{ label: 'Date received', value: job.dateReceived }]
         : []),
-      /*
-       * ONE PART BOOKED IN reads exactly as it always has (Part number, Unit,
-       * Quantity received), so every job card already issued or previewed is
-       * unchanged. SEVERAL (TR-PARTS-1) are listed one row each, in order.
-       */
-      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.partNumber.length > 0
-        ? [{ label: 'Part number', value: job.repairItem.partNumber }]
-        : []),
-      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.description.length > 0
-        ? [{ label: 'Unit', value: job.repairItem.description }]
-        : []),
-      ...(definition.capturesRepairItem && repairItemsOf(job).length <= 1 && job.repairItem.quantity !== null
-        ? [{ label: 'Quantity received', value: String(job.repairItem.quantity) }]
-        : []),
-      ...(definition.capturesRepairItem && repairItemsOf(job).length > 1
-        ? repairItemsOf(job).map((item, index) => ({
-            label: `Part ${index + 1} received`,
-            value: [item.description, item.partNumber.length > 0 ? `(${item.partNumber})` : '', `× ${item.quantity ?? 1}`]
-              .filter((part) => part.length > 0)
-              .join(' '),
-          }))
-        : []),
-      ...(definition.collectedOnCompletion
-        ? [
-            {
-              label: 'Collection',
-              value: job.courierCollection ? 'Courier collection' : 'Customer collection',
-            },
-            ...(job.courierCollection && job.waybillNumber.length > 0
-              ? [{ label: 'Waybill', value: job.waybillNumber }]
-              : []),
-          ]
-        : []),
+      // The parts booked in and the collection: see `received` (PDF-RECV-1).
       {
         label: 'Technician',
         value: technician === null ? 'Unassigned' : userFullName(technician),

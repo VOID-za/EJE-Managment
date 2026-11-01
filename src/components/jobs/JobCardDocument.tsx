@@ -167,9 +167,18 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         </section>
       )}
 
-      {model.charges !== null && (
+      {(model.charges !== null || model.received !== null) && (
         <section className="mt-6">
           <SectionTitle>Labour, travel and parts</SectionTitle>
+          {/* PDF-RECV-1: the parts booked in and the collection, here and not under Job details. */}
+          {model.received !== null && (
+            <dl className="mb-3 space-y-0.5 text-xs text-steel-600" data-testid="job-card-received">
+              {model.received.rows.map((row) => (
+                <Row key={row.label} {...row} />
+              ))}
+            </dl>
+          )}
+          {model.charges !== null && (
           <table className="w-full border-collapse text-xs">
             <thead>
               <tr className="border-y border-steel-300 bg-steel-50 text-left">
@@ -241,6 +250,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
               </tr>
             </tfoot>
           </table>
+          )}
         </section>
       )}
 

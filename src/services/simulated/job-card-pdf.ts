@@ -286,8 +286,19 @@ const chargeLine = (sheet: Sheet, row: ChargeRow): void => {
 };
 
 const charges = (sheet: Sheet, model: JobCardModel): void => {
-  if (model.charges === null) return;
+  if (model.charges === null && model.received === null) return;
   sheet.sectionTitle('Labour, travel and parts');
+
+  /*
+   * PDF-RECV-1 (the tester, 1 November 2026): the parts booked in and the
+   * collection are printed HERE, first, and no longer under Job details. A
+   * document without prices (a courier's copy) still prints them.
+   */
+  if (model.received !== null) {
+    labelValueRows(sheet, model.received.rows, MARGIN, CONTENT_WIDTH);
+    sheet.move(GAP.line - 4);
+  }
+  if (model.charges === null) return;
 
   // Header band, as on screen.
   sheet.need(30);

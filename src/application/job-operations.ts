@@ -1415,6 +1415,47 @@ export const setTestBenchApplied = async (
   return saved;
 };
 
+/** The most test bench fees one job may carry (the database agrees, 0044). */
+export const TEST_BENCH_QUANTITY_MAX = 99;
+
+/**
+ * Sets HOW MANY test bench fees a job carries. BENCH-QTY-1 (the tester,
+ * 1 November 2026): 1 by default, quantity × the bench rate. The same rules as
+ * ticking the fee — whoever may capture on the job (its technician, or the
+ * office administratively), never once the customer has signed — and only
+ * while the fee is applied: a quantity of something not charged says nothing.
+ * A whole number from 1 to 99; audited with from → to.
+ */
+export const setTestBenchQuantity = async (
+  context: OperationContext,
+  job: Job,
+  quantity: number,
+): Promise<Job> => {
+  assertEditable(context, job);
+  assertCanCapture(context, job);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > TEST_BENCH_QUANTITY_MAX) {
+    throw new WorkflowError('That is not a valid test bench quantity.', [
+      { code: 'invalid_test_bench_quantity', message: `Enter a whole number from 1 to ${TEST_BENCH_QUANTITY_MAX}.` },
+    ]);
+  }
+  if (!job.testBenchApplied) {
+    throw new WorkflowError('The test bench fee is not applied to this job.', [
+      { code: 'test_bench_not_applied', message: 'Tick "Charge the test bench fee" first, then set how many.' },
+    ]);
+  }
+  if (job.testBenchQuantity === quantity) return job;
+
+  const saved = await context.repos.jobs.save({ ...job, testBenchQuantity: quantity });
+  await audit(context, {
+    jobId: job.id,
+    type: 'test_bench_changed',
+    summary: `Test bench fee quantity: ${quantity}`,
+    detail: `The job card now carries ${quantity} test bench fee${quantity === 1 ? '' : 's'} at the current rate.`,
+    changes: changesBetween('test bench', { quantity: job.testBenchQuantity }, { quantity }),
+  });
+  return saved;
+};
+
 export const addNote = async (
   context: OperationContext,
   job: Job,
