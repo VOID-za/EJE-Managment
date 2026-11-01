@@ -31,11 +31,11 @@ a gap nobody has decided about yet.
 | **Deployment mode** | The live site still runs as a **demonstration** deployment (demonstration switcher on, customer email `refuse`) — see GO-LIVE-1. |
 | **External integrations** | **None operational.** Microsoft 365 email (Microsoft Graph, sender `sales@ejeie.co.za`), WhatsApp (a new dedicated EJE number, Meta Cloud API) and Google Maps (Geocoding API) are built and tested against mocks only; every one shows **Not configured**. No real email, WhatsApp message or Google lookup has been sent or made. |
 | **Still outstanding** | Owner approval of every TESTED / DEPLOYED row; the external accounts and credentials above, then their real acceptance tests (`docs/staff-testing.md` N1–N9); the physical-device checks (rugged tablet and phone: `docs/staff-testing.md` H–J, L, M and O1–O6; MANDATE-1, MANDATE-2, UX-1); the off-site backup destination and the backup-key escrow holder (BACKUP-1, BACKUP-2); the production OCR decision (BD-21); GO-LIVE-1; the decommissioning of the retired tracker on the server (issue #41). The system is **not** complete while these remain. |
-| **Work items** | GitHub Issues (PROC-6), reconciled against this file on 1 November 2026. |
+| **Work items** | GitHub Issues (PROC-6), reconciled against this file on 1 November 2026: all 73 earlier issues reviewed, updated and labelled (15 closed — 13 answered business decisions, duplicate #42 of #55, audit umbrella #73); 21 issues filed for requirements that had none — ATT-OWN-1 #74, ATT-LOCK-1 #75, TS-ROLE-1 #76, TS-CSV-OFF-1 #77, PDF-UNREC-1 #78, INT-EMAIL #79, INT-WA #80, INT-MAP #81, device checks O1–O6 #82, GO-LIVE-1 #83, and the release batches of 25 October – 31 October #84–#93 and #94. Offline and tablet rows (OFF-*, OFF-QUEUE-*, CAP-REF-*, PWA-*) are tracked by MANDATE-1 #15 and MANDATE-2 #16; QA-4 and AUD-5 by ARCH-6 #22. |
 
 | ID | Requirement | Status and evidence |
 |---|---|---|
-| GO-LIVE-1 | **Before real customer data is used, the live site runs as a production deployment**: `EJE_DEPLOYMENT=production` (the demonstration switcher unreachable — see *A deployment declares itself*), real customer email configured and proven (MANDATE-3, INT-EMAIL-*), and the demonstration data question settled. Raised in the owner's notes of 25 October 2026 (issue #73, "Resolve demonstration-mode / demo-switcher configuration and confirm email delivery is genuinely configured before real customer data is used"). | **OPEN — owner action.** The code for the switch exists and is tested; production health on 1 November 2026 reports `deployment: demonstration`, `demoSwitcher: true`, `email: refuse`. Changing it is a production configuration change the owner must authorise. |
+| GO-LIVE-1 | **Before real customer data is used, the live site runs as a production deployment**: `EJE_DEPLOYMENT=production` (the demonstration switcher unreachable — see *A deployment declares itself*), real customer email configured and proven (MANDATE-3, INT-EMAIL-*), and the demonstration data question settled. Raised in the owner's notes of 25 October 2026 (issue #73, "Resolve demonstration-mode / demo-switcher configuration and confirm email delivery is genuinely configured before real customer data is used"). | **OPEN — owner action** (issue #83). The code for the switch exists and is tested; production health on 1 November 2026 reports `deployment: demonstration`, `demoSwitcher: true`, `email: refuse`. Changing it is a production configuration change the owner must authorise. |
 
 ### How this document is maintained
 
@@ -1562,7 +1562,7 @@ additive). **Every provider is tested with MOCKS only: no real Microsoft 365,
 Meta or Google account has been connected, and none of the three is claimed
 to work against the real service.** Nothing here is approved.
 
-**Confirmed decisions and outstanding setup — recorded 1 November 2026.** None of the three is operational, and none may be marked so until its real credentials are configured and its real acceptance tests (`docs/staff-testing.md` N1–N9) have passed.
+**Confirmed decisions and outstanding setup — recorded 1 November 2026** (issues #79 email, #80 WhatsApp, #81 Google Maps). None of the three is operational, and none may be marked so until its real credentials are configured and its real acceptance tests (`docs/staff-testing.md` N1–N9) have passed.
 
 | Integration | Decided | Outstanding (owner / external) |
 |---|---|---|
@@ -1589,7 +1589,7 @@ to work against the real service.** Nothing here is approved.
 
 ### The tester's attendance and timesheet changes — 1 November 2026 (DEPLOYED in `7c0ca94` with migration 0043; not yet approved)
 
-Asked for by the tester on 1 November 2026 ("Tester Feedback: Attendance and Timesheet Changes"). Commit `7c0ca94`; CI run 41342400983 green on every job; released 1 November 2026 with migration `0043_coordinator_attendance_only` (additive: `monthly_submissions.timesheet_period_id` may be NULL for a Coordinator only, enforced by the guard trigger; a Finance package may carry one attachment); live verification 46/46; no existing attendance, timesheet or submission record changed. *Moved here on 1 November 2026 from the integrations section, where the rows were first written.* Physical-device checks: `docs/staff-testing.md` O1–O6 (not yet done).
+Asked for by the tester on 1 November 2026 ("Tester Feedback: Attendance and Timesheet Changes"). Commit `7c0ca94`; CI run 41342400983 green on every job; released 1 November 2026 with migration `0043_coordinator_attendance_only` (additive: `monthly_submissions.timesheet_period_id` may be NULL for a Coordinator only, enforced by the guard trigger; a Finance package may carry one attachment); live verification 46/46; no existing attendance, timesheet or submission record changed. *Moved here on 1 November 2026 from the integrations section, where the rows were first written.* Physical-device checks: `docs/staff-testing.md` O1–O6 (not yet done; issue #82). Issues: ATT-OWN-1 #74, ATT-LOCK-1 #75, TS-ROLE-1 #76, TS-CSV-OFF-1 #77, PDF-UNREC-1 #78.
 
 | ID | Requirement | Status |
 |---|---|---|

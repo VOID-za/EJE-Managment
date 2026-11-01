@@ -106,3 +106,26 @@ in a comment on issue #1.
 
 The retired repository `VOID-za/eje-tracker` may remain as an archive. The EJE
 application must never depend on it, and does not.
+
+## Reconciled on 1 November 2026
+
+Every issue was re-checked against `docs/SCOPE.md`, the repository and the live
+release `7c0ca94`, and the record on each one says so (a dated status note at
+the top of its description, the original kept below, and an evidence comment):
+
+- **73 earlier issues reviewed.** Each implementing commit was confirmed to be
+  an ancestor of `7c0ca94` (deployed). Stale labels corrected (#14 blocked on
+  credentials; #29, #30, #72 built and awaiting approval); #19's title no
+  longer says it is blocked.
+- **15 closed:** 13 business decisions the owner has answered whose
+  implementation, where there is one, stays open in its own requirement issue
+  (#33–#40, #49, #56, #57, #61, #62); #42, a duplicate of #55 (QA-5); and the
+  audit umbrella #73, its findings mapped to requirement issues. Nothing was
+  closed as approved work: no requirement has owner approval yet.
+- **21 filed** for requirements that had none (#74–#94), including the
+  1 November attendance and timesheet decisions, the three integrations (none
+  operational), the device checks O1–O6 and GO-LIVE-1.
+- The labels `status:APPROVED`, `status:DONE` and `status:SUPERSEDED`, defined
+  above but never created, now exist. `status:DONE` on a closed decision means
+  *answered by the owner*, not an approved implementation.
+- #1 stays open: the server half of the tracker's retirement (#41) is not done.

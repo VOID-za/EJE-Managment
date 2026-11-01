@@ -6,21 +6,21 @@
 
 | # | What | Why it is open | Who acts | Tracked in |
 |---|---|---|---|---|
-| 1 | **Owner approval** of every row marked TESTED / DEPLOYED — not yet approved | Approval is the owner's act (PROC-4); nothing is DONE without it | Owner | Each requirement's GitHub issue (`status:TESTING`) |
-| 2 | **Microsoft 365 email** — Microsoft Graph, sender `sales@ejeie.co.za` | Built and tested with mocks; no app registration or credentials yet; no real email sent | EJE's Microsoft 365 administrator, then the operator | INT-EMAIL-1…5, MANDATE-3; `docs/integrations-setup.md` §3; staff-testing N1–N3 |
-| 3 | **WhatsApp — a new dedicated EJE number** (the office WhatsApp number stays untouched) | Built and tested with mocks; no Meta account, dedicated number or credentials yet; no real message sent | Owner with Meta, then the operator | INT-WA-1…4; `docs/integrations-setup.md` §1–2; staff-testing N4–N6, N8 |
-| 4 | **Google Maps — Geocoding API** (Google coordinates ≤ 30 days, place IDs kept, office coordinates kept) | Built and tested with mocks; no API key or billing yet; no real lookup made | Owner (Google Cloud), then the operator | INT-MAP-1…4; `docs/integrations-setup.md` §4; staff-testing N7, N9 |
-| 5 | **Physical-device checks — attendance and timesheets** | O1–O6 not yet done on the real tablet and phone | Staff | `docs/staff-testing.md` §O |
-| 6 | **Physical-device checks — the rugged tablet** (install, camera, offline job, gloved use, print, share, update) | Automation cannot hold the device | Staff | MANDATE-1, MANDATE-2, UX-1; `docs/staff-testing.md` H–J, L, M |
-| 7 | **GO-LIVE-1** — production mode before real customer data | The live site is still a demonstration deployment (switcher on, email `refuse`) | Owner authorises; operator switches | GO-LIVE-1 |
-| 8 | **Off-site backup destination; backup-key escrow holder** | Nightly backups and weekly restore tests run on the server; no off-site copy or named escrow holder yet | Owner | BACKUP-1, BACKUP-2 |
-| 9 | **Production OCR** | Measured on the demonstration; off in production until the owner decides with limits | Owner | BD-21, LIB-5 |
+| 1 | **Owner approval** of every row marked TESTED / DEPLOYED — not yet approved | Approval is the owner's act (PROC-4); nothing is DONE without it | Owner | Each requirement's GitHub issue (`status:TESTING`) — 70 open on 1 November 2026 |
+| 2 | **Microsoft 365 email** — Microsoft Graph, sender `sales@ejeie.co.za` | Built and tested with mocks; no app registration or credentials yet; no real email sent | EJE's Microsoft 365 administrator, then the operator | #79, #14; INT-EMAIL-1…5, MANDATE-3; `docs/integrations-setup.md` §3; staff-testing N1–N3 |
+| 3 | **WhatsApp — a new dedicated EJE number** (the office WhatsApp number stays untouched) | Built and tested with mocks; no Meta account, dedicated number or credentials yet; no real message sent | Owner with Meta, then the operator | #80; INT-WA-1…4; `docs/integrations-setup.md` §1–2; staff-testing N4–N6, N8 |
+| 4 | **Google Maps — Geocoding API** (Google coordinates ≤ 30 days, place IDs kept, office coordinates kept) | Built and tested with mocks; no API key or billing yet; no real lookup made | Owner (Google Cloud), then the operator | #81; INT-MAP-1…4; `docs/integrations-setup.md` §4; staff-testing N7, N9 |
+| 5 | **Physical-device checks — attendance and timesheets** | O1–O6 not yet done on the real tablet and phone | Staff | #82; `docs/staff-testing.md` §O |
+| 6 | **Physical-device checks — the rugged tablet** (install, camera, offline job, gloved use, print, share, update) | Automation cannot hold the device | Staff | #15, #16, #17; `docs/staff-testing.md` H–J, L, M |
+| 7 | **GO-LIVE-1** — production mode before real customer data | The live site is still a demonstration deployment (switcher on, email `refuse`) | Owner authorises; operator switches | #83 (GO-LIVE-1) |
+| 8 | **Off-site backup destination; backup-key escrow holder** | Nightly backups and weekly restore tests run on the server; no off-site copy or named escrow holder yet | Owner | #6, #23 (BACKUP-1, BACKUP-2) |
+| 9 | **Production OCR** | Measured on the demonstration; off in production until the owner decides with limits | Owner | #63, #26 (BD-21, LIB-5) |
 | 10 | **Retired tracker on the server** | `eje-tracker` service and database not yet decommissioned on the VPS | Owner authorises; operator | Issue #41 (PROJECT-TRACKING-VPS) |
-| 11 | **Legacy multi-site customers** | The one-site database constraint waits until the preflight count reads zero | The office, in the application | SITE-1, SITE-2 |
+| 11 | **Legacy multi-site customers** | The one-site database constraint waits until the preflight count reads zero | The office, in the application | #85 (SITE-1, SITE-2) |
 
 **Decided, and deliberately NOT outstanding:**
 
-- **Submitted monthly attendance stays locked, and there is no attendance correction workflow** (ATT-LOCK-1, the owner's decision of 1 November 2026). Nobody — the office included — edits another person's attendance (ATT-OWN-1).
+- **Submitted monthly attendance stays locked, and there is no attendance correction workflow** (ATT-LOCK-1, the owner's decision of 1 November 2026; issue #75). Nobody — the office included — edits another person's attendance (ATT-OWN-1).
 - A Coordinator completes no timesheet (TS-ROLE-1); the technician has no CSV export of their own timesheet (TS-CSV-OFF-1); attendance and timesheet PDFs list recorded days only (PDF-UNREC-1).
 - Offline documents and video (OFF-3/OFF-12, BD-30) and byte-range upload resume (BD-29) — decided, not to be built.
 
