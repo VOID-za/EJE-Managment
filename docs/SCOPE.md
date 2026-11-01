@@ -1589,7 +1589,7 @@ to work against the real service.** Nothing here is approved.
 
 ### The tester's job, bench-fee and job-card changes — 2 November 2026 (DEPLOYED in `5d726d3` with migration 0044; not yet approved)
 
-Asked for by the tester ("EJE — Full outstanding work completion", Part 1). Migration `0044_test_bench_quantity` (additive). The tester's screenshot for PDF-RECV-1 was referred to but not received; the change follows the written description.
+Asked for by the tester ("EJE — Full outstanding work completion", Part 1). Migration `0044_test_bench_quantity` (additive). Issue #95; device checks P1–P6 in `docs/staff-testing.md`. The tester's screenshot for PDF-RECV-1 was referred to but not received; the change follows the written description.
 
 | ID | Requirement | Status |
 |---|---|---|
