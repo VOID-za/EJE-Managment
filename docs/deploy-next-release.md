@@ -52,6 +52,28 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### DEPLOYED — 1 November 2026: `b946fd3` — dedicated EJE WhatsApp number; Google-compliant pin retention (no migration)
+
+**`b946fd3` is live** (full SHA `b946fd3b531d7049be592ec9c9390e8065abfa0f`; CI run
+41312989337 completed, success, every job and step green, including rollback
+compatibility of `42e71fc` against 0042). Read-only check passed
+(`srv2000625`, script SHA-256 `5ab56162…b3c6`, 179 983 MB free). Released with
+`-ExpectPending none`: backup proven
+`/var/backups/eje/eje-eje_production-2026-11-01T14-17-09Z`; preflight found all
+43 shipped migrations applied; database not touched; switched 14:17:21Z,
+healthy 14:17:23Z. Rollback target: `/opt/eje/releases/42e71fc` (same schema).
+
+Verified afterwards from outside, read-only (21/21): health `b946fd3`, ok,
+PostgreSQL reachable, email `refuse`; all three integrations Not configured;
+WhatsApp shown as "WhatsApp — dedicated EJE number", naming
+`WHATSAPP_DEDICATED_NUMBER` as missing, the office number "Not connected and
+never used", the real API test not passed; a test message refused (no test
+recipient), nothing sent; no credential-shaped value in the response; every
+site pin identical before and after (11 sites, 9 office-verified, 0 from
+Google); the office pin says "Entered by the office: kept" at 1440, 768 and
+390 wide; no page errors. Job counts unchanged (open 64, closed 16, signed 39,
+issued 26); EJE-2050/2046/2041/2001 job cards byte-identical.
+
 ### DEPLOYED — 1 November 2026: `42e71fc` — WhatsApp, Google Maps and email integration, with migration 0042
 
 **DEPLOYED — 1 November 2026: `42e71fc` is live** (full SHA
