@@ -592,6 +592,32 @@ Automated on desktop (1440), tablet (768) and phone (390) — `scripts/forms-reg
 | O4 | As a **Master** or **Coordinator**, open EJE Monthly Forms, choose last month, **View forms** for a technician | Their attendance (and timesheet) open read only — Preview, Print, Download — with no Send, no edit; "Everybody's attendance as a spreadsheet" is under the list |
 | O5 | As a **Technician**, open Timesheets | No Export CSV button; Preview, Print and the PDF are there |
 | O6 | Record only three days of a month, then Preview the monthly attendance and timesheet PDFs | Only the recorded days appear, in order; no blank rows, no "NOT RECORDED"; the totals add up the lines shown; the note says only recorded days are listed |
+## P. Job creation, the test bench quantity and the job card — the tester's changes (2 November 2026)
+
+Automated on desktop (1440), tablet (768) and phone (390) — `scripts/forms-regression.mjs`; the PDF placement and the bench-fee arithmetic in the unit suite. These are the checks a person makes on the real tablet and phone, on a TEST job only.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| P1 | Create New Job → Installation → leave **Machine (optional)** empty → Create job | The job is created with no machine; the job card prints no machine block |
+| P2 | The same for a **Service** job; then create another Service choosing a registered machine | Both are created; the second carries its machine as before |
+| P3 | On a Test & Repair job in progress, tick **Charge the test bench fee** | *Quantity* appears set to **1**; the line reads 1 × the bench rate |
+| P4 | Change Quantity to **3** and tap away | The line reads 3 × rate = amount; the job's Subtotal, VAT and Total rise by exactly 2 × rate (incl. VAT); try 0 or 100 — refused with "Enter a whole number from 1 to 99" |
+| P5 | Preview the job card PDF of that job (with two or more parts booked in) | Under **Labour, travel and parts**: the parts received (Part 1 received, Part 2 received …), the Collection line, then the price table with *Test bench fee — Qty 3 — Rate — Amount*. **Job details** no longer lists the parts received or the collection |
+| P6 | Open an already-signed job card that carried the bench fee | Its amounts are exactly as before — nothing repriced |
+
+## Physical-device acceptance still outstanding (all of it, in one place)
+
+Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
+
+| Area | Checks | Issue |
+|---|---|---|
+| Install, update, camera, print, share on the rugged tablet | H, I, J1–J8 | #16 MANDATE-2 |
+| A full job captured with the network off; offline signature | the offline checks, 23a | #15 MANDATE-1, OFF-SIG |
+| Gloved use in daylight, every screen on the tablet | L | #17 UX-1 |
+| The tester's critical fixes on tablet and phone | M | — |
+| Real accounts: Microsoft 365, WhatsApp, Google Maps | N1–N9 | #79, #80, #81 |
+| Attendance and timesheets | O1–O6 | #82 |
+| Job creation, bench quantity, job card | P1–P6 | — |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

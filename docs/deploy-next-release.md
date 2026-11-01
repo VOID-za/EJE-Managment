@@ -52,6 +52,32 @@ site's intended settings (`docs/demonstration-isolation.md`): its database
 holds fictional data only, and nothing real may be entered while the switcher
 is on.
 
+### DEPLOYED — 1 November 2026 (23:13 UTC): `5d726d3` — optional machine on installations and services; test bench quantity; parts received in Labour, travel and parts (migration 0044)
+
+**`5d726d3` is live** (full SHA `5d726d3972710dcd4bf9c66341cccd6b13298be0`; CI run
+41358500488 completed, success, every job and step green, including the PostgreSQL
+tests and rollback compatibility of `7c0ca94` against 0044; the run before it,
+41355889260, failed one forms-regression step — the test reused a form the new
+behaviour leaves — fixed in `5d726d3`). Read-only check passed (`srv2000625`, script
+SHA-256 `5ab56162…b3c6`, 177 872 MB free). Released with
+`-ExpectPending 0044_test_bench_quantity`: backup proven
+`/var/backups/eje/eje-eje_production-2026-11-01T23-13-05Z`; 0044 applied; switched
+23:13:18Z, healthy 23:13:20Z. Rollback target: `/opt/eje/releases/7c0ca94`.
+
+Verified afterwards (14/14 and 46/46): health `5d726d3`, ok, PostgreSQL reachable;
+the new-job form offers *Machine (optional)* for an installation and a service at
+1440, 768 and 390 wide (nothing submitted); every job reads test bench quantity 1;
+email and WhatsApp Not configured, Maps configured (key loaded by the restart), no
+key in any response, page or the new browser bundle; the attendance and timesheet
+regression unchanged. Data identical before and after: every user's attendance,
+timesheet lines and submissions, all 11 site pins, the frozen prices of all 55
+signed jobs, job counts (65/16/40/26) and four job cards byte-identical. No error in
+the service log since the switch.
+
+Also on 2 November 2026, outside the release: the retired tracker removed from the
+VPS after a verified archive (issue #41), and local OCR switched on for this
+testing environment (`docs/library-ocr.md` §6, issue #63).
+
 ### DEPLOYED — 1 November 2026: `7c0ca94` — own attendance only; no Coordinator timesheet; no technician CSV export; PDFs list recorded days (migration 0043)
 
 **`7c0ca94` is live** (full SHA `7c0ca948ddd8a996517e68a9d9f83ad8c24c7ea9`; CI run

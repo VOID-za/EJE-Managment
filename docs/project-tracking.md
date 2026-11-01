@@ -129,3 +129,15 @@ the top of its description, the original kept below, and an evidence comment):
   above but never created, now exist. `status:DONE` on a closed decision means
   *answered by the owner*, not an approved implementation.
 - #1 stays open: the server half of the tracker's retirement (#41) is not done.
+
+## The tracker removed from the server — 2 November 2026
+
+The last copy of the retired tracker is gone from the VPS: the `eje-tracker`
+service and its import timer, the `eje_tracker` database and its role, the
+`eje-tracker` system user (removed from the `eje` group), `/srv/eje-tracker`,
+`/etc/eje-tracker` and its private EJE checkout `/srv/eje`. A restorable archive
+was made and verified first (`/root/eje-ops/tracker-archive-20261101T221543Z`,
+root-only: the database dump restored into a scratch database with every
+table's row count matching, the files as a checksummed tarball). EJE was not
+restarted or touched by it. **GitHub Issues are now the only project-tracking
+system.** Left for the owner: the `track.syncza.co.za` route in Cloudflare (#41).

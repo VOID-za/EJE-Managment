@@ -1,8 +1,8 @@
-# What is actually left — 1 November 2026, against the live release `7c0ca94`
+# What is actually left — 2 November 2026, against the live release `5d726d3`
 
 *Current. Everything below the line further down is the earlier record (20 and 26 October), kept as it was written. The requirements themselves are in `docs/SCOPE.md` (see its "Current production baseline"); the work items are GitHub Issues.*
 
-**Where things stand.** `7c0ca94` is live (previous `b946fd3`); migrations `0000`…`0043` are applied; CI run 41342400983 green; live verification 46/46. Every requirement with an implementing commit up to `7c0ca94` is deployed. **Nothing is approved** unless its row says so: deployed and tested is not approved. The EJE system is **not complete** while the items below remain.
+**Where things stand.** `5d726d3` is live (previous `7c0ca94`); migrations `0000`…`0044` are applied; CI run 41358500488 green; live verification 14/14 and 46/46, live data identical before and after. Every requirement with an implementing commit up to `5d726d3` is deployed. No requirement that is sufficiently defined is left unbuilt: what remains below is approval, a physical device, an external account, or an owner decision. **Nothing is approved** unless its row says so: deployed and tested is not approved. The EJE system is **not complete** while the items below remain.
 
 | # | What | Why it is open | Who acts | Tracked in |
 |---|---|---|---|---|
@@ -10,12 +10,12 @@
 | 2 | **Microsoft 365 email** — Microsoft Graph, sender `sales@ejeie.co.za` | Built and tested with mocks; no app registration or credentials yet; no real email sent | EJE's Microsoft 365 administrator, then the operator | #79, #14; INT-EMAIL-1…5, MANDATE-3; `docs/integrations-setup.md` §3; staff-testing N1–N3 |
 | 3 | **WhatsApp — a new dedicated EJE number** (the office WhatsApp number stays untouched) | Built and tested with mocks; no Meta account, dedicated number or credentials yet; no real message sent | Owner with Meta, then the operator | #80; INT-WA-1…4; `docs/integrations-setup.md` §1–2; staff-testing N4–N6, N8 |
 | 4 | **Google Maps — Geocoding API** (Google coordinates ≤ 30 days, place IDs kept, office coordinates kept) | **CONFIGURED AND TECHNICALLY VERIFIED** on 1 November 2026: key set on the server, IPv4 and IPv6 look-ups OK, the live service restarted healthy on `7c0ca94`, the Sandton City admin test returned one exact ROOFTOP match, the key appears in no browser file, response or log, no customer/site/job data changed. **Not yet operational** — still needed: the first real customer-site pin, device checks N7 and N9, and EJE's status reading Connected. No site record is changed for this without the owner's authorisation | The office (a real address, when the owner authorises), staff | #81; INT-MAP-1…4; `docs/integrations-setup.md` §4; staff-testing N7, N9 |
-| 5 | **Physical-device checks — attendance and timesheets** | O1–O6 not yet done on the real tablet and phone | Staff | #82; `docs/staff-testing.md` §O |
+| 5 | **Physical-device checks — attendance and timesheets; job creation, bench quantity, job card** | O1–O6 and P1–P6 not yet done on the real tablet and phone | Staff | #82; `docs/staff-testing.md` §O, §P |
 | 6 | **Physical-device checks — the rugged tablet** (install, camera, offline job, gloved use, print, share, update) | Automation cannot hold the device | Staff | #15, #16, #17; `docs/staff-testing.md` H–J, L, M |
 | 7 | **GO-LIVE-1** — production mode before real customer data | The live site is still a demonstration deployment (switcher on, email `refuse`) | Owner authorises; operator switches | #83 (GO-LIVE-1) |
 | 8 | **Off-site backup destination; backup-key escrow holder** | Nightly backups and weekly restore tests run on the server; no off-site copy or named escrow holder yet | Owner | #6, #23 (BACKUP-1, BACKUP-2) |
-| 9 | **Production OCR** | Measured on the demonstration; off in production until the owner decides with limits | Owner | #63, #26 (BD-21, LIB-5) |
-| 10 | **Retired tracker on the server** | `eje-tracker` service and database not yet decommissioned on the VPS | Owner authorises; operator | Issue #41 (PROJECT-TRACKING-VPS) |
+| 9 | **OCR for a real-customer production deployment** | Local OCR runs on the TESTING environment since 2 November 2026 (default limits; ≈5.3 s a page, ≈300 MB, the app unaffected — `docs/library-ocr.md` §6). Whether a future real-customer production deployment runs it, and with which limits, is the owner's decision | Owner | #63, #26 (BD-21, LIB-5) |
+| 10 | **The `track.syncza.co.za` route in Cloudflare** | The retired tracker was removed from the VPS on 2 November 2026 (archived first); the Cloudflare tunnel still lists `track.syncza.co.za → 127.0.0.1:3100`, which now answers nothing. The route (and, if unused, the tunnel and `cloudflared` on the server) is removed in EJE's Cloudflare account | Owner | Issue #41 |
 | 11 | **Legacy multi-site customers** | The one-site database constraint waits until the preflight count reads zero | The office, in the application | #85 (SITE-1, SITE-2) |
 
 **Decided, and deliberately NOT outstanding:**

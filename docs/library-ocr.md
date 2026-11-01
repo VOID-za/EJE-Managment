@@ -414,3 +414,45 @@ machine that also serves the tablets.
 part of this work.** The packages above were installed in the development
 container to take these measurements. The commands are written down so EJE can
 run them when they choose; this session has no access to the VPS.
+
+---
+
+## 6. Switched on for the TESTING environment — 2 November 2026
+
+*The owner's authorisation of 2 November 2026: enable local OCR for the EJE testing environment with the existing defaults, measure it, and do not enable it for a future real-customer production deployment.*
+
+There is no separate staging service on the VPS: the live site `eje.syncza.co.za` IS the testing environment, and it declares itself `EJE_DEPLOYMENT=demonstration`. So:
+
+```bash
+apt-get install -y tesseract-ocr tesseract-ocr-eng     # tesseract 5.3.4; poppler-utils was already there
+# /etc/eje/eje.env (backed up first; nothing else changed):
+EJE_OCR=local                                         # every limit at its default
+```
+
+The web application needs no restart for this: it only records a scan on `library_ocr_queue`; the worker reads it. The worker runs as `eje`, niced, with the service's environment:
+
+```bash
+systemd-run --wait --pipe --collect --uid=eje --gid=eje -p Nice=10 \
+  -p EnvironmentFile=/etc/eje/eje.env -p WorkingDirectory=/opt/eje/app \
+  /usr/bin/node node_modules/.bin/tsx src/ops/library-ocr.ts --max 5
+```
+
+### Measured on the VPS (4 cores, 16 GB)
+
+Two synthetic scanned manuals uploaded through the application (10 and 3 A4 pages, 300 dpi greyscale, no text layer — `pdftotext` returns nothing), each page carrying a heading, an alarm number and thirty paragraphs of machine-manual vocabulary:
+
+| | |
+|---|---|
+| Pages read | 13 of 13, 0 failed, nothing truncated |
+| Wall clock | **69 s** for both (≈ **5.3 s a page**) |
+| CPU | 133 s user — tesseract uses several cores; peak 318 % of 400 % |
+| Memory | peak ≈ 300 MB for the worker and its child processes; the Node worker ≈ 140 MB |
+| Text | 33 987 and 10 240 characters, `source: ocr`, every page indexed |
+| Search | a technician found all 10 alarm numbers of the 10-page scan |
+| The live application during the run | health answered in 4–13 ms; no error logged |
+
+This is about **four to five times faster per page** than the 23–25 s measured in the development container in §5 (that container ran single-threaded); a 40-page document would take roughly three and a half minutes, well inside the 20-minute deadline. The limits were NOT changed — raising them needs its own evidence and decision.
+
+A first run read noise: the sample generator had written 3-channel JPEGs while declaring them grey, so the pages decoded as overlapping copies. The engine read what was there; the samples were fixed, the two faulty test documents archived, and the run repeated.
+
+**Production:** not enabled for a future real-customer deployment. `npm run preflight` still warns when `EJE_OCR=local` meets `EJE_DEPLOYMENT=production` (BD-21).
