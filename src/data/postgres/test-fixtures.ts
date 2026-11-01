@@ -109,9 +109,7 @@ export const seedBaseline = async (db: Database): Promise<void> => {
   await db
     .insert(schema.customers)
     .values({ id: IDS.otherCustomer, name: 'Kruger Engineering', accountNumber: 'KRU-001' });
-  await db
-    .insert(schema.sites)
-    .values({ id: IDS.otherSite, customerId: IDS.otherCustomer, name: 'Benoni' });
+  await db.execute(sql`insert into sites (id, customer_id, name) values (${IDS.otherSite}, ${IDS.otherCustomer}, 'Benoni')`);
   await db.insert(schema.contacts).values({
     id: IDS.otherContact,
     customerId: IDS.otherCustomer,
