@@ -84,9 +84,9 @@ export const seedBaseline = async (db: Database): Promise<void> => {
   await db
     .insert(schema.customers)
     .values({ id: IDS.customer, name: 'ABC Engineering', accountNumber: 'ABC-001' });
-  await db
-    .insert(schema.sites)
-    .values({ id: IDS.site, customerId: IDS.customer, name: 'Isando' });
+  // Plain SQL, naming only the columns every migration has: the upgrade tests
+  // seed a database cut off at an older migration (0042 added pin columns).
+  await db.execute(sql`insert into sites (id, customer_id, name) values (${IDS.site}, ${IDS.customer}, 'Isando')`);
   await db.insert(schema.contacts).values({
     id: IDS.contact,
     customerId: IDS.customer,

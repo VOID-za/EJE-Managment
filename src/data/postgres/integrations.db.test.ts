@@ -194,7 +194,8 @@ describeDb('migration 0042 on PostgreSQL', () => {
     it('round trips the pin record, and an answer for an address the site no longer has is dropped', async () => {
       const customers = new PostgresCustomerRepository(db);
       const site = (await customers.findSiteById(asSiteId(IDS.site)))!;
-      const queued = locationAfterSave(null, { ...site, latitude: null, longitude: null }, IDS.master, NOW);
+      // The fixture site has no address; one with an address is what is geocoded.
+      const queued = locationAfterSave(null, { ...site, addressLine1: '3 Wadeville Boulevard', city: 'Germiston', latitude: null, longitude: null }, IDS.master, NOW);
       const saved = await customers.saveSite(queued);
       expect(siteLocationOf(saved)).toMatchObject({ status: 'pending', nextAttemptAt: NOW });
       expect((await customers.listSitesDueForGeocode(NOW, 5)).map((entry) => entry.id)).toEqual([site.id]);

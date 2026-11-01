@@ -290,7 +290,11 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
      * re-send once the deployment is configured. `delivered` is the one state
      * no adapter may reach on its own, and nothing here reaches it.
      */
-    expect(['failed', 'pending_delivery']).toContain(issued.data.delivery.state);
+    // INT-EMAIL-3: the response is decided inside the transaction, when the email is
+    // queued (sending); the outcome is recorded by the drain after the commit.
+    expect(['sending', 'failed', 'pending_delivery']).toContain(issued.data.delivery.state);
+    const [after] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
+    expect(after?.status).toBe('office_handling');
     expect(issued.data.delivery.state).not.toBe('delivered');
     expect(await db.select().from(schema.jobLabour).where(eq(schema.jobLabour.jobId, id))).toHaveLength(1);
   });
@@ -380,7 +384,9 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     const types = events.map((event) => event.type);
     expect(types).toContain('pdf_generated');
     expect(types).toContain('job_submitted');
-    expect(types).toContain('delivery_state_changed');
+    // INT-EMAIL-3: the customer email is queued in the issue, and its attempt recorded.
+    expect(types).toContain('customer_email_queued');
+    expect(types).toContain('customer_email_failed');
   });
 
   /* -- 7. the signed children are untouched -------------------------------- */
@@ -562,7 +568,7 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
       .select()
       .from(schema.auditEvents)
       .where(eq(schema.auditEvents.jobId, id));
-    expect(events.map((event) => event.type)).toContain('delivery_state_changed');
+    expect(events.map((event) => event.type)).toContain('customer_email_queued');
     expect(jobNumber).toMatch(/^EJE-/u);
   });
 

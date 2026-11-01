@@ -144,8 +144,17 @@ export const signedJobCardValues = async (
   };
 };
 
-/** The job's delivery summary, kept in step with its newest customer email. */
-const deliveryFor = (job: Job, email: CustomerEmail, now: IsoDateTime, attempted: boolean): DeliveryRecord => {
+/**
+ * The job's delivery summary, kept in step with its newest customer email.
+ *
+ * ATTEMPTS ARE COUNTED WHEN THEY BEGIN. PostgreSQL keeps one `delivery_attempts`
+ * row per attempt number, so the count must name the attempt in hand: queuing
+ * an email begins attempt n+1 (shown as sending — or failed, when it is held
+ * for the office), the outcome of that FIRST send updates the same attempt,
+ * and every later automatic attempt (after a back-off) is the next number.
+ * Incremental, so a job issued before the outbox keeps its earlier attempts.
+ */
+const deliveryFor = (job: Job, email: CustomerEmail, now: IsoDateTime, newAttempt: boolean): DeliveryRecord => {
   const kind: DeliveryFailureKind | null =
     email.failureKind === null
       ? null
@@ -167,19 +176,19 @@ const deliveryFor = (job: Job, email: CustomerEmail, now: IsoDateTime, attempted
     acceptedAt: email.state === 'sent' ? (email.sentAt ?? now) : null,
     confirmedAt: null,
     updatedAt: now,
-    attempts: (previous?.attempts ?? 0) + (attempted ? 1 : 0),
+    attempts: (previous?.attempts ?? 0) + (newAttempt ? 1 : 0),
     failureReason: email.state === 'failed' || email.state === 'attention' ? email.failureReason : '',
     failureKind: email.state === 'failed' || email.state === 'attention' ? kind : null,
   };
 };
 
-const syncJobDelivery = async (context: OperationContext, email: CustomerEmail, attempted: boolean): Promise<void> => {
+const syncJobDelivery = async (context: OperationContext, email: CustomerEmail, newAttempt: boolean): Promise<void> => {
   if (email.jobId === null) return;
   const job = await context.repos.jobs.findById(email.jobId as JobId);
   if (job === null || job.finalDocument === null) return;
   // Only the email for the document the job carries now speaks for it.
   if (email.attachment !== null && email.attachment.storageKey !== job.finalDocument.storageKey) return;
-  await context.repos.jobs.save({ ...job, delivery: deliveryFor(job, email, context.services.clock.now(), attempted) });
+  await context.repos.jobs.save({ ...job, delivery: deliveryFor(job, email, context.services.clock.now(), newAttempt) });
 };
 
 interface Composition {
@@ -261,14 +270,25 @@ export const queueSignedJobCardEmail = async (
   options: {
     readonly idempotencyKey?: string;
     readonly retryOf?: CustomerEmail | null;
+    /** Refuse rather than return an email that exists already (a retry). */
+    readonly onlyNew?: boolean;
   } = {},
 ): Promise<CustomerEmail> => {
+  const alreadyThere = (): WorkflowError =>
+    refuse(
+      `${job.jobNumber}'s email is already on its way.`,
+      'delivery_in_flight',
+      'Another retry of this email was made at the same moment. Wait for it rather than sending the customer a second copy.',
+    );
   const document = job.finalDocument;
   if (document === null) throw refuse(`${job.jobNumber} has no signed job card to send.`, 'no_final_document', 'Issue the job card first.');
 
   const key = options.idempotencyKey ?? signedJobCardKey(job, document.storageKey);
   const existing = await context.repos.customerEmails.findByIdempotencyKey(key);
-  if (existing !== null) return existing;
+  if (existing !== null) {
+    if (options.onlyNew === true) throw alreadyThere();
+    return existing;
+  }
 
   const retryOf = options.retryOf ?? null;
   const pinned =
@@ -310,6 +330,7 @@ export const queueSignedJobCardEmail = async (
 
   const written = await context.repos.customerEmails.insert(email);
   if (written === 'duplicate') {
+    if (options.onlyNew === true) throw alreadyThere();
     const live = (await context.repos.customerEmails.listForJob(job.id)).find(
       (candidate) =>
         (candidate.state === 'queued' || candidate.state === 'sending' || candidate.state === 'sent') &&
@@ -339,7 +360,7 @@ export const queueSignedJobCardEmail = async (
       link: `/jobs/${job.jobNumber}`,
     });
   }
-  await syncJobDelivery(context, email, false);
+  await syncJobDelivery(context, email, true);
   return email;
 };
 
@@ -500,7 +521,8 @@ export const recordCustomerEmailOutcome = async (
       });
     }
   }
-  await syncJobDelivery(context, next, true);
+  // The first send was counted when it was queued; a later one is a new attempt.
+  await syncJobDelivery(context, next, email.attempts > 1);
   return next;
 };
 
@@ -637,6 +659,7 @@ export const retryCustomerEmail = async (
     // Never the automatic key: a retry is its own, new record.
     idempotencyKey: latest === null ? signedJobCardKey(job, document.storageKey) : `${signedJobCardKey(job, document.storageKey)}:retry:${history.length}`,
     retryOf: latest,
+    onlyNew: true,
   });
   await audit(context, {
     jobId: job.id,
