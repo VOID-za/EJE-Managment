@@ -224,11 +224,14 @@ describe('the state machine enforces every status write', () => {
       ['review', 'office_handling'],
       ['office_handling', 'awaiting_po'],
       ['awaiting_delivery', 'awaiting_po'],
-      ['awaiting_po', 'invoiced'],
+      ['awaiting_po', 'awaiting_invoice_no'],
+      ['awaiting_invoice_no', 'invoiced'],
       ['submitted', 'office_handling'],
       ['completion', 'customer_signature'],
     ];
     const illegal: readonly (readonly [JobStatus, JobStatus])[] = [
+      // INV-FLOW-1: the PO step cannot be skipped.
+      ['awaiting_po', 'invoiced'],
       ['completion', 'review'],
       ['in_progress', 'review'],
       ['closed', 'review'],

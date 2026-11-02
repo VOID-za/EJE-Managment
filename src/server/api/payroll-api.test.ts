@@ -45,7 +45,8 @@ describe('monthly payroll over HTTP', () => {
     expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, {})).status).toBe(422); // weekdays unconfirmed
     const submitted = await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true });
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(422);
+    // RESUBMIT-1: submitting again replaces the submission — still one.
+    expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(200);
     const master = await signedInAs(DEMO_USERS.master);
     expect((await master.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(403);
 

@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (5d726d3) against a database at 0045
+      - name: Rollback compatibility — the live release (6fdb142) against a database at 0046
         run: bash scripts/release/rollback-compat.sh
 
   browser:
@@ -357,6 +357,25 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run standby-check
+
+      # The tester's critical fixes of 2 November 2026 through the screen:
+      # attendance and timesheet filters, resubmission and file names, the Job
+      # Complete steps and a finger-drawn signature checked in the saved data
+      # and the issued PDF, the PO → invoice workflow, the Inbox subtabs.
+      - name: Tester fixes — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run tester-fixes-check
+
+      - name: Tester fixes — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run tester-fixes-check
+
+      - name: Tester fixes — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run tester-fixes-check
 
       - name: Integrations regression — desktop (simulated providers)
         env:

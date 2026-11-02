@@ -537,7 +537,7 @@ await step('confirming the delivery records it, and does NOT close EJE-1065', as
 await step('the Inbox holds EJE-1065 for office handling, and Mark handled moves it to Awaiting PO', async () => {
   await visit('/notifications');
   // The five tabs, for the office.
-  for (const name of ['Inbox', 'Handled', 'Simulated Outbox', 'Awaiting PO', 'Invoiced']) {
+  for (const name of ['Inbox', 'Handled', 'Simulated Outbox', 'Awaiting PO', 'Awaiting Invoice No', 'Invoiced']) {
     await page.getByRole('tab', { name: new RegExp(`^${name}`) }).waitFor({ timeout: 10000 });
   }
   const card = page.getByTestId('office-handling-EJE-1065');
@@ -549,18 +549,29 @@ await step('the Inbox holds EJE-1065 for office handling, and Mark handled moves
   await page.getByTestId('awaiting-po-EJE-1065').waitFor({ timeout: 15000 });
 });
 
-await step('saving with no Invoice No keeps EJE-1065 Awaiting PO, and says why', async () => {
+await step('saving with no PO number keeps EJE-1065 Awaiting PO, and says why (INV-FLOW-1)', async () => {
   const card = page.getByTestId('awaiting-po-EJE-1065');
   await card.getByRole('button', { name: 'Save' }).click();
-  await card.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 10000 });
+  await card.getByText("Enter the customer's PO number", { exact: false }).waitFor({ timeout: 10000 });
   await visit('/jobs/EJE-1065');
   await page.getByText('Awaiting PO', { exact: false }).first().waitFor({ timeout: 15000 });
 });
 
-await step('a valid Invoice No moves EJE-1065 to Invoiced, and it is persisted', async () => {
+await step('a valid PO number moves EJE-1065 to Awaiting Invoice No', async () => {
   await visit('/notifications?tab=awaiting_po');
   const card = page.getByTestId('awaiting-po-EJE-1065');
   await card.waitFor({ timeout: 15000 });
+  await card.getByTestId('po-number-EJE-1065').fill('PO-E2E-1065');
+  await card.getByRole('button', { name: 'Save' }).click();
+  await card.waitFor({ state: 'detached', timeout: 15000 });
+  await page.getByRole('tab', { name: /^Awaiting Invoice No/ }).click();
+  await page.getByTestId('awaiting-invoice-EJE-1065').waitFor({ timeout: 15000 });
+});
+
+await step('saving with no Invoice No keeps EJE-1065 Awaiting Invoice No; a valid one moves it to Invoiced, persisted', async () => {
+  const card = page.getByTestId('awaiting-invoice-EJE-1065');
+  await card.getByRole('button', { name: 'Save' }).click();
+  await card.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 10000 });
   await card.getByTestId('invoice-number-EJE-1065').fill('INV-E2E-1065');
   await card.getByRole('button', { name: 'Save' }).click();
   await card.waitFor({ state: 'detached', timeout: 15000 });
@@ -996,6 +1007,9 @@ await step('and nothing about EJE-1066 offers a signature step afterwards', asyn
 await step('the office handles and invoices the unsigned EJE-1066 like any submission (BD-22)', async () => {
   // Still signed in as the Master, on EJE-1066.
   await page.getByTestId('mark-handled').click();
+  await page.getByTestId('po-number').waitFor({ timeout: 15000 });
+  await page.getByTestId('po-number').fill('PO-E2E-1066');
+  await page.getByTestId('save-po-number').click();
   await page.getByTestId('invoice-number').waitFor({ timeout: 15000 });
   await page.getByTestId('invoice-number').fill('INV-E2E-1066');
   await page.getByTestId('save-invoice-number').click();

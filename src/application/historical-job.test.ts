@@ -12,7 +12,7 @@ import {
   confirmJobCardDelivery,
 } from './job-operations';
 import type { OperationContext } from './context';
-import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
+import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
@@ -64,7 +64,7 @@ const handOverAndIssue = async (
     ...context,
     actor: seedUsers.find((user) => user.id === 'user-master-elmarie')!,
   };
-  const closed = await recordInvoiceNumber(office, await handleJobCard(office, delivered), 'INV-HIST-1');
+  const closed = await recordInvoiceNumber(office, await recordPurchaseOrder(office, await handleJobCard(office, delivered), 'PO-HIST-1'), 'INV-HIST-1');
   return { ...issued, job: closed };
 };
 

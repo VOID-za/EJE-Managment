@@ -152,7 +152,16 @@ describe('TR-01 extended — parts lock at completion on EVERY job type with an 
         // The office's administrative capture is held to it too.
         await expect(addPart(harness.as(master), current, { partNumber: 'X', description: 'late', quantity: 1, unitPrice: 1 })).rejects.toMatchObject(locked);
       };
-      await tryAll(job);
+      if (jobType === 'test_and_repair') {
+        // TR-PARTS-2 (2 November 2026): a Test & Repair job's parts are listed IN
+        // the completion wizard, so they add, change and remove there; they lock
+        // at the signature below.
+        job = await addPart(tech, job, { partNumber: 'IN-WIZ', description: 'added in completion', quantity: 1, unitPrice: 50 });
+        job = await removeLineItem(tech, job, 'part', job.parts.find((part) => part.partNumber === 'IN-WIZ')!.id);
+        expect(job.parts).toHaveLength(2);
+      } else {
+        await tryAll(job);
+      }
       // The checklist step (installation/service) is irrelevant to the rule: start the signature where it can be.
       const atSignature = await startSignature(tech, job).catch(() => null);
       if (atSignature !== null) {

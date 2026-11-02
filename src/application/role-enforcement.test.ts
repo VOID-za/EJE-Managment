@@ -18,7 +18,7 @@ import { loadActivityFeed } from './activity-read';
 import { runSearch } from './search';
 import { WorkflowError } from './errors';
 import { buildHarness, confirmDelivery, seedUser, type Harness } from './test-harness';
-import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
+import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
 import { asCustomerId, asSiteId, type Job } from '@/domain';
 
 /**
@@ -364,8 +364,10 @@ describe('issuing a job card', () => {
     await expect(handleJobCard(context, delivered)).rejects.toBeInstanceOf(WorkflowError);
     const handled = await handleJobCard(harness.as(coordinator), delivered);
     expect(handled.status).toBe('awaiting_po');
-    await expect(recordInvoiceNumber(context, handled, 'INV-9')).rejects.toBeInstanceOf(WorkflowError);
-    expect((await recordInvoiceNumber(harness.as(coordinator), handled, 'INV-9')).status).toBe('invoiced');
+    await expect(recordPurchaseOrder(context, handled, 'PO-9')).rejects.toBeInstanceOf(WorkflowError);
+    const withPo = await recordPurchaseOrder(harness.as(coordinator), handled, 'PO-9');
+    await expect(recordInvoiceNumber(context, withPo, 'INV-9')).rejects.toBeInstanceOf(WorkflowError);
+    expect((await recordInvoiceNumber(harness.as(coordinator), withPo, 'INV-9')).status).toBe('invoiced');
   });
 });
 

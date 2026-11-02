@@ -1772,6 +1772,8 @@ const LIVE_RAIL = [
   'Review',
   'Office Handling',
   'Awaiting PO',
+  // INV-FLOW-1 (2 November 2026).
+  'Awaiting Invoice No',
   'Invoiced',
 ];
 /** The rail's stage names with any exception flag (" — …") taken off. */
@@ -2401,7 +2403,14 @@ await step('the office handles a submitted job and invoices it, from the job pag
   await panel.getByTestId('mark-handled').click();
   await panel.getByText('Awaiting PO').first().waitFor({ timeout: 10000 });
 
-  // Saving with no invoice number keeps it Awaiting PO, and says why.
+  // INV-FLOW-1: Awaiting PO takes the PO number — a blank one is refused and says why.
+  await panel.getByTestId('save-po-number').click();
+  await panel.getByText("Enter the customer's PO number", { exact: false }).waitFor({ timeout: 8000 });
+  await panel.getByTestId('po-number').fill('PO-SMOKE-1048');
+  await panel.getByTestId('save-po-number').click();
+  await panel.getByText('Awaiting Invoice No').first().waitFor({ timeout: 10000 });
+
+  // Saving with no invoice number keeps it Awaiting Invoice No, and says why.
   await panel.getByTestId('save-invoice-number').click();
   await panel.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 8000 });
 
@@ -2412,6 +2421,7 @@ await step('the office handles a submitted job and invoices it, from the job pag
   // Persisted: a fresh load reads it back from the server, read-only.
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByTestId('office-lifecycle').getByText('INV-SMOKE-1048').waitFor({ timeout: 10000 });
+  await page.getByTestId('office-lifecycle').getByText('PO-SMOKE-1048', { exact: false }).waitFor({ timeout: 10000 });
   await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/05b-invoiced.png`, fullPage: false });
 });
@@ -3110,6 +3120,8 @@ await step('the Master is notified of the message, and the notification opens th
   await page.getByRole('heading', { name: /Good day, Elmarie/ }).waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  // NOTIF-TABS-1: a chat message is in the Inbox's Messages subtab.
+  await page.getByTestId('inbox-box-messages').click();
   const row = page
     .locator('li')
     .filter({ hasText: 'New message from Lerato' })
@@ -4058,26 +4070,18 @@ await step('a technician records their own absence with its reason; their timesh
   await signInAsMasterIfNeeded();
 });
 
-await step('a timesheet is manual: unrecorded days say so, the office reads it, takes a comment, exports it (TIMESHEET-2)', async () => {
+await step('the Master’s Timesheets page is their own: no Whose timesheet block, From and To kept, oldest day first (TS-WHOSE-OFF-1, TS-04)', async () => {
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-person').selectOption('user-tech-sipho');
   await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
-  await page.getByTestId('timesheet-totals').waitFor({ timeout: 5000 });
-  if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) {
-    throw new Error('the office was not offered the timesheet export');
-  }
-  // Nothing is derived: the days nobody entered say NOT RECORDED, and the
-  // office is offered no way to type a technician's hours.
-  await page.getByTestId('timesheet-table').getByText('Not recorded').first().waitFor({ timeout: 5000 });
-  if ((await page.getByTestId('add-timesheet-line').count()) !== 0) {
-    throw new Error('the office was offered a line on a technician’s timesheet');
-  }
-
+  if ((await page.getByTestId('timesheet-person').count()) !== 0) throw new Error('the Whose timesheet block is still on the page');
+  if ((await page.getByLabel('Whose timesheet').count()) !== 0) throw new Error('the Whose timesheet selector is still on the page');
+  await page.getByTestId('timesheet-from').waitFor({ timeout: 5000 });
+  await page.getByTestId('timesheet-to').waitFor({ timeout: 5000 });
+  // Their own sheet: a Master keeps a timesheet, so lines can be added.
+  if ((await page.getByTestId('add-timesheet-line').count()) === 0) throw new Error('the Master is not offered their own timesheet');
   // TS-04/TS-05: oldest day first, each with its day of the week.
   const dates = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
-  if (dates.length > 1 && [...dates].sort().join() !== dates.join()) {
-    throw new Error('the timesheet is not oldest-first');
-  }
+  if (dates.length > 1 && [...dates].sort().join() !== dates.join()) throw new Error('the timesheet is not oldest-first');
   const firstLabel = await page.getByTestId('timesheet-day-label').first().innerText();
   if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) /u.test(firstLabel)) throw new Error(`no day of the week: ${firstLabel}`);
   // A From after the To is said on the screen, not sent to the server.
@@ -4085,17 +4089,9 @@ await step('a timesheet is manual: unrecorded days say so, the office reads it, 
   await page.getByLabel('From').fill('2099-01-01');
   await page.getByTestId('timesheet-range-problem').waitFor({ timeout: 5000 });
   await page.getByLabel('From').fill(from);
-  // The office reads the month and previews it, but has no Save or Send.
-  if ((await page.getByTestId('timesheet-send').count()) !== 0 || (await page.getByTestId('timesheet-save').count()) !== 0) {
-    throw new Error('the office was offered Save or Send to office on a technician’s timesheet');
-  }
   await page.getByTestId('timesheet-preview').click();
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.getByTestId('preview-close').click();
-
-  // And the attendance recorded above, with its reason, is on the same sheet.
-  await page.getByTestId('timesheet-table').getByText(/^Absent — Sick Leave$/).first()
-    .waitFor({ timeout: 5000 });
 });
 
 /*
@@ -4232,18 +4228,10 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   await page.getByTestId('timesheet-send').click();
   await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
   await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
-  // The month is read-only now: no Add line, Edit or Send.
-  if ((await todayRow.getByTestId('add-timesheet-line').count()) !== 0) throw new Error('a sent month still offers Add line');
-  if ((await page.getByTestId('timesheet-send').count()) !== 0) throw new Error('a sent month still offers Send to office');
-  // And the server agrees, whatever the screen shows.
-  const status = await page.evaluate(async ({ base, day }) => {
-    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/entries`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ date: day, customerName: 'X', overtimeHours: 1, doubleHours: 0 }),
-    });
-    return response.status;
-  }, { base: BASE, day: today });
-  if (status !== 422) throw new Error(`the server accepted a line in a sent month (${status})`);
+  // RESUBMIT-1: a sent period stays editable and can be sent again, replacing what the office has.
+  if ((await todayRow.getByTestId('add-timesheet-line').count()) === 0) throw new Error('a sent period no longer offers Add line');
+  const sendAgain = page.getByTestId('timesheet-send');
+  if ((await sendAgain.innerText()).trim() !== 'Send again') throw new Error(`the button reads "${await sendAgain.innerText()}"`);
   await page.getByTestId('timesheet-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
@@ -4252,52 +4240,32 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
+  // NOTIF-TABS-1: a timesheet notification is in the Inbox's Forms subtab.
+  await page.getByTestId('inbox-box-forms').click();
   await page.getByText('Timesheet sent to the office').first().waitFor({ timeout: 10000 });
 });
 
 /*
- * TS-16: A SENT TIMESHEET IS CORRECTED, NOT EDITED. The technician asks, with a
- * reason; the office sees it waiting, opens it, accepts it; the correction is
- * the version in force and the original stays on record.
+ * RESUBMIT-1 (the tester, 2 November 2026): a sent timesheet is corrected by
+ * changing it and sending it again; the new submission replaces the one the
+ * office has, and the office reads the latest.
  */
-await step('the technician asks to correct the sent timesheet; the office accepts it; the original stays on record (TS-16)', async () => {
+await step('the technician changes the sent timesheet and sends it again; the office reads the latest submission (RESUBMIT-1)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-corrections').waitFor({ timeout: 15000 });
-  await page.getByTestId('timesheet-correction-start').click();
-  const form = page.getByTestId('timesheet-correction-form');
-  const workshopRow = form
-    .getByTestId('timesheet-correction-row')
-    .filter({ has: page.locator('option:checked', { hasText: /^Workshop$/u }) })
-    .last();
-  await workshopRow.getByTestId('timesheet-correction-ot').fill('3');
-  // No reason: refused, and the form keeps what was typed.
-  await page.getByTestId('timesheet-correction-submit').click();
-  await page.getByTestId('timesheet-correction-error').waitFor({ timeout: 10000 });
-  await page.getByTestId('timesheet-correction-reason').fill('The workshop overtime was 3 hours, not 2.');
-  await page.getByTestId('timesheet-correction-submit').click();
-  await page.getByTestId('timesheet-correction-done').waitFor({ timeout: 15000 });
-  await page.locator('[data-testid="timesheet-correction"][data-status="pending"]').waitFor({ timeout: 10000 });
-  if ((await page.getByTestId('timesheet-correction-start').count()) !== 0) {
-    throw new Error('a second correction is offered while one is pending');
-  }
-
+  await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week — corrected.');
+  await page.getByTestId('timesheet-send').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
+  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
+  const from = await page.getByTestId('timesheet-from').inputValue();
+  const to = await page.getByTestId('timesheet-to').inputValue();
   await signInAsMasterIfNeeded();
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-pending-corrections').waitFor({ timeout: 15000 });
-  await page.getByTestId('timesheet-pending-open').first().click();
-  const pending = page.locator('[data-testid="timesheet-correction"][data-status="pending"]');
-  await pending.waitFor({ timeout: 15000 });
-  await pending.getByText(/added — Workshop, OT 3/u).waitFor({ timeout: 10000 });
-  await pending.getByTestId('timesheet-correction-accept').click();
-  await page.locator('[data-testid="timesheet-correction"][data-status="accepted"]').waitFor({ timeout: 15000 });
-  await page.getByTestId('timesheet-version-in-force').getByText(/Correction 1, accepted/u).waitFor({ timeout: 10000 });
-  // The original is still there to read.
-  await page.getByTestId('timesheet-preview-original').click();
-  const preview = page.getByTestId('document-preview');
-  await preview.waitFor({ timeout: 20000 });
-  await viewerDrew('document-preview');
-  await page.getByTestId('preview-close').click();
+  const read = await page.evaluate(async ({ base, from, to }) => {
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}`);
+    return response.json();
+  }, { base: BASE, from, to });
+  if (read?.data?.comment !== 'Workshop rebuilds all week — corrected.') throw new Error(`the office reads "${read?.data?.comment}"`);
 });
 
 /*
@@ -4555,7 +4523,8 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
   await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
   await card.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
-  if ((await card.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('a sent month still offers Send to office');
+  // RESUBMIT-1: the submitted month is offered again, and submitting again replaces it.
+  if (!/again/u.test(await card.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again');
   const month = await section.getByTestId('monthly-attendance-month').inputValue();
   const again = await page.evaluate(async ({ base, month }) => {
     const me = await (await fetch(`${base}/api/auth/me`)).json().catch(() => null);
@@ -4568,7 +4537,7 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
     return { id, status: response.status };
   }, { base: BASE, month });
   if (typeof again.id !== 'string') throw new Error('could not read the signed-in technician');
-  if (again.status < 400) throw new Error(`a second submission answered ${again.status}`);
+  if (again.status !== 200) throw new Error(`a second submission answered ${again.status}`);
 
   // The office reads the month on EJE Monthly Forms (ATT-OWN-1): the status, the
   // form opened read-only, and no Send for another person's month.
@@ -4586,7 +4555,9 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
     await officeCard.getByTestId('monthly-attendance-download').waitFor({ timeout: 5000 });
     if ((await officeCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error(`${who} was offered Send for a technician`);
     if ((await officeCard.getByTestId('monthly-forms-edit').count()) !== 0) throw new Error(`${who} was offered editing a technician’s forms`);
-    await page.getByTestId('attendance-export').waitFor({ timeout: 5000 });
+    // CSV-OFF-2 (2 November 2026): no Export CSV on Monthly Forms.
+    if ((await page.getByTestId('attendance-export').count()) !== 0) throw new Error(`${who} still sees the attendance CSV export`);
+    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error(`${who} still sees Export CSV on Monthly Forms`);
   }
 
   // Another technician sees only their own month, and is refused Naledi's.
@@ -4642,7 +4613,7 @@ await step('a technician previews and submits last month’s timesheet and atten
   await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
   await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
   await page.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
-  if ((await page.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('a submitted month still offers Submit');
+  if (!/again/u.test(await page.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again (RESUBMIT-1)');
 
   await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
@@ -5909,7 +5880,7 @@ await step('New Job lives on the Jobs screen, and still works', async () => {
   await page.getByRole('heading', { name: 'New job' }).waitFor({ timeout: 8000 });
 });
 
-await step('the progress rail is the eight stages of the live workflow', async () => {
+await step('the progress rail is the nine stages of the live workflow', async () => {
   await page.goto(`${BASE}/jobs/EJE-1049`, { waitUntil: 'networkidle' });
   const rail = page.locator('ol').filter({ hasText: 'Customer Signature' }).first();
   await rail.waitFor({ timeout: 10000 });
@@ -5925,6 +5896,8 @@ await step('the progress rail is the eight stages of the live workflow', async (
     'Review',
     'Office Handling',
     'Awaiting PO',
+    // INV-FLOW-1 (2 November 2026).
+    'Awaiting Invoice No',
     'Invoiced',
   ];
   if (JSON.stringify(stages) !== JSON.stringify(expected)) {

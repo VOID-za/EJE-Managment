@@ -568,7 +568,7 @@ await check('Attendance: refresh — every day reopens as saved, one record each
   await page.getByTestId('my-attendance').waitFor();
   const states = await page.locator('[data-testid="my-attendance-day"]').evaluateAll((elements) => elements.map((element) => element.dataset.status));
   if (states.some((state) => state === 'unrecorded')) fail('a day reopened unrecorded');
-  const from = attendanceDays[attendanceDays.length - 1];
+  const from = attendanceDays[0];
   const held = (await get(`/api/attendance/mine?from=${from}&to=${await today()}`)).json.data.days.filter((entry) => entry.record !== null).length;
   if (held !== attendanceDays.length) fail(`${held} records for ${attendanceDays.length} days`);
 });
@@ -596,7 +596,7 @@ await check('Attendance: leaving straight after a change, then returning — the
   await press(attendanceDay(attendanceDays[4]).getByTestId('my-attendance-absent'));
   await attendanceDay(attendanceDays[4]).getByLabel('Reason for absence').selectOption('leave');
   await go('/dashboard');
-  await go(`/attendance?from=${attendanceDays[attendanceDays.length - 1]}`);
+  await go(`/attendance?from=${attendanceDays[0]}`);
   await page.getByTestId('my-attendance').waitFor();
   await waitState('saved', 15000);
   if ((await attendanceDay(attendanceDays[4]).getAttribute('data-status')) !== 'absent') fail('the change was lost');
@@ -642,8 +642,8 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Sipho Mahlangu', '
     await page.waitForURL('**/timesheets?from=*', { timeout: 15000 });
     await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
     if ((await page.getByTestId('add-timesheet-line').count()) === 0) fail('their own timesheet for the month is not editable');
-    const picker = page.getByTestId('timesheet-person');
-    if ((await picker.count()) > 0 && !(await picker.locator('option:checked').innerText()).includes('(me)')) fail('the timesheet opened is not their own');
+    // TS-WHOSE-OFF-1: the page is always one's own — there is no person to choose.
+    if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
     await noPageOverflow('Timesheets from My Monthly Forms');
   });
 }
@@ -710,33 +710,27 @@ await check('PDF: a Finance package attachment (stored file)', async () => {
 });
 
 /* ---- 8. The office's own timesheet ------------------------------------- */
-await check('Timesheets: Christene (Coordinator) keeps none — she reads the technicians’ sheets only (TS-ROLE-1)', async () => {
+await check('Timesheets: Christene (Coordinator) keeps none — the page says so, with no sheet and no Whose timesheet (TS-ROLE-1, TS-WHOSE-OFF-1)', async () => {
   await as('Christene van Niekerk');
   await go('/timesheets');
   await page.getByTestId('timesheet-not-required').waitFor({ timeout: 20000 });
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
-  const options = await page.getByTestId('timesheet-person').locator('option').allInnerTexts();
-  if (options.some((option) => option.includes('Christene') || option.includes('(me)'))) fail(`her own sheet is offered: ${options.join(', ')}`);
+  if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
   if ((await page.getByTestId('add-timesheet-line').count()) !== 0) fail('a Coordinator is offered Add line');
   await noPageOverflow('Timesheets (Coordinator)');
 });
 for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
-  await check(`Timesheets: ${first} opens and fills in their OWN timesheet; a technician's is read-only`, async () => {
+  await check(`Timesheets: ${first} opens and fills in their OWN timesheet — no Whose timesheet block (TS-WHOSE-OFF-1)`, async () => {
     await as(who);
     await go('/timesheets');
     await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
-    if (!(await page.getByTestId('timesheet-person').locator('option:checked').innerText()).includes(`${first}`)) fail('the page did not open on their own timesheet');
+    if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
     const addLine = page.getByTestId('add-timesheet-line').first();
     await press(addLine);
     await lineForm().getByTestId('timesheet-customer-pick').selectOption('__workshop__');
     await lineForm().getByTestId('timesheet-overtime').fill('1');
     await press(lineForm().getByTestId('save-timesheet-line'));
     await lineForm().waitFor({ state: 'detached', timeout: 15000 });
-    await page.getByTestId('timesheet-person').selectOption('user-tech-sipho');
-    await page.getByTestId('timesheet-read-only').waitFor({ timeout: 15000 });
-    if ((await page.getByTestId('add-timesheet-line').count()) !== 0) fail('a technician’s timesheet offers Add line to the office');
-    // The office still exports a sheet it READS; never on its own (TS-CSV-OFF-1).
-    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) === 0) fail('the office lost the export of a technician’s sheet');
+    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) fail('Export CSV is on the Timesheets page');
   });
 }
 await check('Timesheets: a technician’s own sheet has no Export CSV, and the server refuses the export (TS-CSV-OFF-1)', async () => {

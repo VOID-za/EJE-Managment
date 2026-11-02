@@ -75,7 +75,8 @@ describe('the tester’s changes over HTTP', () => {
     const me = await idOf(coordinator);
     const submitted = await coordinator.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true });
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    expect((await coordinator.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(422);
+    // RESUBMIT-1: submitting again replaces the submission.
+    expect((await coordinator.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(200);
 
     const master = await signedInAs(DEMO_USERS.master);
     const after = await master.get<{ rows: readonly { technician: { id: string }; submittedAt: string | null; status: string; selectable: boolean }[] }>(`/api/payroll/months/${MONTH}`);

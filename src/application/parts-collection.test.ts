@@ -9,7 +9,7 @@ import {
 } from './job-operations';
 import { loadJobView } from './job-view';
 import type { OperationContext } from './context';
-import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
+import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
@@ -248,7 +248,8 @@ describe('the courier collection document', () => {
     const delivered = await confirmJobCardDelivery(harness.master, issued.job);
     expect(delivered.status).toBe('office_handling');
     const handled = await handleJobCard(harness.master, delivered);
-    expect((await recordInvoiceNumber(harness.master, handled, 'INV-PARTS-1')).status).toBe('invoiced');
+    const withPo = await recordPurchaseOrder(harness.master, handled, 'PO-PARTS-1');
+    expect((await recordInvoiceNumber(harness.master, withPo, 'INV-PARTS-1')).status).toBe('invoiced');
   });
 });
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { asUserId } from '@/domain';
 import { businessToday } from '@/lib/business-time';
-import { loadAttendanceExport, loadMyAttendance, recordAttendance } from './attendance-operations';
+import { loadMyAttendance, recordAttendance } from './attendance-operations';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 
@@ -95,9 +95,10 @@ describe('recording attendance', () => {
   it('shows a technician their own days, unrecorded ones said as such — nothing inferred (ATTEND-2)', async () => {
     await recordAttendance(harness.as(technician), { userId: technician.id, date: today, status: 'present', note: '' });
     const mine = await loadMyAttendance(harness.as(technician), shiftDays(today, -2), today);
-    expect(mine.days.map((day) => day.date)).toEqual([today, shiftDays(today, -1), shiftDays(today, -2)]);
-    expect(mine.days[0]?.record?.status).toBe('present');
-    expect(mine.days.slice(1).every((day) => day.record === null)).toBe(true);
+    // ATT-ORDER-1 (2 November 2026): oldest first, newest last.
+    expect(mine.days.map((day) => day.date)).toEqual([shiftDays(today, -2), shiftDays(today, -1), today]);
+    expect(mine.days[2]?.record?.status).toBe('present');
+    expect(mine.days.slice(0, 2).every((day) => day.record === null)).toBe(true);
     expect(mine.unrecorded).toBe(2);
     // Another person's record never appears on this list.
     await recordAttendance(harness.as(seedUser(THABO)), { userId: THABO, date: shiftDays(today, -1), status: 'present', note: '' });
@@ -231,31 +232,3 @@ describe('what attendance keeps apart', () => {
   });
 });
 
-describe('everybody’s attendance as a spreadsheet (the office reads, never records)', () => {
-  it('exports recorded days only, with who recorded them and any planned leave', async () => {
-    const harness = buildHarness();
-    const today = businessToday();
-    await recordAttendance(harness.as(seedUser(THABO)), { userId: THABO, date: today, status: 'present', note: 'Came in' });
-    await recordAttendance(harness.as(technician), { userId: 'user-tech-sipho', date: today, status: 'absent', absenceReason: 'family_responsibility', note: '' });
-
-    const rows = await loadAttendanceExport(harness.as(coordinator), shiftDays(today, -2), today);
-    expect(rows).toHaveLength(2);
-    expect(rows.find((row) => row.person === 'Thabo Nkosi')).toMatchObject({
-      status: 'present',
-      note: 'Came in',
-      recordedBy: 'Thabo Nkosi',
-      plannedLeave: 'Sick leave',
-    });
-    expect(rows.find((row) => row.person === 'Sipho Mahlangu')).toMatchObject({ status: 'absent', absenceReason: 'Family Responsibility' });
-    // Nobody else was recorded, so nobody else is in the file — not as absent.
-    expect(rows.every((row) => ['Thabo Nkosi', 'Sipho Mahlangu'].includes(row.person))).toBe(true);
-  });
-
-  it('is refused to a technician, and refuses a backwards or over-long range', async () => {
-    const harness = buildHarness();
-    const today = businessToday();
-    expect(await refusal(loadAttendanceExport(harness.as(technician), today, today))).toEqual(['not_permitted']);
-    expect(await refusal(loadAttendanceExport(harness.as(master), today, shiftDays(today, -1)))).toEqual(['invalid_range']);
-    expect(await refusal(loadAttendanceExport(harness.as(master), shiftDays(today, -100), today))).toEqual(['range_too_long']);
-  });
-});

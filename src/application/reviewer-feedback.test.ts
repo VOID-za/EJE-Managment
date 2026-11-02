@@ -18,7 +18,6 @@ import { recordAttendance } from './attendance-operations';
 import {
   loadTimesheet,
   loadTimesheetDocument,
-  removeTimesheetEntry,
   saveTimesheetComment,
   saveTimesheetEntry,
   saveTimesheetPeriodComment,
@@ -28,11 +27,11 @@ import {
   acceptJob,
   addLabour,
   addPart,
-  cancelCompletion,
   removeLineItem,
   saveCompletionReport,
   setCollectionMethod,
   startCompletion,
+  startSignature,
   updatePart,
 } from './job-operations';
 import { createJob } from './job-creation';
@@ -276,7 +275,7 @@ describe('TS-10 / TS-12 — one comment for the timesheet period; Save is not a 
 });
 
 describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () => {
-  it('records the submission once, audited, with the content frozen; the period is then read-only on every path', async () => {
+  it('records the submission, audited, with the content as sent; the lines stay editable and sending again REPLACES it (RESUBMIT-1)', async () => {
     const inside = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const before = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
     await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'All in order.');
@@ -288,30 +287,41 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect(sent.snapshot).toMatchObject({ from: FROM, to: TO, comment: 'All in order.' });
     expect((await events('timesheet_submitted')).length).toBe(1);
 
-    const refusedCode = { violations: [{ code: 'timesheet_submitted' }] };
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)))).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(FROM))).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(TO))).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id })).rejects.toMatchObject(refusedCode);
-    await expect(removeTimesheetEntry(harness.as(sipho), SIPHO, inside.id)).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'changed')).rejects.toMatchObject(refusedCode);
-    await expect(saveTimesheetComment(harness.as(sipho), SIPHO, day(4), 'day note')).rejects.toMatchObject(refusedCode);
-    // A correction cannot move a line INTO the sent period either.
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4)), entryId: before.id })).rejects.toMatchObject(refusedCode);
-    // Days outside it stay open.
-    expect((await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1)))).date).toBe(day(1));
-    // A second send — a double tap, a retry, another tab — is refused, not duplicated.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject(refusedCode);
-    expect((await events('timesheet_submitted')).length).toBe(1);
-
     // The office reads exactly what was sent.
     const document = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
     expect(document.submittedAt).toBe(sent.submittedAt);
     expect(document.comment).toBe('All in order.');
     expect(document.rows.filter((row) => row.recorded)).toHaveLength(1);
     const sheet = await loadTimesheet(harness.as(sipho), SIPHO, FROM, TO);
+    // `locked` now only MARKS a day as sent.
     expect(sheet.days.every((entry) => entry.locked)).toBe(true);
     expect(sheet.period).toMatchObject({ from: FROM, to: TO, submittedAt: sent.submittedAt });
+
+    // RESUBMIT-1: the lines and comments of a sent period stay editable.
+    const changed = await saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id });
+    expect(changed.overtimeHours).toBe(3);
+    const added = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(TO));
+    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Corrected the OT.');
+    await saveTimesheetComment(harness.as(sipho), SIPHO, day(4), 'day note');
+    // Until it is sent again the office still reads the version it has.
+    expect((await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO)).comment).toBe('All in order.');
+
+    // Sent again: the new submission REPLACES the earlier one — nothing of it is kept.
+    const again = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(again.id).toBe(sent.id);
+    expect(again.snapshot?.comment).toBe('Corrected the OT.');
+    expect(again.snapshot?.entries.map((entry) => entry.id).sort()).toEqual([inside.id, added.id].sort());
+    expect(again.snapshot?.entries.find((entry) => entry.id === inside.id)?.overtimeHours).toBe(3);
+    const latest = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
+    expect(latest.comment).toBe('Corrected the OT.');
+    expect(latest.submittedAt).toBe(again.submittedAt);
+    expect(latest.rows.filter((row) => row.recorded)).toHaveLength(2);
+    const periods = await harness.repos.attendance.listSubmittedPeriods(SIPHO as never, FROM, TO);
+    expect(periods).toHaveLength(1);
+    // The lines themselves were never deleted; outside days stay open as before.
+    expect((await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1)))).date).toBe(day(1));
+    expect(before.id).toBeDefined();
+    expect((await events('timesheet_submitted')).length).toBe(2);
   });
 
   it('a period sharing ANY day with a sent one is refused, so no work is sent twice', async () => {
@@ -359,9 +369,9 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect(one?.title).toContain('Sipho');
     expect(one?.body).toContain(formatDayAndDate(FROM));
     expect(one?.link).toBe('/timesheets');
-    // A second attempt is refused and notifies nobody again; nor is a technician told.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toBeDefined();
-    expect(await count()).toBe(officeIds.length);
+    // Sending again (RESUBMIT-1) tells the office once more — about the replacement; nor is a technician told.
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(await count()).toBe(officeIds.length * 2);
     expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_submitted')).toBe(false);
   });
 });
@@ -428,23 +438,56 @@ const workshopJob = async (opts: { courier?: boolean; jobType?: 'test_and_repair
   return job;
 };
 
-describe('TR-01 — no part changes once a job is completed (every job type with an In Progress stage)', () => {
-  it('adding, changing and removing a part are refused in completion; cancelling completion opens them again', async () => {
+/*
+ * TR-PARTS-2 (the tester, 2 November 2026), amending TR-01 for Test & Repair:
+ * the technician lists the parts in the completion wizard, so a Test & Repair
+ * job's parts add, change and remove THERE — saved on the job, reloaded and on
+ * its PDF — and lock when the customer is shown the job card for signature.
+ */
+describe('TR-PARTS-2 — a Test & Repair job’s parts add and remove in completion, and lock at the signature', () => {
+  it('adds, changes and removes parts in completion; the saved job and its PDF carry the final list; locked at the signature', async () => {
     let job = await workshopJob();
     const tech = harness.as(sipho);
     job = await startCompletion(tech, job);
+    expect(job.status).toBe('completion');
+    job = await addPart(tech, job, { partNumber: 'CAP-470', description: 'Capacitor 470uF', quantity: 4, unitPrice: 85 });
+    job = await addPart(tech, job, { partNumber: 'FUSE-5A', description: 'Fuse 5A', quantity: 2, unitPrice: 12 });
+    job = await updatePart(tech, job, job.parts[0]!.id, { partNumber: 'PSU-77', description: 'Power supply board', quantity: 1, unitPrice: 15000 });
+    job = await removeLineItem(tech, job, 'part', job.parts.find((part) => part.partNumber === 'FUSE-5A')!.id);
+
+    // Saved, and read back exactly.
+    const stored = await harness.repos.jobs.findById(job.id);
+    expect(stored?.parts.map((part) => [part.partNumber, part.quantity])).toEqual([['PSU-77', 1], ['CAP-470', 4]]);
+    // The job card the customer will sign, and its PDF, carry the final list.
+    const view = (await loadJobView(harness.repos, job.jobNumber))!;
+    const pdfClock = { now: () => '2026-11-02T10:00:00.000Z' };
+    const text = pdfPlainText((await renderJobCardPdf(view, new SimulatedPdfService(pdfClock), pdfClock, new Map())).bytes);
+    expect(text).toContain('CAP-470');
+    expect(text).toContain('PSU-77');
+    expect(text).not.toContain('FUSE-5A');
+
+    // The office may still capture administratively in completion, under the same rule.
+    job = await addPart(harness.as(master), job, { partNumber: 'OFFICE-1', description: 'office add', quantity: 1, unitPrice: 1 });
+    job = await removeLineItem(harness.as(master), job, 'part', job.parts.find((part) => part.partNumber === 'OFFICE-1')!.id);
+
+    // Locked once the customer is shown the job card.
+    job = await startSignature(tech, job);
+    expect(job.status).toBe('customer_signature');
     const locked = { violations: [{ code: 'parts_locked_after_completion' }] };
     await expect(addPart(tech, job, { partNumber: 'X', description: 'late', quantity: 1, unitPrice: 100 })).rejects.toMatchObject(locked);
-    await expect(updatePart(tech, job, job.parts[0]!.id, { partNumber: 'PSU-77', description: 'changed', quantity: 3, unitPrice: 15000 })).rejects.toMatchObject(locked);
     await expect(removeLineItem(tech, job, 'part', job.parts[0]!.id)).rejects.toMatchObject(locked);
-    // The office is held to the same rule before the signature.
-    await expect(addPart(harness.as(master), job, { partNumber: 'X', description: 'late', quantity: 1, unitPrice: 100 })).rejects.toMatchObject(locked);
-    expect((await harness.repos.jobs.findById(job.id))?.parts).toHaveLength(1);
+    expect((await harness.repos.jobs.findById(job.id))?.parts).toHaveLength(2);
+  });
 
-    job = await cancelCompletion(tech, job);
-    expect(job.status).toBe('in_progress');
-    job = await addPart(tech, job, { partNumber: 'X', description: 'now allowed', quantity: 1, unitPrice: 100 });
-    expect(job.parts).toHaveLength(2);
+  it('a breakdown job is unchanged: parts stay locked in completion (TR-01)', async () => {
+    const tech = harness.as(sipho);
+    let job = (await harness.repos.jobs.findByJobNumber('EJE-1048'))!;
+    job = await acceptJob(tech, job);
+    job = await addLabour(tech, job, { date: day(0), rateType: 'normal', hours: 1, description: '' });
+    job = await addPart(tech, job, { partNumber: 'B-1', description: 'before', quantity: 1, unitPrice: 10 });
+    job = await saveCompletionReport(tech, job, { ...job.completionReport, workPerformed: 'Fixed.' });
+    job = await startCompletion(tech, job);
+    await expect(addPart(tech, job, { partNumber: 'X', description: 'late', quantity: 1, unitPrice: 1 })).rejects.toMatchObject({ violations: [{ code: 'parts_locked_after_completion' }] });
   });
 
   it('a breakdown is locked the same way now (the owner, 28 October 2026); labour is not part of the rule', async () => {

@@ -349,9 +349,9 @@ describe('the customer’s document', () => {
 
     const rows = await cardFor(job.jobNumber);
     const details = new Map(rows.jobDetails.map((row) => [row.label, row.value]));
-    const received = new Map((rows.received?.rows ?? []).map((row) => [row.label, row.value]));
+    const received = new Map((rows.partsReceived?.rows ?? []).map((row) => [row.label, row.value]));
     expect(details.get('Quote number')).toBe('Q-20451');
-    // PDF-RECV-1: what was booked in is printed in Labour, travel and parts, not under Job details.
+    // PDF-RECV-2: what was booked in is its own Parts received section, not under Job details.
     expect(received.get('Part number')).toBe('ABC-123');
     expect(received.get('Unit')).toBe('Servo motor');
     expect(received.get('Quantity received')).toBe('2');

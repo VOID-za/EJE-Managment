@@ -261,7 +261,7 @@ describe('a refused job card is corrected and asked for again', () => {
       reason: SECOND_REASON,
     });
 
-    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
+    expect(JOB_PROGRESS_STAGES).toHaveLength(9);
     expect(JOB_PROGRESS_STAGES.map(jobStatusLabel)).toEqual([
       'Open',
       'In Progress',
@@ -271,6 +271,8 @@ describe('a refused job card is corrected and asked for again', () => {
       // The office lifecycle after submission (issue #73).
       'Office Handling',
       'Awaiting PO',
+      // INV-FLOW-1.
+      'Awaiting Invoice No',
       'Invoiced',
     ]);
     for (const job of [refused, returned, again]) {

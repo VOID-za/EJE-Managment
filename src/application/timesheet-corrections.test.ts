@@ -171,11 +171,15 @@ describe('TS-16 — asking for a correction', () => {
     expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_correction_requested')).toBe(false);
   });
 
-  it('the days stay read-only on the sheet itself, and the period cannot be sent again', async () => {
+  it('sending the period again supersedes its corrections — they are removed with the earlier submission (RESUBMIT-1)', async () => {
     const { first, second } = await sendPeriod();
     await ask(correctedLines(first, second));
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)))).rejects.toMatchObject({ violations: [{ code: 'timesheet_submitted' }] });
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_submitted' }] });
+    const period = (await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))!;
+    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(0);
+    // A DIFFERENT period sharing a day with a sent one is still refused.
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1))).rejects.toMatchObject({ violations: [{ code: 'period_overlaps_submitted' }] });
   });
 });

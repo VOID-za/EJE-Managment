@@ -78,20 +78,23 @@ describe('attendance over HTTP — everybody’s own, nobody else’s (ATT-OWN-1
     expect(mine.data.days[0]?.record?.status).toBe('absent');
   });
 
-  it('the office exports a range as a CSV, audited; a technician is refused', async () => {
+  it('CSV-OFF-2 (2 November 2026): the Monthly Forms CSV export is gone — no route serves it', async () => {
     const today = businessToday();
     const office = await signedInAs(DEMO_USERS.master);
-    await (await signedInAs(DEMO_USERS.technician)).post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
-    const file = await office.download(`/api/attendance/export?from=${today}&to=${today}`);
-    expect(file.status).toBe(200);
-    const lines = file.text.replace(/^﻿/u, '').trim().split('\r\n');
-    expect(lines[0]).toBe('Date,Person,Role,Attendance,Absence reason,Note,Recorded by,Recorded at,Planned leave');
-    expect(lines.some((line) => line.includes('Sipho Mahlangu') && line.includes('Present'))).toBe(true);
-    const activity = await office.get<{ events: readonly { type: string; summary: string }[] }>('/api/activity');
-    expect(activity.data.events.some((event) => event.type === 'data_exported' && event.summary.startsWith('The attendance register exported'))).toBe(true);
+    await expect(office.download(`/api/attendance/export?from=${today}&to=${today}`)).rejects.toThrow(/No API route matches/u);
+  });
 
+  it('serves one’s own attendance for a From/To period as a PDF named for its months (ATT-RANGE-1, PDF-NAME-1)', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
-    expect((await technician.download(`/api/attendance/export?from=${today}&to=${today}`)).status).toBe(403);
+    const today = businessToday();
+    await technician.post('/api/attendance', { userId: 'user-tech-sipho', date: today, status: 'present', note: '' });
+    const from = new Date(Date.parse(`${today}T00:00:00Z`) - 45 * 86_400_000).toISOString().slice(0, 10);
+    const file = await technician.download(`/api/attendance/pdf?from=${from}&to=${today}`);
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-disposition') ?? '').toMatch(/Atten [A-Z][a-z]{2}( \d{4})?-[A-Z][a-z]{2}( \d{4})?\.pdf/u);
+    // At most 92 days.
+    const far = new Date(Date.parse(`${today}T00:00:00Z`) - 120 * 86_400_000).toISOString().slice(0, 10);
+    expect((await technician.download(`/api/attendance/pdf?from=${far}&to=${today}`)).status).toBe(422);
   });
 
   it('a status that is not present or absent never reaches the operation', async () => {

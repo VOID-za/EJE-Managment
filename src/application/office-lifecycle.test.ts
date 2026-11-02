@@ -12,7 +12,7 @@ import {
   startCompletion,
   startSignature,
 } from './job-operations';
-import { handleJobCard, loadOfficeQueue, recordInvoiceNumber } from './office-lifecycle';
+import { handleJobCard, loadOfficeQueue, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 import { canTransition, currentRefusal, type Job } from '@/domain';
@@ -41,6 +41,10 @@ const codesOf = async (attempt: Promise<unknown>): Promise<readonly string[]> =>
   }
   throw new Error('expected a refusal');
 };
+
+/** INV-FLOW-1: an Awaiting PO job given its PO number, now Awaiting Invoice No. */
+const withPo = (harness: Harness, job: Job, number = 'PO-TEST'): Promise<Job> =>
+  recordPurchaseOrder(harness.as(master), job, number);
 
 const submitted = async (harness: Harness, jobNumber = 'EJE-1048'): Promise<Job> => {
   const opened = await harness.repos.jobs.findByJobNumber(jobNumber);
@@ -127,7 +131,7 @@ describe('Office Handling -> Awaiting PO', () => {
     const job = await submitted(harness);
     const before = await harness.repos.activity.list(job.id);
     const handled = await handleJobCard(harness.as(master), job);
-    const invoiced = await recordInvoiceNumber(harness.as(master), handled, 'INV-1001');
+    const invoiced = await recordInvoiceNumber(harness.as(master), await withPo(harness, handled), 'INV-1001');
 
     for (const after of [handled, invoiced]) {
       expect(after.signature).toEqual(job.signature);
@@ -173,7 +177,7 @@ describe('Office Handling -> Awaiting PO', () => {
     });
     expect(await codesOf(handleJobCard(harness.as(master), historical))).toContain('not_in_office_handling');
     expect(await codesOf(recordInvoiceNumber(harness.as(master), historical, 'INV-X'))).toContain(
-      'not_awaiting_po',
+      'not_awaiting_invoice_no',
     );
     const stored = await harness.repos.jobs.findById(job.id);
     expect(stored?.status).toBe('closed');
@@ -181,7 +185,13 @@ describe('Office Handling -> Awaiting PO', () => {
   });
 });
 
-describe('Awaiting PO -> Invoiced, on an invoice number', () => {
+/*
+ * INV-FLOW-1 (the tester, 2 November 2026): Handled → Awaiting PO → Awaiting
+ * Invoice No → Invoiced. The PO number is mandatory to leave Awaiting PO and
+ * cannot be skipped; an invoice number is not a substitute for it; the invoice
+ * number is mandatory to reach Invoiced.
+ */
+describe('Awaiting PO -> Awaiting Invoice No, on the PO number', () => {
   let harness: Harness;
   let awaitingPo: Job;
   beforeEach(async () => {
@@ -189,61 +199,117 @@ describe('Awaiting PO -> Invoiced, on an invoice number', () => {
     awaitingPo = await handleJobCard(harness.as(master), await submitted(harness));
   });
 
-  it('REFUSES a save with no invoice number, and the job stays Awaiting PO', async () => {
-    for (const blank of ['', '   ', '\t']) {
-      expect(await codesOf(recordInvoiceNumber(harness.as(coordinator), awaitingPo, blank))).toContain(
-        'invoice_number_required',
-      );
+  it('REFUSES an invoice number on Awaiting PO — the PO step cannot be skipped — and nothing changes', async () => {
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-1'))).toContain('po_number_required');
+    const stored = await harness.repos.jobs.findById(awaitingPo.id);
+    expect(stored?.status).toBe('awaiting_po');
+    expect(stored?.invoice).toBeNull();
+    expect(stored?.purchaseOrder).toBeNull();
+  });
+
+  it('REFUSES a blank, too-long or control-character PO number, and the job stays Awaiting PO', async () => {
+    for (const bad of ['', '   ', '\t', 'X'.repeat(61), 'PO\n2']) {
+      expect(await codesOf(recordPurchaseOrder(harness.as(coordinator), awaitingPo, bad))).toContain('po_number_required');
     }
     const stored = await harness.repos.jobs.findById(awaitingPo.id);
     expect(stored?.status).toBe('awaiting_po');
+    expect(stored?.purchaseOrder).toBeNull();
+  });
+
+  it('moves to Awaiting Invoice No on a valid PO, which PERSISTS, trimmed, with who and when, audited', async () => {
+    const next = await recordPurchaseOrder(harness.as(coordinator), awaitingPo, '  PO-4471 ');
+    expect(next.status).toBe('awaiting_invoice_no');
+    expect(next.purchaseOrder).toMatchObject({ number: 'PO-4471', recordedBy: coordinator.id });
+    const stored = await harness.repos.jobs.findById(awaitingPo.id);
+    expect(stored?.status).toBe('awaiting_invoice_no');
+    expect(stored?.purchaseOrder?.number).toBe('PO-4471');
+    expect(stored?.invoice).toBeNull();
+    const events = await harness.repos.activity.list(awaitingPo.id);
+    expect(events.some((event) => event.type === 'job_po_recorded' && /PO-4471/.test(event.summary))).toBe(true);
+  });
+
+  it('never replaces a recorded PO number, and refuses recording one twice', async () => {
+    const next = await recordPurchaseOrder(harness.as(master), awaitingPo, 'PO-1');
+    expect(await codesOf(recordPurchaseOrder(harness.as(master), next, 'PO-2'))).toContain('po_already_recorded');
+    expect((await harness.repos.jobs.findById(awaitingPo.id))?.purchaseOrder?.number).toBe('PO-1');
+  });
+
+  it('is REFUSED to a technician', async () => {
+    expect(await codesOf(recordPurchaseOrder(harness.as(technician), awaitingPo, 'PO-1'))).toContain('not_permitted');
+    expect((await harness.repos.jobs.findById(awaitingPo.id))?.status).toBe('awaiting_po');
+  });
+
+  it('cannot skip Handled: a PO number before handling is refused', async () => {
+    const fresh = buildHarness();
+    const job = await submitted(fresh);
+    expect(await codesOf(recordPurchaseOrder(fresh.as(master), job, 'PO-1'))).toContain('not_awaiting_po');
+    expect((await fresh.repos.jobs.findById(job.id))?.status).toBe('office_handling');
+  });
+});
+
+describe('Awaiting Invoice No -> Invoiced, on an invoice number', () => {
+  let harness: Harness;
+  let awaitingInvoice: Job;
+  beforeEach(async () => {
+    harness = buildHarness();
+    awaitingInvoice = await withPo(harness, await handleJobCard(harness.as(master), await submitted(harness)), 'PO-7788');
+  });
+
+  it('REFUSES a save with no invoice number, and the job stays Awaiting Invoice No', async () => {
+    for (const blank of ['', '   ', '\t']) {
+      expect(await codesOf(recordInvoiceNumber(harness.as(coordinator), awaitingInvoice, blank))).toContain(
+        'invoice_number_required',
+      );
+    }
+    const stored = await harness.repos.jobs.findById(awaitingInvoice.id);
+    expect(stored?.status).toBe('awaiting_invoice_no');
     expect(stored?.invoice).toBeNull();
   });
 
   it('refuses a number that is too long or carries control characters', async () => {
-    expect(
-      await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, 'X'.repeat(61))),
-    ).toContain('invoice_number_required');
-    expect(
-      await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, 'INV\n2')),
-    ).toContain('invoice_number_required');
-    expect((await harness.repos.jobs.findById(awaitingPo.id))?.status).toBe('awaiting_po');
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingInvoice, 'X'.repeat(61)))).toContain('invoice_number_required');
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV\n2'))).toContain('invoice_number_required');
+    expect((await harness.repos.jobs.findById(awaitingInvoice.id))?.status).toBe('awaiting_invoice_no');
   });
 
-  it('moves to Invoiced on a valid number, which PERSISTS, trimmed, with who and when', async () => {
-    const invoiced = await recordInvoiceNumber(harness.as(coordinator), awaitingPo, '  INV-2026-0042 ');
+  it('moves to Invoiced on a valid number, which PERSISTS, trimmed, with who and when — the PO kept', async () => {
+    const invoiced = await recordInvoiceNumber(harness.as(coordinator), awaitingInvoice, '  INV-2026-0042 ');
     expect(invoiced.status).toBe('invoiced');
     expect(invoiced.invoice?.number).toBe('INV-2026-0042');
     expect(invoiced.invoice?.recordedBy).toBe(coordinator.id);
+    expect(invoiced.purchaseOrder?.number).toBe('PO-7788');
 
-    const stored = await harness.repos.jobs.findById(awaitingPo.id);
+    const stored = await harness.repos.jobs.findById(awaitingInvoice.id);
     expect(stored?.status).toBe('invoiced');
     expect(stored?.invoice?.number).toBe('INV-2026-0042');
+    expect(stored?.purchaseOrder?.number).toBe('PO-7788');
     expect(stored?.closedAt).toBeNull();
 
-    const events = await harness.repos.activity.list(awaitingPo.id);
+    const events = await harness.repos.activity.list(awaitingInvoice.id);
     expect(events.some((event) => event.type === 'job_invoiced' && /INV-2026-0042/.test(event.summary))).toBe(true);
+    // Into the Invoiced list, and out of the other two.
+    const queue = await loadOfficeQueue(harness.repos, master);
+    expect(queue?.invoiced.map((row) => row.jobNumber)).toContain(awaitingInvoice.jobNumber);
+    expect(queue?.awaitingInvoiceNo.map((row) => row.jobNumber)).not.toContain(awaitingInvoice.jobNumber);
+    expect(queue?.awaitingPo.map((row) => row.jobNumber)).not.toContain(awaitingInvoice.jobNumber);
   });
 
-  it('never replaces a recorded invoice number', async () => {
-    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-1');
-    expect(await codesOf(recordInvoiceNumber(harness.as(master), invoiced, 'INV-2'))).toContain(
-      'already_invoiced',
-    );
-    expect((await harness.repos.jobs.findById(awaitingPo.id))?.invoice?.number).toBe('INV-1');
+  it('never replaces a recorded invoice number, and records no second PO afterwards', async () => {
+    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV-1');
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), invoiced, 'INV-2'))).toContain('already_invoiced');
+    expect(await codesOf(recordPurchaseOrder(harness.as(master), invoiced, 'PO-NEW'))).toContain('po_already_recorded');
+    expect((await harness.repos.jobs.findById(awaitingInvoice.id))?.invoice?.number).toBe('INV-1');
   });
 
   it('is REFUSED to a technician', async () => {
-    expect(await codesOf(recordInvoiceNumber(harness.as(technician), awaitingPo, 'INV-1'))).toContain(
-      'not_permitted',
-    );
-    expect((await harness.repos.jobs.findById(awaitingPo.id))?.status).toBe('awaiting_po');
+    expect(await codesOf(recordInvoiceNumber(harness.as(technician), awaitingInvoice, 'INV-1'))).toContain('not_permitted');
+    expect((await harness.repos.jobs.findById(awaitingInvoice.id))?.status).toBe('awaiting_invoice_no');
   });
 
   it('cannot skip Handled: an invoice number before handling is refused', async () => {
     const fresh = buildHarness();
     const job = await submitted(fresh);
-    expect(await codesOf(recordInvoiceNumber(fresh.as(master), job, 'INV-1'))).toContain('not_awaiting_po');
+    expect(await codesOf(recordInvoiceNumber(fresh.as(master), job, 'INV-1'))).toContain('not_awaiting_invoice_no');
     expect((await fresh.repos.jobs.findById(job.id))?.status).toBe('office_handling');
   });
 });
@@ -257,7 +323,9 @@ describe('a submitted job card stays read-only through the office lifecycle', ()
     for (const job of [handling, awaitingPo]) {
       await expect(addPart(harness.as(master), job, part)).rejects.toBeInstanceOf(WorkflowError);
     }
-    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-7');
+    const awaitingInvoice = await withPo(harness, awaitingPo);
+    expect(await codesOf(addLabour(harness.as(technician), awaitingInvoice, { date: '2026-10-21', rateType: 'normal', hours: 1, description: '' }))).not.toHaveLength(0);
+    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV-7');
     await expect(addPart(harness.as(master), invoiced, part)).rejects.toBeInstanceOf(WorkflowError);
   });
 });
@@ -275,7 +343,7 @@ describe('email delivery is separate, and moves nothing', () => {
     const awaitingPo = await handleJobCard(harness.as(master), atHandling);
     expect((await confirmJobCardDelivery(harness.as(master), awaitingPo)).status).toBe('awaiting_po');
 
-    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-9');
+    const invoiced = await recordInvoiceNumber(harness.as(master), await withPo(harness, awaitingPo), 'INV-9');
     expect((await confirmJobCardDelivery(harness.as(master), invoiced)).status).toBe('invoiced');
     expect((await harness.repos.jobs.findById(job.id))?.closedAt).toBeNull();
   });
@@ -294,7 +362,11 @@ describe('the office queue behind the Notifications tabs', () => {
     expect(afterHandling?.handling.map((row) => row.jobNumber)).not.toContain(handling.jobNumber);
     expect(afterHandling?.awaitingPo.map((row) => row.jobNumber)).toContain(handling.jobNumber);
 
-    await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-55');
+    const awaitingInvoice = await withPo(harness, awaitingPo);
+    const afterPo = await loadOfficeQueue(harness.repos, master);
+    expect(afterPo?.awaitingPo.map((row) => row.jobNumber)).not.toContain(handling.jobNumber);
+    expect(afterPo?.awaitingInvoiceNo.map((row) => row.jobNumber)).toContain(handling.jobNumber);
+    await recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV-55');
     const afterInvoice = await loadOfficeQueue(harness.repos, master);
     expect(afterInvoice?.awaitingPo.map((row) => row.jobNumber)).not.toContain(handling.jobNumber);
     const row = afterInvoice?.invoiced.find((entry) => entry.jobNumber === handling.jobNumber);
@@ -370,25 +442,26 @@ describe('BD-22: a refusal resolved Without Customer Signature goes to the offic
     expect(at('signature_refusal_resolved') <= at('job_submitted')).toBe(true);
   });
 
-  it('is in the office queue, and goes Handled -> Awaiting PO -> Invoiced', async () => {
+  it('is in the office queue, and goes Handled -> Awaiting PO -> Awaiting Invoice No -> Invoiced', async () => {
     const queue = await loadOfficeQueue(harness.repos, master);
     expect(queue?.handling.map((row) => row.jobNumber)).toContain('EJE-1048');
 
     // An invoice number before handling is refused: no office step is skipped.
     expect(await codesOf(recordInvoiceNumber(harness.as(master), resolved, 'INV-BD22'))).toContain(
-      'not_awaiting_po',
+      'not_awaiting_invoice_no',
     );
 
     const awaitingPo = await handleJobCard(harness.as(master), resolved);
     expect(awaitingPo.status).toBe('awaiting_po');
     expect(awaitingPo.officeHandling?.handledBy).toBe(master.id);
 
-    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, '  '))).toContain(
-      'invoice_number_required',
-    );
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-BD22'))).toContain('po_number_required');
     expect((await harness.repos.jobs.findByJobNumber('EJE-1048'))?.status).toBe('awaiting_po');
+    const awaitingInvoice = await withPo(harness, awaitingPo, 'PO-BD22');
+    expect(await codesOf(recordInvoiceNumber(harness.as(master), awaitingInvoice, '  '))).toContain('invoice_number_required');
+    expect((await harness.repos.jobs.findByJobNumber('EJE-1048'))?.status).toBe('awaiting_invoice_no');
 
-    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingPo, 'INV-BD22');
+    const invoiced = await recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV-BD22');
     expect(invoiced.status).toBe('invoiced');
     expect(invoiced.invoice?.number).toBe('INV-BD22');
     expect(invoiced.closedAt).toBeNull();
@@ -410,13 +483,14 @@ describe('BD-22: a refusal resolved Without Customer Signature goes to the offic
 describe('the same invoice number on more than one job card', () => {
   it('is accepted, and each job keeps its own record of it', async () => {
     const harness = buildHarness();
-    const first = await handleJobCard(harness.as(master), await submitted(harness, 'EJE-1048'));
-    // The second job only has to be Awaiting PO: put a seeded one there directly.
+    const first = await withPo(harness, await handleJobCard(harness.as(master), await submitted(harness, 'EJE-1048')));
+    // The second job only has to be Awaiting Invoice No: put a seeded one there directly.
     const seeded = await harness.repos.jobs.findByJobNumber('EJE-1061');
     const second = await harness.repos.jobs.save({
       ...seeded!,
-      status: 'awaiting_po',
+      status: 'awaiting_invoice_no',
       officeHandling: { handledBy: master.id, handledAt: '2026-10-25T08:00:00.000Z' },
+      purchaseOrder: { number: 'PO-SEEDED', recordedBy: master.id, recordedAt: '2026-10-25T09:00:00.000Z' },
     });
 
     const a = await recordInvoiceNumber(harness.as(master), first, 'INV-SHARED-7');

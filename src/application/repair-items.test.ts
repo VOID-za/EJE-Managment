@@ -156,11 +156,13 @@ describe('the one delivery note carries every part', () => {
   });
 
 /*
- * PDF-RECV-1 (the tester, 1 November 2026): "Part 1 received … Part 2 received
- * … Collection" were printed under JOB DETAILS. They belong in LABOUR, TRAVEL
- * AND PARTS — moved there, not duplicated, descriptions and quantities intact.
+ * PDF-RECV-2 (the tester, 2 November 2026): the parts booked in are their OWN
+ * section, PARTS RECEIVED, directly after REPORTED FAULT — not under Job
+ * details, and no longer inside Labour, travel and parts (PDF-RECV-1, 1
+ * November). Printed once, descriptions and quantities intact. The collection
+ * stays first in Labour, travel and parts.
  */
-describe('parts received on the job card PDF (PDF-RECV-1)', () => {
+describe('parts received on the job card PDF (PDF-RECV-2)', () => {
   let harness: Harness;
   beforeEach(() => {
     harness = buildHarness();
@@ -176,24 +178,49 @@ describe('parts received on the job card PDF (PDF-RECV-1)', () => {
   };
   const count = (text: string, needle: string) => text.split(needle).length - 1;
 
-  it('prints every part received and the collection under Labour, travel and parts, once, and nothing of them under Job details', async () => {
+  it('prints every part received ONCE, in its own PARTS RECEIVED section directly after REPORTED FAULT, in the generated PDF', async () => {
     const { text, model } = await pdfText(FOUR);
     const details = text.indexOf('JOB DETAILS');
-    const section = text.indexOf('LABOUR, TRAVEL AND PARTS');
+    const fault = text.indexOf('REPORTED FAULT');
+    const received = text.indexOf('PARTS RECEIVED');
+    const work = text.indexOf('WORK CARRIED OUT');
+    const charges = text.indexOf('LABOUR, TRAVEL AND PARTS');
     expect(details).toBeGreaterThanOrEqual(0);
-    expect(section).toBeGreaterThan(details);
+    expect(fault).toBeGreaterThan(details);
+    expect(count(text, 'PARTS RECEIVED')).toBe(1);
+    // Directly after Reported fault: no other section heading between them.
+    expect(received).toBeGreaterThan(fault);
+    for (const heading of ['WORK CARRIED OUT', 'NOTES', 'LABOUR, TRAVEL AND PARTS', 'CHECKLIST']) {
+      const at = text.indexOf(heading);
+      if (at >= 0) expect(at).toBeGreaterThan(received);
+    }
     for (const [index, item] of FOUR.entries()) {
       const label = `Part ${index + 1} received`;
       expect(count(text, label)).toBe(1);
-      expect(text.indexOf(label)).toBeGreaterThan(section);
+      expect(text.indexOf(label)).toBeGreaterThan(received);
+      if (work >= 0) expect(text.indexOf(label)).toBeLessThan(work);
+      if (charges >= 0) expect(text.indexOf(label)).toBeLessThan(charges);
       expect(text).toContain(item.description);
     }
+    // The collection stays first in Labour, travel and parts.
     expect(count(text, 'Customer collection')).toBe(1);
-    expect(text.indexOf('Customer collection')).toBeGreaterThan(section);
-    // The model agrees: nothing received under Job details, all of it in `received`.
+    expect(text.indexOf('Customer collection')).toBeGreaterThan(charges);
+    // The model agrees: nothing received under Job details; the parts in `partsReceived`.
     expect(model.jobDetails.some((row) => /received$|^Collection$|^Waybill$/u.test(row.label))).toBe(false);
-    expect(model.received?.rows.map((row) => row.label)).toEqual(['Part 1 received', 'Part 2 received', 'Part 3 received', 'Part 4 received', 'Collection']);
-    expect(model.received?.rows[0]?.value).toBe('Bearing (BRG-001) × 2');
+    expect(model.partsReceived?.rows.map((row) => row.label)).toEqual(['Part 1 received', 'Part 2 received', 'Part 3 received', 'Part 4 received']);
+    expect(model.partsReceived?.rows[0]?.value).toBe('Bearing (BRG-001) × 2');
+    expect(model.received?.rows.map((row) => row.label)).toEqual(['Collection']);
+  });
+
+  it('prints Parts received even when the job has no reported fault', async () => {
+    const job = await testAndRepair(harness);
+    await harness.repos.jobs.save({ ...job, faultDescription: '', ...storedRepairItems(FOUR.slice(0, 2)) });
+    const view = (await loadJobView(harness.repos, 'EJE-1067'))!;
+    const rendered = renderJobCardPdf({ ...view, photoImages: new Map() } as never, 'EJE-1067.pdf', '2026-11-01T10:00:00.000Z');
+    const text = pdfPageTexts(rendered.bytes).join(' ');
+    expect(count(text, 'PARTS RECEIVED')).toBe(1);
+    expect(text).toContain('Part 2 received');
+    expect(inspectPdf(rendered.bytes, { margin: 40, edge: 12 }).problems).toEqual([]);
   });
 
   it('a courier collection carries its waybill there too', async () => {

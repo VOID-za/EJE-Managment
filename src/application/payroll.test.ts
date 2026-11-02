@@ -13,6 +13,7 @@ import {
   sanitiseDocumentName,
   timesheetMonthFileName,
   timesheetPeriodFileName,
+  attendancePeriodFileName,
 } from '@/lib/payroll-files';
 import { MAX_ATTACHMENT_BYTES, UnconfiguredEmailService } from '@/services/production/email';
 import type { DeliveryReceipt, EmailMessage, EmailService } from '@/services/ports';
@@ -109,7 +110,17 @@ describe('PAY-03 — file names', () => {
     expect(correctedFileName('JC TIMESHEET OCT.pdf')).toBe('JC TIMESHEET OCT CORRECTED.pdf');
     expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-10-31')).toBe('JC TIMESHEET OCT.pdf');
     expect(timesheetPeriodFileName('JC', '2026-10-03', '2026-10-12')).toBe('JC TIMESHEET 3 OCT-12 OCT.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-12-28', '2027-01-03')).toBe('JC TIMESHEET 28 DEC-3 JAN 2027.pdf');
+    // PDF-NAME-2 (2 November 2026): a period over two or more months names every month, the year where needed.
+    expect(timesheetPeriodFileName('JC', '2026-12-28', '2027-01-03')).toBe('JC Timesheet, Dec 2026 + Jan 2027.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-11-30')).toBe('JC Timesheet, Oct + Nov 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-15', '2026-11-14')).toBe('JC Timesheet, Oct + Nov 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-12-31')).toBe('JC Timesheet, Oct + Nov + Dec 2026.pdf');
+    // PDF-NAME-1: the attendance period names its first and last month.
+    expect(attendancePeriodFileName('JC', '2026-10-01', '2026-10-31')).toBe('JC ATTEN OCTOBER.pdf');
+    expect(attendancePeriodFileName('JC', '2026-10-01', '2026-11-30')).toBe('JC Atten Oct-Nov.pdf');
+    expect(attendancePeriodFileName('JC', '2026-10-15', '2026-11-14')).toBe('JC Atten Oct-Nov.pdf');
+    expect(attendancePeriodFileName('JC', '2026-12-28', '2027-01-03')).toBe('JC Atten Dec 2026-Jan 2027.pdf');
+    expect(attendancePeriodFileName('JC', '2026-10-03', '2026-10-20')).toBe('JC Atten 3-20 Oct.pdf');
   });
   it('the download, the document and the package use the technician’s name on documents', async () => {
     const stored = await harness.repos.users.findById(SIPHO);
@@ -128,14 +139,17 @@ describe('PAY-01/04 — the monthly attendance form', () => {
     const doc = await loadAttendanceDocument(harness.as(sipho), SIPHO, MONTH);
     // PDF-UNREC-1: the two recorded days, in order — no row for any other day.
     expect(doc.rows.map((row) => row.date)).toEqual([`${MONTH}-07`, `${MONTH}-08`]);
-    expect(doc.rows.find((row) => row.date === `${MONTH}-07`)).toMatchObject({ status: 'Absent', reason: 'IOD (Injury on Duty)', note: 'Hand injury' });
+    expect(doc.rows.find((row) => row.date === `${MONTH}-07`)).toMatchObject({ status: 'Absent', reason: 'IOD (Injury on Duty)' });
     expect(doc.summary).toMatchObject({ present: 1, absent: 1 });
     expect(doc.versionLabel).toBe('Draft — not submitted');
     const rendered = renderAttendancePdf(doc, { generatedAt: '2026-10-29T08:00:00.000Z' });
     expect(rendered.pageCount).toBe(1);
     expect(pdfPageTexts(rendered.bytes)).toHaveLength(1);
     const text = pdfPageTexts(rendered.bytes)[0]!;
-    expect(text).toContain('Hand injury');
+    // PDF-NOTES-OFF-1 (2 November 2026): no Notes column on the attendance PDF.
+    expect(text).not.toContain('Hand injury');
+    expect(text).not.toMatch(/\bNote\b/u);
+    expect(text).toContain('IOD (Injury on Duty)');
     expect(text).toContain('Present 1 · Absent 1');
     expect(text).not.toContain('NOT RECORDED');
     expect(text).not.toMatch(/Not recorded \d/u);
@@ -165,10 +179,14 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     }
   });
 
-  it('once only: a retry is refused and nothing is duplicated', async () => {
-    await submitFor(sipho);
-    await expect(submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
+  it('submitted again: the new submission REPLACES the current one — one row, no history kept (RESUBMIT-1)', async () => {
+    const first = await submitFor(sipho);
+    const again = await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
+    expect(again.id).toBe(first.id);
+    expect(again.submittedAt >= first.submittedAt).toBe(true);
     expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(1);
+    // Its timesheet half is still ONE sent period, sent again.
+    expect(await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).toHaveLength(1);
   });
 
   it('only the technician themselves; not another technician, not the office', async () => {
@@ -208,23 +226,25 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect(submission.timesheetPeriodId).toBe(period.id);
   });
 
-  it('after submission nobody changes that month’s attendance — not the person, not the office (ATT-OWN-1)', async () => {
+  it('after submission the PERSON may change their own days and submit again, which replaces the submission; the office still may not (RESUBMIT-1, ATT-OWN-1)', async () => {
     await submitFor(sipho);
-    await expect(
-      recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' }),
-    ).rejects.toMatchObject({ violations: [{ code: 'attendance_month_submitted' }] });
+    const before = await harness.repos.attendance.listRecords(FROM, TO, SIPHO);
+    await recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' });
     for (const office of [coordinator, master]) {
       await expect(
         recordAttendance(harness.as(office), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: 'Office correction' }),
       ).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
     }
-    const current = await loadAttendanceDocument(harness.as(master), SIPHO, MONTH);
-    expect(current.versionLabel).toBe('As submitted');
+    // Until it is submitted again, the office's copy is the one submitted.
+    expect((await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted')).rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
+    // Submitted again: the new submission replaces it, and carries the 14th.
+    await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
     const submitted = await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted');
-    // The submitted record is unchanged; the unrecorded 14th is simply not on the form.
-    expect(submitted.rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
+    expect(submitted.rows.map((row) => row.date)).toEqual([`${MONTH}-07`, `${MONTH}-14`]);
     expect(submitted.inForce).toBe(true);
-    expect((await harness.repos.payroll.findSubmission(SIPHO, MONTH))?.attendance.days).toHaveLength(Number(TO.slice(8, 10)));
+    expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(1);
+    // The underlying attendance records were never deleted.
+    expect((await harness.repos.attendance.listRecords(FROM, TO, SIPHO)).length).toBe(before.length + 1);
   });
 });
 
@@ -245,10 +265,11 @@ describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
     expect(await harness.repos.attendance.findPeriod(COORD, FROM, TO)).toBeNull();
     const [notice] = (await harness.repos.notifications.list(master.id)).filter((n) => n.type === 'timesheet_submitted');
     expect(notice?.title).toMatch(/: attendance$/u);
-    // Frozen like anybody's.
-    await expect(
-      recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' }),
-    ).rejects.toMatchObject({ violations: [{ code: 'attendance_month_submitted' }] });
+    // Editable and submittable again, like anybody's (RESUBMIT-1).
+    await recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' });
+    const again = await submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true });
+    expect(again.id).toBe(submission.id);
+    expect(again.timesheetPeriodId).toBeNull();
   });
 
   it('a Coordinator cannot enter, open, send or correct a timesheet of their own', async () => {

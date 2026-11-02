@@ -94,18 +94,34 @@ describe('the office lifecycle, over the API', () => {
     expect(job.signature).not.toBeNull();
   });
 
-  it('handled -> Awaiting PO -> invoice number -> Invoiced, by the office', async () => {
+  it('handled -> Awaiting PO -> PO number -> Awaiting Invoice No -> invoice number -> Invoiced, by the office (INV-FLOW-1)', async () => {
     const job = await submittedJob(master, tech);
 
     const handled = await coordinator.post<Job>(`/api/jobs/${job.id}/handle_office`, {});
     expect(handled.status, JSON.stringify(handled.error)).toBe(200);
     expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_po');
 
-    // Saving with no invoice number: refused, and the job stays Awaiting PO.
+    // An invoice number does not stand in for the PO: refused, and the job stays Awaiting PO.
+    const skipped = await coordinator.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: 'INV-API-1' });
+    expect(skipped.status).toBe(422);
+    expect(codes(skipped)).toContain('po_number_required');
+    // A blank PO is refused too.
+    const blankPo = await coordinator.post(`/api/jobs/${job.id}/record_po`, { poNumber: '  ' });
+    expect(blankPo.status).toBe(422);
+    expect(codes(blankPo)).toContain('po_number_required');
+    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_po');
+
+    const po = await coordinator.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-API-1' });
+    expect(po.status, JSON.stringify(po.error)).toBe(200);
+    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_invoice_no');
+    // A second PO is refused; the first stays.
+    expect((await master.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-API-2' })).status).toBe(422);
+
+    // Saving with no invoice number: refused, and the job stays Awaiting Invoice No.
     const blank = await coordinator.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: '  ' });
     expect(blank.status).toBe(422);
     expect(codes(blank)).toContain('invoice_number_required');
-    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_po');
+    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_invoice_no');
 
     const invoiced = await coordinator.post(`/api/jobs/${job.id}/record_invoice`, {
       invoiceNumber: 'INV-API-1',
@@ -114,6 +130,7 @@ describe('the office lifecycle, over the API', () => {
     const reread = await jobOf(master, job.jobNumber);
     expect(reread.status).toBe('invoiced');
     expect(reread.invoice?.number).toBe('INV-API-1');
+    expect(reread.purchaseOrder?.number).toBe('PO-API-1');
     expect(reread.officeHandling).not.toBeNull();
   });
 
@@ -121,10 +138,12 @@ describe('the office lifecycle, over the API', () => {
     const job = await submittedJob(master, tech);
     expect((await tech.post(`/api/jobs/${job.id}/handle_office`, {})).status).toBe(403);
     await master.post(`/api/jobs/${job.id}/handle_office`, {});
+    expect((await tech.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-X' })).status).toBe(403);
+    await master.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-X' });
     expect(
       (await tech.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: 'INV-X' })).status,
     ).toBe(403);
-    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_po');
+    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_invoice_no');
   });
 
   it('refuses a body on handle_office, and a malformed invoice request, by schema', async () => {
@@ -148,7 +167,7 @@ describe('the office lifecycle, over the API', () => {
     expect(reread.closedAt).toBeNull();
   });
 
-  it('serves the five tabs’ jobs to the office, from the persisted status', async () => {
+  it('serves the office tabs’ jobs to the office, from the persisted status', async () => {
     const job = await submittedJob(master, tech);
     const queueOf = async (client: ApiTestClient) =>
       (await client.get<{ officeQueue: OfficeQueue | null }>('/api/notifications')).data.officeQueue;
@@ -156,9 +175,12 @@ describe('the office lifecycle, over the API', () => {
     expect((await queueOf(master))?.handling.map((row) => row.jobNumber)).toContain(job.jobNumber);
     await master.post(`/api/jobs/${job.id}/handle_office`, {});
     expect((await queueOf(coordinator))?.awaitingPo.map((row) => row.jobNumber)).toContain(job.jobNumber);
+    await master.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-TAB-1' });
+    expect((await queueOf(coordinator))?.awaitingInvoiceNo.map((row) => row.jobNumber)).toContain(job.jobNumber);
     await master.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: 'INV-TAB-1' });
     const invoiced = (await queueOf(master))?.invoiced.find((row) => row.jobNumber === job.jobNumber);
     expect(invoiced?.invoice?.number).toBe('INV-TAB-1');
+    expect(invoiced?.purchaseOrder?.number).toBe('PO-TAB-1');
 
     // A technician has no office tabs at all.
     expect(await queueOf(tech)).toBeNull();

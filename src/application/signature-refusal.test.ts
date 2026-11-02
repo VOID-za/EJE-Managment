@@ -495,7 +495,7 @@ describe('what the refusal does to the workflow', () => {
   // The rail is the eight stages of the live workflow (issue #73 added the
   // office lifecycle after Review); a refusal adds none of its own.
   it('adds no stage of its own — the rail is the eight stages of the live workflow', () => {
-    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
+    expect(JOB_PROGRESS_STAGES).toHaveLength(9);
     expect(JOB_PROGRESS_STAGES.map(jobStatusLabel)).toEqual([
       'Open',
       'In Progress',
@@ -505,6 +505,8 @@ describe('what the refusal does to the workflow', () => {
       // The office lifecycle after submission (issue #73).
       'Office Handling',
       'Awaiting PO',
+      // INV-FLOW-1.
+      'Awaiting Invoice No',
       'Invoiced',
     ]);
   });
