@@ -19,6 +19,14 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## RELEASED — `b3a9014`, the tester's critical fixes (2 November 2026, evening)
+
+Released 2 November 2026 14:18 UTC (healthy 14:18:28) through `deploy/release/stage-release.ps1` with migration `0046_tester_fixes_2_november` (additive). Backup proven first: `C:/Program Files/Git/var/backups/eje/eje-eje_production-2026-11-02T14-18-09Z`. Rollback target `6fdb142` — CI run 41455418841 proved `6fdb142` against a database at 0046. Unit tests 3,651 passed, 0 failed (PostgreSQL tests in CI: green); live verification 28/28 (reads and refused writes; nothing written); existing jobs, the frozen prices of all 58 signed jobs, attendance, timesheets, monthly submissions and site pins identical before and after. The live checks created no records (reads, PDFs and refused writes only); the write flows are proven in CI. Retention ran 6 seconds after start: 23 notifications (15 days or older) and 458 activity events (older than 7 days) deleted, as decided.
+
+**After this release, retention runs on its own:** within a minute of start the worker deletes notifications 15 days old or older and activity older than 7 days, and records each run (`npm run retention` on the server shows the last runs). Earlier activity is kept only in the backups.
+
+**Rolling back:** switch to `6fdb142` the way the release tool does. 0046 stays applied; `6fdb142` reads a database at 0046 (proved in CI), although it does not know the Awaiting Invoice No status — roll back only before any job reaches it, or move such jobs on first.
+
 ## RELEASED — `6fdb142`, the standby calendar (2 November 2026)
 
 Released 2 November 2026 10:48 UTC (healthy 10:48:54) through `deploy/release/stage-release.ps1` with migration `0045_standby_calendar` (additive). Backup proven first: `C:/Program Files/Git/var/backups/eje/eje-eje_production-2026-11-02T10-48-37Z` (verified, key-checked, restore-tested). Rollback target `5d726d3` — CI run 41427305039 proved `5d726d3` reads and writes a database at 0045. Unit tests 3,630 passed, 0 failed, 19 skipped (the PostgreSQL tests, run in CI); live verification 57/57 (and the attendance/timesheet regression 46/46): the calendar and both swap workflows on the live site, every refusal, in-app notifications only (the outbox unchanged), then the test places and eligibility removed again through the audited routes. Every job-card fingerprint, job count, signed price, attendance and timesheet record and site pin identical before and after.

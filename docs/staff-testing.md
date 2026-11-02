@@ -620,6 +620,23 @@ Automated at desktop (1440), tablet (768, touch) and phone (390, touch) — `scr
 | Q7 | As the Coordinator: Swap requests → **Approve** with a note | Only the two main places changed; helpers and apprentices did not; both technicians have a notification |
 | Q8 | As an apprentice: ask for an apprentice swap; as a Master, **Reject** it with a note; then change a published place (reason required) | The calendar is unchanged after the rejection; the apprentice is notified; the changed place notifies both people and shows in Activity |
 
+## R. The tester’s critical fixes (2 November 2026, evening)
+
+Automated at 1440, 768 (touch) and 390 (touch) — `scripts/tester-fixes-check.mjs`, in CI. These are the checks a person makes on the real rugged tablet and phone, on TEST data.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| R1 | On the PHONE: complete a job to the signature step; sign with a finger, several lines, filling the box | The whole signature shows on the pad, then on the job card and the PDF — not a thin line |
+| R2 | On the phone: the Job Complete steps at the top | Every step can be reached by scrolling the step bar; a done step taps back to it; the page does not scroll sideways |
+| R3 | On the tablet and on a desktop: sign as before | Exactly as before — nothing changed |
+| R4 | A Test & Repair job: Complete job → in the Parts step add two parts, remove one | The list updates; reload — it is kept; the PDF lists the final parts; at the signature they can no longer change |
+| R5 | Preview that Test & Repair job card PDF | **Parts received** is its own section directly under **Reported fault** |
+| R6 | Attendance: choose a From in last month and a To today; leave the page and return | Both months listed oldest first; the same From/To are back; Download PDF is named "… Atten Oct-Nov.pdf" and has no Notes column |
+| R7 | My Monthly Forms: submit last month; change a day; submit again | It submits again; the office sees the new version only |
+| R8 | Timesheets (Master): no Whose timesheet; send a period; change a line; Send again | Sent again; the office reads the latest; a two-month PDF is named "… Timesheet, Oct + Nov 2026.pdf" |
+| R9 | Office: a submitted job → Mark handled → try to save without a PO → save a PO → save the invoice number | Refused without a PO; then Awaiting Invoice No; then Invoiced, in the Invoiced tab with PO and invoice number |
+| R10 | Notifications: Jobcards, Messages, Forms | Each shows only its own; unread counts right; Monthly Forms has no Export CSV |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -634,6 +651,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | Attendance and timesheets | O1–O6 | #82 |
 | Job creation, bench quantity, job card | P1–P6 | #95 |
 | The standby calendar | Q1–Q8 | #96 |
+| The tester’s critical fixes | R1–R10 | #97–#108 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
