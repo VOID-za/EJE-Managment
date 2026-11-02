@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (7c0ca94) against a database at 0044
+      - name: Rollback compatibility — the live release (5d726d3) against a database at 0045
         run: bash scripts/release/rollback-compat.sh
 
   browser:
@@ -339,6 +339,24 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run forms-regression
+
+      # STANDBY-1…8: the standby calendar through the screen — roster, a year
+      # generated and published, month/week/year views, a main swap asked for
+      # and approved, an apprentice swap rejected — at desktop, tablet and phone.
+      - name: Standby calendar — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run standby-check
+
+      - name: Standby calendar — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run standby-check
+
+      - name: Standby calendar — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run standby-check
 
       - name: Integrations regression — desktop (simulated providers)
         env:
