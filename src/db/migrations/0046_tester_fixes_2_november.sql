@@ -208,7 +208,7 @@ BEGIN
     AND OLD."occurred_at" < now() - interval '7 days' THEN
     RETURN OLD;
   END IF;
-  RAISE EXCEPTION 'audit_events is append-only: an event is never changed, and is removed only by the 7-day retention purge'
+  RAISE EXCEPTION 'audit_events is an immutable historical record (append-only): an event is never changed, and is removed only by the 7-day retention purge'
     USING ERRCODE = 'restrict_violation';
 END;
 $$ LANGUAGE plpgsql;--> statement-breakpoint

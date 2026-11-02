@@ -658,7 +658,9 @@ await step('TABLET: the monthly attendance form shows in the app, as its own doc
   const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
   silentDownloads = 0; // asked for
   const text = (await pdfTextIn(previewPage, file.bytes)).text;
-  if (!/Date[\s\S]*Attendance[\s\S]*Absence reason[\s\S]*Note/u.test(text)) throw new Error('the attendance columns are missing');
+  if (!/Date[\s\S]*Attendance[\s\S]*Absence reason/u.test(text)) throw new Error('the attendance columns are missing');
+  // PDF-NOTES-OFF-1 (2 November 2026): no Notes column.
+  if (/\bNote\b/u.test(text)) throw new Error('the attendance PDF still has a Note column');
   if (writes.length !== 0) throw new Error(`previewing sent ${writes.join(', ')}`);
   if (silentDownloads !== 0) throw new Error('the attendance form was downloaded silently');
   await previewPage.getByTestId('preview-close').click();

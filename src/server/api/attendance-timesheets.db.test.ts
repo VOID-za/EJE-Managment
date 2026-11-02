@@ -255,7 +255,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/timesheets/${IDS.technician}/period/comment`, { from, to: today, comment: 'Workshop days.' })).status).toBe(200);
     const sent = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today });
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(422);
+    // RESUBMIT-1: the same period may be sent again — it replaces the submission, still ONE row.
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(200);
 
     const rows = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician));
     expect(rows).toHaveLength(1);
@@ -263,14 +264,17 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(rows[0]?.submittedAt).not.toBeNull();
     expect((rows[0]?.snapshot as { entries: unknown[] }).entries).toHaveLength(1);
 
-    // The office was notified, once, through the existing notifications table.
+    // The office was notified once per send, through the existing notifications table.
     const told = await db.select().from(schema.notifications).where(eq(schema.notifications.type, 'timesheet_submitted'));
-    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.master].sort());
+    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.coordinator, IDS.master, IDS.master].sort());
 
-    // The guard trigger: no script or bug can change, un-send or overlap it.
+    // The guard trigger: a sent period may be sent again, never moved, un-sent, deleted or overlapped (migration 0046).
     expect(await postgresMessage(
-      db.update(schema.timesheetPeriods).set({ comment: 'rewritten' }).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
+      db.update(schema.timesheetPeriods).set({ periodFrom: shift(today, -3) }).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
     )).toContain('sent to the office');
+    expect(await postgresMessage(
+      db.update(schema.timesheetPeriods).set({ submittedAt: null, submittedBy: null, snapshot: null }).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
+    )).toMatch(/sent to the office|submission_whole/u);
     expect(await postgresMessage(
       db.delete(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
     )).toContain('sent to the office');
@@ -398,8 +402,11 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     })).status).toBe(200);
     const submitted = await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true });
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    expect((await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(422);
-    const [row] = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.technician));
+    // RESUBMIT-1: submitted again — it replaces the submission, still ONE row.
+    expect((await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(200);
+    const submissions = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.technician));
+    expect(submissions).toHaveLength(1);
+    const [row] = submissions;
     expect(row?.month).toBe(month);
     // My Monthly Forms' history, read from PostgreSQL (30 October 2026): that month, with its files.
     const history = await tech.get<readonly { month: string; fileNames: { attendance: string } }[]>(`/api/payroll/${IDS.technician}/history`);
@@ -407,11 +414,11 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(history.data.map((entry) => entry.month)).toEqual([month]);
     expect(history.data[0]?.fileNames.attendance).toMatch(/ ATTEN [A-Z]+\.pdf$/u);
 
-    // The database refuses: a rewrite, a delete, a second row, a submission not backed by the exact sent month.
+    // The database refuses: moving it to another month, a delete, a second row, a submission not backed by the exact sent month.
     expect(await postgresMessage(
-      db.update(schema.monthlySubmissions).set({ attendanceSnapshot: {} }).where(eq(schema.monthlySubmissions.id, row!.id)),
-    )).toContain('cannot be changed');
-    expect(await postgresMessage(db.delete(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.id, row!.id)))).toContain('cannot be changed');
+      db.update(schema.monthlySubmissions).set({ month: '2000-01' }).where(eq(schema.monthlySubmissions.id, row!.id)),
+    )).toContain('never moved');
+    expect(await postgresMessage(db.delete(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.id, row!.id)))).toContain('cannot be deleted');
     const [draft] = await db.insert(schema.timesheetPeriods).values({
       id: crypto.randomUUID(), userId: IDS.coordinator, periodFrom: `${month}-01`, periodTo: `${month}-05`,
       updatedBy: IDS.coordinator, commentedAt: new Date().toISOString(),
@@ -423,8 +430,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       }),
     )).toContain('sent timesheet for exactly');
 
-    // The technician's own attendance for that month is frozen; the office cannot change it either (ATT-OWN-1).
-    expect((await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' })).status).toBe(422);
+    // RESUBMIT-1: the technician may still change their own attendance for that month; the office may not (ATT-OWN-1).
+    expect((await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' })).status).toBe(200);
     const master = await signIn('elmarie@example-test.co.za');
     expect((await master.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: 'office' })).status).toBe(403);
 

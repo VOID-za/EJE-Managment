@@ -551,6 +551,12 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect(po[0]?.status).toBe('awaiting_po');
     expect(po[0]?.officeHandledAt).not.toBeNull();
     expect(po[0]?.invoiceNumber).toBeNull();
+    // INV-FLOW-1: an invoice number does not stand in for the PO; the PO number first.
+    expect((await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: 'INV-PG-73' })).status).toBe(422);
+    expect((await master.post(`/api/jobs/${id}/record_po`, { poNumber: 'PO-PG-73' })).status).toBe(200);
+    const awaitingInvoice = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
+    expect(awaitingInvoice[0]?.status).toBe('awaiting_invoice_no');
+    expect(awaitingInvoice[0]?.poNumber).toBe('PO-PG-73');
     expect(
       (await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: 'INV-PG-73' })).status,
     ).toBe(200);

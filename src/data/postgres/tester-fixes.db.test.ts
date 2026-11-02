@@ -156,7 +156,7 @@ describeDb('migration 0046 — the tester’s fixes of 2 November 2026', () => {
     expect(await attendance.listCorrections(sent.id)).toHaveLength(0);
   });
 
-  it('RETAIN-2: an activity event is never updated, and is deleted only by the purge, only when older than 7 days', async () => {
+  it('RETAIN-2: an activity event is never updated, and is deleted only by the purge, only when older than 7 days (the message keeps "immutable historical record")', async () => {
     for (const [id, age] of [[crypto.randomUUID(), 10], [crypto.randomUUID(), 3]] as const) {
       await db.execute(sql`insert into audit_events (id, occurred_at, type, summary) values (${id}, ${daysAgo(age)}, 'settings_updated', ${`aged ${age}`})`);
     }
