@@ -3075,8 +3075,8 @@ await step('a technician can message the office', async () => {
   await page.getByRole('button', { name: 'New message' }).click();
   const compose = page.getByRole('dialog');
   await compose.waitFor({ timeout: 5000 });
-  // A technician does not have to guess which Master is on duty.
-  await compose.getByText('Reaches every Master on duty', { exact: false })
+  // A technician does not have to guess who in the office is on duty (ROLE-LABEL-1: "the office").
+  await compose.getByText('Reaches the office', { exact: false })
     .waitFor({ timeout: 5000 });
   await compose.getByLabel('Message').fill(
     'Hi Christene. I have a doctor appointment tomorrow at 14:00. Back by 16:00.',
@@ -3269,8 +3269,9 @@ await step('a Master can cancel an Open job, with a reason', async () => {
 
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
-  await dialog.getByLabel('Reason').selectOption('customer_resolved');
-  await dialog.getByLabel('Description').fill('Customer resolved the fault before dispatch.');
+  // CANCEL-ALL-1: a category, and the reason always written down.
+  await dialog.getByLabel('Category').selectOption('customer_resolved');
+  await dialog.getByLabel('Why is the job being cancelled?').fill('Customer resolved the fault before dispatch.');
   await dialog.getByRole('button', { name: 'Cancel job' }).click();
 
   await page.getByText('Cancelled', { exact: false }).first().waitFor({ timeout: 10000 });
@@ -4225,23 +4226,34 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   await page.getByTestId('timesheet-save').click();
   await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
 
-  await page.getByTestId('timesheet-send').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
-  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
-  // RESUBMIT-1: a sent period stays editable and can be sent again, replacing what the office has.
-  if ((await todayRow.getByTestId('add-timesheet-line').count()) === 0) throw new Error('a sent period no longer offers Add line');
-  const sendAgain = page.getByTestId('timesheet-send');
-  if ((await sendAgain.innerText()).trim() !== 'Send again') throw new Error(`the button reads "${await sendAgain.innerText()}"`);
+  // FORMS-PAGES-1 (2 November 2026): the Timesheets page shows Preview and Print only; sending is on Monthly Forms.
+  if ((await page.getByTestId('timesheet-send').count()) !== 0) throw new Error('the Timesheets page still offers Send');
+  if ((await page.getByTestId('timesheet-print').count()) !== 1) throw new Error('the Timesheets page has no Print');
   await page.getByTestId('timesheet-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
   await viewerDrew('document-preview');
+  if ((await page.getByTestId('preview-download').count()) !== 0) throw new Error('the Timesheets preview still offers Download');
   await page.getByTestId('preview-close').click();
+  // The period is sent the way Monthly Forms sends it — through the server's route.
+  const sent = await page.evaluate(async ({ base, from, to }) => {
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ from, to }),
+    });
+    return response.status;
+  }, { base: BASE, from: await page.getByTestId('timesheet-from').inputValue(), to: await page.getByTestId('timesheet-to').inputValue() });
+  if (sent !== 200) throw new Error(`sending the period answered ${sent}`);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
+  // RESUBMIT-1: a sent period stays editable.
+  if ((await todayRow.getByTestId('add-timesheet-line').count()) === 0) throw new Error('a sent period no longer offers Add line');
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
-  // NOTIF-TABS-1: a timesheet notification is in the Inbox's Forms subtab.
-  await page.getByTestId('inbox-box-forms').click();
+  // NOTIF-TABS-2: a timesheet notification is in the Inbox's Monthly Forms subtab.
+  await page.getByTestId('inbox-box-monthly_forms').click();
   await page.getByText('Timesheet sent to the office').first().waitFor({ timeout: 10000 });
 });
 
@@ -4255,13 +4267,20 @@ await step('the technician changes the sent timesheet and sends it again; the of
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
   await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week — corrected.');
-  await page.getByTestId('timesheet-send').click();
-  // Wait for the resend itself: the Sent badge is already on screen from the first send.
-  const resent = page.waitForResponse((response) => response.url().includes('/period/submit') && response.request().method() === 'POST', { timeout: 20000 });
-  await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
-  if ((await resent).status() !== 200) throw new Error(`sending again answered ${(await resent).status()}`);
+  await page.getByTestId('timesheet-save').click();
+  await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
   const from = await page.getByTestId('timesheet-from').inputValue();
   const to = await page.getByTestId('timesheet-to').inputValue();
+  // Sent again the way Monthly Forms sends it; the new submission replaces the old.
+  const resent = await page.evaluate(async ({ base, from, to }) => {
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ from, to }),
+    });
+    return response.status;
+  }, { base: BASE, from, to });
+  if (resent !== 200) throw new Error(`sending again answered ${resent}`);
   await signInAsMasterIfNeeded();
   const read = await page.evaluate(async ({ base, from, to }) => {
     const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}`);
@@ -4380,13 +4399,19 @@ await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, 
   await page.getByRole('link', { name: /^Closed Jobs/ }).first().click();
   await page.getByRole('heading', { name: 'Closed Jobs' }).waitFor({ timeout: 10000 });
 
-  // Her Attendance: her own form and days, and no Team register (ATT-OWN-1).
+  // Her Attendance: her own days with Preview and Print only, and no Team register (ATT-OWN-1, FORMS-PAGES-1).
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const own = page.getByTestId('monthly-attendance-own');
+  await page.getByTestId('my-attendance').waitFor({ timeout: 15000 });
+  for (const id of ['attendance-preview', 'attendance-print', 'my-attendance-from', 'my-attendance-to']) await page.getByTestId(id).waitFor({ timeout: 5000 });
+  for (const id of ['monthly-attendance-own', 'monthly-forms-submit', 'monthly-attendance-download', 'my-attendance-pdf', 'monthly-attendance-month']) {
+    if ((await page.getByTestId(id).count()) !== 0) throw new Error(`the Attendance page still has ${id}`);
+  }
+  // Her own monthly form is on My Monthly Forms.
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const own = page.getByTestId('my-monthly-forms');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
   if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('CHRISTENE ATTEN ')) throw new Error('the Coordinator’s own form is not hers');
-  for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-attendance-export']) await own.getByTestId(id).waitFor({ timeout: 5000 });
-  await page.getByTestId('my-attendance').waitFor({ timeout: 10000 });
+  for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-forms-submit']) await own.getByTestId(id).waitFor({ timeout: 5000 });
   if ((await page.getByTestId('team-register-heading').count()) !== 0 || (await page.getByTestId('attendance-register').count()) !== 0) {
     throw new Error('the Coordinator still has the Team register');
   }
@@ -4450,15 +4475,18 @@ await step('the Master: EJE and My Monthly Forms, Timesheets kept, no Closed Job
  * after which nothing offers it again and a second request is refused. The
  * office sees the status, opens the form, and is not offered Send.
  */
-await step('the Attendance page previews, prints, downloads, exports and sends the monthly attendance form; the office reviews it (PAY-01, PAY-02)', async () => {
+await step('My Monthly Forms previews, prints, downloads, exports and submits the monthly attendance form; the office reviews it (PAY-01, PAY-02, FORMS-PAGES-1)', async () => {
   const pdfPages = (bytes) => (Buffer.from(bytes).toString('latin1').match(/\/Type\s*\/Page(?!s)/gu) ?? []).length;
   await signInAs(page, 'Naledi Molefe');
+  // FORMS-PAGES-1: the Attendance page has Preview and Print only — no Download, no Submit.
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const section = page.getByTestId('monthly-attendance-own');
+  await page.getByTestId('attendance-preview').waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the Attendance page still offers Submit');
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const section = page.getByTestId('my-monthly-forms');
   await section.waitFor({ timeout: 15000 });
   const card = section.getByTestId('monthly-forms');
   await card.waitFor({ timeout: 15000 });
-  if ((await card.getByTestId('monthly-timesheet').count()) !== 0) throw new Error('the Attendance page shows the timesheet form too');
   const fileName = (await card.getByTestId('monthly-attendance-file').innerText()).split(' · ')[0];
   if (!/^NALEDI ATTEN [A-Z]+\.pdf$/u.test(fileName)) throw new Error(`attendance file name: ${fileName}`);
 
@@ -4515,19 +4543,17 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
   if (shared.name !== fileName || shared.type !== 'application/pdf') throw new Error(`exported ${shared.name} (${shared.type})`);
   if ((shared.text.match(/\/Type\s*\/Page(?!s)/gu) ?? []).length !== 1) throw new Error('the exported PDF is not one page');
 
-  // Send to office: once, and it says the timesheet goes with it.
-  await card.getByTestId('monthly-forms-together').waitFor({ timeout: 5000 });
+  // Submit: the timesheet and the attendance together.
   const acknowledge = card.getByTestId('monthly-forms-acknowledge');
   if ((await acknowledge.count()) > 0) await acknowledge.check();
   const send = card.getByTestId('monthly-forms-submit');
-  if (!(await send.innerText()).startsWith('Send ')) throw new Error(`the button reads "${await send.innerText()}"`);
   await send.click();
   await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
   await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
   await card.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
   // RESUBMIT-1: the submitted month is offered again, and submitting again replaces it.
   if (!/again/u.test(await card.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again');
-  const month = await section.getByTestId('monthly-attendance-month').inputValue();
+  const month = await section.getByTestId('my-monthly-month').inputValue();
   const again = await page.evaluate(async ({ base, month }) => {
     const me = await (await fetch(`${base}/api/auth/me`)).json().catch(() => null);
     const id = me?.data?.user?.id;
@@ -4564,8 +4590,8 @@ await step('the Attendance page previews, prints, downloads, exports and sends t
 
   // Another technician sees only their own month, and is refused Naledi's.
   await signInAs(page, 'Sipho Mahlangu');
-  await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
-  const own = page.getByTestId('monthly-attendance-own');
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const own = page.getByTestId('my-monthly-forms');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
   if ((await own.getByTestId('monthly-attendance-status').count()) !== 0) throw new Error('a technician was shown the office month list');
   if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('SIPHO ATTEN ')) throw new Error('a technician was shown another person’s form');
@@ -4592,7 +4618,7 @@ await step('a technician previews and submits last month’s timesheet and atten
   await forms.waitFor({ timeout: 15000 });
   const timesheetFile = await page.getByTestId('monthly-timesheet-file').innerText();
   const attendanceFile = await page.getByTestId('monthly-attendance-file').innerText();
-  if (!/^SIPHO TIMESHEET [A-Z]{3}\.pdf/u.test(timesheetFile)) throw new Error(`timesheet file name: ${timesheetFile}`);
+  if (!/^SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf/u.test(timesheetFile)) throw new Error(`timesheet file name: ${timesheetFile}`);
   if (!/^SIPHO ATTEN [A-Z]+\.pdf/u.test(attendanceFile)) throw new Error(`attendance file name: ${attendanceFile}`);
 
   await page.getByTestId('monthly-attendance-preview').click();
@@ -4749,13 +4775,13 @@ await step('the Coordinator is offered Rates & VAT and Checklists, and both open
   await page.getByRole('tab', { name: 'Users', exact: true }).click();
 });
 
-await step('the Coordinator cannot create anything but a technician', async () => {
+await step('the Coordinator (Office) can create only a Technician or an Apprentice (ROLE-APP-1)', async () => {
   await page.getByRole('button', { name: 'Add user' }).first().click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 5000 });
-  const text = await dialog.innerText();
-  if (!text.includes('Role: Technician')) {
-    throw new Error('the Coordinator was offered a role other than Technician');
+  const options = await dialog.getByLabel('Role').locator('option').allTextContents();
+  if (options.join('|') !== 'Technician|Apprentice') {
+    throw new Error(`the Office was offered ${options.join(', ')}`);
   }
   await dialog.getByRole('button', { name: 'Cancel' }).click();
 });
@@ -4827,13 +4853,12 @@ await step('a Master moves a technician to Coordinator and back', async () => {
   let dialog = page.getByRole('dialog');
   await dialog.waitFor({ timeout: 8000 });
   const options = await dialog.getByLabel('Role').locator('option').allTextContents();
-  if (options.includes('Master')) throw new Error('Master was offered as an assignable role');
-  await dialog.getByLabel('Role').selectOption({ label: 'Coordinator' });
+  if (options.includes('Master') || options.includes('Senior Tech')) throw new Error('Senior Tech was offered as an assignable role');
+  if (!options.includes('Apprentice')) throw new Error('Apprentice is not offered');
+  await dialog.getByLabel('Role').selectOption({ label: 'Office' });
   await dialog.getByRole('button', { name: 'Save changes' }).click();
-  await page.waitForFunction(
-    () => (document.querySelector('table')?.innerText ?? '').includes('Coordinator'),
-    { timeout: 10000 },
-  );
+  await page.waitForTimeout(600);
+  if (!(await row().innerText()).includes('Office')) throw new Error('the role did not change to Office');
 
   await row().getByRole('button', { name: 'Manage' }).click();
   await page.getByRole('menuitem', { name: 'Edit user and role' }).click();
@@ -4847,7 +4872,7 @@ await step('a Master moves a technician to Coordinator and back', async () => {
 
 await step('the role change is on the activity trail, with both roles', async () => {
   await page.goto(`${BASE}/activity`, { waitUntil: 'networkidle' });
-  await page.getByText('from Technician to Coordinator', { exact: false })
+  await page.getByText('from Technician to Office', { exact: false })
     .first().waitFor({ timeout: 10000 });
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: 'Users', exact: true }).click();
@@ -5868,7 +5893,7 @@ await step('the header carries the profile, and no global New Job', async () => 
     throw new Error('the header still has a global New Job button');
   }
   await header.getByText('Elmarie Coetzee').waitFor({ timeout: 8000 });
-  await header.getByText('Master', { exact: true }).waitFor({ timeout: 8000 });
+  await header.getByText('Senior Tech', { exact: true }).waitFor({ timeout: 8000 });
 
   await header.locator('[aria-haspopup="menu"]').click();
   await page.getByRole('menuitem', { name: 'Sign out' }).waitFor({ timeout: 5000 });

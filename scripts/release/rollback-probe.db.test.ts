@@ -21,13 +21,13 @@ import { asSiteId } from '@/domain';
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (6fdb142), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (b3a9014), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 6fdb142, and it does: each of these was checked against that commit.
+ * in b3a9014, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0046)
+ * The database was migrated to the newest migration THIS release ships (0047)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
  * library, jobs, attendance, timesheets, corrections, monthly submissions and
@@ -38,7 +38,10 @@ import { asSiteId } from '@/domain';
  * one-file Finance package (0043), which it knows — beside the test bench
  * quantity on jobs (0044) and the standby calendar (0045), which it knows —
  * beside the PO number, the Awaiting Invoice No status, the replaceable
- * submissions and the activity retention guard (0046), which it has never heard of?
+ * submissions and the activity retention guard (0046), which it knows — beside
+ * the apprentice role, customers' rate option and Custom Rates, a document
+ * chosen for the customer email, an email's extra attachments and the standby
+ * day swaps (0047), which it has never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -109,15 +112,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 6fdb142 shipped up to 0045; this release adds 0046.
-    expect(shipped).toHaveLength(46);
-    expect(shipped.at(-1)).toBe('0045_standby_calendar');
-    expect(shipped).not.toContain('0046_tester_fixes_2_november');
+    // b3a9014 shipped up to 0046; this release adds 0047.
+    expect(shipped).toHaveLength(47);
+    expect(shipped.at(-1)).toBe('0046_tester_fixes_2_november');
+    expect(shipped).not.toContain('0047_batch_2_november');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0046 applied beyond what the live release ships.
-    expect(applied).toBe(47);
+    // 0047 applied beyond what the live release ships.
+    expect(applied).toBe(48);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);

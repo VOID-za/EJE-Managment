@@ -14,6 +14,7 @@ import {
   standbyPlanningLimit,
   standbySwapKindOf,
   standbyWeekEnd,
+  standbyWeekOf,
   standbyWeekProblems,
   standbyWeekTiming,
   standbyWeeksOfYear,
@@ -25,6 +26,8 @@ import {
   type StandbyProblem,
   type StandbySwapKind,
   type StandbySwapRequest,
+  type StandbyDayOverride,
+  type StandbyDaySwap,
   type StandbyWeek,
   type StandbyWeekStatus,
   type StandbyWeekTiming,
@@ -105,6 +108,13 @@ export interface StandbyWeekView {
   readonly problems: readonly StandbyProblem[];
   /** Pending swap requests that involve a place in this week. */
   readonly pendingSwaps: number;
+  /**
+   * STANDBY-DAY-1: the days of this week an APPROVED day swap moved — on that
+   * date, that place is held by `name` instead of the week's assignee.
+   */
+  readonly dayChanges: readonly { readonly date: IsoDate; readonly position: StandbyPosition; readonly label: string; readonly name: string }[];
+  /** STANDBY-DAY-1: day swaps still awaiting a decision that involve a day of this week. Pending — nothing has changed. */
+  readonly pendingDaySwaps: readonly { readonly date: IsoDate; readonly position: StandbyPosition; readonly status: 'awaiting_recipient' | 'awaiting_office' }[];
 }
 
 export interface StandbyPerson {
@@ -186,6 +196,7 @@ const weekView = (
   today: IsoDate,
   pending: readonly StandbySwapRequest[],
   office: boolean,
+  days: { readonly overrides: readonly StandbyDayOverride[]; readonly swaps: readonly StandbyDaySwap[] } = { overrides: [], swaps: [] },
 ): StandbyWeekView => ({
   weekStart: week.weekStart,
   weekEnd: standbyWeekEnd(week.weekStart),
@@ -197,6 +208,25 @@ const weekView = (
   }),
   problems: office ? standbyWeekProblems(week, directory.users, directory.eligibility) : [],
   pendingSwaps: pending.filter((request) => involves(request, week.weekStart)).length,
+  dayChanges: week.status !== 'published'
+    ? []
+    : days.overrides
+        .filter((override) => standbyWeekOf(override.date) === week.weekStart)
+        .map((override) => ({
+          date: override.date,
+          position: override.position,
+          label: STANDBY_POSITION_LABELS[override.position],
+          name: nameOf(directory, override.userId) ?? 'Unknown person',
+        })),
+  pendingDaySwaps: days.swaps
+    .filter((swap) => swap.status === 'awaiting_recipient' || swap.status === 'awaiting_office')
+    .flatMap((swap) =>
+      swap.pairs.flatMap((pair) => [
+        { date: pair.requesterDate, position: pair.requesterPosition, status: swap.status as 'awaiting_recipient' | 'awaiting_office' },
+        { date: pair.recipientDate, position: pair.recipientPosition, status: swap.status as 'awaiting_recipient' | 'awaiting_office' },
+      ]),
+    )
+    .filter((day) => standbyWeekOf(day.date) === week.weekStart),
 });
 
 /** The standby calendar between two dates (weeks whose Monday falls in it). */
@@ -215,11 +245,17 @@ export const loadStandbyCalendar = async (
   const office = can(context.actor.role, 'standby.manage');
   const today = todayOf(context);
   const directory = await loadDirectory(context);
-  const [weeks, requests, upcoming] = await Promise.all([
+  const [weeks, requests, upcoming, overrides, daySwaps] = await Promise.all([
     context.repos.standby.listWeeks(from, to),
     context.repos.standby.listSwapRequests(),
     context.repos.standby.listWeeks(addStandbyDays(today, -6), standbyPlanningLimit(today)),
+    context.repos.standby.listDayOverrides(from, addStandbyDays(to, 6)),
+    context.repos.standby.listDaySwaps(),
   ]);
+  // A technician sees only the pending day swaps they are part of; the office sees all.
+  const visibleDaySwaps = daySwaps.filter(
+    (swap) => office || swap.requesterId === context.actor.id || swap.recipientId === context.actor.id,
+  );
   const pending = requests.filter((request) => request.status === 'pending');
   const visible = weeks.filter((week) => office || week.status === 'published');
 
@@ -263,7 +299,7 @@ export const loadStandbyCalendar = async (
     to,
     today,
     planningLimit: standbyPlanningLimit(today),
-    weeks: visible.map((week) => weekView(week, directory, today, pending, office)),
+    weeks: visible.map((week) => weekView(week, directory, today, pending, office, { overrides, swaps: visibleDaySwaps })),
     people,
     mine,
     canManage: office,

@@ -191,11 +191,11 @@ describe('Administration → Integrations', () => {
     // Everything set, but no real test has passed: still "Not configured".
     const complete = await whatsapp();
     expect(complete.state).toBe('not_configured');
-    expect(complete.title).toContain('dedicated EJE number');
+    expect(complete.title).toContain('office number, by WhatsApp Business coexistence'); // WA-SIM-1
     expect(complete.summary).toContain('no real test has passed');
     const check = (label: string) => complete.checks.find((entry) => entry.label === label)!;
-    expect(check('Dedicated EJE number')).toMatchObject({ ok: true });
-    expect(check('Dedicated EJE number').detail).toContain('…0001');
+    expect(check('EJE sending number')).toMatchObject({ ok: true });
+    expect(check('EJE sending number').detail).toContain('…0001');
     expect(check('Office WhatsApp number').detail).toContain('Not connected and never used');
     expect(check('Office WhatsApp number').detail).toContain('1 protected number');
     expect(check('Real API test')).toMatchObject({ ok: false });

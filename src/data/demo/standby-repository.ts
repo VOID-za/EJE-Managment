@@ -6,10 +6,21 @@ import {
   type StandbyEligibility,
   type StandbyPosition,
   type StandbySwapRequest,
+  type StandbyDayOverride,
+  type StandbyDaySwap,
+  STANDBY_DAY_SWAP_ACTIVE,
+  standbyHolderOn,
   type StandbyWeek,
   type UserId,
 } from '@/domain';
-import type { StandbyApproval, StandbyRepository, StandbySwapDecision } from '../repositories';
+import type {
+  StandbyApproval,
+  StandbyDayApproval,
+  StandbyDayMove,
+  StandbyDaySwapDecision,
+  StandbyRepository,
+  StandbySwapDecision,
+} from '../repositories';
 import type { DemoContext } from './repositories';
 import type { DemoDatabase } from './store';
 
@@ -230,6 +241,110 @@ export class DemoStandbyRepository implements StandbyRepository {
         candidate === request ? approved : candidate,
       );
       result = { ok: true, request: approved };
+    });
+    return Promise.resolve(result);
+  }
+
+  /* ---- STANDBY-DAY-1: day swaps ------------------------------------------- */
+
+  listDayOverrides(from: IsoDate, to: IsoDate): Promise<readonly StandbyDayOverride[]> {
+    return Promise.resolve(this.context.read().standbyDayOverrides.filter((o) => o.date >= from && o.date <= to));
+  }
+
+  listDaySwaps(): Promise<readonly StandbyDaySwap[]> {
+    return Promise.resolve([...this.context.read().standbyDaySwaps].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)));
+  }
+
+  findDaySwap(id: string): Promise<StandbyDaySwap | null> {
+    return Promise.resolve(this.context.read().standbyDaySwaps.find((swap) => swap.id === id) ?? null);
+  }
+
+  createDaySwap(swap: StandbyDaySwap): Promise<StandbyDaySwap | null> {
+    let created: StandbyDaySwap | null = null;
+    this.context.commit((draft) => {
+      const slots = (candidate: StandbyDaySwap) =>
+        candidate.pairs.flatMap((pair) => [`${pair.requesterDate}/${pair.requesterPosition}`, `${pair.recipientDate}/${pair.recipientPosition}`]);
+      const claimed = new Set(draft.standbyDaySwaps.filter((other) => STANDBY_DAY_SWAP_ACTIVE.includes(other.status)).flatMap(slots));
+      if (slots(swap).some((slot) => claimed.has(slot))) return;
+      draft.standbyDaySwaps = [...draft.standbyDaySwaps, swap];
+      created = swap;
+    });
+    return Promise.resolve(created);
+  }
+
+  private moveDaySwap(id: string, from: StandbyDaySwap['status'], change: (swap: StandbyDaySwap) => StandbyDaySwap): StandbyDaySwap | null {
+    let changed: StandbyDaySwap | null = null;
+    this.context.commit((draft) => {
+      const swap = draft.standbyDaySwaps.find((candidate) => candidate.id === id);
+      if (swap === undefined || swap.status !== from) return;
+      const next = change(swap);
+      draft.standbyDaySwaps = draft.standbyDaySwaps.map((candidate) => (candidate === swap ? next : candidate));
+      changed = next;
+    });
+    return changed;
+  }
+
+  answerDaySwap(id: string, answer: { readonly approved: boolean; readonly at: IsoDateTime; readonly note: string }): Promise<StandbyDaySwap | null> {
+    return Promise.resolve(
+      this.moveDaySwap(id, 'awaiting_recipient', (swap) => ({
+        ...swap,
+        status: answer.approved ? 'awaiting_office' : 'denied',
+        recipientDecidedAt: answer.at,
+        recipientNote: answer.note,
+      })),
+    );
+  }
+
+  withdrawDaySwap(id: string, at: IsoDateTime): Promise<StandbyDaySwap | null> {
+    return Promise.resolve(this.moveDaySwap(id, 'awaiting_recipient', (swap) => ({ ...swap, status: 'withdrawn', withdrawnAt: at })));
+  }
+
+  rejectDaySwap(decision: StandbyDaySwapDecision): Promise<StandbyDaySwap | null> {
+    return Promise.resolve(
+      this.moveDaySwap(decision.id, 'awaiting_office', (swap) => ({
+        ...swap,
+        status: 'rejected',
+        officeDecidedBy: decision.by,
+        officeDecidedAt: decision.at,
+        officeNote: decision.note,
+      })),
+    );
+  }
+
+  approveDaySwap(decision: StandbyDaySwapDecision, moves: readonly StandbyDayMove[]): Promise<StandbyDayApproval> {
+    let result: StandbyDayApproval = { ok: false, reason: 'not_awaiting_office' };
+    this.context.commit((draft) => {
+      const swap = draft.standbyDaySwaps.find((candidate) => candidate.id === decision.id);
+      if (swap === undefined || swap.status !== 'awaiting_office') return;
+      if (decision.by === swap.requesterId || decision.by === swap.recipientId) throw new Error('a day swap is approved by the Office, not by either person in it');
+      // Every place is checked before anything is written: all or nothing.
+      for (const move of moves) {
+        if (standbyHolderOn(move.date, move.position, draft.standbyWeeks, draft.standbyDayOverrides) !== move.expectedUserId) {
+          result = { ok: false, reason: 'assignment_changed' };
+          return;
+        }
+        const user = draft.users.find((candidate) => candidate.id === move.userId);
+        const eligibility = draft.standbyEligibility.find((record) => record.userId === move.userId);
+        if (!mayStandIn(user, eligibility, standbyCategoryOf(move.position))) {
+          throw new Error(`only an active technician or apprentice eligible for the ${move.position} place can stand in it`);
+        }
+      }
+      const written: StandbyDayOverride[] = moves.map((move) => ({ date: move.date, position: move.position, userId: move.userId, swapId: swap.id, updatedAt: decision.at }));
+      const overrides = [
+        ...draft.standbyDayOverrides.filter((existing) => !moves.some((move) => move.date === existing.date && move.position === existing.position)),
+        ...written,
+      ];
+      // Nobody in two places on one day, once the days are exchanged.
+      for (const date of new Set(moves.map((move) => move.date))) {
+        const holders = (['main', 'helper', 'apprentice_1', 'apprentice_2'] as const)
+          .map((position) => standbyHolderOn(date, position, draft.standbyWeeks, overrides))
+          .filter((id) => id !== null);
+        if (new Set(holders).size !== holders.length) throw new Error(`somebody would hold two standby places on ${date}`);
+      }
+      const approved: StandbyDaySwap = { ...swap, status: 'approved', officeDecidedBy: decision.by, officeDecidedAt: decision.at, officeNote: decision.note };
+      draft.standbyDayOverrides = overrides;
+      draft.standbyDaySwaps = draft.standbyDaySwaps.map((candidate) => (candidate === swap ? approved : candidate));
+      result = { ok: true, swap: approved };
     });
     return Promise.resolve(result);
   }

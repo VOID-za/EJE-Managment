@@ -118,7 +118,8 @@ await check('Attendance: From and To across months, oldest day first, remembered
 });
 
 await check('Attendance: the period PDF is named for both months and has no Notes column', async () => {
-  await page.getByTestId('my-attendance-pdf').waitFor({ timeout: 10000 });
+  // FORMS-PAGES-1 (2 November 2026): the page previews and prints it; the PDF itself is the same route.
+  await page.getByTestId('attendance-preview').waitFor({ timeout: 10000 });
   const pdf = await call('GET', `/api/attendance/pdf?from=${PREVIOUS_MONTH_START}&to=${today}`);
   if (pdf.status !== 200) fail(`the PDF answered ${pdf.status}`);
   const name = fileNameOf(pdf.disposition);
@@ -170,17 +171,19 @@ await check('Timesheets: no Whose timesheet block; From and To remembered; sent,
   const again = await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today });
   if (again.status !== 200) fail(`sending again answered ${again.status}`);
   await go('/timesheets');
-  await page.getByTestId('timesheet-send').waitFor({ timeout: 20000 });
-  if ((await page.getByTestId('timesheet-send').innerText()).trim() !== 'Send again') fail('a sent period is not offered Send again');
+  await page.getByText(/^Sent to office /u).first().waitFor({ timeout: 20000 });
+  // FORMS-PAGES-1: the page shows Preview and Print only — sending is on Monthly Forms.
+  if ((await page.getByTestId('timesheet-send').count()) !== 0) fail('the Timesheets page still offers Send');
   return `${from} → ${today}`;
 });
 
-await check('Timesheets: a period over two months is named for both months, with the year', async () => {
+await check('Timesheets: a period over two months is named for the To month and its year (TS-NAME-TO-1)', async () => {
   const me = (await call('GET', '/api/auth/me')).json.data.user.id;
   const pdf = await call('GET', `/api/timesheets/${me}/period/pdf?from=${PREVIOUS_MONTH_START}&to=${today}`);
   if (pdf.status !== 200) fail(`the PDF answered ${pdf.status}`);
   const name = fileNameOf(pdf.disposition);
-  if (!/^ELMARIE Timesheet, [A-Z][a-z]{2}( \d{4})? \+ [A-Z][a-z]{2} \d{4}\.pdf$/u.test(name)) fail(`file name ${name}`);
+  const toMonth = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }).slice(0, 3);
+  if (name !== `ELMARIE Timesheet ${toMonth} ${today.slice(0, 4)}.pdf`) fail(`file name ${name}`);
   return name;
 });
 
@@ -197,7 +200,7 @@ await check('Monthly Forms: no Export CSV for the Master or the Coordinator; the
   }
 });
 
-await check('Notifications: the Inbox in Jobcards, Messages and Forms, each holding exactly its own', async () => {
+await check('Notifications: the Inbox in Jobcards, Messages, Monthly Forms and Standby, each holding exactly its own', async () => {
   // A message, so the Messages box has something in it.
   await as('Sipho Mahlangu');
   const conversations = await call('GET', '/api/conversations');
@@ -209,9 +212,9 @@ await check('Notifications: the Inbox in Jobcards, Messages and Forms, each hold
   await go('/notifications');
   await page.getByTestId('inbox-boxes').waitFor({ timeout: 20000 });
   const all = (await call('GET', '/api/notifications')).json.data.notifications.filter((n) => n.handledAt === null);
-  const category = (type) => (type === 'chat_message' ? 'messages' : /^(timesheet_|standby_)/u.test(type) ? 'forms' : 'jobcards');
+  const category = (type) => (type === 'chat_message' ? 'messages' : /^timesheet_/u.test(type) ? 'monthly_forms' : /^standby_/u.test(type) ? 'standby' : 'jobcards');
   const counts = {};
-  for (const box of ['jobcards', 'messages', 'forms']) {
+  for (const box of ['jobcards', 'messages', 'monthly_forms', 'standby']) {
     await press(page.getByTestId(`inbox-box-${box}`));
     const expected = all.filter((n) => category(n.type) === box).length;
     const list = page.getByTestId(`inbox-list-${box}`);
@@ -364,7 +367,7 @@ await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) →
   await go('/notifications?tab=awaiting_invoice_no');
   const row = page.getByTestId('awaiting-invoice-EJE-1058');
   await row.waitFor({ timeout: 20000 });
-  await row.getByText('PO PO-CHECK-1058').waitFor({ timeout: 5000 });
+  await row.getByText('Purchase Order:PO-CHECK-1058').waitFor({ timeout: 5000 });
   await press(row.getByRole('button', { name: 'Save' }));
   await row.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 10000 });
   await row.getByTestId('invoice-number-EJE-1058').fill('INV-CHECK-1058');
@@ -374,7 +377,7 @@ await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) →
   const invoiced = page.getByTestId('invoiced-EJE-1058');
   await invoiced.waitFor({ timeout: 15000 });
   await invoiced.getByText('Invoice INV-CHECK-1058').waitFor({ timeout: 5000 });
-  await invoiced.getByText('PO PO-CHECK-1058').waitFor({ timeout: 5000 });
+  await invoiced.getByText('Purchase Order:PO-CHECK-1058').waitFor({ timeout: 5000 }); // NOTIF-PO-LABEL-1 (2 November 2026)
   await noPageOverflow('the Invoiced tab');
 });
 

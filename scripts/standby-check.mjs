@@ -8,11 +8,11 @@
  *     NEXT year as drafts (so every week is in the future, whatever today is),
  *     and publishes it after reviewing the conflicts;
  *   - the month view, the week view, month/week and year navigation;
- *   - a technician sees no administration (and the API refuses it), finds their
- *     week, asks for a main-technician swap by tapping through the form, sees
- *     the week marked "Swap pending" with the calendar unchanged;
- *   - the office approves it in the queue; only the two main places move; both
- *     people are told; an apprentice swap is rejected with a note;
+ *   - a technician sees no administration (and the API refuses it), asks for a
+ *     DAY swap by tapping through the form (STANDBY-DAY-1), the calendar unchanged;
+ *   - the person asked approves, then the Office: only the chosen days move,
+ *     the weekly places stay, both people are told; an apprentice day swap the
+ *     Office rejects with a note;
  *   - no page scrolls sideways and no page error is thrown.
  */
 import { chromium } from 'playwright';
@@ -85,8 +85,6 @@ const mondaysOf = (year) => {
 };
 const WEEKS = mondaysOf(YEAR);
 const yearCalendar = async () => (await call('GET', `/api/standby?from=${YEAR}-01-01&to=${YEAR}-12-31`)).json?.data;
-const holder = (calendar, weekStart, position) =>
-  calendar.weeks.find((week) => week.weekStart === weekStart)?.places.find((place) => place.position === position)?.userId ?? null;
 
 await resetDemonstration(page, BASE);
 
@@ -216,85 +214,113 @@ await check('month view, week view, and month, week and year navigation', async 
 });
 
 let before = null;
-await check('a technician asks for a main-technician swap by tapping through the form; nothing changes yet', async () => {
+let asked = null;
+/*
+ * STANDBY-DAY-1 (2 November 2026): a swap exchanges chosen DAYS, in two stages —
+ * the person asked approves, then the Office — and only the chosen days move.
+ */
+await check('a technician asks for a DAY swap by tapping through the form; nothing changes yet', async () => {
   await as('Sipho Mahlangu');
   before = await yearCalendar();
-  const mine = WEEKS.find((week) => holder(before, week, 'main') === 'user-tech-sipho');
-  await go(`/standby?week=${mine}`);
-  await page.getByTestId('standby-mine').waitFor({ timeout: 20000 });
-  await press(page.getByTestId('standby-week'));
-  await page.getByTestId('standby-week-dialog').waitFor({ timeout: 10000 });
-  await noPageOverflow('the week details');
-  await press(page.getByTestId('standby-request-swap'));
-  await page.getByTestId('standby-swap-mine').waitFor({ timeout: 20000 });
-  await page.getByTestId('standby-swap-person').selectOption({ label: 'Riaan van Wyk' });
-  const theirs = page.getByTestId('standby-swap-theirs');
-  await theirs.waitFor({ timeout: 5000 });
+  await go('/standby');
+  await press(page.getByTestId('standby-new-swap'));
+  await page.getByTestId('day-swap-dialog').waitFor({ timeout: 20000 });
+  const mine = page.getByTestId('day-swap-mine-0');
+  await mine.waitFor({ timeout: 20000 });
+  await mine.selectOption({ index: 1 });
+  await page.getByTestId('day-swap-person').selectOption({ label: 'Riaan van Wyk' });
+  const theirs = page.getByTestId('day-swap-theirs-0');
   await theirs.selectOption({ index: 1 });
-  await page.getByTestId('standby-swap-reason').fill('Family wedding');
-  await noPageOverflow('the swap form');
-  await press(page.getByTestId('standby-swap-submit'));
+  await page.getByTestId('day-swap-reason').fill('Family wedding');
+  await noPageOverflow('the day swap form');
+  await press(page.getByTestId('day-swap-submit'));
   await page.getByTestId('standby-message').filter({ hasText: 'Swap request sent' }).waitFor({ timeout: 20000 });
   const during = await yearCalendar();
-  if (JSON.stringify(during.weeks.map((week) => week.places)) !== JSON.stringify(before.weeks.map((week) => week.places))) {
+  if (JSON.stringify(during.weeks.map((week) => [week.places, week.dayChanges])) !== JSON.stringify(before.weeks.map((week) => [week.places, week.dayChanges]))) {
     fail('a pending request changed the calendar');
   }
-  await page.getByTestId('standby-week-pending').first().waitFor({ timeout: 20000 });
+  asked = (await call('GET', '/api/standby/days')).json.data[0];
+  if (asked?.status !== 'awaiting_recipient') fail(`the request is ${asked?.status}`);
   await press(tab('Swap requests'));
-  await page.getByTestId('standby-withdraw').waitFor({ timeout: 20000 });
-  return `offered ${mine}`;
+  await page.getByTestId('day-swap-withdraw').waitFor({ timeout: 20000 });
+  await noPageOverflow('the swap requests');
+  return asked.pairLabels.join('; ');
 });
 
-await check('the office approves it in the queue: only the two main places move, both people are told', async () => {
+await check('the person asked approves; it waits for the Office, still changing nothing', async () => {
+  await as('Riaan van Wyk');
+  const told = (await call('GET', '/api/notifications')).json.data.notifications;
+  if (!told.some((note) => note.type === 'standby_day_swap_requested')) fail('Riaan was not told he was asked');
+  await go('/standby?tab=requests');
+  const card = page.locator(`[data-testid="day-swap-request"][data-swap="${asked.id}"]`);
+  await card.waitFor({ timeout: 20000 });
+  await press(card.getByTestId('day-swap-approve'));
+  await page.getByTestId('standby-message').filter({ hasText: 'waits for the Office' }).waitFor({ timeout: 20000 });
+  const now = await yearCalendar();
+  if (JSON.stringify(now.weeks.map((week) => week.dayChanges)) !== JSON.stringify(before.weeks.map((week) => week.dayChanges))) fail('the calendar changed before the Office approved');
+});
+
+await check('the Office approves: only the chosen days move, the weekly places stay, both people are told', async () => {
   await as('Christene van Niekerk');
   await go('/standby?tab=requests');
-  const card = page.getByTestId('standby-request').first();
+  const card = page.locator(`[data-testid="day-swap-request"][data-swap="${asked.id}"]`);
   await card.waitFor({ timeout: 20000 });
-  await card.getByTestId('standby-decision-note').fill('Approved — confirmed with both');
-  await press(card.getByTestId('standby-approve'));
-  await page.getByTestId('standby-message').filter({ hasText: 'Swap approved' }).waitFor({ timeout: 20000 });
-  const requests = (await call('GET', '/api/standby/requests?status=approved')).json.data;
-  if (requests.length !== 1) fail(`${requests.length} approved requests`);
-  const request = requests[0];
+  await card.getByTestId('day-swap-note').fill('Approved — confirmed with both');
+  await press(card.getByTestId('day-swap-office-approve'));
+  await page.getByTestId('standby-message').filter({ hasText: 'only those days changed' }).waitFor({ timeout: 20000 });
   const after = await yearCalendar();
-  for (const week of after.weeks) {
-    const was = before.weeks.find((candidate) => candidate.weekStart === week.weekStart);
-    for (const place of week.places) {
-      const old = was.places.find((candidate) => candidate.position === place.position).userId;
-      const expected =
-        place.position === 'main' && week.weekStart === request.requesterWeekStart
-          ? request.counterpartId
-          : place.position === 'main' && week.weekStart === request.counterpartWeekStart
-            ? request.requesterId
-            : old;
-      if (place.userId !== expected) fail(`${week.weekStart} ${place.position}: ${place.userId}, expected ${expected}`);
-    }
-  }
+  if (JSON.stringify(after.weeks.map((week) => week.places)) !== JSON.stringify(before.weeks.map((week) => week.places))) fail('a weekly place changed');
+  const changes = after.weeks.flatMap((week) => week.dayChanges);
+  const pair = asked.pairs[0];
+  const want = [`${pair.requesterDate}/${pair.requesterPosition}/user-tech-riaan`, `${pair.recipientDate}/${pair.recipientPosition}/user-tech-sipho`].sort();
+  const got = changes.map((change) => `${change.date}/${change.position}/${change.name.includes('Riaan') ? 'user-tech-riaan' : change.name.includes('Sipho') ? 'user-tech-sipho' : change.name}`).sort();
+  if (JSON.stringify(got) !== JSON.stringify(want)) fail(`day changes ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
   await as('Riaan van Wyk');
   const notes = (await call('GET', '/api/notifications')).json.data.notifications;
-  if (notes.filter((note) => note.type === 'standby_swap_decided').length !== 1) fail('Riaan was not told exactly once');
-  return `${request.requesterWeekStart} ⇄ ${request.counterpartWeekStart}`;
+  if (notes.filter((note) => note.type === 'standby_day_swap_decided').length !== 1) fail('Riaan was not told exactly once');
+  return got.join(', ');
 });
 
-await check('an apprentice swap is rejected with a note; the calendar stays as it is', async () => {
+await check('an apprentice day swap the Office rejects with a note; the calendar stays as it is', async () => {
   await as('André Steyn');
+  const options = (await call('GET', '/api/standby/days/options')).json.data;
+  const mine = options.mine.find((option) => option.kind === 'apprentice');
+  // The first pairing the server accepts: one that would put nobody in two places on one day.
+  let created = null;
+  let person = null;
+  for (const candidate of options.people) {
+    for (const theirs of candidate.days.filter((day) => day.kind === 'apprentice' && day.date !== mine.date)) {
+      const answer = await call('POST', '/api/standby/days', {
+        recipientId: candidate.userId,
+        kind: 'apprentice',
+        pairs: [{ requesterDate: mine.date, requesterPosition: mine.position, recipientDate: theirs.date, recipientPosition: theirs.position }],
+        reason: 'Exam',
+      });
+      if (answer.status === 200) {
+        created = answer;
+        person = candidate;
+        break;
+      }
+      if (answer.json?.error?.violations?.[0]?.code !== 'would_double_book') fail(`asking answered ${answer.status} ${JSON.stringify(answer.json?.error ?? '')}`);
+    }
+    if (created !== null) break;
+  }
+  if (created === null) fail('no apprentice pairing could be asked for');
+  const swap = created.json.data.swap;
+  await as(person.name);
+  const answered = await call('POST', `/api/standby/days/${swap.id}/answer`, { decision: 'approve', note: '' });
+  if (answered.status !== 200) fail(`approving answered ${answered.status}`);
   const now = await yearCalendar();
-  const mine = WEEKS.find((week) => holder(now, week, 'apprentice_1') === 'user-tech-andre');
-  const options = (await call('GET', '/api/standby/options')).json.data;
-  const target = options.candidates.find((candidate) => candidate.kind === 'apprentice' && candidate.weekStart !== mine && !now.weeks.find((week) => week.weekStart === candidate.weekStart).places.some((place) => place.userId === 'user-tech-andre') && !now.weeks.find((week) => week.weekStart === mine).places.some((place) => place.userId === candidate.userId));
-  const asked = await call('POST', '/api/standby/requests', { kind: 'apprentice', weekStart: mine, counterpartId: target.userId, counterpartWeekStart: target.weekStart, reason: 'Exam' });
-  if (asked.status !== 200) fail(`asking answered ${asked.status}`);
   await as('Elmarie Coetzee');
   await go('/standby?tab=requests');
-  const card = page.getByTestId('standby-request').first();
+  const card = page.locator(`[data-testid="day-swap-request"][data-swap="${swap.id}"]`);
   await card.waitFor({ timeout: 20000 });
-  await card.getByTestId('standby-decision-note').fill('Exam week is covered already');
-  await press(card.getByTestId('standby-reject'));
+  await card.getByTestId('day-swap-note').fill('Exam week is covered already');
+  await press(card.getByTestId('day-swap-office-reject'));
   await page.getByTestId('standby-message').filter({ hasText: 'Swap rejected' }).waitFor({ timeout: 20000 });
   const after = await yearCalendar();
-  if (JSON.stringify(after.weeks.map((week) => week.places)) !== JSON.stringify(now.weeks.map((week) => week.places))) fail('a rejection changed the calendar');
-  await press(tab('Rejected'));
-  await page.getByText('Exam week is covered already').waitFor({ timeout: 10000 });
+  if (JSON.stringify(after.weeks.map((week) => [week.places, week.dayChanges])) !== JSON.stringify(now.weeks.map((week) => [week.places, week.dayChanges]))) fail('a rejection changed the calendar');
+  await card.getByText('Exam week is covered already').waitFor({ timeout: 10000 });
   await noPageOverflow('the swap requests');
 });
 

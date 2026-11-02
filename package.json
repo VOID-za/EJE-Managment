@@ -37,6 +37,7 @@
     "forms-regression": "node scripts/forms-regression.mjs",
     "standby-check": "node scripts/standby-check.mjs",
     "tester-fixes-check": "node scripts/tester-fixes-check.mjs",
+    "batch-check": "node scripts/batch-check.mjs",
     "retention": "tsx src/ops/retention.ts",
     "integrations-regression": "node scripts/integrations-regression.mjs",
     "responsive-check": "node scripts/responsive-check.mjs",

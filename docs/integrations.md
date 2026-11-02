@@ -307,7 +307,7 @@ Business Platform Cloud API.
 | `WHATSAPP_PHONE_NUMBER_ID` | yes | — |
 | `WHATSAPP_ACCESS_TOKEN` | yes | — |
 | `WHATSAPP_API_VERSION` | no | `v21.0` |
-| `WHATSAPP_DEDICATED_NUMBER` | to send | none — the new, dedicated EJE number; nothing is sent without it |
+| `WHATSAPP_DEDICATED_NUMBER` | to send | none — the number EJE sends from: since 2 November 2026 the office's existing number, connected by WhatsApp Business coexistence; nothing is sent without it |
 | `WHATSAPP_PROTECTED_NUMBERS` | no (recommended) | none — the office's WhatsApp number(s); EJE refuses to send from them |
 | `WHATSAPP_API_BASE_URL` | no | `https://graph.facebook.com` |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | no | none — needed to check template approval |
@@ -317,11 +317,16 @@ Business Platform Cloud API.
 | `WHATSAPP_TEST_RECIPIENTS` | no | none — the only numbers Administration's "Send test message" may use |
 | `EJE_PUBLIC_URL` | no | `https://eje.syncza.co.za` — the job link in a message |
 
-**A dedicated EJE number; the office number is never touched.** The owner
-decided (1 November 2026) that notifications go from a new number of EJE's own
-(`docs/integrations-setup.md` §1). The adapter makes two calls only: `GET
-/{phone-number-id}?fields=display_phone_number`, to confirm the sender IS the
-dedicated number (and none of `WHATSAPP_PROTECTED_NUMBERS`) before sending —
+**The office's existing number, by coexistence (WA-SIM-1).** The owner decided
+on 2 November 2026 — superseding the dedicated-number decision of 1 November —
+that notifications go from the office's EXISTING WhatsApp number, connected to
+the Cloud API by WhatsApp Business **coexistence** so the office keeps using
+WhatsApp on its phone; no new SIM (`docs/integrations-setup.md` §1). Nothing
+was connected or changed during development: onboarding is an outside step,
+through a Meta partner, after the eligibility checks in §1.5. The adapter makes
+two calls only: `GET /{phone-number-id}?fields=display_phone_number`, to
+confirm the sender IS the configured sending number (and none of
+`WHATSAPP_PROTECTED_NUMBERS`) before sending —
 refused permanently, nothing sent, if not — and `POST
 /{phone-number-id}/messages` with a template. There is no register,
 deregister, migrate or settings call anywhere (a test pins this).

@@ -7,7 +7,8 @@ import { Badge, Button, Card, EmptyState, Icon, LoadingPanel, QueryFailure, Tabs
 import { PageHeader } from '@/components/layout/PageHeader';
 import { StandbyWeekCard } from '@/components/standby/StandbyWeekCard';
 import { StandbyWeekDialog } from '@/components/standby/StandbyWeekDialog';
-import { SwapRequestDialog } from '@/components/standby/SwapRequestDialog';
+import { DaySwapDialog } from '@/components/standby/DaySwapDialog';
+import { DaySwapsPanel } from '@/components/standby/DaySwapsPanel';
 import { SwapRequestsPanel } from '@/components/standby/SwapRequestsPanel';
 import { StandbyManagePanel } from '@/components/standby/StandbyManagePanel';
 import { monthLabel, monthOf, monthWeekRange, shiftMonth, weekRangeLabel } from '@/components/standby/standby-format';
@@ -46,12 +47,17 @@ const StandbyPageContent = () => {
   const range = view === 'month' ? monthWeekRange(anchor) : { from: standbyWeekOf(anchor), to: standbyWeekOf(anchor) };
   const query = useQuery(`standby:${range.from}:${range.to}`, () => standby.calendar(range.from, range.to));
   const requests = useQuery('standby-requests', () => standby.requests());
+  // STANDBY-DAY-1: day swaps and their two stages.
+  const daySwaps = useQuery('standby-day-swaps', () => standby.daySwaps());
   const meId = currentUser?.id ?? null;
 
   if (query.error !== null) return <QueryFailure code={query.errorCode} message={query.error} onRetry={query.refetch} />;
 
   const data = query.data;
-  const pendingCount = (requests.data ?? []).filter((request) => request.status === 'pending').length;
+  // What waits on THIS person: their answer, the Office's decision, and any earlier week request still pending.
+  const pendingCount =
+    (requests.data ?? []).filter((request) => request.status === 'pending').length +
+    (daySwaps.data ?? []).filter((swap) => swap.canAnswer || swap.canDecide).length;
   const tabs = [
     { id: 'calendar', label: 'Calendar' },
     { id: 'requests', label: 'Swap requests', badge: pendingCount > 0 ? pendingCount : undefined },
@@ -67,6 +73,14 @@ const StandbyPageContent = () => {
     setMessage(text);
     setOpenWeek(null);
     setSwapFor(false);
+    void daySwaps.refetch();
+    void query.refetch();
+  };
+  const changed = (text: string) => {
+    setMessage(text);
+    void daySwaps.refetch();
+    void requests.refetch();
+    void query.refetch();
   };
 
   return (
@@ -214,12 +228,21 @@ const StandbyPageContent = () => {
       )}
 
       {tab === 'requests' &&
-        (requests.error !== null ? (
-          <QueryFailure code={requests.errorCode} message={requests.error} onRetry={requests.refetch} />
-        ) : requests.data === null ? (
+        (daySwaps.error !== null ? (
+          <QueryFailure code={daySwaps.errorCode} message={daySwaps.error} onRetry={daySwaps.refetch} />
+        ) : daySwaps.data === null ? (
           <LoadingPanel rows={3} label="Loading swap requests" />
         ) : (
-          <SwapRequestsPanel requests={requests.data} canDecide={data?.canManage === true} meId={meId} onChanged={setMessage} />
+          <div className="space-y-6">
+            <DaySwapsPanel swaps={daySwaps.data} onChanged={changed} />
+            {/* Earlier WEEK swap requests (before day swaps): kept, and still decidable while pending. */}
+            {requests.data !== null && requests.data.length > 0 && (
+              <section className="space-y-3" data-testid="week-swaps">
+                <h2 className="text-sm font-semibold text-steel-900">Earlier week swaps</h2>
+                <SwapRequestsPanel requests={requests.data} canDecide={data?.canManage === true} meId={meId} onChanged={changed} />
+              </section>
+            )}
+          </div>
         ))}
 
       {tab === 'manage' && data?.canManage === true && <StandbyManagePanel today={today} onMessage={setMessage} />}
@@ -238,7 +261,7 @@ const StandbyPageContent = () => {
           onSaved={setMessage}
         />
       )}
-      <SwapRequestDialog open={swapFor !== false} initialWeek={swapFor === false ? null : swapFor} onClose={() => setSwapFor(false)} onDone={done} />
+      <DaySwapDialog open={swapFor !== false} onClose={() => setSwapFor(false)} onDone={done} />
     </>
   );
 };

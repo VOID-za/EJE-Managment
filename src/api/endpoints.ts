@@ -1,5 +1,7 @@
 'use client';
 
+import type { CurrentStandbyWeek, DaySwapView, StandbyDayOptions } from '@/application/standby-days';
+import type { StandbyDayPair } from '@/domain';
 import type { CustomerRates, PricingInputs } from '@/domain';
 import type {
   CustomerEmail,
@@ -1276,6 +1278,18 @@ export const attendance = {
 
 /** The standby calendar. STANDBY-1…8. */
 export const standby = {
+  /** STANDBY-DASH-1: this week's published standby, for the Overview. */
+  currentWeek: () => query<CurrentStandbyWeek>('/api/standby/current-week'),
+  /** STANDBY-DAY-1: day swaps and their two stages. */
+  daySwaps: () => query<readonly DaySwapView[]>('/api/standby/days'),
+  dayOptions: () => query<StandbyDayOptions>('/api/standby/days/options'),
+  requestDaySwap: (input: { recipientId: string; kind: 'main' | 'apprentice'; pairs: readonly StandbyDayPair[]; reason: string }) =>
+    command<{ swap: DaySwapView }>('/api/standby/days', input),
+  answerDaySwap: (swapId: string, decision: 'approve' | 'deny', note = '') =>
+    command<{ swap: DaySwapView }>(`/api/standby/days/${segment(swapId)}/answer`, { decision, note }),
+  decideDaySwap: (swapId: string, decision: 'approve' | 'reject', note = '') =>
+    command<{ swap: DaySwapView }>(`/api/standby/days/${segment(swapId)}/decide`, { decision, note }),
+  withdrawDaySwap: (swapId: string) => command<{ swap: DaySwapView }>(`/api/standby/days/${segment(swapId)}/withdraw`, {}),
   calendar: (from: string, to: string) => query<StandbyCalendar>(`/api/standby${search({ from, to })}`),
   requests: (status?: string) => query<readonly StandbySwapView[]>(`/api/standby/requests${search({ status })}`),
   options: () => query<StandbySwapOptions>('/api/standby/options'),

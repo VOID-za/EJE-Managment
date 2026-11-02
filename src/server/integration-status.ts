@@ -167,7 +167,8 @@ export const whatsappStatus = async (): Promise<IntegrationStatus> => {
   ];
   const checks: IntegrationCheck[] = [
     {
-      label: 'Dedicated EJE number',
+      // WA-SIM-1 (2 November 2026): the office's existing number, connected by coexistence.
+      label: 'EJE sending number',
       ok: dedicated.length > 0 && problems.length === 0,
       detail:
         dedicated.length === 0
@@ -210,7 +211,7 @@ export const whatsappStatus = async (): Promise<IntegrationStatus> => {
   else state = 'connected';
   return {
     service: 'whatsapp',
-    title: 'WhatsApp — dedicated EJE number (Meta Cloud API)',
+    title: 'WhatsApp — the office number, by WhatsApp Business coexistence (Meta Cloud API)',
     state,
     summary:
       state === 'simulated'

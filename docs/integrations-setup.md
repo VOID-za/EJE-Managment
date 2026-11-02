@@ -30,24 +30,37 @@ restarted with **`sudo systemctl restart eje`**.
 
 ## 1. WhatsApp: choosing the phone number (read this first)
 
-### 1.1 The decision: a new, dedicated EJE number (confirmed 1 November 2026)
+### 1.1 The decision: the existing office number, by coexistence (2 November 2026)
 
-**The owner has decided: EJE's system notifications use a new WhatsApp number
-of their own (option B below), through the Meta Cloud API directly.** The
-office's existing WhatsApp number is **not** connected, migrated, registered,
-deregistered or changed in any way. The office keeps its WhatsApp Business app,
-its linked devices and its chat history exactly as they are.
+**The owner has decided (2 November 2026, superseding the decision of
+1 November): EJE's system notifications use the office's EXISTING WhatsApp
+number and SIM. No new SIM is requested.** The route that keeps the office's
+own WhatsApp working on that number is **coexistence** (option A below): the
+number stays in the WhatsApp Business app on the office phone *and* is
+connected to the Meta Cloud API, which is how the EJE system sends.
 
-The dedicated number is a **separate system integration**: in Administration
-→ Integrations it is shown as *WhatsApp — dedicated EJE number*, it has its own
-settings (`WHATSAPP_DEDICATED_NUMBER` and the Meta credentials for that
-number), and it says **Not configured** until those are set **and** a real test
-message to an internal number has been accepted by Meta (see 1.6).
+What this means, plainly:
 
-> **NEVER migrate, register or deregister the existing office WhatsApp number
-> on the Cloud API.** Neither the developer, the IT person nor a Meta partner
-> may do this. Reversing the decision above needs a new written decision from
-> the owner.
+- **Nothing has been changed yet.** No account was connected, registered,
+  migrated or deregistered during development, and no message was sent.
+  Connecting the number is an outside step taken with a Meta partner, by the
+  owner, after the checks in 1.5 — never by the developer and never by the EJE
+  system itself (it has no code that can register, migrate or deregister a
+  number; see 1.6).
+- **Eligibility is not assumed.** Coexistence must be confirmed for this exact
+  number before anything is done: it must be on the **WhatsApp Business app**
+  (not the personal WhatsApp app), the app must be **2.24.17 or newer**, and a
+  Meta partner must confirm **in writing** that a **+27** number can be
+  onboarded with coexistence today (see the table in 1.2 — this was unclear
+  in Meta's own documentation on 1 November 2026).
+- **If the number is not eligible, stop.** Do **not** fall back to a full
+  migration (option C): that would switch the WhatsApp app off on the office
+  number and lose its use on the phone. Ask the owner for a new decision.
+
+> **NEVER fully migrate, register without coexistence, or deregister the office
+> WhatsApp number on the Cloud API.** Neither the developer, the IT person nor
+> a Meta partner may do this. Coexistence is connected and disconnected only
+> through the partner's Embedded Signup and the WhatsApp Business app.
 
 ### 1.2 Why not the office number: what Meta's documentation says (checked 1 November 2026)
 
@@ -86,84 +99,83 @@ The facts:
 
 ### 1.3 The three options
 
-| | (A) Coexistence on the existing office number | (B) A **new, dedicated number** for the system | (C) Full migration of the existing office number |
+| | (A) Coexistence on the existing office number — **chosen** | (B) A new, dedicated number | (C) Full migration of the existing office number — **never** |
 |---|---|---|---|
 | Office keeps using the app on its number | Yes, with the limits in 1.2 | Yes, completely unchanged | **No**, the app stops working on that number |
-| Chat history | Last 6 months of one-to-one chats (optional sync), no groups | Untouched | Not migrated |
-| Linked devices / WhatsApp for Windows | All unlinked. Windows not supported | Untouched | Lost |
-| Broadcast lists, view-once, disappearing messages | Disabled | Untouched | Lost |
-| Needs a Meta partner (BSP) or Tech Provider status | **Yes** | No. EJE's own developer app is enough | No |
-| South Africa supported | **Verify at setup time** | Yes | Yes |
-| Risk of disrupting the office | Medium | **None** | High |
+| Chat history | Kept on the phone; up to 6 months of one-to-one chats can be shared with the API (optional), no groups | Untouched | Not migrated |
+| Linked devices / WhatsApp for Windows | All unlinked once; supported ones can be linked again. Windows is not supported | Untouched | Lost |
+| Broadcast lists, view-once, disappearing messages | Broadcast lists read-only; view-once, disappearing messages and live location off | Untouched | Lost |
+| Needs a Meta partner (BSP) or Tech Provider status | **Yes** | No | No |
+| South Africa (+27) supported | **Verify at setup time, in writing** | Yes | Yes |
+| New SIM needed | **No** | Yes | No |
 | Reversible | Yes (Disconnect Account in the app) | Yes | Not documented, so assume not |
 
-### 1.4 Why option B
+### 1.4 Why option A
 
-It is the safest supported setup. Nothing the office does today changes, EJE's own developer
-app can register it directly without a third-party partner, and it can be
-tested without risk. Technicians save it as "EJE Jobs". The messages EJE sends
-are notifications, so the number does not have to be the one customers know.
+The owner wants the office's existing number, not a new SIM. Coexistence is the
+only documented route that connects an existing WhatsApp Business app number to
+the Cloud API **without** switching the app off on it: the office keeps
+WhatsApp on the phone, technicians receive job notifications from the number
+they already know, and the connection can be undone from the app. The costs are
+real and must be accepted before onboarding — they are the rows of 1.2:
+linked devices are unlinked once, WhatsApp for Windows stops working with the
+number, broadcast lists become read-only, and the phone must stay in use.
 
-The number must be able to receive an SMS or a voice call for verification. A
-new SIM, or a landline that can receive a call, both work. It must **not**
-already be registered on any WhatsApp app (or the account on it must be
-deleted first). Short codes are not supported. Source: [Meta: Phone
-numbers](https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers).
+### 1.5 Before connecting the office number (required)
 
-Options A and C are **not** being used. Choosing one later would need a new
-written decision from the owner, a Meta partner's written confirmation that
-+27 coexistence is available (option A), and the checklist in 1.5.
-
-### 1.5 Pre-flight checklist (only if the owner ever reverses the decision)
-
-- [ ] The owner has decided, in writing, which option and which number.
-- [ ] Confirm the number is on the **WhatsApp Business app**, not the personal
-      WhatsApp app. In the app, **Settings** shows "Business tools" only in the
-      Business app.
-- [ ] Update the WhatsApp Business app to **2.24.17 or newer** on the main phone.
-- [ ] **Back up the chats** (Settings → Chats → Chat backup, to Google Drive or
-      iCloud). Export any chat that matters for records.
+- [ ] The owner has confirmed, in writing, the number to connect.
+- [ ] The number is on the **WhatsApp Business app**, not the personal WhatsApp
+      app. (In the app, **Settings** shows "Business tools" only in the Business
+      app.) A personal-app number cannot use coexistence — stop and ask.
+- [ ] The WhatsApp Business app on the main phone is **2.24.17 or newer**.
+- [ ] A **Meta Solution Partner / Tech Provider** has confirmed **in writing**
+      that this +27 number can be onboarded **with coexistence**, and how to
+      **disconnect** it. If they cannot, stop: do not let them migrate it.
+- [ ] **Back up the chats** (Settings → Chats → Chat backup). Export any chat
+      that matters for records.
 - [ ] Write down every linked device (Settings → Linked devices). Anyone using
-      **WhatsApp for Windows** must be told it will stop working with this
-      number, and should switch to WhatsApp Web or the Mac app if supported
-      (**verify at setup time**).
-- [ ] Write down the broadcast lists in use. They become read-only.
-- [ ] Choose a quiet time, and tell the office ladies what will change.
-- [ ] Confirm the partner's process for **disconnecting** before you start.
-- [ ] The main phone must stay in use. Fourteen days of inactivity disconnects it.
+      **WhatsApp for Windows** is told it will stop working with this number.
+- [ ] Write down the broadcast lists in use; they become read-only.
+- [ ] Choose a quiet time and tell the office what will change.
+- [ ] Within **24 hours** of onboarding, decide whether to share chat history
+      (Meta's window), otherwise the partner must offboard and start again.
+- [ ] The main phone stays in use: about 14 days of inactivity disconnects it.
 
-### 1.6 How EJE keeps the office number out
+### 1.6 How EJE protects the office number
 
-These protections are in the code, so a typing mistake cannot put the office
-number to work:
+These protections are in the code:
 
-1. **The dedicated number must be named.** Without `WHATSAPP_DEDICATED_NUMBER`
-   (a full number with the country code), WhatsApp counts as not configured
-   and nothing is sent.
+1. **The sending number must be named.** `WHATSAPP_DEDICATED_NUMBER` is the
+   number EJE sends from — with coexistence, **the office number** (a full
+   number with the country code). Without it, WhatsApp counts as not configured
+   and nothing is sent. (The setting keeps its original name; it now holds the
+   office number.)
 2. **Meta is asked before sending.** Before the first message (and again every
    six hours) EJE asks Meta which number the configured phone number ID
-   belongs to. If it is not the dedicated number, nothing is sent and the
-   office sees why.
-3. **The office number can be protected by name.** List it in
-   `WHATSAPP_PROTECTED_NUMBERS`. EJE then refuses to start if it is set as the
-   dedicated number, and refuses to send if Meta reports it as the sender.
+   belongs to. If it is not the configured sending number, nothing is sent and
+   the office sees why.
+3. **Other numbers can be protected by name.** Any number EJE must never send
+   from is listed in `WHATSAPP_PROTECTED_NUMBERS`. **Do not list the office
+   number there any more** — it is now the sending number, and EJE refuses to
+   start if the two settings name the same number.
 4. **Read-only towards Meta's number settings.** EJE only ever *reads* the
    number's details and *sends* approved template messages. It has no code to
-   register, deregister, migrate or change a number, and a test checks that.
+   register, deregister, migrate or change a number, and a test checks that —
+   so the EJE system can never disconnect the office's WhatsApp.
 5. **Not in use until a real test passes.** Until a test message to a number
    in `WHATSAPP_TEST_RECIPIENTS` is accepted by Meta *with the current
    settings*, the status is **Not configured** and no job notification is sent
    (assignments and transfers still work and notify in the app). A new access
-   token, phone number ID or dedicated number needs a new test.
+   token, phone number ID or sending number needs a new test.
 
 The notification rules do not change: a **direct assignment** notifies the
 assigned technician; a **transfer** notifies only the receiving technician;
 **Open Jobs** send nothing; on **acceptance** the technician can be sent the
 job's own customer site location.
 
-**What you will have at the end of section 1:** a new SIM or landline for the
-dedicated EJE number, able to receive a verification SMS or call, and **not**
-registered on any WhatsApp app.
+**What you will have at the end of section 1:** the office number confirmed as
+eligible for coexistence by a Meta partner in writing, the checklist in 1.5
+done, and a date agreed with the partner for onboarding.
 
 ---
 
@@ -216,28 +228,32 @@ utility bill or bank statement matching the business name and address.
    is in Dev mode."* A Live app needs a **Privacy Policy URL** in **App settings
    → Basic**. Ask the developer which URL to use (**verify at setup time**).
 
-### 2.3 Add and verify the dedicated EJE number
+### 2.3 Connect the office number by coexistence (through the partner)
 
-Use the **new dedicated number** from section 1 — never the office number.
+The office number is **not** added with **API Setup → Add phone number** and is
+**not** "registered" for the Cloud API in the ordinary way: that path requires
+the number to be deleted from WhatsApp first, which would switch the office's
+WhatsApp off on it (see 1.2). It is connected through the **Meta partner's
+Embedded Signup with coexistence**:
 
-1. In **WhatsApp → API Setup → Add phone number**. (Also available in Business
-   Manager → WhatsApp Manager → Phone numbers.)
-2. Enter the **display name**: the name technicians see, e.g. `EJE Industrial
-   Electronics`. It must match the business. Meta's naming rules are in its
-   Display name guidelines Help Centre article. Meta reviews the name, and you
-   can change it at most 10 times in 30 days.
-   Source: [Meta: Display names](https://developers.facebook.com/documentation/business-messaging/whatsapp/display-names.md).
-3. Choose a category (e.g. *Professional services*), then verify the number by
-   **SMS or voice call** using the code Meta sends.
-4. Meta requires a **two-step verification PIN** (6 digits) when the number is
-   registered. **Store it in the password manager.** You need it to change or
-   remove the number later, and it cannot be switched off through the API.
-5. Adding a number in the dashboard does **not** by itself make it usable. It
-   must also be **registered** for Cloud API. The dashboard usually offers this.
-   If it does not, the developer does it once with the PIN.
-6. Wait until the number's **Status** is *Connected* and the display name is
-   *Approved* (WhatsApp Manager → Phone numbers). Meta does not publish a fixed
-   review time.
+1. The partner starts Embedded Signup (v4 or later) for the **EJE Industrial
+   Electronics** business portfolio and chooses the option to connect an
+   **existing WhatsApp Business app** number.
+2. On the office phone, the WhatsApp Business app shows a prompt (or a QR code
+   to scan from the app) to connect the account to the Business Platform.
+   Approve it on the phone.
+3. Choose whether to share up to 6 months of one-to-one chat history (optional;
+   Meta's 24-hour window applies).
+4. Linked devices are unlinked; link the supported ones again.
+5. The display name stays the WhatsApp Business app's name, subject to Meta's
+   review. Check WhatsApp Manager → Phone numbers until the number shows
+   *Connected*.
+6. Give the developer the **phone number ID** and **WhatsApp account ID** for
+   the office number (section 2.6) — never the two-step PIN or a password.
+
+To **disconnect** later: in the WhatsApp Business app, **Settings → Account →
+Business Platform → Disconnect Account**. The Cloud API "deregister" call cannot
+be used on a coexistence number, and EJE has no code for it either way.
 
 ### 2.4 Payment method
 
@@ -291,9 +307,9 @@ Source: [Meta: Access tokens](https://developers.facebook.com/docs/whatsapp/acce
 
 | What | Where to find it | Setting |
 |---|---|---|
-| The dedicated number itself | The new number from section 1, with the country code, e.g. `+27 82 …` | `WHATSAPP_DEDICATED_NUMBER` |
+| The sending number itself | The office number from section 1, with the country code, e.g. `+27 82 …` | `WHATSAPP_DEDICATED_NUMBER` |
 | The office number (to protect it) | The office's existing WhatsApp number. Optional, recommended | `WHATSAPP_PROTECTED_NUMBERS` |
-| Phone Number ID | App Dashboard → WhatsApp → **API Setup**, under the **dedicated** "From" number. A long number, **not** the phone number itself | `WHATSAPP_PHONE_NUMBER_ID` |
+| Phone Number ID | App Dashboard → WhatsApp → **API Setup**, under the office number (connected by coexistence). A long number, **not** the phone number itself | `WHATSAPP_PHONE_NUMBER_ID` |
 | WhatsApp Business Account ID | Same page, "WhatsApp Business Account ID". Also in WhatsApp Manager → account settings | `WHATSAPP_BUSINESS_ACCOUNT_ID` |
 | App Secret | App Dashboard → **App settings → Basic → App secret → Show** (asks for your password) | `WHATSAPP_APP_SECRET` |
 | Webhook verify token | **You invent it.** On any Linux or Mac terminal: `openssl rand -hex 32` | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` |
@@ -913,14 +929,14 @@ listed in `EMAIL_TEST_RECIPIENTS` / `WHATSAPP_TEST_RECIPIENTS`.
    for a mailbox other than sales@.
 7. `journalctl -u eje -n 50` contains no secret, token or key.
 
-**WhatsApp (the dedicated EJE number)**
-1. Administration → Integrations shows *WhatsApp — dedicated EJE number* as
-   **Not configured** with "the dedicated number and the Meta credentials are
-   set, but no real test has passed", the dedicated number's last four digits,
+**WhatsApp (the office number, by coexistence)**
+1. Administration → Integrations shows *WhatsApp — the office number, by WhatsApp Business coexistence* as
+   **Not configured** with "the sending number and the Meta credentials are
+   set, but no real test has passed", the sending number's last four digits,
    and the office number as *Not connected and never used*. All three
    templates approved, webhook verified.
 2. Press **Send test** to a number in `WHATSAPP_TEST_RECIPIENTS`. That phone
-   receives the message **from the dedicated number** with the right display
+   receives the message **from the office number** with the right display
    name, and the status changes to **Connected**. Only now are job
    notifications sent.
 3. Within a minute or two the test shows **delivered** (and **read** once
@@ -964,9 +980,9 @@ All of these go in **`/etc/eje/eje.env`** on the VPS, followed by
 | `EMAIL_SENDER` | Yes, for email | `sales@ejeie.co.za` | The sending mailbox (3.1) |
 | `EMAIL_REPLY_TO` | No | `sales@ejeie.co.za` | Owner's choice |
 | `EMAIL_TEST_RECIPIENTS` | For the test button | `owner@ejeie.co.za,it@ejeie.co.za` | Owner's choice, internal addresses only |
-| `WHATSAPP_DEDICATED_NUMBER` | Yes, to send | `+27820000000` | The new dedicated EJE number (1.1, 2.6) |
+| `WHATSAPP_DEDICATED_NUMBER` | Yes, to send | `+27820000000` | The office number, connected by coexistence (1.1, 2.3, 2.6) |
 | `WHATSAPP_PROTECTED_NUMBERS` | No, recommended | `+27110000000` | The office's existing WhatsApp number(s), comma-separated: EJE refuses to send from them (1.6) |
-| `WHATSAPP_PHONE_NUMBER_ID` | Yes, to send | `123456789012345` | App Dashboard → WhatsApp → API Setup, the dedicated number (2.6) |
+| `WHATSAPP_PHONE_NUMBER_ID` | Yes, to send | `123456789012345` | App Dashboard → WhatsApp → API Setup, the office number (2.6) |
 | `WHATSAPP_ACCESS_TOKEN` | Yes, to send | `<system user token>` | Business Manager → System users → Generate token (2.5) |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | To check template approval | `234567890123456` | App Dashboard → WhatsApp → API Setup (2.6) |
 | `WHATSAPP_APP_SECRET` | Yes, for webhooks (refused without it) | `<app secret>` | App Dashboard → App settings → Basic (2.6) |
@@ -993,9 +1009,11 @@ Fixed values, not settings:
 
 These could not be confirmed from official documentation on 1 November 2026:
 
-1. ~~Whether WhatsApp coexistence accepts +27 numbers~~ — no longer needed:
-   the owner chose a dedicated number (1.1).
-2. ~~A partner's minimum age for coexistence~~ — no longer needed (1.1).
+1. **Whether WhatsApp coexistence accepts +27 numbers** — NEEDED AGAIN since
+   2 November 2026 (the owner chose the existing office number, 1.1). A Meta
+   partner must confirm it in writing before onboarding (1.5).
+2. **A partner's minimum age or other rules for coexistence** — ask the partner
+   (1.5). Meta's own page sets no minimum age.
 3. The exact **expiry options** shown when generating a System User token.
 4. Whether Meta **accepts a URL as a body variable**, and a body that **ends
    with a variable**, in these utility templates.

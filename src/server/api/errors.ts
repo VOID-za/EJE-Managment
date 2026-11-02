@@ -134,6 +134,9 @@ const PERMISSION_CODES = new Set([
    */
   'not_your_assignment',
   'own_request',
+  // STANDBY-DAY-1: answering a day swap asked of somebody else; withdrawing somebody else's.
+  'not_recipient',
+  'not_your_request',
 ]);
 
 const fromWorkflowError = (error: WorkflowError): ApiError =>

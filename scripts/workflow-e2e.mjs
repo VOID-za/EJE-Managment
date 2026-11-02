@@ -220,6 +220,32 @@ await step('EJE-1065 opens on its job screen, which is where the close-out lives
   await page.getByRole('heading', { name: 'EJE-1065' }).first().waitFor({ timeout: 15000 });
 });
 
+/*
+ * JOB-ATT-1/3 (2 November 2026): a ZIP of drawings on the job, chosen to go to
+ * the customer with the signed job card — so the email carries it, and the
+ * final job card offers Download Attachments.
+ */
+const DRAWINGS = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x4a, 0x45]);
+await step('the office attaches a ZIP to EJE-1065 and chooses it for the customer email (JOB-ATT-1, JOB-ATT-3)', async () => {
+  await signInAs('Master', 'Elmarie Coetzee', /Good day, Elmarie/);
+  const result = await page.evaluate(async ({ base, bytes }) => {
+    const view = await (await fetch(`${base}/api/jobs/EJE-1065`)).json();
+    const id = view.data.view.job.id;
+    const form = new FormData();
+    form.append('file', new File([new Uint8Array(bytes)], 'Drawings.zip', { type: 'application/zip' }));
+    const uploaded = await fetch(`${base}/api/jobs/${id}/attachments`, { method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() }, body: form });
+    const body = await uploaded.json();
+    const attachmentId = body.data?.attachments?.[0]?.id;
+    const chosen = await fetch(`${base}/api/jobs/${id}/customer_email_document`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ attachmentId, selected: true }),
+    });
+    return { upload: uploaded.status, chosen: chosen.status, attachmentId };
+  }, { base: BASE, bytes: [...DRAWINGS] });
+  if (result.upload !== 200 || result.chosen !== 200) throw new Error(`upload ${result.upload}, choice ${result.chosen}`);
+});
+
 await step('a technician drives EJE-1065 through the guided close-out', async () => {
   await signInAs('Technician', 'Sipho Mahlangu', /Hello, Sipho/);
   await visit('/jobs/EJE-1065');
@@ -518,6 +544,10 @@ await step('the customer copy was recorded exactly once, and is pending', async 
   await visit('/notifications?tab=outbox');
   const emails = await page.getByText('EJE-1065-Final-Job-Card.pdf').count();
   if (emails !== 1) throw new Error(`the final job card was sent ${emails} times, expected 1`);
+  // JOB-ATT-3: the chosen document went IN the same email.
+  const outbox = await page.evaluate(async (base) => (await (await fetch(`${base}/api/outbox`)).json()).data.entries, BASE);
+  const email = outbox.find((entry) => entry.channel === 'email' && (entry.attachments ?? []).includes('EJE-1065-Final-Job-Card.pdf'));
+  if (!(email?.attachments ?? []).includes('Drawings.zip')) throw new Error(`the email carried ${JSON.stringify(email?.attachments)}`);
   await page.getByText('Delivery pending').first().waitFor({ timeout: 15000 });
 });
 
@@ -615,6 +645,23 @@ await step('the closed job carries its final job card, with both actions', async
   await page.getByText('EJE-1065-Final-Job-Card.pdf').first().waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'View Final PDF' }).waitFor({ timeout: 10000 });
   await page.getByRole('button', { name: 'Download Final PDF' }).waitFor({ timeout: 10000 });
+});
+
+await step('Download Attachments hands over one ZIP holding the original document (JOB-ATT-2)', async () => {
+  const button = page.getByTestId('final-document-attachments');
+  await button.waitFor({ timeout: 10000 });
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button.click()]);
+  if (download.suggestedFilename() !== 'EJE-1065 Attachments.zip') throw new Error(`downloaded as ${download.suggestedFilename()}`);
+  const { readFile } = await import('node:fs/promises');
+  const bytes = await readFile(await download.path());
+  if (bytes.subarray(0, 4).toString('latin1') !== 'PK\u0003\u0004') throw new Error('not a ZIP');
+  if (!bytes.includes(Buffer.from('Drawings.zip'))) throw new Error('the archive does not name Drawings.zip');
+  if (!bytes.includes(DRAWINGS)) throw new Error('the archive does not hold the original bytes');
+  // A job without documents has no such button.
+  await visit('/jobs/EJE-1044');
+  await page.getByTestId('final-document-view').waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('final-document-attachments').count()) !== 0) throw new Error('EJE-1044 has no documents but offers Download Attachments');
+  await visit('/jobs/EJE-1065');
 });
 
 await step('View Final PDF shows the STORED document in the viewer, not a 404', async () => {

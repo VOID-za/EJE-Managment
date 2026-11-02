@@ -20,6 +20,8 @@ import type {
   StandbyEligibility,
   StandbySwapRequest,
   CustomerRates,
+  StandbyDayOverride,
+  StandbyDaySwap,
   StandbyWeek,
   TimesheetComment,
   TimesheetEntry,
@@ -145,6 +147,9 @@ export interface DemoDatabase {
   standbySwapRequests: StandbySwapRequest[];
   /** CUST-RATES-1: customers' own rates. */
   customerRates: CustomerRates[];
+  /** STANDBY-DAY-1: days moved by approved day swaps, and the day swaps. */
+  standbyDayOverrides: StandbyDayOverride[];
+  standbyDaySwaps: StandbyDaySwap[];
   /** PAY-02. Monthly submissions. */
   monthlySubmissions: MonthlySubmission[];
   /** PAY-05…08. Finance packages. */
@@ -325,6 +330,8 @@ export const createSeededDatabase = (): DemoDatabase => ({
   standbyWeeks: [],
   standbySwapRequests: [],
   customerRates: [],
+  standbyDayOverrides: [],
+  standbyDaySwaps: [],
   monthlySubmissions: [],
   financePackages: [],
   deliveryNoteDocuments: [],

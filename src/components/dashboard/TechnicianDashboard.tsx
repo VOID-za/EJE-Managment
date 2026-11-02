@@ -1,5 +1,6 @@
 'use client';
 
+import { CurrentStandbyCard } from './CurrentStandbyCard';
 import Link from 'next/link';
 import type { User } from '@/domain';
 import {
@@ -182,6 +183,9 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
         </div>
 
         <div className="space-y-6">
+          {/* STANDBY-DASH-1: this week's published standby. */}
+          <CurrentStandbyCard />
+
           <Card>
             <CardHeader
               title="Notifications"

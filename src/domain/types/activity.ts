@@ -49,6 +49,13 @@ export type ActivityEventType =
   | 'job_document_email_selection'
   // CUST-RATES-1: a customer's rate option or Custom Rates changed.
   | 'customer_rates_updated'
+  // STANDBY-DAY-1: the two-stage day swap.
+  | 'standby_day_swap_requested'
+  | 'standby_day_swap_accepted'
+  | 'standby_day_swap_denied'
+  | 'standby_day_swap_approved'
+  | 'standby_day_swap_rejected'
+  | 'standby_day_swap_withdrawn'
   /** An attachment taken off the job, and by whom. */
   | 'photo_removed'
   /**

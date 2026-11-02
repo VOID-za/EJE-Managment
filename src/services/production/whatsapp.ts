@@ -272,7 +272,7 @@ export class CloudApiWhatsAppService implements WhatsAppService {
     }
     if (actual !== this.config.dedicatedNumber) {
       throw new WhatsAppSendFailed(
-        `The configured phone number id belongs to ${actual.length === 0 ? 'an unknown number' : last4(actual)}, not the dedicated EJE number (${last4(this.config.dedicatedNumber)}). Nothing was sent.`,
+        `The configured phone number id belongs to ${actual.length === 0 ? 'an unknown number' : last4(actual)}, not the configured sending number (${last4(this.config.dedicatedNumber)}). Nothing was sent.`,
         'wrong_number',
         true,
       );

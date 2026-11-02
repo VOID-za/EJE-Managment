@@ -4,6 +4,8 @@ import type {
   StandbyEligibility,
   StandbyPosition,
   StandbySwapRequest,
+  StandbyDayOverride,
+  StandbyDaySwap,
   StandbyWeek,
   AppNotification,
   CaptureReferral,
@@ -898,6 +900,29 @@ export interface StandbySwapDecision {
   readonly decisionNote: string;
 }
 
+/**
+ * One day's place as a day swap expects to find it, and who it moves to.
+ * STANDBY-DAY-1: approval writes nothing unless EVERY place is still held by
+ * the person named.
+ */
+export interface StandbyDayMove {
+  readonly date: IsoDate;
+  readonly position: StandbyPosition;
+  readonly expectedUserId: UserId;
+  readonly userId: UserId;
+}
+
+export interface StandbyDaySwapDecision {
+  readonly id: string;
+  readonly by: UserId;
+  readonly at: IsoDateTime;
+  readonly note: string;
+}
+
+export type StandbyDayApproval =
+  | { readonly ok: true; readonly swap: StandbyDaySwap }
+  | { readonly ok: false; readonly reason: 'not_awaiting_office' | 'assignment_changed' };
+
 /** What approving a swap came to. Nothing is written unless it is `ok`. */
 export type StandbyApproval =
   | { readonly ok: true; readonly request: StandbySwapRequest }
@@ -950,6 +975,33 @@ export interface StandbyRepository {
    * places are exchanged and the request is recorded approved, together.
    */
   approveSwapRequest(decision: StandbySwapDecision): Promise<StandbyApproval>;
+
+  /* ---- STANDBY-DAY-1: day swaps (2 November 2026) ------------------------ */
+
+  /** Day overrides with a date between `from` and `to`, inclusive. */
+  listDayOverrides(from: IsoDate, to: IsoDate): Promise<readonly StandbyDayOverride[]>;
+  /** Every day swap, newest first. */
+  listDaySwaps(): Promise<readonly StandbyDaySwap[]>;
+  findDaySwap(id: string): Promise<StandbyDaySwap | null>;
+  /**
+   * Records a new request — null when any of its days' places is already in
+   * another active (awaiting) day swap. Checked under a lock, so two
+   * simultaneous requests for the same day cannot both be recorded.
+   */
+  createDaySwap(swap: StandbyDaySwap): Promise<StandbyDaySwap | null>;
+  /** The person asked answers. Null unless it was still awaiting them. */
+  answerDaySwap(id: string, answer: { readonly approved: boolean; readonly at: IsoDateTime; readonly note: string }): Promise<StandbyDaySwap | null>;
+  /** The requester withdraws. Null unless it was still awaiting the person asked. */
+  withdrawDaySwap(id: string, at: IsoDateTime): Promise<StandbyDaySwap | null>;
+  /** The Office rejects. Null unless it was awaiting the Office. */
+  rejectDaySwap(decision: StandbyDaySwapDecision): Promise<StandbyDaySwap | null>;
+  /**
+   * THE OFFICE APPROVES AND THE DAYS ARE EXCHANGED, ALL OR NOTHING: only while
+   * the swap awaits the Office and every place still holds the person
+   * `moves` expects; then each day's override is written and the swap
+   * recorded approved, together. Any other day, place or week is untouched.
+   */
+  approveDaySwap(decision: StandbyDaySwapDecision, moves: readonly StandbyDayMove[]): Promise<StandbyDayApproval>;
 }
 
 export interface RepositoryBundle {

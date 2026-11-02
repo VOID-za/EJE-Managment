@@ -162,9 +162,9 @@ await check('Integrations: three services, each saying what it is, and no test w
     if (!/Demonstration \(simulated\)/u.test(text)) fail(`${service} does not say it is simulated: ${text.slice(0, 80)}`);
   }
   if (!(await page.getByTestId('integration-email').innerText()).includes('EMAIL_TEST_RECIPIENTS')) fail('the email card does not say why no test can be sent');
-  // The owner's decision: a separate, dedicated EJE number; the office number not connected.
+  // WA-SIM-1 (2 November 2026): the office's existing number, by WhatsApp Business coexistence.
   const whatsapp = await page.getByTestId('integration-whatsapp').innerText();
-  if (!whatsapp.includes('dedicated EJE number')) fail('the WhatsApp card does not name the dedicated EJE number');
+  if (!whatsapp.includes('office number, by WhatsApp Business coexistence')) fail('the WhatsApp card does not name the office number and coexistence');
   if (!/Office WhatsApp number[\s\S]*Not connected and never used/u.test(whatsapp)) fail('the WhatsApp card does not say the office number is untouched');
   await noPageOverflow('Integrations');
 });

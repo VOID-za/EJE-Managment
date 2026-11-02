@@ -8,6 +8,12 @@ import {
   type StandbyPosition,
   type StandbySwapKind,
   type StandbySwapRequest,
+  type StandbyDayOverride,
+  type StandbyDayPair,
+  type StandbyDaySwap,
+  type StandbyDaySwapStatus,
+  STANDBY_DAY_SWAP_ACTIVE,
+  standbyHolderOn,
   type StandbySwapStatus,
   type StandbyWeek,
   type StandbyWeekStatus,
@@ -15,12 +21,16 @@ import {
 } from '@/domain';
 import type {
   StandbyApproval,
+  StandbyDayApproval,
+  StandbyDayMove,
+  StandbyDaySwapDecision,
   StandbyRepository,
   StandbySwapDecision,
 } from '@/data/repositories';
 import type { DatabaseExecutor } from '@/db/client';
 import * as schema from '@/db/schema';
 import { isUuid } from './identifiers';
+import { standbyWeekOf as standbyWeekOfDate } from '@/domain';
 
 type WeekRow = typeof schema.standbyWeeks.$inferSelect;
 type AssignmentRow = typeof schema.standbyAssignments.$inferSelect;
@@ -398,5 +408,177 @@ export class PostgresStandbyRepository implements StandbyRepository {
       .returning();
     if (decided[0] === undefined) throw new Error(`standby swap request ${decision.id} changed while locked`);
     return { ok: true, request: (await this.requests(decided))[0]! };
+  }
+
+  /* ---- STANDBY-DAY-1: day swaps ------------------------------------------- */
+
+  private toDaySwap(row: typeof schema.standbyDaySwaps.$inferSelect): StandbyDaySwap {
+    return {
+      id: row.id,
+      kind: row.kind as StandbySwapKind,
+      requesterId: asUserId(row.requesterId),
+      recipientId: asUserId(row.recipientId),
+      pairs: row.pairs as unknown as StandbyDayPair[],
+      reason: row.reason,
+      status: row.status as StandbyDaySwapStatus,
+      requestedAt: row.requestedAt,
+      recipientDecidedAt: row.recipientDecidedAt,
+      recipientNote: row.recipientNote,
+      officeDecidedBy: optionalUser(row.officeDecidedBy),
+      officeDecidedAt: row.officeDecidedAt,
+      officeNote: row.officeNote,
+      withdrawnAt: row.withdrawnAt,
+    };
+  }
+
+  async listDayOverrides(from: IsoDate, to: IsoDate): Promise<readonly StandbyDayOverride[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.standbyDayOverrides)
+      .where(between(schema.standbyDayOverrides.date, from, to))
+      .orderBy(asc(schema.standbyDayOverrides.date));
+    return rows.map((row) => ({
+      date: row.date,
+      position: row.position as StandbyPosition,
+      userId: asUserId(row.userId),
+      swapId: row.swapId,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async listDaySwaps(): Promise<readonly StandbyDaySwap[]> {
+    const rows = await this.db.select().from(schema.standbyDaySwaps).orderBy(desc(schema.standbyDaySwaps.requestedAt));
+    return rows.map((row) => this.toDaySwap(row));
+  }
+
+  async findDaySwap(id: string): Promise<StandbyDaySwap | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db.select().from(schema.standbyDaySwaps).where(eq(schema.standbyDaySwaps.id, id)).limit(1);
+    return rows[0] === undefined ? null : this.toDaySwap(rows[0]);
+  }
+
+  /** Every day-swap write takes this lock first, so no two can claim the same day at once. */
+  private async lockDays(): Promise<void> {
+    await this.db.execute(sql`select pg_advisory_xact_lock(hashtext('eje.standby.days'))`);
+  }
+
+  async createDaySwap(swap: StandbyDaySwap): Promise<StandbyDaySwap | null> {
+    await this.lockDays();
+    const active = await this.db
+      .select({ pairs: schema.standbyDaySwaps.pairs })
+      .from(schema.standbyDaySwaps)
+      .where(inArray(schema.standbyDaySwaps.status, [...STANDBY_DAY_SWAP_ACTIVE]));
+    const slots = (pairs: readonly { requesterDate: string; requesterPosition: string; recipientDate: string; recipientPosition: string }[]) =>
+      pairs.flatMap((pair) => [`${pair.requesterDate}/${pair.requesterPosition}`, `${pair.recipientDate}/${pair.recipientPosition}`]);
+    const claimed = new Set(active.flatMap((row) => slots(row.pairs)));
+    if (slots(swap.pairs).some((slot) => claimed.has(slot))) return null;
+    const rows = await this.db
+      .insert(schema.standbyDaySwaps)
+      .values({
+        id: swap.id,
+        kind: swap.kind,
+        requesterId: swap.requesterId,
+        recipientId: swap.recipientId,
+        pairs: swap.pairs.map((pair) => ({ ...pair })),
+        reason: swap.reason,
+        status: 'awaiting_recipient',
+        requestedAt: swap.requestedAt,
+      })
+      .returning();
+    return this.toDaySwap(rows[0]!);
+  }
+
+  private async moveDaySwap(
+    id: string,
+    from: StandbyDaySwapStatus,
+    set: Partial<typeof schema.standbyDaySwaps.$inferInsert>,
+  ): Promise<StandbyDaySwap | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .update(schema.standbyDaySwaps)
+      .set({ ...set, updatedAt: sql`now()`, version: sql`${schema.standbyDaySwaps.version} + 1` })
+      .where(and(eq(schema.standbyDaySwaps.id, id), eq(schema.standbyDaySwaps.status, from)))
+      .returning();
+    return rows[0] === undefined ? null : this.toDaySwap(rows[0]);
+  }
+
+  answerDaySwap(id: string, answer: { readonly approved: boolean; readonly at: IsoDateTime; readonly note: string }): Promise<StandbyDaySwap | null> {
+    return this.moveDaySwap(id, 'awaiting_recipient', {
+      status: answer.approved ? 'awaiting_office' : 'denied',
+      recipientDecidedAt: answer.at,
+      recipientNote: answer.note,
+    });
+  }
+
+  withdrawDaySwap(id: string, at: IsoDateTime): Promise<StandbyDaySwap | null> {
+    return this.moveDaySwap(id, 'awaiting_recipient', { status: 'withdrawn', withdrawnAt: at });
+  }
+
+  rejectDaySwap(decision: StandbyDaySwapDecision): Promise<StandbyDaySwap | null> {
+    return this.moveDaySwap(decision.id, 'awaiting_office', {
+      status: 'rejected',
+      officeDecidedBy: decision.by,
+      officeDecidedAt: decision.at,
+      officeNote: decision.note,
+    });
+  }
+
+  async approveDaySwap(decision: StandbyDaySwapDecision, moves: readonly StandbyDayMove[]): Promise<StandbyDayApproval> {
+    if (!isUuid(decision.id)) return { ok: false, reason: 'not_awaiting_office' };
+    await this.lockDays();
+    // 1. The swap, locked: a second approval waits here, then sees it decided.
+    const locked = await this.db.select().from(schema.standbyDaySwaps).where(eq(schema.standbyDaySwaps.id, decision.id)).for('update');
+    if (locked[0] === undefined || locked[0].status !== 'awaiting_office') return { ok: false, reason: 'not_awaiting_office' };
+
+    // 2. The weeks those days are in, their places locked, and the days' overrides.
+    const dates = [...new Set(moves.map((move) => move.date))].sort();
+    const mondays = [...new Set(dates.map((date) => standbyWeekOfDate(date)))];
+    const weekRows = mondays.length === 0 ? [] : await this.db.select().from(schema.standbyWeeks).where(inArray(schema.standbyWeeks.weekStart, mondays));
+    const placeRows = weekRows.length === 0
+      ? []
+      : await this.db
+          .select()
+          .from(schema.standbyAssignments)
+          .where(inArray(schema.standbyAssignments.weekId, weekRows.map((row) => row.id)))
+          .orderBy(asc(schema.standbyAssignments.weekId), asc(schema.standbyAssignments.position))
+          .for('update');
+    const weeks = weekRows.map((row) => toWeek(row, placeRows.filter((place) => place.weekId === row.id)));
+    const overrides = await this.listDayOverrides(dates[0] ?? '1970-01-01', dates[dates.length - 1] ?? '1970-01-01');
+    for (const move of moves) {
+      if (standbyHolderOn(move.date, move.position, weeks, overrides) !== move.expectedUserId) {
+        return { ok: false, reason: 'assignment_changed' };
+      }
+    }
+
+    // 3. Every day's override, then the decision. A refusal by the database
+    //    (an ineligible person, two places on one day) throws, and the request's
+    //    transaction rolls every statement back: all or nothing.
+    for (const move of moves) {
+      await this.db
+        .insert(schema.standbyDayOverrides)
+        .values({ id: crypto.randomUUID(), date: move.date, position: move.position, userId: move.userId, swapId: decision.id })
+        .onConflictDoUpdate({
+          target: [schema.standbyDayOverrides.date, schema.standbyDayOverrides.position],
+          set: {
+            userId: move.userId,
+            swapId: decision.id,
+            updatedAt: sql`now()`,
+            version: sql`${schema.standbyDayOverrides.version} + 1`,
+          },
+        });
+    }
+    const after = await this.listDayOverrides(dates[0] ?? '1970-01-01', dates[dates.length - 1] ?? '1970-01-01');
+    for (const date of dates) {
+      const holders = STANDBY_POSITIONS.map((position) => standbyHolderOn(date, position, weeks, after)).filter((id) => id !== null);
+      if (new Set(holders).size !== holders.length) throw new Error(`somebody would hold two standby places on ${date}`);
+    }
+    const decided = await this.moveDaySwap(decision.id, 'awaiting_office', {
+      status: 'approved',
+      officeDecidedBy: decision.by,
+      officeDecidedAt: decision.at,
+      officeNote: decision.note,
+    });
+    if (decided === null) throw new Error(`standby day swap ${decision.id} changed while locked`);
+    return { ok: true, swap: decided };
   }
 }

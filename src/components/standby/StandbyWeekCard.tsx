@@ -4,7 +4,7 @@ import type { IsoDate } from '@/domain';
 import type { StandbyWeekView } from '@/application/standby';
 import { Badge, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
-import { WEEKDAYS, daysOfWeek, weekRangeLabel } from './standby-format';
+import { WEEKDAYS, daysOfWeek, weekRangeLabel, shortDate } from './standby-format';
 
 const SHORT_LABELS: Record<string, string> = {
   main: 'Main',
@@ -61,6 +61,13 @@ export const StandbyWeekCard = ({
         <div className="flex flex-wrap items-center gap-1.5">
           {week.timing === 'current' && <Badge tone="blue" size="sm">This week</Badge>}
           {mine && <Badge tone="violet" size="sm">You are on standby</Badge>}
+          {week.pendingDaySwaps.length > 0 && (
+            <span data-testid="standby-week-day-pending">
+              <Badge tone="amber" size="sm" dot>
+                Day swap pending — not changed yet
+              </Badge>
+            </span>
+          )}
           {week.pendingSwaps > 0 && (
             <span data-testid="standby-week-pending">
               <Badge tone="amber" size="sm" dot>
@@ -119,6 +126,25 @@ export const StandbyWeekCard = ({
           </div>
         ))}
       </dl>
+      {/* STANDBY-DAY-1: the days an approved day swap moved; every other day is as above. */}
+      {week.dayChanges.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-steel-700" data-testid="standby-day-changes">
+          {week.dayChanges.map((change) => (
+            <li key={`${change.date}-${change.position}`} data-testid="standby-day-change" data-date={change.date} data-position={change.position}>
+              <span className="font-semibold">{shortDate(change.date)}</span> — {change.label}: {change.name}
+            </li>
+          ))}
+        </ul>
+      )}
+      {week.pendingDaySwaps.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-amber-eje-700" data-testid="standby-day-pending-list">
+          {week.pendingDaySwaps.map((day) => (
+            <li key={`${day.date}-${day.position}`}>
+              {shortDate(day.date)} — {SHORT_LABELS[day.position]}: swap {day.status === 'awaiting_recipient' ? 'waiting for the other person' : 'waiting for the Office'}
+            </li>
+          ))}
+        </ul>
+      )}
       {large && (
         <p className="mt-3 flex items-center gap-1 text-sm font-semibold text-eje-700">
           Details and swaps <Icon name="chevronRight" className="size-4" />

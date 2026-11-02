@@ -178,13 +178,13 @@ const probeWhatsApp = async (
     if (actual !== config.dedicatedNumber) {
       return {
         ok: false,
-        detail: `The phone number id belongs to …${actual.slice(-4) || '????'}, not the dedicated EJE number (…${config.dedicatedNumber.slice(-4)}).`,
+        detail: `The phone number id belongs to …${actual.slice(-4) || '????'}, not the configured sending number (…${config.dedicatedNumber.slice(-4)}).`,
         credentialRefused: false,
       };
     }
     return {
       ok: true,
-      detail: `The phone number is readable and is the dedicated EJE number (…${actual.slice(-4)}). No message was sent.`,
+      detail: `The phone number is readable and is the configured sending number (…${actual.slice(-4)}). No message was sent.`,
       credentialRefused: false,
     };
   } catch (cause) {

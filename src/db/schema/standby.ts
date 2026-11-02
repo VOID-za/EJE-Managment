@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, date, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, date, index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import { users } from './identity';
 
@@ -151,6 +151,86 @@ export const standbySwapRequests = pgTable(
     check(
       'standby_swap_requests_decided_by_another',
       sql`${table.decidedBy} is null or ${table.decidedBy} <> ${table.requesterId}`,
+    ),
+  ],
+);
+
+/**
+ * DAY SWAPS. STANDBY-DAY-1 (2 November 2026), migration 0047.
+ *
+ *   standby_day_swaps      — a request to exchange chosen DAYS: who asked, who
+ *                            was asked, the date pairs (fixed once written),
+ *                            the person asked's answer and the Office's.
+ *   standby_day_overrides  — one day's place held by somebody other than the
+ *                            week's assignee; written ONLY by an approved day
+ *                            swap. Never deleted.
+ */
+export const standbyDaySwaps = pgTable(
+  'standby_day_swaps',
+  {
+    id: primaryId(),
+    kind: text('kind').notNull(),
+    requesterId: uuid('requester_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    /** [{ requesterDate, requesterPosition, recipientDate, recipientPosition }] — at least one. */
+    pairs: jsonb('pairs').$type<{ requesterDate: string; requesterPosition: string; recipientDate: string; recipientPosition: string }[]>().notNull(),
+    reason: text('reason').notNull().default(''),
+    status: text('status').notNull().default('awaiting_recipient'),
+    requestedAt: instant('requested_at').notNull(),
+    recipientDecidedAt: instant('recipient_decided_at'),
+    recipientNote: text('recipient_note').notNull().default(''),
+    officeDecidedBy: uuid('office_decided_by').references(() => users.id),
+    officeDecidedAt: instant('office_decided_at'),
+    officeNote: text('office_note').notNull().default(''),
+    withdrawnAt: instant('withdrawn_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    index('standby_day_swaps_requester_idx').on(table.requesterId),
+    index('standby_day_swaps_recipient_idx').on(table.recipientId),
+    index('standby_day_swaps_status_idx').on(table.status),
+    check('standby_day_swaps_kind_known', sql`${table.kind} in ('main', 'apprentice')`),
+    check(
+      'standby_day_swaps_status_known',
+      sql`${table.status} in ('awaiting_recipient', 'awaiting_office', 'approved', 'denied', 'rejected', 'withdrawn')`,
+    ),
+    check('standby_day_swaps_two_people', sql`${table.requesterId} <> ${table.recipientId}`),
+    check('standby_day_swaps_has_pairs', sql`jsonb_typeof(${table.pairs}) = 'array' and jsonb_array_length(${table.pairs}) between 1 and 14`),
+    check(
+      'standby_day_swaps_office_is_another',
+      sql`${table.officeDecidedBy} is null or (${table.officeDecidedBy} <> ${table.requesterId} and ${table.officeDecidedBy} <> ${table.recipientId})`,
+    ),
+  ],
+);
+
+export const standbyDayOverrides = pgTable(
+  'standby_day_overrides',
+  {
+    id: primaryId(),
+    date: date('date').notNull(),
+    position: text('position').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    swapId: uuid('swap_id')
+      .notNull()
+      .references(() => standbyDaySwaps.id, { onDelete: 'restrict' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    uniqueIndex('standby_day_overrides_date_position_key').on(table.date, table.position),
+    index('standby_day_overrides_user_idx').on(table.userId),
+    check(
+      'standby_day_overrides_position_known',
+      sql`${table.position} in ('main', 'helper', 'apprentice_1', 'apprentice_2')`,
     ),
   ],
 );

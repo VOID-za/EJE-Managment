@@ -32,8 +32,17 @@ const AttendancePage = () => {
       <PageHeader
         title="Attendance"
         description="Mark yourself Present or Absent for each day. Each choice saves by itself. Nothing is filled in for you, and only you can record your days."
-        actions={<AttendanceRangeFields range={range} today={today} onChange={choose} />}
       />
+      {/* The first block: the period's From and To, top-right — where the Month selector was. */}
+      <Card className="mb-5" data-testid="attendance-filters">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-steel-900">Period</p>
+            <p className="text-xs text-steel-500">Choose the days to show, at most 92. Your monthly form is submitted on Monthly Forms.</p>
+          </div>
+          <AttendanceRangeFields range={range} today={today} onChange={choose} />
+        </div>
+      </Card>
       <DocumentPreviewDialog
         open={previewing !== null}
         autoPrint={previewing === 'print'}
