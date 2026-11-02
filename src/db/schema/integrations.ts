@@ -88,6 +88,8 @@ export const emailMessages = pgTable(
     attachmentStorageKey: text('attachment_storage_key'),
     attachmentFileName: text('attachment_file_name'),
     attachmentSha256: text('attachment_sha256'),
+    // JOB-ATT-3: the job's documents selected for the customer, [{storageKey, fileName, sha256}].
+    extraAttachments: jsonb('extra_attachments').$type<{ storageKey: string; fileName: string; sha256: string | null }[]>().notNull().default([]),
     state: text('state').notNull(),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: instant('next_attempt_at'),

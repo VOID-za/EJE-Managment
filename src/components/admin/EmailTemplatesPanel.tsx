@@ -59,7 +59,7 @@ export const EmailTemplatesPanel = () => {
     <div className="space-y-5" data-testid="email-templates-panel">
       <AdminNotice
         title="Customer email templates"
-        body="The signed job card is emailed to the customer automatically, from the sending mailbox, with the default template for its job type and the signed PDF attached. Both the Master and the Coordinator manage these templates. Every save is a new version; emails already sent keep exactly what they said."
+        body="The signed job card is emailed to the customer automatically, from the sending mailbox, with the default template for its job type and the signed PDF attached. Both the Senior Tech and the Office manage these templates. Every save is a new version; emails already sent keep exactly what they said."
       />
 
       {operation.error !== null && (

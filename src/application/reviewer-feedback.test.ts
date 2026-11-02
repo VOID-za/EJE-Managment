@@ -341,13 +341,13 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect(sheet.period.overlapsSent).toEqual([{ from: day(9), to: day(7) }, { from: FROM, to: TO }]);
   });
 
-  it('validates the period: From after To refused, a To after today refused, at most 92 days', async () => {
+  it('validates the period: From after To refused, at most 92 days; a To after today is allowed (MONTH-END-OFF-1)', async () => {
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, FROM)).rejects.toMatchObject({ violations: [{ code: 'invalid_range' }] });
     const tomorrow = (() => { const d = new Date(`${businessToday()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(2), tomorrow)).rejects.toMatchObject({ violations: [{ code: 'period_in_future' }] });
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(2), tomorrow)).toMatchObject({ from: day(2), to: tomorrow });
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(120), day(0))).rejects.toMatchObject({ violations: [{ code: 'range_too_long' }] });
     // A one-day period is a period.
-    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(0), day(0))).toMatchObject({ from: day(0), to: day(0) });
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(20), day(20))).toMatchObject({ from: day(20), to: day(20) });
   });
 
   it('tells the office — every active Master and Coordinator, once — only after the submission is saved', async () => {

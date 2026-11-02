@@ -24,6 +24,12 @@ interface PreviewProps {
   readonly onClose: () => void;
   /** Print as soon as the document is ready — the Print button's own action. */
   readonly autoPrint?: boolean;
+  /**
+   * Whether the footer offers Download PDF. FORMS-PAGES-1 (2 November 2026):
+   * the Attendance and Timesheets pages show Preview and Print only — the
+   * download, like the submission, is on Monthly Forms.
+   */
+  readonly allowDownload?: boolean;
 }
 
 /**
@@ -49,7 +55,7 @@ export const DocumentPreviewDialog = ({ open, ...props }: PreviewProps & { reado
   // Mounted only while open, so every opening starts from nothing.
   open ? <OpenPreview {...props} /> : null;
 
-const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPrint = false }: PreviewProps) => {
+const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPrint = false, allowDownload = true }: PreviewProps) => {
   const [pdf, setPdf] = useState<PreviewPdf | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<number | null>(null);
@@ -142,15 +148,17 @@ const OpenPreview = ({ title, description, loadPdf, renderHtml, onClose, autoPri
             <Button variant="ghost" onClick={onClose} data-testid="preview-close">
               Close
             </Button>
-            <Button
-              variant="secondary"
-              disabled={pdf === null}
-              leadingIcon={<Icon name="download" className="size-4" />}
-              onClick={() => pdf !== null && downloadBytes(pdf.bytes, pdf.fileName, 'application/pdf')}
-              data-testid="preview-download"
-            >
-              Download PDF
-            </Button>
+            {allowDownload && (
+              <Button
+                variant="secondary"
+                disabled={pdf === null}
+                leadingIcon={<Icon name="download" className="size-4" />}
+                onClick={() => pdf !== null && downloadBytes(pdf.bytes, pdf.fileName, 'application/pdf')}
+                data-testid="preview-download"
+              >
+                Download PDF
+              </Button>
+            )}
             <Button
               disabled={pdf === null}
               loading={printing !== null}

@@ -1,3 +1,4 @@
+import { isFieldRole } from '@/domain';
 import {
   can,
   userFullName,
@@ -214,7 +215,7 @@ export const loadClosedJobs = async (
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((site) => ({ id: site.id, name: site.name, customerId: site.customerId })),
     technicians: users
-      .filter((user) => user.role === 'technician')
+      .filter((user) => isFieldRole(user.role))
       .sort((a, b) => userFullName(a).localeCompare(userFullName(b))),
   };
 };

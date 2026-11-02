@@ -87,7 +87,7 @@ export const UnsignedDeliveryPanel = ({
           <p className="mt-4 text-sm leading-relaxed text-steel-700" data-testid="unsigned-not-sent">
             <strong>Nothing has been sent to the customer.</strong> The job card was issued without a
             signature, so no copy was e-mailed — that is deliberate, and it stays that way unless a
-            Master decides otherwise. The document itself is on file and records the refusal and its
+            Senior Tech decides otherwise. The document itself is on file and records the refusal and its
             reason.
           </p>
 
@@ -153,7 +153,7 @@ export const UnsignedDeliveryPanel = ({
 
           {!mayAuthorise && (
             <p className="mt-3 text-xs text-steel-500">
-              Sending it anyway is a Master’s decision.
+              Sending it anyway is a Senior Tech’s decision.
             </p>
           )}
         </>

@@ -26,7 +26,7 @@ import { holdMedia } from '@/lib/pwa/pending-media';
 import { useCaptureLock } from '@/hooks/useCaptureLock';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatFileSize, formatRelative } from '@/lib/format';
-import { DOCUMENT_ACCEPT_ATTRIBUTE, DOCUMENT_TYPES_SENTENCE, JOB_PHOTO_TYPES_SENTENCE } from '@/lib/upload-limits';
+import { JOB_ATTACHMENT_ACCEPT_ATTRIBUTE, JOB_DOCUMENT_TYPES_SENTENCE, JOB_PHOTO_TYPES_SENTENCE } from '@/lib/upload-limits';
 
 /**
  * PHOTOGRAPHS ON A JOB — THE REAL ONES NOW. PWA-3, CR-09 Phase 3.
@@ -169,6 +169,11 @@ export const JobMediaPanel = ({
   );
 
   /** Reclassifies one, through the operation that records what it was. MEDIA-1. */
+  const chooseForEmail = async (attachmentId: string, selected: boolean) => {
+    const ok = await operation.run(() => jobs.setCustomerEmailDocument(job.id, attachmentId, selected));
+    if (ok) onChanged();
+  };
+
   const reclassify = async (attachmentId: string, next: MediaVisibility) => {
     const ok = await operation.run(() => jobs.setMediaVisibility(job.id, attachmentId, next));
     if (ok) onChanged();
@@ -339,7 +344,7 @@ export const JobMediaPanel = ({
             ref={documentsInput}
             type="file"
             multiple
-            accept={DOCUMENT_ACCEPT_ATTRIBUTE}
+            accept={JOB_ATTACHMENT_ACCEPT_ATTRIBUTE}
             className="hidden"
             onChange={(event) => {
               const files = Array.from(event.target.files ?? []);
@@ -372,7 +377,7 @@ export const JobMediaPanel = ({
             Add Documents
           </Button>
           <p className="basis-full text-xs text-steel-500">
-            Photos: {JOB_PHOTO_TYPES_SENTENCE} Documents: {DOCUMENT_TYPES_SENTENCE}
+            Photos: {JOB_PHOTO_TYPES_SENTENCE} Documents: {JOB_DOCUMENT_TYPES_SENTENCE}
             {!online && ' Documents need a signal; a photo can be held on this tablet.'}
           </p>
           {documentsProblem !== null && (
@@ -401,15 +406,35 @@ export const JobMediaPanel = ({
         ) : (
           <ul className="mt-1 space-y-1 text-sm">
             {job.attachments.map((attachment) => (
-              <li key={attachment.id}>
+              <li key={attachment.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1" data-testid="job-document">
                 <a
-                  className="font-medium text-eje-700 underline-offset-2 hover:underline"
+                  className="min-w-0 break-all font-medium text-eje-700 underline-offset-2 hover:underline"
                   href={jobs.attachmentUrl(job.id, attachment.id)}
                   target="_blank"
                   rel="noreferrer"
                 >
                   {attachment.caption.length > 0 ? attachment.caption : attachment.fileName}
                 </a>
+                {/* JOB-ATT-3: chosen documents travel IN the signed job card email. */}
+                {editable ? (
+                  <label className="flex min-h-11 items-center gap-2 text-xs text-steel-700">
+                    <input
+                      type="checkbox"
+                      className="size-5"
+                      checked={attachment.emailToCustomer === true}
+                      disabled={operation.running}
+                      onChange={(event) => void chooseForEmail(attachment.id, event.target.checked)}
+                      data-testid={`job-document-email-${attachment.id}`}
+                    />
+                    Send to the customer with the signed job card
+                  </label>
+                ) : (
+                  attachment.emailToCustomer === true && (
+                    <span className="text-xs text-steel-600" data-testid={`job-document-emailed-${attachment.id}`}>
+                      Sent with the signed job card email
+                    </span>
+                  )
+                )}
               </li>
             ))}
           </ul>

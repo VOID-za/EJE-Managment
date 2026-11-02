@@ -179,11 +179,18 @@ describe('cancelling a job that will not happen', () => {
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('allows an optional description on a predefined reason', async () => {
+  it('CANCEL-ALL-1: a predefined category still needs the reason written down', async () => {
+    const job0 = await openJob(harness);
+    await expect(
+      cancelJob(harness.as(elmarie), job0, { reason: 'duplicate', description: '   ' }),
+    ).rejects.toThrow(/reason is required/u);
+  });
+
+  it('accepts a predefined category with its reason', async () => {
     const job = await openJob(harness);
     const cancelled = await cancelJob(harness.as(elmarie), job, {
       reason: 'duplicate',
-      description: '',
+      description: 'The customer called it off.',
     });
     expect(cancelled.status).toBe('cancelled');
   });
@@ -192,7 +199,7 @@ describe('cancelling a job that will not happen', () => {
     const job = await openJob(harness);
     const cancelled = await cancelJob(harness.as(elmarie), job, {
       reason: 'customer_cancelled',
-      description: '',
+      description: 'The customer called it off.',
     });
 
     expect(isJobInactive(cancelled)).toBe(true);
@@ -207,7 +214,7 @@ describe('cancelling a job that will not happen', () => {
 
   it('stays searchable', async () => {
     const job = await openJob(harness);
-    await cancelJob(harness.as(elmarie), job, { reason: 'customer_resolved', description: '' });
+    await cancelJob(harness.as(elmarie), job, { reason: 'customer_resolved', description: 'Sorted it out themselves.' });
 
     const results = await runSearch(harness.repos, elmarie, 'EJE-1059');
     expect(results.some((result) => result.title.includes('EJE-1059'))).toBe(true);
@@ -218,7 +225,7 @@ describe('cancelling a job that will not happen', () => {
     const scheduled = await harness.repos.jobs.save({ ...job, scheduledDate: dayOffset(1) });
     await cancelJob(harness.as(elmarie), scheduled, {
       reason: 'customer_resolved',
-      description: '',
+      description: 'The customer called it off.',
     });
 
     const calendar = await loadCalendar(
@@ -247,21 +254,26 @@ describe('cancelling a job that will not happen', () => {
     expect(entry?.actorId).toBe(elmarie.id);
   });
 
-  it('cannot be cancelled once work has started', async () => {
+  // CANCEL-ALL-1 (2 November 2026) supersedes "cannot be cancelled once work has started".
+  it('CANCEL-ALL-1: can be cancelled once work has started, by the office and by the technician on it', async () => {
     const job = await openJob(harness);
     const accepted = await acceptJob(harness.as(sipho), job);
 
-    expect(canCancelJob('master', accepted)).toBe(false);
+    expect(canCancelJob('master', accepted)).toBe(true);
+    expect(canCancelJob(sipho, accepted)).toBe(true);
     await expect(
       cancelJob(harness.as(elmarie), accepted, { reason: 'customer_resolved', description: '' }),
     ).rejects.toBeInstanceOf(WorkflowError);
+    const cancelled = await cancelJob(harness.as(sipho), accepted, { reason: 'customer_resolved', description: 'Customer fixed it before I arrived.' });
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.cancellation?.cancelledBy).toBe(sipho.id);
   });
 
   it('is terminal — a cancelled job is not resurrected', async () => {
     const job = await openJob(harness);
     const cancelled = await cancelJob(harness.as(elmarie), job, {
       reason: 'duplicate',
-      description: '',
+      description: 'The customer called it off.',
     });
     await expect(acceptJob(harness.as(sipho), cancelled)).rejects.toBeInstanceOf(WorkflowError);
   });

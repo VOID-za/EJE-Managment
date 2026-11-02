@@ -102,7 +102,7 @@ const loadMessage = async (context: CommandContext, messageId: string): Promise<
   return found;
 };
 
-const roles = z.enum(['master', 'coordinator', 'technician']);
+const roles = z.enum(['master', 'coordinator', 'technician', 'apprentice']);
 
 export const USER_COMMANDS: CommandRegistry = {
   update: command({

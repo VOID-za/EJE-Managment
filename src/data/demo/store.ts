@@ -19,6 +19,7 @@ import type {
   AvailabilityRecord,
   StandbyEligibility,
   StandbySwapRequest,
+  CustomerRates,
   StandbyWeek,
   TimesheetComment,
   TimesheetEntry,
@@ -142,6 +143,8 @@ export interface DemoDatabase {
   standbyEligibility: StandbyEligibility[];
   standbyWeeks: StandbyWeek[];
   standbySwapRequests: StandbySwapRequest[];
+  /** CUST-RATES-1: customers' own rates. */
+  customerRates: CustomerRates[];
   /** PAY-02. Monthly submissions. */
   monthlySubmissions: MonthlySubmission[];
   /** PAY-05…08. Finance packages. */
@@ -257,7 +260,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 39;
+export const SCHEMA_VERSION = 40;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -321,6 +324,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   standbyEligibility: [],
   standbyWeeks: [],
   standbySwapRequests: [],
+  customerRates: [],
   monthlySubmissions: [],
   financePackages: [],
   deliveryNoteDocuments: [],

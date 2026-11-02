@@ -68,7 +68,7 @@ export const FinanceRecipientCard = ({ user, settings, onSaved }: { readonly use
           </Button>
         </div>
       ) : (
-        <p className="mt-4 text-sm font-medium text-steel-800">{settings.financeEmail || 'Not set — a Master sets it.'}</p>
+        <p className="mt-4 text-sm font-medium text-steel-800">{settings.financeEmail || 'Not set — a Senior Tech sets it.'}</p>
       )}
       {saved && <p role="status" className="mt-2 text-sm text-verdant-700">Saved. The change is on the audit trail.</p>}
       {operation.error !== null && <p role="alert" className="mt-2 text-sm font-medium text-signal-600">{operation.error}</p>}

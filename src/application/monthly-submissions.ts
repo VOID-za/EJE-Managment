@@ -116,8 +116,9 @@ export const loadMonthlyForms = async (
   const missingReasons = days.filter((day) => day.status === 'absent' && day.absenceReason === null).map((day) => day.date);
   const unrecorded = unrecordedWeekdays(days, today);
 
+  // MONTH-END-OFF-1 (2 November 2026): a month may be saved and submitted
+  // before it ends, by every role. Submitting again later replaces it.
   const problems: string[] = [];
-  if (to > today) problems.push(`${monthTitle(month)} has not ended yet: it can be submitted on its last day, ${formatDayAndDate(to)}, or after.`);
   if (blocking.length > 0) {
     problems.push(
       `Part of ${monthTitle(month)} was already sent to the office as ${blocking.map((other) => formatPeriod(other.from, other.to)).join('; ')}. ` +
@@ -143,7 +144,7 @@ export const loadMonthlyForms = async (
     timesheet: {
       sent: exactSent !== null,
       versionInForce:
-        !timesheetRequired ? 'Not required — Coordinators keep no timesheet' :
+        !timesheetRequired ? 'Not required — the Office keeps no timesheet' :
         exactSent === null ? 'Not sent yet' : versionInForce(exactSent, corrections).correction === null ? 'Original submission' : `Correction ${versionInForce(exactSent, corrections).correction!.sequence} accepted`,
       correctionPending: corrections.some((correction) => correction.status === 'pending'),
       blockingPeriods: blocking.map((other) => formatPeriod(other.from, other.to)),
@@ -175,9 +176,6 @@ export const submitMonth = async (
     throw refuse('You can only submit your own month.', 'not_permitted', 'Each person submits their own month; nobody submits another person’s attendance or timesheet.');
   }
   const state = await loadMonthlyForms(context, technicianId, month);
-  if (!state.monthEnded) {
-    throw refuse(`${state.monthLabel} has not ended yet.`, 'month_not_ended', `Submit it on ${formatDayAndDate(state.to)} or after.`);
-  }
   if (state.timesheet.blockingPeriods.length > 0) {
     throw refuse(
       `Part of ${state.monthLabel} was already sent to the office.`,
@@ -232,7 +230,7 @@ export const submitMonth = async (
   const name = userFullName(person);
   const documents = state.timesheetRequired
     ? `Timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance})`
-    : `Attendance (${state.fileNames.attendance}) — no timesheet: Coordinators keep none —`;
+    : `Attendance (${state.fileNames.attendance}) — no timesheet: the Office keeps none —`;
   await audit(context, {
     jobId: null,
     type: 'monthly_forms_submitted',

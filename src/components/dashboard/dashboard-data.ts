@@ -1,3 +1,4 @@
+import { isFieldRole } from '@/domain';
 import type { Job, JobPriority, User } from '@/domain';
 import {
   isJobOpenWork,
@@ -78,7 +79,7 @@ export const jobsByTechnician = (
   users: readonly User[],
 ): readonly TechnicianLoad[] =>
   users
-    .filter((user) => user.role === 'technician' && user.active)
+    .filter((user) => isFieldRole(user.role) && user.active)
     .map((technician) => {
       const assigned = rows.filter(
         (row) =>

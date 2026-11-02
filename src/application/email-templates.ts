@@ -47,7 +47,7 @@ const assertManages = (context: OperationContext): void => {
     throw refuse(
       'Only the office manages email templates.',
       'not_permitted',
-      'A Master or a Coordinator manages the customer email templates.',
+      'A Senior Tech or the Office manages the customer email templates.',
     );
   }
 };

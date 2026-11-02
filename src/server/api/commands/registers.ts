@@ -1,3 +1,4 @@
+import * as customerRates from '@/application/customer-rates';
 import { requeueSiteGeocode, verifySiteLocation, type PinChoice } from '@/application/site-geocoding';
 import 'server-only';
 import { z } from 'zod';
@@ -66,6 +67,18 @@ const customerFields = z
     paymentTerms: text(120),
     /** Withdrawing a customer from the register, which the edit dialog offers. */
     active: z.boolean().optional(),
+  })
+  .strict();
+
+const centsField = z.number().int().nonnegative().max(100_000_000);
+/** CUST-RATES-1: the same fields, and the same limits, as Administration's rates. */
+const customerRatesSchema = z
+  .object({
+    labourRates: z.object({ normal: centsField, overtime: centsField, double: centsField }).strict(),
+    calloutRate: centsField,
+    testBenchFee: centsField,
+    kilometreRate: centsField,
+    vatPercentage: z.number().nonnegative().max(100),
   })
   .strict();
 
@@ -159,6 +172,18 @@ const loadMachine = async (context: CommandContext, machineId: string): Promise<
 
 /** Actions on one customer. `target` is the customer id. */
 export const CUSTOMER_COMMANDS: CommandRegistry = {
+  /** CUST-RATES-1: Default or Custom Rates — the office's choice, never the customer's. */
+  rate_mode: command({
+    schema: z.object({ mode: z.enum(['default', 'custom']) }).strict(),
+    run: (context, input, target) => customerRates.setCustomerRateMode(context.operation, target, input.mode),
+  }),
+
+  /** CUST-RATES-1: a Custom Rates customer's own rates. */
+  rates: command({
+    schema: customerRatesSchema,
+    run: (context, input, target) => customerRates.saveCustomerRates(context.operation, target, input),
+  }),
+
   update: command({
     schema: customerFields,
     async run(context, input, target) {
@@ -384,7 +409,11 @@ export const createCustomerSchema = customerFields.extend({
   /** A customer with nowhere to send a technician is not useful, so this is required. */
   site: siteFields,
   contact: contactFields.nullable(),
+  /** CUST-RATES-1: chosen by the office creating the customer. */
+  rateMode: z.enum(['default', 'custom']).optional(),
 });
+
+
 
 /**
  * A new customer.

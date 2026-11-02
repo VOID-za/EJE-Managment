@@ -14,7 +14,9 @@ import {
   renderEmailSubject,
   siteAddressLine,
   userFullName,
+  EMAIL_ATTACHMENTS_MAX_BYTES,
   type CustomerEmail,
+  type CustomerEmailAttachment,
   type DeliveryFailureKind,
   type DeliveryRecord,
   type EmailTemplateWithVersion,
@@ -258,6 +260,33 @@ const compose = async (
   }
 };
 
+/** The job's documents selected for the customer email (JOB-ATT-3), as the email records them. */
+const selectedCustomerDocuments = (job: Job): CustomerEmailAttachment[] =>
+  job.attachments
+    .filter((attachment) => attachment.emailToCustomer === true)
+    .map((attachment) => ({ storageKey: attachment.storageKey, fileName: attachment.fileName, sha256: attachment.checksumSha256 }));
+
+/** Why these attachments cannot travel in one email, or null when they fit. */
+const attachmentsSizeProblem = async (
+  context: OperationContext,
+  finalKey: string,
+  extras: readonly CustomerEmailAttachment[],
+): Promise<string | null> => {
+  if (extras.length === 0) return null;
+  let total = 0;
+  for (const key of [finalKey, ...extras.map((extra) => extra.storageKey)]) {
+    const stored = await context.services.storage.getDocument(key);
+    if (stored === null) {
+      const name = extras.find((extra) => extra.storageKey === key)?.fileName ?? 'the signed job card';
+      return `${name} could not be read from storage, so the email was not sent without it.`;
+    }
+    total += stored.bytes.length;
+  }
+  if (total <= EMAIL_ATTACHMENTS_MAX_BYTES) return null;
+  const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+  return `The signed job card and the ${extras.length} selected document(s) come to ${mb(total)} MB; one email can carry at most ${mb(EMAIL_ATTACHMENTS_MAX_BYTES)} MB of attachments. Nothing was sent. Select fewer or smaller documents for the customer and retry, or send them separately.`;
+};
+
 /**
  * Writes the automatic email for a job's issued document. Idempotent: called
  * twice for the same document (a replayed signature, a double submit) it
@@ -297,6 +326,19 @@ export const queueSignedJobCardEmail = async (
       : null;
   const composed = await compose(context, job, recipient, pinned);
   const now = context.services.clock.now();
+  /*
+   * JOB-ATT-3: the documents chosen for the customer go IN the email. Their
+   * total with the signed PDF must fit what the mail provider takes; if it
+   * does not, the email is NOT written as queued without them — it waits for
+   * the office, saying exactly why. A retry carries what its original carried.
+   */
+  const extraAttachments = retryOf !== null
+    ? [...(retryOf.extraAttachments ?? [])]
+    : selectedCustomerDocuments(job);
+  const sizeProblem = composed.state === 'queued' ? await attachmentsSizeProblem(context, document.storageKey, extraAttachments) : null;
+  const finalComposed: Composition = sizeProblem === null
+    ? composed
+    : { ...composed, state: 'attention', failureKind: 'attachment_too_large', failureReason: sizeProblem };
 
   const email: CustomerEmail = {
     id: context.services.ids.next('email'),
@@ -312,16 +354,17 @@ export const queueSignedJobCardEmail = async (
     cc: [],
     subject: composed.subject,
     body: composed.body,
-    // The final signed PDF and nothing else, named by key AND checksum.
+    // The final signed PDF, named by key AND checksum — and the documents selected for the customer (JOB-ATT-3).
     attachment: { storageKey: document.storageKey, fileName: document.fileName, sha256: document.checksumSha256 ?? null },
-    state: composed.state,
+    extraAttachments,
+    state: finalComposed.state,
     attempts: 0,
-    nextAttemptAt: composed.state === 'queued' ? now : null,
+    nextAttemptAt: finalComposed.state === 'queued' ? now : null,
     lastAttemptAt: null,
     sentAt: null,
     providerRequestId: null,
-    failureKind: composed.failureKind,
-    failureReason: composed.failureReason,
+    failureKind: finalComposed.failureKind,
+    failureReason: finalComposed.failureReason,
     retryOf: retryOf?.id ?? null,
     createdAt: now,
     createdBy: context.actor.id,
@@ -348,7 +391,7 @@ export const queueSignedJobCardEmail = async (
     summary: email.state === 'queued' ? 'Signed job card email queued' : 'Signed job card email needs the office',
     detail:
       email.state === 'queued'
-        ? `“${email.subject}” to ${email.recipient}, from ${email.sender.length > 0 ? email.sender : 'the configured mailbox'}, with ${document.fileName} attached (template “${email.templateName}”, version ${email.templateVersion}). Queued is not sent: the email history records what Microsoft 365 says.`
+        ? `“${email.subject}” to ${email.recipient}, from ${email.sender.length > 0 ? email.sender : 'the configured mailbox'}, with ${[document.fileName, ...extraAttachments.map((extra) => extra.fileName)].join(', ')} attached (template “${email.templateName}”, version ${email.templateVersion}). Queued is not sent: the email history records what Microsoft 365 says.`
         : `${email.failureReason} Nothing was composed or sent.`,
   });
   if (email.state === 'attention') {
@@ -388,6 +431,26 @@ const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
  * any transaction, between the claim and the record. Never throws.
  */
 export const attemptCustomerEmail = async (services: AppServices, email: CustomerEmail): Promise<EmailAttemptOutcome> => {
+  /*
+   * JOB-ATT-3: every selected document is read and checked like the PDF. A
+   * missing or changed one fails the email — it is never sent without it —
+   * and so does a total the provider would not carry.
+   */
+  const extras = email.extraAttachments ?? [];
+  let totalBytes = 0;
+  for (const extra of extras) {
+    const stored = await services.storage.getDocument(extra.storageKey).catch(() => null);
+    if (stored === null) {
+      return { kind: 'failed', failureKind: 'document_unavailable', reason: `${extra.fileName} could not be read from storage, so nothing was sent.`, retryable: false, retryAfterSeconds: null };
+    }
+    if (extra.sha256 !== null) {
+      const actual = stored.sha256 ?? (await sha256Hex(stored.bytes));
+      if (actual.toLowerCase() !== extra.sha256.toLowerCase()) {
+        return { kind: 'failed', failureKind: 'document_changed', reason: `${extra.fileName} no longer matches the document selected for this email, so it was not sent.`, retryable: false, retryAfterSeconds: null };
+      }
+    }
+    totalBytes += stored.bytes.length;
+  }
   if (email.attachment !== null) {
     const stored = await services.storage.getDocument(email.attachment.storageKey).catch(() => null);
     if (stored === null) {
@@ -406,13 +469,23 @@ export const attemptCustomerEmail = async (services: AppServices, email: Custome
       }
     }
   }
+  if (extras.length > 0 && email.attachment !== null) {
+    const pdf = await services.storage.getDocument(email.attachment.storageKey).catch(() => null);
+    totalBytes += pdf?.bytes.length ?? 0;
+    if (totalBytes > EMAIL_ATTACHMENTS_MAX_BYTES) {
+      return { kind: 'failed', failureKind: 'attachment_too_large', reason: 'The signed job card and the selected documents are larger than one email can carry, so nothing was sent.', retryable: false, retryAfterSeconds: null };
+    }
+  }
   try {
     const receipt = await services.email.send({
       to: [email.recipient],
       cc: [...email.cc],
       subject: email.subject,
       body: email.body,
-      attachments: email.attachment === null ? [] : [{ fileName: email.attachment.fileName, storageKey: email.attachment.storageKey }],
+      attachments: [
+        ...(email.attachment === null ? [] : [{ fileName: email.attachment.fileName, storageKey: email.attachment.storageKey }]),
+        ...extras.map((extra) => ({ fileName: extra.fileName, storageKey: extra.storageKey })),
+      ],
       reference: email.id,
     });
     if (receipt.state === 'failed') {
@@ -576,7 +649,7 @@ export const emailIssuedJobCard = async (context: OperationContext, job: Job, re
 
 const assertOffice = (context: OperationContext): void => {
   if (!can(context.actor.role, 'jobs.officeHandling')) {
-    throw refuse('Only the office sees and retries customer emails.', 'not_permitted', 'A Master or a Coordinator handles customer emails.');
+    throw refuse('Only the office sees and retries customer emails.', 'not_permitted', 'A Senior Tech or the Office handles customer emails.');
   }
 };
 

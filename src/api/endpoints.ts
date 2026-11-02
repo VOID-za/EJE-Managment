@@ -1,5 +1,6 @@
 'use client';
 
+import type { CustomerRates, PricingInputs } from '@/domain';
 import type {
   CustomerEmail,
   EmailEventDefinition,
@@ -301,6 +302,13 @@ export interface MachineRow {
 }
 
 export interface CustomerScreen {
+  /** CUST-RATES-1: the office's only — null for anybody else. */
+  readonly rates: {
+    readonly mode: 'default' | 'custom';
+    readonly custom: CustomerRates | null;
+    readonly defaults: PricingInputs;
+    readonly canEdit: boolean;
+  } | null;
   readonly customer: Customer;
   readonly sites: readonly Site[];
   readonly contacts: readonly Contact[];
@@ -531,6 +539,9 @@ export const jobs = {
   /** Where a job's attachment is downloaded from. Authorised on every request. */
   attachmentUrl: (jobId: string, attachmentId: string) =>
     `/api/jobs/${segment(jobId)}/attachments/${segment(attachmentId)}`,
+  /** JOB-ATT-2: every document on the job as one ZIP. */
+  attachmentsZip: (jobId: string, jobNumber: string) =>
+    apiDownload(`/api/jobs/${segment(jobId)}/attachments/zip`, `${jobNumber} Attachments.zip`),
   /**
    * SENDS A CAPTURE THIS DEVICE HAS BEEN HOLDING. OFF-6.
    *
@@ -659,6 +670,9 @@ export const jobs = {
   /** Reclassifies a photograph as the customer's or as EJE's own. MEDIA-1. */
   setMediaVisibility: (jobId: string, attachmentId: string, visibility: string) =>
     jobAction(jobId, 'set_media_visibility', { attachmentId, visibility }),
+  /** JOB-ATT-3: send this document with the signed job card email, or not. */
+  setCustomerEmailDocument: (jobId: string, attachmentId: string, selected: boolean) =>
+    jobAction(jobId, 'customer_email_document', { attachmentId, selected }),
   removeMedia: (jobId: string, kind: 'photo' | 'video', attachmentId: string) =>
     jobAction(jobId, 'remove_media', { kind, attachmentId }),
   awaitingSpares: (
@@ -835,6 +849,12 @@ export const customers = {
     command<Customer>(`/api/customers/${segment(customerId)}/update`, input),
   addSite: (customerId: string, input: unknown) =>
     command<Site>(`/api/customers/${segment(customerId)}/add_site`, input),
+  /** CUST-RATES-1: Default or Custom Rates — the office's choice. */
+  setRateMode: (customerId: string, mode: 'default' | 'custom') =>
+    command<Customer>(`/api/customers/${segment(customerId)}/rate_mode`, { mode }),
+  /** CUST-RATES-1: a Custom Rates customer's own rates. */
+  saveRates: (customerId: string, rates: PricingInputs) =>
+    command<CustomerRates>(`/api/customers/${segment(customerId)}/rates`, rates),
   /** SITE-2: one of a legacy customer's sites becomes the customer's site. */
   consolidateSites: (customerId: string, keepSiteId: string) =>
     command<{ readonly message: string }>(
@@ -1250,6 +1270,8 @@ export const attendance = {
     apiPost<AttendanceRecord>('/api/attendance', input, newIdempotencyKey(), options),
   /** ATT-RANGE-1: one's own attendance for a From/To period, as a PDF. */
   periodPdfUrl: (from: string, to: string) => `/api/attendance/pdf${search({ from, to })}`,
+  /** The same PDF's bytes, for the Attendance page's Preview and Print. */
+  periodPdf: (from: string, to: string) => apiDownload(`/api/attendance/pdf${search({ from, to })}`, 'Attendance.pdf'),
 };
 
 /** The standby calendar. STANDBY-1…8. */

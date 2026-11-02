@@ -49,6 +49,7 @@ import type {
   UnsignedDeliveryAuthorisation,
   User,
   UserId,
+  CustomerRates,
   ChangeRequest,
   ChangeRequestState,
   OcrJob,
@@ -381,6 +382,17 @@ class DemoCustomerRepository implements CustomerRepository {
     return Promise.resolve(
       this.context.read().customers.find((customer) => customer.id === id) ?? null,
     );
+  }
+
+  findCustomRates(customerId: CustomerId): Promise<CustomerRates | null> {
+    return Promise.resolve(this.context.read().customerRates.find((rates) => rates.customerId === customerId) ?? null);
+  }
+
+  saveCustomRates(rates: CustomerRates): Promise<CustomerRates> {
+    this.context.commit((draft) => {
+      draft.customerRates = [...draft.customerRates.filter((existing) => existing.customerId !== rates.customerId), rates];
+    });
+    return Promise.resolve(rates);
   }
 
   listSites(customerId?: CustomerId, filter?: RegisterFilter): Promise<readonly Site[]> {

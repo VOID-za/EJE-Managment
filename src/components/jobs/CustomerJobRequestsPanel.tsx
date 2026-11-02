@@ -214,7 +214,7 @@ export const CustomerJobRequestsPanel = ({
           {signed && (
             <p className="rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-3.5 py-2.5 text-sm text-amber-eje-800">
               The customer has signed this job card, so it cannot be changed. Recording what they
-              asked for is still worth doing — a Master issues a <strong>correction</strong> with
+              asked for is still worth doing — a Senior Tech issues a <strong>correction</strong> with
               its own addendum if EJE decide the document is wrong.
             </p>
           )}

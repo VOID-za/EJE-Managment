@@ -268,20 +268,68 @@ export const validateUpload = (candidate: UploadCandidate): UploadedFile =>
  * document — only the list and the limit differ.
  */
 /**
- * A document attached to a JOB. DOCUMENTS-1 / VIDEO-OFF-1 (27 October 2026).
- * The same types and limit as every other document in the system — a PDF or an
- * image — sniffed from the bytes. Video is not among them.
+ * THE CONTAINER FORMATS A JOB'S DOCUMENTS MAY ALSO BE. JOB-ATT-1 (2 November 2026).
+ *
+ * A ZIP and every current office document share one signature (`PK\x03\x04`,
+ * or `PK\x05\x06` for an empty archive); the older Word, Excel and
+ * PowerPoint formats share another (the OLE compound file). The bytes decide
+ * the FAMILY and the name decides only which member of it — a file whose bytes
+ * are not a ZIP is never accepted as one because it is called `.zip`, and an
+ * OLE file with any other name is refused. Only a job's documents take these.
  */
-export const validateJobDocumentUpload = (candidate: UploadCandidate): UploadedFile =>
-  validateAgainst(candidate, {
+const ZIP_FAMILY: Readonly<Record<string, string>> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+const OLE_FAMILY: Readonly<Record<string, string>> = {
+  doc: 'application/msword',
+  xls: 'application/vnd.ms-excel',
+  ppt: 'application/vnd.ms-powerpoint',
+};
+const isZipContainer = (bytes: Uint8Array): boolean =>
+  bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b &&
+  ((bytes[2] === 0x03 && bytes[3] === 0x04) || (bytes[2] === 0x05 && bytes[3] === 0x06));
+const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+const isOleContainer = (bytes: Uint8Array): boolean => OLE_MAGIC.every((byte, index) => bytes[index] === byte);
+
+/** The container type of a job document, from its bytes and then its name; null if neither. */
+export const sniffJobContainer = (fileName: string, bytes: Uint8Array): string | null => {
+  const extension = (/\.([a-z0-9]+)$/iu.exec(fileName)?.[1] ?? '').toLowerCase();
+  if (isZipContainer(bytes)) return ZIP_FAMILY[extension] ?? 'application/zip';
+  if (isOleContainer(bytes)) return OLE_FAMILY[extension] ?? null;
+  return null;
+};
+
+export const JOB_CONTAINER_CONTENT_TYPES: readonly string[] = [
+  'application/zip',
+  ...Object.values(ZIP_FAMILY),
+  ...Object.values(OLE_FAMILY),
+];
+
+/**
+ * A document attached to a JOB. DOCUMENTS-1 / VIDEO-OFF-1 (27 October 2026):
+ * a PDF or an image, sniffed from the bytes; never video. JOB-ATT-1 (2 November
+ * 2026): or a ZIP, or a Word, Excel or PowerPoint document (`sniffJobContainer`).
+ * Same size limit, same order of checks.
+ */
+export const validateJobDocumentUpload = (candidate: UploadCandidate): UploadedFile => {
+  const container = candidate.bytes.length > 0 && candidate.bytes.length <= MAX_UPLOAD_BYTES
+    ? sniffJobContainer(candidate.fileName, candidate.bytes)
+    : null;
+  if (container !== null) {
+    return { fileName: safeFileName(candidate.fileName), contentType: container, bytes: candidate.bytes };
+  }
+  return validateAgainst(candidate, {
     maxBytes: MAX_UPLOAD_BYTES,
     allowed: ACCEPTED_CONTENT_TYPES,
     tooLarge: `Documents are limited to ${megabytes(MAX_UPLOAD_BYTES)} MB.`,
     wrongType: {
       message: 'That file cannot be attached to a job.',
-      detail: 'Attach a PDF or an image (PNG, JPEG, TIFF or WebP). Video is not accepted.',
+      detail: 'Attach a PDF, an image (PNG, JPEG, TIFF or WebP), a ZIP, or a Word, Excel or PowerPoint document. Video is not accepted.',
     },
   });
+};
 
 export const validatePhotoUpload = (candidate: UploadCandidate): UploadedFile =>
   validateAgainst(candidate, {

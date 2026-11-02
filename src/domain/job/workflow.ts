@@ -134,11 +134,13 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   // reverse edge exists. It carries all the work already recorded with it.
   open: ['in_progress', 'cancelled'],
   // Awaiting spares may be entered and left any number of times.
-  in_progress: ['awaiting_spares', 'completion', 'open'],
-  awaiting_spares: ['in_progress', 'open'],
+  // CANCEL-ALL-1 (2 November 2026): an accepted job may be cancelled at any
+  // point before the customer signature stage — see `canCancelJob`.
+  in_progress: ['awaiting_spares', 'completion', 'open', 'cancelled'],
+  awaiting_spares: ['in_progress', 'open', 'cancelled'],
   // Handing back from the write-up stage is legitimate — a technician taken
   // ill before the customer signs should not have to abandon the job.
-  completion: ['customer_signature', 'in_progress', 'awaiting_spares', 'open'],
+  completion: ['customer_signature', 'in_progress', 'awaiting_spares', 'open', 'cancelled'],
   customer_signature: ['review', 'completion'],
   // A technician's submission issues the job card itself, so `review` goes
   // straight to awaiting delivery. There is deliberately NO edge to
@@ -672,28 +674,58 @@ export const deleteJobRefusal = (
 };
 
 /**
- * Cancellation is for a legitimate job that will not happen. Allowed while the
- * job is still waiting to be started; once work is under way, cancelling would
- * discard it, so that is deliberately not offered here.
+ * Cancellation is for a legitimate job that will not happen. The job keeps
+ * everything it recorded and stays searchable; nothing is deleted.
  *
- * *Amended 25 September 2026 (CR-11, CANCEL-1…3):* as `canDeleteJob` above —
- * the office, and Open AND unassigned. It takes the JOB now rather than the
- * status alone, because the status alone was never the rule.
+ * *Amended 25 September 2026 (CR-11, CANCEL-1…3):* the office, while the job is
+ * Open AND unassigned.
+ *
+ * *Amended 2 November 2026 (CANCEL-ALL-1):* ALSO, once a job has been ACCEPTED,
+ * it may be cancelled at any point before the Customer Signature stage — Open,
+ * In Progress, Awaiting Spares or Completion — by EVERY role: Senior Tech and
+ * Office on any such job; a Technician or Apprentice on a job they are working
+ * on (the primary or an additional technician). Never once the job has reached
+ * the customer signature: from there it is the customer's record. A reason is
+ * always required (`cancelJob`).
  */
-export const canCancelJob = (
-  role: UserRole,
-  job: Pick<Job, 'status'> & AssignableJob,
-): boolean => can(role, 'jobs.endUnstartedJob') && isEndableJob(job);
+const CANCELLABLE_ONCE_ACCEPTED: readonly JobStatus[] = ['open', 'in_progress', 'awaiting_spares', 'completion'];
 
-export const cancelJobRefusal = (
-  role: UserRole,
-  job: Pick<Job, 'status'> & AssignableJob,
-): JobEndRefusal | null => {
-  if (canCancelJob(role, job)) return null;
-  if (!can(role, 'jobs.endUnstartedJob')) {
-    return permissionRefusal('Only the office can cancel a job.');
-  }
+type CancellableJob = Pick<Job, 'status' | 'acceptedAt'> & AssignableJob;
+type CancelActor = UserRole | Pick<User, 'id' | 'role'>;
+
+const actorOf = (actor: CancelActor): { readonly id: string; readonly role: UserRole } =>
+  typeof actor === 'string' ? { id: '', role: actor } : actor;
+
+const acceptedBeforeSignature = (job: CancellableJob): boolean =>
+  job.acceptedAt !== null && CANCELLABLE_ONCE_ACCEPTED.includes(job.status);
+
+const worksOn = (actorId: string, job: AssignableJob): boolean =>
+  actorId !== '' && (job.primaryTechnicianId === actorId || job.additionalTechnicianIds.includes(actorId as UserId));
+
+export const canCancelJob = (actor: CancelActor, job: CancellableJob): boolean => {
+  const { id, role } = actorOf(actor);
+  if (job.status === 'cancelled') return false;
+  if (can(role, 'jobs.endUnstartedJob')) return isEndableJob(job) || acceptedBeforeSignature(job);
+  if (can(role, 'jobs.acceptField')) return acceptedBeforeSignature(job) && worksOn(id, job);
+  return false;
+};
+
+export const cancelJobRefusal = (actor: CancelActor, job: CancellableJob): JobEndRefusal | null => {
+  if (canCancelJob(actor, job)) return null;
+  const { id, role } = actorOf(actor);
+  const office = can(role, 'jobs.endUnstartedJob');
+  const field = !office && can(role, 'jobs.acceptField');
+  if (!office && !field) return permissionRefusal('Your role cannot cancel a job.');
   if (job.status === 'cancelled') return stateRefusal('This job is already cancelled.');
+  if (field && !worksOn(id, job)) {
+    return permissionRefusal('You can cancel only a job you are working on.');
+  }
+  if (!CANCELLABLE_ONCE_ACCEPTED.includes(job.status) && job.status !== 'draft') {
+    return stateRefusal(
+      `A ${jobStatusLabel(job.status).toLowerCase()} job cannot be cancelled: a job can be cancelled only before the Customer Signature stage.`,
+    );
+  }
+  if (field) return stateRefusal('Accept the job first. Until it is accepted, the office cancels it.');
   return stateRefusal(endableRefusal(job) ?? 'This job cannot be cancelled.');
 };
 

@@ -1,3 +1,4 @@
+import { isFieldRole } from '@/domain';
 import {
   STANDBY_POSITIONS,
   STANDBY_POSITION_LABELS,
@@ -74,7 +75,7 @@ const assertManages = (context: OperationContext): void => {
   throw refuse(
     'Only the office can change the standby calendar.',
     'not_permitted',
-    'A Master or a Coordinator administers standby. A technician asks for a swap instead.',
+    'A Senior Tech or the Office administers standby. A technician asks for a swap instead.',
   );
 };
 
@@ -228,7 +229,7 @@ export const loadStandbyCalendar = async (
     .filter((user) => {
       const record = directory.eligibility.get(user.id);
       const eligible = record !== undefined && (record.main || record.helper || record.apprentice);
-      return shown.has(user.id) || (user.role === 'technician' && (office || (eligible && user.active)));
+      return shown.has(user.id) || (isFieldRole(user.role) && (office || (eligible && user.active)));
     })
     .map((user) => {
       const record = directory.eligibility.get(user.id);
@@ -297,7 +298,7 @@ export const setStandbyEligibility = async (
   const user = await context.repos.users.findById(asUserId(input.userId));
   if (user === null) throw refuse('That person does not exist.', 'user_not_found', 'Reload the list.');
   const any = input.main || input.helper || input.apprentice;
-  if (any && user.role !== 'technician') {
+  if (any && !isFieldRole(user.role)) {
     throw refuse(
       `${userFullName(user)} is not a technician.`,
       'not_technician',

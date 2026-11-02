@@ -1,3 +1,4 @@
+import type { CustomerRateMode } from '@/domain';
 import {
   activeSitesOf,
   asContactId,
@@ -72,6 +73,8 @@ export interface NewCustomerInput {
   readonly officeAddress?: PostalAddress;
   readonly industry: string;
   readonly paymentTerms: string;
+  /** CUST-RATES-1: Default Rates unless the office creating the customer chose Custom Rates. */
+  readonly rateMode?: CustomerRateMode;
   /** The first site. A customer with nowhere to send a technician is not useful. */
   readonly site: NewSiteInput;
   /** Optional first contact for that site. */
@@ -148,6 +151,7 @@ export const createCustomer = async (
     officeAddress: trimAddress(input.officeAddress ?? emptyAddress()),
     industry: input.industry.trim(),
     paymentTerms: input.paymentTerms.trim(),
+    rateMode: input.rateMode ?? 'default',
     active: true,
     notes: [],
     documents: [],
@@ -167,7 +171,8 @@ export const createCustomer = async (
     summary: `Customer added: ${saved.name}`,
     detail:
       `Account ${saved.accountNumber || '—'} created with site "${site.name}"` +
-      (contact === null ? '.' : ` and contact ${contact.firstName} ${contact.lastName}.`),
+      (contact === null ? '.' : ` and contact ${contact.firstName} ${contact.lastName}.`) +
+      ` Priced at ${saved.rateMode === 'custom' ? 'its own Custom Rates' : 'the Default Rates'}.`,
   });
 
   return { customer: saved, site, contact };

@@ -628,6 +628,8 @@ export const jobMedia = pgTable(
     contentType: text('content_type').notNull().default(''),
     sizeBytes: cents('size_bytes').notNull().default(0),
     checksumSha256: text('checksum_sha256'),
+    // JOB-ATT-3: attached to the customer's signed job card email.
+    emailToCustomer: boolean('email_to_customer').notNull().default(false),
     uploadedAt: instant('uploaded_at').notNull(),
     uploadedBy: uuid('uploaded_by').references(() => users.id),
     removedAt: instant('removed_at'),

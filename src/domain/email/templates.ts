@@ -402,6 +402,13 @@ export interface CustomerEmail {
     readonly fileName: string;
     readonly sha256: string | null;
   } | null;
+  /**
+   * JOB-ATT-3 (2 November 2026): the job's documents selected for the
+   * customer, sent IN the email beside the signed job card — never as links.
+   * Fixed when the email is written, like everything else it says. Absent on
+   * an email written before this existed.
+   */
+  readonly extraAttachments?: readonly CustomerEmailAttachment[];
   readonly state: CustomerEmailState;
   readonly attempts: number;
   readonly nextAttemptAt: IsoDateTime | null;
@@ -415,6 +422,24 @@ export interface CustomerEmail {
   readonly createdBy: string | null;
   readonly updatedAt: IsoDateTime;
 }
+
+export interface CustomerEmailAttachment {
+  readonly storageKey: string;
+  readonly fileName: string;
+  readonly sha256: string | null;
+}
+
+/**
+ * THE MOST AN EMAIL'S ATTACHMENTS MAY WEIGH, TOGETHER. JOB-ATT-3.
+ *
+ * Microsoft 365 (Graph) takes at most 3 MB of attachments on one message
+ * without its separate upload-session protocol, which is not used. The rule is
+ * applied when the email is written (so the office is told at once, before
+ * anything is attempted) and again when it is sent, for every provider — an
+ * email that cannot carry the documents chosen for it is never sent without
+ * them and never reported as sent.
+ */
+export const EMAIL_ATTACHMENTS_MAX_BYTES = 3 * 1024 * 1024;
 
 /** Attempts at one email before a temporary failure becomes a failure. */
 export const EMAIL_MAX_ATTEMPTS = 6;

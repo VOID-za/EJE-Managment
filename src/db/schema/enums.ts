@@ -19,7 +19,7 @@ import { pgEnum } from 'drizzle-orm/pg-core';
  * `job_types` table"), so they are reference TABLES with text keys, not enums.
  */
 
-export const userRole = pgEnum('user_role', ['master', 'coordinator', 'technician']);
+export const userRole = pgEnum('user_role', ['master', 'coordinator', 'technician', 'apprentice']);
 
 export const jobStatus = pgEnum('job_status', [
   'draft',
@@ -151,6 +151,10 @@ export const notificationType = pgEnum('notification_type', [
   'standby_swap_requested',
   'standby_swap_decided',
   'standby_assignment_changed',
+  'standby_day_swap_requested',
+  'standby_day_swap_answered',
+  'standby_day_swap_for_office',
+  'standby_day_swap_decided',
 ]);
 
 export const notificationChannel = pgEnum('notification_channel', ['in_app', 'whatsapp', 'email']);

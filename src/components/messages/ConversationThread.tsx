@@ -1,5 +1,6 @@
 'use client';
 
+import { isFieldRole } from '@/domain';
 import { conversations } from '@/api/endpoints';
 import { useState } from 'react';
 import {
@@ -123,7 +124,7 @@ export const ConversationThread = ({
                 {isMaster &&
                   !mine &&
                   message.availabilityRecordId === null &&
-                  named(message.senderId)?.role === 'technician' && (
+                  isFieldRole(named(message.senderId)?.role ?? 'master') && (
                     <Button
                       size="sm"
                       variant="ghost"

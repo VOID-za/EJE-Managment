@@ -104,7 +104,7 @@ export interface RepairItemsEdit {
  */
 export const setRepairItems = async (context: OperationContext, job: Job, edit: RepairItemsEdit): Promise<Job> => {
   if (!can(context.actor.role, 'jobs.editDetails')) {
-    throw refuse('Only the office can change the parts booked in.', 'not_permitted', 'A Master or a Coordinator records what came in with the job.');
+    throw refuse('Only the office can change the parts booked in.', 'not_permitted', 'A Senior Tech or the Office records what came in with the job.');
   }
   assertEditable(context, job);
   const definition = getJobTypeDefinition(job.jobType);

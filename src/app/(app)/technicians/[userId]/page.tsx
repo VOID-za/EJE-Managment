@@ -92,7 +92,7 @@ const TechnicianProfilePage = ({
   // when the question is who marked someone unavailable.
   const authorName = (id: string): string => {
     const author = users.find((candidate) => candidate.id === id);
-    return author === undefined ? 'a Master' : userFullName(author);
+    return author === undefined ? 'a Senior Tech' : userFullName(author);
   };
   const active = records.filter((record) => record.status === 'active');
   const current = active.filter(
@@ -238,7 +238,7 @@ const TechnicianProfilePage = ({
           {!canManage && (
             <div className="rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 px-4 py-3 text-sm text-eje-800">
               This is the official record the office keeps. If something needs to change, send the
-              office a message — a Master records it here.
+              office a message — a Senior Tech records it here.
             </div>
           )}
           {section('Current', 'In effect today.', current)}

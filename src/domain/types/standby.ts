@@ -91,3 +91,62 @@ export interface StandbySwapRequest {
   readonly decisionNote: string;
   readonly cancelledAt: IsoDateTime | null;
 }
+
+/**
+ * ONE DAY'S PLACE HELD BY SOMEBODY OTHER THAN THE WEEK'S ASSIGNEE.
+ * STANDBY-DAY-1 (2 November 2026).
+ *
+ * The weekly schedule is unchanged: a week still has its four places. A day
+ * swap, once the Office approves it, writes one of these for each day it moved
+ * — so on that DATE that PLACE is held by `userId`, and every other day of
+ * the week, and every other place, is exactly as the week says. Only an
+ * approved day swap writes one; it is never deleted.
+ */
+export interface StandbyDayOverride {
+  readonly date: IsoDate;
+  readonly position: StandbyPosition;
+  readonly userId: UserId;
+  /** The approved day swap that moved it. */
+  readonly swapId: string;
+  readonly updatedAt: IsoDateTime;
+}
+
+/**
+ * A DAY SWAP'S STAGES. STANDBY-DAY-1. The person asked approves or denies
+ * first; only then does the Office approve or reject; only the Office's
+ * approval changes the calendar. Withdrawn: by the requester, before the
+ * person asked has answered.
+ */
+export type StandbyDaySwapStatus = 'awaiting_recipient' | 'awaiting_office' | 'approved' | 'denied' | 'rejected' | 'withdrawn';
+
+export const STANDBY_DAY_SWAP_ACTIVE: readonly StandbyDaySwapStatus[] = ['awaiting_recipient', 'awaiting_office'];
+
+/**
+ * One exchange of days: the requester gives their `requesterPosition` on
+ * `requesterDate` to the recipient, and takes the recipient's
+ * `recipientPosition` on `recipientDate`. Both places are of the swap's kind.
+ */
+export interface StandbyDayPair {
+  readonly requesterDate: IsoDate;
+  readonly requesterPosition: StandbyPosition;
+  readonly recipientDate: IsoDate;
+  readonly recipientPosition: StandbyPosition;
+}
+
+export interface StandbyDaySwap {
+  readonly id: string;
+  readonly kind: StandbySwapKind;
+  readonly requesterId: UserId;
+  readonly recipientId: UserId;
+  /** One or more pairs; all of them change, or none. */
+  readonly pairs: readonly StandbyDayPair[];
+  readonly reason: string;
+  readonly status: StandbyDaySwapStatus;
+  readonly requestedAt: IsoDateTime;
+  readonly recipientDecidedAt: IsoDateTime | null;
+  readonly recipientNote: string;
+  readonly officeDecidedBy: UserId | null;
+  readonly officeDecidedAt: IsoDateTime | null;
+  readonly officeNote: string;
+  readonly withdrawnAt: IsoDateTime | null;
+}

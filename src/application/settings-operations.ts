@@ -21,7 +21,7 @@ export const updateSettings = async (
       {
         code: 'not_permitted',
         message:
-          'Rates, travel, call-out, the test bench fee and VAT are commercial terms and are set by a Master or a Coordinator.',
+          'Rates, travel, call-out, the test bench fee and VAT are commercial terms and are set by a Senior Tech or the Office.',
       },
     ]);
   }
@@ -35,8 +35,8 @@ export const updateSettings = async (
   const financeEmail = (settings.financeEmail ?? previous.financeEmail ?? '').trim();
   const financeChanged = financeEmail !== (previous.financeEmail ?? '');
   if (financeChanged && !can(context.actor.role, 'settings.manage')) {
-    throw new WorkflowError('Only a Master can change the Finance recipient.', [
-      { code: 'not_permitted', message: 'Payroll forms go to this address; a Master sets it.' },
+    throw new WorkflowError('Only a Senior Tech can change the Finance recipient.', [
+      { code: 'not_permitted', message: 'Payroll forms go to this address; a Senior Tech sets it.' },
     ]);
   }
   if (financeEmail !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(financeEmail)) {
@@ -50,7 +50,7 @@ export const updateSettings = async (
       jobId: null,
       type: 'settings_updated',
       summary: 'Finance recipient changed',
-      detail: `The monthly payroll package now goes to ${financeEmail || 'nobody (not configured)'}. Changed by a Master.`,
+      detail: `The monthly payroll package now goes to ${financeEmail || 'nobody (not configured)'}. Changed by a Senior Tech.`,
       changes: [{ field: 'Finance recipient', from: previous.financeEmail || '—', to: financeEmail || '—' }],
     });
   }

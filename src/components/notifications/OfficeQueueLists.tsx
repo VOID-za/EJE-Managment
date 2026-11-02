@@ -205,7 +205,7 @@ const NumberStepRow = ({
           {row.officeHandling !== null && <p>Handled {formatDateTime(row.officeHandling.handledAt)}</p>}
           {step === 'invoice' && row.purchaseOrder !== null && (
             <p className="mt-1">
-              <Badge tone="blue" size="sm">PO {row.purchaseOrder.number}</Badge>
+              <Badge tone="blue" size="sm">Purchase Order:{row.purchaseOrder.number}</Badge>
             </p>
           )}
         </div>
@@ -261,7 +261,7 @@ export const InvoicedList = ({ rows }: { readonly rows: readonly OfficeQueueRow[
               <JobHeading row={row} />
               <div className="text-right">
                 {row.purchaseOrder !== null && (
-                  <Badge tone="blue" size="sm">PO {row.purchaseOrder.number}</Badge>
+                  <Badge tone="blue" size="sm">Purchase Order:{row.purchaseOrder.number}</Badge>
                 )}{' '}
                 <Badge tone="green" size="sm">
                   Invoice {row.invoice?.number ?? '—'}

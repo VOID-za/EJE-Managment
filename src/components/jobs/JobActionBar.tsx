@@ -1,5 +1,6 @@
 'use client';
 
+import { isFieldRole } from '@/domain';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
@@ -399,7 +400,7 @@ export const JobActionBar = ({
    * accept are the same answer; there is no second copy of the rule in this
    * file.
    */
-  if (canCancelJob(currentUser.role, job)) {
+  if (canCancelJob(currentUser, job)) {
     actions.push(
       <Button
         key="cancel"
@@ -634,7 +635,7 @@ export const JobActionBar = ({
       {transferring && (
         <TransferJobDialog
           job={job}
-          technicians={view.users.filter((candidate) => candidate.role === 'technician')}
+          technicians={view.users.filter((candidate) => isFieldRole(candidate.role))}
           onClose={() => setTransferring(false)}
           onTransferred={() => {
             setTransferring(false);

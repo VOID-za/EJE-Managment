@@ -1,5 +1,6 @@
 'use client';
 
+import { CustomerRatesPanel } from '@/components/customers/CustomerRatesPanel';
 import { use, useState } from 'react';
 import {
   Badge,
@@ -25,7 +26,7 @@ import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { can, isFinishedStatus, isIssuedStatus } from '@/domain';
 
-type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes';
+type TabId = 'overview' | 'sites' | 'machines' | 'jobs' | 'notes' | 'rates';
 
 /**
  * The customer screen.
@@ -71,7 +72,7 @@ const CustomerDetailPage = ({
     );
   }
 
-  const { customer, sites, contacts, machines, jobRows, users, changeRequests, documents } =
+  const { customer, sites, contacts, machines, jobRows, users, changeRequests, documents, rates } =
     data;
   /*
    * WHO SEES WHICH HALF OF CUST-CR. The office acts on reports, so they see the
@@ -143,6 +144,8 @@ const CustomerDetailPage = ({
           { id: 'machines', label: 'Machines' },
           { id: 'jobs', label: 'Job History' },
           { id: 'notes', label: 'Notes & Documents' },
+          // CUST-RATES-1: beside Notes & Documents, only for a customer on Custom Rates.
+          ...(rates !== null && rates.mode === 'custom' ? [{ id: 'rates', label: 'Custom Rates' }] : []),
         ]}
         activeId={tab}
         onChange={(id) => setTab(id as TabId)}
@@ -223,6 +226,17 @@ const CustomerDetailPage = ({
         no longer true. The server enforces both halves regardless — the screen
         is not the permission.
       */}
+      {tab === 'rates' && rates !== null && rates.mode === 'custom' && (
+        <CustomerRatesPanel
+          customerId={customer.id}
+          customerName={customer.name}
+          rates={rates.custom}
+          defaults={rates.defaults}
+          canEdit={rates.canEdit}
+          onSaved={query.refetch}
+        />
+      )}
+
       {tab === 'notes' && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <CustomerNotesPanel

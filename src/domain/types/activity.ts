@@ -45,6 +45,10 @@ export type ActivityEventType =
   | 'technician_removed'
   | 'note_added'
   | 'photo_uploaded'
+  // JOB-ATT-3: a document chosen for, or taken off, the customer email.
+  | 'job_document_email_selection'
+  // CUST-RATES-1: a customer's rate option or Custom Rates changed.
+  | 'customer_rates_updated'
   /** An attachment taken off the job, and by whom. */
   | 'photo_removed'
   /**

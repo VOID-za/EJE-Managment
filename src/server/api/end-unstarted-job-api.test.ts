@@ -132,12 +132,14 @@ describe('the server refuses every other case, however the request is made', () 
     expect(after.data.view.job.status).toBe('open');
   });
 
-  it('CANCEL-4 / DELETE-3: an accepted, in-progress job is refused', async () => {
+  // CANCEL-ALL-1 (2 November 2026): an accepted job may be cancelled before the signature; never deleted.
+  it('CANCEL-ALL-1 / DELETE-3: an accepted, in-progress job may be cancelled, not deleted', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const inProgress = (await jobs(master)).find((job) => job.status === 'in_progress');
     expect(inProgress).toBeDefined();
     const jobNumber = inProgress?.jobNumber ?? '';
 
+    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
     expect(
       (
         await master.post(`/api/jobs/${jobNumber}/cancel`, {
@@ -145,16 +147,16 @@ describe('the server refuses every other case, however the request is made', () 
           description: 'x',
         })
       ).status,
-    ).toBe(422);
-    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
+    ).toBe(200);
   });
 
-  it('CANCEL-5 / DELETE-4: an awaiting-spares job is refused', async () => {
+  it('CANCEL-ALL-1 / DELETE-4: an awaiting-spares job may be cancelled, not deleted', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const spares = (await jobs(master)).find((job) => job.status === 'awaiting_spares');
     expect(spares).toBeDefined();
     const jobNumber = spares?.jobNumber ?? '';
 
+    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
     expect(
       (
         await master.post(`/api/jobs/${jobNumber}/cancel`, {
@@ -162,8 +164,7 @@ describe('the server refuses every other case, however the request is made', () 
           description: 'x',
         })
       ).status,
-    ).toBe(422);
-    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'x' })).status).toBe(422);
+    ).toBe(200);
   });
 
   it('CANCEL-6 / DELETE-5: a signed job and one in the retired review stage are refused', async () => {

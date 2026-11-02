@@ -1,5 +1,5 @@
-import type { IsoDate } from '../types/common';
-import type { User } from '../types/user';
+import type { IsoDate, UserId } from '../types/common';
+import { isFieldRole, type User } from '../types/user';
 import {
   STANDBY_POSITIONS,
   type StandbyCategory,
@@ -7,6 +7,8 @@ import {
   type StandbyPosition,
   type StandbySwapKind,
   type StandbyWeek,
+  type StandbyDayOverride,
+  type StandbyDaySwapStatus,
 } from '../types/standby';
 
 /**
@@ -110,7 +112,7 @@ export const mayStandIn = (
   user: Pick<User, 'role' | 'active'> | undefined,
   eligibility: StandbyEligibility | undefined,
   category: StandbyCategory,
-): boolean => user !== undefined && user.active && user.role === 'technician' && eligibleFor(eligibility, category);
+): boolean => user !== undefined && user.active && isFieldRole(user.role) && eligibleFor(eligibility, category);
 
 export type StandbyProblemCode = 'missing' | 'duplicate_person' | 'not_eligible' | 'inactive';
 
@@ -162,4 +164,37 @@ export const standbyWeekProblems = (
     }
   }
   return problems;
+};
+
+/**
+ * WHO HOLDS A PLACE ON A DAY. STANDBY-DAY-1 (2 November 2026).
+ *
+ * The day's override when an approved day swap moved it; otherwise the place
+ * of the PUBLISHED week holding that date. A draft week holds nobody for this
+ * purpose — nobody is on standby from a schedule that is not published.
+ */
+export const standbyHolderOn = (
+  date: IsoDate,
+  position: StandbyPosition,
+  weeks: readonly Pick<StandbyWeek, 'weekStart' | 'status' | 'assignments'>[],
+  overrides: readonly Pick<StandbyDayOverride, 'date' | 'position' | 'userId'>[],
+): UserId | null => {
+  const override = overrides.find((candidate) => candidate.date === date && candidate.position === position);
+  if (override !== undefined) return override.userId;
+  const week = weeks.find((candidate) => candidate.weekStart === standbyWeekOf(date));
+  if (week === undefined || week.status !== 'published') return null;
+  return week.assignments.find((assignment) => assignment.position === position)?.userId ?? null;
+};
+
+/** The seven dates of a week, Monday first. */
+export const standbyDaysOfWeek = (weekStart: IsoDate): readonly IsoDate[] =>
+  [0, 1, 2, 3, 4, 5, 6].map((offset) => addStandbyDays(weekStart, offset));
+
+export const STANDBY_DAY_SWAP_STATUS_LABELS: Readonly<Record<StandbyDaySwapStatus, string>> = {
+  awaiting_recipient: 'Waiting for the other person',
+  awaiting_office: 'Waiting for the Office',
+  approved: 'Approved — the days were exchanged',
+  denied: 'Declined by the other person',
+  rejected: 'Rejected by the Office',
+  withdrawn: 'Withdrawn',
 };

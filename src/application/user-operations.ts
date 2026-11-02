@@ -53,7 +53,7 @@ const assertManages = (context: OperationContext, target: User): void => {
   throw new WorkflowError(refusal, [
     {
       code: 'master_not_editable',
-      message: `${userFullName(target)} is a Master account and is not editable from here.`,
+      message: `${userFullName(target)} is a Senior Tech account and is not editable from here.`,
     },
   ]);
 };
@@ -89,7 +89,7 @@ export const createUser = async (
   if (!assignableRoles(context.actor.role).includes(input.role)) {
     throw new WorkflowError(
       input.role === 'master'
-        ? 'A Master account cannot be created from here.'
+        ? 'A Senior Tech account cannot be created from here.'
         : `A ${roleLabel(context.actor.role)} cannot create a ${roleLabel(input.role)} account.`,
       [
         {
@@ -138,8 +138,8 @@ export const updateUser = async (context: OperationContext, user: User): Promise
 
   // The role of an existing Master cannot be changed from here either.
   if (existing.role === 'master' && user.role !== 'master') {
-    throw new WorkflowError('A Master account cannot be demoted from here.', [
-      { code: 'master_not_editable', message: 'Master accounts are managed outside this screen.' },
+    throw new WorkflowError('A Senior Tech account cannot be demoted from here.', [
+      { code: 'master_not_editable', message: 'Senior Tech accounts are managed outside this screen.' },
     ]);
   }
 
@@ -169,7 +169,7 @@ export const updateUser = async (context: OperationContext, user: User): Promise
 
   if (roleChanged && !assignableRoles(context.actor.role).includes(user.role)) {
     throw new WorkflowError(
-      `${roleLabel(context.actor.role)} accounts cannot make somebody a ${roleLabel(user.role)}.`,
+      `${roleLabel(context.actor.role)} accounts cannot make somebody ${roleLabel(user.role) === 'Office' ? 'Office staff' : `a ${roleLabel(user.role)}`}.`,
       [
         {
           code: 'role_not_assignable',
@@ -233,7 +233,7 @@ export const setUserActive = async (
   assertManages(context, user);
   if (user.id === context.actor.id && !active) {
     throw new WorkflowError('You cannot disable your own account.', [
-      { code: 'self_disable', message: 'Ask another Master to disable this account.' },
+      { code: 'self_disable', message: 'Ask another Senior Tech to disable this account.' },
     ]);
   }
 

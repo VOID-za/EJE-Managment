@@ -65,7 +65,7 @@ export const CancelJobDialog = ({
             variant="danger"
             onClick={submit}
             loading={operation.running}
-            disabled={mode === 'delete' && description.trim().length === 0}
+            disabled={description.trim().length === 0}
           >
             {mode === 'cancel' ? 'Cancel job' : 'Delete job'}
           </Button>
@@ -84,7 +84,7 @@ export const CancelJobDialog = ({
         {mode === 'cancel' ? (
           <>
             <SelectField
-              label="Reason"
+              label="Category"
               required
               value={reason}
               onChange={(event) => setReason(event.target.value as CancellationReason)}
@@ -94,16 +94,13 @@ export const CancelJobDialog = ({
               }))}
             />
             <TextAreaField
-              label="Description"
-              required={reason === 'other'}
+              label="Why is the job being cancelled?"
+              required
               rows={3}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              hint={
-                reason === 'other'
-                  ? 'Required when the reason is Other.'
-                  : 'Optional. Worth adding — six months from now the reason alone may not be enough.'
-              }
+              data-testid="cancel-job-reason"
+              hint="Required. Saved with the job and on its history."
             />
           </>
         ) : (

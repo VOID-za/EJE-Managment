@@ -265,7 +265,7 @@ export const decideTimesheetCorrection = async (
     throw refuse(
       'Only the office decides a timesheet correction.',
       'not_permitted',
-      'A Master or a Coordinator accepts or rejects it.',
+      'A Senior Tech or the Office accepts or rejects it.',
     );
   }
   if (input.decision !== 'accept' && input.decision !== 'reject') {

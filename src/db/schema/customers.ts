@@ -61,6 +61,8 @@ export const customers = pgTable(
 
     industry: text('industry').notNull().default(''),
     paymentTerms: text('payment_terms').notNull().default(''),
+    /** CUST-RATES-1: 'default' (Administration's rates) or 'custom' (customer_rates). */
+    rateMode: text('rate_mode').notNull().default('default'),
     /** "Customer since": the date EJE started trading with them. */
     customerSince: instant('customer_since'),
 
@@ -72,6 +74,7 @@ export const customers = pgTable(
   },
   (table) => [
     uniqueIndex('customers_account_number_key').on(table.accountNumber),
+    check('customers_rate_mode_known', sql`${table.rateMode} in ('default', 'custom')`),
     // Search and the customer picker both look the customer up by name.
     index('customers_name_idx').on(sql`lower(${table.name})`),
     index('customers_registration_number_idx')
@@ -269,5 +272,38 @@ export const contacts = pgTable(
     uniqueIndex('contacts_one_primary_per_customer')
       .on(table.customerId)
       .where(sql`${table.isPrimary} and ${table.archivedAt} is null`),
+  ],
+);
+
+/**
+ * A CUSTOMER'S OWN RATES. CUST-RATES-1 (2 November 2026).
+ *
+ * The same fields as Administration's rates, one row per customer on Custom
+ * Rates. Changing them reprices nothing already priced: a job card's prices
+ * are frozen into its pricing snapshot at the customer signature, exactly as
+ * with the defaults.
+ */
+export const customerRates = pgTable(
+  'customer_rates',
+  {
+    customerId: uuid('customer_id')
+      .primaryKey()
+      .references(() => customers.id, { onDelete: 'restrict' }),
+    labourNormalCents: bigintNumber('labour_normal_cents').notNull(),
+    labourOvertimeCents: bigintNumber('labour_overtime_cents').notNull(),
+    labourDoubleCents: bigintNumber('labour_double_cents').notNull(),
+    calloutRateCents: bigintNumber('callout_rate_cents').notNull(),
+    testBenchFeeCents: bigintNumber('test_bench_fee_cents').notNull(),
+    kilometreRateCents: bigintNumber('kilometre_rate_cents').notNull(),
+    vatPercentBasisPoints: integer('vat_percent_basis_points').notNull(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    check(
+      'customer_rates_non_negative',
+      sql`${table.labourNormalCents} >= 0 and ${table.labourOvertimeCents} >= 0 and ${table.labourDoubleCents} >= 0 and ${table.calloutRateCents} >= 0 and ${table.testBenchFeeCents} >= 0 and ${table.kilometreRateCents} >= 0 and ${table.vatPercentBasisPoints} between 0 and 10000`,
+    ),
   ],
 );

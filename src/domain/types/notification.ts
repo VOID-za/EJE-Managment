@@ -25,7 +25,12 @@ export type NotificationType =
   /** STANDBY-6: the office approved (to both people) or rejected (to the requester) a swap. */
   | 'standby_swap_decided'
   /** STANDBY-4: the office changed a published standby place this person was or is now in. */
-  | 'standby_assignment_changed';
+  | 'standby_assignment_changed'
+  // STANDBY-DAY-1 (2 November 2026): the two-stage day swap.
+  | 'standby_day_swap_requested'
+  | 'standby_day_swap_answered'
+  | 'standby_day_swap_for_office'
+  | 'standby_day_swap_decided';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 
@@ -63,10 +68,12 @@ export interface AppNotification {
  * A Record over every type, so adding a notification type without deciding
  * its subtab does not compile. Register approvals (a customer change, a
  * machine, a document) are office work raised from job cards and sit with
- * them; the standby calendar's requests and changes are forms, with the
- * timesheet ones.
+ * them.
+ *
+ * NOTIF-TABS-2 (2 November 2026): Forms becomes Monthly Forms, and every
+ * standby notification has its own Standby subtab.
  */
-export type NotificationCategory = 'jobcards' | 'messages' | 'forms';
+export type NotificationCategory = 'jobcards' | 'messages' | 'monthly_forms' | 'standby';
 
 export const NOTIFICATION_CATEGORY: Readonly<Record<NotificationType, NotificationCategory>> = {
   job_assigned: 'jobcards',
@@ -77,12 +84,16 @@ export const NOTIFICATION_CATEGORY: Readonly<Record<NotificationType, Notificati
   machine_approval_request: 'jobcards',
   document_approval_request: 'jobcards',
   chat_message: 'messages',
-  timesheet_submitted: 'forms',
-  timesheet_correction_requested: 'forms',
-  timesheet_correction_decided: 'forms',
-  standby_swap_requested: 'forms',
-  standby_swap_decided: 'forms',
-  standby_assignment_changed: 'forms',
+  timesheet_submitted: 'monthly_forms',
+  timesheet_correction_requested: 'monthly_forms',
+  timesheet_correction_decided: 'monthly_forms',
+  standby_swap_requested: 'standby',
+  standby_swap_decided: 'standby',
+  standby_assignment_changed: 'standby',
+  standby_day_swap_requested: 'standby',
+  standby_day_swap_answered: 'standby',
+  standby_day_swap_for_office: 'standby',
+  standby_day_swap_decided: 'standby',
 };
 
 export const notificationCategory = (type: NotificationType): NotificationCategory =>

@@ -323,6 +323,16 @@ const JobDetailPage = ({
         }
       />
 
+      {/* CUST-RATES-1: a Custom Rates customer without rates is said plainly — never priced at the defaults. */}
+      {view.rateSource.problem !== null && job.pricingSnapshot === null && (
+        <p role="alert" className="mb-4 rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-3 py-2 text-sm font-medium text-signal-700" data-testid="job-custom-rates-missing">
+          {view.rateSource.problem}
+        </p>
+      )}
+      {view.rateSource.mode === 'custom' && view.rateSource.problem === null && job.pricingSnapshot === null && (
+        <p className="mb-4 text-xs text-steel-600" data-testid="job-custom-rates">Priced at {view.customer.name}&apos;s Custom Rates.</p>
+      )}
+
       {/*
         THE OFFICE LIFECYCLE. Issue #73. Handled, then the invoice number —
         the office's actions, on the job the office is handling.

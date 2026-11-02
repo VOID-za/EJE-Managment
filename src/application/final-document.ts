@@ -146,7 +146,7 @@ export const loadFinalDocumentFile = async (
     throw new WorkflowError(`${job.jobNumber} has no final job card on file.`, [
       {
         code: 'no_final_document',
-        message: 'A final job card exists only once a Master has issued and closed the job.',
+        message: 'A final job card exists only once a Senior Tech has issued and closed the job.',
       },
     ]);
   }

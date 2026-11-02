@@ -206,6 +206,7 @@ const toEmail = (row: EmailRow): CustomerEmail => ({
     row.attachmentStorageKey === null
       ? null
       : { storageKey: row.attachmentStorageKey, fileName: row.attachmentFileName ?? '', sha256: row.attachmentSha256 },
+  extraAttachments: Array.isArray(row.extraAttachments) ? row.extraAttachments : [],
   state: row.state as CustomerEmailState,
   attempts: row.attempts,
   nextAttemptAt: row.nextAttemptAt as IsoDateTime | null,
@@ -243,6 +244,7 @@ export class PostgresCustomerEmailRepository implements CustomerEmailRepository 
         attachmentStorageKey: email.attachment?.storageKey ?? null,
         attachmentFileName: email.attachment?.fileName ?? null,
         attachmentSha256: email.attachment?.sha256 ?? null,
+        extraAttachments: [...(email.extraAttachments ?? [])],
         state: email.state,
         attempts: email.attempts,
         nextAttemptAt: email.nextAttemptAt,
@@ -329,6 +331,7 @@ export class PostgresCustomerEmailRepository implements CustomerEmailRepository 
         attachmentStorageKey: raw.attachment_storage_key,
         attachmentFileName: raw.attachment_file_name,
         attachmentSha256: raw.attachment_sha256,
+        extraAttachments: raw.extra_attachments,
         state: raw.state,
         attempts: raw.attempts,
         nextAttemptAt: iso(raw.next_attempt_at),

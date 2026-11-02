@@ -562,6 +562,18 @@ export const JOB_COMMANDS: CommandRegistry = {
       jobs.setMediaVisibility(context.operation, job, input.attachmentId, input.visibility),
   ),
 
+  /** JOB-ATT-3: attach this document to the customer's signed job card email, or not. */
+  customer_email_document: withInput(
+    z
+      .object({
+        attachmentId: z.string().min(1).max(100),
+        selected: z.boolean(),
+      })
+      .strict(),
+    (context, job, input) =>
+      jobs.setCustomerEmailDocument(context.operation, job, input.attachmentId, input.selected),
+  ),
+
   remove_media: withInput(
     z
       .object({

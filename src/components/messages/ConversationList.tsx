@@ -18,7 +18,7 @@ export const conversationTitle = (summary: ConversationSummary): string => {
   if (summary.participants.length === 1) return userFullName(summary.participants[0]!);
   const allMasters = summary.participants.every((user) => user.role === 'master');
   return allMasters
-    ? `The office (${summary.participants.length} Masters)`
+    ? `The office (${summary.participants.length} Senior Techs)`
     : summary.participants.map((user) => user.firstName).join(', ');
 };
 

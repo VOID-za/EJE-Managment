@@ -2,7 +2,10 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { can, formatAddress, isAddressEmpty, type Customer } from '@/domain';
+import { CUSTOMER_RATE_MODE_LABELS, can, customerRateModeOf, formatAddress, isAddressEmpty, type Customer } from '@/domain';
+import { SelectField } from '@/components/ui';
+import { customers } from '@/api/endpoints';
+import { useOperation } from '@/hooks/useOperation';
 import type { JobListRow } from '@/application/job-view';
 import { Button, Card, CardHeader, DefinitionGrid, Icon } from '@/components/ui';
 import { EditCustomerDialog } from './EditCustomerDialog';
@@ -28,6 +31,14 @@ export const CustomerOverviewTab = ({
 }) => {
   const currentUser = useCurrentUser();
   const [editing, setEditing] = useState(false);
+  const rateOperation = useOperation();
+  // CUST-RATES-1: the rate option is the office's to see and change; the customer never chooses it.
+  const seesRates = can(currentUser.role, 'customers.manage');
+  const setsRates = seesRates && can(currentUser.role, 'settings.rates');
+  const changeRateMode = async (mode: 'default' | 'custom') => {
+    const ok = await rateOperation.run(() => customers.setRateMode(customer.id, mode));
+    if (ok) onChanged();
+  };
   const canManage = can(currentUser.role, 'customers.manage');
 
   return (
@@ -59,6 +70,7 @@ export const CustomerOverviewTab = ({
             { label: 'Office number', value: customer.phone },
             { label: 'Industry', value: customer.industry },
             { label: 'Payment terms', value: customer.paymentTerms },
+            ...(seesRates ? [{ label: 'Rates', value: CUSTOMER_RATE_MODE_LABELS[customerRateModeOf(customer)] }] : []),
             { label: 'Customer since', value: formatDate(customer.createdAt) },
             {
               label: 'Office address',
@@ -68,6 +80,25 @@ export const CustomerOverviewTab = ({
             },
           ]}
         />
+        {setsRates && (
+          <div className="mt-4 max-w-sm">
+            <SelectField
+              label="Price this customer's job cards at"
+              value={customerRateModeOf(customer)}
+              disabled={rateOperation.running}
+              onChange={(event) => void changeRateMode(event.target.value === 'custom' ? 'custom' : 'default')}
+              options={[
+                { value: 'default', label: 'Default Rates' },
+                { value: 'custom', label: 'Custom Rates' },
+              ]}
+              hint="Signed and issued job cards keep their prices."
+              data-testid="customer-rate-mode-edit"
+            />
+            {rateOperation.error !== null && (
+              <p role="alert" className="mt-1 text-sm font-medium text-signal-600">{rateOperation.error}</p>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card>

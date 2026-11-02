@@ -94,27 +94,27 @@ const submitFor = async (user: User) => {
 
 describe('PAY-03 — file names', () => {
   it('follow the owner’s examples exactly, from the technician’s name on documents and the month', () => {
-    expect(timesheetMonthFileName('JC', '2026-10')).toBe('JC TIMESHEET OCT.pdf');
+    expect(timesheetMonthFileName('JC', '2026-10')).toBe('JC Timesheet Oct 2026.pdf');
     expect(attendanceMonthFileName('JC', '2026-10')).toBe('JC ATTEN OCTOBER.pdf');
-    expect(timesheetMonthFileName('Ruan', '2026-10')).toBe('RUAN TIMESHEET OCT.pdf');
+    expect(timesheetMonthFileName('Ruan', '2026-10')).toBe('RUAN Timesheet Oct 2026.pdf');
     expect(attendanceMonthFileName('ruan', '2026-10')).toBe('RUAN ATTEN OCTOBER.pdf');
-    expect(timesheetMonthFileName('JC', '2026-11')).toBe('JC TIMESHEET NOV.pdf');
+    expect(timesheetMonthFileName('JC', '2026-11')).toBe('JC Timesheet Nov 2026.pdf');
     expect(attendanceMonthFileName('JC', '2026-11')).toBe('JC ATTEN NOVEMBER.pdf');
   });
   it('are deterministic and file-system safe; nothing is hard-coded', () => {
     expect(sanitiseDocumentName('  j/c*: "x" ')).toBe('J C X');
-    expect(timesheetMonthFileName('a<b>|c?', '2026-02')).toBe('A B C TIMESHEET FEB.pdf');
+    expect(timesheetMonthFileName('a<b>|c?', '2026-02')).toBe('A B C Timesheet Feb 2026.pdf');
     expect(documentNameOf({ firstName: 'Ruan', initials: 'RB', documentName: null })).toBe('RUAN');
     expect(documentNameOf({ firstName: 'Johannes', initials: 'JC', documentName: 'JC' })).toBe('JC');
     expect(documentNameOf({ firstName: '', initials: '', documentName: '' })).toBe('TECHNICIAN');
     expect(correctedFileName('JC TIMESHEET OCT.pdf')).toBe('JC TIMESHEET OCT CORRECTED.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-10-31')).toBe('JC TIMESHEET OCT.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-10-03', '2026-10-12')).toBe('JC TIMESHEET 3 OCT-12 OCT.pdf');
-    // PDF-NAME-2 (2 November 2026): a period over two or more months names every month, the year where needed.
-    expect(timesheetPeriodFileName('JC', '2026-12-28', '2027-01-03')).toBe('JC Timesheet, Dec 2026 + Jan 2027.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-11-30')).toBe('JC Timesheet, Oct + Nov 2026.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-10-15', '2026-11-14')).toBe('JC Timesheet, Oct + Nov 2026.pdf');
-    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-12-31')).toBe('JC Timesheet, Oct + Nov + Dec 2026.pdf');
+    // TS-NAME-TO-1 (2 November 2026, superseding PDF-NAME-2): the month and year of the TO date, whatever the From.
+    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-10-31')).toBe('JC Timesheet Oct 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-03', '2026-10-12')).toBe('JC Timesheet Oct 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-24', '2026-11-22')).toBe('JC Timesheet Nov 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-12-28', '2027-01-03')).toBe('JC Timesheet Jan 2027.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-11-30')).toBe('JC Timesheet Nov 2026.pdf');
+    expect(timesheetPeriodFileName('JC', '2026-10-01', '2026-12-31')).toBe('JC Timesheet Dec 2026.pdf');
     // PDF-NAME-1: the attendance period names its first and last month.
     expect(attendancePeriodFileName('JC', '2026-10-01', '2026-10-31')).toBe('JC ATTEN OCTOBER.pdf');
     expect(attendancePeriodFileName('JC', '2026-10-01', '2026-11-30')).toBe('JC Atten Oct-Nov.pdf');
@@ -195,12 +195,12 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     }
   });
 
-  it('refuses a month that has not ended, unconfirmed missing weekdays, and an absent day without a reason', async () => {
+  it('MONTH-END-OFF-1: a month not yet ended may be submitted; unconfirmed missing weekdays and an absent day without a reason are refused', async () => {
     const thisMonth = monthOfDate(businessToday());
-    const lastDay = monthBounds(thisMonth).to;
-    if (lastDay > businessToday()) {
-      await expect(submitMonth(harness.as(sipho), SIPHO, thisMonth, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_not_ended' }] });
-    }
+    expect(monthBounds(thisMonth).to >= businessToday()).toBe(true);
+    // 2 November 2026: no month-end restriction, for any role.
+    expect((await loadMonthlyForms(harness.as(sipho), SIPHO, thisMonth)).problems.join(' ')).not.toMatch(/has not ended/u);
+    expect(await submitMonth(harness.as(sipho), SIPHO, thisMonth, { confirmUnrecorded: true })).toMatchObject({ month: thisMonth });
     await expect(submitMonth(harness.as(sipho), SIPHO, MONTH)).rejects.toMatchObject({ violations: [{ code: 'attendance_incomplete' }] });
     await harness.repos.attendance.saveRecord({
       id: 'att-old', userId: SIPHO, date: `${MONTH}-10`, status: 'absent', absenceReason: null, note: 'from before the reasons',

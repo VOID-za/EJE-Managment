@@ -115,7 +115,7 @@ export const isMultiDayAvailability = (record: AvailabilityRecord): boolean =>
 export interface StaffAvailabilityRow {
   readonly id: string;
   readonly name: string;
-  readonly role: 'master' | 'coordinator' | 'technician';
+  readonly role: 'master' | 'coordinator' | 'technician' | 'apprentice';
   readonly jobTitle: string;
   readonly active: boolean;
   /** An active absence covering today, if any. */

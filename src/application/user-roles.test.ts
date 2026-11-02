@@ -119,7 +119,7 @@ describe('a Master administers everyone except another Master', () => {
     const entry = events.find((event) => event.type === 'user_role_changed');
     expect(entry).toBeDefined();
     expect(entry!.actorId).toBe(elmarie.id);
-    expect(entry!.detail).toContain('from Technician to Coordinator');
+    expect(entry!.detail).toContain('from Technician to Office');
     expect(entry!.detail).toContain('Sipho Mahlangu');
     expect(entry!.occurredAt.length).toBeGreaterThan(0);
   });
@@ -144,7 +144,7 @@ describe('a Master account is protected from every other Master', () => {
   it('cannot be edited', async () => {
     await expect(
       updateUser(harness.as(elmarie), { ...johan, mobile: '+27 00 000 0000' }),
-    ).rejects.toThrow(/Master account/i);
+    ).rejects.toThrow(/Senior Tech account/i);
     expect((await reread(harness, johan)).mobile).toBe(johan.mobile);
   });
 
@@ -188,7 +188,7 @@ describe('a Master account is protected from every other Master', () => {
   it('cannot be promoted to from below — nobody can make a Master', async () => {
     await expect(
       updateUser(harness.as(elmarie), { ...sipho, role: 'master' }),
-    ).rejects.toThrow(/cannot make somebody a Master/i);
+    ).rejects.toThrow(/cannot make somebody a Senior Tech/i);
     expect((await reread(harness, sipho)).role).toBe('technician');
   });
 });
@@ -222,7 +222,7 @@ describe('the Coordinator administers technicians only', () => {
   it('cannot promote a technician to Coordinator', async () => {
     await expect(
       updateUser(harness.as(christene), { ...sipho, role: 'coordinator' }),
-    ).rejects.toThrow(/cannot make somebody a Coordinator/i);
+    ).rejects.toThrow(/cannot make somebody Office staff/i);
     expect((await reread(harness, sipho)).role).toBe('technician');
   });
 
@@ -248,9 +248,10 @@ describe('the Coordinator administers technicians only', () => {
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('is offered technicians only by the rules the screen reads', () => {
-    expect(assignableRolesFor(christene, sipho)).toEqual(['technician']);
-    expect(canChangeRole(christene, sipho)).toBe(false);
+  it('is offered technicians and apprentices only by the rules the screen reads (ROLE-APP-1)', () => {
+    expect(assignableRolesFor(christene, sipho)).toEqual(['technician', 'apprentice']);
+    // The Office may move a technician to Apprentice and back, and nowhere else.
+    expect(canChangeRole(christene, sipho)).toBe(true);
     expect(assignableRolesFor(christene, elmarie)).toEqual([]);
   });
 });

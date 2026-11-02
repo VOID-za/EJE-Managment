@@ -110,7 +110,7 @@ const AdminPage = () => {
       <PageHeader
         title="Administration"
         breadcrumbs={[{ label: 'Administration' }]}
-        description="System configuration. In the production system Masters maintain all of this without developer involvement."
+        description="System configuration. In the production system Senior Techs maintain all of this without developer involvement."
       />
 
       <Tabs

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { CONTACT_ROLE_SUGGESTIONS } from '@/domain';
 import type { NewCustomerInput } from '@/application/customer-operations';
-import { Button, Modal, SectionHeading, TextAreaField, TextField } from '@/components/ui';
+import { Button, Modal, SectionHeading, SelectField, TextAreaField, TextField } from '@/components/ui';
 import { customers } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
@@ -25,6 +25,7 @@ const EMPTY: NewCustomerInput = {
   email: '',
   industry: '',
   paymentTerms: '30 days from statement',
+  rateMode: 'default',
   site: {
     name: 'Head Office',
     addressLine1: '',
@@ -179,6 +180,23 @@ export const NewCustomerDialog = ({
               value={draft.paymentTerms}
               onChange={(event) => set('paymentTerms', event.target.value)}
               containerClassName="sm:col-span-2"
+            />
+            {/* CUST-RATES-1: chosen here, by the office, directly below Payment terms. */}
+            <SelectField
+              label="Rates"
+              value={draft.rateMode ?? 'default'}
+              onChange={(event) => set('rateMode', event.target.value === 'custom' ? 'custom' : 'default')}
+              options={[
+                { value: 'default', label: 'Default Rates' },
+                { value: 'custom', label: 'Custom Rates' },
+              ]}
+              hint={
+                draft.rateMode === 'custom'
+                  ? 'Set this customer’s rates on its Custom Rates tab. Its job cards cannot be priced until they are.'
+                  : 'Always the current rates in Administration.'
+              }
+              containerClassName="sm:col-span-2"
+              data-testid="customer-rate-mode"
             />
           </div>
 

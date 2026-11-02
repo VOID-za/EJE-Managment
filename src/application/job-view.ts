@@ -1,3 +1,4 @@
+import { resolveCustomerRateSource } from './customer-rates';
 import type {
   ChangeRequest,
   CustomerId,
@@ -78,7 +79,13 @@ export interface JobView {
   readonly machine: Machine | null;
   readonly primaryTechnician: User | null;
   readonly additionalTechnicians: readonly User[];
+  /**
+   * The rates this job is priced at while it is not yet frozen: Administration's,
+   * or — CUST-RATES-1 — the customer's own Custom Rates (`resolveCustomerRateSource`).
+   */
   readonly settings: SystemSettings;
+  /** CUST-RATES-1: which rates price this job, and why it cannot be priced (custom rates missing). */
+  readonly rateSource: { readonly mode: 'default' | 'custom'; readonly problem: string | null };
   /** Everyone who could be named on this job, for resolving note and entry authors. */
   readonly users: readonly User[];
   /**
@@ -224,10 +231,10 @@ export const loadJobView = async (
     viewer,
   );
 
-  const [customer, machine, settings, sites, contacts, users] = await Promise.all([
+  const [customer, machine, rateSource, sites, contacts, users] = await Promise.all([
     repos.customers.findById(job.customerId),
     job.machineId === null ? Promise.resolve(null) : repos.machines.findById(job.machineId),
-    repos.settings.get(),
+    resolveCustomerRateSource({ repos }, job.customerId),
     // Resolution, not selection: a job must still resolve the site and contact
     // it was carried out for even after that record has been withdrawn from the
     // register, or a closed job card would stop rendering.
@@ -322,7 +329,8 @@ export const loadJobView = async (
     additionalTechnicians: users.filter((candidate) =>
       job.additionalTechnicianIds.includes(candidate.id),
     ),
-    settings,
+    settings: rateSource.settings,
+    rateSource: { mode: rateSource.mode, problem: rateSource.problem },
     users,
     checklistTemplate,
     checklistVersionMissing,

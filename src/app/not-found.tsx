@@ -73,7 +73,7 @@ const NotFound = () => {
         </p>
         <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {[
-            { href: '/dashboard', label: 'Dashboard' },
+            { href: '/dashboard', label: 'Overview' },
             { href: '/jobs', label: 'Jobs' },
             { href: '/jobs/closed', label: 'Closed Jobs' },
             { href: '/calendar', label: 'Calendar' },

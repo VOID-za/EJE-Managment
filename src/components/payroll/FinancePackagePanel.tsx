@@ -94,7 +94,7 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
         <p className="text-sm font-semibold text-steel-900">Finance package — {data.monthLabel}</p>
         <p className="text-xs text-steel-600" data-testid="finance-recipient">
           Finance recipient: <strong>{data.recipient || 'not set'}</strong>
-          {data.recipient === '' ? ' — a Master sets it in Administration → Settings.' : ''}
+          {data.recipient === '' ? ' — a Senior Tech sets it in Administration → Settings.' : ''}
         </p>
       </div>
       <p className={`mt-1 text-xs ${data.email.ready ? 'text-steel-500' : 'font-medium text-signal-600'}`} data-testid="finance-email-readiness">

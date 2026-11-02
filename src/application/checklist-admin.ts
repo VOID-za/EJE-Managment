@@ -29,7 +29,7 @@ const assertOffice = (context: OperationContext): void => {
   throw new WorkflowError('Only the office can administer checklists.', [
     {
       code: 'not_permitted',
-      message: 'Checklist administration is done by a Master or a Coordinator.',
+      message: 'Checklist administration is done by a Senior Tech or the Office.',
     },
   ]);
 };

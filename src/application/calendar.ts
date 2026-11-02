@@ -1,3 +1,4 @@
+import { isFieldRole } from '@/domain';
 import {
   availabilityTimeLabel,
   availabilityTypeLabel,
@@ -238,7 +239,7 @@ export const loadCalendar = async (
     entries: [...jobEntries, ...availabilityEntries].sort(
       (a, b) => b.days - a.days || a.start.localeCompare(b.start),
     ),
-    technicians: users.filter((user) => user.role === 'technician' && user.active),
+    technicians: users.filter((user) => isFieldRole(user.role) && user.active),
   };
 };
 

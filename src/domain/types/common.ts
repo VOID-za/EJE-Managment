@@ -111,4 +111,9 @@ export interface Attachment {
    * photographs are the only `simulated` ones, and they carry no bytes.
    */
   readonly provenance: Provenance;
+  /**
+   * JOB-ATT-3 (2 November 2026): a job's document chosen to go to the customer
+   * with the final signed job card email. Absent (false) on every other kind.
+   */
+  readonly emailToCustomer?: boolean;
 }

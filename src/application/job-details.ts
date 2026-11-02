@@ -77,7 +77,7 @@ export const editJobDetails = async (
     throw refuse(
       'Only the office can change a job’s details.',
       'not_permitted',
-      'A Master or a Coordinator corrects the order number, references and fault description. If one is wrong, raise a change request.',
+      'A Senior Tech or the Office corrects the order number, references and fault description. If one is wrong, raise a change request.',
     );
   }
 

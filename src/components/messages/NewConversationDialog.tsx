@@ -65,7 +65,7 @@ export const NewConversationDialog = ({
       title="New message"
       description={
         isTechnician
-          ? 'Reaches every Master on duty.'
+          ? 'Reaches every Senior Tech on duty.'
           : 'Goes to the technician you choose.'
       }
       onClose={onClose}
@@ -101,7 +101,7 @@ export const NewConversationDialog = ({
           onChange={(event) => setRecipientId(event.target.value)}
           placeholder={isTechnician ? undefined : 'Choose a technician'}
           options={[
-            ...(isTechnician ? [{ value: 'office', label: 'The office (all Masters)' }] : []),
+            ...(isTechnician ? [{ value: 'office', label: 'The office (all Senior Techs)' }] : []),
             ...recipients.map((user) => ({
               value: user.id,
               label: `${userFullName(user)} — ${user.jobTitle}`,

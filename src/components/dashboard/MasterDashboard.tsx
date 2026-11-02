@@ -57,7 +57,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
   if (jobsQuery.loading || supportQuery.loading) {
     return (
       <>
-        <PageHeader title="Dashboard" description="Loading the current workload…" />
+        <PageHeader title="Overview" description="Loading the current workload…" />
         <LoadingPanel rows={5} label="Loading dashboard" />
       </>
     );

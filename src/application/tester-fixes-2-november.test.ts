@@ -122,15 +122,18 @@ describe('the Inbox subtabs (NOTIF-TABS-1)', () => {
   it('classifies every notification type into exactly one of Jobcards, Messages and Forms', () => {
     const types = Object.keys(NOTIFICATION_CATEGORY) as NotificationType[];
     expect(types.length).toBeGreaterThanOrEqual(14);
-    for (const type of types) expect(['jobcards', 'messages', 'forms']).toContain(notificationCategory(type));
+    for (const type of types) expect(['jobcards', 'messages', 'monthly_forms', 'standby']).toContain(notificationCategory(type));
     expect(notificationCategory('chat_message')).toBe('messages');
     expect(types.filter((type) => notificationCategory(type) === 'messages')).toEqual(['chat_message']);
     for (const type of ['job_assigned', 'job_transferred', 'job_submitted', 'signature_refused'] as const) {
       expect(notificationCategory(type)).toBe('jobcards');
     }
-    for (const type of ['timesheet_submitted', 'timesheet_correction_requested', 'timesheet_correction_decided', 'standby_swap_requested'] as const) {
-      expect(notificationCategory(type)).toBe('forms');
+    for (const type of ['timesheet_submitted', 'timesheet_correction_requested', 'timesheet_correction_decided'] as const) {
+      expect(notificationCategory(type)).toBe('monthly_forms');
     }
+    // NOTIF-TABS-2: every standby notification is in Standby, none in Monthly Forms.
+    expect(types.filter((type) => type.startsWith('standby_')).every((type) => notificationCategory(type) === 'standby')).toBe(true);
+    expect(types.filter((type) => notificationCategory(type) === 'standby').every((type) => type.startsWith('standby_'))).toBe(true);
   });
 });
 

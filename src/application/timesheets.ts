@@ -251,9 +251,9 @@ export const buildTimesheetDays = (input: {
 export const assertKeepsTimesheet = (context: OperationContext): void => {
   if (completesTimesheet(context.actor.role)) return;
   throw refuse(
-    'A Coordinator does not complete a timesheet.',
+    'The Office does not complete a timesheet.',
     'timesheet_not_required',
-    'Coordinators work no overtime and keep no timesheet; only attendance. Masters and Technicians complete both.',
+    'The Office works no overtime and keep no timesheet; only attendance. Senior Techs, Technicians and Apprentices complete both.',
   );
 };
 
@@ -300,17 +300,13 @@ const assertRange = (from: string, to: string): void => {
   }
 };
 
-/** A timesheet period: a valid From/To range that has ended by today. */
-const assertPeriod = (context: OperationContext, from: string, to: string): void => {
+/**
+ * A timesheet period: a valid From/To range. MONTH-END-OFF-1 (2 November
+ * 2026): it no longer has to have ended — a month is sent when its owner is
+ * ready, and sending it again replaces it.
+ */
+const assertPeriod = (_context: OperationContext, from: string, to: string): void => {
   assertRange(from, to);
-  const today = businessToday(new Date(context.services.clock.now()));
-  if (to > today) {
-    throw refuse(
-      'That period has not ended yet.',
-      'period_in_future',
-      `Today is ${today}. Choose a To on or before today.`,
-    );
-  }
 };
 
 /**

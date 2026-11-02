@@ -191,7 +191,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
    * SHOULD be holdable cannot be forgotten.
    */
   release_draft:
-    'Releasing a draft is a Master’s act in the office, and it re-checks the register on the server.',
+    'Releasing a draft is a Senior Tech’s act in the office, and it re-checks the register on the server.',
   /*
    * JOB-EDIT-1. Office work, never held: the edit carries the values it
    * replaces and is refused if the job moved underneath it — a held edit
@@ -211,6 +211,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
     'Changing a charge replaces a value on the job, so it needs a connection.',
   set_collection: 'The collection method replaces a value on the job, so it needs a connection.',
   set_media_visibility: 'Reclassifying a photograph changes a stored value, so it needs a connection.',
+  customer_email_document: 'Choosing a document for the customer email changes a stored value, so it needs a connection.',
   add_media:
     'A photograph is not sent with the other captures. It is kept on this tablet and uploaded on its own when there is a signal.',
   remove_media: 'Removing a photograph changes the record on the server.',
@@ -253,17 +254,17 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
    * `jobs.authoriseUnsignedDelivery` are a Master's).
    */
   raise_correction:
-    'Correcting a job card EJE have already issued is a Master’s decision, taken in the office with the original document to hand.',
+    'Correcting a job card EJE have already issued is a Senior Tech’s decision, taken in the office with the original document to hand.',
   acknowledge_correction:
     'Recording that the customer acknowledged a correction is office work on the server’s record.',
   authorise_unsigned_delivery:
-    'Sending a customer a job card they declined to sign is a Master’s decision and goes out through the mail provider.',
+    'Sending a customer a job card they declined to sign is a Senior Tech’s decision and goes out through the mail provider.',
   retry_unsigned_delivery:
     'Re-sending an unsigned job card needs a connection to the mail provider.',
   awaiting_spares: 'Putting a job on hold is a workflow step the server decides.',
   reschedule:
     'Changing the date moves the job in the calendar everybody shares, so it needs a connection.',
-  cancel: 'Cancelling a job is an office decision recorded on the server.',
+  cancel: 'Cancelling a job is recorded on the server, with its reason.',
   delete: 'Deleting a job is an office action, and never one taken from a tablet.',
   assign_primary: 'Who owns a job is decided by the office on the server.',
   add_technician: 'Adding somebody to a job changes who may work on it, which the office decides.',

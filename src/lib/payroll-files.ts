@@ -80,9 +80,12 @@ export const documentNameOf = (user: Pick<User, 'firstName' | 'initials'> & { re
   return 'TECHNICIAN';
 };
 
-/** "JC TIMESHEET OCT.pdf". */
+/**
+ * "JC Timesheet Oct 2026.pdf". TS-NAME-TO-1 (2 November 2026): one consistent
+ * timesheet name — the person, the month and its year.
+ */
 export const timesheetMonthFileName = (documentName: string, month: string): string =>
-  `${sanitiseDocumentName(documentName)} TIMESHEET ${MONTHS_SHORT[parts(month).index]}.pdf`;
+  `${sanitiseDocumentName(documentName)} Timesheet ${shortTitle(month)} ${parts(month).year}.pdf`;
 
 /** "JC ATTEN OCTOBER.pdf". */
 export const attendanceMonthFileName = (documentName: string, month: string): string =>
@@ -116,21 +119,13 @@ const monthWords = (months: readonly string[]): { readonly words: readonly strin
 };
 
 /**
- * A timesheet's file name. A whole month: "JC TIMESHEET OCT.pdf". A part of one
- * month keeps its two days: "JC TIMESHEET 3 OCT-12 OCT.pdf". A period over two
- * or more months names every month (PDF-NAME-2, the tester, 2 November 2026):
- * "JC Timesheet, Oct + Nov 2026.pdf"; across a year "JC Timesheet, Dec 2026 + Jan 2027.pdf".
+ * A timesheet period's file name. TS-NAME-TO-1 (2 November 2026, superseding
+ * PDF-NAME-2): the month and year of the TO date, whatever the From — From
+ * 24 October 2026, To 22 November 2026 is "JC Timesheet Nov 2026.pdf"; To
+ * 3 January 2027 is "JC Timesheet Jan 2027.pdf".
  */
-export const timesheetPeriodFileName = (documentName: string, from: string, to: string): string => {
-  if (periodIsMonth(from, to)) return timesheetMonthFileName(documentName, from.slice(0, 7));
-  const months = monthsOfPeriod(from, to);
-  if (months.length > 1) {
-    const { words, sameYear } = monthWords(months);
-    return `${sanitiseDocumentName(documentName)} Timesheet, ${words.join(' + ')}${sameYear ? ` ${from.slice(0, 4)}` : ''}.pdf`;
-  }
-  const day = (date: string) => `${Number(date.slice(8, 10))} ${MONTHS_SHORT[Number(date.slice(5, 7)) - 1]}`;
-  return `${sanitiseDocumentName(documentName)} TIMESHEET ${day(from)}-${day(to)}.pdf`;
-};
+export const timesheetPeriodFileName = (documentName: string, _from: string, to: string): string =>
+  timesheetMonthFileName(documentName, to.slice(0, 7));
 
 /**
  * An attendance period's file name. A whole month: "JC ATTEN OCTOBER.pdf". A

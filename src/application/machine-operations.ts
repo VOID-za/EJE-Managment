@@ -258,7 +258,7 @@ export const createMachine = async (
         : '') +
       (approval === 'approved'
         ? 'Added directly to the official register by the office.'
-        : 'Added on site and awaiting Master approval.'),
+        : 'Added on site and awaiting Senior Tech approval.'),
   });
 
   if (approval === 'pending_approval') {
@@ -426,7 +426,7 @@ export const approveMachine = async (
   machine: Machine,
 ): Promise<Machine> => {
   if (!can(context.actor.role, 'machines.manage')) {
-    throw new WorkflowError('Only a Master can confirm a machine onto the register.', [
+    throw new WorkflowError('Only a Senior Tech can confirm a machine onto the register.', [
       { code: 'not_permitted', message: 'Technicians can add machines but not approve them.' },
     ]);
   }
@@ -466,7 +466,7 @@ export const updateMachine = async (
   moveNote?: string,
 ): Promise<Machine> => {
   if (!can(context.actor.role, 'machines.manage')) {
-    throw new WorkflowError('Only a Master can change the official machine record.', [
+    throw new WorkflowError('Only a Senior Tech can change the official machine record.', [
       { code: 'not_permitted', message: 'Technicians can raise a change request instead.' },
     ]);
   }

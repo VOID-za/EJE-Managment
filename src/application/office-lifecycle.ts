@@ -38,7 +38,7 @@ const assertOffice = (context: OperationContext, what: string): void => {
   throw refuse(
     `Only the office can ${what}.`,
     'not_permitted',
-    'Handling a submitted job card and recording its invoice number is done by a Master or a Coordinator.',
+    'Handling a submitted job card and recording its invoice number is done by a Senior Tech or the Office.',
   );
 };
 

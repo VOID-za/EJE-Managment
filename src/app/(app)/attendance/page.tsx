@@ -1,31 +1,76 @@
 'use client';
 
+import { useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { MyAttendance } from '@/components/attendance/MyAttendance';
-import { MonthlyAttendanceForms } from '@/components/attendance/MonthlyAttendanceForms';
+import { Button, Card, Icon } from '@/components/ui';
+import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
+import {
+  AttendanceRangeFields,
+  MyAttendance,
+  useAttendanceRange,
+} from '@/components/attendance/MyAttendance';
+import { attendance } from '@/api/endpoints';
+import { formatPeriod } from '@/lib/timesheet-dates';
 
 /**
  * ATTENDANCE — EVERYBODY'S OWN. ATTEND-2, ATT-OWN-1 (the tester, 1 November 2026).
  *
- * One page, the same for every role: the person's own monthly attendance form
- * (Preview, Print, Download PDF, Export PDF, Send to office) and their own
- * days, which save themselves (ATT-AUTO-1).
- *
- * THE TEAM REGISTER IS GONE. The office's half of this page — every user's
- * day, recorded by a Master or a Coordinator, with its range export and every
- * user's monthly forms — was withdrawn: nobody records another person's
- * attendance (refused by the server too, `recordAttendance`). The office reads
- * everybody's attendance, and exports it, on EJE Monthly Forms.
+ * FORMS-PAGES-1 (2 November 2026): the same first two blocks as the Timesheets
+ * page — the From and To top-right, then the period with Preview and Print —
+ * and then the person's own days, which save themselves (ATT-AUTO-1). Nothing
+ * about a timesheet is on this page, and there is no Month selector, Download
+ * or Submit: the monthly forms are downloaded and submitted on Monthly Forms.
+ * Nothing here waits for the month to end.
  */
-const AttendancePage = () => (
-  <>
-    <PageHeader
-      title="Attendance"
-      description="Mark yourself Present or Absent for each day. Each choice saves by itself. Nothing is filled in for you, and only you can record your days."
-    />
-    <MonthlyAttendanceForms />
-    <MyAttendance />
-  </>
-);
+const AttendancePage = () => {
+  const { range, usable, choose, today } = useAttendanceRange();
+  const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
+  const label = formatPeriod(range.from, range.to);
+
+  return (
+    <>
+      <PageHeader
+        title="Attendance"
+        description="Mark yourself Present or Absent for each day. Each choice saves by itself. Nothing is filled in for you, and only you can record your days."
+        actions={<AttendanceRangeFields range={range} today={today} onChange={choose} />}
+      />
+      <DocumentPreviewDialog
+        open={previewing !== null}
+        autoPrint={previewing === 'print'}
+        allowDownload={false}
+        title={`Attendance — ${label}`}
+        description="Preview only. Nothing is saved or sent by looking at it; submit on Monthly Forms."
+        loadPdf={() => attendance.periodPdf(range.from, range.to)}
+        onClose={() => setPreviewing(null)}
+      />
+      {usable && (
+        <Card className="mb-5" data-testid="attendance-period">
+          <p className="text-sm font-semibold text-steel-900" data-testid="attendance-period-label">
+            Attendance period: {label}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              leadingIcon={<Icon name="document" className="size-4" />}
+              onClick={() => setPreviewing('preview')}
+              data-testid="attendance-preview"
+            >
+              Preview
+            </Button>
+            <Button
+              variant="secondary"
+              leadingIcon={<Icon name="document" className="size-4" />}
+              onClick={() => setPreviewing('print')}
+              data-testid="attendance-print"
+            >
+              Print
+            </Button>
+          </div>
+        </Card>
+      )}
+      <MyAttendance range={range} usable={usable} />
+    </>
+  );
+};
 
 export default AttendancePage;

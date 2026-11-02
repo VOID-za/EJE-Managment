@@ -408,11 +408,11 @@ export const createJob = async (
 ): Promise<Job> => {
   const asDraft = options.asDraft === true;
   if (asDraft && !can(context.actor.role, 'jobs.manageDrafts')) {
-    throw new WorkflowError('A draft job card is a Master’s.', [
+    throw new WorkflowError('A draft job card is a Senior Tech’s.', [
       {
         code: 'not_permitted',
         message:
-          'Only a Master drafts a job. Raise it as an open job, or ask a Master to draft it.',
+          'Only a Senior Tech drafts a job. Raise it as an open job, or ask a Senior Tech to draft it.',
       },
     ]);
   }
@@ -747,10 +747,10 @@ export const createJob = async (
  */
 export const releaseDraft = async (context: OperationContext, job: Job): Promise<Job> => {
   if (!can(context.actor.role, 'jobs.manageDrafts')) {
-    throw new WorkflowError('Releasing a draft is a Master’s.', [
+    throw new WorkflowError('Releasing a draft is a Senior Tech’s.', [
       {
         code: 'not_permitted',
-        message: 'Ask a Master to release it. Until then it is not a job anybody can work.',
+        message: 'Ask a Senior Tech to release it. Until then it is not a job anybody can work.',
       },
     ]);
   }

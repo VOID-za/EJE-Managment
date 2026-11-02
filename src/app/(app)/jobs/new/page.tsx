@@ -1,5 +1,6 @@
 'use client';
 
+import { isFieldRole } from '@/domain';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -151,7 +152,7 @@ const NewJobPage = () => {
   const selectedSite = sites.find((site) => site.id === siteId) ?? null;
   /** Who may be given field work. The same rule the server enforces. */
   const fieldTechnicians = useMemo(
-    () => (data?.users ?? []).filter((user) => user.role === 'technician' && user.active),
+    () => (data?.users ?? []).filter((user) => isFieldRole(user.role) && user.active),
     [data?.users],
   );
 

@@ -29,7 +29,7 @@ import { WorkflowError } from './errors';
  */
 const assertManages = (context: OperationContext): void => {
   if (can(context.actor.role, 'library.manage')) return;
-  throw new WorkflowError('Only a Master can manage the technical library.', [
+  throw new WorkflowError('Only a Senior Tech can manage the technical library.', [
     {
       code: 'not_permitted',
       message: 'Technicians can upload documents for approval, but not alter approved ones.',
@@ -143,7 +143,7 @@ export const addDocument = async (
     summary: `Document added: ${saved.name}`,
     detail: isMaster
       ? `Version ${saved.version} published to the technical library.`
-      : `Version ${saved.version} uploaded by ${userFullName(context.actor)} and awaiting Master approval.`,
+      : `Version ${saved.version} uploaded by ${userFullName(context.actor)} and awaiting Senior Tech approval.`,
   });
 
   if (!isMaster) {

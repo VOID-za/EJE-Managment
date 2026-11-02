@@ -59,7 +59,7 @@ describe('enums mirror the domain unions', () => {
   });
 
   it('roles are the three the capability matrix knows', () => {
-    expect(enumValues(schema.userRole)).toEqual(['master', 'coordinator', 'technician']);
+    expect(enumValues(schema.userRole)).toEqual(['master', 'coordinator', 'technician', 'apprentice']);
   });
 
   it('delivery state keeps acceptance and delivery apart', () => {

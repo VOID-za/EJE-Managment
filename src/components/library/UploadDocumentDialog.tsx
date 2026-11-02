@@ -97,7 +97,7 @@ export const UploadDocumentDialog = ({
       description={
         goesLiveImmediately
           ? 'Published to the library immediately.'
-          : 'Submitted to the office. It becomes official reference material once a Master approves it.'
+          : 'Submitted to the office. It becomes official reference material once a Senior Tech approves it.'
       }
       onClose={onClose}
       size="lg"

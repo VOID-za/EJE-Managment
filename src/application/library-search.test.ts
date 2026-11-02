@@ -439,7 +439,7 @@ describe('indexing a revision again', () => {
   it('refuses a technician, because it decides what the library can find', async () => {
     const document = await upload(harness, master, pdfWith(DRIVE_MANUAL));
     await expect(reindexDocument(harness.as(technician), document)).rejects.toThrowError(
-      /Only a Master can manage the technical library/i,
+      /Only a Senior Tech can manage the technical library/i,
     );
   });
 });

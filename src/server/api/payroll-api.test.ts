@@ -23,7 +23,7 @@ describe('monthly payroll over HTTP', () => {
 
   it('serves each form as ONE page under its file name; only to the technician and the office', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
-    for (const [kind, pattern] of [['timesheet', / TIMESHEET [A-Z]{3}\.pdf$/u], ['attendance', / ATTEN [A-Z]+\.pdf$/u]] as const) {
+    for (const [kind, pattern] of [['timesheet', / Timesheet [A-Z][a-z]{2} \d{4}\.pdf$/u], ['attendance', / ATTEN [A-Z]+\.pdf$/u]] as const) {
       const file = await technician.download(`/api/payroll/${SIPHO}/${MONTH}/${kind}/pdf`);
       expect(file.status, file.text.slice(0, 200)).toBe(200);
       expect(file.headers.get('content-type')).toContain('application/pdf');

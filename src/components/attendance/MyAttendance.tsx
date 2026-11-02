@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { ABSENCE_REASON_LABELS, type AttendanceRecord } from '@/domain';
 import { Badge, Button, Card, LoadingPanel, QueryFailure, TextField } from '@/components/ui';
-import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { isUsableRange, readRememberedRange, rememberRange, type DateRange } from '@/lib/remembered-range';
 import { attendance } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
@@ -73,16 +72,59 @@ const answerOf = (record: AttendanceRecord | null): AttendanceAnswer => ({
  * saved, and a day not yet saved says so. Nothing is disabled while a save is
  * in flight — every tap is kept. See `AttendanceAutosaver`.
  */
-export const MyAttendance = () => {
+/**
+ * THE PAGE'S FROM AND TO. ATT-RANGE-1 (remembered per person and device);
+ * FORMS-PAGES-1 (2 November 2026): owned by the Attendance page, which shows
+ * them top-right, and handed to the day list.
+ */
+export const useAttendanceRange = () => {
   const currentUser = useCurrentUser();
   const today = businessToday();
   const [range, setRange] = useState<DateRange>(() => initialRange(currentUser.id, today));
-  const { from, to } = range;
   const usable = isUsableRange(range, ATTENDANCE_RANGE_MAX_DAYS);
   const choose = (next: DateRange) => {
     setRange(next);
     if (isUsableRange(next, ATTENDANCE_RANGE_MAX_DAYS)) rememberRange('attendance', currentUser.id, next);
   };
+  return { range, usable, choose, today };
+};
+
+/** The From and To fields, as the Attendance page shows them top-right. */
+export const AttendanceRangeFields = ({
+  range,
+  today,
+  onChange,
+}: {
+  readonly range: DateRange;
+  readonly today: string;
+  readonly onChange: (next: DateRange) => void;
+}) => (
+  <div className="flex flex-wrap items-end gap-3" data-testid="attendance-range">
+    <TextField
+      label="From"
+      type="date"
+      value={range.from}
+      max={range.to}
+      onChange={(event) => event.target.value.length > 0 && onChange({ from: event.target.value, to: range.to })}
+      containerClassName="w-44"
+      data-testid="my-attendance-from"
+    />
+    <TextField
+      label="To"
+      type="date"
+      value={range.to}
+      min={range.from}
+      max={today}
+      onChange={(event) => event.target.value.length > 0 && onChange({ from: range.from, to: event.target.value })}
+      containerClassName="w-44"
+      data-testid="my-attendance-to"
+    />
+  </div>
+);
+
+export const MyAttendance = ({ range, usable }: { readonly range: DateRange; readonly usable: boolean }) => {
+  const currentUser = useCurrentUser();
+  const { from, to } = range;
   const query = useQuery(`attendance:mine:${currentUser.id}:${from}:${to}`, () =>
     usable ? attendance.mine(from, to) : Promise.resolve(null),
   );
@@ -107,35 +149,6 @@ export const MyAttendance = () => {
             Mark yourself Present or Absent for each day. Each choice saves by itself. You can catch up on earlier days
             and correct a day; every change is recorded.
           </p>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <TextField
-            label="From"
-            type="date"
-            value={from}
-            max={to}
-            onChange={(event) => event.target.value.length > 0 && choose({ from: event.target.value, to })}
-            containerClassName="w-44"
-            data-testid="my-attendance-from"
-          />
-          <TextField
-            label="To"
-            type="date"
-            value={to}
-            min={from}
-            max={today}
-            onChange={(event) => event.target.value.length > 0 && choose({ from, to: event.target.value })}
-            containerClassName="w-44"
-            data-testid="my-attendance-to"
-          />
-          {usable && (
-            <DownloadFileButton
-              href={attendance.periodPdfUrl(from, to)}
-              label="Download PDF"
-              fallbackName="Attendance.pdf"
-              testId="my-attendance-pdf"
-            />
-          )}
         </div>
       </div>
       {!usable && (

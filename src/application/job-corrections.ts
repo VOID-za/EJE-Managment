@@ -67,7 +67,7 @@ const requireMaster = (context: OperationContext): void => {
     {
       code: 'not_permitted',
       message:
-        'Correcting a document EJE have already issued is a Master’s decision. The office can ' +
+        'Correcting a document EJE have already issued is a Senior Tech’s decision. The office can ' +
         'record the customer’s acknowledgement of one.',
     },
   ]);

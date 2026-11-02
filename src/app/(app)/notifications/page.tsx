@@ -49,6 +49,10 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   standby_swap_requested: 'calendar',
   standby_swap_decided: 'calendar',
   standby_assignment_changed: 'calendar',
+  standby_day_swap_requested: 'calendar',
+  standby_day_swap_answered: 'calendar',
+  standby_day_swap_for_office: 'calendar',
+  standby_day_swap_decided: 'calendar',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -66,6 +70,10 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   standby_swap_requested: 'Standby swap to review',
   standby_swap_decided: 'Standby swap decided',
   standby_assignment_changed: 'Standby schedule changed',
+  standby_day_swap_requested: 'Standby day swap asked of you',
+  standby_day_swap_answered: 'Standby day swap answered',
+  standby_day_swap_for_office: 'Standby day swap for the office',
+  standby_day_swap_decided: 'Standby day swap decided',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {
@@ -100,7 +108,8 @@ type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'awaiting_invoice_
 const INBOX_BOXES: readonly { readonly id: NotificationCategory; readonly label: string; readonly empty: string }[] = [
   { id: 'jobcards', label: 'Jobcards', empty: 'Job assignments, transfers, submitted job cards and approval requests appear here.' },
   { id: 'messages', label: 'Messages', empty: 'A new chat message from a colleague appears here.' },
-  { id: 'forms', label: 'Forms', empty: 'Timesheets, corrections and standby requests appear here.' },
+  { id: 'monthly_forms', label: 'Monthly Forms', empty: 'Timesheets and monthly form submissions appear here.' },
+  { id: 'standby', label: 'Standby', empty: 'Standby swaps and changes to your standby appear here.' },
 ];
 
 const NotificationsPageContent = () => {

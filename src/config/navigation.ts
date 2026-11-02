@@ -27,7 +27,7 @@ export interface NavigationItem {
  * and global search still finds a machine directly by serial number.
  */
 export const NAVIGATION: readonly NavigationItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'work' },
+  { href: '/dashboard', label: 'Overview', icon: 'dashboard', group: 'work' },
   { href: '/jobs', label: 'Jobs', icon: 'jobs', group: 'work' },
   /**
    * Scheduled work and availability. EVERY ROLE. MASTER SCOPE §3.3, §16.
@@ -81,7 +81,7 @@ export const NAVIGATION: readonly NavigationItem[] = [
    */
   { href: '/attendance', label: 'Attendance', icon: 'user', group: 'work' },
   // TS-ROLE-1: a Coordinator keeps no timesheet (the tester, 30 October and 1 November 2026); the server refuses it too.
-  { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work', roles: ['master', 'technician'] },
+  { href: '/timesheets', label: 'Timesheets', icon: 'clock', group: 'work', roles: ['master', 'technician', 'apprentice'] },
   /*
    * PAY-01…08, split on 30 October 2026 (the tester): EVERYBODY has their own
    * month — My Monthly Forms — and the office (Master, Coordinator) also has

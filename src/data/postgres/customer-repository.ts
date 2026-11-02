@@ -1,3 +1,5 @@
+import { vatBasisPointsFromPercent, vatPercentFromBasisPoints } from './job-mapper';
+import type { CustomerRates } from '@/domain';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import {
   asProvenance,
@@ -227,6 +229,43 @@ export class PostgresCustomerRepository implements CustomerRepository {
     return rows[0] === undefined ? null : toDomainContact(rows[0]);
   }
 
+  async findCustomRates(customerId: CustomerId): Promise<CustomerRates | null> {
+    const rows = await this.db.select().from(schema.customerRates).where(eq(schema.customerRates.customerId, customerId)).limit(1);
+    const row = rows[0];
+    if (row === undefined) return null;
+    return {
+      customerId: asCustomerId(row.customerId),
+      labourRates: { normal: row.labourNormalCents, overtime: row.labourOvertimeCents, double: row.labourDoubleCents },
+      calloutRate: row.calloutRateCents,
+      testBenchFee: row.testBenchFeeCents,
+      kilometreRate: row.kilometreRateCents,
+      vatPercentage: vatPercentFromBasisPoints(row.vatPercentBasisPoints),
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async saveCustomRates(rates: CustomerRates): Promise<CustomerRates> {
+    const values = {
+      labourNormalCents: rates.labourRates.normal,
+      labourOvertimeCents: rates.labourRates.overtime,
+      labourDoubleCents: rates.labourRates.double,
+      calloutRateCents: rates.calloutRate,
+      testBenchFeeCents: rates.testBenchFee ?? 0,
+      kilometreRateCents: rates.kilometreRate,
+      vatPercentBasisPoints: vatBasisPointsFromPercent(rates.vatPercentage),
+      updatedBy: rates.updatedBy,
+    };
+    await this.db
+      .insert(schema.customerRates)
+      .values({ customerId: rates.customerId, ...values })
+      .onConflictDoUpdate({
+        target: schema.customerRates.customerId,
+        set: { ...values, updatedAt: sql`now()`, version: sql`${schema.customerRates.version} + 1` },
+      });
+    return (await this.findCustomRates(rates.customerId))!;
+  }
+
   async save(customer: Customer): Promise<Customer> {
     const values = {
       name: customer.name,
@@ -245,6 +284,7 @@ export class PostgresCustomerRepository implements CustomerRepository {
       officePostalCode: customer.officeAddress.postalCode,
       industry: customer.industry,
       paymentTerms: customer.paymentTerms,
+      rateMode: customer.rateMode ?? 'default',
       active: customer.active,
     } as const;
 
@@ -553,6 +593,7 @@ export class PostgresCustomerRepository implements CustomerRepository {
       },
       industry: row.industry,
       paymentTerms: row.paymentTerms,
+      rateMode: row.rateMode === 'custom' ? 'custom' : 'default',
       active: row.active,
       notes: notesFor(row.id).map((note) => ({
         id: note.id,

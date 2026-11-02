@@ -107,12 +107,12 @@ describe('CANCEL-1 / CANCEL-2 / DELETE-1 / DELETE-2 — the office, on an Open u
     expect(await harness.repos.jobs.findByJobNumber('EJE-1066')).toBeNull();
   });
 
-  it('a technician may do neither, whatever the job', async () => {
+  it('a technician may do neither on a job that is not theirs (CANCEL-ALL-1: they cancel only jobs they work on)', async () => {
     const job = await unassignedOpenJob(harness);
     expect(canCancelJob('technician', job)).toBe(false);
     expect(canDeleteJob('technician', job)).toBe(false);
 
-    await refuses(() => cancelJob(harness.as(sipho), job, reason), /Only the office/);
+    await refuses(() => cancelJob(harness.as(sipho), job, reason), /only a job you are working on/);
     await refuses(() => deleteJob(harness.as(sipho), job, 'Not mine.'), /Only the office/);
   });
 });
@@ -164,30 +164,31 @@ describe('CANCEL-3 / DELETE-3…5 — every other state is refused', () => {
     await refuses(() => deleteJob(harness.as(elmarie), assigned, 'Duplicate.'), /already been assigned/);
   });
 
-  it('CANCEL-4 / DELETE-3: accepted and in progress is refused', async () => {
+  // CANCEL-ALL-1 (2 November 2026) supersedes CANCEL-4/5: an ACCEPTED job may be
+  // cancelled at any point before the customer signature. It is still never deleted.
+  it('CANCEL-ALL-1 / DELETE-3: accepted and in progress may be cancelled, never deleted', async () => {
     const job = await inState('in_progress');
     expect(job.status).toBe('in_progress');
-    expect(canCancelJob('master', job)).toBe(false);
+    expect(canCancelJob('master', job)).toBe(true);
     expect(canDeleteJob('master', job)).toBe(false);
-
-    await refuses(() => cancelJob(harness.as(elmarie), job, reason), /cannot be cancelled/);
     await refuses(() => deleteJob(harness.as(elmarie), job, 'Duplicate.'), /Cancel it instead/);
+    const cancelled = await cancelJob(harness.as(elmarie), job, reason);
+    expect(cancelled.status).toBe('cancelled');
   });
 
-  it('CANCEL-5 / DELETE-4: awaiting spares is refused', async () => {
+  it('CANCEL-ALL-1 / DELETE-4: awaiting spares may be cancelled, never deleted', async () => {
     const job = await inState('awaiting_spares');
     expect(job.status).toBe('awaiting_spares');
-    expect(canCancelJob('master', job)).toBe(false);
+    expect(canCancelJob('coordinator', job)).toBe(true);
     expect(canDeleteJob('coordinator', job)).toBe(false);
-
-    await refuses(() => cancelJob(harness.as(elmarie), job, reason), /cannot be cancelled/);
     await refuses(() => deleteJob(harness.as(christene), job, 'Duplicate.'), /Cancel it instead/);
+    expect((await cancelJob(harness.as(christene), job, reason)).status).toBe('cancelled');
   });
 
-  it('the completion write-up stage is refused', async () => {
+  it('CANCEL-ALL-1: the completion write-up stage may be cancelled, never deleted', async () => {
     const job = await inState('completion');
     expect(job.status).toBe('completion');
-    expect(canCancelJob('master', job)).toBe(false);
+    expect(canCancelJob('master', job)).toBe(true);
     expect(canDeleteJob('master', job)).toBe(false);
   });
 

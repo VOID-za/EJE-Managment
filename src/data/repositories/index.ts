@@ -16,6 +16,7 @@ import type {
   Contact,
   ContactId,
   Customer,
+  CustomerRates,
   CustomerId,
   DocumentId,
   DocumentPageMatch,
@@ -259,6 +260,9 @@ export interface CustomerRepository {
   findSiteById(id: SiteId): Promise<Site | null>;
   findContactById(id: ContactId): Promise<Contact | null>;
   save(customer: Customer): Promise<Customer>;
+  /** CUST-RATES-1: the customer's own rates, or null when none are set. */
+  findCustomRates(customerId: CustomerId): Promise<CustomerRates | null>;
+  saveCustomRates(rates: CustomerRates): Promise<CustomerRates>;
   saveSite(site: Site): Promise<Site>;
   /**
    * Writes ONLY the pin and its geocoding record (INT-MAP-1), and only while

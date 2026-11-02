@@ -713,6 +713,18 @@ const v38ToV39 = (data: Loose): Loose => ({
     : data.jobs,
 });
 
+/**
+ * v40 (2 November 2026): customers' own rates (CUST-RATES-1, every existing
+ * customer stays on Default Rates), and the standby calendar's day swaps
+ * (STANDBY-DAY-1) — new, empty collections. Nothing existing is rewritten.
+ */
+const v39ToV40 = (data: Loose): Loose => ({
+  ...data,
+  customerRates: Array.isArray(data.customerRates) ? data.customerRates : [],
+  standbyDayOverrides: Array.isArray(data.standbyDayOverrides) ? data.standbyDayOverrides : [],
+  standbyDaySwaps: Array.isArray(data.standbyDaySwaps) ? data.standbyDaySwaps : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -745,6 +757,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   36: v36ToV37,
   37: v37ToV38,
   38: v38ToV39,
+  39: v39ToV40,
 };
 
 /**

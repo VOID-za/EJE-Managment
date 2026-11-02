@@ -1,3 +1,4 @@
+import type { PricingInputs } from './settings';
 import type { Provenance } from './provenance';
 import type {
   Attachment,
@@ -191,6 +192,32 @@ export interface CustomerDocument {
   readonly archivedAt: IsoDateTime | null;
 }
 
+/**
+ * WHICH RATES PRICE THIS CUSTOMER'S JOB CARDS. CUST-RATES-1 (2 November 2026).
+ *
+ * Chosen by the office (a Senior Tech or the Office) when the customer is
+ * created — the customer never chooses or changes it. `default`: always the
+ * current Rates in Administration. `custom`: always this customer's own Custom
+ * Rates, and NEVER the defaults instead — a custom-rate customer whose rates are
+ * not set cannot have a job card priced (see `application/customer-rates.ts`).
+ */
+export type CustomerRateMode = 'default' | 'custom';
+
+export const CUSTOMER_RATE_MODE_LABELS: Readonly<Record<CustomerRateMode, string>> = {
+  default: 'Default Rates',
+  custom: 'Custom Rates',
+};
+
+/** A customer's own rates: every field the Administration rates carry. */
+export interface CustomerRates extends PricingInputs {
+  readonly customerId: CustomerId;
+  readonly updatedBy: string | null;
+  readonly updatedAt: IsoDateTime;
+}
+
+/** The customer's rate mode; a record from before it existed is on the defaults. */
+export const customerRateModeOf = (customer: Pick<Customer, 'rateMode'>): CustomerRateMode => customer.rateMode ?? 'default';
+
 export interface Customer {
   readonly id: CustomerId;
   readonly name: string;
@@ -221,6 +248,8 @@ export interface Customer {
   readonly officeAddress: PostalAddress;
   readonly industry: string;
   readonly paymentTerms: string;
+  /** CUST-RATES-1. Absent on a record from before it existed: Default Rates. */
+  readonly rateMode?: CustomerRateMode;
   readonly active: boolean;
   readonly notes: readonly CustomerNote[];
   readonly documents: readonly Attachment[];

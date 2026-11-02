@@ -13,7 +13,18 @@ import type { IsoDateTime, UserId } from './common';
  * jobs, scheduling and technicians, and prepares the paperwork the business
  * invoices from. She is not a field worker — see `src/domain/access.ts`.
  */
-export type UserRole = 'master' | 'coordinator' | 'technician';
+export type UserRole = 'master' | 'coordinator' | 'technician' | 'apprentice';
+
+/**
+ * A FIELD WORKER: a Technician or an Apprentice. ROLE-APP-1 (2 November 2026).
+ *
+ * An Apprentice has exactly the Technician's permissions, views and workflows —
+ * the role exists so the office can tell apprentices apart and place them in
+ * the apprentice standby positions. Every "is this person a technician?" test
+ * in the system asks this, never `role === 'technician'`, so an apprentice is
+ * never quietly left out of a list a technician is in.
+ */
+export const isFieldRole = (role: UserRole): boolean => role === 'technician' || role === 'apprentice';
 
 export interface User {
   readonly id: UserId;

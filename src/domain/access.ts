@@ -566,6 +566,8 @@ const BY_ROLE: Record<UserRole, readonly Capability[]> = {
   master: MASTER_CAPABILITIES,
   coordinator: COORDINATOR_CAPABILITIES,
   technician: TECHNICIAN_CAPABILITIES,
+  // ROLE-APP-1: an Apprentice is a Technician in everything but the name.
+  apprentice: TECHNICIAN_CAPABILITIES,
 };
 
 /**
@@ -592,4 +594,5 @@ export const can = (role: UserRole, capability: Capability): boolean =>
  * corrections. The server asks this before every write to a timesheet, before
  * the person opens their own, and when a month is submitted.
  */
-export const completesTimesheet = (role: UserRole): boolean => role === 'master' || role === 'technician';
+export const completesTimesheet = (role: UserRole): boolean =>
+  role === 'master' || role === 'technician' || role === 'apprentice';

@@ -88,15 +88,30 @@ export const JOB_PHOTO_TYPES_SENTENCE = `Photographs (PNG, JPEG, TIFF, WebP) up 
  * VIDEO-OFF-1 / DOCUMENTS-1 (27 October 2026). The browser's early answer; the
  * server sniffs the bytes (`validateJobDocumentUpload`) and decides.
  */
-export const JOB_ATTACHMENT_ACCEPT_ATTRIBUTE = DOCUMENT_ACCEPT_ATTRIBUTE;
-export const JOB_ATTACHMENT_TYPES_SENTENCE = `Photographs or documents: ${DOCUMENT_TYPES_SENTENCE}`;
+/**
+ * JOB-ATT-1 (2 November 2026): a job's documents may also be ZIP files and
+ * office documents (Word, Excel, PowerPoint — current and older formats).
+ * Only a JOB's documents: the customer, machine and library registers keep
+ * their PDF-or-image rule.
+ */
+export const JOB_DOCUMENT_EXTENSIONS: readonly string[] = [
+  'pdf', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'webp', 'zip', 'docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt',
+];
+
+export const JOB_ATTACHMENT_ACCEPT_ATTRIBUTE = `${DOCUMENT_ACCEPT_ATTRIBUTE},application/zip,.zip,.docx,.xlsx,.pptx,.doc,.xls,.ppt`;
+export const JOB_DOCUMENT_TYPES_SENTENCE =
+  `PDF, image (PNG, JPEG, TIFF, WebP), ZIP, Word, Excel or PowerPoint, up to ${UPLOAD_LIMIT_MB} MB each.`;
+export const JOB_ATTACHMENT_TYPES_SENTENCE = `Photographs or documents: ${JOB_DOCUMENT_TYPES_SENTENCE}`;
+
+const extensionOf = (name: string): string => (/\.([a-z0-9]+)$/iu.exec(name)?.[1] ?? '').toLowerCase();
 
 export const jobAttachmentProblem = (file: { readonly name: string; readonly type: string; readonly size: number }): string | null => {
   const type = file.type.toLowerCase();
   if (file.size === 0) return `${file.name} is empty.`;
   if (type.startsWith('video/')) return `${file.name} is a video. Video is not accepted — add a photograph instead.`;
-  const allowed = [...PHOTO_ACCEPT_ATTRIBUTE.split(','), 'application/pdf'];
-  if (!allowed.includes(type)) return `${file.name} is not a photograph or a PDF, so it cannot be attached to a job.`;
+  if (!JOB_DOCUMENT_EXTENSIONS.includes(extensionOf(file.name))) {
+    return `${file.name} is not a photograph, PDF, ZIP or office document, so it cannot be attached to a job.`;
+  }
   return file.size > MAX_UPLOAD_BYTES ? `${file.name} is larger than ${UPLOAD_LIMIT_MB} MB, the limit.` : null;
 };
 

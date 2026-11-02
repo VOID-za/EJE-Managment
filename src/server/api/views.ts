@@ -1,3 +1,4 @@
+import { customerRateModeOf, pricingInputsFrom } from '@/domain';
 import 'server-only';
 import {
   asCustomerId,
@@ -307,6 +308,19 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     ({ storageKey: _storageKey, ...rest }) => rest,
   );
 
+  /*
+   * CUST-RATES-1: the rate option and the Custom Rates are the office's — read
+   * and set by a Senior Tech or the Office only. A technician's copy has none.
+   */
+  const rates = can(actor.role, 'customers.manage')
+    ? {
+        mode: customerRateModeOf(customer),
+        custom: await repos.customers.findCustomRates(id),
+        defaults: pricingInputsFrom(await repos.settings.get()),
+        canEdit: can(actor.role, 'settings.rates'),
+      }
+    : null;
+
   return {
     customer,
     sites,
@@ -316,6 +330,7 @@ export const customerView = async ({ repos, actor }: ViewContext, customerId: st
     users,
     changeRequests,
     documents,
+    rates,
   };
 };
 

@@ -142,7 +142,7 @@ export const LibraryAdminPanel = ({
     <div className="space-y-4">
       <AdminNotice
         title="Document control"
-        body="Masters approve technician uploads, publish revisions and archive superseded documents. A revision archives the document it replaces rather than overwriting it, so which revision a technician worked from stays answerable."
+        body="Senior Techs approve technician uploads, publish revisions and archive superseded documents. A revision archives the document it replaces rather than overwriting it, so which revision a technician worked from stays answerable."
       />
 
       {operation.error !== null && (

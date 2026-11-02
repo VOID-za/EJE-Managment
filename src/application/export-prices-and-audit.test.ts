@@ -206,7 +206,7 @@ describe('BD-18: recording an export', () => {
     expect(written?.summary).toMatch(/12 row/u);
     // WHO, and in what role — the point of the record.
     expect(written?.actorId).toBe(master.id);
-    expect(written?.detail).toMatch(/Master/u);
+    expect(written?.detail).toMatch(/Senior Tech/u); // ROLE-LABEL-1: the visible name of the master role
   });
 
   it('records the FILTERS, so "who took what" is answerable', async () => {

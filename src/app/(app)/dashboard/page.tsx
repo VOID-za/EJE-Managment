@@ -1,5 +1,6 @@
 'use client';
 
+import { isFieldRole } from '@/domain';
 import { MasterDashboard } from '@/components/dashboard/MasterDashboard';
 import { TechnicianDashboard } from '@/components/dashboard/TechnicianDashboard';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -17,7 +18,7 @@ import { useCurrentUser } from '@/providers/AppProvider';
  */
 const DashboardPage = () => {
   const user = useCurrentUser();
-  return user.role === 'technician' ? (
+  return isFieldRole(user.role) ? (
     <TechnicianDashboard user={user} />
   ) : (
     <MasterDashboard user={user} />

@@ -100,7 +100,7 @@ const requireMaster = (context: OperationContext, what: string): void => {
     {
       code: 'not_permitted',
       message:
-        'Sending a customer a job card they declined to sign is a Master’s decision. Closing ' +
+        'Sending a customer a job card they declined to sign is a Senior Tech’s decision. Closing ' +
         'the job without a signature is the office’s, and it has already been done.',
     },
   ]);
@@ -286,7 +286,7 @@ export const retryUnsignedDelivery = async (
       {
         code: 'not_authorised',
         message:
-          'A job card the customer did not sign is sent only once a Master has authorised it. ' +
+          'A job card the customer did not sign is sent only once a Senior Tech has authorised it. ' +
           'Nothing has been sent, so there is nothing to retry.',
       },
     ]);
@@ -402,7 +402,7 @@ const send = async (
         : `Attempt ${attempts}: the provider accepted the UNSIGNED job card ` +
           `${document.fileName} for ${authorisation.recipient}. Delivery is ` +
           `${deliveryStateLabel(delivery.state).toLowerCase()}. Authorised by ` +
-          `${authorisation.authorisedBy.length === 0 ? 'a Master' : userFullName(context.actor)}.`,
+          `${authorisation.authorisedBy.length === 0 ? 'a Senior Tech' : userFullName(context.actor)}.`,
   });
 
   return { job: saved, delivery };

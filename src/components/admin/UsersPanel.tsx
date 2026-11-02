@@ -1,5 +1,6 @@
 'use client';
 
+import { isFieldRole } from '@/domain';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -123,7 +124,7 @@ export const UsersPanel = ({
          */
         const items = [];
         if (canManageUser(actor, row)) {
-          if (row.role === 'technician') {
+          if (isFieldRole(row.role)) {
             items.push({
               id: 'availability',
               label: 'Availability',
@@ -169,7 +170,7 @@ export const UsersPanel = ({
     <div className="space-y-4">
       <AdminNotice
         title="User management"
-        body="Masters add users, set roles — including moving somebody between Technician and Coordinator — disable leavers and reactivate returners. A Master cannot edit another Master: those accounts stay listed, with no actions on them. The office manages technicians only. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work."
+        body="Senior Techs add users, set roles — including moving somebody between Technician, Apprentice and Office — disable leavers and reactivate returners. A Senior Tech cannot edit another Senior Tech: those accounts stay listed, with no actions on them. The office manages technicians only. Disabling never deletes: past job cards and the audit trail keep naming the person who did the work."
       />
 
       {operation.error !== null && (
@@ -351,7 +352,7 @@ const UserEditor = ({
       title={existing === null ? 'Add user' : `Edit ${userFullName(existing)}`}
       description={
         existing === null
-          ? 'Creates an account. Master accounts are not created from here.'
+          ? 'Creates an account. Senior Tech accounts are not created from here.'
           : undefined
       }
       onClose={onClose}
@@ -432,8 +433,8 @@ const UserEditor = ({
             }))}
             hint={
               existing === null
-                ? 'A Master account cannot be created from this screen.'
-                : 'Changing this changes what they can do, as soon as it is saved. A Master account cannot be set from here.'
+                ? 'A Senior Tech account cannot be created from this screen.'
+                : 'Changing this changes what they can do, as soon as it is saved. A Senior Tech account cannot be set from here.'
             }
           />
         ) : (
@@ -442,7 +443,7 @@ const UserEditor = ({
               Role: {roleLabel(existing?.role ?? creatable[0] ?? 'technician')}.
             </span>{' '}
             {existing === null
-              ? 'Office and Master accounts are created by a Master.'
+              ? 'Office and Senior Tech accounts are created by a Senior Tech.'
               : existing.id === actor.id
                 ? 'Your own role is set by somebody who administers your account.'
                 : 'This role is not yours to change from here.'}

@@ -1,4 +1,4 @@
-import type { User, UserRole } from '../types/user';
+import { isFieldRole, type User, type UserRole } from '../types/user';
 
 /**
  * Who this person may administer.
@@ -16,7 +16,7 @@ import type { User, UserRole } from '../types/user';
 export const canManageUser = (actor: Pick<User, 'id' | 'role'>, target: User): boolean => {
   if (target.id === actor.id) return true;
   if (actor.role === 'master') return target.role !== 'master';
-  if (actor.role === 'coordinator') return target.role === 'technician';
+  if (actor.role === 'coordinator') return isFieldRole(target.role);
   return false;
 };
 
@@ -26,11 +26,11 @@ export const manageUserRefusal = (
   target: User,
 ): string | null => {
   if (canManageUser(actor, target)) return null;
-  if (actor.role === 'technician') return 'Only the office can manage user accounts.';
+  if (isFieldRole(actor.role)) return 'Only the office can manage user accounts.';
   if (actor.role === 'coordinator') {
-    return 'A Coordinator can manage technicians. Master and Coordinator accounts are managed by a Master.';
+    return 'The Office can manage technicians and apprentices. Senior Tech and Office accounts are managed by a Senior Tech.';
   }
-  return 'Master accounts cannot be edited by another Master.';
+  return 'Senior Tech accounts cannot be edited by another Senior Tech.';
 };
 
 /**
@@ -41,8 +41,8 @@ export const manageUserRefusal = (
  * herself by creating an account and signing in as it.
  */
 export const assignableRoles = (actorRole: UserRole): readonly UserRole[] => {
-  if (actorRole === 'master') return ['coordinator', 'technician'];
-  if (actorRole === 'coordinator') return ['technician'];
+  if (actorRole === 'master') return ['coordinator', 'technician', 'apprentice'];
+  if (actorRole === 'coordinator') return ['technician', 'apprentice'];
   return [];
 };
 
@@ -77,12 +77,16 @@ export const canChangeRole = (actor: Pick<User, 'id' | 'role'>, target: User): b
 
 export const roleLabel = (role: UserRole): string => {
   switch (role) {
+    // ROLE-LABEL-1 (2 November 2026): the visible names. The stored values —
+    // and every historical audit record carrying them — are unchanged.
     case 'master':
-      return 'Master';
+      return 'Senior Tech';
     case 'coordinator':
-      return 'Coordinator';
+      return 'Office';
     case 'technician':
       return 'Technician';
+    case 'apprentice':
+      return 'Apprentice';
   }
 };
 

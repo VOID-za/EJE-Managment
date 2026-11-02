@@ -927,12 +927,13 @@ export class PostgresJobRepository implements JobRepository {
            * and to checklist evidence.
            */
           checksumSha256: item.checksumSha256,
+          emailToCustomer: item.emailToCustomer === true,
           uploadedAt: item.uploadedAt,
           uploadedBy: item.uploadedBy,
         })
         .onConflictDoUpdate({
           target: schema.jobMedia.id,
-          set: { caption: item.caption, removedAt: null },
+          set: { caption: item.caption, removedAt: null, emailToCustomer: item.emailToCustomer === true },
         });
     }
   }

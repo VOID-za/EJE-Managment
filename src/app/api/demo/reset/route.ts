@@ -24,7 +24,7 @@ export const POST = writeRoute({
     if (reset === null) throw notFound('There is nothing to reset.');
 
     if (!can(context.actor.user.role, 'settings.manage')) {
-      throw forbidden('Only a Master can reset the demonstration data.', [
+      throw forbidden('Only a Senior Tech can reset the demonstration data.', [
         { code: 'not_permitted', message: 'Your role does not administer the system.' },
       ]);
     }

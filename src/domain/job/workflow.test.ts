@@ -215,9 +215,10 @@ describe('ending a job: why it was refused', () => {
   it('calls a TECHNICIAN a permission refusal, on both actions', () => {
     // True whatever the job does next, so "speak to the office" is the honest
     // advice and a 403 is the honest code.
+    // CANCEL-ALL-1: a technician cancels only a job they work on — a permission, not a state, refusal.
     expect(cancelJobRefusal('technician', openUnassigned())).toEqual({
       kind: 'permission',
-      message: 'Only the office can cancel a job.',
+      message: 'You can cancel only a job you are working on.',
     });
     expect(deleteJobRefusal('technician', openUnassigned())).toEqual({
       kind: 'permission',

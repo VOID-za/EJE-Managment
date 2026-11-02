@@ -66,7 +66,7 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
 
 const assertFinance = (context: OperationContext): void => {
   if (can(context.actor.role, 'payroll.finance')) return;
-  throw refuse('Only the office prepares the Finance package.', 'not_permitted', 'A Master or a Coordinator does.');
+  throw refuse('Only the office prepares the Finance package.', 'not_permitted', 'A Senior Tech or the Office does.');
 };
 
 export type PayrollRowStatus =
@@ -168,7 +168,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     let detail: string;
     if (submission === null) {
       status = 'not_submitted';
-      detail = forms.problems.length > 0 && !forms.monthEnded ? 'Month not ended' : 'Not submitted yet';
+      detail = 'Not submitted yet';
     } else if (forms.timesheet.correctionPending) {
       status = 'correction_pending';
       detail = 'A timesheet correction is waiting for the office’s decision';
@@ -224,7 +224,7 @@ export const prepareFinancePackage = async (
   const settings = await context.repos.settings.get();
   const recipient = (settings.financeEmail ?? '').trim();
   if (!isEmail(recipient)) {
-    throw refuse('No Finance recipient is set.', 'finance_recipient_missing', 'A Master sets the Finance email address in Administration → Settings.');
+    throw refuse('No Finance recipient is set.', 'finance_recipient_missing', 'A Senior Tech sets the Finance email address in Administration → Settings.');
   }
   const unique = [...new Set(technicianIds)];
   if (unique.length === 0) throw refuse('Choose at least one technician.', 'no_technicians', 'Tick the technicians to include.');

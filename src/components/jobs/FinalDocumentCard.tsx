@@ -53,6 +53,14 @@ export const FinalDocumentCard = ({
    * Resolved by job number through the application layer, so the only file this
    * can ever fetch is the one recorded on this job.
    */
+  /** JOB-ATT-2: every document on the job, as one ZIP of the original files. */
+  const downloadAttachments = useCallback(async () => {
+    await operation.run(async () => {
+      const file = await jobs.attachmentsZip(job.id, job.jobNumber);
+      downloadBytes(file.bytes, file.fileName, 'application/zip');
+    });
+  }, [operation, job.id, job.jobNumber]);
+
   const download = useCallback(async () => {
     setDownloaded(false);
     const ok = await operation.run(async () => {
@@ -155,9 +163,22 @@ export const FinalDocumentCard = ({
           leadingIcon={<Icon name="download" className="size-5" />}
           onClick={download}
           loading={operation.running}
+          data-testid="final-document-download"
         >
           Download Final PDF
         </Button>
+        {/* JOB-ATT-2: only when the job has at least one document. */}
+        {job.attachments.length > 0 && (
+          <Button
+            variant="secondary"
+            leadingIcon={<Icon name="download" className="size-5" />}
+            onClick={downloadAttachments}
+            loading={operation.running}
+            data-testid="final-document-attachments"
+          >
+            Download Attachments
+          </Button>
+        )}
         {downloaded && (
           <span className="text-xs font-medium text-verdant-700">
             <Icon name="check" className="mr-1 inline size-3.5" />

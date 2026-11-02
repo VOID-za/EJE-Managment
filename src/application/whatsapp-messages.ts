@@ -122,7 +122,7 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
 /** The WhatsApp messages about one job, for the office. */
 export const listJobWhatsAppMessages = async (context: OperationContext, jobId: JobId): Promise<readonly OutboxMessage[]> => {
   if (!can(context.actor.role, 'jobs.officeHandling')) {
-    throw refuse('Only the office sees a job’s messages.', 'not_permitted', 'A Master or a Coordinator handles messages.');
+    throw refuse('Only the office sees a job’s messages.', 'not_permitted', 'A Senior Tech or the Office handles messages.');
   }
   return (await context.repos.outbox.listForJob(jobId)).filter((message) => message.channel === 'whatsapp');
 };
@@ -136,7 +136,7 @@ export const listJobWhatsAppMessages = async (context: OperationContext, jobId: 
  */
 export const retryWhatsAppMessage = async (context: OperationContext, messageId: string): Promise<OutboxMessage> => {
   if (!can(context.actor.role, 'jobs.officeHandling')) {
-    throw refuse('Only the office retries messages.', 'not_permitted', 'A Master or a Coordinator handles messages.');
+    throw refuse('Only the office retries messages.', 'not_permitted', 'A Senior Tech or the Office handles messages.');
   }
   const message = await context.repos.outbox.findById(messageId);
   if (message === null || message.channel !== 'whatsapp') throw refuse('That message does not exist.', 'unknown_message', 'Reload the job.');

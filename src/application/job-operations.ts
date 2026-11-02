@@ -1,3 +1,5 @@
+import { customerPricingInputs } from './customer-rates';
+import { createZip, uniqueEntryNames, type ZipEntry } from '@/lib/zip';
 import {
   can,
   offersSiteLocation,
@@ -41,7 +43,6 @@ import {
   siteAddressLine,
   siteNavigationTarget,
   siteNavigationUrl,
-  pricingInputsFrom,
   roleLabel,
   signatureDeclarationFor,
   userFullName,
@@ -131,13 +132,13 @@ export const assertEditable = (context: OperationContext, job: Job): void => {
   throw new WorkflowError(
     finished
       ? `${job.jobNumber} has been submitted and can no longer be changed.`
-      : `${job.jobNumber} is with the office and can only be changed by a Master.`,
+      : `${job.jobNumber} is with the office and can only be changed by a Senior Tech.`,
     [
       {
         code: 'job_locked',
         message: finished
           ? 'A submitted job card is read-only. The office handles it and records the invoice; the job card itself does not change.'
-          : 'Only a Master can amend a job that is awaiting review.',
+          : 'Only a Senior Tech can amend a job that is awaiting review.',
       },
     ],
   );
@@ -1701,6 +1702,44 @@ export const readJobAttachment = async (
 };
 
 /**
+ * EVERY DOCUMENT ON THE JOB, AS ONE ZIP. JOB-ATT-2 (2 November 2026).
+ *
+ * The final signed job card's "Download Attachments": the original uploaded
+ * files, under their own names (a second "Order.pdf" becomes "Order (2).pdf"),
+ * read from storage through the job — so only this job's documents, and only
+ * for somebody who may see this job (the route asks `loadVisibleJob` first).
+ * A document whose bytes were never stored (records from before uploads were
+ * kept) cannot be put in the archive; it is NAMED in "Missing files.txt"
+ * rather than silently left out. Null when the job has no documents at all.
+ */
+export const loadJobAttachmentsArchive = async (
+  context: OperationContext,
+  job: Job,
+): Promise<{ readonly fileName: string; readonly bytes: Uint8Array; readonly included: number; readonly missing: readonly string[] } | null> => {
+  if (job.attachments.length === 0) return null;
+  const found = await Promise.all(
+    job.attachments.map(async (attachment) => ({ attachment, document: await context.services.storage.getDocument(attachment.storageKey) })),
+  );
+  const stored = found.filter((entry) => entry.document !== null);
+  const missing = found.filter((entry) => entry.document === null).map((entry) => entry.attachment.fileName);
+  const names = uniqueEntryNames([...stored.map((entry) => entry.attachment.fileName), ...(missing.length > 0 ? ['Missing files.txt'] : [])]);
+  const entries: ZipEntry[] = stored.map((entry, index) => ({
+    name: names[index]!,
+    bytes: entry.document!.bytes,
+    modifiedAt: new Date(entry.attachment.uploadedAt),
+  }));
+  if (missing.length > 0) {
+    entries.push({
+      name: names[names.length - 1]!,
+      bytes: new TextEncoder().encode(
+        `These documents are listed on ${job.jobNumber} but their files were never stored, so they are not in this archive:\r\n${missing.map((name) => `- ${name}`).join('\r\n')}\r\n`,
+      ),
+    });
+  }
+  return { fileName: `${job.jobNumber} Attachments.zip`, bytes: createZip(entries), included: stored.length, missing };
+};
+
+/**
  * Takes a photograph or video off the job.
  *
  * For the obvious mistake — the wrong machine, a thumb over the lens, a shot of
@@ -1722,6 +1761,42 @@ export const readJobAttachment = async (
  * IMMUT-7 forbids at three layers — here, in the repository's frozen fingerprint,
  * and in `0007`'s trigger.
  */
+/**
+ * CHOOSES WHETHER A JOB'S DOCUMENT GOES TO THE CUSTOMER WITH THE SIGNED JOB
+ * CARD EMAIL. JOB-ATT-3 (2 November 2026).
+ *
+ * Any number may be chosen. The choice is part of the job while it can be
+ * edited — once the customer has signed, the job card and its documents are
+ * fixed (the database refuses a change), and the email written at issue
+ * carries exactly what was chosen.
+ */
+export const setCustomerEmailDocument = async (
+  context: OperationContext,
+  job: Job,
+  attachmentId: string,
+  selected: boolean,
+): Promise<Job> => {
+  assertEditable(context, job);
+  const existing = job.attachments.find((item) => item.id === attachmentId);
+  if (existing === undefined) {
+    throw new WorkflowError('That document is not on this job.', [
+      { code: 'document_not_on_job', message: 'It may have been removed. Reload the job.' },
+    ]);
+  }
+  if ((existing.emailToCustomer === true) === selected) return job;
+  const saved = await context.repos.jobs.save({
+    ...job,
+    attachments: job.attachments.map((item) => (item.id === attachmentId ? { ...item, emailToCustomer: selected } : item)),
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_document_email_selection',
+    summary: selected ? 'Document chosen for the customer email' : 'Document taken off the customer email',
+    detail: `${existing.fileName} ${selected ? 'will be attached to' : 'will not be attached to'} the signed job card email to the customer. Changed by ${userFullName(context.actor)}.`,
+  });
+  return saved;
+};
+
 export const setMediaVisibility = async (
   context: OperationContext,
   job: Job,
@@ -2431,9 +2506,9 @@ export const captureSignature = async (
   // The customer is signing for a figure, so that figure is frozen here. From
   // this point the job prices at its snapshot and a later rate change cannot
   // reach it. An existing snapshot is never overwritten.
-  const settings = await context.repos.settings.get();
+  // CUST-RATES-1: frozen at the customer's own rate source — refused, never defaulted, when Custom Rates are missing.
   const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
-    ...pricingInputsFrom(settings),
+    ...(await customerPricingInputs(context, job)),
     capturedAt: now,
     reason: 'customer_signature',
   };
@@ -2550,9 +2625,9 @@ export const recordSignatureRefusal = async (
   transition(job, 'review');
 
   const now = context.services.clock.now();
-  const settings = await context.repos.settings.get();
+  // CUST-RATES-1: frozen at the customer's own rate source — refused, never defaulted, when Custom Rates are missing.
   const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
-    ...pricingInputsFrom(settings),
+    ...(await customerPricingInputs(context, job)),
     capturedAt: now,
     reason: 'signature_refused',
   };
@@ -3144,9 +3219,9 @@ const renderAndStoreFinalDocument = async (
   job: Job,
   now: string,
 ): Promise<{ readonly job: Job; readonly finalDocument: NonNullable<Job['finalDocument']> }> => {
-  const settings = await context.repos.settings.get();
+  // CUST-RATES-1: frozen at the customer's own rate source — refused, never defaulted, when Custom Rates are missing.
   const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
-    ...pricingInputsFrom(settings),
+    ...(await customerPricingInputs(context, job)),
     capturedAt: now,
     reason: 'submission',
   };
@@ -3396,9 +3471,9 @@ const performIssue = async (
   transition(job, 'office_handling');
 
   const now = context.services.clock.now();
-  const settings = await context.repos.settings.get();
+  // CUST-RATES-1: frozen at the customer's own rate source — refused, never defaulted, when Custom Rates are missing.
   const snapshot: PricingSnapshot = job.pricingSnapshot ?? {
-    ...pricingInputsFrom(settings),
+    ...(await customerPricingInputs(context, job)),
     capturedAt: now,
     reason: 'submission',
   };
@@ -4087,7 +4162,7 @@ export const cancelJob = async (
   job: Job,
   input: CancellationInput,
 ): Promise<Job> => {
-  const refusal = cancelJobRefusal(context.actor.role, job);
+  const refusal = cancelJobRefusal(context.actor, job);
   if (refusal !== null) {
     /*
      * THE CODE FOLLOWS THE CAUSE, NOT THE OPERATION. AUD-9.
@@ -4104,8 +4179,9 @@ export const cancelJob = async (
       },
     ]);
   }
-  if (input.reason === 'other' && input.description.trim().length === 0) {
-    throw new WorkflowError('A description is required when the reason is Other.', [
+  // CANCEL-ALL-1: the reason is always written down, whoever cancels and whatever the category.
+  if (input.description.trim().length === 0) {
+    throw new WorkflowError('A reason is required to cancel a job.', [
       { code: 'description_required', message: 'Say why the job is being cancelled.' },
     ]);
   }

@@ -63,7 +63,7 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
 
 const assertOffice = (context: OperationContext): void => {
   if (!can(context.actor.role, 'customers.manage')) {
-    throw refuse('Only the office manages site pins.', 'not_permitted', 'A Master or a Coordinator verifies and corrects site pins.');
+    throw refuse('Only the office manages site pins.', 'not_permitted', 'A Senior Tech or the Office verifies and corrects site pins.');
   }
 };
 

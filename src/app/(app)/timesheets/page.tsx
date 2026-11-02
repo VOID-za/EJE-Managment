@@ -152,7 +152,6 @@ const TimesheetsPage = () => {
   const [commentDirty, setCommentDirty] = useState(false);
   const [removing, setRemoving] = useState<TimesheetEntry | null>(null);
   const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
-  const [confirmSend, setConfirmSend] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
   const rangeProblem = timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS);
@@ -181,7 +180,8 @@ const TimesheetsPage = () => {
   // Save and Send act on a period that has ended and shares no day with a
   // DIFFERENT sent period. A period already sent can be saved and sent again,
   // replacing the earlier submission (RESUBMIT-1). The server asks the same.
-  const periodOpen = editable && overlapsSent.length === 0 && to <= today;
+  // MONTH-END-OFF-1: a period no longer has to have ended to be worked on.
+  const periodOpen = editable && overlapsSent.length === 0;
   const savedComment = period?.comment ?? '';
   const showHistoricalNt = days.some((day) => day.normalHours > 0);
   const showHistoricalCount = days.some((day) => day.callouts > 0);
@@ -346,24 +346,6 @@ const TimesheetsPage = () => {
     if (ok) refresh();
   };
 
-  /** SEND TO OFFICE (TS-02, TS-14): saves first, then sends the period once. */
-  const send = async (): Promise<void> => {
-    if (personId === null) return;
-    setConfirmSend(false);
-    if (!(await saveOpenLine())) return;
-    const typed = comment.current;
-    const ok = await operation.run(async () => {
-      if (typed !== null && typed !== savedComment) await timesheets.savePeriodComment(personId, from, to, typed);
-      await timesheets.submit(personId, from, to);
-    });
-    if (ok) {
-      comment.current = null;
-      setCommentDirty(false);
-      setSaved(null);
-    }
-    refresh();
-  };
-
   /** A change of person or period starts its comment afresh; an open line stays open. */
   const changePeriod = (nextFrom: string, nextTo: string) => {
     setFrom(nextFrom);
@@ -404,7 +386,7 @@ const TimesheetsPage = () => {
       />
       {!completesTimesheet(currentUser.role) && (
         <p role="status" className="mb-4 text-sm text-steel-600" data-testid="timesheet-not-required">
-          Coordinators do not complete a timesheet — only their attendance. Everybody’s latest submitted timesheet is on EJE Monthly Forms.
+          The Office does not complete a timesheet — only attendance. Everybody’s latest submitted timesheet is on EJE Monthly Forms.
         </p>
       )}
 
@@ -419,24 +401,11 @@ const TimesheetsPage = () => {
         onCancel={() => setRemoving(null)}
       />
 
-      <ConfirmDialog
-        open={confirmSend}
-        title={`Send the timesheet for ${formatPeriod(from, to)} to the office?`}
-        message={
-          sentAt === null
-            ? 'It is saved first, then sent. The office is notified and reads the version you sent. You can still change it and send it again; the new submission replaces this one. No other period may include these days.'
-            : 'It is saved first, then sent again. This replaces the submission the office has now; the earlier one is not kept.'
-        }
-        confirmLabel="Send to office"
-        busy={operation.running}
-        onConfirm={() => void send()}
-        onCancel={() => setConfirmSend(false)}
-      />
-
       {personId !== null && (
         <DocumentPreviewDialog
           open={previewing !== null}
           autoPrint={previewing === 'print'}
+          allowDownload={false}
           title={`Time Sheet — ${formatPeriod(from, to)}`}
           description={sentAt === null ? 'Preview of the draft. Nothing is saved or sent by looking at it.' : `The version in force: ${period?.versionInForce ?? ''}.`}
           loadPdf={() => timesheets.pdf(personId, from, to)}
@@ -505,9 +474,6 @@ const TimesheetsPage = () => {
             Part of these dates was already sent to the office ({overlapsSent.map((sent) => formatPeriod(sent.from, sent.to)).join('; ')}). Choose From and To dates outside it to send a new period.
           </p>
         )}
-        {sentAt === null && overlapsSent.length === 0 && to > today && editable && (
-          <p role="status" className="mt-2 text-sm text-steel-600">A period can be sent once its To date has passed or is today.</p>
-        )}
         <div className="mt-3">
           {periodOpen ? (
             <PeriodComment
@@ -541,11 +507,6 @@ const TimesheetsPage = () => {
           <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('print')} data-testid="timesheet-print">
             Print
           </Button>
-          {periodOpen && (
-            <Button onClick={() => setConfirmSend(true)} loading={operation.running} data-testid="timesheet-send">
-              {sentAt === null ? 'Send to office' : 'Send again'}
-            </Button>
-          )}
         </div>
         {saved !== null && (
           <p role="status" className="mt-2 text-sm text-verdant-700" data-testid="timesheet-saved">
