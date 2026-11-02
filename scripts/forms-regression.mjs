@@ -160,7 +160,12 @@ const downloadOf = async (button) => {
  * reopens; Download is the same PDF the viewer shows; Print prints the PDF's
  * own pages, alone. `open` presses whatever opens this preview.
  */
-const previewWorks = async (open, expectText) => {
+/**
+ * `pdfUrl`: FORMS-PAGES-1 (2 November 2026) — the Attendance and Timesheets
+ * pages preview and print only, with no Download in the preview; the same PDF
+ * is then read from its server route to compare with what the viewer shows.
+ */
+const previewWorks = async (open, expectText, pdfUrl = null) => {
   await open();
   const pages = await viewerDrew();
   const dialog = page.locator('[role="dialog"]').last();
@@ -186,8 +191,16 @@ const previewWorks = async (open, expectText) => {
   // Scrolling: the document scrolls inside the viewer, never the page sideways.
   await page.getByTestId('pdf-scroll').evaluate((element) => element.scrollBy(0, 400));
   await noPageOverflow('preview');
-  // Download is the document on screen.
-  const file = await downloadOf(page.getByTestId('preview-download'));
+  // Download is the document on screen (or, with no Download offered, the route's PDF is).
+  let file;
+  if (pdfUrl === null) {
+    file = await downloadOf(page.getByTestId('preview-download'));
+  } else {
+    if ((await page.getByTestId('preview-download').count()) !== 0) fail('this preview should offer Preview and Print only');
+    const url = await pdfUrl();
+    const bytes = await page.evaluate(async (target) => [...new Uint8Array(await (await fetch(target)).arrayBuffer())], url);
+    file = { name: url, bytes: Buffer.from(bytes) };
+  }
   if (file.bytes.subarray(0, 5).toString('latin1') !== '%PDF-') fail(`${file.name} is not a PDF`);
   const read = await pdfText(file.bytes);
   if (read.pages !== pages) fail(`the viewer shows ${pages} page(s); the download has ${read.pages}`);
@@ -538,7 +551,11 @@ await check('Timesheets: the period comment saves and reopens', async () => {
   await page.reload({ waitUntil: 'networkidle' });
   if ((await page.getByTestId('timesheet-period-comment').inputValue()) !== 'Forms regression comment') fail('the comment did not reopen');
 });
-await check('PDF: the Time Sheet for the period', async () => previewWorks(() => press(page.getByTestId('timesheet-preview')), ['Date', 'Customer', 'Cust Km']));
+await check('PDF: the Time Sheet for the period (Preview and Print only on the page)', async () =>
+  previewWorks(() => press(page.getByTestId('timesheet-preview')), ['Date', 'Customer', 'Cust Km'], async () => {
+    const me = (await get('/api/auth/me')).json.data.user.id;
+    return `/api/timesheets/${me}/period/pdf?from=${await page.getByTestId('timesheet-from').inputValue()}&to=${await page.getByTestId('timesheet-to').inputValue()}`;
+  }));
 
 /* ---- 6. Attendance: it saves itself ------------------------------------ */
 const status = () => page.getByTestId('autosave-status').first().getAttribute('data-state');

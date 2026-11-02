@@ -639,9 +639,15 @@ await step('TABLET: the Time Sheet preview has exactly Date, Customer, OT, D/T, 
   writes.length = 0;
   await previewPage.getByTestId('timesheet-preview').click();
   await viewerDrew(previewPage, 'document-preview');
-  const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
-  silentDownloads = 0; // asked for
-  const text = (await pdfTextIn(previewPage, file.bytes)).text;
+  // FORMS-PAGES-1 (2 November 2026): the Timesheets page previews and prints; the download is on Monthly Forms.
+  if ((await previewPage.getByTestId('preview-download').count()) !== 0) throw new Error('the Timesheets preview still offers Download');
+  const from = await previewPage.getByTestId('timesheet-from').inputValue();
+  const to = await previewPage.getByTestId('timesheet-to').inputValue();
+  const bytes = await previewPage.evaluate(async ({ base, from, to }) => {
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/pdf?from=${from}&to=${to}`);
+    return [...new Uint8Array(await response.arrayBuffer())];
+  }, { base: BASE, from, to });
+  const text = (await pdfTextIn(previewPage, new Uint8Array(bytes))).text;
   for (const column of ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']) {
     if (!text.includes(column)) throw new Error(`the Time Sheet has no ${column} column`);
   }
