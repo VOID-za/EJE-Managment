@@ -27,7 +27,13 @@ describe('the Master', () => {
    * capabilities, named individually — and the exceptions are asserted in
    * their own case below rather than quietly dropped.
    */
-  const field: readonly Capability[] = ['jobs.issueFinal'];
+  /*
+   * `standby.requestSwap` too (STANDBY-5, 2 November 2026): a swap is offered
+   * by the person who holds the standby place, and only a technician account
+   * can be on the standby roster. The office changes the calendar directly
+   * (`standby.manage`), so it has nothing to ask for.
+   */
+  const field: readonly Capability[] = ['jobs.issueFinal', 'standby.requestSwap'];
 
   it('has every capability that is not the field technician’s own', () => {
     const everything = new Set<Capability>(ROLES.flatMap((role) => capabilitiesFor(role)));
@@ -37,7 +43,7 @@ describe('the Master', () => {
     }
   });
 
-  it.each(field)('does NOT hold %s — the technician submits their own job', (capability) => {
+  it.each(field)('does NOT hold %s — it is the field technician’s own', (capability) => {
     expect(can('master', capability)).toBe(false);
     expect(can('technician', capability)).toBe(true);
   });

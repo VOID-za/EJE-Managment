@@ -134,6 +134,7 @@ describe('the route tree', () => {
       '/machines/[machineId]',
       '/technicians/[userId]',
       '/calendar',
+      '/standby',
       '/activity',
       '/library',
       '/search',

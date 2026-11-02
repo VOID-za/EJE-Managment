@@ -44,6 +44,8 @@ const MATRIX = [
   { url: '/machines/machine-abc-lv40', role: 'Master', status: 'any', purpose: 'Machine history' },
   { url: '/technicians/user-tech-lerato', role: 'Master / self', status: 'any', purpose: 'Technician record' },
   { url: '/calendar', role: 'Master / Technician', status: 'any', purpose: 'Calendar' },
+  { url: '/standby', role: 'Everybody', status: 'any', purpose: 'Standby Calendar (STANDBY-2)' },
+  { url: '/standby?tab=requests', role: 'Everybody', status: 'any', purpose: 'Standby swap requests (STANDBY-7)' },
   { url: '/activity', role: 'Master', status: 'any', purpose: 'Audit trail' },
   { url: '/library', role: 'Master / Technician', status: 'any', purpose: 'Technical Library' },
   { url: '/search?q=LW-V40-70214', role: 'Master / Technician', status: 'any', purpose: 'Global search' },

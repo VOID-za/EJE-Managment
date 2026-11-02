@@ -133,7 +133,9 @@ describe('authentication is required', () => {
     }
 
     expect(allowed).toEqual([]);
-  });
+    // One unauthenticated request per route, so the time grows with the route
+    // count; under a full parallel run it outgrew the 15-second default.
+  }, 60_000);
 
   it('keeps that list of exceptions to the ways of signing in', async () => {
     // A new public endpoint has to be added above deliberately, and this says
