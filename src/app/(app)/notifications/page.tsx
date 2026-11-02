@@ -45,6 +45,9 @@ const TYPE_ICONS: Record<NotificationType, IconName> = {
   timesheet_submitted: 'clock',
   timesheet_correction_requested: 'clock',
   timesheet_correction_decided: 'clock',
+  standby_swap_requested: 'calendar',
+  standby_swap_decided: 'calendar',
+  standby_assignment_changed: 'calendar',
 };
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -59,6 +62,9 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   timesheet_submitted: 'Timesheet sent to the office',
   timesheet_correction_requested: 'Timesheet correction to review',
   timesheet_correction_decided: 'Timesheet correction decided',
+  standby_swap_requested: 'Standby swap to review',
+  standby_swap_decided: 'Standby swap decided',
+  standby_assignment_changed: 'Standby schedule changed',
 };
 
 const CHANNEL_ICONS: Record<NotificationChannel, IconName> = {

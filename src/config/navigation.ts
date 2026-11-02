@@ -47,6 +47,12 @@ export const NAVIGATION: readonly NavigationItem[] = [
     group: 'work',
   },
   /*
+   * STANDBY-2 (2 November 2026): EVERY ROLE. The capability is the one the
+   * read enforces (`standby.view`); the office additionally manages the year
+   * and decides swaps on the same page (`standby.manage`, checked by the server).
+   */
+  { href: '/standby', label: 'Standby Calendar', icon: 'calendar', capability: 'standby.view', group: 'work' },
+  /*
    * CLOSED JOBS IS NO LONGER A SIDEBAR ITEM (the tester, 30 October 2026, for
    * the Master and the Coordinator). The archive is unchanged and is reached
    * from the Jobs page, whose "Closed Jobs" filter opens it.
