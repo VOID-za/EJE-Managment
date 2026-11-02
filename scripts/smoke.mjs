@@ -3075,8 +3075,8 @@ await step('a technician can message the office', async () => {
   await page.getByRole('button', { name: 'New message' }).click();
   const compose = page.getByRole('dialog');
   await compose.waitFor({ timeout: 5000 });
-  // A technician does not have to guess who in the office is on duty (ROLE-LABEL-1: "the office").
-  await compose.getByText('Reaches the office', { exact: false })
+  // A technician does not have to guess which Senior Tech is on duty (ROLE-LABEL-1).
+  await compose.getByText('Reaches every Senior Tech on duty', { exact: false })
     .waitFor({ timeout: 5000 });
   await compose.getByLabel('Message').fill(
     'Hi Christene. I have a doctor appointment tomorrow at 14:00. Back by 16:00.',
