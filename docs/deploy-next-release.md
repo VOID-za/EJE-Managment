@@ -19,6 +19,12 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## RELEASED — `6fdb142`, the standby calendar (2 November 2026)
+
+Released 2 November 2026 10:48 UTC (healthy 10:48:54) through `deploy/release/stage-release.ps1` with migration `0045_standby_calendar` (additive). Backup proven first: `C:/Program Files/Git/var/backups/eje/eje-eje_production-2026-11-02T10-48-37Z` (verified, key-checked, restore-tested). Rollback target `5d726d3` — CI run 41427305039 proved `5d726d3` reads and writes a database at 0045. Unit tests 3,630 passed, 0 failed, 19 skipped (the PostgreSQL tests, run in CI); live verification 57/57 (and the attendance/timesheet regression 46/46): the calendar and both swap workflows on the live site, every refusal, in-app notifications only (the outbox unchanged), then the test places and eligibility removed again through the audited routes. Every job-card fingerprint, job count, signed price, attendance and timesheet record and site pin identical before and after.
+
+**Rolling back:** switch to `5d726d3` the way the release tool does (it keeps the previous release directory). 0045 stays applied — `5d726d3` never reads the standby tables, and the rollback-compatibility check proves it works against them.
+
 ## NEXT RELEASE — from `claude/office-workflow-parts` (checklist prepared 26 October 2026, NOT RUN)
 
 **Nothing below has been run.** It needs the owner's approval of the work and a

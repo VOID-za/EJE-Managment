@@ -605,6 +605,21 @@ Automated on desktop (1440), tablet (768) and phone (390) — `scripts/forms-reg
 | P5 | Preview the job card PDF of that job (with two or more parts booked in) | Under **Labour, travel and parts**: the parts received (Part 1 received, Part 2 received …), the Collection line, then the price table with *Test bench fee — Qty 3 — Rate — Amount*. **Job details** no longer lists the parts received or the collection |
 | P6 | Open an already-signed job card that carried the bench fee | Its amounts are exactly as before — nothing repriced |
 
+## Q. The standby calendar (2 November 2026)
+
+Automated at desktop (1440), tablet (768, touch) and phone (390, touch) — `scripts/standby-check.mjs`, in CI. These are the checks a person makes on the real rugged tablet and phone. Use a year with no real schedule yet, and put the places back afterwards.
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| Q1 | As the Coordinator: Standby Calendar → Manage schedule → tick who may be Main, Helper and Apprentice | Each tick saves; ticking Apprentice clears Main and Helper; an inactive person cannot be ticked |
+| Q2 | Enter an order for each place, then **Generate** the year | The year's remaining weeks appear as **Draft**; each place follows the order; nothing published changed |
+| Q3 | As a technician, open the Standby Calendar | No draft is visible and there is no Manage schedule tab |
+| Q4 | As the Coordinator: **Publish** — leave one place empty first | Publishing asks you to acknowledge the empty place; afterwards the technician sees the weeks and *Your upcoming standby* |
+| Q5 | Month view, Week view, the year and month arrows, with gloves, in daylight | Every week shows Main, Helper, Apprentice 1, Apprentice 2; nothing scrolls sideways; buttons are easy to hit |
+| Q6 | As a main technician: open your week → **Request a swap** → choose the other technician and their week → Send | *Swap pending* appears on both weeks; the names have NOT changed |
+| Q7 | As the Coordinator: Swap requests → **Approve** with a note | Only the two main places changed; helpers and apprentices did not; both technicians have a notification |
+| Q8 | As an apprentice: ask for an apprentice swap; as a Master, **Reject** it with a note; then change a published place (reason required) | The calendar is unchanged after the rejection; the apprentice is notified; the changed place notifies both people and shows in Activity |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -617,7 +632,8 @@ Nothing in this list can be done by automation; each stays open until a person h
 | The tester's critical fixes on tablet and phone | M | — |
 | Real accounts: Microsoft 365, WhatsApp, Google Maps | N1–N9 | #79, #80, #81 |
 | Attendance and timesheets | O1–O6 | #82 |
-| Job creation, bench quantity, job card | P1–P6 | — |
+| Job creation, bench quantity, job card | P1–P6 | #95 |
+| The standby calendar | Q1–Q8 | #96 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 
