@@ -259,6 +259,9 @@ export class PostgresJobRepository implements JobRepository {
         invoiceNumber: schema.jobs.invoiceNumber,
         invoicedBy: schema.jobs.invoicedBy,
         invoicedAt: schema.jobs.invoicedAt,
+        poNumber: schema.jobs.poNumber,
+        poRecordedBy: schema.jobs.poRecordedBy,
+        poRecordedAt: schema.jobs.poRecordedAt,
         repairPartNumber: schema.jobs.repairPartNumber,
         repairDescription: schema.jobs.repairDescription,
         repairQuantity: schema.jobs.repairQuantity,
@@ -332,6 +335,10 @@ export class PostgresJobRepository implements JobRepository {
               recordedBy: asUserId(row.invoicedBy),
               recordedAt: row.invoicedAt,
             },
+      purchaseOrder:
+        row.poNumber === null || row.poRecordedBy === null || row.poRecordedAt === null
+          ? null
+          : { number: row.poNumber, recordedBy: asUserId(row.poRecordedBy), recordedAt: row.poRecordedAt },
       repairItem: {
         partNumber: row.repairPartNumber ?? '',
         description: row.repairDescription ?? '',

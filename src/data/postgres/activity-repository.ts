@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import {
   asActivityId,
   asJobId,
@@ -94,6 +94,18 @@ export class PostgresActivityRepository implements ActivityRepository {
       .where(jobId === undefined ? undefined : eq(schema.auditEvents.jobId, jobId))
       .orderBy(desc(schema.auditEvents.occurredAt));
     return rows.map(toDomainEvent);
+  }
+
+  async purgeOccurredBefore(cutoff: string): Promise<number> {
+    // The append-only guard lets a delete through only inside the retention
+    // purge, and only for an event older than 7 days (migration 0046).
+    await this.db.execute(sql`select set_config('eje.retention', 'on', true)`);
+    const rows = await this.db
+      .delete(schema.auditEvents)
+      .where(lt(schema.auditEvents.occurredAt, cutoff))
+      .returning({ id: schema.auditEvents.id });
+    await this.db.execute(sql`select set_config('eje.retention', 'off', true)`);
+    return rows.length;
   }
 
   async append(event: ActivityEvent): Promise<ActivityEvent> {

@@ -89,6 +89,26 @@ export class PostgresPayrollRepository implements PayrollRepository {
     return rows[0] === undefined ? null : toSubmission(rows[0]);
   }
 
+  async replaceSubmission(submission: MonthlySubmission): Promise<MonthlySubmission> {
+    const rows = await this.db
+      .update(schema.monthlySubmissions)
+      .set({
+        attendanceSnapshot: submission.attendance,
+        submittedAt: submission.submittedAt,
+        submittedBy: submission.submittedBy,
+      })
+      .where(
+        and(
+          eq(schema.monthlySubmissions.id, submission.id),
+          eq(schema.monthlySubmissions.userId, submission.userId),
+          eq(schema.monthlySubmissions.month, submission.month),
+        ),
+      )
+      .returning();
+    if (rows[0] === undefined) throw new Error(`no submission ${submission.id} to replace`);
+    return toSubmission(rows[0]);
+  }
+
   async findPackage(id: string): Promise<FinancePackage | null> {
     if (!isUuid(id)) return null;
     const rows = await this.db.select().from(schema.financePackages).where(eq(schema.financePackages.id, id)).limit(1);

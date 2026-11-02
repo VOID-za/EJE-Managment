@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm';
 import {
   asJobId,
   asNotificationId,
@@ -81,6 +81,14 @@ export class PostgresNotificationRepository implements NotificationRepository {
       .update(schema.notifications)
       .set({ readAt: sql`now()` })
       .where(and(eq(schema.notifications.id, id), isNull(schema.notifications.readAt)));
+  }
+
+  async purgeCreatedAtOrBefore(cutoff: string): Promise<number> {
+    const rows = await this.db
+      .delete(schema.notifications)
+      .where(lte(schema.notifications.createdAt, cutoff))
+      .returning({ id: schema.notifications.id });
+    return rows.length;
   }
 
   async markAllRead(recipientId: UserId): Promise<void> {

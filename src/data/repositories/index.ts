@@ -494,6 +494,12 @@ export interface ChecklistTemplateRepository {
 export interface ActivityRepository {
   list(jobId?: JobId): Promise<readonly ActivityEvent[]>;
   append(event: ActivityEvent): Promise<ActivityEvent>;
+  /**
+   * RETAIN-2. Deletes the activity events that occurred before `cutoff` — from
+   * the activity table and nowhere else. Answers how many. The database allows
+   * this delete only through this path (migration 0046).
+   */
+  purgeOccurredBefore(cutoff: IsoDateTime): Promise<number>;
 }
 
 export interface NotificationRepository {
@@ -501,6 +507,11 @@ export interface NotificationRepository {
   create(notification: AppNotification): Promise<AppNotification>;
   markRead(id: NotificationId): Promise<void>;
   markAllRead(recipientId: UserId): Promise<void>;
+  /**
+   * RETAIN-1. Deletes notifications created at or before `cutoff` — the
+   * notification records only, never what they refer to. Answers how many.
+   */
+  purgeCreatedAtOrBefore(cutoff: IsoDateTime): Promise<number>;
   markHandled(id: NotificationId): Promise<void>;
   /**
    * Every recipient's copy of one kind of notification about one job, handled
@@ -568,6 +579,14 @@ export interface AttendanceRepository {
    * period that would overlap another is refused by the database itself.
    */
   submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
+  /**
+   * RESUBMIT-1. Sends an already-sent period again: its snapshot, comment and
+   * submission stamp are replaced; its dates and owner never change. Null when
+   * the period was not sent.
+   */
+  resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
+  /** RESUBMIT-1. Removes every correction of a period that is being sent again. */
+  deleteCorrections(periodId: string): Promise<void>;
   /** TS-16. One period's corrections, oldest (sequence 1) first. */
   listCorrections(periodId: string): Promise<readonly TimesheetCorrection[]>;
   findCorrection(id: string): Promise<TimesheetCorrection | null>;
@@ -839,6 +858,12 @@ export interface PayrollRepository {
   listSubmissionsFor(userId: UserId): Promise<readonly MonthlySubmission[]>;
   /** Null when this technician's month was already submitted — one per month. */
   createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null>;
+  /**
+   * RESUBMIT-1. Replaces the month's current submission in place — the new
+   * attendance snapshot and submission stamp; the person, month and timesheet
+   * period never change. No earlier copy is kept.
+   */
+  replaceSubmission(submission: MonthlySubmission): Promise<MonthlySubmission>;
   findPackage(id: string): Promise<FinancePackage | null>;
   /** Every package for the month, newest first. */
   listPackages(month: string): Promise<readonly FinancePackage[]>;

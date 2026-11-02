@@ -224,6 +224,10 @@ export const jobs = pgTable(
     invoiceNumber: text('invoice_number'),
     invoicedBy: uuid('invoiced_by').references(() => users.id),
     invoicedAt: instant('invoiced_at'),
+    /** INV-FLOW-1, migration 0046. The customer's PO number. Set once, never rewritten. */
+    poNumber: text('po_number'),
+    poRecordedBy: uuid('po_recorded_by').references(() => users.id),
+    poRecordedAt: instant('po_recorded_at'),
 
     createdAt: createdAt(),
     createdBy: uuid('created_by').references(() => users.id),
@@ -332,7 +336,17 @@ export const jobs = pgTable(
     ),
     check(
       'jobs_awaiting_po_was_handled',
-      sql`${table.status}::text not in ('awaiting_po', 'invoiced') or ${table.officeHandledAt} is not null`,
+      sql`${table.status}::text not in ('awaiting_po', 'awaiting_invoice_no', 'invoiced') or ${table.officeHandledAt} is not null`,
+    ),
+    check(
+      'jobs_po_is_whole_or_absent',
+      sql`(${table.poNumber} is null) = (${table.poRecordedAt} is null)
+          and (${table.poNumber} is null) = (${table.poRecordedBy} is null)
+          and (${table.poNumber} is null or ${table.poNumber} ~ '[^[:space:]]')`,
+    ),
+    check(
+      'jobs_awaiting_invoice_no_has_po',
+      sql`${table.status}::text <> 'awaiting_invoice_no' or ${table.poNumber} is not null`,
     ),
     check(
       'jobs_invoiced_has_invoice_number',

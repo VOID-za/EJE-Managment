@@ -197,6 +197,7 @@ const baseJob = (jobNumber: string): Job => ({
   officeHandling: null,
 
   invoice: null,
+  purchaseOrder: null,
   createdAt: timeOffset(-10, 8),
   createdBy: asUserId('user-master-elmarie'),
   acceptedAt: null,

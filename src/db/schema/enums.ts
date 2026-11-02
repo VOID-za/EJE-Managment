@@ -39,6 +39,8 @@ export const jobStatus = pgEnum('job_status', [
   // of the earlier values — and every row that uses them — is untouched. 0032.
   'office_handling',
   'awaiting_po',
+  // Migration 0046 (INV-FLOW-1): the PO number is recorded; waiting for the invoice number.
+  'awaiting_invoice_no',
   'invoiced',
 ]);
 

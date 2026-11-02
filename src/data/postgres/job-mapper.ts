@@ -351,6 +351,12 @@ const officeHandlingFrom = (row: JobRow): JobOfficeHandling | null =>
     ? null
     : { handledBy: asUserId(row.officeHandledBy), handledAt: row.officeHandledAt };
 
+/** The recorded PO number, when there is one. INV-FLOW-1. */
+const purchaseOrderFrom = (row: JobRow): Job['purchaseOrder'] =>
+  row.poNumber === null || row.poRecordedBy === null || row.poRecordedAt === null
+    ? null
+    : { number: row.poNumber, recordedBy: asUserId(row.poRecordedBy), recordedAt: row.poRecordedAt };
+
 /** The recorded invoice number, when there is one. */
 const invoiceFrom = (row: JobRow): JobInvoice | null =>
   row.invoiceNumber === null || row.invoicedBy === null || row.invoicedAt === null
@@ -454,6 +460,7 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     cancellation: cancellationFrom(rows.job),
     officeHandling: officeHandlingFrom(rows.job),
     invoice: invoiceFrom(rows.job),
+    purchaseOrder: purchaseOrderFrom(rows.job),
 
     createdAt: rows.job.createdAt,
     createdBy: asUserId(rows.job.createdBy ?? ''),
@@ -515,6 +522,9 @@ export const toJobRow = (
   invoiceNumber: job.invoice?.number ?? null,
   invoicedBy: job.invoice?.recordedBy ?? null,
   invoicedAt: job.invoice?.recordedAt ?? null,
+  poNumber: job.purchaseOrder?.number ?? null,
+  poRecordedBy: job.purchaseOrder?.recordedBy ?? null,
+  poRecordedAt: job.purchaseOrder?.recordedAt ?? null,
   createdAt: job.createdAt,
   createdBy: job.createdBy,
   acceptedAt: job.acceptedAt,

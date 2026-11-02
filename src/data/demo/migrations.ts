@@ -705,6 +705,14 @@ const v37ToV38 = (data: Loose): Loose => ({
   standbySwapRequests: Array.isArray(data.standbySwapRequests) ? data.standbySwapRequests : [],
 });
 
+/** v39: INV-FLOW-1. No job has a PO number recorded yet. */
+const v38ToV39 = (data: Loose): Loose => ({
+  ...data,
+  jobs: Array.isArray(data.jobs)
+    ? (data.jobs as Record<string, unknown>[]).map((job) => ({ purchaseOrder: null, ...job }))
+    : data.jobs,
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -736,6 +744,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   35: v35ToV36,
   36: v36ToV37,
   37: v37ToV38,
+  38: v38ToV39,
 };
 
 /**

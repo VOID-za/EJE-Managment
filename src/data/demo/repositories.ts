@@ -205,6 +205,7 @@ class DemoJobRepository implements JobRepository {
       moreRepairItems: job.moreRepairItems,
       officeHandling: job.officeHandling,
       invoice: job.invoice,
+      purchaseOrder: job.purchaseOrder ?? null,
       customerId: job.customerId,
       siteId: job.siteId,
       machineId: job.machineId,
@@ -985,6 +986,16 @@ class DemoChecklistTemplateRepository implements ChecklistTemplateRepository {
 class DemoActivityRepository implements ActivityRepository {
   constructor(private readonly context: DemoContext) {}
 
+  purgeOccurredBefore(cutoff: string): Promise<number> {
+    let deleted = 0;
+    this.context.commit((draft) => {
+      const kept = draft.activity.filter((event) => event.occurredAt >= cutoff);
+      deleted = draft.activity.length - kept.length;
+      draft.activity = kept;
+    });
+    return Promise.resolve(deleted);
+  }
+
   list(jobId?: JobId): Promise<readonly ActivityEvent[]> {
     const events = this.context.read().activity;
     const filtered = jobId === undefined ? events : events.filter((event) => event.jobId === jobId);
@@ -1111,6 +1122,16 @@ class DemoOutboxRepository implements OutboxRepository {
 
 class DemoNotificationRepository implements NotificationRepository {
   constructor(private readonly context: DemoContext) {}
+
+  purgeCreatedAtOrBefore(cutoff: string): Promise<number> {
+    let deleted = 0;
+    this.context.commit((draft) => {
+      const kept = draft.notifications.filter((notification) => notification.createdAt > cutoff);
+      deleted = draft.notifications.length - kept.length;
+      draft.notifications = kept;
+    });
+    return Promise.resolve(deleted);
+  }
 
   list(recipientId: UserId): Promise<readonly AppNotification[]> {
     const notifications = this.context
@@ -1426,7 +1447,6 @@ class DemoAttendanceRepository implements AttendanceRepository {
       const existing = draft.timesheetPeriods.find(
         (row) => row.userId === period.userId && row.from === period.from && row.to === period.to,
       );
-      if (existing !== undefined && existing.submittedAt !== null) return;
       const next: TimesheetPeriod =
         existing === undefined
           ? period
@@ -1435,6 +1455,31 @@ class DemoAttendanceRepository implements AttendanceRepository {
       saved = next;
     });
     return Promise.resolve(saved);
+  }
+
+  resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+    let saved: TimesheetPeriod | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.timesheetPeriods.find((row) => row.id === period.id);
+      if (existing === undefined || existing.submittedAt === null) return;
+      const next: TimesheetPeriod = {
+        ...existing,
+        comment: period.comment,
+        submittedAt: period.submittedAt,
+        submittedBy: period.submittedBy,
+        snapshot: period.snapshot,
+      };
+      draft.timesheetPeriods = draft.timesheetPeriods.map((row) => (row === existing ? next : row));
+      saved = next;
+    });
+    return Promise.resolve(saved);
+  }
+
+  deleteCorrections(periodId: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.timesheetCorrections = draft.timesheetCorrections.filter((row) => row.periodId !== periodId);
+    });
+    return Promise.resolve();
   }
 
   submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
@@ -1519,6 +1564,19 @@ class DemoPayrollRepository implements PayrollRepository {
         .monthlySubmissions.filter((row) => row.userId === userId)
         .sort((a, b) => b.month.localeCompare(a.month)),
     );
+  }
+
+  async replaceSubmission(submission: MonthlySubmission): Promise<MonthlySubmission> {
+    let saved: MonthlySubmission | null = null;
+    this.context.commit((draft) => {
+      const existing = draft.monthlySubmissions.find(
+        (row) => row.id === submission.id && row.userId === submission.userId && row.month === submission.month,
+      );
+      if (existing === undefined) throw new Error(`no submission ${submission.id} to replace`);
+      saved = { ...existing, attendance: submission.attendance, submittedAt: submission.submittedAt, submittedBy: submission.submittedBy };
+      draft.monthlySubmissions = draft.monthlySubmissions.map((row) => (row === existing ? saved! : row));
+    });
+    return saved!;
   }
 
   async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {

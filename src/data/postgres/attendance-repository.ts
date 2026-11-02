@@ -320,10 +320,33 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
           updatedAt: sql`now()`,
           version: sql`${schema.timesheetPeriods.version} + 1`,
         },
-        setWhere: isNull(schema.timesheetPeriods.submittedAt),
+        // RESUBMIT-1: a sent period's comment may change too; sending again replaces the sent one.
       })
       .returning();
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
+  }
+
+  async resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+    const rows = await this.db
+      .update(schema.timesheetPeriods)
+      .set({
+        comment: period.comment,
+        submittedAt: period.submittedAt,
+        submittedBy: period.submittedBy,
+        snapshot: period.snapshot,
+        updatedAt: sql`now()`,
+        version: sql`${schema.timesheetPeriods.version} + 1`,
+      })
+      .where(and(eq(schema.timesheetPeriods.id, period.id), isNotNull(schema.timesheetPeriods.submittedAt)))
+      .returning();
+    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
+  }
+
+  async deleteCorrections(periodId: string): Promise<void> {
+    if (!isUuid(periodId)) return;
+    // The guard trigger allows this delete only inside a resubmission (migration 0046).
+    await this.db.execute(sql`select set_config('eje.replacing_submission', 'on', true)`);
+    await this.db.delete(schema.timesheetCorrections).where(eq(schema.timesheetCorrections.periodId, periodId));
   }
 
   async submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
