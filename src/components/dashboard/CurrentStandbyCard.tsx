@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { Card, CardHeader } from '@/components/ui';
+import { ButtonLink, Card, CardHeader } from '@/components/ui';
 import { standby } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { weekRangeLabel } from '@/components/standby/standby-format';
@@ -22,9 +21,9 @@ export const CurrentStandbyCard = () => {
         title="Standby this week"
         description={week === null || week === undefined ? undefined : weekRangeLabel(week.weekStart)}
         action={
-          <Link href="/standby" className="text-sm font-medium text-eje-700 hover:underline">
+          <ButtonLink href="/standby" variant="ghost" size="sm">
             Calendar
-          </Link>
+          </ButtonLink>
         }
       />
       {query.error !== null ? (
