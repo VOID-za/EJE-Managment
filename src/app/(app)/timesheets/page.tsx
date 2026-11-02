@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, can, completesTimesheet, userFullName, type TimesheetEntry } from '@/domain';
+import { ABSENCE_REASON_LABELS, WORKSHOP_LABEL, completesTimesheet, type TimesheetEntry } from '@/domain';
 import {
   Badge,
   Button,
@@ -11,16 +11,14 @@ import {
   Icon,
   LoadingPanel,
   QueryFailure,
-  SelectField,
   TextAreaField,
   TextField,
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
+import { readRememberedRange, rememberRange } from '@/lib/remembered-range';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { useUnsavedWork } from '@/hooks/useUnsavedWork';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
-import { TimesheetCorrections } from '@/components/timesheets/TimesheetCorrections';
 import { TimesheetLineForm } from '@/components/timesheets/TimesheetLineForm';
 import { reads, timesheets } from '@/api/endpoints';
 import { TIMESHEET_MAX_DAYS, type TimesheetDay, type TimesheetDocument } from '@/application/timesheets';
@@ -59,14 +57,22 @@ const kilometres = (value: number): string => value.toFixed(1);
  * opens exactly its month. Read once, in the browser; the page renders a
  * loading panel on the server, so nothing here can disagree with hydration.
  */
-const initialRange = (today: string): { readonly from: string; readonly to: string } => {
+/**
+ * WHERE THE PAGE OPENS: a link's dates first (Monthly Forms sends one), then
+ * the person's last From/To on this page (FILTER-MEM-1, the tester, 2 November
+ * 2026 — was TS-04's "reset on every visit"), then this month to date.
+ */
+const initialRange = (userId: string, today: string): { readonly from: string; readonly to: string } => {
   const fallback = defaultTimesheetRange(today);
   if (typeof window === 'undefined') return fallback;
   const params = new URLSearchParams(window.location.search);
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
-  if (!isCalendarDay(from) || !isCalendarDay(to) || timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS) !== null) return fallback;
-  return { from, to: to > today ? today : to };
+  if (isCalendarDay(from) && isCalendarDay(to) && timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS) === null) {
+    return { from, to: to > today ? today : to };
+  }
+  const remembered = readRememberedRange('timesheets', userId, TIMESHEET_MAX_DAYS);
+  return remembered !== null && timesheetRangeProblem(remembered.from, remembered.to, TIMESHEET_MAX_DAYS) === null ? remembered : fallback;
 };
 
 /**
@@ -130,11 +136,10 @@ const TimesheetsPage = () => {
   // Why the open line was not saved when Save or Send to office saved it first.
   const [lineRefusal, setLineRefusal] = useState<string | null>(null);
   const today = businessToday();
-  // Reset on every visit (TS-04): plain state, deliberately not remembered.
-  const [{ from: firstFrom, to: firstTo }] = useState(() => initialRange(today));
+  // Remembered per person on this device (FILTER-MEM-1).
+  const [{ from: firstFrom, to: firstTo }] = useState(() => initialRange(currentUser.id, today));
   const [from, setFrom] = useState(firstFrom);
   const [to, setTo] = useState(firstTo);
-  const [chosen, setChosen] = useState<string | null>(null);
   // The open line: which opening of it (`key` remounts the form), and its values in `draft`.
   const [open, setOpen] = useState<{ readonly key: number; readonly anchor: string; readonly correcting: boolean } | null>(null);
   const draft = useRef<TimesheetDraft | null>(null);
@@ -152,8 +157,13 @@ const TimesheetsPage = () => {
 
   const rangeProblem = timesheetRangeProblem(from, to, TIMESHEET_MAX_DAYS);
   const people = useQuery(`timesheets:people:${currentUser.id}`, () => timesheets.people());
-  // Your own timesheet first (TST-TS-2 #5): the list puts you first when you are on it.
-  const personId = chosen ?? people.data?.[0]?.id ?? null;
+  /*
+   * ALWAYS ONE'S OWN. TS-WHOSE-OFF-1 (the tester, 2 November 2026): the "Whose
+   * timesheet" block is gone from this page. Each person keeps and sends their
+   * own timesheet here; the office reads everybody's latest submission on EJE
+   * Monthly Forms. A Coordinator keeps none (TS-ROLE-1).
+   */
+  const personId = completesTimesheet(currentUser.role) ? currentUser.id : null;
   const sheet = useQuery(`timesheets:${personId ?? 'none'}:${from}:${to}`, () =>
     personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.sheet(personId, from, to),
   );
@@ -161,10 +171,6 @@ const TimesheetsPage = () => {
     personId === null || rangeProblem !== null ? Promise.resolve(null) : timesheets.document(personId, from, to),
   );
   const customers = useQuery('timesheets:customers', () => reads.customers());
-  const reviewer = can(currentUser.role, 'timesheets.reviewCorrections');
-  const pendingCorrections = useQuery(`timesheets:corrections:pending:${currentUser.id}`, () =>
-    reviewer ? timesheets.pendingCorrections() : Promise.resolve([]),
-  );
 
   // OLDEST DAY FIRST (TS-04): the first entries of the range are at the top.
   const days = sheet.data?.days ?? [];
@@ -172,9 +178,10 @@ const TimesheetsPage = () => {
   const period = sheet.data?.period ?? null;
   const sentAt = period?.submittedAt ?? null;
   const overlapsSent = period?.overlapsSent ?? [];
-  // Save and Send act on a period that has ended, was not sent, and shares no
-  // day with one that was. The server asks the same questions.
-  const periodOpen = editable && sentAt === null && overlapsSent.length === 0 && to <= today;
+  // Save and Send act on a period that has ended and shares no day with a
+  // DIFFERENT sent period. A period already sent can be saved and sent again,
+  // replacing the earlier submission (RESUBMIT-1). The server asks the same.
+  const periodOpen = editable && overlapsSent.length === 0 && to <= today;
   const savedComment = period?.comment ?? '';
   const showHistoricalNt = days.some((day) => day.normalHours > 0);
   const showHistoricalCount = days.some((day) => day.callouts > 0);
@@ -206,7 +213,6 @@ const TimesheetsPage = () => {
   const refresh = useCallback(() => {
     sheet.refetch();
     periodDocument.refetch();
-    pendingCorrections.refetch();
     // The refetch functions are stable; the queries are named for clarity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -362,6 +368,9 @@ const TimesheetsPage = () => {
   const changePeriod = (nextFrom: string, nextTo: string) => {
     setFrom(nextFrom);
     setTo(nextTo);
+    if (timesheetRangeProblem(nextFrom, nextTo, TIMESHEET_MAX_DAYS) === null) {
+      rememberRange('timesheets', currentUser.id, { from: nextFrom, to: nextTo });
+    }
     comment.current = null;
     setCommentDirty(false);
   };
@@ -386,8 +395,6 @@ const TimesheetsPage = () => {
         onDirtyChange={setLineDirty}
       />
     );
-  const viewingOther = personId !== null && personId !== currentUser.id;
-  const personName = userFullName(people.data.find((person) => person.id === personId) ?? people.data[0]!);
 
   return (
     <>
@@ -397,7 +404,7 @@ const TimesheetsPage = () => {
       />
       {!completesTimesheet(currentUser.role) && (
         <p role="status" className="mb-4 text-sm text-steel-600" data-testid="timesheet-not-required">
-          Coordinators do not complete a timesheet — only their attendance. You can read the technicians’ and Masters’ timesheets here.
+          Coordinators do not complete a timesheet — only their attendance. Everybody’s latest submitted timesheet is on EJE Monthly Forms.
         </p>
       )}
 
@@ -415,7 +422,11 @@ const TimesheetsPage = () => {
       <ConfirmDialog
         open={confirmSend}
         title={`Send the timesheet for ${formatPeriod(from, to)} to the office?`}
-        message="It is saved first, then sent. Once sent you can no longer add, change or remove a line on any day in this period, or change the comment, and no other period may include these days. The office is notified and reads the version you sent."
+        message={
+          sentAt === null
+            ? 'It is saved first, then sent. The office is notified and reads the version you sent. You can still change it and send it again; the new submission replaces this one. No other period may include these days.'
+            : 'It is saved first, then sent again. This replaces the submission the office has now; the earlier one is not kept.'
+        }
         confirmLabel="Send to office"
         busy={operation.running}
         onConfirm={() => void send()}
@@ -438,79 +449,19 @@ const TimesheetsPage = () => {
         />
       )}
 
-      {reviewer && (pendingCorrections.data ?? []).length > 0 && (
-        <Card className="mb-5" data-testid="timesheet-pending-corrections">
-          <p className="text-sm font-semibold text-steel-900">Timesheet corrections waiting for you</p>
-          <ul className="mt-2 divide-y divide-steel-100 text-sm">
-            {(pendingCorrections.data ?? []).map((pending) => (
-              <li key={pending.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span>
-                  <strong>{pending.technicianName}</strong> — {pending.periodLabel}, correction {pending.sequence}, asked for {formatDateTime(pending.requestedAt)}. Reason: {pending.reason}
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setChosen(pending.technicianId);
-                    changePeriod(pending.from, pending.to);
-                  }}
-                  data-testid="timesheet-pending-open"
-                >
-                  Open
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-4">
-          {people.data.length > 1 ? (
-            <SelectField
-              label="Whose timesheet"
-              value={personId ?? ''}
-              disabled={open !== null}
-              hint={open !== null ? 'Save or cancel the open line first.' : undefined}
-              onChange={(event) => {
-                setChosen(event.target.value);
-                // A comment being typed belongs to the sheet it was typed on.
-                comment.current = null;
-                setCommentDirty(false);
-              }}
-              options={people.data.map((person) => ({
-                value: person.id,
-                label: person.id === currentUser.id ? `${userFullName(person)} (me)` : userFullName(person),
-              }))}
-              containerClassName="w-full sm:w-72"
-              data-testid="timesheet-person"
-            />
-          ) : (
-            <div className="text-sm">
-              <p className="mb-1.5 font-medium text-steel-700">Technician</p>
-              <p className="font-semibold text-steel-900">{userFullName(people.data[0]!)}</p>
-            </div>
-          )}
           <TextField label="From" type="date" value={from} onChange={(event) => changePeriod(event.target.value, to)} containerClassName="w-44" data-testid="timesheet-from" />
           <TextField label="To" type="date" value={to} onChange={(event) => changePeriod(from, event.target.value)} containerClassName="w-44" data-testid="timesheet-to" />
-          {viewingOther && rangeProblem === null && sheet.data !== null && sheet.data !== undefined && (
-            <DownloadFileButton href={timesheets.exportUrl(personId, from, to)} fallbackName={`timesheet-${from}-${to}.csv`} label="Export CSV" />
-          )}
         </div>
         {rangeProblem !== null && (
           <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="timesheet-range-problem">
             {rangeProblem}
           </p>
         )}
-        {viewingOther && sheet.data !== null && sheet.data !== undefined && (
-          <p role="status" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-steel-700" data-testid="timesheet-read-only">
-            <Badge tone="outline" size="sm">Read-only</Badge>
-            {personName}&apos;s own timesheet. Only they enter it; you can read, preview, print and export it.
-          </p>
-        )}
         <p className="mt-3 text-xs text-steel-500">
           {editable
-            ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines until a period holding that day is sent to the office; every change is recorded.'
+            ? 'Add a line for each customer — or Workshop — you worked for on a day. You can correct or remove your own lines at any time, also after sending; send the period again and the new submission replaces the earlier one. Every change is recorded.'
             : 'This is the person’s own timesheet. Only they enter it; the office reads it, previews and prints it, and exports it.'}
         </p>
       </Card>
@@ -592,7 +543,7 @@ const TimesheetsPage = () => {
           </Button>
           {periodOpen && (
             <Button onClick={() => setConfirmSend(true)} loading={operation.running} data-testid="timesheet-send">
-              Send to office
+              {sentAt === null ? 'Send to office' : 'Send again'}
             </Button>
           )}
         </div>
@@ -612,23 +563,12 @@ const TimesheetsPage = () => {
           </p>
         )}
         <p className="mt-2 text-xs text-steel-500">
-          Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. Send to office is once per period; after that its days are read-only, and a mistake is put right by a correction the office accepts.
+          Preview and Print show the Time Sheet for these dates exactly as it prints, and change nothing. A period can be sent again at any time; the new submission replaces the one the office has, and the earlier one is not kept.
         </p>
-        {sentAt !== null && personId !== null && (
-          <TimesheetCorrections
-            user={currentUser}
-            personId={personId}
-            period={period}
-            entries={days.flatMap((day) => day.entries)}
-            owner={editable}
-            customers={customers.data ?? []}
-            onChanged={refresh}
-          />
-        )}
       </Card>
       )}
 
-      {rangeProblem !== null ? null : sheet.error !== null ? (
+      {rangeProblem !== null || personId === null ? null : sheet.error !== null ? (
         <QueryFailure code={sheet.errorCode} message={sheet.error} onRetry={sheet.refetch} />
       ) : sheet.loading || sheet.data === null || sheet.data === undefined ? (
         <LoadingPanel rows={6} label="Loading the timesheet" />
@@ -703,7 +643,8 @@ const DayRow = memo(function DayRow({
   readonly onEdit: (entry: TimesheetEntry) => void;
   readonly onRemove: (entry: TimesheetEntry) => void;
 }) {
-  const writable = editable && !day.locked;
+  // RESUBMIT-1: a day in a sent period stays editable; `locked` only marks it sent.
+  const writable = editable;
   return (
     <li className="py-3" data-testid="timesheet-day" data-date={day.date} data-recorded={day.recorded ? 'yes' : 'no'}>
       <div className="flex flex-wrap items-center justify-between gap-2">

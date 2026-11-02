@@ -2,8 +2,8 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import type { AppNotification, NotificationChannel, NotificationType } from '@/domain';
-import { deliveryStateLabel } from '@/domain';
+import type { AppNotification, NotificationCategory, NotificationChannel, NotificationType } from '@/domain';
+import { deliveryStateLabel, notificationCategory } from '@/domain';
 import {
   Badge,
   Button, ButtonLink,
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
+  AwaitingInvoiceList,
   AwaitingPoList,
   InvoicedList,
   OfficeHandlingList,
@@ -88,12 +89,27 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
  * its head), Handled, Simulated Outbox, Awaiting PO and Invoiced. A role that is
  * not the office has nothing to do in the last two and is not shown them.
  */
-type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'invoiced';
+type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'awaiting_invoice_no' | 'invoiced';
+
+/*
+ * THE INBOX, IN THREE. NOTIF-TABS-1 (the tester, 2 November 2026): Jobcards,
+ * Messages and Forms, each listing only its own notifications — classified by
+ * `notificationCategory`, which covers every type. Read and handled work
+ * exactly as before; the subtab only chooses which of them are shown.
+ */
+const INBOX_BOXES: readonly { readonly id: NotificationCategory; readonly label: string; readonly empty: string }[] = [
+  { id: 'jobcards', label: 'Jobcards', empty: 'Job assignments, transfers, submitted job cards and approval requests appear here.' },
+  { id: 'messages', label: 'Messages', empty: 'A new chat message from a colleague appears here.' },
+  { id: 'forms', label: 'Forms', empty: 'Timesheets, corrections and standby requests appear here.' },
+];
 
 const NotificationsPageContent = () => {
   const user = useCurrentUser();
   const params = useSearchParams();
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId | null) ?? 'inbox');
+  const [box, setBox] = useState<NotificationCategory>(
+    INBOX_BOXES.find((candidate) => candidate.id === params.get('box'))?.id ?? 'jobcards',
+  );
   /*
    * NOTIF-AUDIT-1: EVERY READ/HANDLED CHANGE INVALIDATES THE WHOLE APP, not just
    * this list, so the bell in the shell re-counts at the same moment. These
@@ -127,7 +143,10 @@ const NotificationsPageContent = () => {
   const handled = notifications.filter((notification) => notification.handledAt !== null);
   const unread = notifications.filter((notification) => notification.readAt === null);
 
-  const visible = tab === 'inbox' ? inbox : handled;
+  const inBox = (category: NotificationCategory) =>
+    inbox.filter((notification) => notificationCategory(notification.type) === category);
+  const visible = tab === 'inbox' ? inBox(box) : handled;
+  const boxEmpty = INBOX_BOXES.find((candidate) => candidate.id === box)?.empty ?? '';
   const officeQueue = query.data?.officeQueue ?? null;
   const handlingCount = officeQueue?.handling.length ?? 0;
 
@@ -183,6 +202,15 @@ const NotificationsPageContent = () => {
                     </Badge>
                   ),
                 },
+                {
+                  id: 'awaiting_invoice_no',
+                  label: 'Awaiting Invoice No',
+                  badge: (
+                    <Badge tone="amber" size="sm">
+                      {officeQueue.awaitingInvoiceNo.length}
+                    </Badge>
+                  ),
+                },
                 { id: 'invoiced', label: 'Invoiced' },
               ]),
         ]}
@@ -197,7 +225,41 @@ const NotificationsPageContent = () => {
         </p>
       )}
 
-      {tab === 'inbox' && officeQueue !== null && (
+      {tab === 'inbox' && (
+        <div
+          role="tablist"
+          aria-label="Inbox"
+          data-testid="inbox-boxes"
+          className="mb-4 flex max-w-full gap-0.5 overflow-x-auto rounded-[var(--radius-control)] bg-steel-100 p-0.5 sm:inline-flex"
+        >
+          {INBOX_BOXES.map((option) => {
+            const count = inBox(option.id).filter((notification) => notification.readAt === null).length;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={box === option.id}
+                data-testid={`inbox-box-${option.id}`}
+                onClick={() => setBox(option.id)}
+                className={cn(
+                  'flex min-h-11 flex-1 shrink-0 items-center justify-center gap-2 rounded-[0.45rem] px-4 text-sm font-semibold transition-colors',
+                  box === option.id ? 'bg-surface text-steel-900 shadow-sm' : 'text-steel-600 hover:text-steel-900',
+                )}
+              >
+                {option.label}
+                {count > 0 && (
+                  <Badge tone="red" size="sm">
+                    {count}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'inbox' && box === 'jobcards' && officeQueue !== null && (
         <OfficeHandlingList rows={officeQueue.handling} onChanged={query.refetch} />
       )}
 
@@ -207,22 +269,22 @@ const NotificationsPageContent = () => {
         officeQueue === null ? null : (
           <AwaitingPoList rows={officeQueue.awaitingPo} onChanged={query.refetch} />
         )
+      ) : tab === 'awaiting_invoice_no' ? (
+        officeQueue === null ? null : (
+          <AwaitingInvoiceList rows={officeQueue.awaitingInvoiceNo} onChanged={query.refetch} />
+        )
       ) : tab === 'invoiced' ? (
         officeQueue === null ? null : <InvoicedList rows={officeQueue.invoiced} />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Loading notifications" />
-      ) : visible.length === 0 && !(tab === 'inbox' && handlingCount > 0) ? (
+      ) : visible.length === 0 && !(tab === 'inbox' && box === 'jobcards' && handlingCount > 0) ? (
         <EmptyState
           title={tab === 'inbox' ? 'Nothing needs your attention' : 'Nothing handled yet'}
-          description={
-            tab === 'inbox'
-              ? 'New job assignments and approval requests will appear here.'
-              : 'Notifications you action will be filed here.'
-          }
+          description={tab === 'inbox' ? boxEmpty : 'Notifications you action will be filed here.'}
           icon={<Icon name="bell" />}
         />
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-3" data-testid={tab === 'inbox' ? `inbox-list-${box}` : 'handled-list'}>
           {visible.map((notification) => (
             <li key={notification.id}>
               <NotificationRow

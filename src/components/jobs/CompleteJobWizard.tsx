@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   canSubmitJobCard,
   checkCollectionDetails,
@@ -202,6 +202,18 @@ export const CompleteJobWizard = ({
   const step = steps[position]!;
   const isSignatureStep = step.id === 'signature';
   const isIssuedStep = step.id === 'issued';
+  /*
+   * MOBILE-TABS-1: the current step scrolled into view WITHIN the strip — the
+   * strip only, sideways, never the page (a vertical scroll would pull the page
+   * back up to the strip while the person is filling in a field below it).
+   */
+  const stepsRef = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const strip = stepsRef.current;
+    const current = strip?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (strip === null || strip === undefined || current === null || current === undefined) return;
+    strip.scrollLeft = Math.max(0, current.offsetLeft - strip.offsetLeft - (strip.clientWidth - current.offsetWidth) / 2);
+  }, [position]);
 
   /*
    * The signed job, held here until the technician has seen it.
@@ -638,15 +650,35 @@ export const CompleteJobWizard = ({
           </div>
         </div>
 
-        <ol className="eje-scrollbar mt-5 flex min-w-max items-center gap-1 overflow-x-auto pb-1">
+        {/* MOBILE-TABS-1: the strip scrolls INSIDE the card on a phone (it used to grow to its full
+            width — min-w-max on the scrolling element itself — and push the page sideways), and the
+            current step is brought into view. */}
+        <ol
+          ref={stepsRef}
+          className="eje-scrollbar mt-5 flex min-w-0 max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain pb-1"
+          data-testid="wizard-steps"
+        >
           {steps.map((candidate, order) => {
             const done = order < position;
             const active = order === position;
             return (
-              <li key={candidate.id} className="flex items-center gap-1">
-                <div
+              <li key={candidate.id} className="flex shrink-0 items-center gap-1">
+                {/* A step already done is a tab back to it (as Back goes, never past a signature);
+                    a step not reached yet cannot be skipped to. */}
+                <button
+                  type="button"
+                  data-testid={`wizard-step-${candidate.id}`}
+                  aria-current={active ? 'step' : undefined}
+                  disabled={!done || isIssuedStep}
+                  onClick={() => {
+                    if (!done || isIssuedStep) return;
+                    operation.clearError();
+                    setErrors({});
+                    setIndex(order);
+                  }}
                   className={cn(
-                    'flex items-center gap-2 rounded-full py-2 pr-4 pl-2 text-sm font-semibold whitespace-nowrap',
+                    'flex min-h-11 items-center gap-2 rounded-full py-2 pr-4 pl-2 text-sm font-semibold whitespace-nowrap disabled:cursor-default',
+                    done && !isIssuedStep && 'cursor-pointer hover:bg-verdant-100',
                     active
                       ? 'bg-action text-white'
                       : done
@@ -667,7 +699,7 @@ export const CompleteJobWizard = ({
                     {done ? <Icon name="check" className="size-3.5" /> : order + 1}
                   </span>
                   {candidate.title}
-                </div>
+                </button>
                 {order < steps.length - 1 && (
                   <span
                     className={cn('h-px w-5', done ? 'bg-verdant-300' : 'bg-steel-200')}

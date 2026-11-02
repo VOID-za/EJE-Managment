@@ -50,7 +50,6 @@ export const AttendanceDocumentView = ({ document }: { readonly document: Attend
             <td className="px-1.5 py-0.5 whitespace-nowrap">{formatDayAndDate(row.date)}</td>
             <td className="px-1.5 py-0.5">{row.status}</td>
             <td className="px-1.5 py-0.5">{row.reason}</td>
-            <td className="px-1.5 py-0.5 whitespace-pre-wrap">{row.note}</td>
           </tr>
         ))}
       </tbody>

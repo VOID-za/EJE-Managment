@@ -7,6 +7,8 @@ import {
   jobStatusLabel,
   jobTypeLabel,
   MAX_INVOICE_NUMBER_LENGTH,
+  MAX_PO_NUMBER_LENGTH,
+  poNumberProblem,
 } from '@/domain';
 import type { OfficeQueueRow } from '@/application/office-lifecycle';
 import { Badge, Button, Card, EmptyState, Icon, TextField } from '@/components/ui';
@@ -106,58 +108,107 @@ const HandlingRow = ({
   );
 };
 
-/** Awaiting PO: each with its Invoice No. field. */
-export const AwaitingPoList = ({
+/**
+ * THE TWO NUMBER STEPS. INV-FLOW-1 (2 November 2026): Awaiting PO takes the
+ * PO number and moves the job to Awaiting Invoice No; Awaiting Invoice No
+ * takes the invoice number and moves it to Invoiced. Neither number stands in
+ * for the other, and the server refuses a skipped step whatever this sends.
+ */
+type NumberStep = 'po' | 'invoice';
+
+const STEP = {
+  po: {
+    list: 'awaiting-po-list',
+    row: 'awaiting-po',
+    field: 'po-number',
+    label: 'PO number',
+    hint: "The customer's purchase order. Saving it moves the job to Awaiting Invoice No.",
+    max: MAX_PO_NUMBER_LENGTH,
+    problem: poNumberProblem,
+    failed: 'The PO number was not saved',
+    emptyTitle: 'Nothing is awaiting a PO',
+    emptyText: 'A job card the office has marked handled appears here until its PO number is recorded.',
+  },
+  invoice: {
+    list: 'awaiting-invoice-list',
+    row: 'awaiting-invoice',
+    field: 'invoice-number',
+    label: 'Invoice No.',
+    hint: 'From Sage. Saving it moves the job to Invoiced.',
+    max: MAX_INVOICE_NUMBER_LENGTH,
+    problem: invoiceNumberProblem,
+    failed: 'The invoice number was not saved',
+    emptyTitle: 'Nothing is awaiting an invoice number',
+    emptyText: 'A job appears here once its PO number is recorded, until its invoice number is.',
+  },
+} as const;
+
+const NumberStepList = ({
+  step,
   rows,
   onChanged,
 }: {
+  readonly step: NumberStep;
   readonly rows: readonly OfficeQueueRow[];
   readonly onChanged: () => void;
 }) =>
   rows.length === 0 ? (
-    <EmptyState
-      title="Nothing is awaiting a PO"
-      description="A job card the office has marked handled appears here until its invoice number is recorded."
-      icon={<Icon name="document" />}
-    />
+    <EmptyState title={STEP[step].emptyTitle} description={STEP[step].emptyText} icon={<Icon name="document" />} />
   ) : (
-    <ul className="space-y-3" data-testid="awaiting-po-list">
+    <ul className="space-y-3" data-testid={STEP[step].list}>
       {rows.map((row) => (
         <li key={row.jobId}>
-          <AwaitingPoRow row={row} onChanged={onChanged} />
+          <NumberStepRow step={step} row={row} onChanged={onChanged} />
         </li>
       ))}
     </ul>
   );
 
-const AwaitingPoRow = ({
+/** Awaiting PO: each with its PO number field. */
+export const AwaitingPoList = (props: { readonly rows: readonly OfficeQueueRow[]; readonly onChanged: () => void }) => (
+  <NumberStepList step="po" {...props} />
+);
+
+/** Awaiting Invoice No: each with its PO shown and its Invoice No. field. */
+export const AwaitingInvoiceList = (props: { readonly rows: readonly OfficeQueueRow[]; readonly onChanged: () => void }) => (
+  <NumberStepList step="invoice" {...props} />
+);
+
+const NumberStepRow = ({
+  step,
   row,
   onChanged,
 }: {
+  readonly step: NumberStep;
   readonly row: OfficeQueueRow;
   readonly onChanged: () => void;
 }) => {
   const operation = useOperation();
-  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [value, setValue] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  const config = STEP[step];
 
   const save = async () => {
-    // Without a number nothing is sent and the job stays Awaiting PO.
-    const reason = invoiceNumberProblem(invoiceNumber);
+    // Without a number nothing is sent and the job stays where it is.
+    const reason = config.problem(value);
     setProblem(reason);
     if (reason !== null) return;
-    if (await operation.run(() => jobs.recordInvoice(row.jobId, invoiceNumber))) onChanged();
+    const sent = step === 'po' ? () => jobs.recordPo(row.jobId, value) : () => jobs.recordInvoice(row.jobId, value);
+    if (await operation.run(sent)) onChanged();
   };
 
   return (
-    <Card data-testid={`awaiting-po-${row.jobNumber}`}>
+    <Card data-testid={`${config.row}-${row.jobNumber}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <JobHeading row={row} />
-        {row.officeHandling !== null && (
-          <span className="text-xs text-steel-500">
-            Handled {formatDateTime(row.officeHandling.handledAt)}
-          </span>
-        )}
+        <div className="text-right text-xs text-steel-500">
+          {row.officeHandling !== null && <p>Handled {formatDateTime(row.officeHandling.handledAt)}</p>}
+          {step === 'invoice' && row.purchaseOrder !== null && (
+            <p className="mt-1">
+              <Badge tone="blue" size="sm">PO {row.purchaseOrder.number}</Badge>
+            </p>
+          )}
+        </div>
       </div>
       <form
         className="mt-3 flex flex-wrap items-end gap-3"
@@ -168,16 +219,16 @@ const AwaitingPoRow = ({
       >
         <div className="min-w-[12rem] flex-1">
           <TextField
-            label="Invoice No."
-            value={invoiceNumber}
-            maxLength={MAX_INVOICE_NUMBER_LENGTH}
+            label={config.label}
+            value={value}
+            maxLength={config.max}
             error={problem ?? undefined}
-            hint="From Sage. Saving it moves the job to Invoiced."
+            hint={config.hint}
             onChange={(event) => {
-              setInvoiceNumber(event.target.value);
+              setValue(event.target.value);
               if (problem !== null) setProblem(null);
             }}
-            data-testid={`invoice-number-${row.jobNumber}`}
+            data-testid={`${config.field}-${row.jobNumber}`}
           />
         </div>
         <Button type="submit" loading={operation.running}>
@@ -186,11 +237,7 @@ const AwaitingPoRow = ({
       </form>
       {operation.error !== null && (
         <div className="mt-3">
-          <RuleViolationNotice
-            title="The invoice number was not saved"
-            message={operation.error}
-            violations={operation.violations}
-          />
+          <RuleViolationNotice title={config.failed} message={operation.error} violations={operation.violations} />
         </div>
       )}
     </Card>
@@ -213,6 +260,9 @@ export const InvoicedList = ({ rows }: { readonly rows: readonly OfficeQueueRow[
             <div className="flex flex-wrap items-center justify-between gap-3">
               <JobHeading row={row} />
               <div className="text-right">
+                {row.purchaseOrder !== null && (
+                  <Badge tone="blue" size="sm">PO {row.purchaseOrder.number}</Badge>
+                )}{' '}
                 <Badge tone="green" size="sm">
                   Invoice {row.invoice?.number ?? '—'}
                 </Badge>

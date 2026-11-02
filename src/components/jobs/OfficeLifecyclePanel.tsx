@@ -6,6 +6,8 @@ import {
   invoiceNumberProblem,
   isAwaitingOfficeHandling,
   MAX_INVOICE_NUMBER_LENGTH,
+  MAX_PO_NUMBER_LENGTH,
+  poNumberProblem,
   userFullName,
   type Job,
   type User,
@@ -43,6 +45,8 @@ export const OfficeLifecyclePanel = ({
   const office = can(currentUser.role, 'jobs.officeHandling');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [poNumber, setPoNumber] = useState('');
+  const [poError, setPoError] = useState<string | null>(null);
   const nameOf = (id: string) => {
     const user = users.find((candidate) => candidate.id === id);
     return user === undefined ? 'Unknown user' : userFullName(user);
@@ -50,6 +54,17 @@ export const OfficeLifecyclePanel = ({
 
   const handle = async () => {
     if (await operation.run(() => jobs.handleOffice(job.id))) onChanged();
+  };
+
+  // INV-FLOW-1: Awaiting PO leaves only on a PO number.
+  const savePo = async () => {
+    const problem = poNumberProblem(poNumber);
+    setPoError(problem);
+    if (problem !== null) return;
+    if (await operation.run(() => jobs.recordPo(job.id, poNumber))) {
+      setPoNumber('');
+      onChanged();
+    }
   };
 
   const saveInvoice = async () => {
@@ -68,13 +83,15 @@ export const OfficeLifecyclePanel = ({
     ? 'Office Handling'
     : job.status === 'awaiting_po'
       ? 'Awaiting PO'
-      : 'Invoiced';
+      : job.status === 'awaiting_invoice_no'
+        ? 'Awaiting Invoice No'
+        : 'Invoiced';
 
   return (
     <Card className="mb-5" data-testid="office-lifecycle">
       <CardHeader
         title="Office handling and invoicing"
-        description="After the technician submits, the office handles the job card, raises the invoice in Sage and records its number here."
+        description="After the technician submits, the office handles the job card, records the customer's PO number, raises the invoice in Sage and records its number here: Handled → Awaiting PO → Awaiting Invoice No → Invoiced."
         action={
           <Badge tone={job.status === 'invoiced' ? 'green' : 'amber'} size="sm">
             {stage}
@@ -104,6 +121,13 @@ export const OfficeLifecyclePanel = ({
                 : `${nameOf(job.officeHandling.handledBy)}, ${formatDateTime(job.officeHandling.handledAt)}`,
           },
           {
+            label: 'PO number',
+            value:
+              job.purchaseOrder === null
+                ? 'Not recorded'
+                : `${job.purchaseOrder.number} (${nameOf(job.purchaseOrder.recordedBy)}, ${formatDateTime(job.purchaseOrder.recordedAt)})`,
+          },
+          {
             label: 'Invoice No.',
             value: job.invoice === null ? 'Not recorded' : job.invoice.number,
           },
@@ -129,6 +153,34 @@ export const OfficeLifecyclePanel = ({
       )}
 
       {office && job.status === 'awaiting_po' && (
+        <form
+          className="mt-4 flex flex-wrap items-end gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void savePo();
+          }}
+        >
+          <div className="min-w-[14rem] flex-1">
+            <TextField
+              label="PO number"
+              value={poNumber}
+              maxLength={MAX_PO_NUMBER_LENGTH}
+              error={poError ?? undefined}
+              hint="The customer's purchase order. Saving it moves the job to Awaiting Invoice No."
+              onChange={(event) => {
+                setPoNumber(event.target.value);
+                if (poError !== null) setPoError(null);
+              }}
+              data-testid="po-number"
+            />
+          </div>
+          <Button type="submit" loading={operation.running} data-testid="save-po-number">
+            Save PO number
+          </Button>
+        </form>
+      )}
+
+      {office && job.status === 'awaiting_invoice_no' && (
         <form
           className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(event) => {

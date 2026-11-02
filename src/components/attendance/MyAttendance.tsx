@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { ABSENCE_REASON_LABELS, type AttendanceRecord } from '@/domain';
 import { Badge, Button, Card, LoadingPanel, QueryFailure, TextField } from '@/components/ui';
+import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
+import { isUsableRange, readRememberedRange, rememberRange, type DateRange } from '@/lib/remembered-range';
 import { attendance } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
@@ -25,11 +27,30 @@ const daysBefore = (date: string, days: number): string => {
  * how My Monthly Forms' "Edit my attendance" opens exactly its month. Read
  * once, in the browser; the server renders the loading panel.
  */
-const initialFrom = (today: string): string => {
-  const fallback = daysBefore(today, 30);
+/** The longest period the page shows at once — the server's own limit. */
+export const ATTENDANCE_RANGE_MAX_DAYS = 92;
+
+const daysAfter = (date: string, days: number): string => daysBefore(date, -days);
+
+/**
+ * WHERE THE PAGE OPENS. ATT-RANGE-1 and FILTER-MEM-1 (the tester, 2 November
+ * 2026): a From and a To, across months if wanted; a link's dates first (Monthly
+ * Forms sends one to a month), then the person's last choice on this page, then
+ * the last 30 days. Never past today, never more than 92 days.
+ */
+const initialRange = (userId: string, today: string): DateRange => {
+  const fallback = { from: daysBefore(today, 30), to: today };
   if (typeof window === 'undefined') return fallback;
-  const asked = new URLSearchParams(window.location.search).get('from') ?? '';
-  return isCalendarDay(asked) && asked <= today && asked >= daysBefore(today, 365) ? asked : fallback;
+  const params = new URLSearchParams(window.location.search);
+  const from = params.get('from') ?? '';
+  if (isCalendarDay(from) && from <= today && from >= daysBefore(today, 365)) {
+    const asked = params.get('to') ?? '';
+    const latest = [today, daysAfter(from, ATTENDANCE_RANGE_MAX_DAYS - 1)].sort()[0]!;
+    const to = isCalendarDay(asked) && asked >= from ? [asked, latest].sort()[0]! : latest;
+    return { from, to };
+  }
+  const remembered = readRememberedRange('attendance', userId, ATTENDANCE_RANGE_MAX_DAYS);
+  return remembered !== null && remembered.to <= today ? remembered : fallback;
 };
 
 const answerOf = (record: AttendanceRecord | null): AttendanceAnswer => ({
@@ -55,16 +76,24 @@ const answerOf = (record: AttendanceRecord | null): AttendanceAnswer => ({
 export const MyAttendance = () => {
   const currentUser = useCurrentUser();
   const today = businessToday();
-  const [from, setFrom] = useState(() => initialFrom(today));
-  const query = useQuery(`attendance:mine:${currentUser.id}:${from}`, () => attendance.mine(from, today));
+  const [range, setRange] = useState<DateRange>(() => initialRange(currentUser.id, today));
+  const { from, to } = range;
+  const usable = isUsableRange(range, ATTENDANCE_RANGE_MAX_DAYS);
+  const choose = (next: DateRange) => {
+    setRange(next);
+    if (isUsableRange(next, ATTENDANCE_RANGE_MAX_DAYS)) rememberRange('attendance', currentUser.id, next);
+  };
+  const query = useQuery(`attendance:mine:${currentUser.id}:${from}:${to}`, () =>
+    usable ? attendance.mine(from, to) : Promise.resolve(null),
+  );
   const { saver, conflict, dismissConflict } = useAttendanceAutosave('mine');
 
   const shown = (date: string, record: AttendanceRecord | null) => {
     const pending = saver?.answerFor(currentUser.id, date) ?? null;
     return { answer: pending ?? answerOf(record), unsaved: pending?.unsaved === true, refused: pending?.refused };
   };
-  const choose = (date: string, record: AttendanceRecord | null, answer: AttendanceAnswer) =>
-    saver?.change(currentUser.id, date, answer, record?.recordedAt ?? null);
+  const setAnswer = (date: string, record: AttendanceRecord | null, next: AttendanceAnswer) =>
+    saver?.change(currentUser.id, date, next, record?.recordedAt ?? null);
 
   const days = query.data?.days ?? [];
   const unrecorded = days.filter((day) => shown(day.date, day.record).answer.status === null).length;
@@ -79,16 +108,41 @@ export const MyAttendance = () => {
             and correct a day; every change is recorded.
           </p>
         </div>
-        <TextField
-          label="Show from"
-          type="date"
-          value={from}
-          max={today}
-          onChange={(event) => event.target.value.length > 0 && setFrom(event.target.value)}
-          containerClassName="w-44"
-          data-testid="my-attendance-from"
-        />
+        <div className="flex flex-wrap items-end gap-3">
+          <TextField
+            label="From"
+            type="date"
+            value={from}
+            max={to}
+            onChange={(event) => event.target.value.length > 0 && choose({ from: event.target.value, to })}
+            containerClassName="w-44"
+            data-testid="my-attendance-from"
+          />
+          <TextField
+            label="To"
+            type="date"
+            value={to}
+            min={from}
+            max={today}
+            onChange={(event) => event.target.value.length > 0 && choose({ from, to: event.target.value })}
+            containerClassName="w-44"
+            data-testid="my-attendance-to"
+          />
+          {usable && (
+            <DownloadFileButton
+              href={attendance.periodPdfUrl(from, to)}
+              label="Download PDF"
+              fallbackName="Attendance.pdf"
+              testId="my-attendance-pdf"
+            />
+          )}
+        </div>
       </div>
+      {!usable && (
+        <p role="alert" className="mt-3 text-sm font-medium text-signal-600" data-testid="my-attendance-range-error">
+          Choose a From date on or before the To date, at most {ATTENDANCE_RANGE_MAX_DAYS} days apart.
+        </p>
+      )}
       <div className="mt-3">
         {saver !== null && (
           <AutosaveStatus state={saver.state()} onRetry={() => saver.retry()} conflict={conflict} onDismissConflict={dismissConflict} />
@@ -142,7 +196,7 @@ export const MyAttendance = () => {
                       size="sm"
                       variant={answer.status === 'present' ? 'primary' : 'secondary'}
                       aria-pressed={answer.status === 'present'}
-                      onClick={() => choose(day.date, day.record, { status: 'present', absenceReason: null, note: answer.note })}
+                      onClick={() => setAnswer(day.date, day.record, { status: 'present', absenceReason: null, note: answer.note })}
                       data-testid="my-attendance-present"
                     >
                       Present
@@ -153,7 +207,7 @@ export const MyAttendance = () => {
                       aria-pressed={answer.status === 'absent'}
                       onClick={() =>
                         answer.status !== 'absent' &&
-                        choose(day.date, day.record, { status: 'absent', absenceReason: day.record?.status === 'absent' ? day.record.absenceReason : null, note: answer.note })
+                        setAnswer(day.date, day.record, { status: 'absent', absenceReason: day.record?.status === 'absent' ? day.record.absenceReason : null, note: answer.note })
                       }
                       data-testid="my-attendance-absent"
                     >
@@ -163,7 +217,7 @@ export const MyAttendance = () => {
                   {answer.status === 'absent' && (
                     <AbsenceReasonPicker
                       value={answer.absenceReason}
-                      onChoose={(reason) => choose(day.date, day.record, { status: 'absent', absenceReason: reason, note: answer.note })}
+                      onChoose={(reason) => setAnswer(day.date, day.record, { status: 'absent', absenceReason: reason, note: answer.note })}
                       onCancel={() => saver?.discard(key)}
                     />
                   )}

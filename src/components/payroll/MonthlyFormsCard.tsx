@@ -153,7 +153,7 @@ export const MonthlyFormsCard = ({
         </div>
       )}
 
-      {state.problems.length > 0 && state.submission === null && (
+      {state.problems.length > 0 && (
         <ul className="mt-3 list-disc space-y-0.5 pl-5 text-sm text-amber-eje-700" data-testid="monthly-forms-problems">
           {state.problems.map((problem) => <li key={problem}>{problem}</li>)}
         </ul>
@@ -165,7 +165,9 @@ export const MonthlyFormsCard = ({
         editing. Only the OWNER is offered these — the office reading somebody
         else's card is not, and the server refuses their writes regardless.
       */}
-      {state.owner && state.submission === null && (
+      {/* RESUBMIT-1 (the tester, 2 November 2026): a submitted month stays editable and can be
+          submitted again; the new submission replaces the one the office has. */}
+      {state.owner && (
         <div className="mt-3 flex flex-wrap gap-2" data-testid="monthly-forms-edit">
           {state.timesheetRequired && (
             <ButtonLink
@@ -177,13 +179,13 @@ export const MonthlyFormsCard = ({
               Edit my timesheet for {state.monthLabel}
             </ButtonLink>
           )}
-          <ButtonLink href={`/attendance?from=${monthBounds(month).from}`} size="sm" variant="secondary" data-testid="monthly-forms-edit-attendance">
+          <ButtonLink href={`/attendance?from=${monthBounds(month).from}&to=${monthBounds(month).to}`} size="sm" variant="secondary" data-testid="monthly-forms-edit-attendance">
             Edit my attendance for {state.monthLabel}
           </ButtonLink>
         </div>
       )}
 
-      {state.owner && state.submission === null && (
+      {state.owner && (
         <div className="mt-3 space-y-2">
           {unrecorded.length > 0 && state.canSubmit && (
             <label className="flex min-h-11 cursor-pointer items-center gap-2 py-1 text-sm text-steel-700">
@@ -210,7 +212,9 @@ export const MonthlyFormsCard = ({
             onClick={() => setConfirm(true)}
             data-testid="monthly-forms-submit"
           >
-            {focus === 'attendance' ? `Send ${state.monthLabel} to the office` : `Submit ${state.monthLabel} to the office`}
+            {state.submission !== null
+              ? `Submit ${state.monthLabel} again — replaces the submission the office has`
+              : focus === 'attendance' ? `Send ${state.monthLabel} to the office` : `Submit ${state.monthLabel} to the office`}
           </Button>
           {focus === 'attendance' && state.timesheetRequired && (
             <p className="text-xs text-steel-500" data-testid="monthly-forms-together">
@@ -225,11 +229,14 @@ export const MonthlyFormsCard = ({
 
       <ConfirmDialog
         open={confirm}
-        title={`Submit ${state.monthLabel} to the office?`}
+        title={state.submission !== null ? `Submit ${state.monthLabel} again?` : `Submit ${state.monthLabel} to the office?`}
         message={
-          state.timesheetRequired
-            ? `Your timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) go together, once. Afterwards you can no longer change that month's lines or attendance; a timesheet mistake is put right by a correction the office accepts.`
-            : `Your attendance (${state.fileNames.attendance}) goes to the office, once. Afterwards you can no longer change that month's attendance.`
+          (state.timesheetRequired
+            ? `Your timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) go together.`
+            : `Your attendance (${state.fileNames.attendance}) goes to the office.`) +
+          (state.submission !== null
+            ? ' This replaces the submission the office has now; the earlier one is not kept.'
+            : ' You can still change them afterwards and submit again; the new submission replaces this one.')
         }
         confirmLabel={state.timesheetRequired ? 'Submit both' : 'Submit attendance'}
         busy={operation.running}

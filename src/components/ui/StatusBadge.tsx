@@ -21,6 +21,7 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   // Amber: the office owes this job something — handling, then a PO.
   office_handling: 'amber',
   awaiting_po: 'amber',
+  awaiting_invoice_no: 'amber',
   // Done, and paid for on paper.
   invoiced: 'green',
   submitted: 'green',

@@ -129,6 +129,18 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
         </section>
       )}
 
+      {/* PDF-RECV-2: the parts booked in, their own section directly after Reported fault. */}
+      {model.partsReceived !== null && (
+        <section className="mt-6" data-testid="job-card-parts-received">
+          <SectionTitle>Parts received</SectionTitle>
+          <dl className="space-y-0.5 text-xs text-steel-600">
+            {model.partsReceived.rows.map((row) => (
+              <Row key={row.label} {...row} />
+            ))}
+          </dl>
+        </section>
+      )}
+
       {model.workBlocks.length > 0 && (
         <section className="mt-6 space-y-4">
           <SectionTitle>Work carried out</SectionTitle>
@@ -170,7 +182,7 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
       {(model.charges !== null || model.received !== null) && (
         <section className="mt-6">
           <SectionTitle>Labour, travel and parts</SectionTitle>
-          {/* PDF-RECV-1: the parts booked in and the collection, here and not under Job details. */}
+          {/* PDF-RECV-1: the collection, here and not under Job details. */}
           {model.received !== null && (
             <dl className="mb-3 space-y-0.5 text-xs text-steel-600" data-testid="job-card-received">
               {model.received.rows.map((row) => (

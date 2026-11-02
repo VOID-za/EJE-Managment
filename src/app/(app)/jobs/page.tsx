@@ -81,6 +81,8 @@ const QUICK_FILTERS: readonly { readonly value: StatusFilter; readonly label: st
   // handle, then the ones waiting on a PO and an invoice number.
   { value: 'office_handling', label: 'Office handling' },
   { value: 'awaiting_po', label: 'Awaiting PO' },
+  // INV-FLOW-1: the PO is recorded, the invoice number is not yet.
+  { value: 'awaiting_invoice_no', label: 'Awaiting Invoice No' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 

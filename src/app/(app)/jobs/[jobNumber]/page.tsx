@@ -92,6 +92,18 @@ const JobDetailPage = ({
    */
   const searchParams = useSearchParams();
   const [completing, setCompleting] = useState(() => searchParams.get('continue') === '1');
+  /*
+   * TR-PARTS-2: the wizard opens on the job AS THE SERVER NOW HOLDS IT. Starting
+   * completion and re-reading the job happen together, and opening the wizard
+   * on the copy read before it showed In Progress controls (add or remove a
+   * part) on a job the server had already moved to Completion — so they were
+   * refused. Until the fresh copy arrives, the wizard waits.
+   */
+  const [openingCompletion, setOpeningCompletion] = useState(false);
+  const startCompleting = () => {
+    setOpeningCompletion(true);
+    setCompleting(true);
+  };
 
   /*
    * WHERE TO COME BACK TO. PWA-4.
@@ -392,14 +404,19 @@ const JobDetailPage = ({
        * technician wander off mid-sequence, and the tablet is about to be
        * handed to a customer.
        */}
-      {completing ? (
+      {completing && openingCompletion && job.status === 'in_progress' ? (
+        <LoadingPanel rows={3} label="Opening the completion steps" />
+      ) : completing ? (
         <CompleteJobWizard
           view={view}
           // The office correcting a refused job card runs the same sequence the
           // technician ran, through the same panels, and ends by handing it
           // back for signature instead of taking one.
           mode={refusalAwaitingResolution(job) ? 'correct' : 'complete'}
-          onClose={() => setCompleting(false)}
+          onClose={() => {
+            setCompleting(false);
+            setOpeningCompletion(false);
+          }}
           onChanged={refresh}
           onSigned={() => {
             /*
@@ -451,7 +468,7 @@ const JobDetailPage = ({
             cover={submissionCover}
             users={users}
             onChanged={refresh}
-            onCompleteJob={() => setCompleting(true)}
+            onCompleteJob={startCompleting}
           />
           {/* PARTS-03/04: the courier's delivery note, separate from the priced job card. */}
           <div className="mt-2 flex flex-wrap gap-2">
@@ -520,7 +537,7 @@ const JobDetailPage = ({
 
       {/* COMPLETE-POS-1: at the bottom of the In Progress page, after the captures. */}
       {job.status === 'in_progress' && workable && (
-        <CompleteJobFooter job={job} onChanged={refresh} onCompleteJob={() => setCompleting(true)} />
+        <CompleteJobFooter job={job} onChanged={refresh} onCompleteJob={startCompleting} />
       )}
         </>
       )}

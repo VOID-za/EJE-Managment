@@ -7,7 +7,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { MonthlyFormsCard } from '@/components/payroll/MonthlyFormsCard';
 import { FinancePackagePanel } from '@/components/payroll/FinancePackagePanel';
 import { MyMonthlyForms } from '@/components/payroll/MyMonthlyForms';
-import { AttendanceExportCard } from '@/components/payroll/AttendanceExportCard';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 import { isPayrollMonth, monthOfDate, previousMonth } from '@/lib/payroll-files';
@@ -72,7 +71,6 @@ const PayrollPage = () => {
 
       {valid && <FinancePackagePanel month={month} onOpenForms={(id) => setViewing(id)} />}
       {valid && viewing !== null && <MonthlyFormsCard key={`${viewing}:${month}`} userId={viewing} month={month} />}
-      <AttendanceExportCard />
     </>
   );
 };
