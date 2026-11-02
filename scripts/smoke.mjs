@@ -4256,8 +4256,10 @@ await step('the technician changes the sent timesheet and sends it again; the of
   await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
   await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week — corrected.');
   await page.getByTestId('timesheet-send').click();
+  // Wait for the resend itself: the Sent badge is already on screen from the first send.
+  const resent = page.waitForResponse((response) => response.url().includes('/period/submit') && response.request().method() === 'POST', { timeout: 20000 });
   await page.getByRole('dialog').getByRole('button', { name: 'Send to office' }).click();
-  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
+  if ((await resent).status() !== 200) throw new Error(`sending again answered ${(await resent).status()}`);
   const from = await page.getByTestId('timesheet-from').inputValue();
   const to = await page.getByTestId('timesheet-to').inputValue();
   await signInAsMasterIfNeeded();
