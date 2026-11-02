@@ -637,6 +637,25 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/tester-fixes-check.m
 | R9 | Office: a submitted job → Mark handled → try to save without a PO → save a PO → save the invoice number | Refused without a PO; then Awaiting Invoice No; then Invoiced, in the Invoiced tab with PO and invoice number |
 | R10 | Notifications: Jobcards, Messages, Forms | Each shows only its own; unread counts right; Monthly Forms has no Export CSV |
 
+## S. The next critical batch (2 November 2026, night)
+
+Automated at 1440, 768 (touch) and 390 (touch) — `scripts/batch-check.mjs` and `scripts/standby-check.mjs`, in CI. On the real tablet and phone, on TEST data:
+
+| # | Do this | Pass looks like |
+|---|---|---|
+| S1 | A job in progress → Photos → Add Documents: a PDF, a ZIP and a Word file | All three listed; each opens/downloads |
+| S2 | Tick "Send to the customer with the signed job card" on two documents; finish the job with a TEST contact address | The email (once email is configured) carries the signed PDF and both documents |
+| S3 | The final signed job card of that job | **Download Attachments** beside the two PDF buttons; the ZIP holds the original files; a job with no documents shows no such button |
+| S4 | Overview, every role | "Standby this week" with the four places, or "No standby schedule has been published" |
+| S5 | As a technician, on your own accepted job: Cancel job | The button waits for a written reason; the job shows Cancelled with the reason; not offered once the customer signature is reached |
+| S6 | Two technicians: A asks B to swap one Saturday each (Standby → Request a swap) | B is notified; B approves; the Office is notified; nothing changes until the Office approves; then only those two days change |
+| S7 | Administration → Users | Roles read Senior Tech, Office, Technician; Add user offers Apprentice; an apprentice signs in and sees what a technician sees |
+| S8 | Add customer → Rates: Custom Rates; open the customer | A Custom Rates tab beside Notes & Documents; a job for it says the rates are missing until saved, then prices at them |
+| S9 | Attendance | From/To top-right, Preview and Print only, no Submit, no timesheet controls; nothing waits for the month to end |
+| S10 | Timesheets | Preview and Print only; a 24 Oct – 22 Nov period prints as "… Timesheet Nov 2026.pdf" |
+| S11 | My Monthly Forms | Download, Preview, Print and Submit for both forms; this month can be submitted |
+| S12 | Notifications | Jobcards, Messages, Monthly Forms, Standby; Invoiced shows "Purchase Order:…" in blue |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -652,6 +671,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | Job creation, bench quantity, job card | P1–P6 | #95 |
 | The standby calendar | Q1–Q8 | #96 |
 | The tester’s critical fixes | R1–R10 | #97–#108 |
+| The next critical batch | S1–S12 | #109–#120 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

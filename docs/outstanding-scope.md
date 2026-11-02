@@ -379,6 +379,9 @@ token. `npm run integrations:check` is what proves them the day they arrive.
 
 ## Awaiting approval, not work
 
+*2 November 2026 (night):* the next critical batch (#109–#120) is deployed in `4606315` and awaits the owner's approval and the device checks S1–S12. WA-SIM-1 (#114) needs the owner and a Meta partner: the coexistence eligibility checks, then onboarding.
+
+
 41 of the 57 open issues are `status:TESTING` — built, tested, waiting for EJE.
 Closing them is the owner's act, not ours (`docs/project-tracking.md`). The
 acceptance blockers among them are **ARCH-6** (#22, CI, now green on every
