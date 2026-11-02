@@ -3,6 +3,7 @@ import {
   canTransition,
   invoiceNumberProblem,
   isAwaitingOfficeHandling,
+  poNumberProblem,
   jobStatusLabel,
   userFullName,
   type Job,
@@ -84,11 +85,64 @@ export const handleJobCard = async (context: OperationContext, given: Job): Prom
 };
 
 /**
- * AWAITING PO -> INVOICED, on a recorded invoice number.
+ * AWAITING PO -> AWAITING INVOICE NO, on a recorded PO number. INV-FLOW-1
+ * (the tester, 2 November 2026: "Handled → Awaiting PO → Awaiting Invoice No →
+ * Invoiced"; the PO is mandatory and cannot be skipped, and an invoice number
+ * is not a substitute for it).
  *
- * Without a usable number NOTHING is written and the job stays Awaiting PO —
- * the refusal says why. A number already recorded is never replaced: the
- * operation refuses it here, and a database trigger refuses it again.
+ * Without a usable PO number NOTHING is written and the job stays Awaiting PO.
+ * A PO number already recorded is never replaced (refused here, and by a
+ * database trigger).
+ */
+export const recordPurchaseOrder = async (
+  context: OperationContext,
+  given: Job,
+  poNumber: string,
+): Promise<Job> => {
+  assertOffice(context, 'record a PO number');
+  const job = await stored(context, given);
+  if (job.purchaseOrder !== null) {
+    throw refuse(
+      `${job.jobNumber} already has a PO number.`,
+      'po_already_recorded',
+      `PO ${job.purchaseOrder.number} is recorded for it, and a PO number is never replaced.`,
+    );
+  }
+  if (job.status !== 'awaiting_po' || !canTransition(job.status, 'awaiting_invoice_no')) {
+    throw refuse(
+      `${job.jobNumber} is not awaiting a PO.`,
+      'not_awaiting_po',
+      `It is ${jobStatusLabel(job.status)}. The office marks a submitted job card handled first; the PO number is recorded after that.`,
+    );
+  }
+  const problem = poNumberProblem(poNumber);
+  if (problem !== null) {
+    throw refuse(`${job.jobNumber} needs a PO number.`, 'po_number_required', problem);
+  }
+  const number = poNumber.trim();
+  const saved = await context.repos.jobs.save({
+    ...job,
+    status: 'awaiting_invoice_no',
+    purchaseOrder: { number, recordedBy: context.actor.id, recordedAt: context.services.clock.now() },
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'job_po_recorded',
+    summary: `PO recorded — ${number}`,
+    detail: `${userFullName(context.actor)} recorded PO ${number} for ${job.jobNumber}. It is awaiting its invoice number.`,
+    changes: [{ field: 'purchaseOrder.number', from: null, to: number }],
+  });
+  return saved;
+};
+
+/**
+ * AWAITING INVOICE NO -> INVOICED, on a recorded invoice number.
+ *
+ * Only from Awaiting Invoice No, so only once the PO number is recorded
+ * (INV-FLOW-1). Without a usable number NOTHING is written and the job stays
+ * where it is — the refusal says why. A number already recorded is never
+ * replaced: the operation refuses it here, and a database trigger refuses it
+ * again.
  */
 export const recordInvoiceNumber = async (
   context: OperationContext,
@@ -104,13 +158,21 @@ export const recordInvoiceNumber = async (
       `Invoice ${job.invoice.number} is recorded for it, and an invoice number is never replaced.`,
     );
   }
-  if (job.status !== 'awaiting_po' || !canTransition(job.status, 'invoiced')) {
+  const poFirst = () =>
+    refuse(
+      `${job.jobNumber} needs its PO number first.`,
+      'po_number_required',
+      'The PO number is recorded before the invoice number; an invoice number does not replace it.',
+    );
+  if (job.status === 'awaiting_po') throw poFirst();
+  if (job.status !== 'awaiting_invoice_no' || !canTransition(job.status, 'invoiced')) {
     throw refuse(
-      `${job.jobNumber} is not awaiting a PO.`,
-      'not_awaiting_po',
-      `It is ${jobStatusLabel(job.status)}. The office marks a submitted job card handled first; the invoice number is recorded after that.`,
+      `${job.jobNumber} is not awaiting an invoice number.`,
+      'not_awaiting_invoice_no',
+      `It is ${jobStatusLabel(job.status)}. The office marks a submitted job card handled, then records the PO number; the invoice number is recorded after that.`,
     );
   }
+  if (job.purchaseOrder === null) throw poFirst();
   const problem = invoiceNumberProblem(invoiceNumber);
   if (problem !== null) {
     throw refuse(`${job.jobNumber} needs an invoice number.`, 'invoice_number_required', problem);
@@ -141,12 +203,15 @@ export interface OfficeQueueRow {
   readonly submittedAt: string | null;
   readonly officeHandling: Job['officeHandling'];
   readonly invoice: Job['invoice'];
+  readonly purchaseOrder: Job['purchaseOrder'];
 }
 
 /** The office queue, by lifecycle step. Invoiced is the most recent first. */
 export interface OfficeQueue {
   readonly handling: readonly OfficeQueueRow[];
   readonly awaitingPo: readonly OfficeQueueRow[];
+  /** INV-FLOW-1: the PO is recorded; the invoice number is not yet. */
+  readonly awaitingInvoiceNo: readonly OfficeQueueRow[];
   readonly invoiced: readonly OfficeQueueRow[];
 }
 
@@ -167,7 +232,7 @@ export const loadOfficeQueue = async (
   if (!can(actor.role, 'jobs.officeHandling')) return null;
   const [summaries, customers] = await Promise.all([
     repos.jobs.listSummaries({
-      statuses: ['office_handling', 'awaiting_delivery', 'awaiting_po', 'invoiced'],
+      statuses: ['office_handling', 'awaiting_delivery', 'awaiting_po', 'awaiting_invoice_no', 'invoiced'],
     }),
     repos.customers.list(),
   ]);
@@ -181,6 +246,7 @@ export const loadOfficeQueue = async (
     submittedAt: job.submittedAt,
     officeHandling: job.officeHandling,
     invoice: job.invoice,
+    purchaseOrder: job.purchaseOrder,
   });
   const oldestFirst = (a: string | null | undefined, b: string | null | undefined) =>
     (a ?? '').localeCompare(b ?? '');
@@ -192,6 +258,10 @@ export const loadOfficeQueue = async (
     awaitingPo: summaries
       .filter((job) => job.status === 'awaiting_po')
       .sort((a, b) => oldestFirst(a.officeHandling?.handledAt, b.officeHandling?.handledAt))
+      .map(row),
+    awaitingInvoiceNo: summaries
+      .filter((job) => job.status === 'awaiting_invoice_no')
+      .sort((a, b) => oldestFirst(a.purchaseOrder?.recordedAt, b.purchaseOrder?.recordedAt))
       .map(row),
     invoiced: summaries
       .filter((job) => job.status === 'invoiced')

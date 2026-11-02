@@ -173,7 +173,8 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       status = 'correction_pending';
       detail = 'A timesheet correction is waiting for the office’s decision';
     } else if (lastSent !== undefined && lastSent.sentAt !== null) {
-      const corrected = await correctedSince(context, person, month, lastSent.sentAt);
+      // RESUBMIT-1: a month submitted again after it went to Finance can be sent again too.
+      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
       status = corrected ? 'corrected_after_sent' : 'sent';
       detail = corrected
         ? `Corrected after it was sent to Finance on ${lastSent.sentAt.slice(0, 10)} — can be sent again, marked CORRECTED`

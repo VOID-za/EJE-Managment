@@ -239,6 +239,7 @@ export const ONLINE_ONLY: Readonly<Record<string, string>> = {
   retry_delivery: 'Sending the customer their copy again needs a connection to the mail provider.',
   // The office lifecycle (issue #73): office steps on the server, never held.
   handle_office: 'Marking a job card handled is an office step the server decides.',
+  record_po: 'Recording the PO number is an office step the server decides.',
   record_invoice:
     'An invoice number is recorded once, against the job as the server has it, so it needs a connection.',
   /*

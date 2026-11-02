@@ -650,6 +650,7 @@ export const createJob = async (
     officeHandling: null,
 
     invoice: null,
+    purchaseOrder: null,
     createdAt: now,
     createdBy: context.actor.id,
     acceptedAt: null,

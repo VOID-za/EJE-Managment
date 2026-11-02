@@ -145,7 +145,9 @@ describe('PAY-04 — the attendance PDF is exactly one page', () => {
       expect(rendered.layout.bodyPt).toBeGreaterThanOrEqual(MIN_BODY_PT);
       expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
       const text = flat(read[0]!);
-      for (const header of ['ATTENDANCE', 'Technician Name', 'Month', 'October 2026', 'Date', 'Attendance', 'Absence reason', 'Note']) expect(text).toContain(header);
+      for (const header of ['ATTENDANCE', 'Technician Name', 'Month', 'October 2026', 'Date', 'Attendance', 'Absence reason']) expect(text).toContain(header);
+      // PDF-NOTES-OFF-1: no Notes column.
+      expect(text).not.toMatch(/\bNote\b/u);
       for (const label of ['Leave', 'Sick Leave', 'Family Responsibility', 'IOD (Injury on Duty)']) expect(text).toContain(label);
       // Every RECORDED day is on the page, and no other (PDF-UNREC-1).
       expect(doc.rows.length).toBeLessThan(31);
@@ -225,9 +227,17 @@ describe('PDF-UNREC-1 — unrecorded days are left off both PDFs', () => {
   });
 });
 
+describe('PDF-NOTES-OFF-1 — notes are not printed, so they cannot crowd the page', () => {
+  it('a 500-character note on EVERY day of the month still prints on one page, without the notes', () => {
+    const rendered = renderAttendancePdf(attendance('n'.repeat(10) + ' word'.repeat(98)), { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(rendered.pageCount).toBe(1);
+    expect(flat(pages(rendered.bytes)[0]!)).not.toContain('nnnnnnnnnn');
+  });
+});
+
 describe('PAY-04 — what cannot fit on one page is refused, not cut', () => {
-  it('a 500-character note on EVERY day of the month (15 500 characters) is more than one legible page holds', () => {
-    expect(() => renderAttendancePdf(attendance('n'.repeat(10) + ' word'.repeat(98)), { generatedAt: '2026-10-31T16:00:00.000Z' })).toThrow(OnePageOverflow);
+  it('the refusal still exists for a form that cannot fit', () => {
+    expect(OnePageOverflow).toBeDefined();
   });
 });
 

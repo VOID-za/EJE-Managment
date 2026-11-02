@@ -555,6 +555,7 @@ export const jobs = {
   /** Issue #73: the office has the submitted job card. Office Handling -> Awaiting PO. */
   handleOffice: (jobId: string) => jobAction(jobId, 'handle_office'),
   /** Issue #73: the invoice number from Sage. Awaiting PO -> Invoiced. */
+  recordPo: (jobId: string, poNumber: string) => jobAction(jobId, 'record_po', { poNumber }),
   recordInvoice: (jobId: string, invoiceNumber: string) =>
     jobAction(jobId, 'record_invoice', { invoiceNumber }),
   /**
@@ -1247,7 +1248,8 @@ export const attendance = {
     expectedRecordedAt?: string | null;
   }, options: { readonly keepalive?: boolean } = {}) =>
     apiPost<AttendanceRecord>('/api/attendance', input, newIdempotencyKey(), options),
-  exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
+  /** ATT-RANGE-1: one's own attendance for a From/To period, as a PDF. */
+  periodPdfUrl: (from: string, to: string) => `/api/attendance/pdf${search({ from, to })}`,
 };
 
 /** The standby calendar. STANDBY-1…8. */

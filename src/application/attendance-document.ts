@@ -12,7 +12,16 @@ import {
   type User,
 } from '@/domain';
 import { businessToday } from '@/lib/business-time';
-import { attendanceMonthFileName, documentNameOf, isPayrollMonth, monthBounds, monthTitle } from '@/lib/payroll-files';
+import {
+  attendanceMonthFileName,
+  attendancePeriodFileName,
+  documentNameOf,
+  isPayrollMonth,
+  monthBounds,
+  monthsOfPeriod,
+  monthTitle,
+  periodTitle,
+} from '@/lib/payroll-files';
 import { formatDayAndDate, weekdayOf } from '@/lib/timesheet-dates';
 import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
@@ -73,6 +82,8 @@ export interface AttendanceDocument {
   readonly inForce: boolean;
   /** Days the office changed after the month was submitted. */
   readonly changedAfterSubmission: readonly IsoDate[];
+  /** Set for a From/To period rather than one month (ATT-RANGE-1). */
+  readonly period?: { readonly from: IsoDate; readonly to: IsoDate };
 }
 
 const daysOf = (month: string): IsoDate[] => {
@@ -222,6 +233,53 @@ export const loadAttendanceDocument = async (
           : changed.length === 0 ? 'As submitted' : `Corrected by the office after submission (${changed.length} day${changed.length === 1 ? '' : 's'}: ${changed.map(formatDayAndDate).join(', ')})`,
     inForce: version === 'current' || changed.length === 0,
     changedAfterSubmission: changed,
+  };
+};
+
+/** The longest attendance period a PDF covers, as the page's own range. */
+export const ATTENDANCE_PERIOD_MAX_DAYS = 92;
+
+/**
+ * THE ATTENDANCE FOR A CHOSEN FROM/TO PERIOD, as a document. ATT-RANGE-1 and
+ * PDF-NAME-1 (the tester, 2 November 2026): any period up to 92 days, across
+ * months, oldest day first, recorded days only (PDF-UNREC-1), named for every
+ * month it spans — "JC Atten Oct-Nov.pdf". One's own attendance, as it stands.
+ */
+export const loadAttendancePeriodDocument = async (
+  context: OperationContext,
+  from: string,
+  to: string,
+): Promise<AttendanceDocument> => {
+  const person = await findPayrollPerson(context, context.actor.id);
+  const days: AttendanceSnapshotDay[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
+    throw refuse('That is not a date range.', 'invalid_range', 'Choose a From date on or before the To date.');
+  }
+  const span = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+  if (span > ATTENDANCE_PERIOD_MAX_DAYS) {
+    throw refuse('That period is too long.', 'range_too_long', `Choose at most ${ATTENDANCE_PERIOD_MAX_DAYS} days.`);
+  }
+  const [records, settings] = await Promise.all([
+    context.repos.attendance.listRecords(from, to, person.id),
+    context.repos.settings.get(),
+  ]);
+  for (const month of monthsOfPeriod(from, to)) {
+    days.push(...attendanceSnapshotDays(month, records).filter((day) => day.date >= from && day.date <= to));
+  }
+  const today = businessToday(new Date(context.services.clock.now()));
+  return {
+    companyName: settings.companyName,
+    technicianName: userFullName(person),
+    fileName: attendancePeriodFileName(documentNameOf(person), from, to),
+    month: from.slice(0, 7),
+    monthLabel: periodTitle(from, to),
+    ...buildAttendanceRows(days, today),
+    submittedAt: null,
+    submittedByName: null,
+    versionLabel: 'As recorded now',
+    inForce: true,
+    changedAfterSubmission: [],
+    period: { from, to },
   };
 };
 

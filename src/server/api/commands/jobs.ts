@@ -27,7 +27,7 @@ import * as unsigned from '@/application/unsigned-delivery';
 import { acceptOfflineSignature } from '@/application/offline-signature';
 import { WorkflowError } from '@/application/errors';
 import { createJob, releaseDraft } from '@/application/job-creation';
-import { handleJobCard, recordInvoiceNumber } from '@/application/office-lifecycle';
+import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from '@/application/office-lifecycle';
 import { editJobDetails } from '@/application/job-details';
 import { setRepairItems } from '@/application/repair-items';
 import { forbidden, notFound } from '../errors';
@@ -849,6 +849,14 @@ export const JOB_COMMANDS: CommandRegistry = {
    * Awaiting PO. Both are the office's (`jobs.officeHandling`).
    */
   handle_office: simple((context, job) => handleJobCard(context.operation, job)),
+  // INV-FLOW-1: Awaiting PO -> Awaiting Invoice No, on the PO number only.
+  record_po: command({
+    schema: z.object({ poNumber: z.string().max(500) }).strict(),
+    async run(context, input: { poNumber: string }, target) {
+      const job = await loadVisibleJob(context, target);
+      return recordPurchaseOrder(context.operation, job, input.poNumber);
+    },
+  }),
   record_invoice: command({
     schema: z.object({ invoiceNumber: z.string().max(500) }).strict(),
     async run(context, input: { invoiceNumber: string }, target) {

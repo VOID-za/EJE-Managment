@@ -1,6 +1,6 @@
 import type { DeliveryNoteModel } from '@/lib/job-card/delivery-note';
 import { PdfBuilder, textWidth } from '@/lib/pdf/writer';
-import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
+import { fitSignatureBox, signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
 import {
   BAND,
   BODY,
@@ -150,7 +150,8 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
     if (mark.kind === 'path') {
       sheet.pdf.normalisedPath(
         mark.path,
-        { x: x + 10, y: boxBottom + 7, width: half - 20, height: boxHeight - 14 },
+        // SIG-MOBILE-1: the stored 4:1 signature space, drawn at 4:1 inside the box.
+        fitSignatureBox({ x: x + 10, y: boxBottom + 7, width: half - 20, height: boxHeight - 14 }),
         { colour: SIGNATURE_INK, width: 1.5 },
       );
     } else {

@@ -16,11 +16,15 @@ import { renderOnePageForm, type FormLayout } from './one-page-form';
  * download and the Finance package are the same document.
  */
 
+/*
+ * PDF-NOTES-OFF-1 (the tester, 2 November 2026): no Notes column. Since
+ * ATT-OWN-1 a person records Present or Absent with its reason, and there is no
+ * note to print; the column is gone from the PDF and its preview alike.
+ */
 export const ATTENDANCE_PDF_COLUMNS = [
-  { key: 'date', header: 'Date', weight: 82, align: 'left' },
-  { key: 'status', header: 'Attendance', weight: 70, align: 'left' },
-  { key: 'reason', header: 'Absence reason', weight: 110, align: 'left' },
-  { key: 'note', header: 'Note', weight: 253, align: 'left' },
+  { key: 'date', header: 'Date', weight: 150, align: 'left' },
+  { key: 'status', header: 'Attendance', weight: 120, align: 'left' },
+  { key: 'reason', header: 'Absence reason', weight: 245, align: 'left' },
 ] as const;
 
 export interface RenderedAttendance {
@@ -51,7 +55,7 @@ export const renderAttendancePdf = (doc: AttendanceDocument, options: { readonly
     title: 'ATTENDANCE',
     fields: [
       ['Technician Name', doc.technicianName],
-      ['Month', doc.monthLabel],
+      [doc.period === undefined ? 'Month' : 'Period', doc.monthLabel],
       [
         'Status',
         doc.submittedAt === null
@@ -62,7 +66,7 @@ export const renderAttendancePdf = (doc: AttendanceDocument, options: { readonly
     ],
     columns: ATTENDANCE_PDF_COLUMNS.map((column) => ({ ...column })),
     rows: doc.rows.map((row) => ({
-      cells: { date: formatDayAndDate(row.date), status: row.status, reason: row.reason, note: row.note },
+      cells: { date: formatDayAndDate(row.date), status: row.status, reason: row.reason },
       muted: !row.recorded,
     })),
     notes: [attendanceSummaryLine(doc)],

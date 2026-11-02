@@ -13,7 +13,7 @@ import type { IsoDate, IsoDateTime, Job, User } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { businessDateOf } from '@/lib/business-time';
 import { confirmJobCardDelivery } from './job-operations';
-import { handleJobCard, recordInvoiceNumber } from './office-lifecycle';
+import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
 import type { AppServices } from './context';
 
 /**
@@ -106,9 +106,12 @@ export const finishOfficeLifecycle = async (
   context: OperationContext,
   job: Job,
   invoiceNumber = 'INV-TEST-1',
+  poNumber = 'PO-TEST-1',
 ): Promise<Job> => {
+  // INV-FLOW-1: Handled -> Awaiting PO -> Awaiting Invoice No -> Invoiced.
   const handled = await handleJobCard(context, job);
-  return recordInvoiceNumber(context, handled, invoiceNumber);
+  const withPo = await recordPurchaseOrder(context, handled, poNumber);
+  return recordInvoiceNumber(context, withPo, invoiceNumber);
 };
 
 /**

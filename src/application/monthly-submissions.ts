@@ -117,7 +117,6 @@ export const loadMonthlyForms = async (
   const unrecorded = unrecordedWeekdays(days, today);
 
   const problems: string[] = [];
-  if (submission !== null) problems.push(`${monthTitle(month)} was submitted to the office ${submission.submittedAt.slice(0, 10)}.`);
   if (to > today) problems.push(`${monthTitle(month)} has not ended yet: it can be submitted on its last day, ${formatDayAndDate(to)}, or after.`);
   if (blocking.length > 0) {
     problems.push(
@@ -176,9 +175,6 @@ export const submitMonth = async (
     throw refuse('You can only submit your own month.', 'not_permitted', 'Each person submits their own month; nobody submits another person’s attendance or timesheet.');
   }
   const state = await loadMonthlyForms(context, technicianId, month);
-  if (state.submission !== null) {
-    throw refuse(`${state.monthLabel} has already been submitted to the office.`, 'month_submitted', 'It was submitted once; the office has it.');
-  }
   if (!state.monthEnded) {
     throw refuse(`${state.monthLabel} has not ended yet.`, 'month_not_ended', `Submit it on ${formatDayAndDate(state.to)} or after.`);
   }
@@ -207,20 +203,29 @@ export const submitMonth = async (
   const person = await findPayrollPerson(context, technicianId);
   // The timesheet half: the exact month period, sent now unless it already
   // was. None for a Coordinator (TS-ROLE-1).
+  /*
+   * SUBMITTED AGAIN: THE NEW SUBMISSION REPLACES THE LAST ONE. RESUBMIT-1 (the
+   * tester, 2 November 2026). The same row is rewritten with the month as it
+   * stands now — no earlier copy, PDF or history of it is kept — and the
+   * timesheet half is sent again with it. The attendance and timesheet lines
+   * themselves are not touched.
+   */
+  const previous = await context.repos.payroll.findSubmission(person.id, month);
   let period = state.timesheetRequired ? await context.repos.attendance.findPeriod(person.id, state.from, state.to) : null;
-  if (state.timesheetRequired && (period === null || period.submittedAt === null)) {
+  if (state.timesheetRequired && (period === null || period.submittedAt === null || previous !== null)) {
     period = await submitTimesheetPeriod(context, technicianId, state.from, state.to, { notify: false });
   }
   const now = context.services.clock.now();
-  const saved = await context.repos.payroll.createSubmission({
-    id: context.services.ids.next('msb'),
+  const next = {
+    id: previous?.id ?? context.services.ids.next('msb'),
     userId: person.id,
     month,
     timesheetPeriodId: period?.id ?? null,
     attendance: await attendanceSnapshotFor(context, person, month),
     submittedAt: now,
     submittedBy: context.actor.id,
-  });
+  };
+  const saved = previous === null ? await context.repos.payroll.createSubmission(next) : await context.repos.payroll.replaceSubmission(next);
   if (saved === null) {
     throw refuse(`${state.monthLabel} has already been submitted to the office.`, 'month_submitted', 'It was submitted once; the office has it.');
   }

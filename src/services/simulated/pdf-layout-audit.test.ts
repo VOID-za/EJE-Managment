@@ -206,7 +206,7 @@ describe('the monthly forms, with the longest content', () => {
     expect(present(rendered.bytes, 'Hoërskool Pretoria-Oos')).toBe(true);
   });
 
-  it('the attendance form keeps the whole footer and every long note', () => {
+  it('the attendance form keeps the whole footer, and prints no notes (PDF-NOTES-OFF-1)', () => {
     const note = 'Booked off by the clinic in Pretoria-Oos; follow-up on Thursday morning';
     const doc: AttendanceDocument = {
       companyName: 'EJE Industrial Services (Pty) Ltd',
@@ -234,6 +234,6 @@ describe('the monthly forms, with the longest content', () => {
     expect(rendered.pageCount).toBe(1);
     expect(faults(rendered.bytes, 28)).toEqual([]);
     expect(present(rendered.bytes, 'Generated')).toBe(true);
-    expect(present(rendered.bytes, note)).toBe(true);
+    expect(present(rendered.bytes, note)).toBe(false);
   });
 });

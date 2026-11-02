@@ -248,6 +248,7 @@ export type JobSummary = Pick<
   // list jobs by these, and neither is a price.
   | 'officeHandling'
   | 'invoice'
+  | 'purchaseOrder'
   | 'customerId'
   | 'siteId'
   | 'machineId'
@@ -310,6 +311,7 @@ export const toJobSummary = (job: JobSummary): JobSummary => ({
   moreRepairItems: job.moreRepairItems,
   officeHandling: job.officeHandling,
   invoice: job.invoice,
+  purchaseOrder: job.purchaseOrder,
   customerId: job.customerId,
   siteId: job.siteId,
   machineId: job.machineId,

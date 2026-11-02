@@ -11,6 +11,20 @@
 /** The longest invoice number accepted. Sage numbers are short; this is generous. */
 export const MAX_INVOICE_NUMBER_LENGTH = 60;
 
+/** The longest PO number accepted. INV-FLOW-1. */
+export const MAX_PO_NUMBER_LENGTH = 60;
+
+/** Null for a usable PO number, otherwise the reason it is not one. INV-FLOW-1. */
+export const poNumberProblem = (value: string): string | null => {
+  const number = value.trim();
+  if (number.length === 0) {
+    return "Enter the customer's PO number. Without it the job stays Awaiting PO.";
+  }
+  if (number.length > MAX_PO_NUMBER_LENGTH) return `A PO number is at most ${MAX_PO_NUMBER_LENGTH} characters.`;
+  if (/[\u0000-\u001f\u007f]/u.test(number)) return 'A PO number cannot contain line breaks or control characters.';
+  return null;
+};
+
 /** Null for a usable invoice number, otherwise the reason it is not one. */
 export const invoiceNumberProblem = (value: string): string | null => {
   const number = value.trim();

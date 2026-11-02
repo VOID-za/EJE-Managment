@@ -63,3 +63,42 @@ export const signatureFacsimile = (strokeData: string): SignatureFacsimile =>
   strokeData.startsWith('M')
     ? { kind: 'path', path: strokeData }
     : { kind: 'name', text: strokeData.replace(/^demo-signature-/, '').replace(/-/g, ' ') };
+
+/*
+ * ONE SHAPE FOR EVERY SIGNATURE. SIG-MOBILE-1 (the tester, 2 November 2026).
+ *
+ * A path is stored in a unit square, and every place that shows one — the
+ * on-screen job card, the delivery note and the PDFs — draws it into a wide
+ * box. The pad used to normalise x by ITS width and y by ITS height, so the
+ * shape of the pad was lost: a desktop pad is about 4:1, which matched the
+ * box, but a phone pad is about 1.6:1, and its signature came out squashed to
+ * a fraction of its height — "only about one line". Now the pad maps its
+ * drawing into a fixed 4:1 signature space, scaled the same both ways and
+ * centred, and every renderer draws that space at 4:1. Nothing is distorted
+ * on any screen.
+ */
+export const SIGNATURE_ASPECT = 4;
+
+const fitPad = (width: number, height: number) => {
+  const scale = Math.min(SIGNATURE_ASPECT / width, 1 / height);
+  return { scale, offsetX: (SIGNATURE_ASPECT - width * scale) / 2, offsetY: (1 - height * scale) / 2 };
+};
+
+/** A point on a pad of the given pixel size, in the stored signature space. */
+export const padToSignature = (x: number, y: number, width: number, height: number): SignaturePoint => {
+  const { scale, offsetX, offsetY } = fitPad(width, height);
+  return { x: (offsetX + x * scale) / SIGNATURE_ASPECT, y: offsetY + y * scale };
+};
+
+/** The inverse: a stored point, in pixels on a pad of the given size. */
+export const signatureToPad = (point: SignaturePoint, width: number, height: number): SignaturePoint => {
+  const { scale, offsetX, offsetY } = fitPad(width, height);
+  return { x: (point.x * SIGNATURE_ASPECT - offsetX) / scale, y: (point.y - offsetY) / scale };
+};
+
+/** The largest 4:1 box inside `box`, centred: where a renderer draws a stored signature. */
+export const fitSignatureBox = <T extends { x: number; y: number; width: number; height: number }>(box: T): T => {
+  const width = Math.min(box.width, box.height * SIGNATURE_ASPECT);
+  const height = width / SIGNATURE_ASPECT;
+  return { ...box, x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+};

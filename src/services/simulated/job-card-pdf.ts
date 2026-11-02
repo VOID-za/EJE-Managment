@@ -1,4 +1,4 @@
-import { signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
+import { fitSignatureBox, signatureFacsimile, SIGNATURE_INK } from '@/lib/signature';
 import { buildJobCardModel, type ChargeRow, type JobCardModel, type LabelValue } from '@/lib/job-card/model';
 import { PdfBuilder, textWidth } from '@/lib/pdf/writer';
 import { displaySize, type PreparedPhoto } from '@/lib/pdf/image';
@@ -217,6 +217,18 @@ const fault = (sheet: Sheet, model: JobCardModel): void => {
   sheet.move(GAP.section - 3);
 };
 
+/**
+ * PARTS RECEIVED, ITS OWN SECTION, DIRECTLY AFTER REPORTED FAULT. PDF-RECV-2
+ * (the tester, 2 November 2026). Printed whether or not there is a reported
+ * fault (a Test & Repair job need not have one), and once.
+ */
+const partsReceived = (sheet: Sheet, model: JobCardModel): void => {
+  if (model.partsReceived === null) return;
+  sheet.sectionTitle('Parts received');
+  labelValueRows(sheet, model.partsReceived.rows, MARGIN, CONTENT_WIDTH);
+  sheet.move(GAP.section - 4);
+};
+
 const work = (sheet: Sheet, model: JobCardModel): void => {
   if (model.workBlocks.length === 0) return;
   sheet.sectionTitle('Work carried out');
@@ -290,9 +302,10 @@ const charges = (sheet: Sheet, model: JobCardModel): void => {
   sheet.sectionTitle('Labour, travel and parts');
 
   /*
-   * PDF-RECV-1 (the tester, 1 November 2026): the parts booked in and the
-   * collection are printed HERE, first, and no longer under Job details. A
-   * document without prices (a courier's copy) still prints them.
+   * PDF-RECV-1 (the tester, 1 November 2026): the collection is printed HERE,
+   * first, and not under Job details. A document without prices (a courier's
+   * copy) still prints it. The parts booked in have their own section since
+   * PDF-RECV-2 (`partsReceived`, after Reported fault).
    */
   if (model.received !== null) {
     labelValueRows(sheet, model.received.rows, MARGIN, CONTENT_WIDTH);
@@ -715,7 +728,8 @@ const acceptance = (sheet: Sheet, model: JobCardModel): void => {
     // the on-screen job card use.
     sheet.pdf.normalisedPath(
       mark.path,
-      { x: rightX + 10, y: boxBottom + 7, width: columnWidth - 20, height: boxHeight - 14 },
+      // SIG-MOBILE-1: the stored 4:1 signature space, drawn at 4:1 inside the box.
+      fitSignatureBox({ x: rightX + 10, y: boxBottom + 7, width: columnWidth - 20, height: boxHeight - 14 }),
       { colour: SIGNATURE_INK, width: 1.5 },
     );
   } else {
@@ -809,6 +823,7 @@ export const renderJobCardPdf = (
   header(sheet, model);
   parties(sheet, model);
   fault(sheet, model);
+  partsReceived(sheet, model);
   work(sheet, model);
   notes(sheet, model);
   charges(sheet, model);

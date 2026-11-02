@@ -38,6 +38,7 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   // filtered — as Office Handling; see `jobStatusLabel` and `statusMatches`.
   'office_handling',
   'awaiting_po',
+  'awaiting_invoice_no',
   'invoiced',
   // Historical: a job finished under the earlier lifecycle, where a confirmed
   // delivery closed it. Kept as a filter so those records stay findable.
@@ -68,6 +69,7 @@ export const JOB_PROGRESS_STAGES: readonly JobStatus[] = [
   // The office lifecycle after the technician submits (issue #73).
   'office_handling',
   'awaiting_po',
+  'awaiting_invoice_no',
   'invoiced',
 ];
 
@@ -176,8 +178,10 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   awaiting_delivery: ['awaiting_po'],
   // The office marks it handled; the invoice is being raised in Sage.
   office_handling: ['awaiting_po'],
+  // INV-FLOW-1: only a recorded PO number moves it on — never an invoice number.
+  awaiting_po: ['awaiting_invoice_no'],
   // Only a recorded invoice number moves it on.
-  awaiting_po: ['invoiced'],
+  awaiting_invoice_no: ['invoiced'],
   // The end of the lifecycle. Terminal, like `closed` before it.
   invoiced: [],
   // Historical only. Nothing transitions INTO this state any more; the edges
@@ -218,6 +222,8 @@ export const jobStatusLabel = (status: JobStatus): string => {
       return 'Office Handling';
     case 'awaiting_po':
       return 'Awaiting PO';
+    case 'awaiting_invoice_no':
+      return 'Awaiting Invoice No';
     case 'invoiced':
       return 'Invoiced';
     case 'submitted':
@@ -259,6 +265,7 @@ export const ISSUED_STATUSES: readonly JobStatus[] = [
   'awaiting_delivery',
   'office_handling',
   'awaiting_po',
+  'awaiting_invoice_no',
   'invoiced',
 ];
 
@@ -811,10 +818,19 @@ export const isFinalized = (job: Pick<Job, 'signature' | 'status'>): boolean =>
  * completion is refused for it (`not_applicable_to_job_type`), so locking its
  * parts at `completion` would leave no way to record them at all. Its parts are
  * locked by the signature, as before.
+ *
+ * AND A TEST & REPAIR JOB IN THE COMPLETION WIZARD. TR-PARTS-2 (the tester,
+ * 2 November 2026): its completion step is where the technician lists the
+ * parts used on the repair, so the Parts card there has to add and remove.
+ * Locking them at `completion` made that card read-only. They lock at
+ * `customer_signature` instead — before the customer is shown the job card —
+ * and the signature freezes them for good, as for every job.
  */
-export const partsLockedAfterCompletion = (job: Pick<Job, 'jobType' | 'status'>): boolean =>
-  !getJobTypeDefinition(job.jobType).officeProcessed &&
-  (job.status === 'completion' || job.status === 'customer_signature');
+export const partsLockedAfterCompletion = (job: Pick<Job, 'jobType' | 'status'>): boolean => {
+  if (getJobTypeDefinition(job.jobType).officeProcessed) return false;
+  if (job.jobType === 'test_and_repair') return job.status === 'customer_signature';
+  return job.status === 'completion' || job.status === 'customer_signature';
+};
 
 export const canEditJobRecord = (
   role: UserRole,

@@ -55,3 +55,35 @@ export interface AppNotification {
    */
   readonly channels: readonly NotificationChannel[];
 }
+
+/**
+ * WHICH INBOX SUBTAB A NOTIFICATION BELONGS TO. NOTIF-TABS-1 (the tester,
+ * 2 November 2026): Jobcards, Messages and Forms.
+ *
+ * A Record over every type, so adding a notification type without deciding
+ * its subtab does not compile. Register approvals (a customer change, a
+ * machine, a document) are office work raised from job cards and sit with
+ * them; the standby calendar's requests and changes are forms, with the
+ * timesheet ones.
+ */
+export type NotificationCategory = 'jobcards' | 'messages' | 'forms';
+
+export const NOTIFICATION_CATEGORY: Readonly<Record<NotificationType, NotificationCategory>> = {
+  job_assigned: 'jobcards',
+  job_transferred: 'jobcards',
+  job_submitted: 'jobcards',
+  signature_refused: 'jobcards',
+  customer_change_request: 'jobcards',
+  machine_approval_request: 'jobcards',
+  document_approval_request: 'jobcards',
+  chat_message: 'messages',
+  timesheet_submitted: 'forms',
+  timesheet_correction_requested: 'forms',
+  timesheet_correction_decided: 'forms',
+  standby_swap_requested: 'forms',
+  standby_swap_decided: 'forms',
+  standby_assignment_changed: 'forms',
+};
+
+export const notificationCategory = (type: NotificationType): NotificationCategory =>
+  NOTIFICATION_CATEGORY[type];

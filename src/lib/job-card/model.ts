@@ -95,12 +95,17 @@ export interface JobCardModel {
   readonly jobDetails: readonly LabelValue[];
 
   /**
-   * THE PARTS BOOKED IN, AND HOW THEY GO BACK. PDF-RECV-1 (the tester,
-   * 1 November 2026): printed in the LABOUR, TRAVEL AND PARTS section, not
-   * under Job details, where "Part 1 received … Collection" used to sit. One
-   * part reads Part number / Unit / Quantity received; several read one
-   * "Part N received" row each, in order; then Collection (and Waybill). Null
-   * when there is nothing to say. Descriptions and quantities are unchanged.
+   * THE PARTS BOOKED IN. PDF-RECV-2 (the tester, 2 November 2026): their OWN
+   * section, "Parts received", directly after Reported fault — no longer inside
+   * Labour, travel and parts (PDF-RECV-1, 1 November), nor under Job details.
+   * One part reads Part number / Unit / Quantity received; several read one
+   * "Part N received" row each, in order. Null when none were booked in.
+   */
+  readonly partsReceived: { readonly rows: readonly LabelValue[] } | null;
+
+  /**
+   * HOW THE GOODS GO BACK: Collection (and Waybill), printed first in Labour,
+   * travel and parts (PDF-RECV-1). Null when the job type is not collected.
    */
   readonly received: { readonly rows: readonly LabelValue[] } | null;
 
@@ -229,11 +234,11 @@ export interface JobCardModelInput {
 }
 
 /**
- * The parts booked in and how they go back, for the LABOUR, TRAVEL AND PARTS
- * section (PDF-RECV-1). One part reads exactly as it always has (Part number,
- * Unit, Quantity received); several (TR-PARTS-1) read one row each, in order.
+ * The parts booked in, for their own "Parts received" section (PDF-RECV-2).
+ * One part reads exactly as it always has (Part number, Unit, Quantity
+ * received); several (TR-PARTS-1) read one row each, in order.
  */
-const receivedOf = (job: JobCardModelInput['job']): JobCardModel['received'] => {
+const partsReceivedOf = (job: JobCardModelInput['job']): JobCardModel['partsReceived'] => {
   const definition = getJobTypeDefinition(job.jobType);
   const items = repairItemsOf(job);
   const rows: LabelValue[] = [
@@ -254,6 +259,14 @@ const receivedOf = (job: JobCardModelInput['job']): JobCardModel['received'] => 
             .join(' '),
         }))
       : []),
+  ];
+  return rows.length === 0 ? null : { rows };
+};
+
+/** How the goods go back — Collection and Waybill — for Labour, travel and parts (PDF-RECV-1). */
+const receivedOf = (job: JobCardModelInput['job']): JobCardModel['received'] => {
+  const definition = getJobTypeDefinition(job.jobType);
+  const rows: LabelValue[] = [
     ...(definition.collectedOnCompletion
       ? [
           { label: 'Collection', value: job.courierCollection ? 'Courier collection' : 'Customer collection' },
@@ -422,6 +435,7 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
               { label: 'Year', value: String(machine.year) },
             ],
           },
+    partsReceived: partsReceivedOf(job),
     received: receivedOf(job),
 
     jobDetails: [

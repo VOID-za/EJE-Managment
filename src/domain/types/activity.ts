@@ -200,8 +200,10 @@ export type ActivityEventType =
   | 'job_closed'
   /** The office handled a submitted job card: Office Handling -> Awaiting PO. Issue #73. */
   | 'job_office_handled'
-  /** The office recorded the invoice number: Awaiting PO -> Invoiced. Issue #73. */
+  /** The office recorded the invoice number: Awaiting Invoice No -> Invoiced. Issue #73, INV-FLOW-1. */
   | 'job_invoiced'
+  /** INV-FLOW-1: the office recorded the PO number: Awaiting PO -> Awaiting Invoice No. */
+  | 'job_po_recorded'
   | 'document_viewed'
   // Record administration. These carry no job id: they describe changes to the
   // customer, machine, user, library and checklist registers.

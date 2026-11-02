@@ -28,13 +28,15 @@ const EXPECTED = [
   'Review',
   'Office Handling',
   'Awaiting PO',
+  // INV-FLOW-1 (2 November 2026): the PO number, then the invoice number.
+  'Awaiting Invoice No',
   'Invoiced',
 ];
 
 describe('the active progress rail', () => {
-  it('is exactly the eight stages of the live workflow, in order', () => {
+  it('is exactly the nine stages of the live workflow, in order', () => {
     expect(JOB_PROGRESS_STAGES.map((stage) => jobStatusLabel(stage))).toEqual(EXPECTED);
-    expect(JOB_PROGRESS_STAGES).toHaveLength(8);
+    expect(JOB_PROGRESS_STAGES).toHaveLength(9);
   });
 
   it('does not contain Master Review, by label or by status', () => {
@@ -109,7 +111,10 @@ describe('the state machine agrees with the rail', () => {
     // Issue #73: no new job enters the legacy delivery wait.
     expect(canTransition('review', 'awaiting_delivery')).toBe(false);
     expect(canTransition('office_handling', 'awaiting_po')).toBe(true);
-    expect(canTransition('awaiting_po', 'invoiced')).toBe(true);
+    // INV-FLOW-1: Awaiting PO leaves only for Awaiting Invoice No, which alone reaches Invoiced.
+    expect(canTransition('awaiting_po', 'invoiced')).toBe(false);
+    expect(canTransition('awaiting_po', 'awaiting_invoice_no')).toBe(true);
+    expect(canTransition('awaiting_invoice_no', 'invoiced')).toBe(true);
   });
 
   it('never closes from Review — not for a refusal, not on delivery (issue #73, BD-22)', () => {

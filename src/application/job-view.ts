@@ -493,6 +493,7 @@ export const ACTIVE_JOB_STATUSES = [
   'awaiting_delivery',
   'office_handling',
   'awaiting_po',
+  'awaiting_invoice_no',
   'submitted',
 ] as const satisfies readonly Job['status'][];
 

@@ -5,6 +5,7 @@ import { drainIntegrationsQuietly } from '@/server/api/integration-dispatch';
 import { recordIntegrationConfiguration } from '@/server/integration-status';
 import { readWhatsAppActivation } from '@/server/whatsapp-activation';
 import { selectPersistenceBackend } from '@/data/backend';
+import { runRetention } from '@/application/retention';
 
 /**
  * THE BACKGROUND WORKER. INT-EMAIL-3, INT-WA-2, INT-MAP-1.
@@ -35,6 +36,10 @@ const tick = async (): Promise<void> => {
     if (selectPersistenceBackend() !== 'demo') await readWhatsAppActivation(runtime).catch(() => undefined);
     await drainOutboxQuietly(runtime);
     await drainIntegrationsQuietly(runtime);
+    // RETAIN-1/2: notifications after 15 days, activity after 7 — each purge only when it is due.
+    await runtime
+      .write((unit) => runRetention(unit.repos, unit.services.clock.now()))
+      .catch((cause: unknown) => console.error('[worker] retention failed', cause instanceof Error ? cause.message : cause));
   } catch (cause) {
     console.error('[worker] integration tick failed', cause instanceof Error ? cause.message : cause);
   } finally {

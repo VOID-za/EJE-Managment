@@ -114,11 +114,16 @@ export type JobStatus =
    */
   | 'office_handling'
   /**
-   * The office has handled the job card — the invoice is being raised in Sage —
-   * and is waiting on the customer's purchase order. Leaves only when an
-   * invoice number is recorded.
+   * The office has handled the job card and is waiting on the customer's
+   * purchase order. Leaves only when the PO NUMBER is recorded (INV-FLOW-1,
+   * 2 November 2026) — an invoice number is not a substitute.
    */
   | 'awaiting_po'
+  /**
+   * INV-FLOW-1 (migration 0046). The PO number is recorded; the invoice is
+   * being raised in Sage. Leaves only when the invoice number is recorded.
+   */
+  | 'awaiting_invoice_no'
   /** The invoice number is recorded. The end of the lifecycle for new work. */
   | 'invoiced'
   /**
@@ -277,6 +282,13 @@ export interface FinalDocument {
 export interface JobOfficeHandling {
   readonly handledBy: UserId;
   readonly handledAt: IsoDateTime;
+}
+
+/** The customer's purchase order number the office recorded. See `Job.purchaseOrder`. INV-FLOW-1. */
+export interface JobPurchaseOrder {
+  readonly number: string;
+  readonly recordedBy: UserId;
+  readonly recordedAt: IsoDateTime;
 }
 
 /** The invoice number the office recorded. See `Job.invoice`. */
@@ -861,6 +873,18 @@ export interface Job {
    * and never changed afterwards — a database trigger refuses a rewrite.
    */
   readonly invoice: JobInvoice | null;
+
+  /**
+   * The customer's purchase order number. INV-FLOW-1 (migration 0046).
+   *
+   * Recorded by the office on the move from `awaiting_po` to
+   * `awaiting_invoice_no`, and never changed afterwards — a database trigger
+   * refuses a rewrite. Its own field, NOT `orderNumber`: the order number is
+   * part of what the customer signed and is frozen at signature, whereas the
+   * PO often arrives after the work. Null on every job that has not passed
+   * Awaiting PO, including every job invoiced before this step existed.
+   */
+  readonly purchaseOrder: JobPurchaseOrder | null;
 
   /*
    * There is no soft deletion.

@@ -331,21 +331,14 @@ const assertTimesheetDate = (context: OperationContext, date: string): void => {
 };
 
 /**
- * SENT TO THE OFFICE MEANS READ-ONLY. TS-02. Asked of every write, for every
- * day the write touches — a correction that moves a line from one day to
- * another touches two. A day inside ANY sent period is refused.
+ * A SENT TIMESHEET STAYS EDITABLE. RESUBMIT-1 (the tester, 2 November 2026):
+ * "A timesheet must be saveable and submittable again at any time, even if
+ * previously submitted." Was TS-02's read-only rule, which refused every write
+ * to a day inside a sent period. The lines are the technician's working copy;
+ * what the office reads is the version last SENT, and sending again replaces
+ * it. Kept as a named step, so every write still passes one place.
  */
-const assertDayOpen = async (context: OperationContext, technicianId: UserId, date: string): Promise<void> => {
-  const sent = await context.repos.attendance.listSubmittedPeriods(technicianId, date, date);
-  const period = sent[0];
-  if (period !== undefined) {
-    throw refuse(
-      `The timesheet for ${formatPeriod(period.from, period.to)} has been sent to the office.`,
-      'timesheet_submitted',
-      'A timesheet sent to the office is read-only. A correction goes through the office’s separate, recorded process.',
-    );
-  }
-};
+const assertDayOpen = async (_context: OperationContext, _technicianId: UserId, _date: string): Promise<void> => {};
 
 const personOf = (user: User): TimesheetPerson => ({
   id: user.id,
@@ -863,7 +856,10 @@ export const saveTimesheetComment = async (
   return saved;
 };
 
-/** No day of the period may already be inside a DIFFERENT sent period. */
+/**
+ * No day of the period may already be inside a DIFFERENT sent period. The SAME
+ * period may be sent again: that replaces what was sent (RESUBMIT-1).
+ */
 const assertNoOverlap = async (
   context: OperationContext,
   technicianId: UserId,
@@ -871,15 +867,7 @@ const assertNoOverlap = async (
   to: string,
 ): Promise<void> => {
   const sent = await context.repos.attendance.listSubmittedPeriods(technicianId, from, to);
-  const exact = sent.find((period) => period.from === from && period.to === to);
-  if (exact !== undefined) {
-    throw refuse(
-      `The timesheet for ${formatPeriod(from, to)} has already been sent to the office.`,
-      'timesheet_submitted',
-      'It was sent once; the office has it.',
-    );
-  }
-  const other = sent[0];
+  const other = sent.find((period) => period.from !== from || period.to !== to);
   if (other !== undefined) {
     throw refuse(
       `Part of ${formatPeriod(from, to)} was already sent to the office (${formatPeriod(other.from, other.to)}).`,
@@ -978,9 +966,17 @@ export const submitTimesheetPeriod = async (
   ]);
   const now = context.services.clock.now();
   const comment = existing?.comment ?? '';
+  /*
+   * SENT AGAIN: THE NEW SUBMISSION REPLACES THE LAST ONE. RESUBMIT-1. Nothing of
+   * the earlier submission is kept — its snapshot is overwritten and any
+   * correction recorded against it removed — and the lines themselves are
+   * untouched. The office reads the latest submission, as before.
+   */
+  const resending = existing !== null && existing.submittedAt !== null;
   let saved: TimesheetPeriod | null;
   try {
-    saved = await context.repos.attendance.submitPeriod({
+    if (resending) await context.repos.attendance.deleteCorrections(existing.id);
+    saved = await context.repos.attendance[resending ? 'resubmitPeriod' : 'submitPeriod']({
       id: existing?.id ?? context.services.ids.next('tsp'),
       userId: id,
       from,
@@ -1010,8 +1006,8 @@ export const submitTimesheetPeriod = async (
   await audit(context, {
     jobId: null,
     type: 'timesheet_submitted',
-    summary: `Timesheet sent to the office: ${userFullName(technician)}, ${label}`,
-    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}. Read-only from now on.`,
+    summary: `Timesheet ${resending ? 'sent again — replaces the earlier submission' : 'sent to the office'}: ${userFullName(technician)}, ${label}`,
+    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}.${resending ? ' The earlier submission is replaced; only this one is kept.' : ''}`,
   });
   if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',

@@ -3,16 +3,12 @@ import {
   ATTENDANCE_NOTE_LIMIT,
   ATTENDANCE_STATUSES,
   asUserId,
-  availabilityTypeLabel,
   isAbsenceReason,
-  can,
   userFullName,
   type AbsenceReason,
   type AttendanceRecord,
   type AttendanceStatus,
   type IsoDate,
-  type User,
-  type UserId,
 } from '@/domain';
 import { businessToday } from '@/lib/business-time';
 import type { OperationContext } from './context';
@@ -60,16 +56,6 @@ export const assertRecordableDate = (date: string, today: IsoDate): void => {
       `Today is ${today}. Record the day on or after it happens.`,
     );
   }
-};
-
-/** Reading everybody's attendance — the export. The office's; it records nothing. */
-const assertViewsAll = (context: OperationContext): void => {
-  if (can(context.actor.role, 'attendance.viewAll')) return;
-  throw refuse(
-    'Only the office reads everybody’s attendance.',
-    'not_permitted',
-    'A Master or a Coordinator does; everybody reads their own.',
-  );
 };
 
 /**
@@ -128,20 +114,11 @@ export const recordAttendance = async (
   assertMayRecordFor(context, input.userId);
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
   /*
-   * PAY-02. A MONTH SUBMITTED TO THE OFFICE IS FROZEN: the person's own days in
-   * it can no longer be changed. Since ATT-OWN-1 nobody else may change them
-   * either, so this holds for every role.
+   * A SUBMITTED MONTH STAYS EDITABLE. RESUBMIT-1 (the tester, 2 November 2026,
+   * replacing ATT-LOCK-1): a person may change their own days after the month
+   * was submitted and submit it again; the new submission replaces the old.
+   * Nobody else may change them (ATT-OWN-1, above).
    */
-  if (isCalendarDate(input.date)) {
-    const submitted = await context.repos.payroll.findSubmission(asUserId(input.userId), input.date.slice(0, 7));
-    if (submitted !== null) {
-      throw refuse(
-        'This month has been submitted to the office.',
-        'attendance_month_submitted',
-        'Attendance for a submitted month can no longer be changed.',
-      );
-    }
-  }
   if (!ATTENDANCE_STATUSES.includes(input.status)) {
     throw refuse('That is not an attendance status.', 'invalid_status', 'Choose Present or Absent.');
   }
@@ -309,7 +286,8 @@ export const loadMyAttendance = async (
   const records = from > last ? [] : await context.repos.attendance.listRecords(from, last, context.actor.id);
   const byDate = new Map(records.map((record) => [record.date, record]));
   const days: MyAttendanceDay[] = [];
-  for (let at = Date.parse(`${last}T00:00:00Z`); at >= Date.parse(`${from}T00:00:00Z`); at -= 86_400_000) {
+  // ATT-ORDER-1 (the tester, 2 November 2026): oldest first, newest last — across months too.
+  for (let at = Date.parse(`${from}T00:00:00Z`); at <= Date.parse(`${last}T00:00:00Z`); at += 86_400_000) {
     const date = new Date(at).toISOString().slice(0, 10);
     days.push({ date, record: byDate.get(date) ?? null });
   }
@@ -318,76 +296,4 @@ export const loadMyAttendance = async (
 
 export const ATTENDANCE_EXPORT_MAX_DAYS = 92;
 
-export interface AttendanceExportRow {
-  readonly date: IsoDate;
-  readonly person: string;
-  readonly role: string;
-  readonly status: AttendanceStatus;
-  /** ATT-01: the reason's label, blank for present and for an absent day from before. */
-  readonly absenceReason: string;
-  readonly note: string;
-  readonly recordedBy: string;
-  readonly recordedAt: string;
-  readonly plannedLeave: string;
-}
 
-/**
- * EVERYBODY'S ATTENDANCE AS A SPREADSHEET, for a date range. ATTEND-1,
- * reporting; offered on EJE Monthly Forms since the Team register went.
- *
- * One row per RECORDED person-day — what was recorded, by whom and when, and
- * any planned leave booked over that day beside it for reference. A day nobody
- * recorded is not invented as "absent": it is simply not in the file, which is
- * the truth about it. The office's: reading, never recording.
- */
-export const loadAttendanceExport = async (
-  context: OperationContext,
-  from: string,
-  to: string,
-): Promise<readonly AttendanceExportRow[]> => {
-  assertViewsAll(context);
-  if (!isCalendarDate(from) || !isCalendarDate(to)) {
-    throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
-  }
-  if (from > to) {
-    throw refuse('The range ends before it starts.', 'invalid_range', 'Choose a start on or before the end.');
-  }
-  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
-  if (days > ATTENDANCE_EXPORT_MAX_DAYS) {
-    throw refuse(
-      'That range is too long for one export.',
-      'range_too_long',
-      `An attendance export covers at most ${ATTENDANCE_EXPORT_MAX_DAYS} days.`,
-    );
-  }
-  const [users, records, availability] = await Promise.all([
-    context.repos.users.list(),
-    context.repos.attendance.listRecords(from, to),
-    context.repos.availability.list(from, to),
-  ]);
-  const byId = new Map<UserId, User>(users.map((user) => [user.id, user]));
-  return records.map((record) => {
-    const person = byId.get(record.userId);
-    const recorder = byId.get(record.recordedBy);
-    return {
-      date: record.date,
-      person: person === undefined ? 'Unknown person' : userFullName(person),
-      role: person === undefined ? '' : person.jobTitle || person.role,
-      status: record.status,
-      absenceReason: record.absenceReason === null ? '' : ABSENCE_REASON_LABELS[record.absenceReason],
-      note: record.note,
-      recordedBy: recorder === undefined ? '' : userFullName(recorder),
-      recordedAt: record.recordedAt,
-      plannedLeave: availability
-        .filter(
-          (entry) =>
-            entry.userId === record.userId &&
-            entry.status === 'active' &&
-            entry.startDate <= record.date &&
-            entry.endDate >= record.date,
-        )
-        .map((entry) => availabilityTypeLabel(entry.type))
-        .join('; '),
-    };
-  });
-};
