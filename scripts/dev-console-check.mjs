@@ -194,7 +194,7 @@ await step('technician opens the transfer dialog on their own job', async () => 
   await dialog.getByText('A specific technician').click();
   await dialog.getByLabel('Reason').selectOption('other');
   await dialog.getByLabel('Description').fill('Covering another call-out.');
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.waitForTimeout(400);
 });
 
@@ -225,7 +225,7 @@ await step('Master opens the availability dialog from a message', async () => {
   await dialog.getByLabel('Type').selectOption('training');
   await dialog.getByLabel('All day').check();
   await dialog.getByLabel('All day').uncheck();
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.waitForTimeout(400);
 });
 
@@ -301,7 +301,7 @@ await step('Master opens the assign dialog and hits an availability clash', asyn
   // The refusal renders inside the dialog; this is the render path most at risk
   // of a setState-during-render, since it is driven by a thrown error.
   await dialog.getByText('Technician unavailable').waitFor({ timeout: 20000 });
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.waitForTimeout(400);
 });
 

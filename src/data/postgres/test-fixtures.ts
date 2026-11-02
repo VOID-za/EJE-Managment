@@ -81,11 +81,10 @@ export const seedBaseline = async (db: Database): Promise<void> => {
     `);
   }
 
-  await db
-    .insert(schema.customers)
-    .values({ id: IDS.customer, name: 'ABC Engineering', accountNumber: 'ABC-001' });
   // Plain SQL, naming only the columns every migration has: the upgrade tests
-  // seed a database cut off at an older migration (0042 added pin columns).
+  // seed a database cut off at an older migration (0042 added pin columns to
+  // sites; 0047 the rate option to customers).
+  await db.execute(sql`insert into customers (id, name, account_number) values (${IDS.customer}, 'ABC Engineering', 'ABC-001')`);
   await db.execute(sql`insert into sites (id, customer_id, name) values (${IDS.site}, ${IDS.customer}, 'Isando')`);
   await db.insert(schema.contacts).values({
     id: IDS.contact,
@@ -106,9 +105,7 @@ export const seedBaseline = async (db: Database): Promise<void> => {
     approval: 'approved',
   });
 
-  await db
-    .insert(schema.customers)
-    .values({ id: IDS.otherCustomer, name: 'Kruger Engineering', accountNumber: 'KRU-001' });
+  await db.execute(sql`insert into customers (id, name, account_number) values (${IDS.otherCustomer}, 'Kruger Engineering', 'KRU-001')`);
   await db.execute(sql`insert into sites (id, customer_id, name) values (${IDS.otherSite}, ${IDS.otherCustomer}, 'Benoni')`);
   await db.insert(schema.contacts).values({
     id: IDS.otherContact,

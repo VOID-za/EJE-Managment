@@ -3214,7 +3214,7 @@ await step('an "Other" period demands a description', async () => {
   await dialog.getByLabel('Type').selectOption('other');
   await dialog.getByRole('button', { name: 'Record availability' }).click();
   await dialog.getByText('description is required', { exact: false }).waitFor({ timeout: 8000 });
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('availability appears on the calendar with its time window', async () => {
@@ -3249,7 +3249,7 @@ await step('an unavailable technician cannot be assigned to a clashing job', asy
   await dialog.getByText('Thabo Nkosi is unavailable', { exact: false })
     .waitFor({ timeout: 8000 });
   await dialog.getByText('sick leave', { exact: false }).waitFor({ timeout: 8000 });
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('an available technician can still be assigned', async () => {
@@ -3558,7 +3558,7 @@ await step('every dialog field accepts typing, not one character per click', asy
   ]) {
     await types(label, text);
   }
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('the same is true of the Add Machine form', async () => {
@@ -3584,7 +3584,7 @@ await step('the same is true of the Add Machine form', async () => {
       throw new Error(`typing into "${label}" produced ${JSON.stringify(value)}`);
     }
   }
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('a Master can add a customer, with its first site', async () => {
@@ -3771,7 +3771,7 @@ await step('a duplicate serial number is refused', async () => {
     );
   }
 
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('the customer overview shows the company details the office asked for', async () => {
@@ -3814,7 +3814,7 @@ await step('neither customer form asks for a company email', async () => {
   if ((await editing.getByLabel('Account email').count()) !== 0) {
     throw new Error('Edit Customer still asks for a company email');
   }
-  await editing.getByRole('button', { name: 'Cancel' }).click();
+  await editing.getByRole('button', { name: 'Cancel', exact: true }).click();
 
   await page.goto(`${BASE}/customers`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Add customer' }).click();
@@ -3823,7 +3823,7 @@ await step('neither customer form asks for a company email', async () => {
   if ((await adding.getByLabel('Account email').count()) !== 0) {
     throw new Error('Add Customer still asks for a company email');
   }
-  await adding.getByRole('button', { name: 'Cancel' }).click();
+  await adding.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.goto(`${BASE}/customers/cust-abc`, { waitUntil: 'networkidle' });
 });
 
@@ -3940,7 +3940,7 @@ await step('a site with machines on it cannot simply be removed', async () => {
   await page.getByRole('button', { name: 'Remove' }).last().click();
   await page.getByText('still has machines on it', { exact: false })
     .first().waitFor({ timeout: 10000 });
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('changing a contact’s site is saved and shown under the new site (CONTACT-SITE-1)', async () => {
@@ -4178,7 +4178,7 @@ await step('a technician types a whole timesheet line, clearing and retyping the
     const values = { date: await reopened.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km'), shared: await reopened.getByTestId('timesheet-callout-shared').isChecked() };
     const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30', shared: true };
     if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`${when}: reopened as ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
-    await reopened.getByRole('button', { name: 'Cancel' }).click();
+    await reopened.getByRole('button', { name: 'Cancel', exact: true }).click();
   };
   await check('after saving');
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
@@ -4783,7 +4783,7 @@ await step('the Coordinator (Office) can create only a Technician or an Apprenti
   if (options.join('|') !== 'Technician|Apprentice') {
     throw new Error(`the Office was offered ${options.join(', ')}`);
   }
-  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('back to a Master for the rest of the office journey', async () => {

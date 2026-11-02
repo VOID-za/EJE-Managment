@@ -465,7 +465,8 @@ describeDb('the HTTP API on PostgreSQL', () => {
     expect(before).toHaveLength(1);
 
     // An accepted job cannot be deleted, so it is cancelled — the other way a
-    // job leaves the workflow, and the one that keeps the record.
+    // job leaves the workflow, and the one that keeps the record. CANCEL-ALL-1
+    // (2 November 2026): an accepted job in progress may now be cancelled.
     expect(
       (
         await master.post(`/api/jobs/${jobNumber}/cancel`, {
@@ -473,7 +474,8 @@ describeDb('the HTTP API on PostgreSQL', () => {
           description: 'Raised twice.',
         })
       ).status,
-    ).toBe(422);
+    ).toBe(200);
+    expect((await master.post(`/api/jobs/${jobNumber}/delete`, { reason: 'Raised twice.' })).status).toBe(422);
 
     const after = (await db.select().from(schema.auditEvents)).filter(
       (row) => row.type === 'line_item_removed',

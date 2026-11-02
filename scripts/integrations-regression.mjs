@@ -128,7 +128,7 @@ await check('Email Templates: an unknown placeholder is shown as a problem and c
   if (!(await problems.innerText()).includes('{{job_numbr}}')) fail('the problem does not name the placeholder');
   await press(page.getByTestId('email-template-save'));
   await page.getByText('The template was not saved').waitFor({ timeout: 15000 });
-  await press(page.getByRole('button', { name: 'Cancel' }));
+  await press(page.getByRole('button', { name: 'Cancel', exact: true }));
 });
 
 await check('Email Templates: a new template made the default, then the system default restored', async () => {

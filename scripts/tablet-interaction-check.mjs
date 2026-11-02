@@ -145,7 +145,7 @@ await step('technician: the Accept dialog fits every short screen and its button
     if ((await accept.count()) === 0) throw new Error('no job offers Accept to this technician');
     await accept.tap();
     await dialogFits(`Accept at ${screen.width}×${screen.height}`);
-    await page.getByRole('dialog').last().getByRole('button', { name: 'Cancel' }).tap();
+    await page.getByRole('dialog').last().getByRole('button', { name: 'Cancel', exact: true }).tap();
   }
   await page.setViewportSize(LANDSCAPE);
 });
@@ -168,7 +168,7 @@ await step('coordinator: Mark unavailable fits every short screen; its fields ta
       await page.keyboard.type('Clinic visit', { delay: 10 });
       if (!(await field.inputValue()).includes('Clinic visit')) throw new Error('the dialog field did not take typing');
     }
-    await dialog.getByRole('button', { name: 'Cancel' }).tap();
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).tap();
   }
   await page.setViewportSize(LANDSCAPE);
 });

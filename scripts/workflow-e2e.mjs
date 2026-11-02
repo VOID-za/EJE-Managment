@@ -1472,7 +1472,7 @@ await step('JOB-EDIT-1: the edit panel fits a tablet without sideways scrolling'
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth + 1,
   );
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 1000 });
   if (overflow) throw new Error('the edit panel overflows horizontally at 820px');
 });
@@ -1489,7 +1489,7 @@ await step('JOB-EDIT-1: a quantity that is not a whole number cannot be sent as 
   if (!(await page.getByTestId('save-repair-items').isDisabled())) {
     throw new Error('Save stayed enabled with a quantity of “abc”, which would be sent as null');
   }
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 await step('JOB-EDIT-1: no edit control on a SIGNED job — the correction mechanism is the remedy', async () => {

@@ -220,7 +220,7 @@ try {
     await dialog.getByText('Update with unsaved work on this screen?').waitFor({ timeout: 5000 });
     if (!(await dialog.innerText()).includes('a timesheet line or comment being typed')) throw new Error(`the dialog does not name the work: ${await dialog.innerText()}`);
     await page.screenshot({ path: `${shots}/3-unsaved.png` });
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.waitForTimeout(2000);
     if (documentLoads !== loadsBefore) throw new Error('the page reloaded although Cancel was chosen');
     if ((await comment.inputValue()) !== 'Typed and not saved — must survive the update offer') throw new Error('the typing was lost');
