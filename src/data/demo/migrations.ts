@@ -697,6 +697,14 @@ const v36ToV37 = (data: Loose): Loose => ({
     : data.jobs,
 });
 
+/** v38: STANDBY-1…8. The standby calendar starts empty. */
+const v37ToV38 = (data: Loose): Loose => ({
+  ...data,
+  standbyEligibility: Array.isArray(data.standbyEligibility) ? data.standbyEligibility : [],
+  standbyWeeks: Array.isArray(data.standbyWeeks) ? data.standbyWeeks : [],
+  standbySwapRequests: Array.isArray(data.standbySwapRequests) ? data.standbySwapRequests : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -727,6 +735,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   34: v34ToV35,
   35: v35ToV36,
   36: v36ToV37,
+  37: v37ToV38,
 };
 
 /**

@@ -17,6 +17,7 @@ export * from './job/signature-refusal';
 export * from './job/visibility';
 export * from './activity/visibility';
 export * from './availability/conflicts';
+export * from './standby/schedule';
 export * from './machine/register';
 export * from './user/management';
 export * from './job/workflow';

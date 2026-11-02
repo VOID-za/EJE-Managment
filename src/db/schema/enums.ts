@@ -145,6 +145,10 @@ export const notificationType = pgEnum('notification_type', [
   // Migration 0039: a correction of a sent timesheet asked for, and decided (TS-16).
   'timesheet_correction_requested',
   'timesheet_correction_decided',
+  // Migration 0045: the standby calendar's swap requests and assignment changes (STANDBY-4…6).
+  'standby_swap_requested',
+  'standby_swap_decided',
+  'standby_assignment_changed',
 ]);
 
 export const notificationChannel = pgEnum('notification_channel', ['in_app', 'whatsapp', 'email']);

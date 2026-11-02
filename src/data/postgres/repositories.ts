@@ -22,6 +22,7 @@ import {
 } from './integration-repositories';
 import { PostgresSettingsRepository } from './settings-repository';
 import { PostgresUserRepository } from './user-repository';
+import { PostgresStandbyRepository } from './standby-repository';
 
 /**
  * The production repository bundle.
@@ -59,4 +60,5 @@ export const createPostgresRepositories = (db: DatabaseExecutor): RepositoryBund
   changeRequests: new PostgresChangeRequestRepository(db),
   deliveryNotes: new PostgresDeliveryNoteRepository(db),
   payroll: new PostgresPayrollRepository(db),
+  standby: new PostgresStandbyRepository(db),
 });

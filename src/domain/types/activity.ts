@@ -313,6 +313,16 @@ export type ActivityEventType =
   | 'timesheet_correction_requested'
   | 'timesheet_correction_accepted'
   | 'timesheet_correction_rejected'
+  /** STANDBY-1…8: who may stand by, the year generated and published, places changed, swaps. */
+  | 'standby_eligibility_changed'
+  | 'standby_schedule_generated'
+  | 'standby_schedule_published'
+  | 'standby_assignment_changed'
+  | 'standby_emergency_change'
+  | 'standby_swap_requested'
+  | 'standby_swap_approved'
+  | 'standby_swap_rejected'
+  | 'standby_swap_cancelled'
   /** PAY-02: a technician submitted the month's timesheet and attendance together. */
   | 'monthly_forms_submitted'
   /** PAY-05…08: the monthly Finance package, prepared, sent, failed or discarded. */

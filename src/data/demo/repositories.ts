@@ -85,6 +85,7 @@ import type {
   ChangeRequestRepository,
 } from '../repositories';
 import type { DemoDatabase } from './store';
+import { DemoStandbyRepository } from './standby-repository';
 
 /**
  * Demo repository implementations.
@@ -1915,4 +1916,5 @@ export const createDemoRepositories = (context: DemoContext): RepositoryBundle =
   availability: new DemoAvailabilityRepository(context),
   attendance: new DemoAttendanceRepository(context),
   chat: new DemoChatRepository(context),
+  standby: new DemoStandbyRepository(context),
 });

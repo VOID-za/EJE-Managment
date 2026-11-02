@@ -1,5 +1,10 @@
 import type {
   ActivityEvent,
+  IsoDate,
+  StandbyEligibility,
+  StandbyPosition,
+  StandbySwapRequest,
+  StandbyWeek,
   AppNotification,
   CaptureReferral,
   CaptureReferralState,
@@ -856,6 +861,68 @@ export interface DeliveryNoteRepository {
   record(note: IssuedDeliveryNote): Promise<IssuedDeliveryNote>;
 }
 
+/** The office's decision on a swap request. STANDBY-6. */
+export interface StandbySwapDecision {
+  readonly id: string;
+  readonly decidedBy: UserId;
+  readonly decidedAt: IsoDateTime;
+  readonly decisionNote: string;
+}
+
+/** What approving a swap came to. Nothing is written unless it is `ok`. */
+export type StandbyApproval =
+  | { readonly ok: true; readonly request: StandbySwapRequest }
+  | { readonly ok: false; readonly reason: 'not_pending' | 'assignment_changed' };
+
+/**
+ * The standby calendar. STANDBY-1…8.
+ *
+ * NOTHING HERE DELETES. A week, a place and a request are kept for good; a
+ * place is emptied by setting its user to null, a request ends approved,
+ * rejected or cancelled. Every write that could race another is CONDITIONAL —
+ * a place changes only while it still holds the person the caller saw, a
+ * request is decided only while it is still pending — and answers whether it
+ * happened, so a lost race is reported rather than overwritten.
+ */
+export interface StandbyRepository {
+  listEligibility(): Promise<readonly StandbyEligibility[]>;
+  saveEligibility(record: StandbyEligibility): Promise<StandbyEligibility>;
+  /** Weeks whose Monday falls between `from` and `to`, inclusive, oldest first. */
+  listWeeks(from: IsoDate, to: IsoDate): Promise<readonly StandbyWeek[]>;
+  findWeek(weekStart: IsoDate): Promise<StandbyWeek | null>;
+  /**
+   * Adds the weeks that do not exist yet, each with its four places. AN
+   * EXISTING WEEK IS NEVER TOUCHED. Answers the Mondays actually added.
+   */
+  createWeeks(weeks: readonly StandbyWeek[]): Promise<readonly IsoDate[]>;
+  /** Fills or empties one place — only while it still holds `expectedUserId`. */
+  setAssignment(change: {
+    readonly weekStart: IsoDate;
+    readonly position: StandbyPosition;
+    readonly expectedUserId: UserId | null;
+    readonly userId: UserId | null;
+    readonly assignedBy: UserId;
+    readonly assignedAt: IsoDateTime;
+  }): Promise<boolean>;
+  /** Publishes the named weeks that are still drafts. Answers the Mondays published. */
+  publishWeeks(weekStarts: readonly IsoDate[], by: UserId, at: IsoDateTime): Promise<readonly IsoDate[]>;
+  /** Every request, newest first. */
+  listSwapRequests(): Promise<readonly StandbySwapRequest[]>;
+  findSwapRequest(id: string): Promise<StandbySwapRequest | null>;
+  /** Null when either place is already offered in a pending request. */
+  createSwapRequest(request: StandbySwapRequest): Promise<StandbySwapRequest | null>;
+  /** Null unless the request was still pending. */
+  rejectSwapRequest(decision: StandbySwapDecision): Promise<StandbySwapRequest | null>;
+  /** Null unless the request was still pending. */
+  cancelSwapRequest(id: string, at: IsoDateTime): Promise<StandbySwapRequest | null>;
+  /**
+   * APPROVES AND EXCHANGES, ALL OR NOTHING. Only while the request is pending
+   * and each place still holds the person it names; then exactly those two
+   * places are exchanged and the request is recorded approved, together.
+   */
+  approveSwapRequest(decision: StandbySwapDecision): Promise<StandbyApproval>;
+}
+
 export interface RepositoryBundle {
   readonly jobs: JobRepository;
   readonly customers: CustomerRepository;
@@ -882,4 +949,6 @@ export interface RepositoryBundle {
   /** The courier Delivery Notes issued beside priced job cards. PARTS-03/04. */
   readonly deliveryNotes: DeliveryNoteRepository;
   readonly payroll: PayrollRepository;
+  /** The standby calendar. STANDBY-1…8. */
+  readonly standby: StandbyRepository;
 }

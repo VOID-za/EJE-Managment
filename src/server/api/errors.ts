@@ -128,6 +128,12 @@ const PERMISSION_CODES = new Set([
    * their own: they keep none, and no amount of finishing work changes that.
    */
   'timesheet_not_required',
+  /*
+   * STANDBY-5/6 (2 November 2026). Offering a standby place one does not hold,
+   * and deciding one's own swap request: permanent for this actor.
+   */
+  'not_your_assignment',
+  'own_request',
 ]);
 
 const fromWorkflowError = (error: WorkflowError): ApiError =>

@@ -19,7 +19,13 @@ export type NotificationType =
   /** TS-16: a technician asked to correct a sent timesheet. To Masters and Coordinators. */
   | 'timesheet_correction_requested'
   /** TS-16: the office accepted or rejected the correction. To the technician. */
-  | 'timesheet_correction_decided';
+  | 'timesheet_correction_decided'
+  /** STANDBY-5: a technician asked to swap a standby place. To Masters and Coordinators. */
+  | 'standby_swap_requested'
+  /** STANDBY-6: the office approved (to both people) or rejected (to the requester) a swap. */
+  | 'standby_swap_decided'
+  /** STANDBY-4: the office changed a published standby place this person was or is now in. */
+  | 'standby_assignment_changed';
 
 export type NotificationChannel = 'in_app' | 'whatsapp' | 'email';
 

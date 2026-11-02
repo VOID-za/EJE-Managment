@@ -32,3 +32,4 @@ export * from './audit';
 export * from './captures';
 export * from './api';
 export * from './integrations';
+export * from './standby';

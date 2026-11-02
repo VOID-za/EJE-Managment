@@ -17,6 +17,9 @@ import type {
   Site,
   AttendanceRecord,
   AvailabilityRecord,
+  StandbyEligibility,
+  StandbySwapRequest,
+  StandbyWeek,
   TimesheetComment,
   TimesheetEntry,
   TimesheetPeriod,
@@ -135,6 +138,10 @@ export interface DemoDatabase {
   timesheetPeriods: TimesheetPeriod[];
   /** Corrections of sent periods. TS-16. */
   timesheetCorrections: TimesheetCorrection[];
+  /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
+  standbyEligibility: StandbyEligibility[];
+  standbyWeeks: StandbyWeek[];
+  standbySwapRequests: StandbySwapRequest[];
   /** PAY-02. Monthly submissions. */
   monthlySubmissions: MonthlySubmission[];
   /** PAY-05…08. Finance packages. */
@@ -250,7 +257,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -310,6 +317,10 @@ export const createSeededDatabase = (): DemoDatabase => ({
   timesheetEntries: [],
   timesheetPeriods: [],
   timesheetCorrections: [],
+  // Empty, and honestly so: who may stand by and the schedule are the office's to enter.
+  standbyEligibility: [],
+  standbyWeeks: [],
+  standbySwapRequests: [],
   monthlySubmissions: [],
   financePackages: [],
   deliveryNoteDocuments: [],

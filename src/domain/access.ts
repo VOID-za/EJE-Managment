@@ -182,6 +182,23 @@ export type Capability =
    * when they are booked was refused because they may not book anybody else.
    */
   | 'calendar.view'
+  /**
+   * READ THE PUBLISHED STANDBY CALENDAR. STANDBY-3. Everybody: a technician has
+   * to know who is on standby, and when they are themselves.
+   */
+  | 'standby.view'
+  /**
+   * ADMINISTER THE STANDBY CALENDAR: eligibility, the annual schedule, drafts,
+   * publication, manual and emergency changes, and the decision on every swap
+   * request. The office — Master and Coordinator. STANDBY-3, STANDBY-4.
+   */
+  | 'standby.manage'
+  /**
+   * ASK TO SWAP ONE'S OWN STANDBY PLACE. The field. The request changes nothing
+   * until the office approves it, and only the place the requester actually
+   * holds can be offered. STANDBY-5.
+   */
+  | 'standby.requestSwap'
   /** WRITE the calendar: record, change or cancel an absence. The office. */
   | 'availability.manage'
   /**
@@ -405,6 +422,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'library.view',
   'library.manage',
   'calendar.view',
+  'standby.view',
+  'standby.manage',
   'availability.manage',
   // Everybody's attendance (read only) and every technician's timesheet. ATT-OWN-1, TIMESHEET-1.
   'attendance.viewAll',
@@ -476,6 +495,8 @@ const COORDINATOR_CAPABILITIES: readonly Capability[] = [
   'library.view',
   'library.manage',
   'calendar.view',
+  'standby.view',
+  'standby.manage',
   'availability.manage',
   // Everybody's attendance (read only) and every technician's timesheet. ATT-OWN-1, TIMESHEET-1.
   'attendance.viewAll',
@@ -536,6 +557,9 @@ const TECHNICIAN_CAPABILITIES: readonly Capability[] = [
   'customers.view',
   'library.view',
   'calendar.view',
+  // STANDBY-3/5: reads the published standby calendar and asks to swap their own place.
+  'standby.view',
+  'standby.requestSwap',
 ];
 
 const BY_ROLE: Record<UserRole, readonly Capability[]> = {

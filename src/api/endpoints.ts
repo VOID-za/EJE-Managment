@@ -89,6 +89,14 @@ import type { JobListRow, JobView } from '@/application/job-view';
 import type { MyAttendance } from '@/application/attendance-operations';
 import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
 import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
+import type {
+  StandbyAssignResult,
+  StandbyCalendar,
+  StandbyGenerateResult,
+  StandbyPublishResult,
+  StandbySwapOptions,
+  StandbySwapView,
+} from '@/application/standby';
 import type { MonthlyFormsState, MonthlyHistoryEntry } from '@/application/monthly-submissions';
 import type { AttendanceDocument } from '@/application/attendance-document';
 import type { FinancePackageView, PayrollMonthView } from '@/application/finance-packages';
@@ -1240,6 +1248,32 @@ export const attendance = {
   }, options: { readonly keepalive?: boolean } = {}) =>
     apiPost<AttendanceRecord>('/api/attendance', input, newIdempotencyKey(), options),
   exportUrl: (from: string, to: string) => `/api/attendance/export${search({ from, to })}`,
+};
+
+/** The standby calendar. STANDBY-1…8. */
+export const standby = {
+  calendar: (from: string, to: string) => query<StandbyCalendar>(`/api/standby${search({ from, to })}`),
+  requests: (status?: string) => query<readonly StandbySwapView[]>(`/api/standby/requests${search({ status })}`),
+  options: () => query<StandbySwapOptions>('/api/standby/options'),
+  requestSwap: (input: {
+    kind: 'main' | 'apprentice';
+    weekStart: string;
+    counterpartId: string;
+    counterpartWeekStart: string;
+    reason: string;
+  }) => command<{ request: StandbySwapView }>('/api/standby/requests', input),
+  decide: (requestId: string, decision: 'approve' | 'reject', note: string) =>
+    command<{ request: StandbySwapView }>(`/api/standby/requests/${segment(requestId)}/decide`, { decision, note }),
+  cancel: (requestId: string) =>
+    command<{ request: StandbySwapView }>(`/api/standby/requests/${segment(requestId)}/cancel`),
+  setEligibility: (input: { userId: string; main: boolean; helper: boolean; apprentice: boolean }) =>
+    command<{ eligibility: unknown }>('/api/standby/eligibility', input),
+  generate: (year: number, rotation?: Partial<Record<'main' | 'helper' | 'apprentice_1' | 'apprentice_2', readonly string[]>>) =>
+    command<{ result: StandbyGenerateResult }>('/api/standby/generate', rotation === undefined ? { year } : { year, rotation }),
+  assign: (input: { weekStart: string; position: string; userId: string | null; expectedUserId: string | null; reason: string }) =>
+    command<StandbyAssignResult>('/api/standby/assign', input),
+  publish: (year: number, acknowledgeIncomplete: boolean) =>
+    command<{ result: StandbyPublishResult }>('/api/standby/publish', { year, acknowledgeIncomplete }),
 };
 
 /** Technician timesheets. TIMESHEET-1. */
