@@ -32,6 +32,20 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## RELEASED — `89668e8` = v1.0.0, semantic versions for every release (3 November 2026)
+
+Released 3 November 2026 21:16:54 UTC (healthy 21:16:56) from branch `claude/semantic-versioning` through `stage-release.ps1 -ExpectPending none`. **The first release with a semantic version: v1.0.0** (no version was recorded before it; earlier releases are known by commit only).
+
+- **Version:** assigned by the release itself (`version: v1.0.0 (after none; commit 89668e8)`), recorded as `version=1.0.0` in `release-89668e8.state`, held by the health gate, and confirmed from outside: `RELEASED 89668e8 (v1.0.0)`. `/api/health` reports `"commit":"89668e8"` and `"version":"1.0.0"`; the page carries both meta tags; Administration → System shows Version v1.0.0 and Commit 89668e8.
+- **Migration:** none; all 50 shipped migrations were already applied.
+- **Backup proven first:** `/var/backups/eje/eje-eje_production-2026-11-03T21-16-43Z` (verified, key-checked, restore-tested). Firewall script unchanged (`ee451ac` on both sides; ufw active).
+- **CI:** run 41714901909, 65 of 65 steps green (incl. the two-release update check, v1.0.0 → v1.0.1).
+- **Tests:** unit 3,761 passed, 0 failed; release-script harness 92/92; stage-release harness 40/40; two-release browser check locally ALL PASSED.
+- **Data:** fingerprints, counts, the frozen prices of all 64 signed jobs, attendance, timesheets, 9 customers and 13 sites identical before and after. 0 error lines in the service log.
+- **Mode:** demonstration on, email `refuse`, WhatsApp and email not configured. Nothing was sent.
+
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `7acb77e` (no migration in between). The next release is still numbered from 1.0.0 upward — a rollback never frees a version.
+
 ## RELEASED — `9fa858f`, the Test & Repair delivery-note photo and the simpler Delivery Note (3 November 2026)
 
 Released 3 November 2026 18:08:52 UTC (healthy 18:08:54) from branch `claude/tr-photo-delivery-note-simplify` through `stage-release.ps1 -ExpectPending 0049_tr_photo_delivery_note_site`.
