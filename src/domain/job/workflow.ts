@@ -885,6 +885,25 @@ export const finalizedRefusal = (job: Pick<Job, 'signature' | 'status'>): string
 };
 
 /**
+ * WHO MAY STILL CHOOSE THE DOCUMENTS FOR AN UNSIGNED COPY. UNSIGNED-ATT-1 (3 November 2026).
+ *
+ * A job card issued WITHOUT a signature is sent only when a Senior Tech
+ * authorises it, which happens after issue — so the documents that travel with
+ * it are chosen then too. Only which documents go with the email changes; the
+ * issued record and its documents do not. Open until the copy has gone: while
+ * nothing is sent, or after a failed attempt.
+ */
+export const canChooseUnsignedCopyDocuments = (
+  role: UserRole,
+  job: Pick<Job, 'signature' | 'status' | 'finalDocument' | 'delivery'>,
+): boolean =>
+  can(role, 'jobs.authoriseUnsignedDelivery') &&
+  (job.status === 'closed' || isIssuedStatus(job.status)) &&
+  job.signature === null &&
+  job.finalDocument !== null &&
+  (job.delivery === null || job.delivery.attempts === 0 || job.delivery.state === 'failed');
+
+/**
  * WHETHER THE WORK IS FINISHED. Job completion §6.
  *
  * `completion` is where the work is done and the job is being closed out — the

@@ -58,11 +58,14 @@ export const JobMediaPanel = ({
   job,
   users,
   editable,
+  unsignedCopy = false,
   onChanged,
 }: {
   readonly job: Job;
   readonly users: readonly User[];
   readonly editable: boolean;
+  /** UNSIGNED-ATT-1: a Senior Tech choosing what goes with an unsigned job card's copy. */
+  readonly unsignedCopy?: boolean;
   readonly onChanged: () => void;
 }) => {
   const operation = useOperation();
@@ -416,7 +419,19 @@ export const JobMediaPanel = ({
                   {attachment.caption.length > 0 ? attachment.caption : attachment.fileName}
                 </a>
                 {/* JOB-ATT-3: chosen documents travel IN the signed job card email. */}
-                {editable ? (
+                {unsignedCopy ? (
+                  <label className="flex min-h-11 items-center gap-2 text-xs text-steel-700">
+                    <input
+                      type="checkbox"
+                      className="size-5"
+                      checked={attachment.emailToCustomer === true}
+                      disabled={operation.running}
+                      onChange={(event) => void chooseForEmail(attachment.id, event.target.checked)}
+                      data-testid={`job-document-email-${attachment.id}`}
+                    />
+                    Send to the customer with the unsigned job card
+                  </label>
+                ) : editable ? (
                   <label className="flex min-h-11 items-center gap-2 text-xs text-steel-700">
                     <input
                       type="checkbox"
@@ -431,13 +446,20 @@ export const JobMediaPanel = ({
                 ) : (
                   attachment.emailToCustomer === true && (
                     <span className="text-xs text-steel-600" data-testid={`job-document-emailed-${attachment.id}`}>
-                      Sent with the signed job card email
+                      {job.signature === null && job.finalDocument !== null
+                        ? 'Sent with the unsigned job card, if it is sent'
+                        : 'Sent with the signed job card email'}
                     </span>
                   )
                 )}
               </li>
             ))}
           </ul>
+        )}
+        {unsignedCopy && operation.error !== null && (
+          <p role="alert" className="mt-1 text-sm font-medium text-signal-600" data-testid="job-document-email-problem">
+            {operation.error}
+          </p>
         )}
       </div>
 

@@ -32,6 +32,7 @@ import {
   transferReasonLabel,
   availabilityTypeLabel,
   canEditJob,
+  canChooseUnsignedCopyDocuments,
   canResendCustomerCopy,
   canSubmitJobCard,
   canTakeOverSubmission,
@@ -1776,7 +1777,9 @@ export const setCustomerEmailDocument = async (
   attachmentId: string,
   selected: boolean,
 ): Promise<Job> => {
-  assertEditable(context, job);
+  // UNSIGNED-ATT-1: an unsigned copy's documents are chosen when it is authorised, after issue.
+  const unsignedCopy = canChooseUnsignedCopyDocuments(context.actor.role, job);
+  if (!unsignedCopy) assertEditable(context, job);
   const existing = job.attachments.find((item) => item.id === attachmentId);
   if (existing === undefined) {
     throw new WorkflowError('That document is not on this job.', [
@@ -1792,7 +1795,7 @@ export const setCustomerEmailDocument = async (
     jobId: job.id,
     type: 'job_document_email_selection',
     summary: selected ? 'Document chosen for the customer email' : 'Document taken off the customer email',
-    detail: `${existing.fileName} ${selected ? 'will be attached to' : 'will not be attached to'} the signed job card email to the customer. Changed by ${userFullName(context.actor)}.`,
+    detail: `${existing.fileName} ${selected ? 'will be attached to' : 'will not be attached to'} ${unsignedCopy ? 'the unsigned job card, if it is sent' : 'the signed job card email'} to the customer. Changed by ${userFullName(context.actor)}.`,
   });
   return saved;
 };

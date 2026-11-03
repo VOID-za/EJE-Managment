@@ -29,6 +29,8 @@ import type { AppServices, OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
 import { ensureSystemEmailTemplates } from './email-templates';
+// The selection and the checksum are shared with the unsigned copy (UNSIGNED-ATT-1).
+import { selectedCustomerDocuments, sha256Hex } from './email-attachments';
 
 /**
  * THE SIGNED JOB CARD, EMAILED AUTOMATICALLY. INT-EMAIL-3/4 (the owner,
@@ -260,12 +262,6 @@ const compose = async (
   }
 };
 
-/** The job's documents selected for the customer email (JOB-ATT-3), as the email records them. */
-const selectedCustomerDocuments = (job: Job): CustomerEmailAttachment[] =>
-  job.attachments
-    .filter((attachment) => attachment.emailToCustomer === true)
-    .map((attachment) => ({ storageKey: attachment.storageKey, fileName: attachment.fileName, sha256: attachment.checksumSha256 }));
-
 /** Why these attachments cannot travel in one email, or null when they fit. */
 const attachmentsSizeProblem = async (
   context: OperationContext,
@@ -420,11 +416,6 @@ export type EmailAttemptOutcome =
       readonly retryable: boolean;
       readonly retryAfterSeconds: number | null;
     };
-
-const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
-  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-};
 
 /**
  * One attempt at one claimed email. Touches NO repository: it runs outside

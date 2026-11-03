@@ -61,6 +61,8 @@ export const UnsignedDeliveryPanel = ({
 
   const delivery = job.delivery;
   const attempted = delivery !== null && delivery.attempts > 0;
+  // UNSIGNED-ATT-1: the documents chosen under Photos → Documents travel with the job card.
+  const chosen = job.attachments.filter((attachment) => attachment.emailToCustomer === true);
 
   return (
     // The test id goes on a wrapper: `Card` does not forward one.
@@ -81,6 +83,13 @@ export const UnsignedDeliveryPanel = ({
           )
         }
       />
+
+      <p className="mt-4 text-xs leading-relaxed text-steel-600" data-testid="unsigned-delivery-documents">
+        {chosen.length === 0
+          ? 'The job card PDF only. Documents for the customer are chosen under Photos → Documents.'
+          : `The job card PDF, with: ${chosen.map((attachment) => attachment.fileName).join(', ')}. ` +
+            'If any of them cannot be sent, nothing is sent and the reason is shown here.'}
+      </p>
 
       {authorisation === null ? (
         <>

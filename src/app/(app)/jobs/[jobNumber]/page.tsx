@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   can,
   getJobTypeDefinition,
+  canChooseUnsignedCopyDocuments,
   canEditJobRecord,
   cancellationReasonLabel,
   isJobTechnician,
@@ -528,7 +529,13 @@ const JobDetailPage = ({
         ) : null)}
 
       {tab === 'media' && (
-        <JobMediaPanel job={job} users={users} editable={editable} onChanged={refresh} />
+        <JobMediaPanel
+          job={job}
+          users={users}
+          editable={editable}
+          unsignedCopy={canChooseUnsignedCopyDocuments(currentUser.role, job)}
+          onChanged={refresh}
+        />
       )}
 
       {tab === 'notes' && (

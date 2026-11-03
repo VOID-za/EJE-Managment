@@ -14,6 +14,7 @@ import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 import { audit } from './audit';
 import { deliveryFailureKindOf } from '@/services/ports';
+import { emailDocumentsProblem, selectedCustomerDocuments } from './email-attachments';
 
 /**
  * SENDING A JOB CARD THE CUSTOMER DID NOT SIGN. BD-06, DELIV-7, AUD-4.
@@ -67,11 +68,12 @@ const REASON_LIMIT = 2000;
 const SENDING_STALE_AFTER_MS = 10 * 60 * 1000;
 
 /** The subject and body of an UNSIGNED copy. One place, so retries match. */
-const unsignedDocumentMail = (job: Job) => ({
+const unsignedDocumentMail = (job: Job, documents: readonly string[]) => ({
   subject: `${job.jobNumber} — Job Card (issued without signature)`,
   body:
     `Good day,\n\n` +
-    `Please find attached the job card for ${job.jobNumber}.\n\n` +
+    `Please find attached the job card for ${job.jobNumber}` +
+    (documents.length === 0 ? '.\n\n' : `, with: ${documents.join(', ')}.\n\n`) +
     'This copy was issued WITHOUT a customer signature. The document itself records that, ' +
     'and why. If anything on it is not as you understood it, please reply to this message.\n\n' +
     `Kind regards\nEJE Industrial Electronics`,
@@ -235,6 +237,14 @@ export const authoriseUnsignedDelivery = async (
     ]);
   }
 
+  /*
+   * UNSIGNED-ATT-1: THE DOCUMENTS ARE CHECKED BEFORE THE DECISION IS RECORDED.
+   * A selected document that is missing, changed, no longer a document a job
+   * may carry, or too large to travel refuses the whole send — nothing is
+   * authorised and nothing is sent, and the message says which file and why.
+   */
+  await assertDocumentsSendable(context, job);
+
   const now = context.services.clock.now();
   const authorisation = await context.repos.jobs.saveUnsignedDeliveryAuthorisation({
     id: context.services.ids.next('unsigned-delivery-authorisation'),
@@ -301,7 +311,25 @@ export const retryUnsignedDelivery = async (
     ]);
   }
 
+  await assertDocumentsSendable(context, job);
   return send(context, job, authorisation);
+};
+
+/**
+ * The job card and the documents chosen for the customer, checked as the signed
+ * email checks them (`emailDocumentsProblem`). Refuses with the reason.
+ */
+const assertDocumentsSendable = async (context: OperationContext, job: Job): Promise<void> => {
+  const document = job.finalDocument;
+  if (document === null) return;
+  const problem = await emailDocumentsProblem(
+    context.services,
+    { storageKey: document.storageKey, fileName: document.fileName, sha256: document.checksumSha256 ?? null },
+    'unsigned job card',
+    selectedCustomerDocuments(job),
+  );
+  if (problem === null) return;
+  throw new WorkflowError(`${job.jobNumber} was not sent to the customer.`, [problem]);
 };
 
 /**
@@ -348,7 +376,9 @@ const send = async (
 
   const at = context.services.clock.now();
   const attempts = (job.delivery?.attempts ?? 0) + 1;
-  const mail = unsignedDocumentMail(job);
+  // The documents chosen for the customer travel WITH the job card (UNSIGNED-ATT-1).
+  const extras = selectedCustomerDocuments(job);
+  const mail = unsignedDocumentMail(job, extras.map((extra) => extra.fileName));
 
   const sending = await context.repos.jobs.save({
     ...job,
@@ -361,7 +391,10 @@ const send = async (
       to: [authorisation.recipient],
       subject: mail.subject,
       body: mail.body,
-      attachments: [{ fileName: document.fileName, storageKey: document.storageKey }],
+      attachments: [
+        { fileName: document.fileName, storageKey: document.storageKey },
+        ...extras.map((extra) => ({ fileName: extra.fileName, storageKey: extra.storageKey })),
+      ],
     });
   } catch (error) {
     receipt = {
@@ -400,7 +433,7 @@ const send = async (
               : ` ${deliveryRetryAdvice(delivery.failureKind)}`
           }`
         : `Attempt ${attempts}: the provider accepted the UNSIGNED job card ` +
-          `${document.fileName} for ${authorisation.recipient}. Delivery is ` +
+          `${[document.fileName, ...extras.map((extra) => extra.fileName)].join(', ')} for ${authorisation.recipient}. Delivery is ` +
           `${deliveryStateLabel(delivery.state).toLowerCase()}. Authorised by ` +
           `${authorisation.authorisedBy.length === 0 ? 'a Senior Tech' : userFullName(context.actor)}.`,
   });
