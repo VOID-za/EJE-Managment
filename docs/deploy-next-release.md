@@ -19,6 +19,19 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## Versions (VERSION-1, from 3 November 2026)
+
+Every release is given its semantic version by `deploy-release.sh` while it
+builds — never by hand: the highest `version=` in `/var/lib/eje-release/`
+(every release ever attempted, so a failed or rolled-back one's number is not
+reused), stepped by the commits since the live release (`type!:` / BREAKING
+CHANGE → MAJOR, `feat` → MINOR, anything else → PATCH). It is stamped into the
+build (`EJE_APP_VERSION`), recorded beside the commit, required by the health
+gate, and printed by the release tool: `RELEASED abc1234 (v1.2.0)`. When a
+release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
+`major`) raises the step. The commit remains what identifies a deployment;
+`/api/health` reports both.
+
 ## RELEASED — `9fa858f`, the Test & Repair delivery-note photo and the simpler Delivery Note (3 November 2026)
 
 Released 3 November 2026 18:08:52 UTC (healthy 18:08:54) from branch `claude/tr-photo-delivery-note-simplify` through `stage-release.ps1 -ExpectPending 0049_tr_photo_delivery_note_site`.
