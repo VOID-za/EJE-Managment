@@ -200,6 +200,8 @@ describeDb('the library, the settings and the reference data', () => {
         'service',
         'test_and_repair',
         'parts',
+        // DELIVERY-NOTE-1 (0048).
+        'delivery_note',
       ]);
 
       const parts = rows.find((row) => row.code === 'parts');
@@ -218,7 +220,7 @@ describeDb('the library, the settings and the reference data', () => {
       await syncReferenceData(db);
 
       const rows = await db.select().from(schema.jobTypes);
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
     });
 
     it('maps a machine type label to a key that survives a relabelling', async () => {

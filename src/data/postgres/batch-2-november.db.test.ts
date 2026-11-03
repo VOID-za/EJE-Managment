@@ -101,7 +101,7 @@ describeDb('migration 0047 — the next critical batch', () => {
 
   it('ROLE-APP-1: an apprentice holds an apprentice standby place; an office account still may not', async () => {
     expect((await repo.findWeek(WEEK_A))!.assignments.find((place) => place.position === 'apprentice_1')!.userId).toBe(APPRENTICE);
-    expect(await refusal(db.execute(sql`update standby_assignments set user_id = ${IDS.coordinator} where position = 'apprentice_2' and week_id = (select id from standby_weeks where week_start = ${WEEK_B})`))).toMatch(/technician or apprentice/u);
+    expect(await refusal(db.execute(sql`update standby_assignments set user_id = ${IDS.coordinator} where position = 'apprentice_2' and week_id = (select id from standby_weeks where week_start = ${WEEK_B})`))).toMatch(/technician(?: or|,) apprentice/u);
   });
 
   it('CUST-RATES-1: every existing customer is on Default Rates; the option is checked; Custom Rates are stored whole', async () => {
@@ -205,7 +205,7 @@ describeDb('migration 0047 — the next critical batch', () => {
     );
     expect(await refusal(db.execute(sql`insert into standby_day_overrides (id, date, position, user_id, swap_id) values (${crypto.randomUUID()}, '2027-03-02', 'main', ${IDS.otherTechnician}, ${pending.id})`))).toMatch(/only when the Office approves/u);
     expect(await refusal(db.execute(sql`insert into standby_day_overrides (id, date, position, user_id, swap_id) values (${crypto.randomUUID()}, '2027-05-01', 'main', ${IDS.otherTechnician}, ${swap.id})`))).toMatch(/published week/u);
-    expect(await refusal(db.execute(sql`insert into standby_day_overrides (id, date, position, user_id, swap_id) values (${crypto.randomUUID()}, ${SAT_A}, 'main', ${IDS.coordinator}, ${swap.id})`))).toMatch(/technician or apprentice/u);
+    expect(await refusal(db.execute(sql`insert into standby_day_overrides (id, date, position, user_id, swap_id) values (${crypto.randomUUID()}, ${SAT_A}, 'main', ${IDS.coordinator}, ${swap.id})`))).toMatch(/technician(?: or|,) apprentice/u);
     await run(coordinator, (context) => decideStandbyDaySwap(context, swap.id, { approve: true }));
     expect(await refusal(db.execute(sql`delete from standby_day_overrides`))).toMatch(/cannot be deleted/u);
     expect(await refusal(db.execute(sql`update standby_day_overrides set date = '2027-03-03'`))).toMatch(/cannot be moved/u);

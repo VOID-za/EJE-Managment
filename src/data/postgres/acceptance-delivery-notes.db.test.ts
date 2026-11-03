@@ -139,7 +139,7 @@ describeDb('migration 0048 — Delivery Notes, overlapping timesheets, Senior Te
     await standby.createWeeks([week('2027-03-01', { main: IDS.master })]);
     expect((await standby.findWeek('2027-03-01'))?.assignments.find((place) => place.position === 'main')?.userId).toBe(IDS.master);
     // Even with an apprentice tick written behind the application's back, the database refuses the place.
-    await db.execute(sql`update standby_eligibility set may_apprentice = true where user_id = ${IDS.master}`);
+    await db.execute(sql`update standby_eligibility set may_main = false, may_helper = false, may_apprentice = true where user_id = ${IDS.master}`);
     expect(await refusal(db.execute(sql`update standby_assignments set user_id = ${IDS.master}
       where position = 'apprentice_1' and week_id = (select id from standby_weeks where week_start = '2027-03-01')`))).toMatch(/technician, apprentice or Senior Tech/u);
     // An Office account still never stands by.
