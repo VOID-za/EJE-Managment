@@ -45,7 +45,9 @@ import { RepairItemsEditor, emptyRepairItemDraft, repairDraftsValid, repairItems
 import {
   JOB_ATTACHMENT_ACCEPT_ATTRIBUTE,
   JOB_ATTACHMENT_TYPES_SENTENCE,
+  PHOTO_ACCEPT_ATTRIBUTE,
   jobAttachmentProblem,
+  jobMediaProblem,
 } from '@/lib/upload-limits';
 
 /**
@@ -110,6 +112,9 @@ const NewJobPage = () => {
   const [additionalIds, setAdditionalIds] = useState<readonly string[]>([]);
   /** The real files, held until the job exists to attach them to. */
   const [attachments, setAttachments] = useState<readonly File[]>([]);
+  // TR-REF-PHOTO-1: photos of the incoming delivery note — internal, for the technician.
+  const [referencePhotos, setReferencePhotos] = useState<readonly File[]>([]);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   /** Which file is uploading now, once the job exists. Null when nothing is. */
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -143,7 +148,7 @@ const NewJobPage = () => {
     () =>
       (data?.contacts ?? []).filter(
         (contact) =>
-          contact.customerId === customerId && (contact.siteId === null || contact.siteId === siteId),
+          contact.customerId === customerId && (contact.siteId === null || contact.siteId === siteId || siteId.length === 0),
       ),
     [data?.contacts, customerId, siteId],
   );
@@ -194,7 +199,8 @@ const NewJobPage = () => {
   const submit = async (asDraft = false) => {
     const next: Record<string, string> = {};
     if (customerId.length === 0) next.customerId = 'Select a customer.';
-    if (siteId.length === 0) next.siteId = 'Select a site.';
+    // DN-SITE-OPT-1: a Delivery Note may be raised without a site (the server asks the same).
+    if (siteId.length === 0 && !definition.siteOptional) next.siteId = 'Select a site.';
     if (contactId.length === 0) next.contactId = 'Select a site contact.';
     /*
      * A MACHINE ONLY WHERE THE JOB TYPE NEEDS ONE. Create New Job §3A / §4.
@@ -266,15 +272,16 @@ const NewJobPage = () => {
     const ok = await operation.run(async () => {
       created = await api.create({
         customerId,
-        siteId,
+        siteId: siteId.length === 0 ? null : siteId,
         contactId,
         machineId: machineId.length > 0 ? machineId : null,
         jobType,
         priority,
         scheduledDate: scheduledDate.length > 0 ? scheduledDate : null,
         scheduledEndDate: scheduledEndDate.length > 0 ? scheduledEndDate : null,
-        orderNumber,
-        referenceNumber,
+        // DN-SIMPLIFY-1: not recorded on a Delivery Note.
+        orderNumber: definition.capturesOrderAndReference ? orderNumber : '',
+        referenceNumber: definition.capturesOrderAndReference ? referenceNumber : '',
         faultDescription: definition.officeProcessed ? '' : faultDescription,
         primaryTechnicianId: technicianId.length > 0 ? technicianId : null,
         additionalTechnicianIds: technicianId.length > 0 ? [...additionalIds] : [],
@@ -333,6 +340,17 @@ const NewJobPage = () => {
             ? `${file.name} (${error.message})`
             : file.name,
         );
+      }
+    }
+    // TR-REF-PHOTO-1: the delivery-note photos, as INTERNAL references (their own route; never the job card).
+    if (getJobTypeDefinition(job.jobType).capturesDeliveryNotePhoto) {
+      for (const [position, file] of referencePhotos.entries()) {
+        setUploadProgress(`Uploading delivery-note photo ${position + 1} of ${referencePhotos.length}: ${file.name}`);
+        try {
+          await api.attachReferencePhoto(job.id, file);
+        } catch (error) {
+          failed.push(error instanceof Error && error.message.length > 0 ? `${file.name} (${error.message})` : file.name);
+        }
       }
     }
     setUploadProgress(null);
@@ -469,7 +487,8 @@ const NewJobPage = () => {
                    * several sites still asks which one.
                    */
                   const own = (data.sites ?? []).filter((site) => site.customerId === chosen);
-                  setSiteId(own.length === 1 ? own[0]!.id : '');
+                  // DN-SITE-OPT-1: a Delivery Note starts with no site; one may be chosen.
+                  setSiteId(own.length === 1 && !definition.siteOptional ? own[0]!.id : '');
                   setContactId('');
                   setMachineId('');
                 }}
@@ -478,7 +497,22 @@ const NewJobPage = () => {
                   label: customer.name,
                 }))}
               />
-              {customerId.length > 0 && sites.length === 1 ? (
+              {definition.siteOptional ? (
+                <SelectField
+                  label="Site (optional)"
+                  value={siteId}
+                  placeholder="No site"
+                  hint="A Delivery Note needs no site. Choose one only if the goods went to a particular site."
+                  disabled={customerId.length === 0}
+                  onChange={(event) => {
+                    setSiteId(event.target.value);
+                    setContactId('');
+                    setMachineId('');
+                  }}
+                  options={sites.map((site) => ({ value: site.id, label: `${site.name} — ${site.city}` }))}
+                  data-testid="job-site-optional"
+                />
+              ) : customerId.length > 0 && sites.length === 1 ? (
                 // The one site, filled in from the customer. Not a choice.
                 <div data-testid="job-site" className="text-sm">
                   <p className="mb-1.5 font-medium text-steel-700">Site</p>
@@ -545,8 +579,8 @@ const NewJobPage = () => {
                 value={contactId}
                 error={errors.contactId}
                 hint="Who receives the signed job card. Changeable later, before it is issued."
-                placeholder={siteId.length === 0 ? 'Select a site first' : 'Select a contact'}
-                disabled={siteId.length === 0}
+                placeholder={siteId.length === 0 && !definition.siteOptional ? 'Select a site first' : 'Select a contact'}
+                disabled={definition.siteOptional ? customerId.length === 0 : siteId.length === 0}
                 onChange={(event) => setContactId(event.target.value)}
                 options={contacts.map((contact) => ({
                   value: contact.id,
@@ -609,6 +643,8 @@ const NewJobPage = () => {
                      */
                     const chosen = getJobTypeDefinition(code);
                     setPriority(chosen.requiresPriority ? chosen.defaultPriority : null);
+                    // DN-SITE-OPT-1: leaving a Delivery Note, a one-site customer's site comes back with the customer.
+                    if (!chosen.siteOptional && siteId.length === 0 && sites.length === 1) setSiteId(sites[0]!.id);
                     // Only service work is booked across a range.
                     if (!getJobTypeDefinition(code).schedulesDateRange) setScheduledEndDate('');
                     /*
@@ -858,8 +894,9 @@ const NewJobPage = () => {
                   </>
                 ) : (
                   <>
-                    {orderNumberField}
-                    {referenceNumberField}
+                    {/* DN-SIMPLIFY-1: no customer order number or reference on a Delivery Note. */}
+                    {definition.capturesOrderAndReference && orderNumberField}
+                    {definition.capturesOrderAndReference && referenceNumberField}
                     {deliveryNoteField}
                     {quoteNumberField}
                   </>
@@ -1067,6 +1104,76 @@ const NewJobPage = () => {
               PDFs and images up to 25 MB. Uploaded once the job is raised, and available to the
               technician on the job card.
             </p>
+
+            {/*
+              TR-REF-PHOTO-1 (3 November 2026): the delivery note that came in with the
+              parts, photographed — on a Test & Repair job only. An INTERNAL reference
+              for the technician: it is stored as an internal photo and never appears on
+              the job card or any customer document. Take Photo asks the device for its
+              rear camera (`capture`); where a browser cannot, it opens the picker, which
+              is what Choose Photo does. The server sniffs the bytes of whatever is sent.
+            */}
+            {definition.capturesDeliveryNotePhoto && (
+              <div className="mt-5 rounded-[var(--radius-control)] border border-violet-eje-200 bg-violet-eje-50 p-4" data-testid="reference-photo-block">
+                <p className="text-sm font-semibold text-violet-eje-700">Delivery note photo (internal reference)</p>
+                <p className="mt-1 text-xs text-steel-700">
+                  A photo of the delivery note that came with the parts, for the technician. It is kept with the job and
+                  never printed on the job card or sent to the customer.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[
+                    { label: 'Take Photo', testid: 'reference-photo-take', capture: true },
+                    { label: 'Choose Photo', testid: 'reference-photo-choose', capture: false },
+                  ].map((control) => (
+                    <label
+                      key={control.testid}
+                      className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-steel-300 bg-surface px-4 text-sm font-semibold text-steel-800 hover:bg-steel-50"
+                    >
+                      <Icon name={control.capture ? 'camera' : 'image'} className="size-4" />
+                      {control.label}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept={PHOTO_ACCEPT_ATTRIBUTE}
+                        {...(control.capture ? { capture: 'environment' as const } : {})}
+                        data-testid={control.testid}
+                        onChange={(event) => {
+                          const chosen = Array.from(event.target.files ?? []);
+                          const problems = chosen
+                            .map((file) => jobMediaProblem(file, { videos: false }))
+                            .filter((problem): problem is string => problem !== null);
+                          setReferenceError(problems.length > 0 ? problems.join(' ') : null);
+                          setReferencePhotos((current) => [...current, ...chosen.filter((file) => jobMediaProblem(file, { videos: false }) === null)]);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {referencePhotos.length > 0 && (
+                  <ul className="mt-3 space-y-2" data-testid="reference-photo-list">
+                    {referencePhotos.map((file, index) => (
+                      <li
+                        key={`${file.name}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-steel-200 bg-surface px-3 py-2 text-sm"
+                        data-testid="reference-photo-item"
+                      >
+                        <AttachmentThumb file={file} />
+                        <span className="min-w-0 flex-1 truncate text-steel-800">{file.name}</span>
+                        <Button size="sm" variant="ghost" onClick={() => setReferencePhotos((current) => current.filter((_, at) => at !== index))}>
+                          Remove
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {referenceError !== null && (
+                  <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="reference-photo-error">
+                    {referenceError}
+                  </p>
+                )}
+              </div>
+            )}
           </Card>
 
           {operation.error !== null && (

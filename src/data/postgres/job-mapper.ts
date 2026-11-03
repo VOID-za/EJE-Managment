@@ -115,6 +115,7 @@ const attachmentFrom = (row: MediaRow): Attachment => ({
   storageKey: row.storageKey,
   checksumSha256: row.checksumSha256,
   ...(row.kind === 'document' ? { emailToCustomer: row.emailToCustomer } : {}),
+  ...(row.purpose === 'delivery_note_reference' ? { purpose: 'delivery_note_reference' as const } : {}),
   /*
    * JOB MEDIA IS ALWAYS GENUINE, and that is a fact about this system rather
    * than a default: every path that records one stores bytes first and the
@@ -373,7 +374,7 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     id: asJobId(rows.job.id),
     jobNumber: rows.job.jobNumber,
     customerId: asCustomerId(rows.job.customerId),
-    siteId: asSiteId(rows.job.siteId),
+    siteId: rows.job.siteId === null ? null : asSiteId(rows.job.siteId),
     contactId: asContactId(rows.job.contactId),
     machineId: rows.job.machineId === null ? null : asMachineId(rows.job.machineId),
     jobType: rows.job.jobTypeCode as Job['jobType'],

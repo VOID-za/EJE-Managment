@@ -1603,6 +1603,65 @@ export const addMedia = async (
 };
 
 /**
+ * THE DELIVERY NOTE THAT CAME WITH THE PARTS, PHOTOGRAPHED. TR-REF-PHOTO-1
+ * (3 November 2026).
+ *
+ * The office photographs (or picks a photo of) the delivery note that came in
+ * with a Test & Repair job's parts, so the technician who takes the job can
+ * see what arrived. It is an INTERNAL reference: always `internal`, marked
+ * `delivery_note_reference`, never on the job card or any customer document
+ * (`documentPhotos` excludes it, and the database keeps it internal). The
+ * bytes are sniffed as a photograph by the route; this stores and records it.
+ *
+ * WHO: the office (`jobs.create` — the people who raise jobs), on a job that
+ * may still be changed. Anyone who may see the job may view it.
+ */
+export const addDeliveryNoteReferencePhoto = async (
+  context: OperationContext,
+  job: Job,
+  input: { readonly fileName: string; readonly contentType: string; readonly bytes: Uint8Array },
+): Promise<Job> => {
+  if (!getJobTypeDefinition(job.jobType).capturesDeliveryNotePhoto) {
+    throw new WorkflowError(`${job.jobNumber} takes no delivery-note photo.`, [
+      { code: 'not_applicable_to_job_type', message: 'Only a Test & Repair job carries a photo of the incoming delivery note.' },
+    ]);
+  }
+  if (!can(context.actor.role, 'jobs.create')) {
+    throw new WorkflowError('Only the office adds the delivery-note photo.', [
+      { code: 'not_permitted', message: 'The people who raise jobs photograph the delivery note that came with the parts.' },
+    ]);
+  }
+  assertEditable(context, job);
+  const stored = await storeAndMeasure(
+    context,
+    { fileName: input.fileName, contentType: input.contentType, bytes: input.bytes },
+    'That photograph could not be stored.',
+  );
+  const attachment: Attachment = {
+    id: asAttachmentId(context.services.ids.next('att')),
+    kind: 'photo',
+    visibility: 'internal',
+    purpose: 'delivery_note_reference',
+    fileName: input.fileName,
+    caption: 'Delivery note (reference)',
+    storageKey: stored.storageKey,
+    uploadedAt: context.services.clock.now(),
+    uploadedBy: context.actor.id,
+    sizeBytes: stored.sizeBytes,
+    checksumSha256: stored.checksumSha256,
+    provenance: 'genuine',
+  };
+  const saved = await context.repos.jobs.save({ ...job, photos: [...job.photos, attachment] });
+  await audit(context, {
+    jobId: job.id,
+    type: 'photo_uploaded',
+    summary: 'Delivery-note reference photo added',
+    detail: `${input.fileName} — internal, for the technician; never on the job card or a customer document. Added by ${userFullName(context.actor)}.`,
+  });
+  return saved;
+};
+
+/**
  * Attaches a DOCUMENT to a job, bytes and all.
  *
  * SEPARATE FROM `addMedia`, which allocates a key for a photograph whose bytes
@@ -1843,6 +1902,12 @@ export const setMediaVisibility = async (
   if (existing === undefined) {
     throw new WorkflowError('That photograph is not on this job.', [
       { code: 'media_not_on_job', message: 'It may already have been removed. Reload the job.' },
+    ]);
+  }
+  // TR-REF-PHOTO-1: the delivery-note reference photo is internal, always.
+  if (existing.purpose === 'delivery_note_reference' && visibility !== 'internal') {
+    throw new WorkflowError('The delivery-note photo stays internal.', [
+      { code: 'reference_photo_internal', message: 'It is a reference for the technician and never goes on the job card or to the customer.' },
     ]);
   }
   /*

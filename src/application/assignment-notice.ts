@@ -247,7 +247,8 @@ export const assignmentDetails = async (
 ): Promise<AssignmentContext> => {
   const [customer, site, machine] = await Promise.all([
     context.repos.customers.findById(job.customerId),
-    context.repos.customers.findSiteById(job.siteId),
+    // DN-SITE-OPT-1: a Delivery Note may have no site (and is never assigned).
+    job.siteId === null ? Promise.resolve(null) : context.repos.customers.findSiteById(job.siteId),
     job.machineId === null
       ? Promise.resolve(null)
       : context.repos.machines.findById(job.machineId),

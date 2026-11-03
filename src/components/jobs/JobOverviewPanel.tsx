@@ -84,6 +84,39 @@ export const JobOverviewPanel = ({
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
       <div className="space-y-5 xl:col-span-2">
+        {/*
+          TR-REF-PHOTO-1: the office's photo of the delivery note that came with the
+          parts — first, so the technician sees it on opening the job. Internal: it is
+          never on the job card or a customer document. Opened through the authorised
+          media route, like every photo on a job.
+        */}
+        {job.photos.some((photo) => photo.purpose === 'delivery_note_reference') && (
+          <Card data-testid="reference-photo-card">
+            <CardHeader
+              title="Delivery note photo (internal reference)"
+              description="The delivery note that came in with the parts. For the workshop only — not on the job card."
+            />
+            <ul className="mt-3 flex flex-wrap gap-3" data-testid="reference-photos">
+              {job.photos
+                .filter((photo) => photo.purpose === 'delivery_note_reference')
+                .map((photo) => (
+                  <li key={photo.id}>
+                    <a
+                      href={jobs.mediaUrl(job.id, photo.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block overflow-hidden rounded-[var(--radius-control)] border border-steel-200"
+                      aria-label={`Open the delivery-note photo ${photo.fileName}`}
+                      data-testid="reference-photo-link"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- an authorised, session-bound media route, not a static asset */}
+                      <img src={jobs.mediaUrl(job.id, photo.id)} alt={`Delivery note — ${photo.fileName}`} className="h-32 w-auto max-w-full object-cover" />
+                    </a>
+                  </li>
+                ))}
+            </ul>
+          </Card>
+        )}
         <Card>
           <CardHeader
             title="Reported fault"

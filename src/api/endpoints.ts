@@ -539,6 +539,9 @@ export const jobs = {
       file,
       caption,
     ),
+  /** TR-REF-PHOTO-1: the office's photo of the incoming delivery note — internal, for the technician. */
+  attachReferencePhoto: (jobId: string, file: File) =>
+    apiUpload<{ id: string; fileName: string; caption: string }>(`/api/jobs/${segment(jobId)}/reference-photo`, file, ''),
   /** Where a job's attachment is downloaded from. Authorised on every request. */
   attachmentUrl: (jobId: string, attachmentId: string) =>
     `/api/jobs/${segment(jobId)}/attachments/${segment(attachmentId)}`,

@@ -1,4 +1,5 @@
 import {
+  NO_SITE_ID,
   getJobTypeDefinition,
   repairItemsOf,
   requiresDeliveryNote,
@@ -133,7 +134,8 @@ export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: st
     jobNumber: job.jobNumber,
     deliverTo: [
       customer.name,
-      `${site.name}${address.length > 0 ? ` — ${address}` : ''}`,
+      // DN-SITE-OPT-1: a Delivery Note raised without a site prints no site line.
+      ...(site.id === NO_SITE_ID ? [] : [`${site.name}${address.length > 0 ? ` — ${address}` : ''}`]),
       ...(contact === null ? [] : [`Attention: ${contact.firstName} ${contact.lastName}`.trim()]),
     ],
     details: [

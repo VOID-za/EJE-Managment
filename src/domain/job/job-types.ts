@@ -206,11 +206,31 @@ export interface JobTypeDefinition {
   readonly capturesDeliveryDate: boolean;
   /** DELIVERY-NOTE-1. Each part line carries a comment ("Loan unit", "Part returned"). */
   readonly capturesPartComments: boolean;
+  /**
+   * DN-SITE-OPT-1 (3 November 2026). The job may be raised without a site:
+   * a Delivery Note is a record of goods handed over, not of work at a place.
+   * A site chosen anyway is kept. Every other job type still needs one.
+   */
+  readonly siteOptional: boolean;
+  /**
+   * DN-SIMPLIFY-1 (3 November 2026). The customer order number and EJE's
+   * reference are recorded on this job type. False on a Delivery Note.
+   */
+  readonly capturesOrderAndReference: boolean;
+  /**
+   * TR-REF-PHOTO-1 (3 November 2026). The office may attach a photograph of the
+   * delivery note that came in with the parts, as an INTERNAL reference for the
+   * technician — never on the job card or any customer document.
+   */
+  readonly capturesDeliveryNotePhoto: boolean;
 }
 
 const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   breakdown: {
     code: 'breakdown',
+    siteOptional: false,
+    capturesOrderAndReference: true,
+    capturesDeliveryNotePhoto: false,
     priced: true,
     closesOnIssue: false,
     capturesDeliveryDate: false,
@@ -240,6 +260,9 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   installation: {
     code: 'installation',
+    siteOptional: false,
+    capturesOrderAndReference: true,
+    capturesDeliveryNotePhoto: false,
     priced: true,
     closesOnIssue: false,
     capturesDeliveryDate: false,
@@ -269,6 +292,9 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   service: {
     code: 'service',
+    siteOptional: false,
+    capturesOrderAndReference: true,
+    capturesDeliveryNotePhoto: false,
     priced: true,
     closesOnIssue: false,
     capturesDeliveryDate: false,
@@ -298,6 +324,9 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   parts: {
     code: 'parts',
+    siteOptional: false,
+    capturesOrderAndReference: true,
+    capturesDeliveryNotePhoto: false,
     priced: true,
     closesOnIssue: false,
     capturesDeliveryDate: false,
@@ -339,6 +368,9 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
 
   test_and_repair: {
     code: 'test_and_repair',
+    siteOptional: false,
+    capturesOrderAndReference: true,
+    capturesDeliveryNotePhoto: true,
     priced: true,
     closesOnIssue: false,
     capturesDeliveryDate: false,
@@ -369,6 +401,9 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
 
   delivery_note: {
     code: 'delivery_note',
+    siteOptional: true,
+    capturesOrderAndReference: false,
+    capturesDeliveryNotePhoto: false,
     priced: false,
     closesOnIssue: true,
     capturesDeliveryDate: true,

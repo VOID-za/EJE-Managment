@@ -347,7 +347,7 @@ export class PostgresJobRepository implements JobRepository {
       },
       moreRepairItems: repairItemsFromColumn(row.moreRepairItems),
       customerId: asCustomerId(row.customerId),
-      siteId: asSiteId(row.siteId),
+      siteId: row.siteId === null ? null : asSiteId(row.siteId),
       machineId: row.machineId === null ? null : asMachineId(row.machineId),
       primaryTechnicianId: row.primaryTechnicianId === null ? null : asUserId(row.primaryTechnicianId),
       additionalTechnicianIds: additional.get(row.id) ?? [],
@@ -930,6 +930,8 @@ export class PostgresJobRepository implements JobRepository {
            */
           checksumSha256: item.checksumSha256,
           emailToCustomer: item.emailToCustomer === true,
+          // TR-REF-PHOTO-1: written once, with the row; never changed by an update.
+          purpose: item.purpose ?? '',
           uploadedAt: item.uploadedAt,
           uploadedBy: item.uploadedBy,
         })

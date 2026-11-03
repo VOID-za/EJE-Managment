@@ -106,7 +106,8 @@ export const editableDetailFields = (jobType: JobTypeCode): readonly JobDetailFi
     switch (field) {
       case 'orderNumber':
       case 'referenceNumber':
-        return true;
+        // DN-SIMPLIFY-1: a Delivery Note records neither.
+        return definition.capturesOrderAndReference;
       case 'deliveryNote':
         return definition.capturesDeliveryNote;
       case 'quoteNumber':

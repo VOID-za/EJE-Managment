@@ -300,7 +300,8 @@ const answerFor = (item: ChecklistItem, response: ChecklistResponse | undefined)
  * preview), so nothing loads a photograph the document will not print.
  */
 export const documentPhotos = (job: Job): Job['photos'] =>
-  job.photos.filter((photo) => photo.visibility === 'customer_facing');
+  // TR-REF-PHOTO-1: a delivery-note reference photo is internal anyway; it is excluded by name as well.
+  job.photos.filter((photo) => photo.visibility === 'customer_facing' && photo.purpose === undefined);
 
 export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
   const { job, customer, site, contact, machine, settings, checklistTemplate, users } = input;

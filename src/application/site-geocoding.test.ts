@@ -105,7 +105,7 @@ describe('Workflow A — a new customer and site', () => {
       attachments: [],
     } as unknown as NewJobInput);
     await assignPrimaryTechnician(harness.as(master), job, technician.id, 'Sipho');
-    const jobSite = (await harness.repos.customers.findSiteById(job.siteId))!;
+    const jobSite = (await harness.repos.customers.findSiteById(job.siteId!))!;
     const target = siteNavigationTarget(jobSite);
     expect(target.kind).toBe('verified_pin');
     // A Google pin is linked by its place, never its coordinates (rule 5).

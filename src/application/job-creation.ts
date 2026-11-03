@@ -50,7 +50,8 @@ import { normaliseRepairItems } from './repair-items';
  */
 export interface NewJobInput {
   readonly customerId: CustomerId;
-  readonly siteId: SiteId;
+  /** DN-SITE-OPT-1: null only on a job type whose site is optional (a Delivery Note). */
+  readonly siteId: SiteId | null;
   readonly machineId: MachineId | null;
   readonly jobType: JobTypeCode;
   /**
@@ -158,7 +159,8 @@ const allocateJobNumber = async (
  */
 interface ResolvedRegister {
   readonly customer: Customer;
-  readonly site: Site;
+  /** Null only for a job type whose site is optional (DN-SITE-OPT-1), raised without one. */
+  readonly site: Site | null;
   readonly contact: Contact;
   readonly machine: Machine | null;
 }
@@ -168,7 +170,10 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
 /** Exactly the four ids this reads, so a caller cannot pass a cast. DRAFT-1. */
-type RegisterInput = Pick<NewJobInput, 'customerId' | 'siteId' | 'contactId' | 'machineId'>;
+type RegisterInput = Pick<NewJobInput, 'customerId' | 'siteId' | 'contactId' | 'machineId'> & {
+  /** DN-SITE-OPT-1: the job type allows no site. */
+  readonly siteOptional?: boolean;
+};
 
 const resolveRegister = async (
   context: OperationContext,
@@ -183,6 +188,20 @@ const resolveRegister = async (
       'Work cannot be raised against a withdrawn customer account.');
   }
 
+  // DN-SITE-OPT-1: no site at all is allowed only where the job type says so.
+  if (input.siteId === null) {
+    if (input.siteOptional !== true) {
+      throw refuse('Choose the site.', 'site_required', 'Every job type except a Delivery Note is raised at one of the customer’s sites.');
+    }
+    if (input.machineId !== null) {
+      throw refuse('A machine stands at a site.', 'machine_needs_site', 'Choose the site, or leave the machine empty.');
+    }
+    const headOffice = await context.repos.customers.findContactById(input.contactId);
+    if (headOffice === null || headOffice.archivedAt !== null || headOffice.customerId !== customer.id) {
+      throw refuse('That contact is not on the register.', 'unknown_contact', 'Choose who at the customer receives it.');
+    }
+    return { customer, site: null, contact: headOffice, machine: null };
+  }
   const site = await context.repos.customers.findSiteById(input.siteId);
   if (site === null || site.archivedAt !== null) {
     throw refuse('That site is not on the register.', 'unknown_site', 'Choose one of the customer’s sites.');
@@ -461,7 +480,7 @@ export const createJob = async (
    * burn a number off the sequence, because EJE's job numbers are a continuous
    * commercial record and a gap in them is a question somebody has to answer.
    */
-  const { customer, site, contact, machine } = await resolveRegister(context, input);
+  const { customer, site, contact, machine } = await resolveRegister(context, { ...input, siteOptional: getJobTypeDefinition(input.jobType).siteOptional });
 
   /*
    * WHAT THE JOB IS ABOUT — ON THE JOB TYPES THAT HAVE SUCH A THING. CR-13.
@@ -531,7 +550,7 @@ export const createJob = async (
      * assumed, and it is the shape the next reader should copy.
      */
     customerId: customer.id,
-    siteId: site.id,
+    siteId: site?.id ?? null,
     contactId: contact.id,
     machineId: machine === null ? null : machine.id,
     jobType: input.jobType,
@@ -577,8 +596,9 @@ export const createJob = async (
     status: asDraft ? 'draft' : definition.officeProcessed ? 'completion' : 'open',
     scheduledDate: definition.officeProcessed ? null : input.scheduledDate,
     scheduledEndDate: definition.schedulesDateRange ? input.scheduledEndDate : null,
-    orderNumber: input.orderNumber.trim(),
-    referenceNumber: input.referenceNumber.trim(),
+    // DN-SIMPLIFY-1: a Delivery Note records no order or reference number — never stored, whatever is sent.
+    orderNumber: definition.capturesOrderAndReference ? input.orderNumber.trim() : '',
+    referenceNumber: definition.capturesOrderAndReference ? input.referenceNumber.trim() : '',
     /*
      * WHAT CAME IN FOR TEST AND REPAIR, AND THE CUSTOMER'S QUOTE NUMBER.
      * Test & Repair §4.
@@ -793,6 +813,7 @@ export const releaseDraft = async (context: OperationContext, job: Job): Promise
     siteId: job.siteId,
     machineId: job.machineId,
     contactId: job.contactId,
+    siteOptional: getJobTypeDefinition(job.jobType).siteOptional,
   });
 
   const { primaryId, additionalIds } = await resolveTechnicians(context, {
@@ -809,7 +830,7 @@ export const releaseDraft = async (context: OperationContext, job: Job): Promise
     // own close-out, everything else in the pool.
     status: definition.officeProcessed ? 'completion' : 'open',
     customerId: customer.id,
-    siteId: site.id,
+    siteId: site?.id ?? null,
     contactId: contact.id,
     machineId: machine === null ? null : machine.id,
     primaryTechnicianId: primaryId,

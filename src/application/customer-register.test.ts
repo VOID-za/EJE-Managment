@@ -213,7 +213,7 @@ describe('sites', () => {
 
   it('archives a site that has job history, and that job still reads', async () => {
     const job = await harness.repos.jobs.findByJobNumber('EJE-1044');
-    const site = await harness.repos.customers.findSiteById(job!.siteId);
+    const site = await harness.repos.customers.findSiteById(job!.siteId!);
     expect(site).not.toBeNull();
 
     // Clear the machines standing at it; the refusal above is a separate rule.

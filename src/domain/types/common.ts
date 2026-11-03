@@ -116,4 +116,12 @@ export interface Attachment {
    * with the final signed job card email. Absent (false) on every other kind.
    */
   readonly emailToCustomer?: boolean;
+  /**
+   * TR-REF-PHOTO-1 (3 November 2026): what an INTERNAL photograph is for. A
+   * `delivery_note_reference` is the office's photo of the delivery note that
+   * came in with a Test & Repair job's parts — for the technician only, always
+   * internal, never on the job card or any customer document (the database
+   * holds it internal too). Absent on every other attachment.
+   */
+  readonly purpose?: 'delivery_note_reference';
 }

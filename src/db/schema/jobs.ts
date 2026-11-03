@@ -61,9 +61,8 @@ export const jobs = pgTable(
     customerId: uuid('customer_id')
       .notNull()
       .references(() => customers.id, { onDelete: 'restrict' }),
-    siteId: uuid('site_id')
-      .notNull()
-      .references(() => sites.id, { onDelete: 'restrict' }),
+    // DN-SITE-OPT-1 (0049): null only on a Delivery Note raised without a site (database check).
+    siteId: uuid('site_id').references(() => sites.id, { onDelete: 'restrict' }),
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contacts.id, { onDelete: 'restrict' }),
@@ -626,6 +625,8 @@ export const jobMedia = pgTable(
      * photographs on a job are evidence of the work, not notes to the workshop.
      */
     visibility: mediaVisibility('visibility').notNull().default('customer_facing'),
+    // TR-REF-PHOTO-1 (0049): '' or 'delivery_note_reference' (always an internal photo — database check).
+    purpose: text('purpose').notNull().default(''),
     fileName: text('file_name').notNull(),
     caption: text('caption').notNull().default(''),
     storageKey: text('storage_key').notNull(),

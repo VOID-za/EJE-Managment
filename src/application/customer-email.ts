@@ -121,7 +121,8 @@ export const signedJobCardValues = async (
 ): Promise<PlaceholderValues> => {
   const [customer, site, machine, technician] = await Promise.all([
     context.repos.customers.findById(job.customerId),
-    context.repos.customers.findSiteById(job.siteId),
+    // DN-SITE-OPT-1: a Delivery Note may have no site.
+    job.siteId === null ? Promise.resolve(null) : context.repos.customers.findSiteById(job.siteId),
     job.machineId === null ? Promise.resolve(null) : context.repos.machines.findById(job.machineId),
     job.primaryTechnicianId === null ? Promise.resolve(null) : context.repos.users.findById(job.primaryTechnicianId),
   ]);

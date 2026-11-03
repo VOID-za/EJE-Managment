@@ -72,7 +72,7 @@ describe('who is told', () => {
     const unconfigured = buildHarness({ whatsapp: new UnconfiguredWhatsAppService() });
     const job = await acceptJob(unconfigured.as(sipho), (await unconfigured.repos.jobs.findByJobNumber('EJE-1048'))!);
     expect(job.status).toBe('in_progress');
-    const site = (await unconfigured.repos.customers.findSiteById(job.siteId))!;
+    const site = (await unconfigured.repos.customers.findSiteById(job.siteId!))!;
     const customer = (await unconfigured.repos.customers.findById(job.customerId))!;
     const result = await sendSiteLocation(unconfigured.as(sipho), job, { site, machine: null, customerName: customer.name });
     expect(result).toMatchObject({ queued: false, configured: false });
@@ -83,7 +83,7 @@ describe('who is told', () => {
 
   it('the location the technician asks for uses the JOB’S site, its pin when trusted', async () => {
     const job = await accepted(harness);
-    const site = (await harness.repos.customers.findSiteById(job.siteId))!;
+    const site = (await harness.repos.customers.findSiteById(job.siteId!))!;
     const customer = (await harness.repos.customers.findById(job.customerId))!;
     const result = await sendSiteLocation(harness.as(sipho), job, { site, machine: null, customerName: customer.name });
     const expected = site.latitude === null ? encodeURIComponent(site.addressLine1).slice(0, 10) : `${site.latitude}%2C${site.longitude}`;

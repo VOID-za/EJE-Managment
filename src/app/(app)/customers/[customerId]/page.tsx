@@ -178,7 +178,7 @@ const CustomerDetailPage = ({
           sites={sites}
           contacts={contacts}
           machines={machines}
-          jobSiteIds={jobRows.map((row) => row.job.siteId)}
+          jobSiteIds={jobRows.flatMap((row) => (row.job.siteId === null ? [] : [row.job.siteId]))}
           onChanged={query.refetch}
         />
       )}

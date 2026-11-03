@@ -57,7 +57,7 @@ describe('the development seed dataset', () => {
 
     for (const job of seedJobs) {
       expect(customers.has(job.customerId), `${job.jobNumber} customer`).toBe(true);
-      expect(sites.has(job.siteId), `${job.jobNumber} site`).toBe(true);
+      expect(sites.has(job.siteId!), `${job.jobNumber} site`).toBe(true);
       expect(contacts.has(job.contactId), `${job.jobNumber} contact`).toBe(true);
       if (job.machineId !== null) {
         expect(machines.has(job.machineId), `${job.jobNumber} machine`).toBe(true);
@@ -75,7 +75,7 @@ describe('the development seed dataset', () => {
       expect(customerOf.get(contact.siteId)).toBe(contact.customerId);
     }
     for (const job of seedJobs) {
-      expect(customerOf.get(job.siteId), `${job.jobNumber} site/customer`).toBe(job.customerId);
+      expect(customerOf.get(job.siteId!), `${job.jobNumber} site/customer`).toBe(job.customerId);
     }
   });
 

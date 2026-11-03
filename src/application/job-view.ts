@@ -16,6 +16,7 @@ import type {
   User,
 } from '@/domain';
 import {
+  noSitePlaceholder,
   canSeeDraftJobs,
   withoutHiddenDrafts,
   can,
@@ -73,7 +74,10 @@ export type MachineLocationAtWork =
 export interface JobView {
   readonly job: Job;
   readonly customer: Customer;
+  /** DN-SITE-OPT-1: a display placeholder (`noSitePlaceholder`) when the job was raised without a site. */
   readonly site: Site;
+  /** DN-SITE-OPT-1: false when the job has no site — only a Delivery Note may. */
+  readonly siteRecorded: boolean;
   readonly contact: Contact | null;
   /** Null for a parts collection, which is not against a machine. */
   readonly machine: Machine | null;
@@ -243,7 +247,8 @@ export const loadJobView = async (
     repos.users.list(),
   ]);
 
-  const site = sites.find((candidate) => candidate.id === job.siteId);
+  // DN-SITE-OPT-1: a Delivery Note raised without a site shows a placeholder, never a guessed site.
+  const site = job.siteId === null ? noSitePlaceholder(job.customerId) : sites.find((candidate) => candidate.id === job.siteId);
   // A missing machine is only a failure when the job is supposed to have one.
   if (customer === null || site === undefined) return null;
   if (job.machineId !== null && machine === null) return null;
@@ -312,6 +317,7 @@ export const loadJobView = async (
     job,
     customer,
     site,
+    siteRecorded: job.siteId !== null,
     contact: contacts.find((candidate) => candidate.id === job.contactId) ?? null,
     /*
      * EVERY CONTACT THE CUSTOMER HAS. CUST-CR, the job half.

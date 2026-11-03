@@ -65,6 +65,27 @@ export interface Contact {
   readonly archivedAt: IsoDateTime | null;
 }
 
+/**
+ * DN-SITE-OPT-1: what a job raised WITHOUT a site shows where a site would be.
+ * Display only — never stored, never a register entry, never a destination.
+ * Its id is not a real site's, so nothing can be raised against or sent to it.
+ */
+export const NO_SITE_ID = 'no-site';
+export const noSitePlaceholder = (customerId: CustomerId): Site => ({
+  id: NO_SITE_ID as Site['id'],
+  customerId,
+  name: 'No site recorded',
+  addressLine1: '',
+  addressLine2: '',
+  city: '',
+  province: '',
+  postalCode: '',
+  accessNotes: '',
+  latitude: null,
+  longitude: null,
+  archivedAt: null,
+});
+
 export interface Site {
   readonly id: SiteId;
   readonly customerId: CustomerId;

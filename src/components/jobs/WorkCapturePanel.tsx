@@ -412,6 +412,8 @@ export const WorkCapturePanel = ({
         No quantity and no unit price, because a sum of money with a reason
         beside it has neither — see `AdditionalChargeEntry`.
       */}
+      {/* DN-SIMPLIFY-1: a Delivery Note has no Additional Charges section — it prices nothing (the server and database refuse a charge). */}
+      {priced && (
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-steel-100 px-5 py-4">
           <CardHeader
@@ -480,6 +482,7 @@ export const WorkCapturePanel = ({
           </div>
         )}
       </Card>
+      )}
 
       {/*
         DISCOUNTS WERE WITHDRAWN on 27 October 2026 (DISCOUNT-OFF-1, the owner's

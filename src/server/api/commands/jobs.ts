@@ -286,7 +286,7 @@ export const JOB_COMMANDS: CommandRegistry = {
     assertFieldTechnicianOnJob(context, job, 'ask for the site location of');
 
     const [site, machine, customer] = await Promise.all([
-      context.repos.customers.findSiteById(job.siteId),
+      job.siteId === null ? Promise.resolve(null) : context.repos.customers.findSiteById(job.siteId),
       job.machineId === null
         ? Promise.resolve(null)
         : context.repos.machines.findById(job.machineId),
@@ -1092,7 +1092,8 @@ export const JOB_COMMANDS: CommandRegistry = {
 export const createJobSchema = z
   .object({
     customerId: z.string().min(1).max(100),
-    siteId: z.string().min(1).max(100),
+    // DN-SITE-OPT-1: null only for a Delivery Note; the rule is `createJob`'s.
+    siteId: z.string().min(1).max(100).nullable(),
     contactId: z.string().min(1).max(100),
     machineId: z.string().min(1).max(100).nullable(),
     jobType: z.enum(['breakdown', 'installation', 'service', 'parts', 'test_and_repair', 'delivery_note']),
@@ -1215,7 +1216,7 @@ export const runCreateJob = async (
       ...(repairItems === undefined ? {} : { repairItems }),
       quoteNumber: quoteNumber ?? '',
       customerId: asCustomerId(input.customerId),
-      siteId: asSiteId(input.siteId),
+      siteId: input.siteId === null ? null : asSiteId(input.siteId),
       contactId: asContactId(input.contactId),
       machineId: input.machineId === null ? null : asMachineId(input.machineId),
       primaryTechnicianId:

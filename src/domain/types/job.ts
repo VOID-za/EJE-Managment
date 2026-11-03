@@ -653,7 +653,11 @@ export interface Job {
   readonly id: JobId;
   readonly jobNumber: string;
   readonly customerId: CustomerId;
-  readonly siteId: SiteId;
+  /**
+   * DN-SITE-OPT-1 (3 November 2026): null only on a Delivery Note raised without
+   * a site (`JobTypeDefinition.siteOptional`); every other job type has one.
+   */
+  readonly siteId: SiteId | null;
   readonly contactId: ContactId;
   /**
    * The machine the job is against.

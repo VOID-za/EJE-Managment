@@ -631,7 +631,11 @@ const MediaGrid = ({
               <p className="mt-1.5 truncate text-xs font-medium text-steel-800">
                 {item.caption.length > 0 ? item.caption : item.fileName}
               </p>
-              {onReclassify !== undefined && (
+              {/* TR-REF-PHOTO-1: the delivery-note reference photo stays internal — no Show to customer. */}
+              {item.purpose === 'delivery_note_reference' && (
+                <p className="mt-1 text-xs font-semibold text-violet-eje-700" data-testid="reference-photo-tag">Delivery note — internal reference</p>
+              )}
+              {onReclassify !== undefined && item.purpose !== 'delivery_note_reference' && (
                 /*
                   A 44px target, because this is set on a tablet with gloves on —
                   rule 25. A full-width button rather than a toggle: the label says
