@@ -19,6 +19,20 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## RELEASED — `9fa858f`, the Test & Repair delivery-note photo and the simpler Delivery Note (3 November 2026)
+
+Released 3 November 2026 18:08:52 UTC (healthy 18:08:54) from branch `claude/tr-photo-delivery-note-simplify` through `stage-release.ps1 -ExpectPending 0049_tr_photo_delivery_note_site`.
+
+- **Migration:** exactly one pending migration, `0049`, was applied. The database is at 50 migrations, with the checks `jobs_site_required_unless_delivery_note`, `job_media_purpose_known` and `job_media_reference_photo_internal` in place. All 100 existing jobs still have a site.
+- **Backup proven first:** `/var/backups/eje/eje-eje_production-2026-11-03T18-08-36Z`. Firewall scripts unchanged.
+- **CI:** run 41685116786, 65 of 65 steps green, none skipped (rollback check: `6ec5655` against 0049, prepare 10/10, probe 13/13).
+- **Tests:** unit 3,751 passed, 0 failed; database tests 479 passed.
+- **Live verification:** 25/25. One temporary, unassigned Test & Repair job (EJE-2101) was raised through the screen with a delivery-note photo, checked, and deleted through the audited office delete. Its job number is used and the deletion is on the audit trail. Everything else was reads, refused writes and read-only screens at three sizes.
+- **Data:** fingerprints, counts, the frozen prices of all 64 signed jobs, attendance, timesheets, 9 customers and 13 sites were identical before and after. There were 0 error lines in the service log.
+- **Mode:** demonstration on, email `refuse`, WhatsApp and email not configured.
+
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `6ec5655` (see `docs/rollback-4606315.md` §9). Once a site-less Delivery Note exists, fix forward instead.
+
 ## RELEASED — `6ec5655`, physical acceptance follow-up and the Delivery Note (3 November 2026)
 
 Released 3 November 2026 12:15:07 UTC (healthy 12:15:09) from branch `claude/acceptance-delivery-notes` through `deploy/release/stage-release.ps1 -ExpectPending 0048_acceptance_delivery_notes`.

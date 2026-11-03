@@ -118,6 +118,8 @@ Released in `6ec5655` on 3 November 2026 at 12:15 UTC. **Backup before 0048:** `
 
 **What 0049 changes (additive):** `jobs.site_id` may be null, but only on a Delivery Note (check `jobs_site_required_unless_delivery_note`). `job_media.purpose` is added (`''` or `delivery_note_reference`), and the database keeps a reference photo an internal photo (`job_media_reference_photo_internal`).
 
+Released in `9fa858f` on 3 November 2026 at 18:08 UTC. **Backup before 0049:** `/var/backups/eje/eje-eje_production-2026-11-03T18-08-36Z`.
+
 **The rollback target after this release is `6ec5655`.** The CI rollback check runs `6ec5655`'s own code against a database at 0049 holding a site-less Delivery Note and a reference photo. It finds:
 
 | 0049 data | Under `6ec5655` | Risk while rolled back |
