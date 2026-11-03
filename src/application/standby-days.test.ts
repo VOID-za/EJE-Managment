@@ -299,9 +299,12 @@ describe('eligibility, kinds and double booking', () => {
     await scheduled();
     const jc = byId(await holderOn(SAT_7, 'main'));
     const ruan = byId(await holderOn(SAT_14, 'main'));
-    // Ruan is made the HELPER for the week of the 2nd: taking JC's Saturday main place would double-book him.
-    const helperBefore = await holderOn(SAT_7, 'helper');
-    await assignStandby(as(coordinator), { weekStart: '2026-11-02', position: 'helper', userId: ruan.id, expectedUserId: helperBefore as never, reason: 'Cover' });
+    // Ruan held Apprentice 1 the week of the 2nd while he was an apprentice, and has since become a main technician:
+    // taking JC's Saturday main place would make him Main AND Apprentice 1 that day. (Helper is the place the two
+    // TRADE — STANDBY-DAY-2 — an apprentice place is not.)
+    await setStandbyEligibility(as(coordinator), { userId: ruan.id, main: false, helper: false, apprentice: true });
+    await assignStandby(as(coordinator), { weekStart: '2026-11-02', position: 'apprentice_1', userId: ruan.id, expectedUserId: (await holderOn(SAT_7, 'apprentice_1')) as never });
+    await setStandbyEligibility(as(coordinator), { userId: ruan.id, main: true, helper: true, apprentice: false });
     expect(await codeOf(requestStandbyDaySwap(as(jc), { recipientId: ruan.id, kind: 'main', pairs: [{ requesterDate: SAT_7, requesterPosition: 'main', recipientDate: SAT_14, recipientPosition: 'main' }] }))).toBe('would_double_book');
   });
 
@@ -368,4 +371,84 @@ describe('the Overview: this week’s published standby', () => {
     expect(week.places.every((place) => place.name === null)).toBe(true);
     expect((await loadCurrentStandbyWeek(as(coordinator))).published).toBe(false);
   });
+});
+
+/**
+ * STANDBY-DAY-2 (3 November 2026): THE DEFECT FROM THE PHYSICAL TEST.
+ *
+ * On the testing site David and Mike rotate the main AND the helper place:
+ * David is Main and Mike Helper one week, the other way round the next. Mike
+ * chose several pairs of his main days for David's and was told "That swap
+ * cannot be asked for." — every pair would have left one of them Main and
+ * Helper on the same day. The two now trade both places on such a day.
+ */
+describe('STANDBY-DAY-2: two people who rotate the main and helper places', () => {
+  const rotated = async (helperEligible = true) => {
+    await setStandbyEligibility(as(coordinator), { userId: sipho.id, main: true, helper: true, apprentice: false });
+    await setStandbyEligibility(as(coordinator), { userId: riaan.id, main: true, helper: true, apprentice: false });
+    for (const user of [andre, naledi, deon, lerato]) await setStandbyEligibility(as(coordinator), { userId: user.id, main: false, helper: false, apprentice: true });
+    await generateStandbyYear(as(coordinator), {
+      year: 2026,
+      rotation: { main: [sipho.id, riaan.id], helper: [riaan.id, sipho.id], apprentice_1: [andre.id, naledi.id], apprentice_2: [deon.id, lerato.id] },
+    });
+    await publishStandbyYear(as(coordinator), { year: 2026, acknowledgeIncomplete: false });
+    // Eligibility withdrawn AFTER the year was planned: Riaan still holds helper places, but may not take another.
+    if (!helperEligible) await setStandbyEligibility(as(coordinator), { userId: riaan.id, main: true, helper: false, apprentice: false });
+  };
+
+  it('the screenshot scenario: several pairs are asked, approved twice, and the two trade both places on each day', async () => {
+    await rotated();
+    const a = byId(await holderOn(SAT_7, 'main'));
+    const b = byId(await holderOn(SAT_14, 'main'));
+    // The rotation that broke it: each is the other's helper.
+    expect(await holderOn(SAT_7, 'helper')).toBe(b.id);
+    expect(await holderOn(SAT_14, 'helper')).toBe(a.id);
+    const before = await snapshot();
+
+    const swap = await requestStandbyDaySwap(as(b), {
+      recipientId: a.id,
+      kind: 'main',
+      pairs: [
+        { requesterDate: SAT_14, requesterPosition: 'main', recipientDate: SAT_7, recipientPosition: 'main' },
+        { requesterDate: SUN_15, requesterPosition: 'main', recipientDate: SUN_8, recipientPosition: 'main' },
+      ],
+    });
+    expect(swap.status).toBe('awaiting_recipient');
+    expect(swap.reason).toBe('');
+    await answerStandbyDaySwap(as(a), swap.id, { approve: true });
+    expect((await listStandbyDaySwaps(as(coordinator))).find((view) => view.id === swap.id)?.stillValid).toBe(true);
+    await decideStandbyDaySwap(as(coordinator), swap.id, { approve: true });
+
+    const after = await snapshot();
+    for (const [date, giver, taker] of [[SAT_7, a, b], [SUN_8, a, b], [SAT_14, b, a], [SUN_15, b, a]] as const) {
+      expect(after[`${date}/main`]).toBe(taker.id);
+      expect(after[`${date}/helper`]).toBe(giver.id);
+    }
+    // Nothing else moved: every other day and every apprentice place.
+    const changed = Object.keys(before).filter((key) => before[key] !== after[key]).sort();
+    expect(changed).toEqual([SAT_14, SAT_7, SUN_15, SUN_8].flatMap((date) => [`${date}/helper`, `${date}/main`]).sort());
+    // The weekly schedule itself is untouched.
+    const week = await harness.repos.standby.listWeeks('2026-11-02', '2026-11-02');
+    expect(week[0]?.assignments.find((place) => place.position === 'main')?.userId).toBe(a.id);
+    // Audited: the trade of the helper place is recorded with the approval, place by place.
+    const approval = (await harness.repos.activity.list()).find((event) => event.type === 'standby_day_swap_approved')!;
+    expect(approval.detail).toContain('companion place');
+    expect(approval.changes?.map((change) => change.field)).toContain(`standby.${SAT_7}.helper`);
+  });
+
+  it('still refuses when the one going out may not take the helper place', async () => {
+    await rotated(false);
+    const a = byId(await holderOn(SAT_7, 'main'));
+    const b = byId(await holderOn(SAT_14, 'main'));
+    const giver = a.id === riaan.id ? a : b;
+    const taker = giver.id === a.id ? b : a;
+    const giverDay = giver.id === a.id ? SAT_7 : SAT_14;
+    const takerDay = giver.id === a.id ? SAT_14 : SAT_7;
+    expect(await codeOf(requestStandbyDaySwap(as(taker), {
+      recipientId: giver.id,
+      kind: 'main',
+      pairs: [{ requesterDate: takerDay, requesterPosition: 'main', recipientDate: giverDay, recipientPosition: 'main' }],
+    }))).toBe('not_eligible');
+  });
+
 });

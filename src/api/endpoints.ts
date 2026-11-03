@@ -1283,7 +1283,7 @@ export const standby = {
   /** STANDBY-DAY-1: day swaps and their two stages. */
   daySwaps: () => query<readonly DaySwapView[]>('/api/standby/days'),
   dayOptions: () => query<StandbyDayOptions>('/api/standby/days/options'),
-  requestDaySwap: (input: { recipientId: string; kind: 'main' | 'apprentice'; pairs: readonly StandbyDayPair[]; reason: string }) =>
+  requestDaySwap: (input: { recipientId: string; kind: 'main' | 'apprentice'; pairs: readonly StandbyDayPair[]; reason?: string }) =>
     command<{ swap: DaySwapView }>('/api/standby/days', input),
   answerDaySwap: (swapId: string, decision: 'approve' | 'deny', note = '') =>
     command<{ swap: DaySwapView }>(`/api/standby/days/${segment(swapId)}/answer`, { decision, note }),
@@ -1308,7 +1308,7 @@ export const standby = {
     command<{ eligibility: unknown }>('/api/standby/eligibility', input),
   generate: (year: number, rotation?: Partial<Record<'main' | 'helper' | 'apprentice_1' | 'apprentice_2', readonly string[]>>) =>
     command<{ result: StandbyGenerateResult }>('/api/standby/generate', rotation === undefined ? { year } : { year, rotation }),
-  assign: (input: { weekStart: string; position: string; userId: string | null; expectedUserId: string | null; reason: string }) =>
+  assign: (input: { weekStart: string; position: string; userId: string | null; expectedUserId: string | null; reason?: string }) =>
     command<StandbyAssignResult>('/api/standby/assign', input),
   publish: (year: number, acknowledgeIncomplete: boolean) =>
     command<{ result: StandbyPublishResult }>('/api/standby/publish', { year, acknowledgeIncomplete }),

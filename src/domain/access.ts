@@ -424,6 +424,8 @@ const MASTER_CAPABILITIES: readonly Capability[] = [
   'calendar.view',
   'standby.view',
   'standby.manage',
+  // STANDBY-ELIG-2: a Senior Tech on the roster asks for day swaps too; another Office person decides them.
+  'standby.requestSwap',
   'availability.manage',
   // Everybody's attendance (read only) and every technician's timesheet. ATT-OWN-1, TIMESHEET-1.
   'attendance.viewAll',

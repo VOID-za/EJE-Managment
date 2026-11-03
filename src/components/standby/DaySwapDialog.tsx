@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { STANDBY_SWAP_KIND_LABELS, type StandbyDayPair } from '@/domain';
-import { Button, Icon, Modal, SelectField, TextAreaField } from '@/components/ui';
+import { Button, Icon, Modal, SelectField } from '@/components/ui';
 import { standby } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 import { useQuery } from '@/hooks/useQuery';
@@ -31,7 +31,6 @@ const DaySwapForm = ({ open, onClose, onDone }: Props) => {
   const operation = useOperation();
   const [person, setPerson] = useState('');
   const [rows, setRows] = useState<{ mine: string; theirs: string }[]>([{ mine: '', theirs: '' }]);
-  const [reason, setReason] = useState('');
 
   const mine = options?.mine ?? [];
   const firstMine = mine.find((option) => key(option.date, option.position) === rows[0]?.mine) ?? null;
@@ -59,7 +58,7 @@ const DaySwapForm = ({ open, onClose, onDone }: Props) => {
         recipientPosition: recipientPosition as StandbyDayPair['recipientPosition'],
       };
     });
-    const ok = await operation.run(() => standby.requestDaySwap({ recipientId: person, kind, pairs, reason }));
+    const ok = await operation.run(() => standby.requestDaySwap({ recipientId: person, kind, pairs }));
     if (ok) {
       const name = options?.people.find((candidate) => candidate.userId === person)?.name ?? 'They';
       onDone(`Swap request sent to ${name}. Nothing changes until ${name} and then the Office approve it.`);
@@ -151,7 +150,6 @@ const DaySwapForm = ({ open, onClose, onDone }: Props) => {
             >
               Add another pair of days
             </Button>
-            <TextAreaField label="Reason (optional)" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} data-testid="day-swap-reason" />
           </>
         )}
         {operation.error !== null && (

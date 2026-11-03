@@ -231,7 +231,8 @@ await check('a technician asks for a DAY swap by tapping through the form; nothi
   await page.getByTestId('day-swap-person').selectOption({ label: 'Riaan van Wyk' });
   const theirs = page.getByTestId('day-swap-theirs-0');
   await theirs.selectOption({ index: 1 });
-  await page.getByTestId('day-swap-reason').fill('Family wedding');
+  // STANDBY-NOREASON-1: no reason is asked for a day swap.
+  if ((await page.getByTestId('day-swap-reason').count()) !== 0) throw new Error('the day-swap form still asks for a reason');
   await noPageOverflow('the day swap form');
   await press(page.getByTestId('day-swap-submit'));
   await page.getByTestId('standby-message').filter({ hasText: 'Swap request sent' }).waitFor({ timeout: 20000 });

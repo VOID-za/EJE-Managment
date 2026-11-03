@@ -1,4 +1,4 @@
-import { isFieldRole } from '@/domain';
+import { mayBeOnStandby } from '@/domain';
 import {
   STANDBY_POSITIONS,
   STANDBY_POSITION_LABELS,
@@ -50,8 +50,9 @@ import { WorkflowError } from './errors';
  *     generating a year's weeks (filling only EMPTY places of DRAFT weeks, from
  *     an order the office itself enters — nothing is invented, nothing that
  *     exists is overwritten, a published week is never touched); changing one
- *     place (a reason is required once a week is published, and a change to
- *     the week in progress is an EMERGENCY change); publishing.
+ *     place (no reason is asked since STANDBY-NOREASON-1, 3 November 2026 — who
+ *     changed it and when is on the record; a change to the week in progress is
+ *     an EMERGENCY change); publishing.
  *   SWAP (a technician, `standby.requestSwap`). Offer ONE place they hold — the
  *     main place, or an apprentice place — in exchange for the same kind of
  *     place another eligible person holds in another week. Nothing changes
@@ -124,6 +125,8 @@ export interface StandbyPerson {
   readonly main: boolean;
   readonly helper: boolean;
   readonly apprentice: boolean;
+  /** STANDBY-ELIG-2: a Senior Tech, who stands in the main and helper places only. */
+  readonly seniorTech?: boolean;
 }
 
 export interface StandbyMyPlace {
@@ -265,7 +268,8 @@ export const loadStandbyCalendar = async (
     .filter((user) => {
       const record = directory.eligibility.get(user.id);
       const eligible = record !== undefined && (record.main || record.helper || record.apprentice);
-      return shown.has(user.id) || (isFieldRole(user.role) && (office || (eligible && user.active)));
+      // STANDBY-ELIG-2: a Senior Tech is listed too, so the Office can tick their main and helper places.
+      return shown.has(user.id) || (mayBeOnStandby(user.role) && (office || (eligible && user.active)));
     })
     .map((user) => {
       const record = directory.eligibility.get(user.id);
@@ -276,6 +280,7 @@ export const loadStandbyCalendar = async (
         main: record?.main ?? false,
         helper: record?.helper ?? false,
         apprentice: record?.apprentice ?? false,
+        seniorTech: user.role === 'master',
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -334,11 +339,18 @@ export const setStandbyEligibility = async (
   const user = await context.repos.users.findById(asUserId(input.userId));
   if (user === null) throw refuse('That person does not exist.', 'user_not_found', 'Reload the list.');
   const any = input.main || input.helper || input.apprentice;
-  if (any && !isFieldRole(user.role)) {
+  if (any && !mayBeOnStandby(user.role)) {
     throw refuse(
       `${userFullName(user)} is not a technician.`,
       'not_technician',
-      'Standby is field work: only a technician account can be put on the standby roster.',
+      'Standby is field work: only a Senior Tech, technician or apprentice account can be put on the standby roster.',
+    );
+  }
+  if (input.apprentice && user.role === 'master') {
+    throw refuse(
+      `${userFullName(user)} is a Senior Tech.`,
+      'senior_tech_main_helper',
+      'A Senior Tech stands in the main and helper places, not an apprentice place.',
     );
   }
   if (any && !user.active) {
@@ -532,7 +544,7 @@ export interface StandbyAssignInput {
   readonly userId: string | null;
   /** Who the screen showed in the place. The change is refused if that is no longer true. */
   readonly expectedUserId: string | null;
-  readonly reason: string;
+  readonly reason?: string;
 }
 
 export interface StandbyAssignResult {
@@ -567,7 +579,8 @@ export const assignStandby = async (
   if (input.weekStart > standbyPlanningLimit(today)) {
     throw refuse('That week is too far ahead.', 'beyond_planning_limit', `Standby is planned up to ${standbyPlanningLimit(today)}.`);
   }
-  const reason = input.reason.trim();
+  // STANDBY-NOREASON-1: optional. Still recorded when one is given (an older screen, the API).
+  const reason = (input.reason ?? '').trim();
   if (reason.length > STANDBY_REASON_LIMIT) {
     throw refuse('That reason is too long.', 'reason_too_long', `Keep it to ${STANDBY_REASON_LIMIT} characters.`);
   }
@@ -602,15 +615,6 @@ export const assignStandby = async (
   }
   const published = week.status === 'published';
   const emergency = published && timing === 'current';
-  if (published && reason.length === 0) {
-    throw refuse(
-      'Say why this published week is being changed.',
-      'reason_required',
-      emergency
-        ? 'This week is in progress: an emergency change needs its reason on the record.'
-        : 'People already work to this week; the reason goes on the record and to them.',
-    );
-  }
 
   const current = holderOf(week, position);
   if (current !== expected) {

@@ -116,17 +116,18 @@ export const StandbyManagePanel = ({ today, onMessage }: { readonly today: strin
       <Card data-testid="standby-eligibility">
         <CardHeader
           title="1. Who may stand by"
-          description="The office decides who may take each place — a technician account is not assumed to be eligible. An apprentice takes apprentice places only."
+          description="The office decides who may take each place — no account is assumed to be eligible. A Senior Tech takes main and helper places; an apprentice takes apprentice places only."
         />
         <ul className="mt-3 divide-y divide-steel-100">
           {technicians.map((person) => (
             <li key={person.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-testid="standby-eligibility-row">
               <span className={cn('text-sm font-medium', person.active ? 'text-steel-900' : 'text-steel-400')}>
                 {person.name}
+                {person.seniorTech === true && ' (Senior Tech)'}
                 {!person.active && ' (inactive)'}
               </span>
               <span className="flex flex-wrap gap-1.5">
-                {(['main', 'helper', 'apprentice'] as const).map((flag) => (
+                {(person.seniorTech === true ? (['main', 'helper'] as const) : (['main', 'helper', 'apprentice'] as const)).map((flag) => (
                   <label
                     key={flag}
                     className={cn(

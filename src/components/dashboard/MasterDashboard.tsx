@@ -101,6 +101,9 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
         }
       />
 
+      {/* STANDBY-DASH-2: the standby block, directly below the greeting. */}
+      <CurrentStandbyCard />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="Total Open Jobs"
@@ -348,9 +351,6 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
               ))}
             </ul>
           </Card>
-
-          {/* STANDBY-DASH-1: this week's published standby. */}
-          <CurrentStandbyCard />
 
           <Card>
             <CardHeader

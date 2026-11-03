@@ -7,7 +7,7 @@ import {
   addStandbyDays,
   asUserId,
   can,
-  isFieldRole,
+  mayBeOnStandby,
   isIsoDate,
   mayStandIn,
   standbyCategoryOf,
@@ -111,12 +111,49 @@ const holder = (world: World, date: IsoDate, position: StandbyPosition): UserId 
 
 const pairDates = (pairs: readonly StandbyDayPair[]): IsoDate[] => pairs.flatMap((pair) => [pair.requesterDate, pair.recipientDate]);
 
-/** What exchanging these pairs would write: each day's place to the other person. */
-const movesOf = (swap: Pick<StandbyDaySwap, 'pairs' | 'requesterId' | 'recipientId'>): StandbyDayMove[] =>
-  swap.pairs.flatMap((pair) => [
+/**
+ * The place that goes with a swapped place when the SAME two people hold both
+ * on the day. STANDBY-DAY-2 (3 November 2026).
+ *
+ * THE DEFECT IT FIXES. The main and helper places rotate between the same main
+ * technicians: David is Main and Mike Helper one week, the other way round the
+ * next. Mike offering his main Saturday for David's moved only the main place,
+ * so Mike would have been Main AND Helper on David's Saturday. Every such swap
+ * was refused as a double booking ("That swap cannot be asked for."), although
+ * the form offered it. The two of them simply trade places on that day: the
+ * one coming in to the main place hands the helper place to the one going out.
+ * Nobody else is touched, both still hold one place a day, and the helper's
+ * place is never asked for in its own right. The apprentice places pair the
+ * same way. Anybody else in a second place is still a double booking.
+ */
+const COMPANION: Readonly<Record<StandbyPosition, StandbyPosition | null>> = {
+  main: 'helper',
+  helper: null,
+  apprentice_1: 'apprentice_2',
+  apprentice_2: 'apprentice_1',
+};
+
+/**
+ * What exchanging these pairs would write: each day's place to the other
+ * person — and, on a day where the person coming in holds the companion place,
+ * that place to the person going out (`COMPANION`).
+ */
+const movesOf = (world: World, swap: Pick<StandbyDaySwap, 'pairs' | 'requesterId' | 'recipientId'>): StandbyDayMove[] => {
+  const primary = swap.pairs.flatMap((pair) => [
     { date: pair.requesterDate, position: pair.requesterPosition, expectedUserId: swap.requesterId, userId: swap.recipientId },
     { date: pair.recipientDate, position: pair.recipientPosition, expectedUserId: swap.recipientId, userId: swap.requesterId },
   ]);
+  const taken = new Set(primary.map((move) => `${move.date}/${move.position}`));
+  const companions: StandbyDayMove[] = [];
+  for (const move of primary) {
+    const companion = COMPANION[move.position];
+    if (companion === null || taken.has(`${move.date}/${companion}`)) continue;
+    if (holder(world, move.date, companion) !== move.userId) continue;
+    taken.add(`${move.date}/${companion}`);
+    companions.push({ date: move.date, position: companion, expectedUserId: move.userId, userId: move.expectedUserId });
+  }
+  return [...primary, ...companions];
+};
 
 /**
  * Why these pairs cannot be exchanged as they stand, or null. Asked when the
@@ -154,8 +191,19 @@ const daySwapProblem = (
       }
     }
   }
+  // The companion places the two trade on the day (STANDBY-DAY-2): only to somebody eligible for them.
+  const moves = movesOf(world, swap);
+  for (const move of moves.slice(swap.pairs.length * 2)) {
+    const person = world.users.get(move.userId);
+    if (!mayStandIn(person, world.eligibility.get(move.userId), standbyCategoryOf(move.position))) {
+      return {
+        code: 'not_eligible',
+        message:
+          `On ${dayLabel(move.date)} ${person === undefined ? 'that person' : userFullName(person)} would take over the ${STANDBY_POSITION_LABELS[move.position]} place, and may not stand in it. The Office can add the eligibility, or choose other days.`,
+      };
+    }
+  }
   // Nobody in two places on one day once every pair is exchanged.
-  const moves = movesOf(swap);
   const after = [
     ...world.overrides.filter((existing) => !moves.some((move) => move.date === existing.date && move.position === existing.position)),
     ...moves.map((move) => ({ date: move.date, position: move.position, userId: move.userId, swapId: '', updatedAt: '' })),
@@ -179,8 +227,8 @@ export interface DaySwapInput {
 }
 
 export const requestStandbyDaySwap = async (context: OperationContext, input: DaySwapInput): Promise<StandbyDaySwap> => {
-  if (!can(context.actor.role, 'standby.requestSwap') || !isFieldRole(context.actor.role)) {
-    throw refuse('Only a technician or an apprentice asks for a standby swap.', 'not_permitted', 'The office changes the calendar directly.');
+  if (!can(context.actor.role, 'standby.requestSwap') || !mayBeOnStandby(context.actor.role)) {
+    throw refuse('Only somebody on the standby roster asks for a standby swap.', 'not_permitted', 'The office changes the calendar directly.');
   }
   const kind = input.kind as StandbySwapKind;
   if (kind !== 'main' && kind !== 'apprentice') throw refuse('That is not a kind of swap.', 'invalid_kind', 'Swap a main place or an apprentice place.');
@@ -325,10 +373,14 @@ export const decideStandbyDaySwap = async (
   if (note.length > DAY_SWAP_NOTE_LIMIT) throw refuse('That note is too long.', 'note_too_long', `At most ${DAY_SWAP_NOTE_LIMIT} characters.`);
   const decision = { id, by: context.actor.id, at: context.services.clock.now(), note };
   let decided: StandbyDaySwap;
+  let world: World | null = null;
+  let moves: readonly StandbyDayMove[] = [];
   if (input.approve) {
-    const problem = daySwapProblem(await loadWorld(context, pairDates(swap.pairs)), todayOf(context), swap);
+    world = await loadWorld(context, pairDates(swap.pairs));
+    const problem = daySwapProblem(world, todayOf(context), swap);
     if (problem !== null) throw refuse('That swap can no longer be made.', problem.code, `${problem.message} Reject it instead.`);
-    const result = await context.repos.standby.approveDaySwap(decision, movesOf(swap));
+    moves = movesOf(world, swap);
+    const result = await context.repos.standby.approveDaySwap(decision, moves);
     if (!result.ok) {
       throw result.reason === 'assignment_changed'
         ? refuse('A day in that swap has changed.', 'assignment_changed', 'Somebody else changed one of those days meanwhile. Reject it instead.')
@@ -349,9 +401,9 @@ export const decideStandbyDaySwap = async (
     jobId: null,
     type: input.approve ? 'standby_day_swap_approved' : 'standby_day_swap_rejected',
     summary: input.approve ? `Standby day swap approved: ${names}` : `Standby day swap rejected: ${names}`,
-    detail: `${userFullName(context.actor)} ${input.approve ? 'approved' : 'rejected'} the swap between ${names}: ${swap.pairs.map(pairLabel).join('; ')}.${input.approve ? ' Only those days changed.' : ' Nothing on the calendar changed.'}${note.length > 0 ? ` Note: ${note}` : ''}`,
+    detail: `${userFullName(context.actor)} ${input.approve ? 'approved' : 'rejected'} the swap between ${names}: ${swap.pairs.map(pairLabel).join('; ')}.${input.approve ? ` Only those days changed${moves.length > swap.pairs.length * 2 ? '; on a day where the two also held the companion place, they traded that too' : ''}.` : ' Nothing on the calendar changed.'}${note.length > 0 ? ` Note: ${note}` : ''}`,
     changes: input.approve
-      ? movesOf(swap).map((move) => ({
+      ? moves.map((move) => ({
           field: `standby.${move.date}.${move.position}`,
           from: move.expectedUserId === swap.requesterId ? (requester === null ? move.expectedUserId : userFullName(requester)) : (recipient === null ? move.expectedUserId : userFullName(recipient)),
           to: move.userId === swap.requesterId ? (requester === null ? move.userId : userFullName(requester)) : (recipient === null ? move.userId : userFullName(recipient)),
@@ -513,23 +565,47 @@ export interface CurrentStandbyWeek {
   readonly places: readonly { readonly position: StandbyPosition; readonly label: string; readonly name: string | null }[];
   /** Days this week whose place an approved day swap moved. */
   readonly dayChanges: readonly { readonly date: IsoDate; readonly label: string; readonly position: StandbyPosition; readonly name: string }[];
+  /** STANDBY-DASH-2: next week, when it is published (null otherwise). */
+  readonly next: {
+    readonly weekStart: IsoDate;
+    readonly places: readonly { readonly position: StandbyPosition; readonly label: string; readonly name: string | null }[];
+  } | null;
+  /** STANDBY-DASH-2: the viewer's own places in published weeks from this week on — the next four, and how many more. */
+  readonly mine: readonly { readonly weekStart: IsoDate; readonly position: StandbyPosition; readonly label: string }[];
+  readonly mineMore: number;
 }
 
 /**
  * THE CURRENT WEEK'S STANDBY, FOR THE OVERVIEW. STANDBY-DASH-1 (2 November
  * 2026). From the published schedule only — a draft is never shown, to anyone,
  * here — with the days an approved day swap moved. No separate data source.
+ *
+ * STANDBY-DASH-2 (3 November 2026): it is the block at the top of the
+ * Overview, directly below the greeting, and carries what the Standby page's
+ * "Your upcoming standby" block did — next week's places and the viewer's own
+ * upcoming weeks — so that block is not shown twice.
  */
 export const loadCurrentStandbyWeek = async (context: OperationContext): Promise<CurrentStandbyWeek> => {
   if (!can(context.actor.role, 'standby.view')) throw refuse('You cannot view the standby calendar.', 'not_permitted', 'Standby is visible to staff only.');
   const weekStart = standbyWeekOf(todayOf(context));
   const weekEnd = standbyWeekEnd(weekStart);
-  const [week, overrides, users] = await Promise.all([
+  const [week, overrides, users, ahead] = await Promise.all([
     context.repos.standby.findWeek(weekStart),
     context.repos.standby.listDayOverrides(weekStart, weekEnd),
     context.repos.users.list(),
+    context.repos.standby.listWeeks(weekStart, addStandbyDays(weekStart, OPTIONS_WEEKS * 7)),
   ]);
   const published = week !== null && week.status === 'published';
+  const nextStart = addStandbyDays(weekStart, 7);
+  const nextWeek = ahead.find((candidate) => candidate.weekStart === nextStart && candidate.status === 'published') ?? null;
+  const mineAll = ahead
+    .filter((candidate) => candidate.status === 'published')
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .flatMap((candidate) =>
+      candidate.assignments
+        .filter((place) => place.userId === context.actor.id)
+        .map((place) => ({ weekStart: candidate.weekStart, position: place.position, label: STANDBY_POSITION_LABELS[place.position] })),
+    );
   const name = (id: UserId | null): string | null => {
     if (id === null) return null;
     const user = users.find((candidate) => candidate.id === id);
@@ -552,6 +628,19 @@ export const loadCurrentStandbyWeek = async (context: OperationContext): Promise
           name: name(override.userId) ?? 'Unknown person',
         }))
       : [],
+    next:
+      nextWeek === null
+        ? null
+        : {
+            weekStart: nextWeek.weekStart,
+            places: STANDBY_POSITIONS.map((position) => ({
+              position,
+              label: STANDBY_POSITION_LABELS[position],
+              name: name(nextWeek.assignments.find((place) => place.position === position)?.userId ?? null),
+            })),
+          },
+    mine: mineAll.slice(0, 4),
+    mineMore: Math.max(0, mineAll.length - 4),
   };
 };
 

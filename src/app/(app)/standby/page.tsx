@@ -121,34 +121,7 @@ const StandbyPageContent = () => {
 
       {tab === 'calendar' && (
         <>
-          {data !== null && data.mine.length > 0 && (
-            <Card className="mb-5" data-testid="standby-mine">
-              <h2 className="text-sm font-semibold text-steel-900">Your upcoming standby</h2>
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {/* The next four; the rest are on the calendar itself, so a long year does not push it off a phone screen. */}
-                {data.mine.slice(0, 4).map((place) => (
-                  <li key={`${place.weekStart}-${place.position}`}>
-                    <button
-                      type="button"
-                      className="min-h-11 rounded-[var(--radius-control)] border border-violet-eje-100 bg-violet-eje-50 px-3 py-1.5 text-left text-sm text-violet-eje-700"
-                      onClick={() => {
-                        setView('week');
-                        setAnchor(place.weekStart);
-                      }}
-                    >
-                      <span className="block font-semibold">{weekRangeLabel(place.weekStart)}</span>
-                      <span className="block">{place.label}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {data.mine.length > 4 && (
-                <p className="mt-2 text-sm text-steel-600" data-testid="standby-mine-more">
-                  and {data.mine.length - 4} more standby {data.mine.length - 4 === 1 ? 'week' : 'weeks'} later — marked on the calendar.
-                </p>
-              )}
-            </Card>
-          )}
+          {/* STANDBY-DASH-2: "Your upcoming standby" is on the Overview now, in the standby block below the greeting. */}
 
           <Card className="mb-5">
             <div className="flex flex-wrap items-center justify-between gap-3">

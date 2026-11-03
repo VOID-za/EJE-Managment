@@ -32,8 +32,17 @@ describe('the Master', () => {
    * by the person who holds the standby place, and only a technician account
    * can be on the standby roster. The office changes the calendar directly
    * (`standby.manage`), so it has nothing to ask for.
+   *
+   * STANDBY-ELIG-2 (the owner, 3 November 2026): a Senior Tech may be on the
+   * roster (main and helper places), so a Senior Tech holds it too; the Office
+   * still does not (asserted in the Coordinator's block and in standby.test.ts).
    */
-  const field: readonly Capability[] = ['jobs.issueFinal', 'standby.requestSwap'];
+  const field: readonly Capability[] = ['jobs.issueFinal'];
+
+  it('STANDBY-ELIG-2: holds standby.requestSwap, as somebody who may be on the roster', () => {
+    expect(can('master', 'standby.requestSwap')).toBe(true);
+    expect(can('coordinator', 'standby.requestSwap')).toBe(false);
+  });
 
   it('has every capability that is not the field technician’s own', () => {
     const everything = new Set<Capability>(ROLES.flatMap((role) => capabilitiesFor(role)));

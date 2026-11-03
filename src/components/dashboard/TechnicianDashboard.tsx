@@ -85,6 +85,9 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
         }
       />
 
+      {/* STANDBY-DASH-2: the standby block, directly below the greeting. */}
+      <CurrentStandbyCard />
+
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatTile
           label="My Jobs"
@@ -183,9 +186,6 @@ export const TechnicianDashboard = ({ user }: { readonly user: User }) => {
         </div>
 
         <div className="space-y-6">
-          {/* STANDBY-DASH-1: this week's published standby. */}
-          <CurrentStandbyCard />
-
           <Card>
             <CardHeader
               title="Notifications"

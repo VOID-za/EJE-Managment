@@ -118,8 +118,9 @@ describe('STANDBY-DAY-1 / STANDBY-DASH-1 over HTTP', () => {
     expect(week.data.places).toHaveLength(4);
     expect((await tech.get('/api/standby/days')).status).toBe(200);
     expect((await tech.get('/api/standby/days/options')).status).toBe(200);
-    const master = await signedInAs(DEMO_USERS.master);
-    const asked = await master.post('/api/standby/days', {
+    // The Office never asks (STANDBY-ELIG-2 lets a Senior Tech on the roster ask; the Office still may not).
+    const office = await signedInAs(DEMO_USERS.coordinator);
+    const asked = await office.post('/api/standby/days', {
       recipientId: 'x',
       kind: 'main',
       pairs: [{ requesterDate: '2030-01-05', requesterPosition: 'main', recipientDate: '2030-01-12', recipientPosition: 'main' }],

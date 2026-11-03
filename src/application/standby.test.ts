@@ -278,13 +278,23 @@ describe('manual and emergency changes', () => {
     await scheduled();
   });
 
-  it('requires a reason on a published week, records before and after, and tells both people', async () => {
+  it('STANDBY-NOREASON-1: a published week changes WITHOUT a reason, and who and when are still recorded', async () => {
     const current = await holder('2026-11-09', 'helper');
     const replacement = current === thabo.id ? francois : thabo;
-    // Francois/Thabo may already hold the helper place the other week, never this one.
-    expect(
-      await codeOf(assignStandby(as(coordinator), { weekStart: '2026-11-09', position: 'helper', userId: replacement.id, expectedUserId: current, reason: '' })),
-    ).toBe('reason_required');
+    const other = replacement.id === thabo.id ? francois : thabo;
+    // No reason at all: saved, audited with who and when, both people told.
+    const silent = await assignStandby(as(coordinator), { weekStart: '2026-11-09', position: 'helper', userId: replacement.id, expectedUserId: current });
+    expect(silent.emergency).toBe(false);
+    const unexplained = (await harness.repos.activity.list()).find((entry) => entry.type === 'standby_assignment_changed')!;
+    expect(unexplained.actorId).toBe(coordinator.id);
+    expect(unexplained.occurredAt).toBeTruthy();
+    expect(unexplained.detail).not.toContain('Reason:');
+    expect(other.id).not.toBe(replacement.id);
+  });
+
+  it('records a reason when one is given, before and after, and tells both people', async () => {
+    const current = await holder('2026-11-09', 'helper');
+    const replacement = current === thabo.id ? francois : thabo;
     const result = await assignStandby(as(coordinator), {
       weekStart: '2026-11-09',
       position: 'helper',
@@ -477,5 +487,30 @@ describe('swap requests', () => {
     expect(await holder(weekA, 'main')).toBe(userB);
     expect(await holder(weekB, 'main')).toBe(userA);
     expect((await harness.repos.notifications.list(userA as never)).filter((note) => note.type === 'standby_swap_decided')).toHaveLength(1);
+  });
+});
+
+/**
+ * STANDBY-ELIG-2 (the owner, 3 November 2026): a Senior Tech can be put on the
+ * main and helper standby places by the Office — listed, never made eligible
+ * automatically, never an apprentice place. The Office itself never stands by.
+ */
+describe('STANDBY-ELIG-2: a Senior Tech on the main standby roster', () => {
+  it('is listed for the Office, but not eligible until the Office says so', async () => {
+    const calendar = await loadStandbyCalendar(as(coordinator), '2026-11-02', '2026-11-08');
+    const listed = calendar.people.find((person) => person.id === master.id);
+    expect(listed).toMatchObject({ seniorTech: true, main: false, helper: false, apprentice: false });
+    expect(calendar.people.some((person) => person.id === coordinator.id)).toBe(false);
+  });
+
+  it('is made eligible for main and helper, takes a main place, and is refused an apprentice place', async () => {
+    await setStandbyEligibility(as(coordinator), { userId: master.id, main: true, helper: true, apprentice: false });
+    expect(await codeOf(setStandbyEligibility(as(coordinator), { userId: master.id, main: false, helper: false, apprentice: true }))).toBe('senior_tech_main_helper');
+    expect(await codeOf(setStandbyEligibility(as(coordinator), { userId: coordinator.id, main: true, helper: false, apprentice: false }))).toBe('not_technician');
+    await assignStandby(as(coordinator), { weekStart: '2026-11-09', position: 'main', userId: master.id, expectedUserId: null });
+    const week = await harness.repos.standby.findWeek('2026-11-09');
+    expect(week?.assignments.find((place) => place.position === 'main')?.userId).toBe(master.id);
+    const calendar = await loadStandbyCalendar(as(coordinator), '2026-11-09', '2026-11-15');
+    expect(calendar.people.find((person) => person.id === master.id)).toMatchObject({ main: true, helper: true });
   });
 });

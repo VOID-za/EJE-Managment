@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { standbyCategoryOf, type StandbyPosition } from '@/domain';
 import type { StandbyPerson, StandbyWeekView } from '@/application/standby';
-import { Button, SelectField, TextAreaField } from '@/components/ui';
+import { Button, SelectField } from '@/components/ui';
 import { standby } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
 
@@ -12,9 +12,10 @@ const EMPTY = '__empty__';
 /**
  * THE OFFICE CHANGES ONE PLACE. STANDBY-4.
  *
- * A draft week saves as soon as a person is chosen. A PUBLISHED week asks for
- * the reason first — people already work to it, the reason goes on the record
- * and to them — and a change to the week in progress is recorded as an
+ * A draft week saves as soon as a person is chosen. A PUBLISHED week asks the
+ * office to confirm first, because people already work to it and they are told
+ * — no reason is asked (STANDBY-NOREASON-1, 3 November 2026); who changed it
+ * and when is on the record. A change to the week in progress is recorded as an
  * emergency change. The server checks everything again, including that the
  * place still holds who this screen showed.
  */
@@ -31,7 +32,6 @@ export const StandbyPlaceEditor = ({
 }) => {
   const place = week.places.find((candidate) => candidate.position === position)!;
   const [choice, setChoice] = useState<string | null>(null);
-  const [reason, setReason] = useState('');
   const operation = useOperation();
   const category = standbyCategoryOf(position);
   const published = week.status === 'published';
@@ -56,12 +56,10 @@ export const StandbyPlaceEditor = ({
         position,
         userId: value === EMPTY ? null : value,
         expectedUserId: place.userId,
-        reason,
       }),
     );
     if (ok) {
       setChoice(null);
-      setReason('');
       onSaved?.(published ? 'Saved. Everyone affected has been told.' : 'Saved.');
     }
   };
@@ -85,20 +83,14 @@ export const StandbyPlaceEditor = ({
       />
       {choice !== null && (
         <div className="mt-2 space-y-2 rounded-md border border-amber-eje-200 bg-amber-eje-50 p-2">
-          <TextAreaField
-            label={week.timing === 'current' ? 'Reason for this emergency change' : 'Reason for changing a published week'}
-            value={reason}
-            rows={2}
-            maxLength={1000}
-            data-testid={`standby-edit-reason-${position}`}
-            onChange={(event) => setReason(event.target.value)}
-          />
+          <p className="text-xs text-steel-700" data-testid={`standby-edit-confirm-${position}`}>
+            {week.timing === 'current' ? 'This week is in progress: an emergency change.' : 'This week is published.'} Everyone affected is told.
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               onClick={() => void save(choice)}
               loading={operation.running}
-              disabled={reason.trim().length === 0}
               data-testid={`standby-edit-save-${position}`}
             >
               Save change

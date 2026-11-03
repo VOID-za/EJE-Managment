@@ -1,5 +1,5 @@
 import type { IsoDate, UserId } from '../types/common';
-import { isFieldRole, type User } from '../types/user';
+import { isFieldRole, type User, type UserRole } from '../types/user';
 import {
   STANDBY_POSITIONS,
   type StandbyCategory,
@@ -104,15 +104,28 @@ export const eligibleFor = (
 };
 
 /**
- * Whether this person may stand in this place at all: an ACTIVE technician
- * account whose eligibility record allows it. Inactive people and office
- * accounts never qualify, whatever their record says.
+ * WHICH ACCOUNTS MAY BE PUT ON THE STANDBY ROSTER AT ALL. STANDBY-ELIG-2.
+ *
+ * A Technician or an Apprentice — and, since 3 November 2026 (the owner), a
+ * Senior Tech, who stands in the MAIN and HELPER places only. Being allowed is
+ * not being eligible: the Office still ticks each person's places, and nobody
+ * is made eligible automatically. An Office account never stands by.
+ */
+export const mayBeOnStandby = (role: UserRole): boolean => isFieldRole(role) || role === 'master';
+
+export const standbyRoleAllows = (role: UserRole, category: StandbyCategory): boolean =>
+  isFieldRole(role) || (role === 'master' && category !== 'apprentice');
+
+/**
+ * Whether this person may stand in this place at all: an ACTIVE account the
+ * roster allows (`standbyRoleAllows`) whose eligibility record allows it.
+ * Inactive people and office accounts never qualify, whatever their record says.
  */
 export const mayStandIn = (
   user: Pick<User, 'role' | 'active'> | undefined,
   eligibility: StandbyEligibility | undefined,
   category: StandbyCategory,
-): boolean => user !== undefined && user.active && isFieldRole(user.role) && eligibleFor(eligibility, category);
+): boolean => user !== undefined && user.active && standbyRoleAllows(user.role, category) && eligibleFor(eligibility, category);
 
 export type StandbyProblemCode = 'missing' | 'duplicate_person' | 'not_eligible' | 'inactive';
 
