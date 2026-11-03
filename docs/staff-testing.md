@@ -657,6 +657,46 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/batch-check.mjs` and
 | S12 | Notifications | Jobcards, Messages, Monthly Forms, Standby; Invoiced shows "Purchase Order:…" in blue |
 | S13 | As the Senior Tech, on a job card issued WITHOUT a signature: Photos → tick "Send to the customer with the unsigned job card" on a document; then *Authorise sending it to the customer* with a TEST contact address | The panel lists the PDF and the document; the email (once email is configured) carries both. A document over the limit is refused with the reason and nothing is sent |
 
+### S1–S13 — what is proven, and what still needs the device (review of 3 November 2026)
+
+**Nothing in this table was done on a phone or a rugged tablet.** "Browser" means a desktop browser driving the screen at 1440×900, and at 768×1024 and 390×844 with touch emulation (Playwright, in CI and on the development PC). Emulation is not acceptance: every check below still needs the real device, and none is marked physically passed.
+
+| # | What it tests | Automated (unit / API / database) | Browser at desktop, tablet, phone | Physical device |
+|---|---|---|---|---|
+| S1 | PDF, ZIP and Word documents attached to a job | `batch-2-november.test.ts` (types sniffed from the bytes; fake ZIP refused) | `batch-check.mjs` (ZIP uploaded by the screen) ×3; `workflow-e2e.mjs` | NOT TESTED — the tablet's file picker and camera roll |
+| S2 | Chosen documents travel in the signed email | `batch-2-november.test.ts` (outbox carries both files; size limit; missing file) | `batch-check.mjs` (document chosen) ×3 | NOT TESTED — needs email configured; demonstration mode keeps it off |
+| S3 | Download Attachments ZIP beside the PDF buttons | `zip.test.ts`, `batch-2-november.test.ts` | `workflow-e2e.mjs` | NOT TESTED — opening the ZIP on the device |
+| S4 | Overview standby block | `standby-days.test.ts` | `batch-check.mjs` ×3; `acceptance-check.mjs` (directly below the greeting) ×3 | NOT TESTED |
+| S5 | A technician cancels their own job, with a reason | `batch-2-november.test.ts` (every role and stage) | `batch-check.mjs` ×3 | NOT TESTED |
+| S6 | Two technicians swap Saturdays; two approvals | `standby-days.test.ts` (incl. the main/helper rotation, STANDBY-DAY-2) | `standby-check.mjs` ×3; `acceptance-check.mjs` (several pairs, the live rotation) ×3 | NOT TESTED |
+| S7 | Role names; Add user offers Apprentice | `batch-2-november.test.ts`, `access.test.ts` | `batch-check.mjs` ×3 | NOT TESTED |
+| S8 | Custom Rates tab; missing rates flagged | `batch-2-november.test.ts` | `batch-check.mjs` ×3 | NOT TESTED |
+| S9 | Attendance: From/To, Preview and Print only | `payroll.test.ts` | `batch-check.mjs`, `forms-regression.mjs` ×3 | NOT TESTED — printing from the device |
+| S10 | Timesheets: Preview and Print; To-month file name | `payroll.test.ts` | `batch-check.mjs`, `tablet-pdf-check.mjs` | NOT TESTED — printing from the device |
+| S11 | Monthly Forms: Download, Preview, Print, Submit | `payroll.test.ts` | `batch-check.mjs`, `forms-regression.mjs` ×3 | NOT TESTED |
+| S12 | Notification tabs; "Purchase Order:" label | `tester-fixes-2-november.test.ts` | `batch-check.mjs` ×3; `tester-fixes-check.mjs` (now in Closed Jobs) ×3 | NOT TESTED |
+| S13 | Unsigned job card carries chosen documents | `unsigned-attachments.test.ts` (9) | — (the panel is covered by the responsive audit only) | NOT TESTED |
+
+## T. Physical acceptance follow-up (3 November 2026)
+
+Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs`, in CI and run on the development PC (13/13 at each size before release). On the real tablet and phone, on TEST data:
+
+| # | Do this | Pass looks like | Automated | Browser ×3 | Physical |
+|---|---|---|---|---|---|
+| T1 | Timesheets → Add line | No "Shared call-out" tick; the text says the call-out is YOUR share and nothing is divided | `reviewer-feedback.test.ts` | yes | NOT TESTED |
+| T2 | Send a timesheet period, then send a period that overlaps it (and the same period again) | Both are sent; the earlier one is replaced for the office; your daily lines are unchanged and still editable; the PDF is named for the To month | `reviewer-feedback.test.ts`, `payroll.test.ts`, `timesheet-corrections.test.ts`, database test | yes | NOT TESTED |
+| T3 | Two main technicians who rotate Main and Helper: one asks the other for several pairs of days | The request is sent (no "That swap cannot be asked for."); after both approvals, on each chosen day the two trade Main and Helper; nothing else moves | `standby-days.test.ts` | yes | NOT TESTED |
+| T4 | Standby → Manage schedule → Who may stand by | The Senior Tech is listed with Main and Helper only; ticking Main saves | `standby.test.ts` | yes | NOT TESTED |
+| T5 | Office: open a published week and change a place | No reason is asked; *Save change*; everyone affected is told | `standby.test.ts` | yes | NOT TESTED |
+| T6 | Open Overview | The standby block is the first thing below the greeting: this week's four places, next week, your upcoming standby; not on the Standby page any more | `standby-days.test.ts` | yes | NOT TESTED |
+| T7 | Office: Jobs → New job → Delivery Note; choose the customer and delivery date | Raised straight into completion; no technician is asked for; it is not in any technician's queue | `delivery-note-job.test.ts` | yes | NOT TESTED |
+| T8 | Add parts: two lines, each with a comment (Loan unit, Part returned); remove one, add it back | No price field and no total; the lines and comments are listed | `delivery-note-job.test.ts` | yes | NOT TESTED |
+| T9 | Collection: Courier with no waybill, then with one; on another note, Customer collection | Courier without a waybill is refused; customer collection needs none | `delivery-note-job.test.ts` | yes (API) | NOT TESTED |
+| T10 | Take the signature with a finger and with the stylus; *Issue Delivery Note* | The pad keeps its proportions and the page does not scroll while signing; the job shows **Delivery Note**; the PDF prints the company, delivery date, part numbers, descriptions, quantities, comments, collection method, waybill, signature and job number, and no price | `delivery-note-job.test.ts` (document text) | issue by the screen; signature through the API | NOT TESTED — **the signature itself has only been taken through the API** |
+| T11 | Try to add or change a part on the issued Delivery Note | Refused: it is final | `delivery-note-job.test.ts`, database test | yes | NOT TESTED |
+| T12 | Closed Jobs → Status: Delivery Note, then Invoiced | The Delivery Note is listed as Delivery Note, never as Invoiced; no amount anywhere | `office-lifecycle.test.ts` | yes | NOT TESTED |
+| T13 | Office: take a job through Handled → Awaiting PO → Awaiting Invoice No → Invoiced | It leaves the Notifications queues (there is no Invoiced tab) and appears in Closed Jobs with "Purchase Order:…", its invoice number, signed PDF and attachments | `office-lifecycle.test.ts`, `office-lifecycle-api.test.ts` | `tester-fixes-check.mjs`, `workflow-e2e.mjs` | NOT TESTED |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -673,6 +713,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | The standby calendar | Q1–Q8 | #96 |
 | The tester’s critical fixes | R1–R10 | #97–#108 |
 | The next critical batch | S1–S13 | #109–#120 |
+| The physical acceptance follow-up | T1–T13 | #121–#127 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

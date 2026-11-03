@@ -96,3 +96,18 @@ or corrupted data (§6), never as a way to roll back.
 - The 0047 rows in the CI probe are representative, one of each kind, not a copy of live data. **The live site is in use**: on 2 November it held none of them; on the morning of 3 November it held 8 customers, **1 of them on Custom Rates** (read-only snapshot before `9569c85`). Its unsigned jobs are exactly the case §3 marks unsafe, so a rollback to `b3a9014` now needs step 2(b).
 - Screens were not exercised under `b3a9014` against 0047 data. The probe covers repositories and domain rules; the screen effects above come from reading `b3a9014`'s code.
 - Releases older than `b3a9014` were not tested against 0047 and are not supported.
+
+## 8. Migration 0048 — the physical acceptance follow-up (3 November 2026)
+
+**What 0048 adds (additive only):** `jobs.delivery_date`, `job_parts.comment`, the `delivery_note` job type row and its guards (no price, labour, call-out or invoicing status on a Delivery Note); `timesheet_periods.superseded_at` / `superseded_by` and the guard allowing one current submission per person per day; the standby guards widened to a Senior Tech in main and helper places. Nothing existing is rewritten.
+
+**The rollback target after this release is `9569c85`** (the release before it, at 0047). The CI rollback check now runs `9569c85`'s own code against a database at 0048 that holds a Delivery Note, a superseded timesheet and a Senior Tech on standby. It proves the old code still starts, reads and writes. It also records what that code makes of the new rows:
+
+| 0048 data | Under `9569c85` | Risk while rolled back |
+|---|---|---|
+| **Delivery Note jobs** | The row is read, but `9569c85` has no `delivery_note` job type: every screen that looks the type up (job lists, the job page, Closed Jobs) fails for that job. Re-saving an **unsigned** Delivery Note drops its part comments, because the old code rewrites part lines without them. | **Unsafe once any Delivery Note exists.** A signed one is protected by the signed-job triggers; an unsigned one can lose comments. |
+| **Superseded timesheet submissions** | Listed as sent again: the office sees both the earlier and the later submission for the same days, and a technician's new overlapping period is refused by the old rule. | Confusing, not damaging. Nothing is deleted. |
+| **A Senior Tech in a standby place** | Shown, but the old rules treat the Senior Tech as ineligible: the week is flagged, and the old screen will not offer the Senior Tech. | Office confusion. The place stays. |
+| **Day swaps between the main/helper rotation pair** | Approved swaps stay in place. New such swaps are refused again (the old defect). | The defect returns until rolled forward. |
+
+**Recommendation: forward-fix only once a Delivery Note exists.** If an application rollback is unavoidable, run the steps in §5 with `-Rollback` (the recorded target is `9569c85`). First list the Delivery Notes with `select job_number, status from jobs where job_type_code = 'delivery_note';` and tell the office not to open or edit them until the system is rolled forward. A database restore follows §6 and loses everything since the pre-0048 backup.
