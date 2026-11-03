@@ -210,13 +210,21 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(0);
   });
 
-  it('a month that shares days with a different sent period is refused — no day is sent twice', async () => {
+  it('TS-OVERLAP-1: a month that shares days with a different sent period is submitted, and REPLACES it for the office', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(`${MONTH}-03`));
-    await submitTimesheetPeriod(harness.as(sipho), SIPHO, `${MONTH}-01`, `${MONTH}-07`);
+    const week = await submitTimesheetPeriod(harness.as(sipho), SIPHO, `${MONTH}-01`, `${MONTH}-07`);
     const forms = await loadMonthlyForms(harness.as(sipho), SIPHO, MONTH);
-    expect(forms.canSubmit).toBe(false);
-    expect(forms.timesheet.blockingPeriods).toHaveLength(1);
-    await expect(submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'period_overlaps_submitted' }] });
+    expect(forms.problems.join(' ')).not.toMatch(/already sent/u);
+    const submission = await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
+    // One current submission for every day of the month: the month's own.
+    const current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO);
+    expect(current.map((period) => period.id)).toEqual([submission.timesheetPeriodId]);
+    // The week is kept, not deleted — only no longer current.
+    const kept = await harness.repos.attendance.findPeriod(SIPHO, `${MONTH}-01`, `${MONTH}-07`);
+    expect(kept?.id).toBe(week.id);
+    expect(kept?.supersededAt).toBeTruthy();
+    // The line itself is untouched.
+    expect((await harness.repos.attendance.listEntries(SIPHO, FROM, TO)).map((entry) => entry.date)).toEqual([`${MONTH}-03`]);
   });
 
   it('an exact month period already sent is used, not sent again', async () => {

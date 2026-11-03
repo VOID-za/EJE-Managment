@@ -179,8 +179,10 @@ describe('TS-16 — asking for a correction', () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(0);
-    // A DIFFERENT period sharing a day with a sent one is still refused.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1))).rejects.toMatchObject({ violations: [{ code: 'period_overlaps_submitted' }] });
+    // TS-OVERLAP-1: a DIFFERENT period sharing a day is sent, and replaces this one for the office.
+    const later = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1));
+    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.supersededAt).toBeTruthy();
+    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toEqual([later.id]);
   });
 });
 

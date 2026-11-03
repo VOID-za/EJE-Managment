@@ -197,6 +197,9 @@ export const timesheetPeriods = pgTable(
     submittedAt: instant('submitted_at'),
     submittedBy: uuid('submitted_by').references(() => users.id),
     snapshot: jsonb('snapshot'),
+    // TS-OVERLAP-1 (0048): a later, overlapping submission replaced this one.
+    supersededAt: instant('superseded_at'),
+    supersededBy: uuid('superseded_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     version: rowVersion(),

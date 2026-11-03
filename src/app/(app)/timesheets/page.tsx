@@ -177,11 +177,11 @@ const TimesheetsPage = () => {
   const period = sheet.data?.period ?? null;
   const sentAt = period?.submittedAt ?? null;
   const overlapsSent = period?.overlapsSent ?? [];
-  // Save and Send act on a period that has ended and shares no day with a
-  // DIFFERENT sent period. A period already sent can be saved and sent again,
-  // replacing the earlier submission (RESUBMIT-1). The server asks the same.
-  // MONTH-END-OFF-1: a period no longer has to have ended to be worked on.
-  const periodOpen = editable && overlapsSent.length === 0;
+  // Any period may be saved and sent (TS-OVERLAP-1, 3 November 2026): one that
+  // shares days with an earlier submission replaces it when sent, and the
+  // same period sent again replaces itself (RESUBMIT-1). MONTH-END-OFF-1: a
+  // period no longer has to have ended to be worked on.
+  const periodOpen = editable;
   const savedComment = period?.comment ?? '';
   const showHistoricalNt = days.some((day) => day.normalHours > 0);
   const showHistoricalCount = days.some((day) => day.callouts > 0);
@@ -471,7 +471,7 @@ const TimesheetsPage = () => {
         </div>
         {sentAt === null && overlapsSent.length > 0 && (
           <p role="status" className="mt-2 text-sm text-amber-eje-700" data-testid="timesheet-period-overlap">
-            Part of these dates was already sent to the office ({overlapsSent.map((sent) => formatPeriod(sent.from, sent.to)).join('; ')}). Choose From and To dates outside it to send a new period.
+            Part of these dates was sent before ({overlapsSent.map((sent) => formatPeriod(sent.from, sent.to)).join('; ')}). Sending this period replaces that submission; the office then reads this one. Your daily lines are not changed.
           </p>
         )}
         <div className="mt-3">

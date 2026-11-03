@@ -571,8 +571,21 @@ export interface AttendanceRepository {
   deleteEntry(id: string): Promise<void>;
   /** TS-02/TS-10. One technician's period, by its exact From and To. */
   findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null>;
-  /** Every SENT period of this technician that shares at least one day with the range. */
+  /** Every CURRENT sent period of this technician that shares at least one day with the range (none superseded). */
   listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]>;
+  /**
+   * TS-OVERLAP-1. Marks every CURRENT sent period of this technician that shares
+   * a day with the range — other than `exceptId` — superseded, and returns them.
+   * Nothing is deleted. Called in the same unit of work as the new submission.
+   */
+  supersedeOverlappingPeriods(input: {
+    readonly userId: UserId;
+    readonly from: string;
+    readonly to: string;
+    readonly exceptId: string | null;
+    readonly at: string;
+    readonly by: UserId;
+  }): Promise<readonly TimesheetPeriod[]>;
   /**
    * Writes the period's comment. Refused (`null`) when that period has
    * already been sent to the office — a sent period is write-once.

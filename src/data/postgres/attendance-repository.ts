@@ -1,5 +1,5 @@
 import { isUuid } from './identifiers';
-import { and, asc, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
 import {
   asCustomerId,
   asUserId,
@@ -51,6 +51,8 @@ const toDomainPeriod = (row: PeriodRow): TimesheetPeriod => ({
   submittedAt: row.submittedAt,
   submittedBy: row.submittedBy === null ? null : asUserId(row.submittedBy),
   snapshot: (row.snapshot as TimesheetSubmissionSnapshot | null) ?? null,
+  supersededAt: row.supersededAt ?? null,
+  supersededBy: row.supersededBy === null || row.supersededBy === undefined ? null : asUserId(row.supersededBy),
 });
 
 const toDomainEntry = (row: EntryRow): TimesheetEntry => ({
@@ -289,11 +291,39 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         and(
           eq(schema.timesheetPeriods.userId, userId),
           isNotNull(schema.timesheetPeriods.submittedAt),
+          isNull(schema.timesheetPeriods.supersededAt),
           lte(schema.timesheetPeriods.periodFrom, to),
           gte(schema.timesheetPeriods.periodTo, from),
         ),
       )
       .orderBy(asc(schema.timesheetPeriods.periodFrom));
+    return rows.map(toDomainPeriod);
+  }
+
+  async supersedeOverlappingPeriods(input: {
+    readonly userId: UserId;
+    readonly from: string;
+    readonly to: string;
+    readonly exceptId: string | null;
+    readonly at: string;
+    readonly by: UserId;
+  }): Promise<readonly TimesheetPeriod[]> {
+    // The guard serialises one person's submissions; this takes the same lock first.
+    await this.db.execute(sql`select pg_advisory_xact_lock(hashtext('timesheet_periods:' || ${input.userId}::text))`);
+    const rows = await this.db
+      .update(schema.timesheetPeriods)
+      .set({ supersededAt: input.at, supersededBy: input.by, updatedAt: sql`now()`, version: sql`${schema.timesheetPeriods.version} + 1` })
+      .where(
+        and(
+          eq(schema.timesheetPeriods.userId, input.userId),
+          isNotNull(schema.timesheetPeriods.submittedAt),
+          isNull(schema.timesheetPeriods.supersededAt),
+          lte(schema.timesheetPeriods.periodFrom, input.to),
+          gte(schema.timesheetPeriods.periodTo, input.from),
+          ...(input.exceptId !== null && isUuid(input.exceptId) ? [ne(schema.timesheetPeriods.id, input.exceptId)] : []),
+        ),
+      )
+      .returning();
     return rows.map(toDomainPeriod);
   }
 
@@ -334,6 +364,9 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         submittedAt: period.submittedAt,
         submittedBy: period.submittedBy,
         snapshot: period.snapshot,
+        // Sent again: current again, if a later overlapping submission had replaced it.
+        supersededAt: null,
+        supersededBy: null,
         updatedAt: sql`now()`,
         version: sql`${schema.timesheetPeriods.version} + 1`,
       })

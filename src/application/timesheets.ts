@@ -56,6 +56,12 @@ import { assertRecordableDate, isCalendarDate } from './attendance-operations';
  *     before stay readable as history.
  *   - THE PERIOD IS CHOSEN (the owner, 28 October 2026): the technician's From
  *     and To dates, not a calendar month.
+ *   - OVERLAPPING PERIODS (TS-OVERLAP-1, 3 November 2026): any From and To may
+ *     be saved and sent, whatever was sent before. Sending a period that shares
+ *     a day with an earlier CURRENT submission replaces it — the earlier one is
+ *     marked superseded in the same unit of work, kept, and never shown — so
+ *     the office reads exactly one current submission for any day, and the
+ *     daily lines are never touched. (What follows is the history of the rule.)
  *   - SEND TO OFFICE (TS-02, TS-03, TS-14): a period is sent once. From then on
  *     the technician cannot add, correct or remove a line on any day inside it,
  *     nor change its comment — refused here on every path, and the database
@@ -449,13 +455,19 @@ export const loadTimesheet = async (
   assertMayRead(context, id);
   assertRange(from, to);
   const technician = await findTechnician(context, id);
-  const [entries, comments, records, sent, exact] = await Promise.all([
+  const [entries, comments, records, sent, stored] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
     context.repos.attendance.listComments(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
     context.repos.attendance.listSubmittedPeriods(id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
   ]);
+  /*
+   * TS-OVERLAP-1: a submission a later one replaced is not "sent" any more as far
+   * as this sheet is concerned — the office reads the later one. Shown as a draft
+   * (its comment kept), so it can be sent again, which makes it current again.
+   */
+  const exact = stored !== null && (stored.supersededAt ?? null) !== null ? { ...stored, submittedAt: null, submittedBy: null } : stored;
   /*
    * THE VERSION IN FORCE for every sent day (TS-16): where a correction of its
    * period has been accepted, the day shows that correction's lines, not the
@@ -625,14 +637,9 @@ export const normaliseTimesheetLine = async (
       `Enter rand and cents, up to ${formatCurrency(TIMESHEET_MAX_CALLOUT_CENTS)}.`,
     );
   }
+  // TS-CALLOUT-2 (3 November 2026): the Shared tick is gone — the technician enters their own share.
+  // A line written before keeps what it stored; a new one stores false.
   const calloutShared = input.calloutShared === true;
-  if (calloutShared && calloutAmount === 0) {
-    throw refuse(
-      'A shared call-out needs its amount.',
-      'callout_shared_without_amount',
-      'Enter the call-out amount, or untick Shared.',
-    );
-  }
   const internalKm = input.internalKm ?? 0;
   const customerKm = input.customerKm ?? 0;
   assertKm('Internal km', internalKm, 'invalid_internal_km');
@@ -852,30 +859,10 @@ export const saveTimesheetComment = async (
   return saved;
 };
 
-/**
- * No day of the period may already be inside a DIFFERENT sent period. The SAME
- * period may be sent again: that replaces what was sent (RESUBMIT-1).
- */
-const assertNoOverlap = async (
-  context: OperationContext,
-  technicianId: UserId,
-  from: string,
-  to: string,
-): Promise<void> => {
-  const sent = await context.repos.attendance.listSubmittedPeriods(technicianId, from, to);
-  const other = sent.find((period) => period.from !== from || period.to !== to);
-  if (other !== undefined) {
-    throw refuse(
-      `Part of ${formatPeriod(from, to)} was already sent to the office (${formatPeriod(other.from, other.to)}).`,
-      'period_overlaps_submitted',
-      'Choose From and To dates that do not include a day already sent, so no work is sent twice.',
-    );
-  }
-};
 
 /**
  * SAVE: the one comment for the whole timesheet period. TS-10, TS-12. The
- * owner only, for a period that has ended and shares no day with a sent one.
+ * owner only, for any period (TS-OVERLAP-1: overlapping a sent one is fine).
  * An unchanged comment writes nothing. Saving is never a submission.
  */
 export const saveTimesheetPeriodComment = async (
@@ -896,7 +883,6 @@ export const saveTimesheetPeriodComment = async (
       `Keep it to ${TIMESHEET_PERIOD_COMMENT_LIMIT} characters.`,
     );
   }
-  await assertNoOverlap(context, id, from, to);
   const existing = await context.repos.attendance.findPeriod(id, from, to);
   if (existing !== null && existing.comment === comment) return existing;
 
@@ -913,8 +899,6 @@ export const saveTimesheetPeriodComment = async (
     snapshot: null,
   });
   if (saved === null) {
-    // Sent from another tab between the check and the write.
-    await assertNoOverlap(context, id, from, to);
     throw refuse('The comment could not be saved.', 'comment_not_saved', 'Reload the timesheet.');
   }
   await audit(context, {
@@ -931,9 +915,10 @@ export const saveTimesheetPeriodComment = async (
  * SEND TO OFFICE. TS-02, TS-03, TS-14 — for the period the technician chose.
  *
  * The owner sends one period, once. What is sent is FROZEN in the submission:
- * every line inside the period and the comment, exactly as they stand. It may
- * not share a day with a period already sent, so no work is sent twice —
- * checked here, and again by the database's trigger. The repository sets the
+ * every line inside the period and the comment, exactly as they stand. Any
+ * earlier CURRENT submission sharing a day with it is superseded first, in
+ * the same unit of work (TS-OVERLAP-1), so no day is ever in two current
+ * submissions — the database's trigger refuses that too. The repository sets the
  * submission only where none exists, so a double tap, a retry or two tabs
  * produce one submission and one refusal.
  *
@@ -954,7 +939,6 @@ export const submitTimesheetPeriod = async (
   const id = asUserId(technicianId);
   assertOwner(context, id);
   assertPeriod(context, from, to);
-  await assertNoOverlap(context, id, from, to);
   const technician = await findTechnician(context, id);
   const [entries, existing] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
@@ -969,6 +953,15 @@ export const submitTimesheetPeriod = async (
    * untouched. The office reads the latest submission, as before.
    */
   const resending = existing !== null && existing.submittedAt !== null;
+  // TS-OVERLAP-1: every other current submission sharing a day is replaced by this one.
+  const replaced = await context.repos.attendance.supersedeOverlappingPeriods({
+    userId: id,
+    from,
+    to,
+    exceptId: existing?.id ?? null,
+    at: now,
+    by: context.actor.id,
+  });
   let saved: TimesheetPeriod | null;
   try {
     if (resending) await context.repos.attendance.deleteCorrections(existing.id);
@@ -985,9 +978,9 @@ export const submitTimesheetPeriod = async (
       snapshot: { technicianName: userFullName(technician), from, to, comment, entries },
     });
   } catch (cause) {
-    // Another send for an overlapping period got there first (the database's guard).
+    // Another send for an overlapping period got there in between (the database's guard): say so plainly.
     if (cause instanceof Error && /overlaps a period already sent/u.test(`${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}`)) {
-      await assertNoOverlap(context, id, from, to);
+      throw refuse('Another submission for these dates was being sent at the same time.', 'timesheet_send_conflict', 'Reload the timesheet and send it again.');
     }
     throw cause;
   }
@@ -1003,7 +996,7 @@ export const submitTimesheetPeriod = async (
     jobId: null,
     type: 'timesheet_submitted',
     summary: `Timesheet ${resending ? 'sent again — replaces the earlier submission' : 'sent to the office'}: ${userFullName(technician)}, ${label}`,
-    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}.${resending ? ' The earlier submission is replaced; only this one is kept.' : ''}`,
+    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}.${resending ? ' The earlier submission is replaced; only this one is kept.' : ''}${replaced.length > 0 ? ` It replaces the overlapping submission${replaced.length === 1 ? '' : 's'} ${replaced.map((period) => formatPeriod(period.from, period.to)).join('; ')}, which the office no longer reads.` : ''}`,
   });
   if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',

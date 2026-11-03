@@ -225,15 +225,14 @@ describe('TS-07 — NT is no longer entered; OT and DT are', () => {
 });
 
 describe('TS-08 — the call-out is a rand amount', () => {
-  it('in whole cents, validated; a shared call-out is recorded as entered, never divided', async () => {
+  it('in whole cents, validated; a call-out is recorded as entered, never divided (TS-CALLOUT-2: no Shared tick)', async () => {
     for (const bad of [-100, 12.5, 100_000_001]) {
       await expect(
         saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { calloutAmount: bad })),
       ).rejects.toMatchObject({ violations: [{ code: 'invalid_callout_amount' }] });
     }
-    await expect(
-      saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { calloutAmount: 0, calloutShared: true })),
-    ).rejects.toMatchObject({ violations: [{ code: 'callout_shared_without_amount' }] });
+    // TS-CALLOUT-2: the Shared tick and its rule are gone; a zero call-out is simply no call-out.
+    expect((await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1), { calloutAmount: 0 }))).calloutAmount).toBe(0);
     await expect(
       saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { callouts: 2 })),
     ).rejects.toMatchObject({ violations: [{ code: 'callout_count_withdrawn' }] });
@@ -324,21 +323,34 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect((await events('timesheet_submitted')).length).toBe(2);
   });
 
-  it('a period sharing ANY day with a sent one is refused, so no work is sent twice', async () => {
+  it('TS-OVERLAP-1: overlapping periods are saved and sent; each replaces the overlapping one, so every day has ONE current submission', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
-    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    const overlap = { violations: [{ code: 'period_overlaps_submitted' }] };
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), FROM)).rejects.toMatchObject(overlap);
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, day(0))).rejects.toMatchObject(overlap);
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(5), day(3))).rejects.toMatchObject(overlap);
-    await expect(saveTimesheetPeriodComment(harness.as(sipho), SIPHO, day(10), day(0), 'x')).rejects.toMatchObject(overlap);
-    // The days either side are free: a period ending the day before is accepted.
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
-    const next = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(9), day(7));
-    expect(next).toMatchObject({ from: day(9), to: day(7) });
-    // And the view says which sent periods overlap a wider range.
-    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(12), day(0));
-    expect(sheet.period.overlapsSent).toEqual([{ from: day(9), to: day(7) }, { from: FROM, to: TO }]);
+    const first = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    // The comment of an overlapping period saves; nothing is refused.
+    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, day(10), day(0), 'Covers the shutdown week');
+    const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0));
+    expect(wider.comment).toBe('Covers the shutdown week');
+    let current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
+    expect(current.map((period) => period.id)).toEqual([wider.id]);
+    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.supersededAt).toBeTruthy();
+    // The same narrower period sent again: current again, and the wider one replaced in turn.
+    const again = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(again.id).toBe(first.id);
+    current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
+    expect(current.map((period) => period.id)).toEqual([first.id]);
+    // Lines are never touched by any of it, and stay editable and removable.
+    const lines = await harness.repos.attendance.listEntries(SIPHO, day(30), day(0));
+    expect(lines.map((entry) => entry.date)).toEqual([day(4)]);
+    // The office is told each time, and the audit names what was replaced.
+    const trail = (await harness.repos.activity.list()).filter((event) => event.type === 'timesheet_submitted');
+    expect(trail.some((event) => event.detail.includes('replaces the overlapping submission'))).toBe(true);
+    // A disjoint period is simply another current submission.
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(25)));
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(26), day(24));
+    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0))).length).toBe(2);
+    // And the view says which current submissions a wider range shares days with.
+    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(30), day(0));
+    expect(sheet.period.overlapsSent.length).toBe(2);
   });
 
   it('validates the period: From after To refused, at most 92 days; a To after today is allowed (MONTH-END-OFF-1)', async () => {

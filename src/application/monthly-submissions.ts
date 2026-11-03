@@ -119,12 +119,7 @@ export const loadMonthlyForms = async (
   // MONTH-END-OFF-1 (2 November 2026): a month may be saved and submitted
   // before it ends, by every role. Submitting again later replaces it.
   const problems: string[] = [];
-  if (blocking.length > 0) {
-    problems.push(
-      `Part of ${monthTitle(month)} was already sent to the office as ${blocking.map((other) => formatPeriod(other.from, other.to)).join('; ')}. ` +
-        'A monthly submission covers the whole month and no day may be sent twice; ask the office.',
-    );
-  }
+  // TS-OVERLAP-1: an earlier overlapping submission is not a problem — submitting replaces it.
   if (missingReasons.length > 0) {
     problems.push(`Give the absence reason for ${missingReasons.map(formatDayAndDate).join(', ')} (Attendance).`);
   }
@@ -176,13 +171,7 @@ export const submitMonth = async (
     throw refuse('You can only submit your own month.', 'not_permitted', 'Each person submits their own month; nobody submits another person’s attendance or timesheet.');
   }
   const state = await loadMonthlyForms(context, technicianId, month);
-  if (state.timesheet.blockingPeriods.length > 0) {
-    throw refuse(
-      `Part of ${state.monthLabel} was already sent to the office.`,
-      'period_overlaps_submitted',
-      `Already sent: ${state.timesheet.blockingPeriods.join('; ')}. A monthly submission covers the whole month; no day is sent twice.`,
-    );
-  }
+  // TS-OVERLAP-1 (3 November 2026): an overlapping earlier submission no longer blocks the month; sending replaces it.
   if (state.attendance.absentWithoutReason.length > 0) {
     throw refuse(
       'An absent day has no reason.',

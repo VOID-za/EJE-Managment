@@ -181,16 +181,10 @@ export const TimesheetLineForm = ({
         {number('Int Km', 'internalKm', 'timesheet-internal-km')}
         {number('Cust Km', 'customerKm', 'timesheet-customer-km')}
       </div>
-      <label className="flex min-h-11 items-center gap-2 text-sm text-steel-700">
-        <input
-          type="checkbox"
-          checked={draft.calloutShared}
-          onChange={(event) => change({ ...draft, calloutShared: event.target.checked })}
-          className="size-4.5 shrink-0 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
-          data-testid="timesheet-callout-shared"
-        />
-        Shared call-out — enter only YOUR share (e.g. R500 of a R1 000 call-out shared by two). Nothing is divided for you.
-      </label>
+      {/* TS-CALLOUT-2 (3 November 2026): no Shared tick — the amount IS the technician's own share. */}
+      <p className="text-sm text-steel-700" data-testid="timesheet-callout-hint">
+        Callout (R): enter only YOUR share of the call-out (e.g. R500 of a R1 000 call-out shared by two). Nothing is divided automatically.
+      </p>
       {(draft.keepNormal ?? 0) > 0 && (
         <p className="text-xs text-steel-500">
           This line was entered before 28 October 2026 with NT {hours(draft.keepNormal ?? 0)} h. NT is no longer recorded; it is kept as it was.

@@ -295,15 +295,8 @@ export const TimesheetCorrections = ({
                 <TextField label="Cust Km" inputMode="decimal" value={row.customerKm} onChange={(event) => change(row.key, { customerKm: event.target.value })} />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex items-center gap-2 text-sm text-steel-700">
-                  <input
-                    type="checkbox"
-                    checked={row.calloutShared}
-                    onChange={(event) => change(row.key, { calloutShared: event.target.checked })}
-                    className="size-4.5 rounded border-steel-300 text-eje-600"
-                  />
-                  Shared call-out (your share only)
-                </label>
+                {/* TS-CALLOUT-2: no Shared tick — the call-out entered is the technician's own share. */}
+                <p className="text-xs text-steel-600">Callout: your own share only; nothing is divided.</p>
                 <Button size="sm" variant="ghost" onClick={() => setRows(rows.filter((other) => other.key !== row.key))}>
                   Remove line
                 </Button>

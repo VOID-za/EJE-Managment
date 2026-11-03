@@ -4154,7 +4154,9 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await typeInto('Callout (R)', '450');
   await typeInto('Int Km', '12.5');
   await typeInto('Cust Km', '30');
-  await form.getByTestId('timesheet-callout-shared').check();
+  // TS-CALLOUT-2: no Shared tick; the hint says the amount is the technician's own share.
+  if ((await form.getByTestId('timesheet-callout-shared').count()) !== 0) throw new Error('the Shared call-out tick is still on the form');
+  await form.getByTestId('timesheet-callout-hint').waitFor({ timeout: 5000 });
   // An earlier field corrected after the later ones: nothing else moves or resets.
   await typeInto('OT (hours)', '3');
   for (const [label, expected] of [['Customer', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
@@ -4175,8 +4177,8 @@ await step('a technician types a whole timesheet line, clearing and retyping the
     const reopened = page.getByTestId('timesheet-line-form');
     await reopened.waitFor({ timeout: 5000 });
     const read = async (label) => reopened.getByLabel(label, { exact: true }).inputValue();
-    const values = { date: await reopened.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km'), shared: await reopened.getByTestId('timesheet-callout-shared').isChecked() };
-    const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30', shared: true };
+    const values = { date: await reopened.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
+    const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30' };
     if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`${when}: reopened as ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
     await reopened.getByRole('button', { name: 'Cancel', exact: true }).click();
   };
@@ -4193,7 +4195,7 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   }, { base: BASE, from: days[0], to: days.at(-1) });
   if (stored.length !== 1) throw new Error(`${stored.length} stored lines for the customer`);
   const [line] = stored;
-  if (line.date !== target || line.overtimeHours !== 3 || line.doubleHours !== 1.25 || line.calloutAmount !== 45000 || line.calloutShared !== true || line.internalKm !== 12.5 || line.customerKm !== 30) {
+  if (line.date !== target || line.overtimeHours !== 3 || line.doubleHours !== 1.25 || line.calloutAmount !== 45000 || line.calloutShared !== false || line.internalKm !== 12.5 || line.customerKm !== 30) {
     throw new Error(`stored: ${JSON.stringify(line)}`);
   }
 });

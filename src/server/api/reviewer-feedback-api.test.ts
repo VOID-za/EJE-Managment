@@ -46,8 +46,8 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     expect(sent.data.period).toMatchObject({ from, to: today });
 
     // RESUBMIT-1: the lines stay editable and the same period may be sent again
-    // (replacing the submission); a DIFFERENT period sharing a day is still refused.
-    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -5), to: from })).status).toBe(422);
+    // (replacing the submission). TS-OVERLAP-1: a DIFFERENT period sharing a day is sent too, and replaces it.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -5), to: from })).status).toBe(200);
     expect((await technician.post('/api/timesheets/user-tech-sipho/entries', {
       date: today, customerName: 'X', overtimeHours: 1, doubleHours: 0,
     })).status).toBe(200);
@@ -61,8 +61,8 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     const office = await signedInAs(DEMO_USERS.coordinator);
     const notes = await office.get<{ notifications: readonly { type: string; title: string; link: string | null }[] }>('/api/notifications');
     const told = notes.data.notifications.filter((n) => n.type === 'timesheet_submitted');
-    // Once for each send: the first, and the one that replaced it.
-    expect(told).toHaveLength(2);
+    // Once for each send: the first, the overlapping one (TS-OVERLAP-1) and the one that replaced them.
+    expect(told).toHaveLength(3);
     expect(told[0]).toMatchObject({ link: '/timesheets' });
     expect(told[0]!.title).toContain('Sipho');
 

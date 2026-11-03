@@ -1448,9 +1448,32 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(
       this.context
         .read()
-        .timesheetPeriods.filter((row) => row.userId === userId && row.submittedAt !== null && row.from <= to && row.to >= from)
+        .timesheetPeriods.filter((row) => row.userId === userId && row.submittedAt !== null && (row.supersededAt ?? null) === null && row.from <= to && row.to >= from)
         .sort((x, y) => x.from.localeCompare(y.from)),
     );
+  }
+
+  supersedeOverlappingPeriods(input: {
+    readonly userId: UserId;
+    readonly from: string;
+    readonly to: string;
+    readonly exceptId: string | null;
+    readonly at: string;
+    readonly by: UserId;
+  }): Promise<readonly TimesheetPeriod[]> {
+    const superseded: TimesheetPeriod[] = [];
+    this.context.commit((draft) => {
+      draft.timesheetPeriods = draft.timesheetPeriods.map((row) => {
+        const replaced =
+          row.userId === input.userId && row.submittedAt !== null && (row.supersededAt ?? null) === null &&
+          row.from <= input.to && row.to >= input.from && row.id !== input.exceptId;
+        if (!replaced) return row;
+        const next: TimesheetPeriod = { ...row, supersededAt: input.at, supersededBy: input.by };
+        superseded.push(next);
+        return next;
+      });
+    });
+    return Promise.resolve(superseded);
   }
 
   savePeriodComment(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
@@ -1480,6 +1503,8 @@ class DemoAttendanceRepository implements AttendanceRepository {
         submittedAt: period.submittedAt,
         submittedBy: period.submittedBy,
         snapshot: period.snapshot,
+        supersededAt: null,
+        supersededBy: null,
       };
       draft.timesheetPeriods = draft.timesheetPeriods.map((row) => (row === existing ? next : row));
       saved = next;
@@ -1501,10 +1526,11 @@ class DemoAttendanceRepository implements AttendanceRepository {
         (row) => row.userId === period.userId && row.from === period.from && row.to === period.to,
       );
       if (existing !== undefined && existing.submittedAt !== null) return;
-      // As the database's trigger does: a sent period may not overlap another.
+      // As the database's trigger does: a sent period may not overlap another CURRENT one (TS-OVERLAP-1:
+      // the application supersedes those first, in the same unit of work).
       const overlaps = draft.timesheetPeriods.some(
         (row) =>
-          row !== existing && row.userId === period.userId && row.submittedAt !== null &&
+          row !== existing && row.userId === period.userId && row.submittedAt !== null && (row.supersededAt ?? null) === null &&
           row.from <= period.to && row.to >= period.from,
       );
       if (overlaps) throw new Error('timesheet period overlaps a period already sent to the office');

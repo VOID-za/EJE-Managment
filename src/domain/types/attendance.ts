@@ -178,6 +178,13 @@ export interface TimesheetPeriod {
   readonly submittedAt: IsoDateTime | null;
   readonly submittedBy: UserId | null;
   readonly snapshot: TimesheetSubmissionSnapshot | null;
+  /**
+   * TS-OVERLAP-1 (3 November 2026): when a LATER submission covered any of
+   * these days, this one stopped being current — the office reads the later one.
+   * Kept, never shown as history, never deleted. Null (or absent) while current.
+   */
+  readonly supersededAt?: IsoDateTime | null;
+  readonly supersededBy?: UserId | null;
 }
 
 /** What was sent to the office, frozen. */
