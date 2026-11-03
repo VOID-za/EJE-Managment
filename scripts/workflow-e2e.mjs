@@ -566,10 +566,11 @@ await step('confirming the delivery records it, and does NOT close EJE-1065', as
 
 await step('the Inbox holds EJE-1065 for office handling, and Mark handled moves it to Awaiting PO', async () => {
   await visit('/notifications');
-  // The five tabs, for the office.
-  for (const name of ['Inbox', 'Handled', 'Simulated Outbox', 'Awaiting PO', 'Awaiting Invoice No', 'Invoiced']) {
+  // The office's tabs. INVOICED-CLOSED-1: no Invoiced tab — invoiced work is in Closed Jobs.
+  for (const name of ['Inbox', 'Handled', 'Simulated Outbox', 'Awaiting PO', 'Awaiting Invoice No']) {
     await page.getByRole('tab', { name: new RegExp(`^${name}`) }).waitFor({ timeout: 10000 });
   }
+  if ((await page.getByRole('tab', { name: /^Invoiced/ }).count()) !== 0) throw new Error('the office queue still has an Invoiced tab');
   const card = page.getByTestId('office-handling-EJE-1065');
   await card.waitFor({ timeout: 15000 });
   await card.getByRole('button', { name: 'Mark handled' }).click();
@@ -606,9 +607,11 @@ await step('saving with no Invoice No keeps EJE-1065 Awaiting Invoice No; a vali
   await card.getByRole('button', { name: 'Save' }).click();
   await card.waitFor({ state: 'detached', timeout: 15000 });
 
-  await page.getByRole('tab', { name: /^Invoiced/ }).click();
+  // INVOICED-CLOSED-1: into Closed Jobs, with its invoice number.
+  await visit('/jobs/closed');
   await page
-    .getByTestId('invoiced-EJE-1065')
+    .getByTestId('closed-status-EJE-1065')
+    .first()
     .getByText('INV-E2E-1065', { exact: false })
     .waitFor({ timeout: 15000 });
 

@@ -43,6 +43,8 @@ export interface DeliveryNoteModel {
     readonly partNumber: string;
     readonly description: string;
     readonly quantity: string;
+    /** DELIVERY-NOTE-1: the line's comment ("Loan unit"), where the job type records one. */
+    readonly comment?: string;
   }[];
   readonly totalQuantity: string;
   readonly priceNote: string;
@@ -113,6 +115,7 @@ export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: st
     partNumber: part.partNumber,
     description: part.description,
     quantity: String(part.quantity),
+    ...(definition.capturesPartComments && (part.comment ?? '').length > 0 ? { comment: part.comment } : {}),
   }));
   const items = [...repairItem, ...parts];
   const totalQuantity = items.reduce((total, item) => total + Number(item.quantity), 0);
@@ -135,7 +138,9 @@ export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: st
     ],
     details: [
       { label: 'Job type', value: definition.label },
-      { label: 'Collection', value: 'Courier collection' },
+      // DELIVERY-NOTE-1: delivery date; and a Delivery Note may be collected by the customer too.
+      ...(definition.capturesDeliveryDate && (job.deliveryDate ?? null) !== null ? [{ label: 'Delivery date', value: formatDate(job.deliveryDate!) }] : []),
+      { label: 'Collection', value: job.courierCollection ? 'Courier collection' : 'Customer collection' },
       ...optional('Waybill', job.waybillNumber),
       ...optional('Customer order number', job.orderNumber),
       ...optional('Delivery note / waybill (customer)', job.deliveryNote),
@@ -145,7 +150,9 @@ export const buildDeliveryNoteModel = (input: DeliveryNoteInput, generatedAt: st
     ],
     items,
     totalQuantity: String(totalQuantity),
-    priceNote: 'No prices are shown on a delivery note. The priced job card is kept by EJE and sent to the customer.',
+    priceNote: definition.priced
+      ? 'No prices are shown on a delivery note. The priced job card is kept by EJE and sent to the customer.'
+      : 'Proof of delivery. A Delivery Note carries no prices and is not invoiced.',
     signature:
       job.signature === null
         ? null

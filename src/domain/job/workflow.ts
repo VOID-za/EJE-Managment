@@ -985,6 +985,13 @@ export const checkReadyForSignature = (job: Job): TransitionCheck => {
         message: 'At least one part line is required before the collector signs.',
       });
     }
+    // DELIVERY-NOTE-1: a Delivery Note says when the goods were delivered.
+    if (definition.capturesDeliveryDate && (job.deliveryDate ?? null) === null) {
+      violations.push({
+        code: 'delivery_date_required',
+        message: 'The delivery date is required before the Delivery Note is signed.',
+      });
+    }
     if (definition.requiresOrderNumber && job.orderNumber.trim().length === 0) {
       violations.push({
         code: 'order_number_required',

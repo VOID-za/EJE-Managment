@@ -17,8 +17,10 @@ const filters = z
     customerId: z.string().max(100).optional(),
     siteId: z.string().max(100).optional(),
     jobType: z
-      .enum(['all', 'breakdown', 'installation', 'service', 'parts', 'test_and_repair'])
+      .enum(['all', 'breakdown', 'installation', 'service', 'parts', 'test_and_repair', 'delivery_note'])
       .optional(),
+    // DELIVERY-NOTE-1 / INVOICED-CLOSED-1: Invoiced, Delivery Note, or closed under the earlier lifecycle.
+    outcome: z.enum(['all', 'invoiced', 'delivery_note', 'closed']).optional(),
     technicianId: z.string().max(100).optional(),
     closedFrom: z.string().max(10).optional(),
     closedTo: z.string().max(10).optional(),

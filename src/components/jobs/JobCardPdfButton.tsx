@@ -7,6 +7,10 @@ import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDia
 import { SimulatedPdfService } from '@/services/simulated/pdf';
 import { SystemClock } from '@/services/simulated/system';
 import { renderJobCardPdf } from './job-card-pdf';
+import { DeliveryNoteDocument } from './DeliveryNoteDocument';
+import { getJobTypeDefinition } from '@/domain';
+import { buildDeliveryNoteModel, deliveryNoteFileName } from '@/lib/job-card/delivery-note';
+import { renderDeliveryNotePdf } from '@/services/simulated/delivery-note-pdf';
 import { JobCardDocument } from './JobCardDocument';
 import { PartsCollectionNote } from './PartsCollectionNote';
 
@@ -49,14 +53,25 @@ export const JobCardPdfButton = ({
       </Button>
       <DocumentPreviewDialog
         open={open}
-        title={`${view.job.jobNumber} — ${view.job.jobType === 'parts' ? 'Parts Collection Note' : 'Job Card'}`}
+        title={`${view.job.jobNumber} — ${!getJobTypeDefinition(view.job.jobType).priced ? 'Delivery Note' : view.job.jobType === 'parts' ? 'Parts Collection Note' : 'Job Card'}`}
         description="From what is saved on the job now. Looking at it changes nothing."
         loadPdf={async () => {
+          // DELIVERY-NOTE-1: a Delivery Note previews as itself — price-less — never as a job card.
+          if (!getJobTypeDefinition(view.job.jobType).priced) {
+            const note = renderDeliveryNotePdf(buildDeliveryNoteModel(view, clock.now()));
+            return { bytes: note.bytes, fileName: deliveryNoteFileName(view.job) };
+          }
           const rendered = await renderJobCardPdf(view, pdf, clock);
           return { bytes: rendered.bytes, fileName: rendered.fileName };
         }}
         renderHtml={() =>
-          view.job.jobType === 'parts' ? <PartsCollectionNote view={view} /> : <JobCardDocument view={view} />
+          !getJobTypeDefinition(view.job.jobType).priced ? (
+            <DeliveryNoteDocument model={buildDeliveryNoteModel(view, clock.now())} />
+          ) : view.job.jobType === 'parts' ? (
+            <PartsCollectionNote view={view} />
+          ) : (
+            <JobCardDocument view={view} />
+          )
         }
         onClose={() => setOpen(false)}
       />

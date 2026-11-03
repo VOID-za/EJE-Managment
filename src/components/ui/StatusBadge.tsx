@@ -1,4 +1,4 @@
-import type { JobPriority, JobStatus } from '@/domain';
+import type { JobPriority, JobStatus, JobTypeCode } from '@/domain';
 import { jobStatusLabel, priorityLabel } from '@/domain';
 import { Badge, type BadgeTone } from './Badge';
 import { cn } from '@/lib/cn';
@@ -30,17 +30,28 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   cancelled: 'red',
 };
 
+/**
+ * DELIVERY-NOTE-1: a signed Delivery Note is closed, and reads "Delivery Note" —
+ * beside "Invoiced", never as it — so it is told apart from finished, invoiced work.
+ */
 export const JobStatusBadge = ({
   status,
+  jobType,
   size = 'md',
 }: {
   readonly status: JobStatus;
+  readonly jobType?: JobTypeCode;
   readonly size?: 'sm' | 'md';
-}) => (
-  <Badge tone={STATUS_TONES[status]} dot size={size}>
-    {jobStatusLabel(status)}
-  </Badge>
-);
+}) =>
+  jobType === 'delivery_note' && status === 'closed' ? (
+    <Badge tone="green" dot size={size}>
+      <span data-testid="status-delivery-note">Delivery Note</span>
+    </Badge>
+  ) : (
+    <Badge tone={STATUS_TONES[status]} dot size={size}>
+      {jobStatusLabel(status)}
+    </Badge>
+  );
 
 const PRIORITY_TONES: Record<JobPriority, BadgeTone> = {
   low: 'neutral',

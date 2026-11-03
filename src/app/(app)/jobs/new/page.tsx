@@ -126,6 +126,8 @@ const NewJobPage = () => {
   const [quoteNumber, setQuoteNumber] = useState('');
   /** The day the unit arrived; '' means nobody recorded it. Never defaulted. */
   const [dateReceived, setDateReceived] = useState('');
+  // DELIVERY-NOTE-1: the delivery date of a Delivery Note.
+  const [deliveryDate, setDeliveryDate] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -234,6 +236,11 @@ const NewJobPage = () => {
       if (problem !== null) next.dateReceived = problem;
     }
 
+    // DELIVERY-NOTE-1: a Delivery Note says when the goods were delivered (the server asks the same).
+    if (definition.capturesDeliveryDate && !asDraft && deliveryDate.length === 0) {
+      next.deliveryDate = 'Enter the delivery date.';
+    }
+
     // On a parts collection the order number is what ties the goods to what the
     // customer ordered, so it is not optional the way it is on a site visit.
     if (definition.requiresOrderNumber && orderNumber.trim().length === 0) {
@@ -294,6 +301,7 @@ const NewJobPage = () => {
         quoteNumber,
         // Null when blank or when the job type books in no unit: never a guess.
         dateReceived: definition.capturesRepairItem && dateReceived.length > 0 ? dateReceived : null,
+        deliveryDate: definition.capturesDeliveryDate && deliveryDate.length > 0 ? deliveryDate : null,
         asDraft,
       });
     });
@@ -766,6 +774,28 @@ const NewJobPage = () => {
                 All three optional. A unit can be booked in while somebody is
                 still looking for the part number on the casting.
               */}
+              {/* DELIVERY-NOTE-1: the delivery date; the parts, collection and signature follow on the Delivery Note itself. */}
+              {definition.capturesDeliveryDate && (
+                <div className="mt-4 rounded-[var(--radius-control)] border border-green-200 bg-green-50 p-4" data-testid="delivery-note-details">
+                  <p className="text-sm font-semibold text-steel-800">Delivery Note</p>
+                  <p className="mt-1 text-sm text-steel-700">
+                    Proof of delivery — no technician, no pricing, never invoiced. Once raised, add the parts, record how they were
+                    collected and take the signature.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <TextField
+                      label="Delivery date"
+                      type="date"
+                      required
+                      value={deliveryDate}
+                      error={errors.deliveryDate}
+                      onChange={(event) => setDeliveryDate(event.target.value)}
+                      data-testid="delivery-date"
+                    />
+                  </div>
+                </div>
+              )}
+
               {definition.capturesRepairItem && (
                 <div className="mt-4 rounded-[var(--radius-control)] border border-violet-eje-200 bg-violet-eje-50 p-4">
                   <p className="text-sm font-semibold text-violet-eje-700">

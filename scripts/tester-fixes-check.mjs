@@ -349,7 +349,7 @@ await check('Signature: shown again at its own proportions, and drawn in the iss
 });
 
 /* ---- Invoicing ------------------------------------------------------------- */
-await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) → Awaiting Invoice No → Invoiced, in the Invoiced tab', async () => {
+await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) → Awaiting Invoice No → Invoiced, then in Closed Jobs (INVOICED-CLOSED-1)', async () => {
   await as('Elmarie Coetzee');
   await go('/jobs/EJE-1058');
   const panel = page.getByTestId('office-lifecycle');
@@ -373,12 +373,15 @@ await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) →
   await row.getByTestId('invoice-number-EJE-1058').fill('INV-CHECK-1058');
   await press(row.getByRole('button', { name: 'Save' }));
   await row.waitFor({ state: 'detached', timeout: 15000 });
-  await press(page.getByRole('tab', { name: /^Invoiced/u }));
-  const invoiced = page.getByTestId('invoiced-EJE-1058');
-  await invoiced.waitFor({ timeout: 15000 });
+  // INVOICED-CLOSED-1 (3 November 2026): no Invoiced tab in the active workflow — the job is in Closed Jobs.
+  if ((await page.getByRole('tab', { name: /^Invoiced/u }).count()) !== 0) fail('the office queue still has an Invoiced tab');
+  await go('/jobs/closed');
+  const invoiced = page.getByTestId('closed-status-EJE-1058').first();
+  await invoiced.waitFor({ timeout: 20000 });
   await invoiced.getByText('Invoice INV-CHECK-1058').waitFor({ timeout: 5000 });
   await invoiced.getByText('Purchase Order:PO-CHECK-1058').waitFor({ timeout: 5000 }); // NOTIF-PO-LABEL-1 (2 November 2026)
-  await noPageOverflow('the Invoiced tab');
+  await invoiced.getByText('Invoiced').waitFor({ timeout: 5000 });
+  await noPageOverflow('Closed Jobs');
 });
 
 await check('no page errors anywhere in the run', async () => {

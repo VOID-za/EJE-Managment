@@ -13,11 +13,13 @@ import {
   CLOSED_JOBS_PAGE_SIZE,
   emptyClosedJobFilters,
   type ClosedJobFilters,
+  type ClosedJobOutcome,
 } from '@/application/closed-jobs';
 import {
   Badge,
   Button,
   Card,
+  JobStatusBadge,
   DataTable,
   EmptyState,
   Icon,
@@ -132,6 +134,21 @@ const ClosedJobsPage = () => {
       render: (row) => <JobTypeChip jobType={row.job.jobType} />,
     },
     {
+      // DELIVERY-NOTE-1 / INVOICED-CLOSED-1: how it finished — Invoiced (with its PO and invoice number) or Delivery Note.
+      key: 'status',
+      header: 'Status',
+      width: '170px',
+      render: (row) => (
+        <div className="min-w-0" data-testid={`closed-status-${row.job.jobNumber}`}>
+          <JobStatusBadge status={row.job.status} jobType={row.job.jobType} size="sm" />
+          {row.job.purchaseOrder !== null && row.job.purchaseOrder !== undefined && (
+            <p className="mt-0.5 truncate text-xs text-eje-700">Purchase Order:{row.job.purchaseOrder.number}</p>
+          )}
+          {row.job.invoice !== null && <p className="truncate text-xs text-steel-600">Invoice {row.job.invoice.number}</p>}
+        </div>
+      ),
+    },
+    {
       key: 'technician',
       header: 'Technician',
       secondary: true,
@@ -143,7 +160,8 @@ const ClosedJobsPage = () => {
       width: '120px',
       render: (row) => (
         <span className="tabular text-sm text-steel-700">
-          {row.job.closedAt === null ? '—' : formatDate(row.job.closedAt)}
+          {/* An invoiced job finished when its invoice number was recorded. */}
+          {(row.job.closedAt ?? row.job.invoice?.recordedAt ?? null) === null ? '—' : formatDate((row.job.closedAt ?? row.job.invoice?.recordedAt)!)}
         </span>
       ),
     },
@@ -231,6 +249,19 @@ const ClosedJobsPage = () => {
               { value: 'all', label: 'All types' },
               ...JOB_TYPE_CODES.map((code) => ({ value: code, label: jobTypeLabel(code) })),
             ]}
+          />
+          {/* DELIVERY-NOTE-1 / INVOICED-CLOSED-1: Invoiced and Delivery Note, side by side and filterable. */}
+          <SelectField
+            label="Status"
+            value={filters.outcome ?? 'all'}
+            onChange={(event) => set('outcome', event.target.value as ClosedJobOutcome | 'all')}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'invoiced', label: 'Invoiced' },
+              { value: 'delivery_note', label: 'Delivery Note' },
+              { value: 'closed', label: 'Closed (earlier lifecycle)' },
+            ]}
+            data-testid="closed-outcome"
           />
           <SelectField
             label="Technician"

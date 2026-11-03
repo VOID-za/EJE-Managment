@@ -66,6 +66,9 @@ export const WorkCapturePanel = ({
   // A parts collection has no site visit, so hours, distance and a call-out fee
   // do not apply. Driven by the job type definition rather than a code check.
   const capturesLabourAndTravel = getJobTypeDefinition(job.jobType).capturesLabourAndTravel;
+  // DELIVERY-NOTE-1: a Delivery Note prices nothing and records a comment on each part line.
+  const priced = getJobTypeDefinition(job.jobType).priced;
+  const partComments = getJobTypeDefinition(job.jobType).capturesPartComments;
   const [dialog, setDialog] = useState<
     'labour' | 'travel' | 'part' | 'additional_charge' | null
   >(null);
@@ -344,8 +347,9 @@ export const WorkCapturePanel = ({
                   <th className="px-5 py-2.5 text-left font-semibold">Part number</th>
                   <th className="px-3 py-2.5 text-left font-semibold">Description</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Qty</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Unit</th>
-                  <th className="px-5 py-2.5 text-right font-semibold">Total</th>
+                  {partComments && <th className="px-3 py-2.5 text-left font-semibold">Comment</th>}
+                  {priced && <th className="px-3 py-2.5 text-right font-semibold">Unit</th>}
+                  {priced && <th className="px-5 py-2.5 text-right font-semibold">Total</th>}
                   {partsEditable && <th className="w-12" />}
                 </tr>
               </thead>
@@ -359,12 +363,17 @@ export const WorkCapturePanel = ({
                     <td className="tabular px-3 py-3 text-right text-steel-800">
                       {entry.quantity}
                     </td>
-                    <td className="tabular px-3 py-3 text-right text-steel-600">
-                      {formatCurrency(entry.unitPrice)}
-                    </td>
-                    <td className="tabular px-5 py-3 text-right font-semibold text-steel-900">
-                      {formatCurrency(totals.partLines[index]?.total ?? 0)}
-                    </td>
+                    {partComments && <td className="px-3 py-3 text-steel-600" data-testid="part-comment">{entry.comment ?? ''}</td>}
+                    {priced && (
+                      <td className="tabular px-3 py-3 text-right text-steel-600">
+                        {formatCurrency(entry.unitPrice)}
+                      </td>
+                    )}
+                    {priced && (
+                      <td className="tabular px-5 py-3 text-right font-semibold text-steel-900">
+                        {formatCurrency(totals.partLines[index]?.total ?? 0)}
+                      </td>
+                    )}
                     {partsEditable && (
                       <td className="pr-3">
                         <LineActions
@@ -649,6 +658,8 @@ export const WorkCapturePanel = ({
 
       <PartDialog
         key={`part-${editingId ?? 'new'}-${dialogNonce}`}
+        priced={priced}
+        comments={partComments}
         open={dialog === 'part'}
         existing={job.parts.find((entry) => entry.id === editingId) ?? null}
         onClose={closeDialog}
@@ -1026,6 +1037,8 @@ type PartValues = {
   description: string;
   quantity: number;
   unitPrice: number;
+  /** DELIVERY-NOTE-1: sent only where the job type records a comment. */
+  comment?: string;
 };
 
 interface PartRow {
@@ -1034,27 +1047,29 @@ interface PartRow {
   readonly description: string;
   readonly quantity: string;
   readonly unitPrice: string;
+  readonly comment: string;
 }
 
-const blankRow = (key: number): PartRow => ({ key, partNumber: '', description: '', quantity: '1', unitPrice: '' });
+const blankRow = (key: number, priced = true): PartRow => ({ key, partNumber: '', description: '', quantity: '1', unitPrice: priced ? '' : '0', comment: '' });
 
-const rowErrors = (row: PartRow): Record<string, string> => {
+const rowErrors = (row: PartRow, priced = true): Record<string, string> => {
   const errors: Record<string, string> = {};
   const quantity = Number(row.quantity);
   const price = Number.parseFloat(row.unitPrice);
   if (row.partNumber.trim().length === 0) errors.partNumber = 'A part number is required.';
   if (row.description.trim().length === 0) errors.description = 'A description is required.';
   if (!Number.isInteger(quantity) || quantity <= 0) errors.quantity = 'Enter a whole quantity.';
-  if (!Number.isFinite(price) || price < 0) errors.unitPrice = 'Enter a unit price.';
+  if (priced && (!Number.isFinite(price) || price < 0)) errors.unitPrice = 'Enter a unit price.';
   return errors;
 };
 
-const valuesOf = (row: PartRow): PartValues => ({
+const valuesOf = (row: PartRow, priced = true, comments = false): PartValues => ({
   partNumber: row.partNumber.trim(),
   description: row.description.trim(),
   quantity: Number(row.quantity),
-  // Prices are entered in rands and stored in cents.
-  unitPrice: Math.round(Number.parseFloat(row.unitPrice) * 100),
+  // Prices are entered in rands and stored in cents. DELIVERY-NOTE-1: none at all on a type that prices nothing.
+  unitPrice: priced ? Math.round(Number.parseFloat(row.unitPrice) * 100) : 0,
+  ...(comments ? { comment: row.comment.trim() } : {}),
 });
 
 /**
@@ -1066,6 +1081,8 @@ const valuesOf = (row: PartRow): PartValues => ({
  * order. EDITING one existing line is unchanged — one line, one form.
  */
 const PartDialog = ({
+  priced = true,
+  comments = false,
   open,
   onClose,
   onSubmitNew,
@@ -1074,6 +1091,10 @@ const PartDialog = ({
   existing,
   refusal,
 }: {
+  /** DELIVERY-NOTE-1: false on a Delivery Note — no price field, no totals. */
+  readonly priced?: boolean;
+  /** DELIVERY-NOTE-1: a comment on each line ("Loan unit", "Part returned"). */
+  readonly comments?: boolean;
   readonly open: boolean;
   readonly onClose: () => void;
   /** Adds the lines in order; answers how many were saved. */
@@ -1085,7 +1106,7 @@ const PartDialog = ({
 }) => {
   const [rows, setRows] = useState<readonly PartRow[]>(() =>
     existing === null
-      ? [blankRow(0)]
+      ? [blankRow(0, priced)]
       : [
           {
             key: 0,
@@ -1093,6 +1114,7 @@ const PartDialog = ({
             description: existing.description,
             quantity: String(existing.quantity),
             unitPrice: (existing.unitPrice / 100).toFixed(2),
+            comment: existing.comment ?? '',
           },
         ],
   );
@@ -1108,18 +1130,18 @@ const PartDialog = ({
     if (submitting) return;
     const found: Record<number, Record<string, string>> = {};
     for (const row of rows) {
-      const problems = rowErrors(row);
+      const problems = rowErrors(row, priced);
       if (Object.keys(problems).length > 0) found[row.key] = problems;
     }
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     if (existing !== null) {
-      onSubmitEdit(valuesOf(rows[0]!));
+      onSubmitEdit(valuesOf(rows[0]!, priced, comments));
       return;
     }
     setSubmitting(true);
     try {
-      const saved = await onSubmitNew(rows.map(valuesOf));
+      const saved = await onSubmitNew(rows.map((row) => valuesOf(row, priced, comments)));
       // The lines that were saved leave the form; anything refused stays to be fixed.
       setRows((current) => current.slice(saved));
     } finally {
@@ -1137,7 +1159,7 @@ const PartDialog = ({
     <Modal
       open={open}
       title={existing === null ? 'Add parts' : 'Edit part'}
-      description="Parts fitted on this job. Prices are entered excluding VAT."
+      description={priced ? 'Parts fitted on this job. Prices are entered excluding VAT.' : 'The parts delivered. A Delivery Note carries no prices.'}
       onClose={onClose}
       footer={
         <>
@@ -1209,20 +1231,32 @@ const PartDialog = ({
                   error={rowError.quantity}
                   required
                 />
-                <TextField
-                  label="Unit price (excl. VAT)"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  value={row.unitPrice}
-                  onChange={(event) => change(row.key, 'unitPrice', event.target.value)}
-                  error={rowError.unitPrice}
-                  placeholder="0.00"
-                  required
-                />
+                {priced && (
+                  <TextField
+                    label="Unit price (excl. VAT)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={row.unitPrice}
+                    onChange={(event) => change(row.key, 'unitPrice', event.target.value)}
+                    error={rowError.unitPrice}
+                    placeholder="0.00"
+                    required
+                  />
+                )}
               </div>
-              {Number.isFinite(quantity) && Number.isFinite(price) && price >= 0 && (
+              {comments && (
+                <TextField
+                  label="Comment"
+                  value={row.comment}
+                  maxLength={300}
+                  onChange={(event) => change(row.key, 'comment', event.target.value)}
+                  placeholder="e.g. Loan unit, Part returned, Replacement part"
+                  data-testid="part-comment-input"
+                />
+              )}
+              {priced && Number.isFinite(quantity) && Number.isFinite(price) && price >= 0 && (
                 <p className="text-sm text-steel-600">
                   Line total:{' '}
                   <span className="tabular font-semibold text-steel-900">
@@ -1240,16 +1274,18 @@ const PartDialog = ({
               variant="secondary"
               leadingIcon={<Icon name="plus" className="size-4" />}
               onClick={() => {
-                setRows((current) => [...current, blankRow(nextKey)]);
+                setRows((current) => [...current, blankRow(nextKey, priced)]);
                 setNextKey((value) => value + 1);
               }}
               data-testid="add-part-line"
             >
               Add another part
             </Button>
-            <p className="text-sm text-steel-600">
-              Parts total: <span className="tabular font-semibold text-steel-900">{formatCurrency(grandTotal)}</span>
-            </p>
+            {priced && (
+              <p className="text-sm text-steel-600">
+                Parts total: <span className="tabular font-semibold text-steel-900">{formatCurrency(grandTotal)}</span>
+              </p>
+            )}
           </div>
         )}
       </div>

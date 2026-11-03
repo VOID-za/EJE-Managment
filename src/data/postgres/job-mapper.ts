@@ -153,6 +153,7 @@ const partFrom = (row: PartRow): PartEntry => ({
   description: row.description,
   quantity: row.quantity,
   unitPrice: row.unitPriceCents,
+  ...(row.comment.length > 0 ? { comment: row.comment } : {}),
   capturedAt: row.capturedAt,
   capturedBy: asUserId(row.capturedBy ?? ''),
 });
@@ -393,6 +394,7 @@ export const toDomainJob = (rows: JobRowSet): Job => {
     moreRepairItems: repairItemsFromColumn(rows.job.moreRepairItems),
     quoteNumber: rows.job.quoteNumber,
     dateReceived: rows.job.dateReceived,
+    deliveryDate: rows.job.deliveryDate ?? null,
     faultDescription: rows.job.faultDescription,
 
     attachments: media.filter((row) => row.kind === 'document').map(attachmentFrom),
@@ -497,6 +499,7 @@ export const toJobRow = (
   moreRepairItems: job.moreRepairItems.map((item) => ({ partNumber: item.partNumber, description: item.description, quantity: item.quantity })),
   quoteNumber: job.quoteNumber,
   dateReceived: job.dateReceived,
+  deliveryDate: job.deliveryDate ?? null,
   faultDescription: job.faultDescription,
   primaryTechnicianId: job.primaryTechnicianId,
   calloutApplied: job.calloutApplied,

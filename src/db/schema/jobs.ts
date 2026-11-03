@@ -128,6 +128,8 @@ export const jobs = pgTable(
     quoteNumber: text('quote_number').notNull().default(''),
     /** When the unit arrived on the counter. Test & Repair; optional. 0031. */
     dateReceived: date('date_received'),
+    // DELIVERY-NOTE-1 (0048): the delivery date of a Delivery Note; null on every other type.
+    deliveryDate: date('delivery_date'),
     /**
      * DECISION 2: an Installation or Service job may proceed without an order
      * number only through an explicit acknowledgement, which is recorded.
@@ -524,6 +526,8 @@ export const jobParts = pgTable(
     description: text('description').notNull().default(''),
     quantity: integer('quantity').notNull(),
     unitPriceCents: cents('unit_price_cents').notNull(),
+    // DELIVERY-NOTE-1 (0048): "Loan unit", "Part returned"… on a Delivery Note.
+    comment: text('comment').notNull().default(''),
     capturedAt: instant('captured_at').notNull(),
     capturedBy: uuid('captured_by').references(() => users.id),
     updatedAt: updatedAt(),

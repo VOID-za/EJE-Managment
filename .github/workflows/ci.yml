@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (b3a9014) against a database at 0047
+      - name: Rollback compatibility — the live release (9569c85) against a database at 0048
         run: bash scripts/release/rollback-compat.sh
 
   browser:
@@ -391,6 +391,21 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run batch-check
+
+      - name: Acceptance follow-up — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run acceptance-check
+
+      - name: Acceptance follow-up — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run acceptance-check
+
+      - name: Acceptance follow-up — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run acceptance-check
 
       - name: Integrations regression — desktop (simulated providers)
         env:

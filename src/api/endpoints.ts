@@ -463,6 +463,7 @@ export const reads = {
         technicianId: filters.technicianId,
         closedFrom: filters.closedFrom,
         closedTo: filters.closedTo,
+        outcome: filters.outcome ?? 'all',
       })}`,
     ),
   customers: () => query<readonly CustomerRow[]>('/api/customers'),

@@ -337,6 +337,13 @@
       "when": 1794200000000,
       "tag": "0047_batch_2_november",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0048_acceptance_delivery_notes",
+      "breakpoints": true
     }
   ]
 }

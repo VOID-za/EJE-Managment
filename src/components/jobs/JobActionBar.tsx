@@ -284,7 +284,7 @@ export const JobActionBar = ({
             onClick={() => setSubmitting(true)}
             leadingIcon={<Icon name="mail" className="size-5" />}
           >
-            {job.jobType === 'parts' ? 'Submit collection note' : 'Submit job card'}
+            {job.jobType === 'delivery_note' ? 'Issue Delivery Note' : job.jobType === 'parts' ? 'Submit collection note' : 'Submit job card'}
           </Button>,
         );
       }

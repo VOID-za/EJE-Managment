@@ -87,6 +87,8 @@ export interface NewJobInput {
    * Optional, and cleared on a type that does not capture a repair item.
    */
   readonly dateReceived?: string | null;
+  /** DELIVERY-NOTE-1: the delivery date. Required on a Delivery Note; ignored elsewhere. */
+  readonly deliveryDate?: string | null;
   readonly faultDescription: string;
   /**
    * Who the customer's copy of the job card goes to.
@@ -506,6 +508,14 @@ export const createJob = async (
     ]);
   }
 
+  // DELIVERY-NOTE-1: a Delivery Note says when the goods were delivered. A calendar date, required.
+  const deliveryDate = definition.capturesDeliveryDate ? (input.deliveryDate ?? null) : null;
+  if (definition.capturesDeliveryDate && !asDraft && (deliveryDate === null || !/^\d{4}-\d{2}-\d{2}$/u.test(deliveryDate) || Number.isNaN(Date.parse(`${deliveryDate}T00:00:00Z`)))) {
+    throw new WorkflowError('A Delivery Note needs its delivery date.', [
+      { code: 'delivery_date_required', message: 'Enter the date the goods were delivered.' },
+    ]);
+  }
+
   const settings = await context.repos.settings.get();
   const allocated = await allocateJobNumber(context, settings);
   const now = context.services.clock.now();
@@ -586,6 +596,7 @@ export const createJob = async (
       : { repairItem: emptyRepairItem(), moreRepairItems: [] }),
     quoteNumber: definition.capturesQuoteNumber ? (input.quoteNumber ?? '').trim() : '',
     dateReceived,
+    deliveryDate,
     faultDescription,
     /*
      * A NEW JOB HAS NO ATTACHMENTS, and cannot be given one here.

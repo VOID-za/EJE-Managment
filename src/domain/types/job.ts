@@ -66,7 +66,16 @@ export type JobTypeCode =
    * courier collects parts from the EJE office, so there is no labour and no
    * travel — only parts lines and a collector's signature.
    */
-  | 'parts';
+  | 'parts'
+  /**
+   * DELIVERY-NOTE-1 (the owner, 3 November 2026). A PROOF-OF-DELIVERY record,
+   * not a service job: the office raises it for a customer and a delivery date,
+   * lists the parts (number, description, quantity, comment), records how they
+   * were collected and takes the signature. No technician, no acceptance, no
+   * price of any kind, and it never enters the invoicing workflow — once signed
+   * it is closed, as a Delivery Note.
+   */
+  | 'delivery_note';
 
 export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -389,6 +398,11 @@ export interface PartEntry {
   readonly description: string;
   readonly quantity: number;
   readonly unitPrice: Cents;
+  /**
+   * DELIVERY-NOTE-1: what the line is — "Loan unit", "Part returned",
+   * "Replacement part". Recorded on a Delivery Note; empty elsewhere.
+   */
+  readonly comment?: string;
   readonly capturedAt: IsoDateTime;
   /**
    * Who wrote the line down.
@@ -827,6 +841,12 @@ export interface Job {
    * today, because a guessed date reads exactly like a recorded one.
    */
   readonly dateReceived: IsoDate | null;
+
+  /**
+   * DELIVERY-NOTE-1: the day the goods were delivered. Required on a Delivery
+   * Note (`JobTypeDefinition.capturesDeliveryDate`), absent everywhere else.
+   */
+  readonly deliveryDate?: IsoDate | null;
 
   /**
    * The rates this job is priced at, frozen when the customer signed.

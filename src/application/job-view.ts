@@ -330,7 +330,8 @@ export const loadJobView = async (
       job.additionalTechnicianIds.includes(candidate.id),
     ),
     settings: rateSource.settings,
-    rateSource: { mode: rateSource.mode, problem: rateSource.problem },
+    // DELIVERY-NOTE-1: a type that prices nothing has no rates to be missing.
+    rateSource: { mode: rateSource.mode, problem: getJobTypeDefinition(job.jobType).priced ? rateSource.problem : null },
     users,
     checklistTemplate,
     checklistVersionMissing,

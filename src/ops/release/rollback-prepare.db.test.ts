@@ -9,7 +9,8 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
 import { STANDBY_POSITIONS, type StandbyWeek } from '@/domain';
@@ -401,5 +402,52 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     const [counts] = await db.execute<{ rates: string; overrides: string }>(sql`select
       (select count(*) from customer_rates)::text as rates, (select count(*) from standby_day_overrides)::text as overrides`);
     expect(counts).toEqual({ rates: '1', overrides: '2' });
+  });
+
+  /*
+   * 0048, which the live release (9569c85) has never heard of: a Delivery Note
+   * still being completed (its part line carries a comment), an overlapping
+   * timesheet submission that superseded an earlier one, and a Senior Tech in
+   * a main standby place.
+   */
+  it('writes the rows only this release can (0048): a Delivery Note, a superseded timesheet, a Senior Tech on standby', async () => {
+    const B = ROLLBACK_0048;
+    const at = '2027-02-21T08:00:00.000Z';
+    const jobs = new PostgresJobRepository(db);
+    const allocated = await jobs.allocateJobNumber();
+    await jobs.save(
+      jobFixture(allocated.jobNumber, {
+        id: asJobId(B.deliveryNoteJob),
+        jobType: 'delivery_note',
+        status: 'completion',
+        primaryTechnicianId: null,
+        deliveryDate: '2027-02-21',
+        parts: [{ id: asLineItemId(B.partLine), partNumber: 'LU-200', description: 'Loan servo drive', quantity: 1, unitPrice: 0, comment: 'Loan unit', capturedAt: at, capturedBy: asUserId(IDS.coordinator) }],
+      }),
+    );
+    const attendance = new PostgresAttendanceRepository(db);
+    const tech = asUserId(IDS.technician);
+    const period = (id: string, from: string, to: string) => ({
+      id, userId: tech, from, to, comment: '', updatedBy: tech, updatedAt: at, submittedAt: at, submittedBy: tech,
+      snapshot: { technicianName: 'Sipho Mahlangu', from, to, comment: '', entries: [] },
+    });
+    await attendance.submitPeriod(period(B.earlyPeriod, '2027-01-01', '2027-01-31'));
+    await attendance.supersedeOverlappingPeriods({ userId: tech, from: '2027-01-15', to: '2027-02-14', exceptId: null, at, by: tech });
+    await attendance.submitPeriod(period(B.latePeriod, '2027-01-15', '2027-02-14'));
+    const standby = new PostgresStandbyRepository(db);
+    await standby.saveEligibility({ userId: asUserId(IDS.master), main: true, helper: true, apprentice: false, updatedBy: asUserId(IDS.coordinator), updatedAt: at });
+    await standby.createWeeks([{
+      id: crypto.randomUUID(), weekStart: B.standbyWeek, status: 'draft', publishedBy: null, publishedAt: null, createdBy: asUserId(IDS.master), createdAt: at,
+      assignments: STANDBY_POSITIONS.map((position) => ({
+        position,
+        userId: position === 'main' ? asUserId(IDS.master) : null,
+        assignedBy: position === 'main' ? asUserId(IDS.master) : null,
+        assignedAt: position === 'main' ? at : null,
+      })),
+    }]);
+    const [state] = await db.execute<{ comment: string; superseded: string }>(sql`select
+      (select comment from job_parts where id = ${B.partLine}) as comment,
+      (select count(*) from timesheet_periods where superseded_at is not null)::text as superseded`);
+    expect(state).toEqual({ comment: 'Loan unit', superseded: '1' });
   });
 });

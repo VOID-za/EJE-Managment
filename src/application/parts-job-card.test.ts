@@ -78,12 +78,15 @@ const raiseParts = async (harness: Harness, actor: User = master): Promise<Job> 
 };
 
 describe('the job type rules, stated once', () => {
-  it('gives every type a write-up and a refusal workflow except a parts collection', () => {
+  it('gives every type a write-up and a refusal workflow except a parts collection and a Delivery Note', () => {
     for (const code of JOB_TYPE_CODES) {
       const definition = getJobTypeDefinition(code);
-      expect(definition.capturesCompletionWriteUp, code).toBe(code !== 'parts');
-      expect(definition.allowsSignatureRefusal, code).toBe(code !== 'parts');
-      expect(definition.capturesLabourAndTravel, code).toBe(code !== 'parts');
+      // DELIVERY-NOTE-1: a Delivery Note is office-processed like a parts collection, and prices nothing at all.
+      const counter = code === 'parts' || code === 'delivery_note';
+      expect(definition.capturesCompletionWriteUp, code).toBe(!counter);
+      expect(definition.allowsSignatureRefusal, code).toBe(!counter);
+      expect(definition.capturesLabourAndTravel, code).toBe(!counter);
+      expect(definition.priced, code).toBe(code !== 'delivery_note');
     }
   });
 });

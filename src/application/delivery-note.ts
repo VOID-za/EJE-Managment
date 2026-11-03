@@ -182,3 +182,66 @@ export const generateDeliveryNote = async (
 
 /** Whether this job's issue must also issue a Delivery Note. */
 export const issuesDeliveryNote = (job: Job): boolean => requiresDeliveryNote(job);
+
+/**
+ * A SIGNED DELIVERY NOTE, ISSUED. DELIVERY-NOTE-1 (the owner, 3 November 2026).
+ *
+ * The Delivery Note job type has no priced job card: its document IS the
+ * price-less Delivery Note — company, delivery date, every part with its
+ * number, description, quantity and comment, the collection method and
+ * waybill, the signature and the job reference. It is rendered once, stored,
+ * read back and recorded as the job's final document, and the job CLOSES:
+ * it never enters Office Handling or the invoicing workflow, and nothing is
+ * emailed from here. Once signed the record is final (`assertEditable`, and
+ * the database's signed-job triggers); a correction follows the existing
+ * job-card correction route, which never touches the signed document.
+ */
+export const issueSignedDeliveryNote = async (context: OperationContext, job: Job, now: IsoDateTime): Promise<Job> => {
+  const view = await loadJobView(context.repos, job.jobNumber);
+  if (view === null) throw new WorkflowError(`${job.jobNumber} could not be read for issue.`, []);
+  const rendered = renderDeliveryNotePdf(
+    buildDeliveryNoteModel(
+      { job, customer: view.customer, site: view.site, contact: view.contact, settings: view.settings, users: view.users },
+      now,
+    ),
+  );
+  const fileName = deliveryNoteFileName(job);
+  const storageKey = `jobcards/final/${job.jobNumber}-Delivery-Note.pdf`;
+  await context.services.storage.putDocument({ storageKey, fileName, contentType: CONTENT_TYPE, bytes: rendered.bytes, renderer: 1, backfilled: false });
+  const stored = await context.services.storage.getDocument(storageKey);
+  if (stored === null || stored.bytes.byteLength === 0) {
+    throw new WorkflowError(`${job.jobNumber} could not be issued.`, [
+      { code: 'delivery_note_not_stored', message: 'The signed Delivery Note could not be stored, so it was not issued. Try again.' },
+    ]);
+  }
+  const issued = await context.repos.jobs.save({
+    ...job,
+    status: 'closed',
+    closedAt: now,
+    submittedAt: job.submittedAt ?? now,
+    completedAt: job.completedAt ?? now,
+    finalDocument: {
+      fileName,
+      storageKey,
+      pageCount: rendered.pageCount,
+      generatedAt: now,
+      generatedBy: context.actor.id,
+      renderedLocally: true,
+      issuedTo: '',
+      sizeBytes: stored.sizeBytes ?? stored.bytes.byteLength,
+      checksumSha256: stored.sha256 ?? null,
+      renderer: stored.renderer ?? null,
+      provenance: 'genuine',
+    },
+  });
+  await audit(context, {
+    jobId: job.id,
+    type: 'delivery_note_generated',
+    summary: `Delivery Note ${job.jobNumber} signed and issued`,
+    detail:
+      `${fileName} (${rendered.pageCount} page${rendered.pageCount === 1 ? '' : 's'}), no prices, ${job.parts.length} part line${job.parts.length === 1 ? '' : 's'}, ` +
+      `${job.courierCollection ? `courier collection, waybill ${job.waybillNumber}` : 'customer collection'}. ` +
+      `Signed by ${job.signature === null ? 'nobody' : `${job.signature.customerName} ${job.signature.customerSurname}`}. The job is closed as a Delivery Note; it is not invoiced.`,
+  });
+  return issued;
+};

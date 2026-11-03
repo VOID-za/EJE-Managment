@@ -63,6 +63,7 @@ describe('job-type colours', () => {
       service: 'verdant', // green
       test_and_repair: 'violet-eje', // purple
       parts: 'amber-eje', // amber
+      delivery_note: 'verdant', // green (DELIVERY-NOTE-1)
     };
 
     for (const code of JOB_TYPE_CODES) {

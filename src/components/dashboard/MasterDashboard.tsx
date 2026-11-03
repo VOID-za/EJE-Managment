@@ -241,7 +241,7 @@ export const MasterDashboard = ({ user }: { readonly user: User }) => {
                         <span className="min-w-0 flex-1 truncate text-sm text-steel-700">
                           {row.customerName}
                         </span>
-                        <JobStatusBadge status={row.job.status} size="sm" />
+                        <JobStatusBadge status={row.job.status} jobType={row.job.jobType} size="sm" />
                         <span className="text-xs text-steel-400">
                           {formatRelative(row.job.submittedAt)}
                         </span>

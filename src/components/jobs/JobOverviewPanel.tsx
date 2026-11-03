@@ -521,10 +521,13 @@ export const JobOverviewPanel = ({
           </ul>
         </Card>
 
-        <Card>
-          <CardHeader title="Job value" description="Calculated from captured work." />
-          <JobCostSummary job={job} settings={view.settings} className="mt-4" />
-        </Card>
+        {/* DELIVERY-NOTE-1: a Delivery Note has no value to show — it is never priced. */}
+        {getJobTypeDefinition(job.jobType).priced && (
+          <Card>
+            <CardHeader title="Job value" description="Calculated from captured work." />
+            <JobCostSummary job={job} settings={view.settings} className="mt-4" />
+          </Card>
+        )}
 
         <Card>
           <CardHeader title="Requirements" description="Set by the job type." />

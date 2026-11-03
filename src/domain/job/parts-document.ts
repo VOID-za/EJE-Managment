@@ -28,7 +28,9 @@ export const showsPricesOnCollectionDocument = (
  * Parts and workshop Test & Repair jobs — the two collected from the counter.
  */
 export const requiresDeliveryNote = (job: Pick<Job, 'jobType' | 'courierCollection'>): boolean =>
-  getJobTypeDefinition(job.jobType).collectedOnCompletion && job.courierCollection;
+  getJobTypeDefinition(job.jobType).collectedOnCompletion &&
+  // DELIVERY-NOTE-1: a Delivery Note is signed on its own price-less document whoever collects.
+  (job.courierCollection || !getJobTypeDefinition(job.jobType).priced);
 
 export interface PartsDocumentLine {
   readonly partNumber: string;

@@ -42,11 +42,11 @@ const master = seedUser('user-master-elmarie');
 const coordinator = seedUser('user-coord-christene');
 
 describe('which job types are collected', () => {
-  it('is parts and test and repair, and nothing else', () => {
+  it('is parts, test and repair and — DELIVERY-NOTE-1 — the Delivery Note, and nothing else', () => {
     const collected = JOB_TYPE_CODES.filter(
       (code) => getJobTypeDefinition(code).collectedOnCompletion,
     );
-    expect([...collected].sort()).toEqual(['parts', 'test_and_repair']);
+    expect([...collected].sort()).toEqual(['delivery_note', 'parts', 'test_and_repair']);
   });
 
   it('offers a delivery note on exactly those two', () => {

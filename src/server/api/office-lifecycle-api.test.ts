@@ -178,9 +178,14 @@ describe('the office lifecycle, over the API', () => {
     await master.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-TAB-1' });
     expect((await queueOf(coordinator))?.awaitingInvoiceNo.map((row) => row.jobNumber)).toContain(job.jobNumber);
     await master.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: 'INV-TAB-1' });
-    const invoiced = (await queueOf(master))?.invoiced.find((row) => row.jobNumber === job.jobNumber);
-    expect(invoiced?.invoice?.number).toBe('INV-TAB-1');
-    expect(invoiced?.purchaseOrder?.number).toBe('PO-TAB-1');
+    // INVOICED-CLOSED-1: out of the office queue, and into Closed Jobs with its PO and invoice number.
+    expect((await queueOf(master))?.invoiced).toEqual([]);
+    expect((await queueOf(master))?.awaitingInvoiceNo.map((row) => row.jobNumber)).not.toContain(job.jobNumber);
+    const closed = await master.get<{ rows: readonly { job: { jobNumber: string; invoice: { number: string } | null; purchaseOrder: { number: string } | null } }[] }>('/api/jobs/closed?outcome=invoiced');
+    expect(closed.status).toBe(200);
+    const invoiced = closed.data.rows.find((row) => row.job.jobNumber === job.jobNumber);
+    expect(invoiced?.job.invoice?.number).toBe('INV-TAB-1');
+    expect(invoiced?.job.purchaseOrder?.number).toBe('PO-TAB-1');
 
     // A technician has no office tabs at all.
     expect(await queueOf(tech)).toBeNull();

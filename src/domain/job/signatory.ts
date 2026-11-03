@@ -79,7 +79,8 @@ const REPAIR_COLLECTOR: SignatoryLabels = {
  * signed by the customer, acknowledging that the work was done.
  */
 export const signatoryLabelsFor = (jobType: JobTypeCode): SignatoryLabels => {
-  if (jobType === 'parts') return COLLECTOR;
+  // DELIVERY-NOTE-1: a Delivery Note is signed for, like a parts collection.
+  if (jobType === 'parts' || jobType === 'delivery_note') return COLLECTOR;
   if (getJobTypeDefinition(jobType).collectedOnCompletion) return REPAIR_COLLECTOR;
   return CUSTOMER;
 };

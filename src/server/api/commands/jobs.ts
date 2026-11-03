@@ -400,6 +400,8 @@ export const JOB_COMMANDS: CommandRegistry = {
         // Cents, as an integer. A price with a fraction of a cent on it is a
         // bug somewhere upstream, and the job card has to add up exactly.
         unitPrice: z.number().int().nonnegative().max(1_000_000_000),
+        // DELIVERY-NOTE-1: the line's comment, where the job type records one.
+        comment: z.string().max(400).optional(),
       })
       .strict(),
     (context, job, input) => jobs.addPart(context.operation, job, input),
@@ -413,6 +415,7 @@ export const JOB_COMMANDS: CommandRegistry = {
         description: text(500),
         quantity: z.number().int().positive().max(10_000),
         unitPrice: z.number().int().nonnegative().max(1_000_000_000),
+        comment: z.string().max(400).optional(),
       })
       .strict(),
     (context, job, { lineId, ...input }) => jobs.updatePart(context.operation, job, lineId, input),
@@ -1092,7 +1095,7 @@ export const createJobSchema = z
     siteId: z.string().min(1).max(100),
     contactId: z.string().min(1).max(100),
     machineId: z.string().min(1).max(100).nullable(),
-    jobType: z.enum(['breakdown', 'installation', 'service', 'parts', 'test_and_repair']),
+    jobType: z.enum(['breakdown', 'installation', 'service', 'parts', 'test_and_repair', 'delivery_note']),
     /*
      * NULLABLE, BECAUSE A JOB MAY BE UNGRADED. Create New Job §3B / §4.
      *
@@ -1132,6 +1135,8 @@ export const createJobSchema = z
     quoteNumber: text(120).optional(),
     /** When the unit arrived. A calendar date or null; the rules are `createJob`'s. */
     dateReceived: isoDate.nullable().optional(),
+    /** DELIVERY-NOTE-1: the delivery date of a Delivery Note. */
+    deliveryDate: isoDate.nullable().optional(),
     /*
      * PRESENT, BUT NOT NECESSARILY FILLED IN. CR-13.
      *

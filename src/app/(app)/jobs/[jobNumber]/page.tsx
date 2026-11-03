@@ -298,7 +298,7 @@ const JobDetailPage = ({
         description={[view.customer.name, view.site.name, view.machine === null ? null : `${view.machine.manufacturer} ${view.machine.model}`].filter((part) => part !== null).join(' · ')}
         meta={
           <div className="flex flex-wrap items-center gap-2">
-            <JobStatusBadge status={job.status} />
+            <JobStatusBadge status={job.status} jobType={job.jobType} />
             <JobTypeChip jobType={job.jobType} />
             <PriorityBadge priority={job.priority} />
             {job.scheduledDate !== null && (

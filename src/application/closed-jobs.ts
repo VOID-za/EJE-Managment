@@ -43,7 +43,18 @@ export interface ClosedJobFilters {
   /** Inclusive, against the date the job was closed. */
   readonly closedFrom: IsoDate | '';
   readonly closedTo: IsoDate | '';
+  /**
+   * DELIVERY-NOTE-1 / INVOICED-CLOSED-1: how the job finished — Invoiced (the
+   * office lifecycle), a signed Delivery Note, or closed under the earlier lifecycle.
+   */
+  readonly outcome?: ClosedJobOutcome | 'all';
 }
+
+export type ClosedJobOutcome = 'invoiced' | 'delivery_note' | 'closed';
+
+/** How an archived job finished. */
+export const closedJobOutcome = (job: Pick<Job, 'status' | 'jobType'>): ClosedJobOutcome =>
+  job.status === 'invoiced' ? 'invoiced' : job.jobType === 'delivery_note' ? 'delivery_note' : 'closed';
 
 export const emptyClosedJobFilters: ClosedJobFilters = {
   term: '',
@@ -186,6 +197,7 @@ export const loadClosedJobs = async (
     .filter((row) => filters.customerId === 'all' || row.job.customerId === filters.customerId)
     .filter((row) => filters.siteId === 'all' || row.job.siteId === filters.siteId)
     .filter((row) => filters.jobType === 'all' || row.job.jobType === filters.jobType)
+    .filter((row) => (filters.outcome ?? 'all') === 'all' || closedJobOutcome(row.job) === filters.outcome)
     .filter(
       (row) =>
         filters.technicianId === 'all' ||

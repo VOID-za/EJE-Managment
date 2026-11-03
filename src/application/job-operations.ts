@@ -81,7 +81,7 @@ import type { PdfVariant, StoredDocument } from '@/services/ports';
 import type { OperationContext } from './context';
 import { assignmentDetails, notifyAssignment, queueAssignmentWhatsApp } from './assignment-notice';
 import { emailIssuedJobCard, retryCustomerEmail } from './customer-email';
-import { issueDeliveryNote, issuesDeliveryNote } from './delivery-note';
+import { issueDeliveryNote, issueSignedDeliveryNote, issuesDeliveryNote } from './delivery-note';
 import { audit, changesBetween, notify, notifyOffice } from './audit';
 import { storeFinalDocument } from './final-document';
 import { storeAndMeasure } from './stored-file';
@@ -843,9 +843,32 @@ export interface PartInput {
   readonly partNumber: string;
   readonly description: string;
   readonly quantity: number;
-  /** Unit price in cents. */
+  /** Unit price in cents. Zero, and only zero, on a job type that prices nothing (DELIVERY-NOTE-1). */
   readonly unitPrice: number;
+  /** DELIVERY-NOTE-1: "Loan unit", "Part returned"… Kept where the job type records it. */
+  readonly comment?: string;
 }
+
+/**
+ * DELIVERY-NOTE-1. A job type that prices nothing takes no price: refused on
+ * the server, not merely hidden on the screen.
+ */
+const assertPriceAllowed = (job: Job, what: string, amount: number): void => {
+  if (getJobTypeDefinition(job.jobType).priced || amount === 0) return;
+  throw new WorkflowError(`A ${getJobTypeDefinition(job.jobType).label} carries no prices.`, [
+    { code: 'not_priced', message: `${what} cannot carry an amount on a ${getJobTypeDefinition(job.jobType).label}: it is a proof of delivery, never invoiced.` },
+  ]);
+};
+
+const PART_COMMENT_LIMIT = 300;
+const partCommentOf = (job: Job, input: PartInput): string => {
+  if (!getJobTypeDefinition(job.jobType).capturesPartComments) return '';
+  const comment = (input.comment ?? '').trim();
+  if (comment.length > PART_COMMENT_LIMIT) {
+    throw new WorkflowError('That comment is too long.', [{ code: 'comment_too_long', message: `Keep it to ${PART_COMMENT_LIMIT} characters.` }]);
+  }
+  return comment;
+};
 
 export const addPart = async (
   context: OperationContext,
@@ -855,12 +878,15 @@ export const addPart = async (
   assertEditable(context, job);
   assertCanCapture(context, job);
   assertPartsOpen(job);
+  assertPriceAllowed(job, 'A part line', input.unitPrice);
+  const comment = partCommentOf(job, input);
   const entry = {
     id: asLineItemId(context.services.ids.next('prt')),
     partNumber: input.partNumber,
     description: input.description,
     quantity: input.quantity,
     unitPrice: input.unitPrice,
+    ...(comment.length > 0 ? { comment } : {}),
     capturedAt: context.services.clock.now(),
     capturedBy: context.actor.id,
   };
@@ -870,7 +896,7 @@ export const addPart = async (
     jobId: job.id,
     type: 'part_added',
     summary: `Part captured: ${input.partNumber}`,
-    detail: `${input.description}, quantity ${input.quantity}.` + administrativeNote(context, job),
+    detail: `${input.description}, quantity ${input.quantity}.${comment.length > 0 ? ` Comment: ${comment}.` : ''}` + administrativeNote(context, job),
   });
   await recordPostSignatureChange(context, saved, 'A parts line was added.');
   return saved;
@@ -926,6 +952,7 @@ export const addAdditionalCharge = async (
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
+  assertPriceAllowed(job, 'A charge', input.amount);
   const description = chargeDescription(input.description);
   const entry: AdditionalChargeEntry = {
     id: asLineItemId(context.services.ids.next('chg')),
@@ -1133,6 +1160,8 @@ export const updatePart = async (
   if (existing === undefined) {
     throw new WorkflowError('That part line no longer exists on this job.');
   }
+  assertPriceAllowed(job, 'A part line', input.unitPrice);
+  const comment = partCommentOf(job, input);
 
   const saved = await context.repos.jobs.save({
     ...job,
@@ -1144,6 +1173,7 @@ export const updatePart = async (
             description: input.description,
             quantity: input.quantity,
             unitPrice: input.unitPrice,
+            comment,
           }
         : entry,
     ),
@@ -3462,6 +3492,22 @@ const performIssue = async (
    * stored; the email is written in the attention state, the office is told,
    * and a retry after the contact's address is corrected reads it afresh.
    */
+
+  /*
+   * DELIVERY-NOTE-1: a Delivery Note is not a job card and is never invoiced.
+   * Its signed document is the price-less Delivery Note, and issuing it CLOSES
+   * the job — no Office Handling, no pricing, no customer email from here.
+   */
+  if (getJobTypeDefinition(job.jobType).closesOnIssue) {
+    const at = context.services.clock.now();
+    const closed = await issueSignedDeliveryNote(context, { ...job, pricingSnapshot: job.pricingSnapshot ?? null }, at);
+    return {
+      job: closed,
+      documentFileName: closed.finalDocument?.fileName ?? '',
+      emailedTo: '',
+      delivery: emptyDelivery('', at),
+    };
+  }
 
   /*
    * INTO THE OFFICE'S HANDS. Issue #73, Batch 1.

@@ -215,8 +215,14 @@ export interface OfficeQueue {
   readonly invoiced: readonly OfficeQueueRow[];
 }
 
-/** How many invoiced jobs the tab lists. The closed-jobs archive holds them all. */
-export const INVOICED_TAB_LIMIT = 100;
+/**
+ * How many invoiced jobs the queue carries: NONE since INVOICED-CLOSED-1 (the
+ * owner, 3 November 2026). An invoiced job has left the active invoicing
+ * workflow and is in Closed Jobs, with its PO, invoice number, signed PDF,
+ * pricing, attachments, signature and history intact. Kept as a name, so a
+ * caller reading the field gets an empty list rather than an error.
+ */
+export const INVOICED_TAB_LIMIT = 0;
 
 /**
  * THE JOBS THE OFFICE OWES SOMETHING, read from the jobs themselves — their
@@ -232,7 +238,8 @@ export const loadOfficeQueue = async (
   if (!can(actor.role, 'jobs.officeHandling')) return null;
   const [summaries, customers] = await Promise.all([
     repos.jobs.listSummaries({
-      statuses: ['office_handling', 'awaiting_delivery', 'awaiting_po', 'awaiting_invoice_no', 'invoiced'],
+      // INVOICED-CLOSED-1: `invoiced` is not active work any more — Closed Jobs holds it.
+      statuses: ['office_handling', 'awaiting_delivery', 'awaiting_po', 'awaiting_invoice_no'],
     }),
     repos.customers.list(),
   ]);

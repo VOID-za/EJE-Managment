@@ -1,6 +1,7 @@
 import type { Cents } from '../types/common';
 import type { Job, LabourRateType, PricingSnapshot } from '../types/job';
 import type { PricingInputs, SystemSettings } from '../types/settings';
+import { getJobTypeDefinition } from '../job/job-types';
 
 /**
  * Job costing.
@@ -128,9 +129,30 @@ export type CostedJob = Pick<
   | 'calloutApplied'
   | 'pricingSnapshot'
 > &
-  Partial<Pick<Job, 'testBenchApplied' | 'testBenchQuantity'>>;
+  Partial<Pick<Job, 'testBenchApplied' | 'testBenchQuantity' | 'jobType'>>;
 
-export const calculateJobTotals = (job: CostedJob, settings: SystemSettings): JobTotals => {
+/**
+ * DELIVERY-NOTE-1: a job type that prices nothing comes to nothing, whatever
+ * is stored on it — no labour, call-out, bench fee, travel, part price, charge
+ * or discount reaches a total. The server refuses those lines anyway; this is
+ * the second lock, so no stored value can ever surface as an amount.
+ */
+const withoutPrices = (job: CostedJob): CostedJob =>
+  job.jobType === undefined || getJobTypeDefinition(job.jobType).priced
+    ? job
+    : {
+        ...job,
+        labour: [],
+        travel: [],
+        additionalCharges: [],
+        discount: null,
+        calloutApplied: false,
+        testBenchApplied: false,
+        parts: job.parts.map((part) => ({ ...part, unitPrice: 0 })),
+      };
+
+export const calculateJobTotals = (unpriced: CostedJob, settings: SystemSettings): JobTotals => {
+  const job = withoutPrices(unpriced);
   // A signed job prices at its snapshot; everything else prices at current rates.
   const pricing = resolveJobPricing(job, settings);
 

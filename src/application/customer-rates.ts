@@ -1,4 +1,5 @@
 import {
+  getJobTypeDefinition,
   asCustomerId,
   can,
   customerRateModeOf,
@@ -83,8 +84,12 @@ export const resolveCustomerRateSource = async (
  * The rates a job's prices are frozen at. Refuses for a Custom Rates customer
  * whose rates are not set — never the defaults instead.
  */
-export const customerPricingInputs = async (context: OperationContext, job: Pick<Job, 'customerId' | 'jobNumber'>): Promise<PricingInputs> => {
+export const customerPricingInputs = async (context: OperationContext, job: Pick<Job, 'customerId' | 'jobNumber'> & Partial<Pick<Job, 'jobType'>>): Promise<PricingInputs> => {
   const source = await resolveCustomerRateSource(context, job.customerId);
+  // DELIVERY-NOTE-1: a job type that prices nothing is never blocked by missing Custom Rates — it has no amount to price.
+  if (source.problem !== null && job.jobType !== undefined && !getJobTypeDefinition(job.jobType).priced) {
+    return pricingInputsFrom((await context.repos.settings.get()));
+  }
   if (source.problem !== null) {
     throw new WorkflowError(`${job.jobNumber} cannot be priced: its customer's custom rates are not set.`, [
       { code: 'custom_rates_missing', message: source.problem },

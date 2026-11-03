@@ -20,7 +20,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import {
   AwaitingInvoiceList,
   AwaitingPoList,
-  InvoicedList,
   OfficeHandlingList,
 } from '@/components/notifications/OfficeQueueLists';
 import {
@@ -97,7 +96,8 @@ const REQUIRES_ACTION: readonly NotificationType[] = [
  * its head), Handled, Simulated Outbox, Awaiting PO and Invoiced. A role that is
  * not the office has nothing to do in the last two and is not shown them.
  */
-type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'awaiting_invoice_no' | 'invoiced';
+// INVOICED-CLOSED-1: no Invoiced tab — an invoiced job is in Closed Jobs.
+type TabId = 'inbox' | 'handled' | 'outbox' | 'awaiting_po' | 'awaiting_invoice_no';
 
 /*
  * THE INBOX, IN THREE. NOTIF-TABS-1 (the tester, 2 November 2026): Jobcards,
@@ -220,7 +220,6 @@ const NotificationsPageContent = () => {
                     </Badge>
                   ),
                 },
-                { id: 'invoiced', label: 'Invoiced' },
               ]),
         ]}
         activeId={tab}
@@ -282,8 +281,6 @@ const NotificationsPageContent = () => {
         officeQueue === null ? null : (
           <AwaitingInvoiceList rows={officeQueue.awaitingInvoiceNo} onChanged={query.refetch} />
         )
-      ) : tab === 'invoiced' ? (
-        officeQueue === null ? null : <InvoicedList rows={officeQueue.invoiced} />
       ) : query.loading ? (
         <LoadingPanel rows={4} label="Loading notifications" />
       ) : visible.length === 0 && !(tab === 'inbox' && box === 'jobcards' && handlingCount > 0) ? (

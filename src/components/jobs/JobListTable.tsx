@@ -104,7 +104,7 @@ export const JobListTable = ({
       header: 'Status',
       render: (row) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          <JobStatusBadge status={row.job.status} size="sm" />
+          <JobStatusBadge status={row.job.status} jobType={row.job.jobType} size="sm" />
           {/* The exception, wherever the job is listed. The status stays what
               it is — Review — and this says what happened at the signature. */}
           {refusalAwaitingResolution(row.job) && (

@@ -49,7 +49,11 @@ export const DeliveryNoteDocument = ({ model }: { readonly model: DeliveryNoteMo
           <tr key={`${item.partNumber}-${index}`} className="border-t border-steel-100" data-testid="delivery-note-item">
             <td className="px-1.5 py-1 text-steel-500">{item.kind}</td>
             <td className="px-1.5 py-1 font-mono">{item.partNumber}</td>
-            <td className="px-1.5 py-1">{item.description}</td>
+            <td className="px-1.5 py-1">
+              {item.description}
+              {/* DELIVERY-NOTE-1: the line's comment. */}
+              {(item.comment ?? '').length > 0 && <span className="block text-xs text-steel-600">Comment: {item.comment}</span>}
+            </td>
             <td className="px-1.5 py-1 text-right tabular-nums">{item.quantity}</td>
           </tr>
         ))}

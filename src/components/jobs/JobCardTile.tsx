@@ -46,7 +46,7 @@ export const JobCardTile = ({ row }: { readonly row: JobListRow }) => {
             {row.siteName} · {row.machineLabel}
           </p>
         </div>
-        <JobStatusBadge status={job.status} size="sm" />
+        <JobStatusBadge status={job.status} jobType={job.jobType} size="sm" />
       </div>
 
       {job.faultDescription.length > 0 && (

@@ -65,3 +65,17 @@ export const ROLLBACK_0047 = {
   saturdayA: '2027-03-06',
   saturdayB: '2027-03-13',
 } as const;
+
+/**
+ * The rows only the release after 9569c85 can write (migration 0048): a
+ * Delivery Note job still being completed, with a commented part line; an
+ * overlapping timesheet submission that superseded an earlier one; a Senior
+ * Tech in a main standby place. Copied into the probe as `BATCH_0048`.
+ */
+export const ROLLBACK_0048 = {
+  deliveryNoteJob: '00000000-0000-4000-8000-0000000008a1',
+  partLine: '00000000-0000-4000-8000-0000000008a2',
+  earlyPeriod: '00000000-0000-4000-8000-0000000008b1',
+  latePeriod: '00000000-0000-4000-8000-0000000008b2',
+  standbyWeek: '2027-04-05',
+} as const;

@@ -88,7 +88,11 @@ export const renderDeliveryNotePdf = (model: DeliveryNoteModel): { bytes: Uint8A
     sheet.paragraph('No goods are listed on this job.', { size: SIZE.body, colour: MUTED });
   }
   for (const item of model.items) {
-    const lines = PdfBuilder.wrap(item.description, QTY - 60 - DESC, SIZE.body);
+    // DELIVERY-NOTE-1: the line's comment prints under its description.
+    const lines = [
+      ...PdfBuilder.wrap(item.description, QTY - 60 - DESC, SIZE.body),
+      ...((item.comment ?? '').length > 0 ? PdfBuilder.wrap(`Comment: ${item.comment}`, QTY - 60 - DESC, SIZE.body) : []),
+    ];
     // A FANUC-style part number (A06B-6114-H208#H580) is wider than its
     // column; it wraps there instead of printing over the description.
     const part = PdfBuilder.wrap(item.partNumber, DESC - PART - 8, SIZE.body);

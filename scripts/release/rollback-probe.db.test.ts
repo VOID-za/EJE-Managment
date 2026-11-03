@@ -17,22 +17,22 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
-// 0047: each of these exists in b3a9014 (checked against that commit).
+// Each of these exists in 9569c85 (checked against that commit).
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresNotificationRepository } from '@/data/postgres/notification-repository';
 import { PostgresCustomerEmailRepository } from '@/data/postgres/integration-repositories';
-import { asCustomerId, asJobId, can, notificationCategory, roleLabel, type UserRole } from '@/domain';
+import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory, roleLabel, type JobTypeCode, type UserRole } from '@/domain';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (b3a9014), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (9569c85), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in b3a9014, and it does: each of these was checked against that commit.
+ * in 9569c85, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0047)
+ * The database was migrated to the newest migration THIS release ships (0048)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
  * library, jobs, attendance, timesheets, corrections, monthly submissions and
@@ -46,7 +46,9 @@ import { asCustomerId, asJobId, can, notificationCategory, roleLabel, type UserR
  * submissions and the activity retention guard (0046), which it knows — beside
  * the apprentice role, customers' rate option and Custom Rates, a document
  * chosen for the customer email, an email's extra attachments and the standby
- * day swaps (0047), which it has never heard of?
+ * day swaps (0047), which it knows — beside the Delivery Note, superseded
+ * timesheet submissions and a Senior Tech on standby (0048), which it has
+ * never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
  */
@@ -97,6 +99,15 @@ const INTEGRATIONS = {
   outbox: '00000000-0000-4000-8000-0000000006c1',
 } as const;
 
+// A copy of ROLLBACK_0048 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0048 = {
+  deliveryNoteJob: '00000000-0000-4000-8000-0000000008a1',
+  partLine: '00000000-0000-4000-8000-0000000008a2',
+  earlyPeriod: '00000000-0000-4000-8000-0000000008b1',
+  latePeriod: '00000000-0000-4000-8000-0000000008b2',
+  standbyWeek: '2027-04-05',
+} as const;
+
 // A copy of ROLLBACK_0047 in `src/ops/release/rollback-fixture.ts`.
 const BATCH_0047 = {
   apprentice: '00000000-0000-4000-8000-0000000007a1',
@@ -132,15 +143,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // b3a9014 shipped up to 0046; this release adds 0047.
-    expect(shipped).toHaveLength(47);
-    expect(shipped.at(-1)).toBe('0046_tester_fixes_2_november');
-    expect(shipped).not.toContain('0047_batch_2_november');
+    // 9569c85 shipped up to 0047; this release adds 0048.
+    expect(shipped).toHaveLength(48);
+    expect(shipped.at(-1)).toBe('0047_batch_2_november');
+    expect(shipped).not.toContain('0048_acceptance_delivery_notes');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0047 applied beyond what the live release ships.
-    expect(applied).toBe(48);
+    // 0048 applied beyond what the live release ships.
+    expect(applied).toBe(49);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -412,57 +423,48 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
   });
 
   /*
-   * 0047, WHICH THIS CODE HAS NEVER HEARD OF. Not "does it work" alone but
-   * WHAT IT MAKES OF EACH ROW, because that is what a rollback would do to the
-   * people using it (docs/rollback-4606315.md). It reads all of them without
-   * error, writes beside them without damaging them — and ignores or hides
-   * what they mean.
+   * 0047, WHICH THIS CODE KNOWS (9569c85 is the release that added it): the
+   * apprentice, Custom Rates, the chosen document, the email's extra
+   * attachment, the day swap and its notification read as what they are.
    */
-  it('meets the 0047 rows without error or damage, and ignores what they mean', async () => {
+  it('reads the 0047 rows as what they are', async () => {
     const B = BATCH_0047;
-
-    // An Apprentice is read, but this code grants an unknown role nothing at all.
     const apprentice = (await new PostgresUserRepository(db).list()).find((user) => user.id === B.apprentice);
-    expect(apprentice?.role).toBe('apprentice');
     const role = apprentice!.role as UserRole;
-    expect(can(role, 'jobs.captureWork')).toBe(false);
-    expect(can(role, 'standby.view')).toBe(false);
-    expect(roleLabel(role)).toBeUndefined();
-
-    // A Custom Rates customer is read and saved; the option and the rates survive, unread.
-    const customers = new PostgresCustomerRepository(db);
-    const customer = await customers.findById(asCustomerId(IDS.customer));
-    expect(customer).not.toBeNull();
-    expect('rateMode' in customer!).toBe(false);
-    await customers.save(customer!);
-    const [rates] = await db.execute<{ mode: string; normal: string }>(sql`select c.rate_mode as mode, r.labour_normal_cents::text as normal
-      from customers c join customer_rates r on r.customer_id = c.id where c.id = ${IDS.customer}`);
-    expect(rates).toEqual({ mode: 'custom', normal: '100000' });
-
-    // A document chosen for the customer email: the job is read and saved, the choice kept.
-    const [media] = await db.execute<{ job_id: string }>(sql`select job_id from job_media where id = ${B.document}`);
-    const jobs = new PostgresJobRepository(db);
-    const job = await jobs.findById(asJobId(media!.job_id));
-    expect(job?.attachments.some((attachment) => attachment.id === B.document)).toBe(true);
-    await jobs.save(job!);
-    const [kept] = await db.execute<{ chosen: boolean }>(sql`select email_to_customer as chosen from job_media where id = ${B.document}`);
-    expect(kept?.chosen).toBe(true);
-
-    // A QUEUED email with an extra attachment: read, and the extra is not part of what this code would send.
+    expect(can(role, 'jobs.captureWork')).toBe(true);
+    expect(roleLabel(role)).toBe('Apprentice');
+    const customer = await new PostgresCustomerRepository(db).findById(asCustomerId(IDS.customer));
+    expect((customer as { rateMode?: string } | null)?.rateMode).toBe('custom');
     const email = await new PostgresCustomerEmailRepository(db).findById(B.queuedEmail);
-    expect(email?.state).toBe('queued');
-    expect('extraAttachments' in email!).toBe(false);
-
-    // An approved day swap: the calendar still shows the WEEKLY holder on the swapped Saturday.
-    const weekA = await new PostgresStandbyRepository(db).findWeek(B.weekA);
-    expect(weekA?.assignments.find((place) => place.position === 'main')?.userId).toBe(IDS.technician);
-    const [days] = await db.execute<{ n: string }>(sql`select count(*)::text as n from standby_day_overrides where swap_id = ${B.daySwap}`);
-    expect(days?.n).toBe('2');
-
-    // A day-swap notification: read, but in none of this code's inbox tabs.
+    expect(email?.extraAttachments?.map((extra) => extra.fileName)).toEqual(['Customer order.pdf']);
     const inbox = await new PostgresNotificationRepository(db).list(asUserId(IDS.technician));
-    const notice = inbox.find((notification) => notification.id === B.notification);
-    expect(notice?.type).toBe('standby_day_swap_decided');
-    expect(notificationCategory(notice!.type)).toBeUndefined();
+    expect(notificationCategory(inbox.find((notification) => notification.id === B.notification)!.type)).toBe('standby');
+    expect((await new PostgresStandbyRepository(db).findWeek(B.weekA))?.status).toBe('published');
+  });
+
+  /*
+   * 0048, WHICH THIS CODE HAS NEVER HEARD OF — and WHAT IT MAKES OF EACH ROW,
+   * because that is what a rollback would do (docs/rollback-4606315.md, 0048).
+   */
+  it('meets the 0048 rows: reads them without error, but ignores what they mean — and re-saving a Delivery Note drops its comments', async () => {
+    const B = BATCH_0048;
+    // A Delivery Note: the row is read, but this code has no such job type.
+    const jobs = new PostgresJobRepository(db);
+    const note = await jobs.findById(asJobId(B.deliveryNoteJob));
+    expect(note?.jobType).toBe('delivery_note');
+    expect(note?.parts.map((part) => part.partNumber)).toEqual(['LU-200']);
+    expect('deliveryDate' in note!).toBe(false);
+    expect(getJobTypeDefinition('delivery_note' as JobTypeCode)).toBeUndefined();
+    // Re-saved by this code while still being completed, the part comments are LOST (it rewrites the lines without them).
+    await jobs.save(note!);
+    const [line] = await db.execute<{ comment: string }>(sql`select comment from job_parts where job_id = ${B.deliveryNoteJob}`);
+    expect(line?.comment).toBe('');
+    const [date] = await db.execute<{ delivery_date: string | null }>(sql`select delivery_date::text from jobs where id = ${B.deliveryNoteJob}`);
+    expect(date?.delivery_date).toBe('2027-02-21');
+    // Superseded timesheets: this code still lists the superseded one as sent.
+    const sent = await new PostgresAttendanceRepository(db).listSubmittedPeriods(asUserId(IDS.technician), '2027-01-01', '2027-02-28');
+    expect(sent.map((period) => period.id).sort()).toEqual([B.earlyPeriod, B.latePeriod].sort());
+    // A Senior Tech in a main place: read, but this code would never have allowed it.
+    expect((await new PostgresStandbyRepository(db).findWeek(B.standbyWeek))?.assignments.find((place) => place.position === 'main')?.userId).toBe(IDS.master);
   });
 });

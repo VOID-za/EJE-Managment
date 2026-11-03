@@ -54,6 +54,8 @@ export const SubmitJobCardDialog = ({
   const email = contact?.email.trim() ?? '';
   const recipient = contact === null ? customer.name : contactFullName(contact);
   const parts = job.jobType === 'parts';
+  // DELIVERY-NOTE-1: issued and closed as proof of delivery; nothing is emailed, nothing invoiced.
+  const deliveryNote = job.jobType === 'delivery_note';
 
   return (
     <>
@@ -69,9 +71,15 @@ export const SubmitJobCardDialog = ({
 
       <ConfirmDialog
         open={open}
-        title={parts ? 'Submit collection note?' : 'Submit job card?'}
+        title={deliveryNote ? 'Issue the Delivery Note?' : parts ? 'Submit collection note?' : 'Submit job card?'}
         message={
-          <>
+          deliveryNote ? (
+            <p data-testid="issue-delivery-note-message">
+              The signed Delivery Note is generated and stored as the proof of delivery, and {job.jobNumber} is closed as a
+              Delivery Note. It carries no prices, nothing is emailed and it is never invoiced. This cannot be undone: once
+              issued, nothing on it can be changed.
+            </p>
+          ) : <>
             <p>
               The {parts ? 'signed collection note' : 'signed job card'} will be generated and
               emailed to {recipient}
@@ -90,7 +98,7 @@ export const SubmitJobCardDialog = ({
             </p>
           </>
         }
-        confirmLabel={parts ? 'Submit collection note' : 'Submit job card'}
+        confirmLabel={deliveryNote ? 'Issue Delivery Note' : parts ? 'Submit collection note' : 'Submit job card'}
         cancelLabel="Cancel"
         busy={operation.running}
         onConfirm={async () => {
@@ -122,6 +130,8 @@ export const SubmitJobCardDialog = ({
  * exists so the button is not offered into an obvious dead end.
  */
 export const submissionBlocker = (view: JobView): string | null => {
+  // DELIVERY-NOTE-1: nothing is emailed, so no address is needed.
+  if (view.job.jobType === 'delivery_note') return null;
   const email = view.contact?.email.trim() ?? '';
   if (email.length === 0) {
     const who = view.contact === null ? view.customer.name : contactFullName(view.contact);

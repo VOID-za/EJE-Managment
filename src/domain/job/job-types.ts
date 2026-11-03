@@ -189,11 +189,32 @@ export interface JobTypeDefinition {
   readonly defaultPriority: JobPriority;
   /** Tailwind-safe token name used by the design system for this job type. */
   readonly accent: 'red' | 'blue' | 'green' | 'violet' | 'amber';
+  /**
+   * DELIVERY-NOTE-1. Whether ANYTHING on this job is priced. False on a
+   * Delivery Note: no labour, overtime, call-out, travel, part price, charge or
+   * invoice amount — refused on the server, and the totals are zero whatever
+   * is stored.
+   */
+  readonly priced: boolean;
+  /**
+   * DELIVERY-NOTE-1. Issuing the signed document CLOSES the job, instead of
+   * handing it to Office Handling and the invoicing workflow. The document is
+   * the price-less Delivery Note itself.
+   */
+  readonly closesOnIssue: boolean;
+  /** DELIVERY-NOTE-1. A delivery date is recorded, and required. */
+  readonly capturesDeliveryDate: boolean;
+  /** DELIVERY-NOTE-1. Each part line carries a comment ("Loan unit", "Part returned"). */
+  readonly capturesPartComments: boolean;
 }
 
 const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   breakdown: {
     code: 'breakdown',
+    priced: true,
+    closesOnIssue: false,
+    capturesDeliveryDate: false,
+    capturesPartComments: false,
     officeProcessed: false,
     label: 'Breakdown',
     description: 'Unplanned machine failure requiring a reactive site visit.',
@@ -219,6 +240,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   installation: {
     code: 'installation',
+    priced: true,
+    closesOnIssue: false,
+    capturesDeliveryDate: false,
+    capturesPartComments: false,
     officeProcessed: false,
     label: 'Installation',
     description: 'Commissioning and hand-over of a machine at a customer site.',
@@ -244,6 +269,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   service: {
     code: 'service',
+    priced: true,
+    closesOnIssue: false,
+    capturesDeliveryDate: false,
+    capturesPartComments: false,
     officeProcessed: false,
     label: 'Service',
     description: 'Planned preventative maintenance against the service schedule.',
@@ -269,6 +298,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
   },
   parts: {
     code: 'parts',
+    priced: true,
+    closesOnIssue: false,
+    capturesDeliveryDate: false,
+    capturesPartComments: false,
     officeProcessed: true,
     label: 'Parts',
     description:
@@ -306,6 +339,10 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
 
   test_and_repair: {
     code: 'test_and_repair',
+    priced: true,
+    closesOnIssue: false,
+    capturesDeliveryDate: false,
+    capturesPartComments: false,
     officeProcessed: false,
     label: 'Test & Repair',
     description: 'Workshop or on-site testing and repair of a unit or assembly.',
@@ -329,6 +366,39 @@ const DEFINITIONS: Readonly<Record<JobTypeCode, JobTypeDefinition>> = {
     defaultPriority: 'normal',
     accent: 'violet',
   },
+
+  delivery_note: {
+    code: 'delivery_note',
+    priced: false,
+    closesOnIssue: true,
+    capturesDeliveryDate: true,
+    capturesPartComments: true,
+    // Raised and completed by the office, like a parts collection: no
+    // technician, no acceptance queue, straight to completion (CR-12).
+    officeProcessed: true,
+    label: 'Delivery Note',
+    description: 'Proof of delivery: the parts handed to a customer or a courier, signed for. No pricing.',
+    checklistRequired: false,
+    photosRequired: false,
+    schedulesDateRange: false,
+    capturesLabourAndTravel: false,
+    visitsSite: false,
+    requiresOrderNumber: false,
+    orderNumberExpectation: 'optional',
+    capturesDeliveryNote: false,
+    // Courier (with its waybill) or customer collection, as on a parts job.
+    collectedOnCompletion: true,
+    requiresFaultDescription: false,
+    requiresMachine: false,
+    requiresPriority: false,
+    capturesRepairItem: false,
+    capturesQuoteNumber: false,
+    acceptsVideoAttachments: false,
+    capturesCompletionWriteUp: false,
+    allowsSignatureRefusal: false,
+    defaultPriority: 'normal',
+    accent: 'green',
+  },
 };
 
 export const JOB_TYPE_CODES: readonly JobTypeCode[] = [
@@ -337,6 +407,7 @@ export const JOB_TYPE_CODES: readonly JobTypeCode[] = [
   'service',
   'test_and_repair',
   'parts',
+  'delivery_note',
 ];
 
 export const getJobTypeDefinition = (code: JobTypeCode): JobTypeDefinition => DEFINITIONS[code];

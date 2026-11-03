@@ -13,6 +13,7 @@ import {
   startSignature,
 } from './job-operations';
 import { handleJobCard, loadOfficeQueue, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
+import { emptyClosedJobFilters, loadClosedJobs } from './closed-jobs';
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 import { canTransition, currentRefusal, type Job } from '@/domain';
@@ -287,11 +288,23 @@ describe('Awaiting Invoice No -> Invoiced, on an invoice number', () => {
 
     const events = await harness.repos.activity.list(awaitingInvoice.id);
     expect(events.some((event) => event.type === 'job_invoiced' && /INV-2026-0042/.test(event.summary))).toBe(true);
-    // Into the Invoiced list, and out of the other two.
+    // INVOICED-CLOSED-1: out of the active invoicing workflow entirely, and into Closed Jobs — the record whole.
     const queue = await loadOfficeQueue(harness.repos, master);
-    expect(queue?.invoiced.map((row) => row.jobNumber)).toContain(awaitingInvoice.jobNumber);
+    expect(queue?.invoiced).toEqual([]);
     expect(queue?.awaitingInvoiceNo.map((row) => row.jobNumber)).not.toContain(awaitingInvoice.jobNumber);
     expect(queue?.awaitingPo.map((row) => row.jobNumber)).not.toContain(awaitingInvoice.jobNumber);
+    expect(queue?.handling.map((row) => row.jobNumber)).not.toContain(awaitingInvoice.jobNumber);
+    const closed = await loadClosedJobs(harness.repos, master, { ...emptyClosedJobFilters, outcome: 'invoiced' });
+    const archived = closed.rows.find((entry) => entry.job.jobNumber === awaitingInvoice.jobNumber);
+    expect(archived?.job.invoice?.number).toBe('INV-2026-0042');
+    expect(archived?.job.purchaseOrder?.number).toBe('PO-7788');
+    expect(archived?.job.finalDocument).not.toBeNull();
+    // The full record (signature, pricing snapshot, history) is the stored job, unchanged by invoicing.
+    expect((await harness.repos.jobs.findByJobNumber(awaitingInvoice.jobNumber))?.signature).not.toBeNull();
+    expect((await harness.repos.jobs.findByJobNumber(awaitingInvoice.jobNumber))?.pricingSnapshot).not.toBeNull();
+    // And not a Delivery Note.
+    const notes = await loadClosedJobs(harness.repos, master, { ...emptyClosedJobFilters, outcome: 'delivery_note' });
+    expect(notes.rows.some((entry) => entry.job.jobNumber === awaitingInvoice.jobNumber)).toBe(false);
   });
 
   it('never replaces a recorded invoice number, and records no second PO afterwards', async () => {
@@ -369,8 +382,11 @@ describe('the office queue behind the Notifications tabs', () => {
     await recordInvoiceNumber(harness.as(master), awaitingInvoice, 'INV-55');
     const afterInvoice = await loadOfficeQueue(harness.repos, master);
     expect(afterInvoice?.awaitingPo.map((row) => row.jobNumber)).not.toContain(handling.jobNumber);
-    const row = afterInvoice?.invoiced.find((entry) => entry.jobNumber === handling.jobNumber);
-    expect(row?.invoice?.number).toBe('INV-55');
+    // INVOICED-CLOSED-1: invoiced leaves every queue list; Closed Jobs has it.
+    expect(afterInvoice?.awaitingInvoiceNo.map((row) => row.jobNumber)).not.toContain(handling.jobNumber);
+    expect(afterInvoice?.invoiced).toEqual([]);
+    const closed = await loadClosedJobs(harness.repos, master, emptyClosedJobFilters);
+    expect(closed.rows.find((entry) => entry.job.jobNumber === handling.jobNumber)?.job.invoice?.number).toBe('INV-55');
 
     expect(await loadOfficeQueue(harness.repos, technician)).toBeNull();
   });
