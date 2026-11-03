@@ -17,6 +17,11 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
+// 0047: each of these exists in b3a9014 (checked against that commit).
+import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
+import { PostgresNotificationRepository } from '@/data/postgres/notification-repository';
+import { PostgresCustomerEmailRepository } from '@/data/postgres/integration-repositories';
+import { asCustomerId, asJobId, can, notificationCategory, roleLabel, type UserRole } from '@/domain';
 
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
@@ -90,6 +95,21 @@ const INTEGRATIONS = {
   templateVersion: '00000000-0000-4000-8000-0000000006a2',
   email: '00000000-0000-4000-8000-0000000006b1',
   outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
+// A copy of ROLLBACK_0047 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0047 = {
+  apprentice: '00000000-0000-4000-8000-0000000007a1',
+  document: '00000000-0000-4000-8000-0000000007b1',
+  queuedEmail: '00000000-0000-4000-8000-0000000007c1',
+  daySwap: '00000000-0000-4000-8000-0000000007d1',
+  overrideA: '00000000-0000-4000-8000-0000000007d2',
+  overrideB: '00000000-0000-4000-8000-0000000007d3',
+  notification: '00000000-0000-4000-8000-0000000007e1',
+  weekA: '2027-03-01',
+  weekB: '2027-03-08',
+  saturdayA: '2027-03-06',
+  saturdayB: '2027-03-13',
 } as const;
 
 const id = (value: string): DocumentId => asDocumentId(value);
@@ -389,5 +409,60 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect(september.find((submission) => submission.userId === IDS.technician)?.timesheetPeriodId).toBe(TIMESHEET.monthPeriod);
     const august = await payroll.listPackages('2026-08');
     expect(august.map((financePackage) => financePackage.attachments.length)).toEqual([1]);
+  });
+
+  /*
+   * 0047, WHICH THIS CODE HAS NEVER HEARD OF. Not "does it work" alone but
+   * WHAT IT MAKES OF EACH ROW, because that is what a rollback would do to the
+   * people using it (docs/rollback-4606315.md). It reads all of them without
+   * error, writes beside them without damaging them — and ignores or hides
+   * what they mean.
+   */
+  it('meets the 0047 rows without error or damage, and ignores what they mean', async () => {
+    const B = BATCH_0047;
+
+    // An Apprentice is read, but this code grants an unknown role nothing at all.
+    const apprentice = (await new PostgresUserRepository(db).list()).find((user) => user.id === B.apprentice);
+    expect(apprentice?.role).toBe('apprentice');
+    const role = apprentice!.role as UserRole;
+    expect(can(role, 'jobs.captureWork')).toBe(false);
+    expect(can(role, 'standby.view')).toBe(false);
+    expect(roleLabel(role)).toBeUndefined();
+
+    // A Custom Rates customer is read and saved; the option and the rates survive, unread.
+    const customers = new PostgresCustomerRepository(db);
+    const customer = await customers.findById(asCustomerId(IDS.customer));
+    expect(customer).not.toBeNull();
+    expect('rateMode' in customer!).toBe(false);
+    await customers.save(customer!);
+    const [rates] = await db.execute<{ mode: string; normal: string }>(sql`select c.rate_mode as mode, r.labour_normal_cents::text as normal
+      from customers c join customer_rates r on r.customer_id = c.id where c.id = ${IDS.customer}`);
+    expect(rates).toEqual({ mode: 'custom', normal: '100000' });
+
+    // A document chosen for the customer email: the job is read and saved, the choice kept.
+    const [media] = await db.execute<{ job_id: string }>(sql`select job_id from job_media where id = ${B.document}`);
+    const jobs = new PostgresJobRepository(db);
+    const job = await jobs.findById(asJobId(media!.job_id));
+    expect(job?.attachments.some((attachment) => attachment.id === B.document)).toBe(true);
+    await jobs.save(job!);
+    const [kept] = await db.execute<{ chosen: boolean }>(sql`select email_to_customer as chosen from job_media where id = ${B.document}`);
+    expect(kept?.chosen).toBe(true);
+
+    // A QUEUED email with an extra attachment: read, and the extra is not part of what this code would send.
+    const email = await new PostgresCustomerEmailRepository(db).findById(B.queuedEmail);
+    expect(email?.state).toBe('queued');
+    expect('extraAttachments' in email!).toBe(false);
+
+    // An approved day swap: the calendar still shows the WEEKLY holder on the swapped Saturday.
+    const weekA = await new PostgresStandbyRepository(db).findWeek(B.weekA);
+    expect(weekA?.assignments.find((place) => place.position === 'main')?.userId).toBe(IDS.technician);
+    const [days] = await db.execute<{ n: string }>(sql`select count(*)::text as n from standby_day_overrides where swap_id = ${B.daySwap}`);
+    expect(days?.n).toBe('2');
+
+    // A day-swap notification: read, but in none of this code's inbox tabs.
+    const inbox = await new PostgresNotificationRepository(db).list(asUserId(IDS.technician));
+    const notice = inbox.find((notification) => notification.id === B.notification);
+    expect(notice?.type).toBe('standby_day_swap_decided');
+    expect(notificationCategory(notice!.type)).toBeUndefined();
   });
 });

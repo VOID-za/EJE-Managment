@@ -1609,6 +1609,7 @@ Asked for by the owner on 2 November 2026 ("EJE — Next critical development ba
 | MONTHLY-FORMS-2 | **Monthly Forms: Download, Preview, Print and Submit** for both forms. #118 | **DEPLOYED — not yet approved.** Resubmission still replaces (RESUBMIT-1). Live at three sizes. |
 | NOTIF-TABS-2, NOTIF-PO-LABEL-1 | **Inbox: Jobcards, Messages, Monthly Forms, Standby; "Purchase Order:{n}".** #119 | **DEPLOYED — not yet approved.** Live at three sizes. |
 | NAV-OVERVIEW-1 | **Sidebar: Overview** (was Dashboard). #120 | **DEPLOYED — not yet approved.** |
+| UNSIGNED-ATT-1 *(follow-up, 3 November 2026)* | **The unsigned job card a Senior Tech authorises carries the chosen documents too**, under the signed email's rules. #109 | **TESTED — awaiting approval.** The PDF plus every document ticked "Send to the customer…"; a Senior Tech may change the choice after issue until the copy has gone. Each file is checked before anything is sent or authorised — missing, changed (checksum), no longer an acceptable job document, or over the 3 MB total → refused with the file and the reason, nothing authorised or sent, never sent short. Shared with the signed path: `src/application/email-attachments.ts`. `unsigned-attachments.test.ts` (9). Rollback analysis for 4606315: `docs/rollback-4606315.md`. |
 
 ### The tester’s critical fixes — 2 November 2026 (evening) (DEPLOYED in `b3a9014` with migration 0046; not yet approved)
 

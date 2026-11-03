@@ -655,6 +655,7 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/batch-check.mjs` and
 | S10 | Timesheets | Preview and Print only; a 24 Oct – 22 Nov period prints as "… Timesheet Nov 2026.pdf" |
 | S11 | My Monthly Forms | Download, Preview, Print and Submit for both forms; this month can be submitted |
 | S12 | Notifications | Jobcards, Messages, Monthly Forms, Standby; Invoiced shows "Purchase Order:…" in blue |
+| S13 | As the Senior Tech, on a job card issued WITHOUT a signature: Photos → tick "Send to the customer with the unsigned job card" on a document; then *Authorise sending it to the customer* with a TEST contact address | The panel lists the PDF and the document; the email (once email is configured) carries both. A document over the limit is refused with the reason and nothing is sent |
 
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
@@ -671,7 +672,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | Job creation, bench quantity, job card | P1–P6 | #95 |
 | The standby calendar | Q1–Q8 | #96 |
 | The tester’s critical fixes | R1–R10 | #97–#108 |
-| The next critical batch | S1–S12 | #109–#120 |
+| The next critical batch | S1–S13 | #109–#120 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

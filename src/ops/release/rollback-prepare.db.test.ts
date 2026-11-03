@@ -9,7 +9,10 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
+import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
+import { STANDBY_POSITIONS, type StandbyWeek } from '@/domain';
 import { PostgresAttendanceRepository } from '@/data/postgres/attendance-repository';
 import { PostgresDeliveryNoteRepository } from '@/data/postgres/delivery-note-repository';
 import { asCustomerId, asJobId, type TimesheetEntry } from '@/domain';
@@ -338,5 +341,65 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       sentBy: null, sendStartedAt: null, sentAt: null, providerMessageId: null, providerState: null, failureReason: '', failureKind: null, attempts: 0,
     });
     expect(prepared?.attachments).toHaveLength(1);
+  });
+
+  /*
+   * 0047, which the live release (b3a9014) has never heard of: an Apprentice,
+   * a customer on Custom Rates, a document chosen for the customer email, a
+   * QUEUED email carrying it, an approved day swap and its notification. The
+   * probe records what the old code makes of each — read, ignored or hidden.
+   */
+  it('writes the rows only this release can (0047): apprentice, Custom Rates, email documents, day swaps', async () => {
+    const B = ROLLBACK_0047;
+    const at = '2027-02-20T08:00:00.000Z';
+    await db.execute(sql`insert into users (id, first_name, last_name, initials, email, role)
+      values (${B.apprentice}, 'Ayanda', 'Apprentice', 'AA', 'ayanda@example-test.co.za', 'apprentice')`);
+
+    const customers = new PostgresCustomerRepository(db);
+    const customer = (await customers.findById(asCustomerId(IDS.customer)))!;
+    await customers.save({ ...customer, rateMode: 'custom' });
+    await customers.saveCustomRates({
+      customerId: asCustomerId(IDS.customer),
+      labourRates: { normal: 100000, overtime: 150000, double: 200000 },
+      calloutRate: 80000, testBenchFee: 40000, kilometreRate: 2000, vatPercentage: 15,
+      updatedBy: IDS.master, updatedAt: at,
+    });
+
+    const job = (await new PostgresJobRepository(db).list()).find((candidate) => candidate.jobType === 'test_and_repair')!;
+    await db.execute(sql`insert into job_media (id, job_id, kind, file_name, storage_key, content_type, size_bytes, uploaded_at, uploaded_by, email_to_customer)
+      values (${B.document}, ${job.id}, 'document', 'Customer order.pdf', 'uploads/rollback-order', 'application/pdf', 1200, ${at}, ${IDS.master}, true)`);
+    await db.execute(sql`insert into email_messages (id, idempotency_key, event, job_id, recipient, subject, body, state, created_at, updated_at, attachment_storage_key, attachment_file_name, extra_attachments)
+      values (${B.queuedEmail}, 'signed_job_card:rollback-0047', 'signed_job_card', ${job.id}, 'customer@example.test', 'EJE-ROLLBACK — Signed Job Card', 'Good day', 'queued', now(), now(), 'documents/rollback-0047.pdf', 'EJE-ROLLBACK.pdf',
+        ${JSON.stringify([{ storageKey: 'uploads/rollback-order', fileName: 'Customer order.pdf', sha256: null }])}::jsonb)`);
+
+    const standby = new PostgresStandbyRepository(db);
+    for (const userId of [IDS.technician, IDS.otherTechnician]) {
+      await standby.saveEligibility({ userId: asUserId(userId), main: true, helper: false, apprentice: false, updatedBy: asUserId(IDS.master), updatedAt: at });
+    }
+    await standby.saveEligibility({ userId: asUserId(B.apprentice), main: false, helper: false, apprentice: true, updatedBy: asUserId(IDS.master), updatedAt: at });
+    const week = (weekStart: string, main: string): StandbyWeek => ({
+      id: crypto.randomUUID(), weekStart, status: 'draft', publishedBy: null, publishedAt: null, createdBy: asUserId(IDS.master), createdAt: at,
+      assignments: STANDBY_POSITIONS.map((position) => {
+        const holder = position === 'main' ? main : position === 'apprentice_1' ? B.apprentice : null;
+        return { position, userId: holder === null ? null : asUserId(holder), assignedBy: holder === null ? null : asUserId(IDS.master), assignedAt: holder === null ? null : at };
+      }),
+    });
+    await standby.createWeeks([week(B.weekA, IDS.technician), week(B.weekB, IDS.otherTechnician)]);
+    await standby.publishWeeks([B.weekA, B.weekB], asUserId(IDS.master), at);
+    // The two stages, then the Office's approval writing exactly the two Saturdays.
+    const pairs = JSON.stringify([{ requesterDate: B.saturdayA, requesterPosition: 'main', recipientDate: B.saturdayB, recipientPosition: 'main' }]);
+    await db.execute(sql`insert into standby_day_swaps (id, kind, requester_id, recipient_id, pairs, reason, requested_at)
+      values (${B.daySwap}, 'main', ${IDS.technician}, ${IDS.otherTechnician}, ${pairs}::jsonb, 'Wedding', ${at})`);
+    await db.execute(sql`update standby_day_swaps set status = 'awaiting_office', recipient_decided_at = ${at} where id = ${B.daySwap}`);
+    await db.execute(sql`insert into standby_day_overrides (id, date, position, user_id, swap_id) values
+      (${B.overrideA}, ${B.saturdayA}, 'main', ${IDS.otherTechnician}, ${B.daySwap}),
+      (${B.overrideB}, ${B.saturdayB}, 'main', ${IDS.technician}, ${B.daySwap})`);
+    await db.execute(sql`update standby_day_swaps set status = 'approved', office_decided_by = ${IDS.coordinator}, office_decided_at = ${at} where id = ${B.daySwap}`);
+    await db.execute(sql`insert into notifications (id, recipient_id, type, title, body, link, channels)
+      values (${B.notification}, ${IDS.technician}, 'standby_day_swap_decided', 'Standby day swap approved', 'Saturday 6 March is now Riaan''s.', '/standby', '{in_app}')`);
+
+    const [counts] = await db.execute<{ rates: string; overrides: string }>(sql`select
+      (select count(*) from customer_rates)::text as rates, (select count(*) from standby_day_overrides)::text as overrides`);
+    expect(counts).toEqual({ rates: '1', overrides: '2' });
   });
 });

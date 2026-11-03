@@ -44,3 +44,24 @@ export const ROLLBACK_DOCUMENTS = {
   failed: '00000000-0000-4000-8000-0000000004a4',
   coverageUnknown: '00000000-0000-4000-8000-0000000004a5',
 } as const;
+
+/**
+ * The rows only the release after b3a9014 can write (migration 0047): an
+ * Apprentice, a customer on Custom Rates with its rates, a document chosen for
+ * the customer email, a QUEUED email carrying an extra attachment, an approved
+ * standby day swap with its two days, and a day-swap notification. Copied into
+ * the probe as `BATCH_0047`, so the live release meets each of them.
+ */
+export const ROLLBACK_0047 = {
+  apprentice: '00000000-0000-4000-8000-0000000007a1',
+  document: '00000000-0000-4000-8000-0000000007b1',
+  queuedEmail: '00000000-0000-4000-8000-0000000007c1',
+  daySwap: '00000000-0000-4000-8000-0000000007d1',
+  overrideA: '00000000-0000-4000-8000-0000000007d2',
+  overrideB: '00000000-0000-4000-8000-0000000007d3',
+  notification: '00000000-0000-4000-8000-0000000007e1',
+  weekA: '2027-03-01',
+  weekB: '2027-03-08',
+  saturdayA: '2027-03-06',
+  saturdayB: '2027-03-13',
+} as const;
