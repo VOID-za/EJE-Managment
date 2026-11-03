@@ -19,6 +19,12 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## RELEASED — `9569c85`, the unsigned job card's documents (3 November 2026)
+
+Released 3 November 2026 07:59:28 UTC (healthy 07:59:30) through `deploy/release/stage-release.ps1 -ExpectPending none`, with **no migration** (preflight: all 48 already applied; migrate: none). Firewall scripts unchanged (the server's `ufw-apply.sh` matches the reviewed copy). Backup proven first: `/var/backups/eje/eje-eje_production-2026-11-03T07-59-16Z` (verified, key-checked, restore-tested). CI run 41593939392 on `9569c85`: all 62 steps green, none skipped. That includes the rollback probe, which now writes every kind of 0047 row (prepare 8/8, probe 11/11). Unit tests 3,714 passed, 0 failed, 19 skipped (the PostgreSQL tests, run in CI). Live: 4/4 checks passed (health; a signed job card refused on the unsigned path; an authorisation without a reason refused; outbox 0 → 0), and 0 error lines in the service log. Job-card fingerprints, counts, the frozen prices of all 60 signed jobs, attendance, timesheets, 8 customers and 12 sites were identical before and after.
+
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `4606315` (same schema; only the unsigned copy's documents are lost). Going further back, to `b3a9014`, is covered in `docs/rollback-4606315.md`.
+
 ## RELEASED — `4606315`, the next critical batch (2 November 2026, night)
 
 Released 2 November 2026 20:47 UTC (healthy 20:47:26) through `deploy/release/stage-release.ps1` with migration `0047_batch_2_november` (additive). Backup proven first: `/var/backups/eje/eje-eje_production-2026-11-02T20-47-09Z`. Rollback target `b3a9014` — CI run 41517187236 proved `b3a9014` reads and writes a database at 0047. Live verification 48/48 (nothing written); all existing data identical before and after; still a demonstration deployment; nothing sent.

@@ -7,10 +7,10 @@ No rollback, restore, destructive migration or production database change was ma
 
 | | |
 |---|---|
-| Live release | `4606315`, released 2 November 2026 20:47:23 UTC (healthy 20:47:26) |
+| Live release | `9569c85` since 3 November 2026 07:59:28 UTC (healthy 07:59:30): `4606315` plus the unsigned job card's documents (UNSIGNED-ATT-1). No migration. `4606315` itself was released 2 November 2026 20:47:23 UTC (healthy 20:47:26) |
 | Migration it added | `0047_batch_2_november` — additive only (new enum values, columns with defaults, new tables, guard triggers) |
-| Recorded rollback target | `b3a9014` — built and kept on the server (`/opt/eje/releases/b3a9014/.next` present, read-only check 3 November) |
-| Backup before 0047 | `/var/backups/eje/eje-eje_production-2026-11-02T20-47-09Z` (verified, key-checked, restore-tested by the guarded release) |
+| Recorded rollback target | **`4606315`** (the release before `9569c85`). It is the same schema and every 0047 feature; rolling back to it loses only the unsigned copy's documents (it sends the PDF alone). **`b3a9014`** is the last release from BEFORE 0047, built and kept on the server (`/opt/eje/releases/b3a9014/.next` present, read-only check 3 November). This document is about going back to it |
+| Backup before 0047 | `/var/backups/eje/eje-eje_production-2026-11-02T20-47-09Z` (verified, key-checked, restore-tested by the guarded release). Newest release backup: `/var/backups/eje/eje-eje_production-2026-11-03T07-59-16Z` (before `9569c85`, at 0047) |
 | Down migrations | **None exist, and none should be written.** 0047 is not reversed by switching code |
 
 `b3a9014` is **database-compatible** with 0047: it starts, its preflight accepts 48 applied
@@ -21,6 +21,7 @@ migrations against the 47 it ships, and it reads and writes every table it knows
 
 | Version | Ships up to | Against a database at 0047 |
 |---|---|---|
+| `4606315` | 0047 | **Fully supported**: the release that added 0047. The first choice if `9569c85` must be undone (`stage-release.ps1 -Rollback`, which picks the recorded target). |
 | `b3a9014` | 0046 | **Supported.** Proven in CI by `scripts/release/rollback-compat.sh` (the live release's own code against a disposable database migrated to 0047). Since 3 November the probe also writes every kind of 0047 row and records what `b3a9014` makes of each (§3). |
 | `6fdb142` and older (`5d726d3`, `7c0ca94`, …) | 0045 or less | **Not supported.** Each was proven only against its successor's migration. They do not know 0046 either (the PO number, the *Awaiting Invoice No* status, replaceable submissions), so a job in a status they do not know would be mishandled. Never roll back past `b3a9014`. |
 
@@ -71,7 +72,7 @@ or corrupted data (§6), never as a way to roll back.
    d. pending day swaps — `select id, status from standby_day_swaps where status in ('awaiting_recipient','awaiting_office');`
    e. emails that would lose documents — `select id, state from email_messages where state in ('queued','sending','attention') and extra_attachments <> '[]'::jsonb;`. If any exist and the site sends email, **set email delivery to `refuse` before switching**, or resolve them first.
    f. the usual before snapshot (job-card fingerprints, counts, signed prices, attendance, timesheets, site pins), as for a release.
-3. **Switch the application, not the database:**
+3. **Switch the application, not the database.** If `9569c85` alone is the problem, `stage-release.ps1 -Rollback` (no `-To`) returns to `4606315`, and none of the steps in 2 apply. Going back past 0047:
    `powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Rollback -To b3a9014 -SshExe C:\Windows\System32\OpenSSH\ssh.exe -LogDir <dir>`
    This runs `deploy-release.sh --rollback b3a9014`. It relinks `/opt/eje/app`, restarts the service and waits for `/api/health` to report `b3a9014` with the database reachable. **It does not touch the database.** Its message still says "Migration 0030 stays applied": that wording is out of date, and the meaning (the database is left as it is) is correct.
 4. **Verify:** health reports `b3a9014`, `deployment: demonstration`, the email mode is as intended; the after snapshot matches the before snapshot; a signed job card opens.
@@ -92,6 +93,6 @@ or corrupted data (§6), never as a way to roll back.
 
 ## 7. Limits of this analysis
 
-- The 0047 rows in the CI probe are representative, one of each kind, not a copy of live data. The live site currently holds **none** of them (0 apprentices, 0 Custom Rates customers, 0 chosen documents, 0 emails with extras, 0 day swaps; read-only counts, 2 November).
+- The 0047 rows in the CI probe are representative, one of each kind, not a copy of live data. **The live site is in use**: on 2 November it held none of them; on the morning of 3 November it held 8 customers, **1 of them on Custom Rates** (read-only snapshot before `9569c85`). Its unsigned jobs are exactly the case §3 marks unsafe, so a rollback to `b3a9014` now needs step 2(b).
 - Screens were not exercised under `b3a9014` against 0047 data. The probe covers repositories and domain rules; the screen effects above come from reading `b3a9014`'s code.
 - Releases older than `b3a9014` were not tested against 0047 and are not supported.
