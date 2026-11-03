@@ -101,6 +101,8 @@ or corrupted data (§6), never as a way to roll back.
 
 **What 0048 adds (additive only):** `jobs.delivery_date`, `job_parts.comment`, the `delivery_note` job type row and its guards (no price, labour, call-out or invoicing status on a Delivery Note); `timesheet_periods.superseded_at` / `superseded_by` and the guard allowing one current submission per person per day; the standby guards widened to a Senior Tech in main and helper places. Nothing existing is rewritten.
 
+Released in `6ec5655` on 3 November 2026 at 12:15 UTC. **Backup before 0048:** `/var/backups/eje/eje-eje_production-2026-11-03T12-14-49Z` (verified, key-checked, restore-tested). Restoring it loses everything since 12:14:49 UTC on 3 November, and the restored database is at 0047.
+
 **The rollback target after this release is `9569c85`** (the release before it, at 0047). The CI rollback check now runs `9569c85`'s own code against a database at 0048 that holds a Delivery Note, a superseded timesheet and a Senior Tech on standby. It proves the old code still starts, reads and writes. It also records what that code makes of the new rows:
 
 | 0048 data | Under `9569c85` | Risk while rolled back |

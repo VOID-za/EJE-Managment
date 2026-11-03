@@ -19,6 +19,18 @@ would be guessing.
 **Nothing in this repository deploys anything.** Every command below is run by
 somebody with root on the VPS.
 
+## RELEASED — `6ec5655`, physical acceptance follow-up and the Delivery Note (3 November 2026)
+
+Released 3 November 2026 12:15:07 UTC (healthy 12:15:09) from branch `claude/acceptance-delivery-notes` through `deploy/release/stage-release.ps1 -ExpectPending 0048_acceptance_delivery_notes`.
+
+- **Migration:** preflight found exactly one pending migration; only `0048_acceptance_delivery_notes` was applied (additive). The database is now at 49 migrations, and `job_types` includes `delivery_note`.
+- **Before the release:** firewall scripts unchanged, and the server's `ufw-apply.sh` matches the reviewed copy. Backup proven first: `/var/backups/eje/eje-eje_production-2026-11-03T12-14-49Z` (verified, key-checked, restore-tested).
+- **CI:** run 41629100556 on `6ec5655`, 65 of 65 steps green, none skipped. This includes the new acceptance check at three sizes and the rollback check, which ran `9569c85` against 0048 (prepare 9/9, probe 12/12).
+- **Tests:** unit 3,733 passed, 0 failed; database tests 477 passed.
+- **Live verification:** 38/38 checks passed (reads, refused writes and read-only screens at three sizes; no record created). There were 0 error lines in the service log. Job-card fingerprints, counts, the frozen prices of all 61 signed jobs, attendance, timesheets, 9 customers and 13 sites were identical before and after. Email and WhatsApp are still not configured, demonstration mode is on, and email is `refuse`.
+
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `9569c85`; see `docs/rollback-4606315.md` §8. Once any Delivery Note exists, fix forward instead.
+
 ## RELEASED — `9569c85`, the unsigned job card's documents (3 November 2026)
 
 Released 3 November 2026 07:59:28 UTC (healthy 07:59:30) through `deploy/release/stage-release.ps1 -ExpectPending none`, with **no migration** (preflight: all 48 already applied; migrate: none). Firewall scripts unchanged (the server's `ufw-apply.sh` matches the reviewed copy). Backup proven first: `/var/backups/eje/eje-eje_production-2026-11-03T07-59-16Z` (verified, key-checked, restore-tested). CI run 41593939392 on `9569c85`: all 62 steps green, none skipped. That includes the rollback probe, which now writes every kind of 0047 row (prepare 8/8, probe 11/11). Unit tests 3,714 passed, 0 failed, 19 skipped (the PostgreSQL tests, run in CI). Live: 4/4 checks passed (health; a signed job card refused on the unsigned path; an authorisation without a reason refused; outbox 0 → 0), and 0 error lines in the service log. Job-card fingerprints, counts, the frozen prices of all 60 signed jobs, attendance, timesheets, 8 customers and 12 sites were identical before and after.
