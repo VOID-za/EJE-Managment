@@ -80,6 +80,8 @@ const RootLayout = ({ children }: { readonly children: React.ReactNode }) => (
           `npm run check-routes` reads to tell the two apart. */}
       <meta name="eje-build-commit" content={process.env.EJE_BUILD_COMMIT ?? 'unknown'} />
       <meta name="eje-build-time" content={process.env.EJE_BUILD_TIME ?? 'unknown'} />
+      {/* VERSION-1: the release's semantic version, beside its commit. */}
+      <meta name="eje-build-version" content={process.env.EJE_APP_VERSION ?? 'unknown'} />
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
     </head>
     <body className="min-h-dvh antialiased">

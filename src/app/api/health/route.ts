@@ -57,6 +57,8 @@ export const GET = async (): Promise<NextResponse> => {
   const build = {
     commit: process.env.EJE_BUILD_COMMIT ?? 'unknown',
     builtAt: process.env.EJE_BUILD_TIME ?? 'unknown',
+    // VERSION-1: what this release is called. The commit above still identifies it.
+    version: process.env.EJE_APP_VERSION ?? 'unknown',
   };
   const demoSwitcher = isDemoSwitcherEnabled();
   /*

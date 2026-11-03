@@ -44,6 +44,11 @@ param(
   # tag. Each element may itself be comma-separated (`-File` passes 'a,b,c' as
   # one string), so both forms reach the same validated list.
   [string[]]$ExpectPending = @(),
+  # VERSION-1: the release's semantic version is worked out on the server from the
+  # commits since the live release. -Bump may RAISE the step (minor, major) when a
+  # release is bigger than its commits say; it never lowers it. Empty: automatic.
+  [ValidateSet('', 'minor', 'major')]
+  [string]$Bump = '',
   # Test seams.
   [string]$Repo = '',
   [string]$ProbeScript = ''
@@ -160,7 +165,7 @@ $action = switch ($mode) {
   'release' {
     # Detached, so a dropped connection cannot kill it mid-switch; then follow it.
     # The start is checked on its own: `a && b & c` would background `a && b`.
-    "systemd-run --quiet --unit=eje-release-$short --collect --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $(if ($pendingEnv) { "--setenv=$pendingEnv " })/bin/bash /root/eje-ops/deploy-release.sh --release $Sha || { echo START_FAILED; exit 5; }; " +
+    "systemd-run --quiet --unit=eje-release-$short --collect --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $(if ($pendingEnv) { "--setenv=$pendingEnv " })$(if ($Bump) { "--setenv=EJE_RELEASE_BUMP=$Bump " })/bin/bash /root/eje-ops/deploy-release.sh --release $Sha || { echo START_FAILED; exit 5; }; " +
     "journalctl -u eje-release-$short -f -o cat --no-pager & follower=`$!; " +
     "while systemctl is-active --quiet eje-release-$short 2>/dev/null; do sleep 3; done; sleep 2; kill `$follower 2>/dev/null; " +
     'echo; bash /root/eje-ops/deploy-release.sh --status'
@@ -204,7 +209,9 @@ switch ($mode) {
       $public = PublicHealth
       Log "public health: $($public.Trim())"
       if ($public -match "`"commit`":`"$short`"" -and $public -match '"database":"reachable"') {
-        if (UpdateNoticeReady $short) { Log "`nRELEASED $short - confirmed from outside; installed apps will be offered the update."; exit 0 }
+        # VERSION-1: name the release by its version too, as the site now reports it.
+        $version = if ($public -match '"version":"([0-9]+\.[0-9]+\.[0-9]+)"') { "v$($Matches[1])" } else { 'not versioned' }
+        if (UpdateNoticeReady $short) { Log "`nRELEASED $short ($version) - confirmed from outside; installed apps will be offered the update."; exit 0 }
         Stop-Stage "$short is serving and healthy, but the page or the worker does not present the new build (above), so installed apps would not be offered the update. Read before acting." 2
       }
       Stop-Stage "The server reports $short released, but the public health endpoint does not confirm it (above). Read before acting." 2

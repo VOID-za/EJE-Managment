@@ -58,13 +58,16 @@ if (!existsSync(`${DIST_A}/BUILD_ID`)) throw new Error('Build release A first: n
 // ---- release B: a second real build, stamped with a different commit ------------
 const headA = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim() || 'unknown';
 const COMMIT_B = `${process.env.EJE_BUILD_COMMIT ?? headA}-next`;
+// VERSION-1: release B is the next PATCH of release A, as the release would number it.
+const VERSION_A = /^\d+\.\d+\.\d+$/u.test(process.env.EJE_APP_VERSION ?? '') ? process.env.EJE_APP_VERSION : null;
+const VERSION_B = VERSION_A === null ? '1.0.1' : VERSION_A.replace(/\d+$/u, (patch) => String(Number(patch) + 1));
 if (process.env.EJE_UPDATE_REUSE !== '1' || !existsSync(`${DIST_B}/BUILD_ID`)) {
   // `next build` rewrites these two for its distDir; they are put back exactly.
   const kept = ['tsconfig.json', 'next-env.d.ts'].map((file) => [file, readFileSync(file)]);
-  console.log(`building release B (${COMMIT_B}) in ${DIST_B} …`);
+  console.log(`building release B (${COMMIT_B}, v${VERSION_B}) in ${DIST_B} …`);
   const built = spawnSync(process.execPath, ['node_modules/next/dist/bin/next', 'build'], {
     stdio: 'inherit',
-    env: { ...process.env, EJE_DIST_DIR: DIST_B, EJE_BUILD_COMMIT: COMMIT_B },
+    env: { ...process.env, EJE_DIST_DIR: DIST_B, EJE_BUILD_COMMIT: COMMIT_B, EJE_APP_VERSION: VERSION_B },
   });
   for (const [file, bytes] of kept) writeFileSync(file, bytes);
   if (built.status !== 0) throw new Error('release B did not build');
@@ -92,6 +95,13 @@ const serve = async (dist) => {
   }
   throw new Error(`release in ${dist} did not start:\n${log.slice(-2000)}`);
 };
+/** What the serving release reports as its version (VERSION-1), or null. */
+const servedVersion = async () => {
+  const version = (await (await fetch(`${BASE}/api/health`)).json())?.build?.version;
+  return typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version) ? version : null;
+};
+/** How the bar names a release: "v1.0.1", or its short commit when it has no version. */
+const label = (version, commit) => (version === null ? commit.slice(0, 7) : `v${version}`);
 const stop = async () => {
   if (server === null) return;
   const exited = new Promise((resolve) => server.once('exit', resolve));
@@ -144,9 +154,11 @@ const waitForNotice = async (timeout = 60000) => {
 };
 
 let A = null;
+let versionA = null;
 let B = null;
 try {
   A = await serve(DIST_A);
+  versionA = await servedVersion();
   console.log(`release A is serving: ${A}`);
 
   await step('release A: the tablet opens EJE, the worker takes control under A’s build, and there is no notice', async () => {
@@ -162,12 +174,18 @@ try {
   B = await serve(DIST_B);
   console.log(`release B is serving: ${B}`);
   if (A === B) throw new Error('both releases report the same commit');
+  const versionB = await servedVersion();
+  console.log(`release B reports version ${versionB ?? 'none'}; release A ${versionA ?? 'none'}`);
 
   await step('release B goes live: the open page notices WITHOUT a reload or a cache clear, and offers Update now', async () => {
     const loadsBefore = documentLoads;
     const notice = await waitForNotice();
     const text = await notice.innerText();
     if (!text.includes('A new version of EJE is available.')) throw new Error(`notice reads: ${text}`);
+    // VERSION-1: both sides by their semantic versions, in the owner's words.
+    const said = `Version ${label(versionB, B)} is live; this screen is still version ${label(versionA, A)}. Update now reloads EJE on the new version. Anything already saved is kept.`;
+    if (!text.replace(/\s+/gu, ' ').includes(said)) throw new Error(`notice reads: ${text} — wanted: ${said}`);
+    if (versionB === null) throw new Error('release B reports no version');
     if ((await notice.getAttribute('data-target')) !== B || (await notice.getAttribute('data-current')) !== A) {
       throw new Error(`notice says ${await notice.getAttribute('data-current')} → ${await notice.getAttribute('data-target')}`);
     }
@@ -184,6 +202,9 @@ try {
     const updated = page.getByTestId('app-updated');
     await updated.waitFor({ timeout: 15000 });
     if ((await updated.getAttribute('data-build')) !== B) throw new Error(`updated notice says ${await updated.getAttribute('data-build')}`);
+    if ((await updated.getByTestId('app-updated-version').innerText()) !== label(versionB, B)) throw new Error(`updated notice names ${await updated.getByTestId('app-updated-version').innerText()}`);
+    // The commit is still there, beside the version, for diagnostics.
+    if ((await page.evaluate(() => document.querySelector('meta[name="eje-build-version"]')?.getAttribute('content'))) !== (versionB ?? 'unknown')) throw new Error('the page does not carry B’s version');
     if ((await controllerBuild()) !== B) throw new Error(`the worker in control is ${await controllerBuild()}, not ${B}`);
     await page.screenshot({ path: `${shots}/2-updated.png` });
     // No loop: one reload, and a later check stays quiet.

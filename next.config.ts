@@ -85,6 +85,14 @@ const nextConfig: NextConfig = {
   env: {
     EJE_BUILD_COMMIT: buildCommit(),
     EJE_BUILD_TIME: new Date().toISOString(),
+    /*
+     * VERSION-1: the semantic version people see (`1.4.0`), given to the build by
+     * the release (`deploy/release/deploy-release.sh`, scripts/release/
+     * next-version.mjs). A build nobody versioned (a developer's, CI's own) is
+     * 'unknown', and the screens fall back to its commit. The COMMIT stays what
+     * identifies a deployment; the version is what it is called.
+     */
+    EJE_APP_VERSION: /^\d+\.\d+\.\d+$/u.test(process.env.EJE_APP_VERSION ?? '') ? process.env.EJE_APP_VERSION! : 'unknown',
   },
   headers: () =>
     Promise.resolve([

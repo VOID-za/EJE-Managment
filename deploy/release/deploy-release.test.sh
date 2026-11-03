@@ -67,8 +67,9 @@ else echo "git $*" >> "$T/calls"; fi'
   stub runuser '[ "$1" = -u ] && [ "$3" = -- ] || { echo "runuser: bad usage $*" >&2; exit 2; }; user=$2; shift 3; AS_USER=$user exec "$@"'
   # Health of whatever /opt/eje/app points at, unless that release is marked unhealthy.
   stub curl 'name=$(basename "$(readlink -f "$T/app")"); echo "curl $name" >> "$T/calls"
+version=$(cat "$T/releases/$name/.eje-version" 2>/dev/null); [ -e "$T/no-version" ] && version=unknown
 if [ -e "$T/unhealthy-$name" ]; then echo "{\"status\":\"degraded\",\"database\":\"unreachable\",\"build\":{\"commit\":\"$name\"}}"
-else echo "{\"status\":\"ok\",\"backend\":\"postgres\",\"database\":\"reachable\",\"build\":{\"commit\":\"$name\"}}"; fi'
+else echo "{\"status\":\"ok\",\"backend\":\"postgres\",\"database\":\"reachable\",\"build\":{\"commit\":\"$name\",\"version\":\"$version\"}}"; fi'
   stub systemctl 'echo "systemctl $*" >> "$T/calls"
 case "$1" in restart) [ ! -e "$T/fail-restart" ];; is-active) [ ! -e "$T/inactive" ];; *) :;; esac'
   # systemd-run: the build, or an npm script as eje. Plays each outcome by marker.
@@ -77,6 +78,8 @@ case "$all" in
   *"git clone"*)
     echo "systemd-run build" >> "$T/calls"; [ -e "$T/fail-build" ] && exit 1
     mkdir -p "$dir/.next"; printf "%s\n" "$all" | grep -oE "detach [0-9a-f]{40}" | cut -d" " -f2 > "$dir/.sha"
+    printf "%s\n" "$all" | grep -oE "EJE_PREVIOUS_VERSION=[^ ]*" > "$T/previous-seen"
+    cat "$T/stamp-version" 2>/dev/null > "$dir/.eje-version" || echo 1.0.0 > "$dir/.eje-version"; [ -s "$dir/.eje-version" ] || echo 1.0.0 > "$dir/.eje-version"
     [ -e "$T/no-journal" ] || { mkdir -p "$dir/src/db/migrations/meta"; cp "$T/journal.json" "$dir/src/db/migrations/meta/_journal.json"; };;
   *"npm run backup:verify"*) echo "systemd-run verify" >> "$T/calls"; [ ! -e "$T/fail-verify" ];;
   *"npm run backup:key-check"*) echo "systemd-run key-check" >> "$T/calls"; [ ! -e "$T/fail-keycheck" ];;
@@ -290,6 +293,25 @@ that "...serving it, and the database is not touched" "[ \$(serving) = $LIVE ] &
 sandbox; mkdir -p "$T/releases/nonsense"
 expect "--rollback refuses a target that is not a built release" 1 "$(run --rollback nonsense)" 'not a built release'
 that "...nothing switched" "[ \$(serving) = $LIVE ] && [ \$(called 'systemctl restart') = 0 ]"
+
+# ---- the semantic version (VERSION-1) -------------------------------------------------
+sandbox; touch "$T/nothing-pending"
+code=$(EXPECT_PENDING=none run --release "$SHA")
+expect "a release records and announces the version its build was stamped with" 0 "$code" "RELEASED: serving $SHORT, healthy, database reachable, version v1.0.0"
+that "...version=1.0.0 is in the release's record, beside its commit" "grep -qx 'version=1.0.0' '$T/state/release-$SHORT.state'"
+that "...the first versioned release starts from no previous version" "grep -qx 'EJE_PREVIOUS_VERSION=' '$T/previous-seen'"
+sandbox; touch "$T/nothing-pending"
+printf 'version=1.9.3\nhealthy=x\n' > "$T/state/release-aaaaaaa.state"
+printf 'version=1.10.0\n' > "$T/state/release-bbbbbbb.state"
+printf 'version=unknown\n' > "$T/state/release-ccccccc.state"
+echo 1.10.1 > "$T/stamp-version"
+code=$(EXPECT_PENDING=none run --release "$SHA")
+that "the next version starts from the HIGHEST ever recorded (1.10.0 > 1.9.3, a failed one included), so none is reused" "grep -qx 'EJE_PREVIOUS_VERSION=1.10.0' '$T/previous-seen' && grep -qx 'version=1.10.1' '$T/state/release-$SHORT.state'"
+sandbox; touch "$T/nothing-pending" "$T/no-version"
+expect "a build that does not report the version it was given is rolled back, never advertised" 1 "$(EXPECT_PENDING=none run --release "$SHA")" "ROLLED BACK: serving $LIVE"
+that "...it is not recorded healthy, and the live release keeps serving" "! grep -q '^healthy=' '$T/state/release-$SHORT.state' && [ \$(serving) = $LIVE ]"
+sandbox; touch "$T/nothing-pending"; mkdir -p "$T/releases/$SHORT/.next"; echo "$SHA" > "$T/releases/$SHORT/.sha"; echo 1.4.2 > "$T/releases/$SHORT/.eje-version"; with_journal "$T/releases/$SHORT"
+expect "a reused verified build keeps the version it was stamped with" 0 "$(EXPECT_PENDING=none run --release "$SHA")" "version v1.4.2"
 
 # ---- what it never does ---------------------------------------------------------------
 that "never touches the firewall or SSH, and never deletes a release (static)" \

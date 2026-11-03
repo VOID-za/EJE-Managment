@@ -19,9 +19,16 @@ Copy-Item (Join-Path $PSScriptRoot 'deploy-release.sh') (Join-Path $repo 'deploy
 $sha = (& git -C $repo rev-parse HEAD).Trim()
 $short = $sha.Substring(0, 7)
 $key = Join-Path $work 'a key with spaces'; Set-Content $key 'not a key'
-# Public health: answers for whatever commit FAKE_PUBLIC names.
+# The public site: health answers for whatever commit FAKE_PUBLIC names (with
+# version 1.0.0, VERSION-1); the page carries that build and the worker is served,
+# as the update-notice check (REL-UPD-1) reads them.
 $probe = Join-Path $work 'probe.ps1'
-Set-Content $probe -Value 'param($k,$u) "{""status"":""ok"",""database"":""reachable"",""build"":{""commit"":""$env:FAKE_PUBLIC""}}"'
+Set-Content $probe -Value @'
+param($k,$u)
+if ($k -eq 'health') { "{""status"":""ok"",""database"":""reachable"",""build"":{""commit"":""$env:FAKE_PUBLIC"",""version"":""1.0.0""}}" }
+elseif ($u -match '/eje-sw\.js') { 'self.addEventListener("message", e => { if (e.data === "EJE_SKIP_WAITING") self.skipWaiting(); });' }
+else { "<meta name=""eje-build-commit"" content=""$env:FAKE_PUBLIC"" />" }
+'@
 
 # A HASHTABLE, not an array: splatting an array passes '-Sha' as a positional
 # string, and only hashtable splatting binds names to parameters and switches.
@@ -64,7 +71,7 @@ Check 'the wrong host stops before anything runs' ($r.Code -eq 1 -and $r.Log -ma
 # ---- the release: detached, followed, verified from outside ------------------------
 $r = Run @{ Sha = $sha } 'ok' $short
 Check 'release: runs as a DETACHED unit, the start checked on its own' ($r.Calls[0].cmd -match "systemd-run --quiet --unit=eje-release-$short --collect" -and $r.Calls[0].cmd -match '\|\| \{ echo START_FAILED; exit 5; \}' -and $r.Calls[0].cmd -notmatch '&& journalctl')
-Check 'release: RELEASED, confirmed from outside, exit 0' ($r.Code -eq 0 -and $r.Log -match "RELEASED $short - confirmed from outside")
+Check 'release: RELEASED, confirmed from outside, exit 0' ($r.Code -eq 0 -and $r.Log -match "RELEASED $short \(v1\.0\.0\) - confirmed from outside")
 $r = Run @{ Sha = $sha } 'ok' '4634d5d'
 Check 'release: the server says released but the public endpoint disagrees -> exit 2, not success' ($r.Code -eq 2 -and $r.Log -match 'does not confirm')
 $r = Run @{ Sha = $sha } 'stopped'

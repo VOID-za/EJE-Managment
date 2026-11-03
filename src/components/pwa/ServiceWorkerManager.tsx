@@ -21,12 +21,16 @@ import {
   outcomeAfterReload,
   recordAttempt,
   serverBuildOf,
+  serverVersionOf,
+  versionLabel,
   workerUrl,
   type AttemptOutcome,
 } from '@/lib/pwa/app-version';
 
 /** The build this page was served from — stamped by `next.config.ts`, the same value as the page's meta tag. */
 const PAGE_BUILD = process.env.EJE_BUILD_COMMIT ?? 'unknown';
+// VERSION-1: what this page is CALLED. The commit above is still what is compared.
+const PAGE_VERSION = process.env.EJE_APP_VERSION ?? 'unknown';
 
 /** A version check no more often than this, however many events ask for one. */
 const MIN_CHECK_GAP_MS = 10 * 1000;
@@ -111,6 +115,8 @@ const waitForInstalled = (registration: ServiceWorkerRegistration, build: string
 export const ServiceWorkerManager = () => {
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
   const [serverBuild, setServerBuild] = useState<string | null>(null);
+  // VERSION-1: the version the server's build reports, kept with the build it belongs to.
+  const [serverVersion, setServerVersion] = useState<{ readonly build: string; readonly version: string | null } | null>(null);
   // The release "Not now" was said to ('worker' for a waiting worker of an unstamped build).
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<AttemptOutcome>({ kind: 'none' });
@@ -137,9 +143,13 @@ export const ServiceWorkerManager = () => {
     lastCheck.current = now;
     try {
       const response = await fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' });
-      const build = serverBuildOf(await response.json());
+      const body: unknown = await response.json();
+      const build = serverBuildOf(body);
       // A failed read (offline, mid-release restart) keeps what was known.
-      if (build !== null) setServerBuild(build);
+      if (build !== null) {
+        setServerBuild(build);
+        setServerVersion({ build, version: serverVersionOf(body) });
+      }
     } catch {
       // Offline. The next check will ask again.
     }
@@ -211,6 +221,9 @@ export const ServiceWorkerManager = () => {
   const waitingBuild = waiting === null ? null : buildOfWorkerUrl(waiting.scriptURL);
   const target = isNewRelease(PAGE_BUILD, serverBuild) ? serverBuild : waiting !== null && waitingBuild !== PAGE_BUILD ? waitingBuild : null;
   const offered = target !== null || (waiting !== null && waitingBuild === null);
+  // VERSION-1: each side as people know it — the version, or the short commit when a build has none.
+  const pageLabel = versionLabel(PAGE_VERSION, PAGE_BUILD);
+  const targetLabel = target === null ? null : versionLabel(serverVersion !== null && serverVersion.build === target ? serverVersion.version : null, target);
 
   // "Not now", said on another page of this tab within the hour, still holds.
   useEffect(() => {
@@ -266,7 +279,7 @@ export const ServiceWorkerManager = () => {
       >
         <p>
           <strong className="font-semibold">EJE has been updated.</strong> You are now on version{' '}
-          <span className="font-mono">{PAGE_BUILD}</span>.
+          <span className="font-mono" data-testid="app-updated-version">{pageLabel}</span>.
         </p>
         <Button type="button" size="sm" variant="secondary" onClick={() => setOutcome({ kind: 'none' })}>
           OK
@@ -285,14 +298,16 @@ export const ServiceWorkerManager = () => {
         data-testid="app-update-available"
         data-current={PAGE_BUILD}
         data-target={target ?? ''}
+        data-current-version={pageLabel}
+        data-target-version={targetLabel ?? ''}
       >
         <div className="min-w-0">
           <p className="text-base font-semibold">A new version of EJE is available.</p>
           <p>
             {target !== null ? (
               <>
-                Version <span className="font-mono">{target}</span> is live; this screen is still version{' '}
-                <span className="font-mono">{PAGE_BUILD}</span>.{' '}
+                Version <span className="font-mono" data-testid="app-update-target-version">{targetLabel}</span> is live; this
+                screen is still version <span className="font-mono" data-testid="app-update-current-version">{pageLabel}</span>.{' '}
               </>
             ) : null}
             Update now reloads EJE on the new version. Anything already saved is kept.

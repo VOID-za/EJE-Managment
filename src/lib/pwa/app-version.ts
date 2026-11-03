@@ -27,6 +27,13 @@
  * the reload, so the page that comes back can say whether it is now the
  * release it was asked for — and say so once.
  *
+ * WHAT PEOPLE ARE SHOWN (VERSION-1, 3 November 2026): a semantic version —
+ * "v1.4.0" — given to every release by the release itself. The COMMIT still
+ * decides whether a release is new (two builds of the same version cannot be
+ * mistaken for one another, and nothing about detection changed); the version
+ * is only what the bar calls each side. A build without one (an older release,
+ * a developer's build) is shown by its short commit, as before.
+ *
  * Pure functions over strings and a `Storage`, so all of it is unit-tested
  * without a browser; `ServiceWorkerManager` wires it to one.
  */
@@ -75,6 +82,21 @@ export const serverBuildOf = (body: unknown): string | null => {
   const commit = build?.commit;
   return typeof commit === 'string' && isKnownBuild(commit) ? commit : null;
 };
+
+/** A semantic version, as a release stamps it ('1.4.0'). Anything else is no version. */
+export const isKnownVersion = (version: string | null | undefined): version is string =>
+  typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version);
+
+/** The version `/api/health` reports, or null when it reports none. */
+export const serverVersionOf = (body: unknown): string | null => {
+  if (typeof body !== 'object' || body === null) return null;
+  const version = (body as { build?: { version?: unknown } }).build?.version;
+  return typeof version === 'string' && isKnownVersion(version) ? version : null;
+};
+
+/** What a person is shown for a release: "v1.4.0", or its short commit when it has no version. */
+export const versionLabel = (version: string | null | undefined, build: string | null | undefined): string =>
+  isKnownVersion(version) ? `v${version}` : isKnownBuild(build) ? build.slice(0, 7) : 'unknown';
 
 export interface UpdateAttempt {
   readonly from: string;

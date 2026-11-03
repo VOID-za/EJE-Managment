@@ -244,8 +244,12 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      # VERSION-1: this build is "release A" for the update check below, so it
+      # carries a semantic version the way a real release does (B gets the next).
       - name: Production build
         run: npm run build
+        env:
+          EJE_APP_VERSION: 1.0.0
 
       # Started as a background process and waited for through the health
       # route, which answers only once the process can serve: `sleep` would be
@@ -431,6 +435,8 @@ jobs:
       # that this step stays here.
       - name: Update notice across two releases
         run: node scripts/update-check.mjs
+        env:
+          EJE_APP_VERSION: 1.0.0
 
       # The screenshots and the server log, for a failure somebody has to
       # diagnose from a transcript rather than a browser.

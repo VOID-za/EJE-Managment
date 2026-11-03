@@ -485,6 +485,8 @@ const SystemPanel = ({
         />
         <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
           {[
+            // VERSION-1: the release's name, and the commit that identifies it.
+            ['Version', process.env.EJE_APP_VERSION === undefined || process.env.EJE_APP_VERSION === 'unknown' ? 'not versioned' : `v${process.env.EJE_APP_VERSION}`],
             ['Commit', process.env.EJE_BUILD_COMMIT ?? 'unknown'],
             ['Built', process.env.EJE_BUILD_TIME ?? 'unknown'],
             ['Mode', process.env.NODE_ENV],

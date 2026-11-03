@@ -11,6 +11,15 @@
 #   bash deploy-release.sh --rollback [<release>] back to the recorded previous release
 #   bash deploy-release.sh --status               read-only: what is serving, what was recorded
 #
+# THE VERSION (VERSION-1, 3 November 2026). Every release gets the next semantic
+# version without anybody choosing it: the highest `version=` ever recorded in
+# $STATE_DIR (failed and rolled-back releases included, so none is reused), and
+# the step the commits since the live release ask for — worked out inside the
+# release by scripts/release/next-version.mjs and stamped into the build
+# (EJE_APP_VERSION). It is recorded beside the commit, and the health gate holds
+# the release to it. EJE_RELEASE_BUMP=minor|major may raise the step, never lower
+# it. A release that never became healthy is never what the site reports.
+#
 # Run as root on the VPS. It is the commands in docs/deploy-next-release.md
 # ("Release de0d9b6"), in that order, each one checked before the next runs.
 #
@@ -212,6 +221,12 @@ record "$SHORT" previous "$LIVE"
 record "$SHORT" started "$(date -u +%FT%TZ)"
 say "release $SHA; the rollback target is $LIVE"
 
+# THE VERSION'S STARTING POINT: the highest ever recorded (sort -V: 1.10.0 > 1.9.0),
+# and the commit the step is measured from (what is live now).
+previous_version=$(sed -n 's/^version=//p' "$STATE_DIR"/release-*.state 2>/dev/null \
+  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+live_sha=$(release_head "$LIVE")
+
 # 1. BUILD, beside the live release. Never in /opt/eje/app.
 if [ -d "$RELEASE/.next" ] && [ "$(release_head "$RELEASE")" = "$SHA" ]; then
   say "1/6 build: reusing the verified build in $RELEASE"
@@ -221,17 +236,27 @@ else
   systemd-run --quiet --collect --pipe --wait --uid=eje --gid=eje \
     --working-directory="$RELEASE" -p MemoryMax=4G -p Nice=10 -p CPUWeight=20 -p PrivateTmp=yes \
     --setenv=HOME=/opt/eje --setenv=EJE_BUILD_COMMIT="$SHORT" \
+    --setenv=EJE_PREVIOUS_VERSION="$previous_version" --setenv=EJE_VERSION_BASE="$live_sha" \
+    --setenv=EJE_RELEASE_BUMP="${EJE_RELEASE_BUMP:-}" \
     /bin/bash -c "set -eo pipefail
       git clone --quiet --no-checkout $REPO_URL .
       git checkout --quiet --detach $SHA
       test \"\$(git rev-parse HEAD)\" = $SHA
+      if [ -f scripts/release/next-version.mjs ]; then
+        node scripts/release/next-version.mjs --previous \"\$EJE_PREVIOUS_VERSION\" --from \"\$EJE_VERSION_BASE\" --to $SHA > .eje-version
+      else echo unknown > .eje-version; fi
       npm ci --no-audit --no-fund
-      npm run build" \
+      EJE_APP_VERSION=\"\$(cat .eje-version)\" npm run build" \
     || stop "the build failed in $RELEASE (left there to inspect). The live release was not touched."
   [ "$(release_head "$RELEASE")" = "$SHA" ] && [ -d "$RELEASE/.next" ] \
     || stop "the build finished but $RELEASE is not a build of $SHA. The live release was not touched."
 fi
 record "$SHORT" built yes
+# The version this build was stamped with — a reused build keeps the one it was given.
+VERSION=$(tr -d '[:space:]' < "$RELEASE/.eje-version" 2>/dev/null)
+printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || VERSION=unknown
+record "$SHORT" version "$VERSION"
+say "    version: v$VERSION (after ${previous_version:-none}; commit $SHORT)"
 
 # 2. BACK UP, WITH THE NEW CODE, AND PROVE THE BACKUP RESTORES.
 say "2/6 backup: backup, verify, key check, restore test"
@@ -341,10 +366,13 @@ fi
 
 # 6. THE HEALTH GATE — and automatic rollback if it does not pass.
 say "6/6 health: waiting for $SHORT, status ok, database reachable"
-if wait_healthy_as "$SHORT"; then
+# AND IT MUST SAY THE VERSION IT WAS GIVEN: a build that reports another (or none)
+# is not the release that was recorded, and is rolled back like any unhealthy one.
+version_reported() { [ "$VERSION" = unknown ] || health | grep -q "\"version\":\"$VERSION\""; }
+if wait_healthy_as "$SHORT" && version_reported; then
   record "$SHORT" healthy "$(date -u +%FT%TZ)"
   say ""
-  say "RELEASED: serving $SHORT, healthy, database reachable. The previous release $(basename "$LIVE") is kept as the rollback target:"
+  say "RELEASED: serving $SHORT, healthy, database reachable, version v$VERSION. The previous release $(basename "$LIVE") is kept as the rollback target:"
   say "  bash deploy-release.sh --rollback"
   exit 0
 fi
