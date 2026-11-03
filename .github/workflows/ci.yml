@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (9569c85) against a database at 0048
+      - name: Rollback compatibility — the live release (6ec5655) against a database at 0049
         run: bash scripts/release/rollback-compat.sh
 
   browser:

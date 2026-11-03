@@ -348,6 +348,116 @@ await check('Closed Jobs shows it as a Delivery Note — filterable, and apart f
   await noPageOverflow('Closed Jobs');
 });
 
+/* ---- Follow-up (3 November 2026): the Test & Repair delivery-note photo ---- */
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+let repair = null;
+await check('Test & Repair: Take Photo (camera) and Choose Photo; a chosen photo is previewed, a PDF refused; the job is raised with it', async () => {
+  await as('Christene van Niekerk');
+  await go('/jobs/new');
+  await page.getByLabel('Job type').selectOption('test_and_repair');
+  const block = page.getByTestId('reference-photo-block');
+  await block.waitFor({ timeout: 15000 });
+  if ((await block.getByText('Take Photo').count()) !== 1 || (await block.getByText('Choose Photo').count()) !== 1) fail('the two buttons are not both there');
+  if ((await page.getByTestId('reference-photo-take').getAttribute('capture')) !== 'environment') fail('Take Photo does not ask for the camera');
+  if ((await page.getByTestId('reference-photo-choose').getAttribute('capture')) !== null) fail('Choose Photo asks for the camera');
+  await page.getByTestId('reference-photo-choose').setInputFiles({ name: 'order.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 not a photo') });
+  await page.getByTestId('reference-photo-error').waitFor({ timeout: 5000 });
+  await page.getByTestId('reference-photo-choose').setInputFiles({ name: 'delivery-note.png', mimeType: 'image/png', buffer: PNG_BYTES });
+  await page.getByTestId('reference-photo-item').filter({ hasText: 'delivery-note.png' }).waitFor({ timeout: 5000 });
+  const first = async (labelText) => {
+    const field = page.getByLabel(labelText, { exact: false }).first();
+    const values = await field.locator('option').evaluateAll((options) => options.map((option) => option.value).filter(Boolean));
+    await field.selectOption(values[0]);
+  };
+  await first('Customer');
+  await page.waitForTimeout(300);
+  if ((await page.getByLabel('Site', { exact: false }).count()) > 0 && (await page.getByTestId('job-site').count()) === 0) await first('Site');
+  await page.waitForTimeout(300);
+  await first('Customer email recipient');
+  const technician = page.getByLabel('Primary technician');
+  if ((await technician.count()) > 0) await technician.selectOption({ label: 'Sipho Mahlangu' }).catch(() => {});
+  await noPageOverflow('New Job — Test & Repair');
+  await press(page.getByRole('button', { name: 'Create job' }));
+  await page.waitForURL('**/jobs/EJE-**', { timeout: 30000 });
+  repair = page.url().split('/').pop().split('?')[0];
+  const job = (await call('GET', `/api/jobs/${repair}`)).json.data.view.job;
+  const photo = job.photos.find((item) => item.purpose === 'delivery_note_reference');
+  if (photo === undefined || photo.visibility !== 'internal') fail(`stored as ${JSON.stringify(photo)}`);
+  await page.getByTestId('reference-photo-card').waitFor({ timeout: 20000 });
+  return repair;
+});
+
+await check('the technician opening the job sees the delivery-note photo; it is never on the job card', async () => {
+  if (repair === null) fail('no Test & Repair job');
+  await as('Sipho Mahlangu');
+  await go(`/jobs/${repair}`);
+  await page.getByTestId('reference-photo-card').waitFor({ timeout: 20000 });
+  const src = await page.getByTestId('reference-photo-link').first().getAttribute('href');
+  const image = await call('GET', src);
+  if (image.status !== 200) fail(`the photo answered ${image.status}`);
+  const job = (await call('GET', `/api/jobs/${repair}`)).json.data.view.job;
+  // The internal photo cannot be turned customer-facing through the API either.
+  const id = job.photos.find((item) => item.purpose === 'delivery_note_reference').id;
+  const shown = await call('POST', `/api/jobs/${job.id}/set_media_visibility`, { attachmentId: id, visibility: 'customer_facing' });
+  if (shown.status === 200) fail('the reference photo was made customer-facing');
+  await noPageOverflow('the Test & Repair job');
+});
+
+/* ---- Follow-up: the simpler Delivery Note -------------------------------- */
+let siteless = null;
+await check('Delivery Note: no site needed, no order or reference number; raised without a site', async () => {
+  await as('Christene van Niekerk');
+  await go('/jobs/new');
+  await page.getByLabel('Job type').selectOption('delivery_note');
+  await page.getByTestId('delivery-note-details').waitFor({ timeout: 15000 });
+  const customer = page.getByLabel('Customer', { exact: false }).first();
+  const values = await customer.locator('option').evaluateAll((options) => options.map((option) => option.value).filter(Boolean));
+  await customer.selectOption(values[0]);
+  await page.waitForTimeout(300);
+  const site = page.getByTestId('job-site-optional');
+  await site.waitFor({ timeout: 10000 });
+  if ((await site.inputValue()) !== '') fail('a site was chosen for the office');
+  if ((await page.getByLabel('Customer order number').count()) !== 0 || (await page.getByLabel('Reference number').count()) !== 0) fail('order or reference number is still asked');
+  if ((await page.getByTestId('reference-photo-block').count()) !== 0) fail('the Test & Repair photo is offered on a Delivery Note');
+  const recipient = page.getByLabel('Customer email recipient');
+  const contacts = await recipient.locator('option').evaluateAll((options) => options.map((option) => option.value).filter(Boolean));
+  await recipient.selectOption(contacts[0]);
+  await page.getByTestId('delivery-date').fill(today);
+  await noPageOverflow('New Job — Delivery Note without a site');
+  await press(page.getByRole('button', { name: 'Create job' }));
+  await page.waitForURL('**/jobs/EJE-**', { timeout: 30000 });
+  siteless = page.url().split('/').pop().split('?')[0];
+  const job = (await call('GET', `/api/jobs/${siteless}`)).json.data.view;
+  if (job.job.siteId !== null || job.siteRecorded !== false || job.job.orderNumber !== '' || job.job.referenceNumber !== '') fail(`raised as ${JSON.stringify({ site: job.job.siteId, order: job.job.orderNumber })}`);
+  return siteless;
+});
+
+await check('Delivery Note completion: no Additional Charges section; parts, collection and issue still work without a site', async () => {
+  if (siteless === null) fail('no Delivery Note');
+  await go(`/jobs/${siteless}?continue=1`);
+  await page.getByRole('button', { name: /Add part/u }).first().waitFor({ timeout: 20000 });
+  if ((await page.getByText('Additional charges', { exact: true }).count()) !== 0) fail('the Additional Charges section is shown');
+  const job = (await call('GET', `/api/jobs/${siteless}`)).json.data.view.job;
+  const charge = await call('POST', `/api/jobs/${job.id}/add_additional_charge`, { description: 'Courier', amount: 25000 });
+  if (charge.status !== 422) fail(`a charge answered ${charge.status}`);
+  for (const [path, body] of [
+    ['add_part', { partNumber: 'LU-200', description: 'Loan servo drive', quantity: 1, unitPrice: 0, comment: 'Loan unit' }],
+    ['set_collection', { courier: false, waybillNumber: '' }],
+    ['start_signature', {}],
+    ['capture_signature', { customerName: 'Thabo', customerSurname: 'Dlamini', strokeData: 'M10,10 L60,40' }],
+  ]) {
+    const answer = await call('POST', `/api/jobs/${job.id}/${path}`, body);
+    if (answer.status !== 200) fail(`${path} answered ${answer.status} ${JSON.stringify(answer.json?.error ?? '')}`);
+  }
+  const issued = await call('POST', `/api/jobs/${job.id}/issue`, {});
+  if (issued.status !== 200) fail(`issue answered ${issued.status} ${JSON.stringify(issued.json?.error ?? '')}`);
+  const closed = (await call('GET', `/api/jobs/${siteless}`)).json.data.view.job;
+  if (closed.status !== 'closed') fail(`the note is ${closed.status}`);
+  await go(`/jobs/${siteless}`);
+  await page.getByTestId('status-delivery-note').first().waitFor({ timeout: 20000 });
+  await noPageOverflow('the site-less Delivery Note');
+});
+
 await check('no page errors anywhere in the run', async () => {
   if (pageErrors.length > 0) fail(pageErrors.slice(0, 3).join(' | '));
 });

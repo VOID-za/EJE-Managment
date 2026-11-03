@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 
 /**
  * The two rollback phases agree about which document holds which state.
@@ -53,5 +53,14 @@ describe('the rollback-compatibility fixture', () => {
       [...block.matchAll(/(\w+): '([0-9a-f-]+)'/gu)].map((match) => [match[1], match[2]]),
     );
     expect(copied).toEqual(ROLLBACK_0048);
+  });
+
+  it('copies the 0049 rows exactly too', () => {
+    const probe = readFileSync('scripts/release/rollback-probe.db.test.ts', 'utf8');
+    const block = /const BATCH_0049 = \{([\s\S]*?)\} as const;/u.exec(probe)?.[1] ?? '';
+    const copied = Object.fromEntries(
+      [...block.matchAll(/(\w+): '([0-9a-f-]+)'/gu)].map((match) => [match[1], match[2]]),
+    );
+    expect(copied).toEqual(ROLLBACK_0049);
   });
 });

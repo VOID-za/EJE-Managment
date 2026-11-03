@@ -79,3 +79,13 @@ export const ROLLBACK_0048 = {
   latePeriod: '00000000-0000-4000-8000-0000000008b2',
   standbyWeek: '2027-04-05',
 } as const;
+
+/**
+ * The rows only the release after 6ec5655 can write (migration 0049): a
+ * Delivery Note with NO site, and the office's delivery-note reference photo
+ * on phase 1's Test & Repair job. Copied into the probe as `BATCH_0049`.
+ */
+export const ROLLBACK_0049 = {
+  siteLessNote: '00000000-0000-4000-8000-0000000009a1',
+  referencePhoto: '00000000-0000-4000-8000-0000000009b2',
+} as const;

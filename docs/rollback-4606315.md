@@ -113,3 +113,16 @@ Released in `6ec5655` on 3 November 2026 at 12:15 UTC. **Backup before 0048:** `
 | **Day swaps between the main/helper rotation pair** | Approved swaps stay in place. New such swaps are refused again (the old defect). | The defect returns until rolled forward. |
 
 **Recommendation: forward-fix only once a Delivery Note exists.** If an application rollback is unavoidable, run the steps in §5 with `-Rollback` (the recorded target is `9569c85`). First list the Delivery Notes with `select job_number, status from jobs where job_type_code = 'delivery_note';` and tell the office not to open or edit them until the system is rolled forward. A database restore follows §6 and loses everything since the pre-0048 backup.
+
+## 9. Migration 0049 — the Test & Repair photo and the simpler Delivery Note (3 November 2026)
+
+**What 0049 changes (additive):** `jobs.site_id` may be null, but only on a Delivery Note (check `jobs_site_required_unless_delivery_note`). `job_media.purpose` is added (`''` or `delivery_note_reference`), and the database keeps a reference photo an internal photo (`job_media_reference_photo_internal`).
+
+**The rollback target after this release is `6ec5655`.** The CI rollback check runs `6ec5655`'s own code against a database at 0049 holding a site-less Delivery Note and a reference photo. It finds:
+
+| 0049 data | Under `6ec5655` | Risk while rolled back |
+|---|---|---|
+| **A Delivery Note without a site** | The row is read, but `6ec5655` cannot build its job view. | The job's screen would not open. Lists show it with no site. **Fix forward once any site-less Delivery Note exists.** |
+| **A delivery-note reference photo** | Read as an ordinary **internal** photo, so it stays off `6ec5655`'s job card too. The purpose survives a save, and making it customer-facing is refused by the database. | Only the label is lost. |
+
+Recovery is the same as §5 and §6: `stage-release.ps1 -Rollback` returns the code only, and a database restore goes into a new database and loses everything since the pre-0049 backup.

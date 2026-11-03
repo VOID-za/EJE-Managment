@@ -697,6 +697,21 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs
 | T12 | Closed Jobs → Status: Delivery Note, then Invoiced | The Delivery Note is listed as Delivery Note, never as Invoiced; no amount anywhere | `office-lifecycle.test.ts` | yes | NOT TESTED |
 | T13 | Office: take a job through Handled → Awaiting PO → Awaiting Invoice No → Invoiced | It leaves the Notifications queues (there is no Invoiced tab) and appears in Closed Jobs with "Purchase Order:…", its invoice number, signed PDF and attachments | `office-lifecycle.test.ts`, `office-lifecycle-api.test.ts` | `tester-fixes-check.mjs`, `workflow-e2e.mjs` | NOT TESTED |
 
+## U. Test & Repair delivery-note photo, and the simpler Delivery Note (3 November 2026)
+
+Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs` (17/17 at each size on the development PC before release; in CI). **The camera has not been opened on a real phone or tablet**: in the browser check, *Take Photo* is checked for asking for the camera (`capture="environment"`) and the photo is supplied as a file.
+
+| # | Do this | Pass looks like | Automated | Browser ×3 | Physical |
+|---|---|---|---|---|---|
+| U1 | Office, on a **phone**: New job → Test & Repair → **Take Photo** of a delivery note | The rear camera opens; the photo appears in the list with a preview; *Remove* takes it off | `tr-photo-delivery-note.test.ts` | file supplied; camera request checked | NOT TESTED — **the camera** |
+| U2 | On the **rugged tablet**: the same with Take Photo, then **Choose Photo** from the gallery | Both work; a PDF or other non-photo is refused with a message | API test (bytes sniffed, size limit) | yes | NOT TESTED |
+| U3 | Create the job and reopen it | "Delivery note photo (internal reference)" is the first block on the job; the photo opens | yes | yes | NOT TESTED |
+| U4 | As the assigned technician, open the job (before and after accepting) | The same block and photo are there | yes | yes | NOT TESTED |
+| U5 | Edit the job's details; complete, sign and issue the job card | The photo is still on the job; it is **not** on the job card PDF; the Photos tab shows it as "Delivery note — internal reference" with no *Show to customer* | yes (model and document), database check | yes | NOT TESTED |
+| U6 | New job → Delivery Note | Site shows "No site" and is optional; no Customer order number or Reference number; the job is raised without a site and its PDF has no site line | yes | yes | NOT TESTED |
+| U7 | A Delivery Note with a site chosen | The site is kept | yes | — | NOT TESTED |
+| U8 | Complete a Delivery Note | No Additional Charges section; parts, collection, signature and issue as before | yes (a charge is refused by the server and the database) | yes | NOT TESTED |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -714,6 +729,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | The tester’s critical fixes | R1–R10 | #97–#108 |
 | The next critical batch | S1–S13 | #109–#120 |
 | The physical acceptance follow-up | T1–T13 | #121–#127 |
+| Test & Repair photo; simpler Delivery Note | U1–U8 | #128, #129 |
 
 ## Automated post-deployment verification — 30 October 2026, against `e54f7d3`
 

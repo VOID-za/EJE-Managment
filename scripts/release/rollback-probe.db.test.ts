@@ -17,7 +17,10 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
-// Each of these exists in 9569c85 (checked against that commit).
+// Each of these exists in 6ec5655 (checked against that commit).
+import { loadJobView } from '@/application/job-view';
+import { readRepositories } from '@/data/backend';
+import { documentPhotos } from '@/lib/job-card/model';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresNotificationRepository } from '@/data/postgres/notification-repository';
 import { PostgresCustomerEmailRepository } from '@/data/postgres/integration-repositories';
@@ -26,13 +29,13 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (9569c85), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (6ec5655), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 9569c85, and it does: each of these was checked against that commit.
+ * in 6ec5655, and it does: each of these was checked against that commit.
  *
- * The database was migrated to the newest migration THIS release ships (0048)
+ * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
  * the migrations have run, does the old code still read and write — the
  * library, jobs, attendance, timesheets, corrections, monthly submissions and
@@ -46,8 +49,9 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
  * submissions and the activity retention guard (0046), which it knows — beside
  * the apprentice role, customers' rate option and Custom Rates, a document
  * chosen for the customer email, an email's extra attachments and the standby
- * day swaps (0047), which it knows — beside the Delivery Note, superseded
- * timesheet submissions and a Senior Tech on standby (0048), which it has
+ * day swaps (0047), and the Delivery Note, superseded timesheet submissions
+ * and a Senior Tech on standby (0048), which it knows — beside a Delivery Note
+ * with no site and the Test & Repair delivery-note photo (0049), which it has
  * never heard of?
  *
  * Skipped unless RELEASE_ROLLBACK_PHASE=probe, so it never runs by accident.
@@ -99,6 +103,12 @@ const INTEGRATIONS = {
   outbox: '00000000-0000-4000-8000-0000000006c1',
 } as const;
 
+// A copy of ROLLBACK_0049 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0049 = {
+  siteLessNote: '00000000-0000-4000-8000-0000000009a1',
+  referencePhoto: '00000000-0000-4000-8000-0000000009b2',
+} as const;
+
 // A copy of ROLLBACK_0048 in `src/ops/release/rollback-fixture.ts`.
 const BATCH_0048 = {
   deliveryNoteJob: '00000000-0000-4000-8000-0000000008a1',
@@ -143,15 +153,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 9569c85 shipped up to 0047; this release adds 0048.
-    expect(shipped).toHaveLength(48);
-    expect(shipped.at(-1)).toBe('0047_batch_2_november');
-    expect(shipped).not.toContain('0048_acceptance_delivery_notes');
+    // 6ec5655 shipped up to 0048; this release adds 0049.
+    expect(shipped).toHaveLength(49);
+    expect(shipped.at(-1)).toBe('0048_acceptance_delivery_notes');
+    expect(shipped).not.toContain('0049_tr_photo_delivery_note_site');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0048 applied beyond what the live release ships.
-    expect(applied).toBe(49);
+    // 0049 applied beyond what the live release ships.
+    expect(applied).toBe(50);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -443,28 +453,42 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
   });
 
   /*
-   * 0048, WHICH THIS CODE HAS NEVER HEARD OF — and WHAT IT MAKES OF EACH ROW,
-   * because that is what a rollback would do (docs/rollback-4606315.md, 0048).
+   * 0048, WHICH THIS CODE KNOWS (6ec5655 added it): the Delivery Note with its
+   * part comment, the superseded submission hidden, the Senior Tech on standby.
    */
-  it('meets the 0048 rows: reads them without error, but ignores what they mean — and re-saving a Delivery Note drops its comments', async () => {
+  it('reads the 0048 rows as what they are', async () => {
     const B = BATCH_0048;
-    // A Delivery Note: the row is read, but this code has no such job type.
     const jobs = new PostgresJobRepository(db);
     const note = await jobs.findById(asJobId(B.deliveryNoteJob));
     expect(note?.jobType).toBe('delivery_note');
-    expect(note?.parts.map((part) => part.partNumber)).toEqual(['LU-200']);
-    expect('deliveryDate' in note!).toBe(false);
-    expect(getJobTypeDefinition('delivery_note' as JobTypeCode)).toBeUndefined();
-    // Re-saved by this code while still being completed, the part comments are LOST (it rewrites the lines without them).
-    await jobs.save(note!);
-    const [line] = await db.execute<{ comment: string }>(sql`select comment from job_parts where job_id = ${B.deliveryNoteJob}`);
-    expect(line?.comment).toBe('');
-    const [date] = await db.execute<{ delivery_date: string | null }>(sql`select delivery_date::text from jobs where id = ${B.deliveryNoteJob}`);
-    expect(date?.delivery_date).toBe('2027-02-21');
-    // Superseded timesheets: this code still lists the superseded one as sent.
+    expect(getJobTypeDefinition('delivery_note' as JobTypeCode)?.label).toBe('Delivery Note');
+    expect(note?.parts.map((part) => (part as { comment?: string }).comment)).toEqual(['Loan unit']);
     const sent = await new PostgresAttendanceRepository(db).listSubmittedPeriods(asUserId(IDS.technician), '2027-01-01', '2027-02-28');
-    expect(sent.map((period) => period.id).sort()).toEqual([B.earlyPeriod, B.latePeriod].sort());
-    // A Senior Tech in a main place: read, but this code would never have allowed it.
+    expect(sent.map((period) => period.id)).toEqual([B.latePeriod]);
     expect((await new PostgresStandbyRepository(db).findWeek(B.standbyWeek))?.assignments.find((place) => place.position === 'main')?.userId).toBe(IDS.master);
+  });
+
+  /*
+   * 0049, WHICH THIS CODE HAS NEVER HEARD OF — and what it makes of each row
+   * (docs/rollback-4606315.md §9).
+   */
+  it('meets the 0049 rows: the site-less Delivery Note is read but has no job view; the reference photo stays internal and off the job card', async () => {
+    const B = BATCH_0049;
+    const jobs = new PostgresJobRepository(db);
+    // A Delivery Note with no site: the row reads, but this code cannot build the job's view (its screen would not open).
+    const note = await jobs.findById(asJobId(B.siteLessNote));
+    expect(note?.jobType).toBe('delivery_note');
+    expect(note?.siteId ?? null).toBeNull();
+    expect(await loadJobView(readRepositories(db), note!.jobNumber)).toBeNull();
+    // The reference photo: read as an ordinary INTERNAL photo — so never on this code's job card either.
+    const repair = (await jobs.list()).find((candidate) => candidate.jobType === 'test_and_repair')!;
+    const photo = repair.photos.find((item) => item.id === B.referencePhoto);
+    expect(photo?.visibility).toBe('internal');
+    expect(documentPhotos(repair).some((item) => item.id === B.referencePhoto)).toBe(false);
+    // Saved by this code, the photo keeps its purpose; made customer-facing by it, the database refuses.
+    await jobs.save(repair);
+    const [kept] = await db.execute<{ purpose: string }>(sql`select purpose from job_media where id = ${B.referencePhoto}`);
+    expect(kept?.purpose).toBe('delivery_note_reference');
+    await expect(db.execute(sql`update job_media set visibility = 'customer_facing' where id = ${B.referencePhoto}`)).rejects.toThrow();
   });
 });

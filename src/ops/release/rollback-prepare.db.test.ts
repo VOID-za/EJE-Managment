@@ -9,8 +9,8 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
-import { asLineItemId } from '@/domain';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
 import { STANDBY_POSITIONS, type StandbyWeek } from '@/domain';
@@ -449,5 +449,32 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       (select comment from job_parts where id = ${B.partLine}) as comment,
       (select count(*) from timesheet_periods where superseded_at is not null)::text as superseded`);
     expect(state).toEqual({ comment: 'Loan unit', superseded: '1' });
+  });
+
+  /*
+   * 0049, which the live release (6ec5655) has never heard of: a Delivery Note
+   * raised WITHOUT a site, and a Test & Repair job carrying the office's
+   * internal delivery-note reference photo.
+   */
+  it('writes the rows only this release can (0049): a site-less Delivery Note, a delivery-note reference photo', async () => {
+    const B = ROLLBACK_0049;
+    const at = '2027-02-22T08:00:00.000Z';
+    const jobs = new PostgresJobRepository(db);
+    await jobs.save(jobFixture((await jobs.allocateJobNumber()).jobNumber, {
+      id: asJobId(B.siteLessNote), jobType: 'delivery_note', status: 'completion', primaryTechnicianId: null, siteId: null, deliveryDate: '2027-02-22',
+    }));
+    // On phase 1's one Test & Repair job (the probe counts exactly one).
+    const repair = (await jobs.list()).find((candidate) => candidate.jobType === 'test_and_repair')!;
+    await jobs.save({
+      ...repair,
+      photos: [{
+        id: asAttachmentId(B.referencePhoto), kind: 'photo', visibility: 'internal', purpose: 'delivery_note_reference', fileName: 'delivery-note.jpg',
+        caption: 'Delivery note (reference)', storageKey: 'uploads/rollback-dn', uploadedAt: at, uploadedBy: asUserId(IDS.coordinator), sizeBytes: 10, checksumSha256: null, provenance: 'genuine',
+      }],
+    });
+    const [state] = await db.execute<{ site: string | null; purpose: string }>(sql`select
+      (select site_id::text from jobs where id = ${B.siteLessNote}) as site,
+      (select purpose from job_media where id = ${B.referencePhoto}) as purpose`);
+    expect(state).toEqual({ site: null, purpose: 'delivery_note_reference' });
   });
 });
