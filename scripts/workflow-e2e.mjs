@@ -573,7 +573,12 @@ await step('the Inbox holds EJE-1065 for office handling, and Mark handled moves
   if ((await page.getByRole('tab', { name: /^Invoiced/ }).count()) !== 0) throw new Error('the office queue still has an Invoiced tab');
   const card = page.getByTestId('office-handling-EJE-1065');
   await card.waitFor({ timeout: 15000 });
-  await card.getByRole('button', { name: 'Mark handled' }).click();
+  // PO-FLOW-1: EJE-1065 was raised with an order number, which handling would
+  // record as its PO. This walks the Awaiting PO path, so the office says the
+  // order number is not the PO — the queue offers exactly that.
+  const decline = card.getByTestId('queue-mark-handled-await-po-EJE-1065');
+  if ((await decline.count()) > 0) await decline.click();
+  else await card.getByRole('button', { name: 'Mark handled', exact: true }).click();
   await card.waitFor({ state: 'detached', timeout: 15000 });
 
   await page.getByRole('tab', { name: /^Awaiting PO/ }).click();
