@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -502,5 +502,28 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       submittedAt: at, submittedBy: tech,
     });
     expect(month?.timesheetPeriodId).toBeNull();
+  });
+
+  it('writes the rows only this release can (0051): a Lathe checklist chosen, a Fail before its note, readings in a row’s blanks', async () => {
+    const B = ROLLBACK_0051;
+    const tech = asUserId(IDS.technician);
+    const jobs = new PostgresJobRepository(db);
+    const answer = (itemId: string, over: { choice: 'pass' | 'fail'; fieldValues?: Record<string, string> }) => ({
+      itemId, choice: over.choice, yesNo: null, measurement: null, text: '', notes: '',
+      fieldValues: over.fieldValues ?? {}, photos: [], answeredAt: '2027-10-01T08:00:00.000Z', answeredBy: tech,
+    });
+    const job = async (id: string, jobType: 'service' | 'installation', checklist: string, kind: string, responses: ReturnType<typeof answer>[]) => {
+      const allocated = await jobs.allocateJobNumber();
+      await jobs.save(jobFixture(allocated.jobNumber, {
+        id: asJobId(id), jobType, status: 'in_progress', primaryTechnicianId: tech,
+        checklist: { templateId: checklist as never, templateVersion: '1.0', checklistKind: kind, responses, completedAt: null, completedBy: null },
+      }));
+    };
+    await job(B.latheJob, 'service', B.latheChecklist, 'service_lathe', [answer(B.handwrittenRow, { choice: 'fail' })]);
+    await job(B.installationJob, 'installation', B.installationChecklist, 'installation', [
+      answer(B.voltageRow, { choice: 'pass', fieldValues: { r: '401', s: '399', t: '400' } }),
+    ]);
+    const [stored] = await db.execute<{ kind: string }>(sql`select checklist_kind as kind from checklist_instances where job_id = ${B.latheJob}`);
+    expect(stored?.kind).toBe('service_lathe');
   });
 });

@@ -103,3 +103,20 @@ export const ROLLBACK_0050 = {
   attendanceOnlyMonth: '00000000-0000-4000-8000-000000000ab1',
   month: '2027-03',
 } as const;
+
+/**
+ * The rows only the release after f693747 can write (migration 0051, CHK-SRC):
+ * a Service job on the Lathe checklist with the choice recorded and a Fail
+ * tapped before its note, and an Installation job with readings typed into a
+ * row's printed blanks. Copied into the probe as `BATCH_0051`.
+ */
+export const ROLLBACK_0051 = {
+  latheJob: '00000000-0000-4000-8000-000000000ba1',
+  installationJob: '00000000-0000-4000-8000-000000000ba2',
+  latheChecklist: 'a664c9a7-e7c9-527b-b920-d02c6bd7313f',
+  installationChecklist: '69479130-a5bf-5041-a6ef-eb91dddab44b',
+  /** Lathe ELECTRICAL, the handwritten "Changed Fanuc control battery". */
+  handwrittenRow: '49ce73ee-0a1f-5e6f-b583-b8caccd634f3',
+  /** Installation 2, "Check electrical voltage" — R / S / T. */
+  voltageRow: 'f59a9e7a-1331-51c0-81b1-07019a1a8dc4',
+} as const;

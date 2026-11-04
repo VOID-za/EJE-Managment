@@ -17,7 +17,7 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
-// Each of these exists in 46096ac (checked against that commit).
+// Each of these exists in f693747 (checked against that commit).
 import { loadJobView } from '@/application/job-view';
 import { readRepositories } from '@/data/backend';
 import { documentPhotos } from '@/lib/job-card/model';
@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (46096ac), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (f693747), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 46096ac, and it does: each of these was checked against that commit.
+ * in f693747, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -103,6 +103,16 @@ const INTEGRATIONS = {
   outbox: '00000000-0000-4000-8000-0000000006c1',
 } as const;
 
+// A copy of ROLLBACK_0051 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0051 = {
+  latheJob: '00000000-0000-4000-8000-000000000ba1',
+  installationJob: '00000000-0000-4000-8000-000000000ba2',
+  latheChecklist: 'a664c9a7-e7c9-527b-b920-d02c6bd7313f',
+  installationChecklist: '69479130-a5bf-5041-a6ef-eb91dddab44b',
+  handwrittenRow: '49ce73ee-0a1f-5e6f-b583-b8caccd634f3',
+  voltageRow: 'f59a9e7a-1331-51c0-81b1-07019a1a8dc4',
+} as const;
+
 // A copy of ROLLBACK_0050 in `src/ops/release/rollback-fixture.ts`.
 const BATCH_0050 = {
   longPeriod: '00000000-0000-4000-8000-000000000aa1',
@@ -162,14 +172,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 46096ac (v1.1.0) shipped up to 0050; this release adds no migration.
+    // f693747 (v1.2.0) shipped up to 0050; this release adds 0051.
     expect(shipped).toHaveLength(51);
     expect(shipped.at(-1)).toBe('0050_timesheets_paper');
+    expect(shipped).not.toContain('0051_source_checklists');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // Exactly what the live release ships: this release adds none.
-    expect(applied).toBe(51);
+    // 0051 applied beyond what the live release ships.
+    expect(applied).toBe(52);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -519,5 +530,49 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       updatedBy: asUserId(IDS.technician), updatedAt: '2027-09-02T08:00:00.000Z',
     });
     expect(saved.overtimeHours).toBe(1);
+  });
+
+  /*
+   * 0051, WHICH THIS CODE HAS NEVER HEARD OF (CHK-SRC): the source checklists,
+   * the chosen kind, typed blanks, a Fail tapped before its note, the
+   * demonstration wording archived. It reads every job as it is, issues one of
+   * the current checklists for each type, starts one without sending a kind
+   * (the trigger fills it), and saves a Fail with no note on the tap — which
+   * 0051 now allows; the database still refuses to COMPLETE it.
+   */
+  it('meets the 0051 rows: reads the chosen checklists, starts one, saves a Fail on the tap, refuses completion without its note', async () => {
+    const B = BATCH_0051;
+    const jobs = new PostgresJobRepository(db);
+    const lathe = await jobs.findById(asJobId(B.latheJob));
+    expect(lathe?.checklist?.templateId).toBe(B.latheChecklist);
+    expect(lathe?.checklist?.responses.find((r) => r.itemId === B.handwrittenRow)?.choice).toBe('fail');
+    const installation = await jobs.findById(asJobId(B.installationJob));
+    expect(installation?.checklist?.responses.find((r) => r.itemId === B.voltageRow)?.choice).toBe('pass');
+    expect((await loadJobView(readRepositories(db), lathe!.jobNumber))?.checklistTemplate?.id).toBe(B.latheChecklist);
+
+    // What this code issues to a new job: a current source checklist, never the archived demonstration wording.
+    const templates = readRepositories(db).checklistTemplates;
+    const forInstallation = await templates.findForJobType('installation');
+    expect(forInstallation?.id).toBe(B.installationChecklist);
+    const forService = await templates.findForJobType('service');
+    expect(forService?.version).toBe('1.0');
+
+    // Its own writes: a checklist started on a new job (no kind sent — the trigger fills it in)…
+    const allocated = await jobs.allocateJobNumber();
+    const fresh = jobFixture(allocated.jobNumber, {
+      jobType: 'installation', status: 'in_progress', primaryTechnicianId: asUserId(IDS.technician),
+      checklist: { templateId: forInstallation!.id, templateVersion: '1.0', responses: [], completedAt: null, completedBy: null },
+    });
+    await jobs.save(fresh);
+    const [started] = await db.execute<{ kind: string }>(sql`select checklist_kind as kind from checklist_instances where job_id = ${fresh.id}`);
+    expect(started?.kind).toBe('installation');
+
+    // …a Fail tapped before its note is saved, and completing over it is refused.
+    const failed = {
+      ...lathe!,
+      checklist: { ...lathe!.checklist!, completedAt: '2027-10-02T08:00:00.000Z', completedBy: asUserId(IDS.technician) },
+    };
+    await expect(jobs.save(failed)).rejects.toThrow();
+    expect((await jobs.findById(asJobId(B.latheJob)))?.checklist?.completedAt).toBeNull();
   });
 });
