@@ -465,3 +465,41 @@ describe('the workflow is unchanged', () => {
     }
   });
 });
+
+/**
+ * ARCHIVE-1 — the archive's pages, through the route. The page travels with the
+ * filters; the order is the moment each job finished, newest first.
+ */
+describe('ARCHIVE-1: the closed-job archive, page by page', () => {
+  beforeEach(() => {
+    startTestServer();
+  });
+
+  interface ArchivePage {
+    readonly rows: readonly { readonly job: { readonly jobNumber: string; readonly closedAt: string | null; readonly invoice: { readonly recordedAt: string } | null } }[];
+    readonly matched: number;
+    readonly page: number;
+    readonly pages: number;
+  }
+
+  it('accepts a page with the filters, answers which page it is, and keeps newest-finished first', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const first = await master.get<ArchivePage>('/api/jobs/closed?page=1&jobType=all');
+    expect(first.status).toBe(200);
+    expect(first.data.page).toBe(1);
+    expect(first.data.pages).toBeGreaterThanOrEqual(1);
+    const at = (row: ArchivePage['rows'][number]) => Date.parse(row.job.closedAt ?? row.job.invoice?.recordedAt ?? '') || 0;
+    for (let index = 1; index < first.data.rows.length; index += 1) {
+      expect(at(first.data.rows[index]!)).toBeLessThanOrEqual(at(first.data.rows[index - 1]!));
+    }
+    const beyond = await master.get<ArchivePage>(`/api/jobs/closed?page=${first.data.pages + 3}`);
+    expect(beyond.status).toBe(200);
+    expect(beyond.data.page).toBe(first.data.pages);
+  });
+
+  it('refuses a malformed page', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    expect((await master.get('/api/jobs/closed?page=0')).status).toBe(400);
+    expect((await master.get('/api/jobs/closed?page=abc')).status).toBe(400);
+  });
+});

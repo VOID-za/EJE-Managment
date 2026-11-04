@@ -10,7 +10,6 @@ import {
   type JobTypeCode,
 } from '@/domain';
 import {
-  CLOSED_JOBS_PAGE_SIZE,
   emptyClosedJobFilters,
   type ClosedJobFilters,
   type ClosedJobOutcome,
@@ -51,6 +50,9 @@ const ClosedJobsPage = () => {
   const router = useRouter();
   const currentUser = useCurrentUser();
   const [filters, setFilters] = useState<ClosedJobFilters>(emptyClosedJobFilters);
+  // ARCHIVE-1: the page; any change to the search or a filter starts again at page 1.
+  const [page, setPage] = useState(1);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const canView = can(currentUser.role, 'jobs.viewAll');
 
@@ -60,12 +62,20 @@ const ClosedJobsPage = () => {
    * `canView` branch below is the friendly wording for that refusal, and the
    * query is not even run for somebody it would refuse.
    */
-  const query = useQuery(`closed-jobs:${currentUser.id}:${JSON.stringify(filters)}`, () =>
-    canView ? reads.closedJobs(filters) : Promise.resolve(null),
+  const query = useQuery(`closed-jobs:${currentUser.id}:${page}:${JSON.stringify(filters)}`, () =>
+    canView ? reads.closedJobs(filters, page) : Promise.resolve(null),
   );
 
-  const set = <K extends keyof ClosedJobFilters>(key: K, value: ClosedJobFilters[K]): void =>
+  const set = <K extends keyof ClosedJobFilters>(key: K, value: ClosedJobFilters[K]): void => {
     setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  };
+  /** How many of the advanced filters are set — shown on the closed button, so none hides. */
+  const activeAdvanced = (
+    ['customerId', 'siteId', 'jobType', 'technicianId', 'outcome'] as const
+  ).filter((key) => (filters[key] ?? 'all') !== 'all').length +
+    (filters.closedFrom.length > 0 ? 1 : 0) +
+    (filters.closedTo.length > 0 ? 1 : 0);
 
   const data = query.data;
 
@@ -213,9 +223,29 @@ const ClosedJobsPage = () => {
           onChange={(event) => set('term', event.target.value)}
           placeholder="Job number, customer, site, machine, serial number, order or reference"
           hint="Searches every one of those fields, so you do not have to remember the job number."
+          data-testid="closed-search"
         />
 
-        <div className="mt-4 grid grid-cols-1 gap-4 border-t border-steel-100 pt-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* ARCHIVE-1: the filters fold away, closed by default, and say how many are set. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            data-testid="closed-advanced-toggle"
+          >
+            {advancedOpen ? 'Hide advanced filters' : 'Advanced filters'}
+            {activeAdvanced > 0 && (
+              <Badge tone="blue" size="sm">
+                {activeAdvanced} on
+              </Badge>
+            )}
+          </Button>
+        </div>
+
+        {advancedOpen && (
+        <div className="mt-4 grid grid-cols-1 gap-4 border-t border-steel-100 pt-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="closed-advanced">
           <SelectField
             label="Customer"
             value={filters.customerId}
@@ -288,12 +318,17 @@ const ClosedJobsPage = () => {
             onChange={(event) => set('closedTo', event.target.value)}
           />
         </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-steel-100 pt-4">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setFilters(emptyClosedJobFilters)}
+            onClick={() => {
+              setFilters(emptyClosedJobFilters);
+              setPage(1);
+            }}
+            data-testid="closed-clear"
             disabled={JSON.stringify(filters) === JSON.stringify(emptyClosedJobFilters)}
           >
             Clear filters
@@ -302,14 +337,7 @@ const ClosedJobsPage = () => {
             {query.loading
               ? 'Searching…'
               : `${data?.matched ?? 0} closed ${(data?.matched ?? 0) === 1 ? 'job' : 'jobs'}`}
-            {data?.truncated === true && (
-              <>
-                {' '}
-                <Badge tone="amber" size="sm">
-                  showing the most recent {CLOSED_JOBS_PAGE_SIZE}
-                </Badge>
-              </>
-            )}
+            {data !== undefined && data !== null && data.pages > 1 && ` · page ${data.page} of ${data.pages}`}
           </p>
         </div>
       </Card>
@@ -325,6 +353,20 @@ const ClosedJobsPage = () => {
           emptyTitle="No closed jobs match"
           emptyDescription="Widen the search, or clear the filters to see the whole archive."
         />
+      )}
+
+      {data !== undefined && data !== null && data.pages > 1 && (
+        <div className="mt-4 flex items-center justify-between gap-3" data-testid="closed-pagination">
+          <Button variant="secondary" size="sm" disabled={data.page <= 1 || query.loading} onClick={() => setPage(data.page - 1)}>
+            Newer
+          </Button>
+          <span className="tabular text-sm text-steel-600">
+            Page {data.page} of {data.pages}
+          </span>
+          <Button variant="secondary" size="sm" disabled={data.page >= data.pages || query.loading} onClick={() => setPage(data.page + 1)} data-testid="closed-next-page">
+            Older
+          </Button>
+        </div>
       )}
     </>
   );

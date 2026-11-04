@@ -157,7 +157,8 @@ export const jobFormView = async ({ repos, actor }: ViewContext) => {
 export const closedJobsView = (
   { repos, actor }: ViewContext,
   filters: ClosedJobFilters,
-) => loadClosedJobs(repos, actor, filters);
+  page = 1,
+) => loadClosedJobs(repos, actor, filters, undefined, page);
 
 /* -------------------------------------------------------------------------- */
 /* Dashboards                                                                 */

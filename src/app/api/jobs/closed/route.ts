@@ -24,14 +24,17 @@ const filters = z
     technicianId: z.string().max(100).optional(),
     closedFrom: z.string().max(10).optional(),
     closedTo: z.string().max(10).optional(),
+    // ARCHIVE-1: the page, 1-based; the filters travel with it.
+    page: z.coerce.number().int().min(1).max(100000).optional(),
   })
   .strict();
 
 export const GET = readRoute('jobs.closed', (context) => {
-  const query = parseWith(filters, Object.fromEntries(context.request.nextUrl.searchParams));
+  const { page, ...query } = parseWith(filters, Object.fromEntries(context.request.nextUrl.searchParams));
   const merged: ClosedJobFilters = { ...emptyClosedJobFilters, ...query };
   return closedJobsView(
     { repos: context.repos, services: context.services, actor: context.actor.user },
     merged,
+    page ?? 1,
   );
 });

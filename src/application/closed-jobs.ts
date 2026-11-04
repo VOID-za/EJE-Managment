@@ -11,6 +11,7 @@ import {
 } from '@/domain';
 import type { RepositoryBundle } from '@/data/repositories';
 import { WorkflowError } from './errors';
+import { businessDateOf } from '@/lib/business-time';
 import { loadJobRows, type JobListRow } from './job-view';
 
 /**
@@ -107,6 +108,10 @@ export interface ClosedJobsPage {
   readonly matched: number;
   /** True when `rows` is a capped slice of `matched`. */
   readonly truncated: boolean;
+  /** ARCHIVE-1: which page this is (1-based), of how many, and its size. */
+  readonly page: number;
+  readonly pages: number;
+  readonly pageSize: number;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly sites: readonly { readonly id: string; readonly name: string; readonly customerId: string }[];
   readonly technicians: readonly User[];
@@ -135,8 +140,37 @@ const matchesTerm = (row: JobListRow, needle: string): boolean => {
  * under the office lifecycle (issue #73). Neither borrows the other's field —
  * an invoiced job has no `closedAt`, because nobody closed it.
  */
-const closedOn = (job: Pick<Job, 'closedAt' | 'invoice'>): IsoDate | null =>
-  (job.closedAt ?? job.invoice?.recordedAt ?? null)?.slice(0, 10) ?? null;
+export const finishedAt = (job: Pick<Job, 'closedAt' | 'invoice'>): string | null =>
+  job.closedAt ?? job.invoice?.recordedAt ?? null;
+
+/**
+ * The business DAY it finished — in Johannesburg, not UTC (ARCHIVE-1): a job
+ * closed at 00:30 on the 5th is on the 5th, where slicing the UTC timestamp
+ * put it on the 4th. "Closed From" and "Closed To" are both inclusive days.
+ */
+const closedOn = (job: Pick<Job, 'closedAt' | 'invoice'>): IsoDate | null => {
+  const at = finishedAt(job);
+  return at === null ? null : businessDateOf(at);
+};
+
+/**
+ * NEWEST FINISHED FIRST, BY THE MOMENT IT FINISHED. ARCHIVE-1.
+ *
+ * It sorted by `closedAt` alone — and a job that finishes through the office
+ * lifecycle is INVOICED, not closed, so it has no `closedAt`: every invoiced
+ * job sorted as blank and the archive's order among them was arbitrary. The
+ * finish is `closedAt` or, for an invoiced job, the moment its invoice number
+ * was recorded. Equal moments fall back to the job number, newest first, so
+ * the order — and every page of it — is the same on every read.
+ */
+export const compareFinishedNewestFirst = (
+  a: Pick<Job, 'closedAt' | 'invoice' | 'jobNumber'>,
+  b: Pick<Job, 'closedAt' | 'invoice' | 'jobNumber'>,
+): number => {
+  const byTime = (Date.parse(finishedAt(b) ?? '') || 0) - (Date.parse(finishedAt(a) ?? '') || 0);
+  if (byTime !== 0) return byTime;
+  return b.jobNumber.localeCompare(a.jobNumber, 'en', { numeric: true });
+};
 
 /**
  * Whether a job belongs in the archive.
@@ -152,6 +186,8 @@ export const loadClosedJobs = async (
   actor: Pick<User, 'id' | 'role'>,
   filters: ClosedJobFilters,
   pageSize: number = CLOSED_JOBS_PAGE_SIZE,
+  /** 1-based. The filters and the order are the same on every page. */
+  page = 1,
 ): Promise<ClosedJobsPage> => {
   if (!can(actor.role, 'jobs.viewAll')) {
     throw new WorkflowError('The closed-job archive is an office screen.', [
@@ -212,14 +248,19 @@ export const loadClosedJobs = async (
       if (filters.closedTo.length > 0 && (date === null || date > filters.closedTo)) return false;
       return true;
     })
-    // Most recently closed first: the archive is usually searched from the
+    // Most recently finished first: the archive is usually searched from the
     // recent end.
-    .sort((a, b) => (b.job.closedAt ?? '').localeCompare(a.job.closedAt ?? ''));
+    .sort((a, b) => compareFinishedNewestFirst(a.job, b.job));
 
+  const pages = Math.max(1, Math.ceil(matchedRows.length / pageSize));
+  const current = Math.min(Math.max(1, Math.floor(page)), pages);
   return {
-    rows: matchedRows.slice(0, pageSize),
+    rows: matchedRows.slice((current - 1) * pageSize, current * pageSize),
     matched: matchedRows.length,
     truncated: matchedRows.length > pageSize,
+    page: current,
+    pages,
+    pageSize,
     customers: [...customers]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((customer) => ({ id: customer.id, name: customer.name })),

@@ -108,6 +108,8 @@ const JobsPageContent = () => {
     params.get('signatureRefusal') === 'unresolved',
   );
   const [term, setTerm] = useState('');
+  // JOBS-FILTER-1: the less-used filters fold away, closed by default.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [accepting, setAccepting] = useState<JobListRow | null>(null);
   const isMaster = can(user.role, 'jobs.viewAll');
 
@@ -149,6 +151,21 @@ const JobsPageContent = () => {
       ),
     [query.data, status, jobType, priority, mineOnly, refusalsOnly, term, user.id],
   );
+
+  /*
+   * JOBS-FILTER-1: how many filters inside the folded section are set, shown on
+   * its button so a filter can never be hiding behind it. The status is counted
+   * only when no tab shows it (a tab is its own indicator).
+   */
+  const statusShownByTab = QUICK_FILTERS.some((filter) => filter.value === status) || status === 'open-work';
+  const activeAdvanced =
+    (statusShownByTab ? 0 : 1) + (jobType !== 'all' ? 1 : 0) + (priority !== 'all' ? 1 : 0) + (mineOnly ? 1 : 0);
+  const clearAdvanced = () => {
+    setStatus('open-work');
+    setJobType('all');
+    setPriority('all');
+    setMineOnly(false);
+  };
 
   /*
    * NO "DOWNLOAD CSV" HERE ANY MORE (the tester, 30 October 2026, for every
@@ -334,8 +351,8 @@ const JobsPageContent = () => {
       </div>
 
       <Card className="mb-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="xl:col-span-2">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-0 flex-1 basis-64">
             <label
               htmlFor="job-search"
               className="mb-1.5 block text-sm font-semibold text-steel-700"
@@ -354,10 +371,30 @@ const JobsPageContent = () => {
                 onChange={(event) => setTerm(event.target.value)}
                 placeholder="Job number, customer, serial, order number…"
                 className="h-11 w-full rounded-[var(--radius-control)] border border-steel-300 bg-surface pr-3 pl-10 text-sm placeholder:text-steel-400 hover:border-steel-400 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none"
+                data-testid="jobs-search"
               />
             </div>
           </div>
+          <Button
+            variant="secondary"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            data-testid="jobs-advanced-toggle"
+          >
+            {advancedOpen ? 'Hide advanced filters' : 'Advanced filters'}
+            {activeAdvanced > 0 && (
+              <span className="tabular rounded-full bg-eje-600 px-1.5 text-xs text-white">{activeAdvanced}</span>
+            )}
+          </Button>
+          {activeAdvanced > 0 && (
+            <Button variant="ghost" onClick={clearAdvanced} data-testid="jobs-clear-filters">
+              Clear filters
+            </Button>
+          )}
+        </div>
 
+        {advancedOpen && (
+        <div className="mt-4 grid grid-cols-1 gap-4 border-t border-steel-100 pt-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="jobs-advanced">
           <SelectField
             label="Status"
             value={status}
@@ -385,19 +422,21 @@ const JobsPageContent = () => {
               ...PRIORITY_ORDER.map((value) => ({ value, label: priorityLabel(value) })),
             ]}
           />
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-steel-100 pt-4">
-          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium text-steel-700">
+          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 self-end text-sm font-medium text-steel-700">
             <input
               type="checkbox"
               checked={mineOnly}
               onChange={(event) => setMineOnly(event.target.checked)}
               className="size-4.5 rounded border-steel-300 text-eje-600 focus:ring-eje-500"
+              data-testid="jobs-mine-only"
             />
             Only jobs assigned to me
           </label>
-          <p className="tabular text-sm text-steel-500">
+        </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
+          <p className="tabular text-sm text-steel-500" data-testid="jobs-count">
             {query.loading ? 'Loading…' : `${rows.length} ${rows.length === 1 ? 'job' : 'jobs'}`}
           </p>
         </div>

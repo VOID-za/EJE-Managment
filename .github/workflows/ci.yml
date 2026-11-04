@@ -192,8 +192,8 @@ jobs:
   browser:
     name: Routes, workflow and smoke
     runs-on: ubuntu-latest
-    # 75: the forms regression below runs three times (desktop, tablet, phone).
-    timeout-minutes: 75
+    # 90: the forms regression, the source checklists and the office filters each run three times (desktop, tablet, phone).
+    timeout-minutes: 90
     env:
       EJE_CHECK_URL: http://127.0.0.1:3210
       EJE_E2E_URL: http://127.0.0.1:3210
@@ -417,6 +417,24 @@ jobs:
       # CHK-SRC (4 November 2026): the business's own checklists — Administration,
       # the Service choice, Milling, Lathe, Installation, the job card — at the
       # three sizes they are used on.
+      # PO-FLOW-1, ARCHIVE-1, JOBS-FILTER-1 (4 November 2026): the PO decides
+      # Awaiting PO; the Jobs and Closed Jobs filters fold away; the archive is
+      # newest-finished first — at the three sizes the office uses.
+      - name: Office filters and PO — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run office-filters-check
+
+      - name: Office filters and PO — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run office-filters-check
+
+      - name: Office filters and PO — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run office-filters-check
+
       - name: Source checklists — desktop
         env:
           EJE_FORMS_VIEWPORT: 1440x900

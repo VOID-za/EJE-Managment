@@ -504,3 +504,93 @@ describe('history links', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+/**
+ * ARCHIVE-1 — NEWEST FINISHED FIRST, ON EVERY PAGE.
+ *
+ * The archive sorted by `closedAt` alone, and an INVOICED job (the office
+ * lifecycle's finish) has none — so every invoiced job sorted as blank, in no
+ * particular order. These jobs are made to finish in an order unlike their
+ * creation, their job numbers and their types.
+ */
+describe('ARCHIVE-1: ordered by the moment each job finished', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  /** Re-stamps a seeded archived job as finishing at `at` — closed or invoiced. */
+  const finishAt = async (jobNumber: string, at: string, how: 'closed' | 'invoiced'): Promise<void> => {
+    const job = await seededJob(harness, jobNumber);
+    await harness.repos.jobs.save(
+      how === 'closed'
+        ? { ...job, status: 'closed', closedAt: at, invoice: null }
+        : {
+            ...job,
+            status: 'invoiced',
+            closedAt: null,
+            invoice: { number: `INV-${jobNumber}`, recordedBy: master.id, recordedAt: at },
+          },
+    );
+  };
+
+  const archived = async (): Promise<readonly string[]> =>
+    (await loadClosedJobs(harness.repos, master, filters(), 500)).rows.map((row) => row.job.jobNumber);
+
+  it('puts the most recently finished first — invoiced or closed — whatever the job number', async () => {
+    const all = await archived();
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    const [a, b, c] = [all.at(-1)!, all.at(-2)!, all.at(-3)!];
+    // The OLDEST-numbered of the three finishes LAST; an invoiced job between them.
+    await finishAt(a, '2031-03-01T08:00:00.000Z', 'invoiced');
+    await finishAt(b, '2031-02-01T08:00:00.000Z', 'closed');
+    await finishAt(c, '2031-01-01T08:00:00.000Z', 'invoiced');
+    expect((await archived()).slice(0, 3)).toEqual([a, b, c]);
+  });
+
+  it('breaks a tie on the same moment by job number, newest first, so every read agrees', async () => {
+    const all = await archived();
+    const [x, y] = [all.at(-1)!, all.at(-2)!];
+    await finishAt(x, '2031-04-01T08:00:00.000Z', 'invoiced');
+    await finishAt(y, '2031-04-01T08:00:00.000Z', 'closed');
+    const top = (await archived()).slice(0, 2);
+    expect(top).toEqual([x, y].sort((p, q) => q.localeCompare(p, 'en', { numeric: true })));
+    expect((await archived()).slice(0, 2)).toEqual(top);
+  });
+
+  it('pages through the same order with the same filters, without repeating or skipping a job', async () => {
+    const whole = (await loadClosedJobs(harness.repos, master, filters(), 500)).rows.map((row) => row.job.jobNumber);
+    const size = Math.max(1, Math.floor(whole.length / 3));
+    const seen: string[] = [];
+    const first = await loadClosedJobs(harness.repos, master, filters(), size, 1);
+    for (let page = 1; page <= first.pages; page += 1) {
+      const slice = await loadClosedJobs(harness.repos, master, filters(), size, page);
+      expect(slice.page).toBe(page);
+      seen.push(...slice.rows.map((row) => row.job.jobNumber));
+    }
+    expect(seen).toEqual(whole);
+    // A page past the end is the last page, not an empty one.
+    const beyond = await loadClosedJobs(harness.repos, master, filters(), size, first.pages + 5);
+    expect(beyond.page).toBe(first.pages);
+  });
+
+  it('keeps the order under a search and a filter', async () => {
+    const all = await archived();
+    const [a, b] = [all.at(-1)!, all.at(-2)!];
+    await finishAt(a, '2031-05-02T08:00:00.000Z', 'invoiced');
+    await finishAt(b, '2031-05-01T08:00:00.000Z', 'invoiced');
+    const filtered = await loadClosedJobs(harness.repos, master, filters({ closedFrom: '2031-05-01', closedTo: '2031-05-31' }), 500);
+    expect(filtered.rows.map((row) => row.job.jobNumber)).toEqual([a, b]);
+    const searched = await loadClosedJobs(harness.repos, master, filters({ term: b, closedFrom: '2031-05-01' }), 500);
+    expect(searched.rows.map((row) => row.job.jobNumber)).toEqual([b]);
+  });
+
+  it('dates a finish by the Johannesburg day: 00:30 on the 5th is the 5th, inclusive at both ends', async () => {
+    const all = await archived();
+    const late = all.at(-1)!;
+    // 22:30 UTC on the 4th is 00:30 on the 5th in Johannesburg.
+    await finishAt(late, '2031-06-04T22:30:00.000Z', 'invoiced');
+    expect((await jobNumbers(harness, { closedFrom: '2031-06-05', closedTo: '2031-06-05' }))).toContain(late);
+    expect((await jobNumbers(harness, { closedFrom: '2031-06-04', closedTo: '2031-06-04' }))).not.toContain(late);
+  });
+});

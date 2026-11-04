@@ -41,6 +41,7 @@
     "acceptance-check": "node scripts/acceptance-check.mjs",
     "timesheets-paper-check": "node scripts/timesheets-paper-check.mjs",
     "checklists-source-check": "node scripts/checklists-source-check.mjs",
+    "office-filters-check": "node scripts/office-filters-check.mjs",
     "retention": "tsx src/ops/retention.ts",
     "integrations-regression": "node scripts/integrations-regression.mjs",
     "responsive-check": "node scripts/responsive-check.mjs",
