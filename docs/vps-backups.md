@@ -282,6 +282,8 @@ beside its PostgreSQL 16 service container.
 
 ## 5. Get it off the machine
 
+**Current state (4 November 2026): `docs/offsite-backups.md`** — an interim daily pull of the encrypted backups to the owner's computer (`deploy/backup/pull-offsite.ps1`), verified there and restore-tested from the copy; the key escrow (BACKUP-2) and a permanent bucket (BACKUP-1) still need the owner.
+
 A backup in `/var/backups/eje` is on the same disk as
 `/var/lib/eje/storage`. It survives a mistaken `DELETE` and nothing else — not
 the disk, not the provider, not ransomware, not an unpaid invoice. Every run

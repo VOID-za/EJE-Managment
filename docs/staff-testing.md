@@ -714,6 +714,8 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs
 
 ## V. Timesheets as a piece of paper (4 November 2026)
 
+**The printable sheet for doing these on real devices — phone, rugged tablet, office desktop and printer — is `docs/timesheets-physical-test-sheet.md`.** V1–V13 remain NOT TESTED on physical devices until it is completed.
+
 Automated at 1440, 768 (touch) and 390 (touch) — `scripts/timesheets-paper-check.mjs` (9/9 at each size on the development PC before release; in CI) — and the owner's twenty scenarios in `src/application/timesheets-paper.test.ts`.
 
 | # | Do this | Pass looks like | Automated | Browser ×3 | Physical |
