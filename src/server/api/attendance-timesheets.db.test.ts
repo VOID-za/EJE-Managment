@@ -98,7 +98,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(await db.select().from(schema.attendance).where(eq(schema.attendance.userId, IDS.technician))).toHaveLength(0);
   });
 
-  it('a Coordinator’s month is attendance only — and only a Coordinator’s (TS-ROLE-1, migration 0043)', async () => {
+  it('a Coordinator’s month is attendance only (TS-ROLE-1, migration 0043) — and since 0050 anybody’s may be (TS-PAPER)', async () => {
     const today = businessToday();
     const month = (() => {
       const [y, m] = today.slice(0, 7).split('-').map(Number) as [number, number];
@@ -115,13 +115,13 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(row?.timesheetPeriodId).toBeNull();
     expect(await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.coordinator))).toHaveLength(0);
 
-    // The database itself refuses an attendance-only month for anybody else.
-    expect(await postgresMessage(
-      db.insert(schema.monthlySubmissions).values({
-        id: crypto.randomUUID(), userId: IDS.technician, month, timesheetPeriodId: null,
-        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
-      }),
-    )).toContain('without a timesheet is a Coordinator');
+    // Migration 0050 (TS-PAPER): the month is the attendance for everybody — a technician's
+    // attendance-only month is accepted by the database too (it refused it under 0043).
+    const [technicianMonth] = await db.insert(schema.monthlySubmissions).values({
+      id: crypto.randomUUID(), userId: IDS.technician, month, timesheetPeriodId: null,
+      attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
+    }).returning();
+    expect(technicianMonth?.timesheetPeriodId).toBeNull();
 
     // A package of her month alone: ONE attachment, which 0043 allows.
     await db.update(schema.systemSettings).set({ financeEmail: 'payroll@finance.example.test' });
