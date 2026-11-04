@@ -210,9 +210,13 @@ export const checklistInstances = pgTable(
  * single text column would make "was this measured, or left blank?"
  * unanswerable.
  *
- * A FAIL REQUIRES A NOTE. Enforced by the CHECK below as well as by
- * `requiresNote` in the domain, because a failed check with no explanation is
- * the one answer that tells nobody anything.
+ * A FAIL REQUIRES A NOTE — by the time the checklist is COMPLETED. Enforced by
+ * `requiresNote`/`completeChecklist` in the domain and, since 0051, by the
+ * `checklist_instances_fail_needs_note` trigger, which refuses to stamp a
+ * checklist complete over an unexplained Fail. It was a CHECK on this row
+ * (0000), which refused the technician's TAP on Fail before the note could be
+ * typed — a server error on PostgreSQL. A failed check with no explanation is
+ * still the one answer that tells nobody anything; it is refused where it ends.
  */
 export const checklistAnswers = pgTable(
   'checklist_answers',
@@ -243,10 +247,6 @@ export const checklistAnswers = pgTable(
     check(
       'checklist_answers_field_values_object',
       sql`jsonb_typeof(${table.fieldValues}) = 'object'`,
-    ),
-    check(
-      'checklist_answers_fail_needs_note',
-      sql`${table.choice} is distinct from 'fail' or btrim(${table.notes}) <> ''`,
     ),
   ],
 );

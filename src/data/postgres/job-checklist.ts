@@ -92,6 +92,10 @@ export const loadChecklists = async (
       schema.checklistQuestions,
       eq(schema.checklistQuestions.id, schema.checklistAnswers.questionId),
     )
+    .innerJoin(
+      schema.checklistSections,
+      eq(schema.checklistSections.id, schema.checklistQuestions.sectionId),
+    )
     .where(
       inArray(
         schema.checklistAnswers.instanceId,
@@ -99,7 +103,8 @@ export const loadChecklists = async (
       ),
     )
     // The order the technician saw them in, so a re-read renders identically.
-    .orderBy(asc(schema.checklistQuestions.position));
+    // Section by section, then row by row: a position is only unique within its section.
+    .orderBy(asc(schema.checklistSections.position), asc(schema.checklistQuestions.position));
 
   const photos =
     answers.length === 0

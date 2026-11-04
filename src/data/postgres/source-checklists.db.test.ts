@@ -328,6 +328,37 @@ describeDb('the source checklists in PostgreSQL (CHK-SRC-1)', () => {
       expect(comparable({ ...used!, status: 'current' })).toEqual(comparable(latheServiceChecklist));
     });
 
+    it('takes a Fail on the tap, before its note, and will not complete the checklist until the note is there', async () => {
+      const row = latheServiceChecklist.sections[1]!.items[5]!; // the handwritten battery line
+      const answer = (notes: string) => ({
+        itemId: row.id,
+        choice: 'fail' as const,
+        yesNo: null,
+        measurement: null,
+        text: '',
+        notes,
+        fieldValues: {},
+        photos: [],
+        answeredAt: '2026-11-04T09:00:00.000Z',
+        answeredBy: asUserId(IDS.technician),
+      });
+      const job = await jobOf('service', started(latheServiceChecklist, { responses: [answer('')] }));
+      await jobs.save(job); // the tap: Fail, no note yet — saved, not a server error
+      expect((await jobs.findById(job.id))?.checklist?.responses[0]?.choice).toBe('fail');
+
+      const complete = (notes: string): ChecklistInstance =>
+        started(latheServiceChecklist, {
+          responses: [answer(notes)],
+          completedAt: '2026-11-04T10:00:00.000Z',
+          completedBy: asUserId(IDS.technician),
+        });
+      await expect(jobs.save({ ...job, checklist: complete('') })).rejects.toThrow();
+      expect((await jobs.findById(job.id))?.checklist?.completedAt).toBeNull();
+
+      await jobs.save({ ...job, checklist: complete('Battery replaced.') });
+      expect((await jobs.findById(job.id))?.checklist?.completedAt).not.toBeNull();
+    });
+
     it('fills in the kind for a writer that sends none (the release before, after a rollback)', async () => {
       const job = await jobOf('service', started(latheServiceChecklist, { checklistKind: null }));
       await jobs.save(job);

@@ -39,6 +39,8 @@ Branch `claude/source-checklists`. **One migration: `0051_source_checklists`** �
 **What 0051 does to the live database** (reviewed line by line; `source-checklists.db.test.ts` runs it on PostgreSQL 16):
 - adds columns, every one defaulted (`checklists.kind`, `selection_label`; `checklist_versions.layout`; `checklist_questions.number`, `group_label`, `fields`, `source_note`; `checklist_answers.field_values`; `checklist_instances.checklist_kind`) — no existing row is rewritten;
 - extends the immutability guards (a used version's layout, section headings and kind are frozen), and adds a trigger keeping a checklist's recorded kind equal to its version's (a writer that sends none has it filled in — so the release before this one still works against it);
+- moves the rule "a Fail needs a note" from each answer row (`checklist_answers_fail_needs_note`, dropped) to the moment of completion (`checklist_instances_fail_needs_note` trigger): the old CHECK refused the technician's tap on **Fail** before the note could be typed — a server error on PostgreSQL, live today; a checklist still cannot be completed over an unexplained Fail;
+- provides the `installation` and `service` job types if absent (`ON CONFLICT DO NOTHING` — production's rows untouched; needed on an empty database);
 - **archives** the two demonstration versions still current for Installation and Service (`status` only; the guard permits exactly that) — the 10 jobs that answered them (7 completed, 3 in progress: EJE-2007, EJE-2011, EJE-2077) keep their version, answers and documents unchanged;
 - inserts the three source checklists, version 1.0, current.
 

@@ -163,6 +163,37 @@ CREATE TRIGGER checklist_instances_kind_matches
   BEFORE INSERT OR UPDATE OF version_id, checklist_kind ON checklist_instances
   FOR EACH ROW EXECUTE FUNCTION checklist_instances_kind_matches();--> statement-breakpoint
 
+-- A FAIL STILL NEEDS A NOTE — WHEN THE CHECKLIST IS COMPLETED, not on the tap.
+-- `checklist_answers_fail_needs_note` (0000) refused the answer row itself, but
+-- the technician's screen saves each tap as it is made: tapping Fail is saved
+-- before the note can be typed, and on PostgreSQL that tap was refused with a
+-- server error (the demonstration store has no such constraint, so no browser
+-- suite saw it). The rule moves to the moment it is about: the database
+-- refuses to stamp a checklist complete while any Fail on it has no note —
+-- exactly what `completeChecklist` already refuses in the application.
+ALTER TABLE "checklist_answers" DROP CONSTRAINT IF EXISTS "checklist_answers_fail_needs_note";--> statement-breakpoint
+CREATE OR REPLACE FUNCTION checklist_instances_fail_needs_note()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.completed_at IS NOT NULL AND OLD.completed_at IS NULL AND EXISTS (
+    SELECT 1 FROM checklist_answers a
+     WHERE a.instance_id = NEW.id
+       AND a.choice = 'fail'
+       AND btrim(a.notes) = ''
+  ) THEN
+    RAISE EXCEPTION 'A checklist with a failed item and no note cannot be completed.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+DROP TRIGGER IF EXISTS checklist_instances_fail_needs_note ON checklist_instances;--> statement-breakpoint
+CREATE TRIGGER checklist_instances_fail_needs_note
+  BEFORE UPDATE OF completed_at ON checklist_instances
+  FOR EACH ROW EXECUTE FUNCTION checklist_instances_fail_needs_note();--> statement-breakpoint
+
 -- 5 (before 4, so nothing is ever briefly issued twice). Withdraw the
 --    demonstration wording from NEW jobs. Status only — the guard permits
 --    exactly this on a used version.
