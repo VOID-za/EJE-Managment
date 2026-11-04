@@ -32,16 +32,17 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
-## NEXT RELEASE — the Timesheets follow-up, from `claude/timesheets-paper-fixes` (prepared 4 November 2026, NOT RUN — awaiting the owner's authorisation)
+## RELEASED — `f693747` = v1.2.0, the Timesheets follow-up (4 November 2026)
 
-No migration (`-ExpectPending none`). The version is assigned by the release: the commits since v1.1.0 include a `feat` (the multi-page PDF), so **v1.2.0**.
+Authorised by the owner on 4 November 2026. Released 10:36:58 UTC (healthy 10:37:01) from branch `claude/timesheets-paper-fixes` through `stage-release.ps1 -ExpectPending none`. Version assigned by the release: **v1.2.0** (after 1.1.0). Before it: host `srv2000625`, serving `46096ac` v1.1.0, firewall script unchanged (`ee451ac`), ufw active.
 
-```
-powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha <full sha> -CheckOnly -ExpectPending none -SshExe C:\Windows\System32\OpenSSH\ssh.exe
-powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha <full sha> -ExpectPending none -SshExe C:\Windows\System32\OpenSSH\ssh.exe
-```
+- **Fresh backup, proven before the switch:** `/var/backups/eje/eje-eje_production-2026-11-04T10-36-46Z` — database 1 559 659 bytes and 184 documents, aes-256-gcm (key 23dba6772da10057); verify: both artefacts intact and authentic; key check: MATCH; **restore test: restored into a scratch database (jobs 104, users 7, customers 9, machines 14, final documents 54, job media 27, signatures 68, audit events 1 952; 184 documents unpacked), then dropped — RESTORE-TESTED**. 17 storage keys were already missing when it was taken (recorded in the manifest). No off-server backup destination is configured (unchanged).
+- **Migration:** none; 51 applied. **Health:** ok, PostgreSQL reachable, email `refuse`, demonstration on; 0 error lines in the service log since the switch; the page and worker carry `f693747`.
+- **Data identical:** every timesheet table row for row (35 entries, 1 day comment, 13 periods with their snapshots, 0 corrections, 0 working comments, 7 monthly submissions, 0 finance packages); the 1 952 audit events that existed before the release have the same fingerprint (the 23 added during the checks are the read-only scripts' own sign-ins); job-card fingerprints, counts, the frozen prices of all 68 signed jobs, attendance, 9 customers and 13 sites identical.
+- **Live, read only:** the working sheet (owner 200, another technician 403); the office's 9 submissions (8 current, 1 replaced) — every original readable, the replaced one labelled replaced, all 9 PDFs downloaded; Finance month views: every current submission in exactly one month (September 5, October 2, November 1), the replaced one in none.
+- **Still outstanding:** device checks V1–V13 on real phones and tablets, and printing a multi-page timesheet on a real printer (V13).
 
-Rollback target after it: `46096ac` (`docs/rollback-4606315.md` §11).
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `46096ac` (`docs/rollback-4606315.md` §11).
 
 ## RELEASED — `46096ac` = v1.1.0, timesheets as a piece of paper (4 November 2026)
 
