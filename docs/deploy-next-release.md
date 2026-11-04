@@ -32,9 +32,16 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
-## NEXT RELEASE — the business's own checklists and the Service choice (CHK-SRC-1…4, 4 November 2026)
+## RELEASED — `75c3b6b` = v1.3.0, the business's own checklists and the Service choice (CHK-SRC-1…4, 4 November 2026)
 
-Branch `claude/source-checklists`. **One migration: `0051_source_checklists`** — release with `stage-release.ps1 -ExpectPending 0051_source_checklists`. Version: a `feat` commit, so the release assigns the next MINOR (v1.3.0).
+Released 17:46:36 UTC from branch `claude/source-checklists` through `stage-release.ps1 -ExpectPending 0051_source_checklists` after CI run 41871774913 (68/68: unit, lint, types, build, PostgreSQL, rollback compatibility f693747→0051, every browser suite). Version assigned: **v1.3.0**. Before it: host `srv2000625`, serving `f693747` v1.2.0, healthy.
+
+- **Fresh backup, proven before the migration:** `/var/backups/eje/eje-eje_production-2026-11-04T17-46-17Z` — 186 documents, aes-256-gcm (key 23dba6772da10057); verify: both artefacts intact and authentic; key check MATCH; restore test into a scratch database (jobs 105, users 7, customers 9, machines 14, final documents 54, job media 28, signatures 68, audit events 2 034; 186 documents unpacked), then dropped — RESTORE-TESTED. 17 storage keys already missing when taken (the demonstration records, `docs/missing-documents-2026-11-04.md`).
+- **Migration 0051 applied** (52 recorded). **Every checklist row that existed before is identical** (instances 10, answers 96, evidence photos 4, the 21 demonstration questions and 6 sections — fingerprints taken before and after); the two demonstration versions now `archived`; Installation 36, Service — Milling 39, Service — Lathe 41 questions current; signatures 68 and final documents 54 identical. The jobs count went 104 → 105 during the window: EJE-2106, a Test & Repair job John Master created on the live site at 17:42 — not part of the release.
+- **Live, read only** (desktop and phone): Administration → Checklists shows the three in full, the demonstration wording archived; EJE-2008 (Service) asks "Which Service checklist…", Open is disabled with nothing chosen, and a start with no choice is refused (`checklist_selection_required`) — nothing started; EJE-2002 (Installation) offers the Installation checklist with no choice; EJE-2073 (completed on the demonstration wording) still shows it, and the issued PDFs of EJE-2073 and EJE-2074 are byte-identical to their stored SHA-256. Health ok, email `refuse`, demonstration on; 0 errors in the service log since the switch.
+- **Not verified live, deliberately:** completing a source checklist and rendering its PDF on production — that writes a job; it is proved in CI and locally (`source-checklist-document.test.ts`, the browser checks).
+
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `f693747`.
 
 **What 0051 does to the live database** (reviewed line by line; `source-checklists.db.test.ts` runs it on PostgreSQL 16):
 - adds columns, every one defaulted (`checklists.kind`, `selection_label`; `checklist_versions.layout`; `checklist_questions.number`, `group_label`, `fields`, `source_note`; `checklist_answers.field_values`; `checklist_instances.checklist_kind`) — no existing row is rewritten;

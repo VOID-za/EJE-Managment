@@ -414,6 +414,24 @@ jobs:
       # TS-PAPER (4 November 2026): the timesheet as a piece of paper — filled in,
       # submitted on payday for the dates confirmed, read by the office — at the
       # three sizes it is used on.
+      # CHK-SRC (4 November 2026): the business's own checklists — Administration,
+      # the Service choice, Milling, Lathe, Installation, the job card — at the
+      # three sizes they are used on.
+      - name: Source checklists — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run checklists-source-check
+
+      - name: Source checklists — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run checklists-source-check
+
+      - name: Source checklists — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run checklists-source-check
+
       - name: Timesheets as paper — desktop
         env:
           EJE_FORMS_VIEWPORT: 1440x900
