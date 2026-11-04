@@ -269,9 +269,15 @@ describeDb('checklists in PostgreSQL', () => {
       expect(read?.checklist?.responses[0]?.notes).toBe('Within tolerance.');
     });
 
-    it('refuses a failed check with no explanation, at the database', async () => {
+    /*
+     * Since 0051 (CHK-SRC-4) the database refuses an unexplained Fail where it
+     * ends — at COMPLETION — not on the answer row: the technician's screen
+     * saves the tap on Fail before the note can be typed, and refusing the row
+     * made that tap a server error on PostgreSQL.
+     */
+    it('refuses to complete a checklist over a failed check with no explanation, at the database', async () => {
       await templates.save(version2());
-      const job = await serviceJob({
+      const inProgress = await serviceJob({
         templateId: TEMPLATE,
         templateVersion: '2.0',
         responses: [
@@ -291,7 +297,22 @@ describeDb('checklists in PostgreSQL', () => {
         completedBy: null,
       });
 
-      await expect(jobs.save(job)).rejects.toThrow();
+      // The tap on Fail is saved while the checklist is in progress…
+      await jobs.save(inProgress);
+      expect((await jobs.findById(inProgress.id))?.checklist?.responses[0]?.choice).toBe('fail');
+
+      // …and the checklist cannot be stamped complete over it.
+      await expect(
+        jobs.save({
+          ...inProgress,
+          checklist: {
+            ...inProgress.checklist!,
+            completedAt: '2026-09-20T12:00:00.000Z',
+            completedBy: asUserId(IDS.technician),
+          },
+        }),
+      ).rejects.toThrow();
+      expect((await jobs.findById(inProgress.id))?.checklist?.completedAt).toBeNull();
     });
 
     it('refuses to store answers against a version it does not hold', async () => {
