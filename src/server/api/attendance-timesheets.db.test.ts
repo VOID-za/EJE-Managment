@@ -119,7 +119,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     // attendance-only month is accepted by the database too (it refused it under 0043).
     const [technicianMonth] = await db.insert(schema.monthlySubmissions).values({
       id: crypto.randomUUID(), userId: IDS.technician, month, timesheetPeriodId: null,
-      attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
+      attendanceSnapshot: { technicianName: 'Sipho', month, days: [] }, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
     }).returning();
     expect(technicianMonth?.timesheetPeriodId).toBeNull();
 
