@@ -314,6 +314,10 @@ await step('Master works the Closed Jobs archive', async () => {
   await page.getByLabel('Search the archive').fill('EJE-1044');
   await page.waitForTimeout(500);
   await page.getByLabel('Search the archive').fill('');
+  // ARCHIVE-1: the archive's filters fold away, closed by default.
+  if ((await page.getByTestId('closed-advanced-toggle').getAttribute('aria-expanded')) === 'false') {
+    await page.getByTestId('closed-advanced-toggle').click();
+  }
   await page.getByLabel('Customer').selectOption('cust-abc');
   await page.waitForTimeout(400);
   await page.getByLabel('Job type').selectOption('service');

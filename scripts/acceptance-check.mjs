@@ -353,6 +353,10 @@ await check('courier collection needs its waybill; signed and issued, it is CLOS
 await check('Closed Jobs shows it as a Delivery Note — filterable, and apart from Invoiced', async () => {
   if (note === null) fail('no Delivery Note');
   await go('/jobs/closed');
+  // ARCHIVE-1: the archive's filters fold away, closed by default.
+  if ((await page.getByTestId('closed-advanced-toggle').getAttribute('aria-expanded')) === 'false') {
+    await page.getByTestId('closed-advanced-toggle').click();
+  }
   await page.getByTestId('closed-outcome').selectOption('delivery_note');
   const row = page.getByTestId(`closed-status-${note}`).first();
   await row.waitFor({ timeout: 20000 });
