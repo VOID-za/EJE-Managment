@@ -32,16 +32,18 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
-## NEXT RELEASE — timesheets as a piece of paper, from `claude/timesheets-paper` (prepared 4 November 2026)
+## RELEASED — `46096ac` = v1.1.0, timesheets as a piece of paper (4 November 2026)
 
-One migration: `0050_timesheets_paper` (additive — `docs/rollback-4606315.md` §10). The version is assigned by the release (a `feat` commit since v1.0.0: **v1.1.0**).
+Released 4 November 2026 08:14:34 UTC from branch `claude/timesheets-paper` through `stage-release.ps1 -ExpectPending 0050_timesheets_paper`. The release assigned **v1.1.0** itself (`version: v1.1.0 (after 1.0.0; commit 46096ac)` — a `feat` since v1.0.0).
 
-```
-powershell -ExecutionPolicy Bypass -File deployeleasestage-release.ps1 -Sha <full sha> -CheckOnly -ExpectPending 0050_timesheets_paper -SshExe C:WindowsSystem32OpenSSHssh.exe
-powershell -ExecutionPolicy Bypass -File deployeleasestage-release.ps1 -Sha <full sha> -ExpectPending 0050_timesheets_paper -SshExe C:WindowsSystem32OpenSSHssh.exe
-```
+- **Migration:** exactly one pending, `0050_timesheets_paper`, applied; the database is at 51 migrations. `timesheet_periods_range_ordered` present, `timesheet_periods_range_valid` gone, `timesheet_working_comments` created (empty).
+- **Backup proven first:** `/var/backups/eje/eje-eje_production-2026-11-04T08-14-18Z` (verified, key-checked, restore-tested). Firewall script unchanged (`ee451ac`), ufw active.
+- **CI:** run 41793177998, 68 of 68 steps green (incl. PostgreSQL 479 tests, the rollback probe — `89668e8` against 0050 — and the three Timesheets-as-paper browser steps).
+- **Timesheet data identical row for row** (md5 of every row): 35 entries, 1 day comment, 13 periods (snapshots included), 0 corrections, 7 monthly submissions, 0 finance packages. Job-card fingerprints, counts, the frozen prices of all 67 signed jobs, attendance, timesheets, 9 customers and 13 sites identical. 0 error lines in the service log.
+- **Live, read only:** a technician's working sheet opens (5 open lines; proposed 1–4 Nov, the day after their last submission); the office lists all 9 existing submissions (8 current, 1 replaced) and opens one with its PDF; another technician is refused both. No submission was made on the live site (a submission is permanent).
+- **Mode:** demonstration on, email `refuse`, WhatsApp and email not configured. Nothing was sent.
 
-After it: `timesheet_periods_range_ordered` present and `timesheet_periods_range_valid` gone; `timesheet_working_comments` empty; every existing entry, period, snapshot, correction and monthly submission identical.
+**Rolling back:** `stage-release.ps1 -Rollback` returns to `89668e8` (`docs/rollback-4606315.md` §10). 0050 stays applied, which `89668e8` reads.
 
 ## RELEASED — `89668e8` = v1.0.0, semantic versions for every release (3 November 2026)
 
