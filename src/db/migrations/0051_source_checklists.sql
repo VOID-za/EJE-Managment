@@ -174,6 +174,22 @@ UPDATE "checklist_versions" v
    AND c."job_type_code" IN ('installation', 'service')
    AND v."status" = 'current';--> statement-breakpoint
 
+-- The two job types these checklists belong to. Present on every database that
+-- has run the application (the reference sync writes them); on an EMPTY one —
+-- a fresh server being rebuilt, before the sync — they are not yet there, and
+-- the checklists' foreign key would refuse this migration. As 0048 did for
+-- Delivery Note: the application's own definition, and nothing if the row
+-- exists (production's rows are untouched).
+INSERT INTO "job_types" ("code", "label", "description", "checklist_required", "photos_required", "schedules_date_range",
+  "captures_labour_and_travel", "visits_site", "order_number_expectation", "captures_delivery_note", "collected_on_completion",
+  "default_priority", "accent", "position")
+VALUES
+  ('installation', 'Installation', 'Commissioning and hand-over of a machine at a customer site.',
+    true, true, false, true, true, 'expected', false, false, 'normal', 'blue', 1),
+  ('service', 'Service', 'Planned preventative maintenance against the service schedule.',
+    true, false, true, true, true, 'expected', false, false, 'normal', 'green', 2)
+ON CONFLICT ("code") DO NOTHING;--> statement-breakpoint
+
 -- 4. The three source checklists. Generated from
 --    src/data/checklists/source-checklists.ts; source-checklists.db.test.ts
 --    proves the rows equal it.
