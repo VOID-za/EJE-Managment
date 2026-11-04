@@ -4261,7 +4261,7 @@ await step('the same dates cannot be submitted again; the office opens the submi
   const row = office.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${to}"]`).filter({ hasText: 'Sipho' }).first();
   await row.waitFor({ timeout: 15000 });
   await row.getByTestId('timesheet-submission-csv').waitFor({ timeout: 5000 });
-  await row.getByTestId('timesheet-submission-view').click();
+  await row.getByTestId('timesheet-submission-view-original').click();
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.getByTestId('preview-close').click();
   const read = await page.evaluate(async ({ base }) => (await (await fetch(`${base}/api/timesheets/submissions?userId=user-tech-sipho`)).json()).data, { base: BASE });

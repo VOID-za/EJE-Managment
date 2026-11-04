@@ -169,7 +169,7 @@ await check('the submission is listed exactly as sent, and the same dates cannot
   const listed = page.locator(`[data-testid="timesheet-submission"][data-from="${submittedFrom}"][data-to="${today}"]`);
   await listed.waitFor({ timeout: 10000 });
   if (!(await listed.innerText()).includes('5 lines')) fail(`the submission reads ${await listed.innerText()}`);
-  await press(listed.getByTestId('timesheet-submission-view'));
+  await press(listed.getByTestId('timesheet-submission-view-original'));
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await press(page.getByTestId('preview-close'));
   const mine = (await call('GET', '/api/timesheets/submissions')).json?.data ?? [];
@@ -199,7 +199,7 @@ await check('the office sees it among everybody’s, opens it, and has its PDF a
   await row.waitFor({ timeout: 15000 });
   await row.getByTestId('timesheet-submission-pdf').waitFor({ timeout: 5000 });
   await row.getByTestId('timesheet-submission-csv').waitFor({ timeout: 5000 });
-  await press(row.getByTestId('timesheet-submission-view'));
+  await press(row.getByTestId('timesheet-submission-view-original'));
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await press(page.getByTestId('preview-close'));
   const document = (await call('GET', `/api/timesheets/submissions/${submissionId}`)).json?.data;

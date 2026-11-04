@@ -3,7 +3,7 @@ import type { TimesheetDocument, TimesheetDocumentRow } from '@/application/time
 import type { AttendanceDocument } from '@/application/attendance-document';
 import { buildAttendanceRows } from '@/application/attendance-document';
 import { pdfPageTexts } from '@/lib/pdf/inspect';
-import { renderTimesheetPdf } from './timesheet-pdf';
+import { READABLE_BODY_PT, renderTimesheetPdf } from './timesheet-pdf';
 import { renderAttendancePdf } from './attendance-pdf';
 import { MIN_BODY_PT, OnePageOverflow, renderOnePageForm } from './one-page-form';
 import { buildTimesheetDocumentRows } from '@/application/timesheets';
@@ -58,53 +58,73 @@ const timesheet = (rows: TimesheetDocumentRow[], comment: string, absences = 0):
 const pages = (bytes: Uint8Array) => pdfPageTexts(bytes);
 const flat = (text: string) => text.replace(/\s+/gu, ' ');
 
-describe('PAY-04 — the timesheet PDF is exactly one page', () => {
+describe('PAY-04 / TS-PAPER-6 — the timesheet PDF: one readable page when it fits, more pages when it does not', () => {
   const cases: [string, TimesheetDocumentRow[], string, number][] = [
     ['a realistic month: one line a day', days('2026-10', 31).map((date, i) => row(date, i, 'ABC Engineering')), 'Normal month.', 0],
     // Worst cases a real month can produce, each pushed on one axis at a time
     // with everything else heavy too.
     ['a busy month: three lines every day, two with 80-character customer names, a 500-character comment, four absences', days('2026-10', 31).flatMap((date, i) => [row(date, i, LONG), row(date, i + 1, `${LONG} B`), row(date, i + 2, 'Workshop')]), 'A long comment about the month. '.repeat(16).slice(0, 500), 4],
     ['the longest comment allowed (2 000 characters), two long lines a day, every weekday of absences named', days('2026-10', 31).flatMap((date, i) => [row(date, i, LONG), row(date, i + 1, 'Workshop')]), 'Comment text that goes on. '.repeat(80).slice(0, 2000), 22],
-    ['a very busy month: five lines every day (155 rows) — two panels', days('2026-10', 31).flatMap((date, i) => Array.from({ length: 5 }, (_, k) => row(date, i + k, `Kruger Engineering ${k}`))), 'Five jobs a day.', 0],
+    ['a very busy month: five lines every day (155 rows)', days('2026-10', 31).flatMap((date, i) => Array.from({ length: 5 }, (_, k) => row(date, i + k, `Kruger Engineering ${k}`))), 'Five jobs a day.', 0],
     ['a 92-day period, two lines a day (184 rows)', [...days('2026-08', 31), ...days('2026-09', 30), ...days('2026-10', 31)].flatMap((date, i) => [row(date, i, 'Kruger Engineering Midrand'), row(date, i + 1, 'Workshop')]), 'Quarter.', 0],
   ];
   for (const [name, rows, comment, absences] of cases) {
     it(name, () => {
       const rendered = renderTimesheetPdf(timesheet(rows, comment, absences), { generatedAt: '2026-10-31T16:00:00.000Z' });
       const read = pages(rendered.bytes);
-      expect(rendered.pageCount).toBe(1);
-      expect(read).toHaveLength(1);
-      expect(rendered.layout.bodyPt).toBeGreaterThanOrEqual(MIN_BODY_PT);
-      expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
-      const text = flat(read[0]!);
+      expect(read).toHaveLength(rendered.pageCount);
+      if (rendered.layout !== null) {
+        // One page — only at a readable size.
+        expect(rendered.pageCount).toBe(1);
+        expect(rendered.layout.bodyPt).toBeGreaterThanOrEqual(READABLE_BODY_PT);
+        expect(rendered.layout?.lowestBaseline ?? 1).toBeGreaterThanOrEqual(rendered.layout?.footerTop ?? 0);
+      } else {
+        expect(rendered.pageCount).toBeGreaterThan(1);
+      }
+      const text = read.map(flat).join(' ');
       for (const header of ['Date', 'Customer', 'OT', 'D/T', 'Callout', 'Int Km', 'Cust Km', 'Totals', 'Comments']) expect(text).toContain(header);
+      // The table's headings on every page the table reaches (up to the totals); Page X of Y on every page.
+      const totalsPage = read.findIndex((page) => flat(page).includes('Totals'));
+      read.forEach((page, index) => {
+        if (index <= totalsPage) for (const header of ['Customer', 'Callout', 'Cust Km']) expect(flat(page)).toContain(header);
+        expect(flat(page)).toContain(`Page ${index + 1} of ${read.length}`);
+      });
       expect(text).not.toMatch(/\bHm\b/u);
-      // Every row is on the page: each line's OT value is printed once per row.
+      // Every row is printed: each line's OT value once per row.
       const otPrinted = (text.match(/\b[2-4]\.25\b/gu) ?? []).length;
       expect(otPrinted).toBeGreaterThanOrEqual(rows.length);
-      // A long customer name is wrapped, not cut: every word of it is on the page.
+      // A long customer name is wrapped, not cut: every word of it is printed.
       if (rows.some((r) => r.customer === LONG)) {
         for (const word of ['Vanderbijlpark', 'Plant', 'Works', '(Pty)']) expect(text).toContain(word);
       }
       expect(text).not.toContain('…');
-      expect(text).toContain('Page 1 of 1');
+      // The totals and the comment come after the last line, on the last page.
+      expect(totalsPage).toBeGreaterThanOrEqual(0);
+      expect(read.slice(totalsPage).map(flat).join(' ')).toContain('Comments');
     });
   }
 
   it('reports two panels only when one cannot hold the month', () => {
     const light = renderTimesheetPdf(timesheet(days('2026-10', 31).map((d, i) => row(d, i, 'ABC')), ''), { generatedAt: '2026-10-31T16:00:00.000Z' });
-    expect(light.layout.panels).toBe(1);
-    expect(light.layout.scale).toBe(1);
+    expect(light.layout?.panels).toBe(1);
+    expect(light.layout?.scale).toBe(1);
   });
 
-  it('refuses a form that cannot be printed legibly on one page, instead of a second page or dropped rows', () => {
+  it('no timesheet is too long: 930 lines and every axis at its maximum render on several pages, nothing dropped', () => {
     const absurd = days('2026-10', 31).flatMap((date, i) => Array.from({ length: 30 }, (_, k) => row(date, i + k, `${LONG} ${k}`)));
-    expect(() => renderTimesheetPdf(timesheet(absurd, ''), { generatedAt: '2026-10-31T16:00:00.000Z' })).toThrow(OnePageOverflow);
-    // Every axis at its maximum at once — three 80-character lines every day,
-    // the longest comment, absent every day as well — is more than one legible
-    // page holds: refused, said so, never trimmed.
+    const many = renderTimesheetPdf(timesheet(absurd, ''), { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(many.layout).toBeNull();
+    expect(many.pageCount).toBeGreaterThan(10);
+    expect(pages(many.bytes).map(flat).join(' ').match(/\b[2-4]\.25\b/gu)?.length ?? 0).toBeGreaterThanOrEqual(absurd.length);
     const everything = days('2026-10', 31).flatMap((date, i) => [row(date, i, LONG), row(date, i + 1, `${LONG} B`), row(date, i + 2, 'Workshop')]);
-    expect(() => renderTimesheetPdf(timesheet(everything, 'x'.repeat(2000), 31), { generatedAt: '2026-10-31T16:00:00.000Z' })).toThrow(OnePageOverflow);
+    const heavy = renderTimesheetPdf(timesheet(everything, 'x'.repeat(2000), 31), { generatedAt: '2026-10-31T16:00:00.000Z' });
+    expect(heavy.pageCount).toBeGreaterThan(1);
+    expect(flat(pages(heavy.bytes).at(-1)!)).toContain('x'.repeat(40));
+    // The one-page form itself (every other payroll form) still refuses rather than overflow.
+    expect(() => renderOnePageForm({
+      companyName: 'EJE', title: 'X', fields: [], columns: [{ key: 'a', header: 'A', weight: 1, align: 'left' }],
+      rows: absurd.map((r) => ({ cells: { a: r.customer } })), notes: [], footer: 'f',
+    })).toThrow(OnePageOverflow);
   });
 });
 
@@ -143,7 +163,7 @@ describe('PAY-04 — the attendance PDF is exactly one page', () => {
       expect(rendered.pageCount).toBe(1);
       expect(read).toHaveLength(1);
       expect(rendered.layout.bodyPt).toBeGreaterThanOrEqual(MIN_BODY_PT);
-      expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
+      expect(rendered.layout?.lowestBaseline ?? 1).toBeGreaterThanOrEqual(rendered.layout?.footerTop ?? 0);
       const text = flat(read[0]!);
       for (const header of ['ATTENDANCE', 'Technician Name', 'Month', 'October 2026', 'Date', 'Attendance', 'Absence reason']) expect(text).toContain(header);
       // PDF-NOTES-OFF-1: no Notes column.
@@ -187,7 +207,7 @@ describe('PDF-UNREC-1 — unrecorded days are left off both PDFs', () => {
     expect(text).not.toContain('NOT RECORDED');
     expect(text).toContain('4.50');
     expect(text).toContain('Only days with a recorded line are listed');
-    expect(rendered.layout.lowestBaseline).toBeGreaterThanOrEqual(rendered.layout.footerTop);
+    expect(rendered.layout?.lowestBaseline ?? 1).toBeGreaterThanOrEqual(rendered.layout?.footerTop ?? 0);
   });
 
   it('a timesheet with nothing recorded renders one page with its totals at zero and says so', () => {

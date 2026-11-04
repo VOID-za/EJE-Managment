@@ -17,7 +17,7 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
-// Each of these exists in 89668e8 (checked against that commit).
+// Each of these exists in 46096ac (checked against that commit).
 import { loadJobView } from '@/application/job-view';
 import { readRepositories } from '@/data/backend';
 import { documentPhotos } from '@/lib/job-card/model';
@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (89668e8), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (46096ac), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 89668e8, and it does: each of these was checked against that commit.
+ * in 46096ac, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -162,14 +162,13 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 89668e8 shipped up to 0049; this release adds 0050.
-    expect(shipped).toHaveLength(50);
-    expect(shipped.at(-1)).toBe('0049_tr_photo_delivery_note_site');
-    expect(shipped).not.toContain('0050_timesheets_paper');
+    // 46096ac (v1.1.0) shipped up to 0050; this release adds no migration.
+    expect(shipped).toHaveLength(51);
+    expect(shipped.at(-1)).toBe('0050_timesheets_paper');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0050 applied beyond what the live release ships.
+    // Exactly what the live release ships: this release adds none.
     expect(applied).toBe(51);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });

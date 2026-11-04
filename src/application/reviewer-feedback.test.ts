@@ -311,11 +311,13 @@ describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (T
     expect((await events('timesheet_submitted')).length).toBe(1);
   });
 
-  it('TS-OVERLAP-1: dates overlapping an earlier submission replace it for the office; the earlier one is KEPT', async () => {
+  it('TS-OVERLAP-1 / TS-PAPER-7: dates COVERING an earlier submission replace it once confirmed; the earlier one is KEPT', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const first = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
     await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Covers the shutdown week');
-    const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0));
+    // Not without the technician's confirmation.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0))).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_unconfirmed' }] });
+    const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0), { replace: true });
     expect(wider.comment).toBe('Covers the shutdown week');
     const current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
     expect(current.map((period) => period.id)).toEqual([wider.id]);

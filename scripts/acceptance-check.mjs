@@ -224,25 +224,39 @@ await check('the timesheet line form has no Shared call-out tick; it says the am
   await press(form.getByRole('button', { name: 'Cancel', exact: true }));
 });
 
-await check('overlapping periods are sent; the later replaces the earlier for the office; the lines stay', async () => {
+await check('overlapping dates: part of a submission is refused on screen and by the server; all of it replaces it once confirmed; the lines stay (TS-PAPER-7)', async () => {
   await as('Sipho Mahlangu');
   const me = 'user-tech-sipho';
   const line = await call('POST', `/api/timesheets/${me}/entries`, { date: shift(today, -3), customerName: 'Acceptance', overtimeHours: 1, doubleHours: 0 });
   if (line.status !== 200) fail(`saving a line answered ${line.status}`);
   const first = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -10), to: shift(today, -2) });
-  const second = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -5), to: today });
-  if (first.status !== 200 || second.status !== 200) fail(`the sends answered ${first.status} and ${second.status} ${JSON.stringify(second.json?.error ?? '')}`);
-  // Dates overlapping the last submission: the page says submitting replaces it (the earlier one is kept).
+  if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
+  const partial = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -5), to: today });
+  if (partial.status !== 422 || partial.json?.error?.violations?.[0]?.code !== 'timesheet_partial_overlap') fail(`a partial overlap answered ${partial.status} ${JSON.stringify(partial.json?.error ?? '')}`);
+  // On screen: part of it is said, and Submit waits.
   await go('/timesheets');
+  await page.getByTestId('timesheet-from').fill(shift(today, -5));
+  await page.getByTestId('timesheet-to').fill(today);
+  await page.locator('[data-testid="timesheet-period-overlap"][data-kind="partial"]').waitFor({ timeout: 15000 });
+  if (await page.getByTestId('timesheet-send').isEnabled()) fail('Submit is offered for a partial overlap');
+  // All of it: said as a replacement, and confirmed in the dialog as one.
   await page.getByTestId('timesheet-from').fill(shift(today, -12));
-  await page.getByTestId('timesheet-period-overlap').filter({ hasText: 'replaces' }).waitFor({ timeout: 15000 });
-  const sheet = (await call('GET', `/api/timesheets/${me}?from=${shift(today, -10)}&to=${today}`)).json?.data;
-  if (sheet !== undefined && sheet !== null) {
-    const lines = sheet.days.flatMap((day) => day.entries ?? []);
-    if (!lines.some((entry) => entry.customerName === 'Acceptance')) fail('the line was lost');
-  }
+  await page.locator('[data-testid="timesheet-period-overlap"][data-kind="replace"]').filter({ hasText: 'replaces' }).waitFor({ timeout: 15000 });
+  await press(page.getByTestId('timesheet-send'));
+  await page.getByRole('dialog').getByRole('button', { name: 'Replace and submit' }).waitFor({ timeout: 5000 });
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Cancel' }));
+  const unconfirmed = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -12), to: today });
+  if (unconfirmed.status !== 422) fail(`a replacement without confirmation answered ${unconfirmed.status}`);
+  const replaced = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -12), to: today, replace: true });
+  if (replaced.status !== 200) fail(`the confirmed replacement answered ${replaced.status} ${JSON.stringify(replaced.json?.error ?? '')}`);
+  const list = (await call('GET', `/api/timesheets/submissions?userId=${me}`)).json?.data ?? [];
+  const earlier = list.find((row) => row.from === shift(today, -10) && row.to === shift(today, -2));
+  if (earlier?.current !== false) fail('the replaced submission is not kept as replaced');
+  const original = await call('GET', `/api/timesheets/submissions/${earlier.id}?version=original`);
+  if (!original.json?.data?.rows?.some((row) => row.customer === 'Acceptance')) fail('the replaced original is not readable in full');
   await noPageOverflow('the timesheet');
 });
+
 
 /* ---- The Delivery Note ---------------------------------------------------- */
 let note = null;

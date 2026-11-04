@@ -540,4 +540,68 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       }),
     )).toContain('timesheet_entries_reviewer_bounded');
   });
+
+  it('TS-PAPER-7 on PostgreSQL: a partial overlap is refused and changes nothing; a covering submission replaces only when confirmed; the repository never replaces what it does not cover', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    for (const [date, tag] of [['2026-11-05', 'L-1105'], ['2026-11-22', 'L-1122'], ['2026-12-10', 'L-1210']] as const) {
+      expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date, customerName: tag, overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
+    }
+    const first = await tech.post<{ period: { id: string; snapshot: unknown } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-11-01', to: '2026-11-25' });
+    expect(first.status, JSON.stringify(first.error)).toBe(200);
+    const rows = () => db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician)).orderBy(schema.timesheetPeriods.periodFrom);
+    const entries = () => db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician)).orderBy(schema.timesheetEntries.id);
+    const before = { periods: await rows(), entries: await entries() };
+
+    // The owner's example: 20 Nov – 15 Dec covers only part of 1–25 Nov.
+    const partial = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-11-20', to: '2026-12-15', replace: true });
+    expect(partial.status).toBe(422);
+    expect(partial.error?.violations?.[0]?.code).toBe('timesheet_partial_overlap');
+    expect({ periods: await rows(), entries: await entries() }).toEqual(before);
+
+    // Covering all of it: refused without the confirmation, accepted with it; the original kept.
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-10-26', to: '2026-12-15' })).status).toBe(422);
+    const covering = await tech.post<{ period: { id: string; snapshot: { entries: { customerName: string }[] } } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-10-26', to: '2026-12-15', replace: true });
+    expect(covering.status, JSON.stringify(covering.error)).toBe(200);
+    expect(covering.data.period.snapshot.entries.map((entry) => entry.customerName).sort()).toEqual(['L-1105', 'L-1122', 'L-1210']);
+    const [kept] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
+    expect(kept?.supersededAt).not.toBeNull();
+    expect(kept?.snapshot).toEqual(before.periods[0]?.snapshot);
+
+    // The repository itself: dates covering only part of a current submission replace nothing.
+    const { PostgresAttendanceRepository } = await import('@/data/postgres/attendance-repository');
+    const touched = await new PostgresAttendanceRepository(db).supersedeOverlappingPeriods({
+      userId: IDS.technician as never, from: '2026-12-01', to: '2027-01-31', exceptId: null, at: new Date().toISOString(), by: IDS.technician as never,
+    });
+    expect(touched).toEqual([]);
+    const [current] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, covering.data.period.id));
+    expect(current?.supersededAt).toBeNull();
+    // And the database still refuses a second current submission sharing a day.
+    expect(await postgresMessage(
+      db.insert(schema.timesheetPeriods).values({
+        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: '2026-12-01', periodTo: '2027-01-31',
+        updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
+      }),
+    )).toContain('overlaps a period already sent');
+  });
+
+  it('TS-PAPER-6 on PostgreSQL: a 250-line submission downloads as a multi-page PDF, and the original of a replaced submission is readable', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const start = Date.parse('2026-09-01T00:00:00Z');
+    for (let index = 0; index < 250; index += 1) {
+      const date = new Date(start + Math.floor(index / 3) * 86_400_000).toISOString().slice(0, 10);
+      expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date, customerName: `Customer ${index}`, overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
+    }
+    const sent = await tech.post<{ period: { id: string } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-09-01', to: '2026-11-30' });
+    expect(sent.status, JSON.stringify(sent.error)).toBe(200);
+    const pdf = await tech.download(`/api/timesheets/submissions/${sent.data.period.id}/pdf`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.text).toMatch(/Page 1 of [2-9]/u);
+    const replacement = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-08-01', to: '2026-12-31', replace: true });
+    expect(replacement.status, JSON.stringify(replacement.error)).toBe(200);
+    const original = await tech.get<{ rows: unknown[]; versionLabel: string }>(`/api/timesheets/submissions/${sent.data.period.id}?version=original`);
+    expect(original.status).toBe(200);
+    expect(original.data.rows).toHaveLength(250);
+    expect(original.data.versionLabel).toMatch(/replaced by a later submission/u);
+  });
 });

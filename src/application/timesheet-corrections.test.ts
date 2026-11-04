@@ -180,13 +180,15 @@ describe('TS-16 — asking for a correction', () => {
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
     expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.snapshot).toEqual(period.snapshot);
-    // TS-OVERLAP-1: a DIFFERENT period sharing a day is sent, and replaces this one for the office.
-    const later = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1));
+    // TS-PAPER-7: dates covering only part of it are refused; dates covering all of it are refused too
+    // while it carries a correction (replacing it from the sheet's lines would undo the correction).
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1))).rejects.toMatchObject({ violations: [{ code: 'timesheet_partial_overlap' }] });
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(8), day(0), { replace: true })).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_corrected' }] });
     const kept = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
-    expect(kept?.supersededAt).toBeTruthy();
+    expect(kept?.supersededAt ?? null).toBeNull();
     expect(kept?.snapshot).toEqual(period.snapshot);
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
-    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toEqual([later.id]);
+    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toEqual([period.id]);
   });
 });
 
