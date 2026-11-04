@@ -8,7 +8,7 @@ import {
   loadTimesheet,
   loadTimesheetDocument,
   saveTimesheetEntry,
-  saveTimesheetPeriodComment,
+  saveWorkingTimesheetComment,
   submitTimesheetPeriod,
 } from './timesheets';
 import {
@@ -62,7 +62,7 @@ const sendPeriod = async () => {
   const tech = harness.as(sipho);
   const first = await saveTimesheetEntry(tech, SIPHO, line(day(5)));
   const second = await saveTimesheetEntry(tech, SIPHO, line(day(3), { customerName: 'Vaal Steel', overtimeHours: 2 }));
-  await saveTimesheetPeriodComment(tech, SIPHO, FROM, TO, 'Week of the Vaal shutdown');
+  await saveWorkingTimesheetComment(tech, SIPHO, 'Week of the Vaal shutdown');
   const period = await submitTimesheetPeriod(tech, SIPHO, FROM, TO);
   return { period, first, second };
 };
@@ -127,13 +127,12 @@ describe('TS-16 — asking for a correction', () => {
     ).rejects.toMatchObject({ violations: [{ code: 'timesheet_not_sent' }] });
   });
 
-  it('a reason is required; lines stay inside the period; every line rule of the timesheet applies; no day over 24 hours', async () => {
+  it('a reason is required; lines stay inside the period; every line rule of the timesheet applies (TS-PAPER: no customer required, two decimals); no day over 24 hours', async () => {
     const { first, second } = await sendPeriod();
     await expect(ask(correctedLines(first, second), { reason: '   ' })).rejects.toMatchObject({ violations: [{ code: 'correction_reason_required' }] });
     await expect(ask([line(day(1))] as never)).rejects.toMatchObject({ violations: [{ code: 'correction_outside_period' }] });
     await expect(ask([line(day(7))] as never)).rejects.toMatchObject({ violations: [{ code: 'correction_outside_period' }] });
-    await expect(ask([line(day(5), { overtimeHours: 1.1 })] as never)).rejects.toMatchObject({ violations: [{ code: 'invalid_overtime_hours' }] });
-    await expect(ask([line(day(5), { customerName: '' })] as never)).rejects.toMatchObject({ violations: [{ code: 'customer_required' }] });
+    await expect(ask([line(day(5), { overtimeHours: 1.111 })] as never)).rejects.toMatchObject({ violations: [{ code: 'invalid_overtime_hours' }] });
     await expect(ask([line(day(5), { workshop: true })] as never)).rejects.toMatchObject({ violations: [{ code: 'workshop_and_customer' }] });
     await expect(ask([line(day(5), { normalHours: 2 })] as never)).rejects.toMatchObject({ violations: [{ code: 'nt_not_entered' }] });
     await expect(
@@ -171,17 +170,22 @@ describe('TS-16 — asking for a correction', () => {
     expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_correction_requested')).toBe(false);
   });
 
-  it('sending the period again supersedes its corrections — they are removed with the earlier submission (RESUBMIT-1)', async () => {
+  it('a submission and its corrections are never removed: the same dates again are refused; overlapping dates replace it and KEEP it (TS-PAPER)', async () => {
     const { first, second } = await sendPeriod();
     await ask(correctedLines(first, second));
     const period = (await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))!;
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
-    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(0);
+    // Was RESUBMIT-1, which overwrote the snapshot and deleted the corrections.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
+    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
+    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.snapshot).toEqual(period.snapshot);
     // TS-OVERLAP-1: a DIFFERENT period sharing a day is sent, and replaces this one for the office.
     const later = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1));
-    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.supersededAt).toBeTruthy();
+    const kept = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
+    expect(kept?.supersededAt).toBeTruthy();
+    expect(kept?.snapshot).toEqual(period.snapshot);
+    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
     expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toEqual([later.id]);
   });
 });

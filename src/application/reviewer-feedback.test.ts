@@ -3,7 +3,6 @@ import { asUserId, getJobTypeDefinition, type Job, type TimesheetEntry } from '@
 import { businessToday } from '@/lib/business-time';
 import { pdfPlainText } from '@/lib/pdf/inspect';
 import {
-  defaultTimesheetRange,
   formatDayAndDate,
   formatPeriod,
   timesheetRangeProblem,
@@ -18,9 +17,10 @@ import { recordAttendance } from './attendance-operations';
 import {
   loadTimesheet,
   loadTimesheetDocument,
-  saveTimesheetComment,
   saveTimesheetEntry,
-  saveTimesheetPeriodComment,
+  saveWorkingTimesheetComment,
+  loadWorkingTimesheet,
+  listTimesheetSubmissions,
   submitTimesheetPeriod,
 } from './timesheets';
 import {
@@ -162,12 +162,11 @@ describe('TS-04 / TS-05 — dates, order and the day of the week', () => {
     expect(formatPeriod('2026-10-26', '2026-10-26')).toBe('Mon 26 Oct 2026');
   });
 
-  it('the page opens on the first of the month to today, and an impossible range is said, not queried', () => {
-    expect(defaultTimesheetRange('2026-10-28')).toEqual({ from: '2026-10-01', to: '2026-10-28' });
-    expect(timesheetRangeProblem('2026-10-28', '2026-10-01', 92)).toBe('From must be on or before To.');
-    expect(timesheetRangeProblem('2026-10-01', '', 92)).toBe('Choose both a From and a To date.');
-    expect(timesheetRangeProblem('2026-01-01', '2026-12-31', 92)).toMatch(/at most 92/);
-    expect(timesheetRangeProblem('2026-10-01', '2026-10-01', 92)).toBeNull();
+  it('a submission’s dates may be any length; an impossible range is said, not queried (TS-PAPER)', () => {
+    expect(timesheetRangeProblem('2026-10-28', '2026-10-01')).toBe('From must be on or before To.');
+    expect(timesheetRangeProblem('2026-10-01', '')).toBe('Choose both a From and a To date.');
+    expect(timesheetRangeProblem('2026-01-01', '2026-12-31')).toBeNull();
+    expect(timesheetRangeProblem('2026-10-01', '2026-10-01')).toBeNull();
   });
 
   it('the sheet is OLDEST FIRST, each day with its weekday; an empty range is empty, not an error', async () => {
@@ -189,9 +188,10 @@ describe('TS-06 — Workshop', () => {
     await expect(
       saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { workshop: true, customerName: 'ABC' })),
     ).rejects.toMatchObject({ violations: [{ code: 'workshop_and_customer' }] });
+    // TS-PAPER: Workshop never needs a customer, and a line may name neither.
     await expect(
       saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(0), { customerName: '' })),
-    ).rejects.toMatchObject({ violations: [{ code: 'customer_required' }] });
+    ).resolves.toMatchObject({ workshop: false, customerName: '' });
     // No fake customer was created.
     const customers = await harness.repos.customers.list();
     expect(customers.some((customer) => customer.name === 'Workshop')).toBe(false);
@@ -259,25 +259,25 @@ describe('TS-09 — internal and customer kilometres', () => {
 const FROM = day(6);
 const TO = day(2);
 
-describe('TS-10 / TS-12 — one comment for the timesheet period; Save is not a submission', () => {
-  it('saves and changes the period’s comment; an unchanged comment writes nothing', async () => {
-    const saved = await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Waited for the crane on the 14th.');
-    expect(saved).toMatchObject({ from: FROM, to: TO, comment: 'Waited for the crane on the 14th.', submittedAt: null });
+describe('TS-10 / TS-12 — one comment for the open timesheet; Save is not a submission', () => {
+  it('saves and changes the sheet’s comment; an unchanged comment writes nothing (TS-PAPER: not tied to any dates)', async () => {
+    expect(await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Waited for the crane on the 14th.')).toEqual({ comment: 'Waited for the crane on the 14th.' });
     const before = (await events('timesheet_comment_saved')).length;
-    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Waited for the crane on the 14th.');
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Waited for the crane on the 14th.');
     expect((await events('timesheet_comment_saved')).length).toBe(before);
+    // The draft of ANY dates prints it: the comment belongs to the sheet, not to a From/To.
     expect((await loadTimesheetDocument(harness.as(master), SIPHO, FROM, TO)).comment).toBe('Waited for the crane on the 14th.');
-    // The exact period: another range has its own comment.
-    expect((await loadTimesheetDocument(harness.as(master), SIPHO, FROM, day(1))).comment).toBe('');
-    await expect(saveTimesheetPeriodComment(harness.as(master), SIPHO, FROM, TO, 'x')).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
+    expect((await loadTimesheetDocument(harness.as(master), SIPHO, FROM, day(1))).comment).toBe('Waited for the crane on the 14th.');
+    expect((await loadWorkingTimesheet(harness.as(sipho), SIPHO)).comment).toBe('Waited for the crane on the 14th.');
+    await expect(saveWorkingTimesheetComment(harness.as(master), SIPHO, 'x')).rejects.toMatchObject({ violations: [{ code: 'not_permitted' }] });
   });
 });
 
-describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () => {
-  it('records the submission, audited, with the content as sent; the lines stay editable and sending again REPLACES it (RESUBMIT-1)', async () => {
+describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (TS-PAPER)', () => {
+  it('records an IMMUTABLE submission with who and when; the same dates again are refused, never overwritten', async () => {
     const inside = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const before = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
-    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'All in order.');
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'All in order.');
     const sent = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
     expect(sent).toMatchObject({ from: FROM, to: TO, submittedBy: SIPHO });
     expect(sent.submittedAt).not.toBeNull();
@@ -291,75 +291,59 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect(document.submittedAt).toBe(sent.submittedAt);
     expect(document.comment).toBe('All in order.');
     expect(document.rows.filter((row) => row.recorded)).toHaveLength(1);
-    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, FROM, TO);
-    // `locked` now only MARKS a day as sent.
-    expect(sheet.days.every((entry) => entry.locked)).toBe(true);
-    expect(sheet.period).toMatchObject({ from: FROM, to: TO, submittedAt: sent.submittedAt });
 
-    // RESUBMIT-1: the lines and comments of a sent period stay editable.
-    const changed = await saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id });
-    expect(changed.overtimeHours).toBe(3);
-    const added = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(TO));
-    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Corrected the OT.');
-    await saveTimesheetComment(harness.as(sipho), SIPHO, day(4), 'day note');
-    // Until it is sent again the office still reads the version it has.
-    expect((await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO)).comment).toBe('All in order.');
+    // The comment is cleared for the next sheet; the line outside the dates stays on it.
+    const working = await loadWorkingTimesheet(harness.as(sipho), SIPHO);
+    expect(working.comment).toBe('');
+    expect(working.entries.map((entry) => entry.id)).toEqual([before.id]);
+    expect(working.lastSubmission).toMatchObject({ from: FROM, to: TO });
 
-    // Sent again: the new submission REPLACES the earlier one — nothing of it is kept.
-    const again = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    expect(again.id).toBe(sent.id);
-    expect(again.snapshot?.comment).toBe('Corrected the OT.');
-    expect(again.snapshot?.entries.map((entry) => entry.id).sort()).toEqual([inside.id, added.id].sort());
-    expect(again.snapshot?.entries.find((entry) => entry.id === inside.id)?.overtimeHours).toBe(3);
-    const latest = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
-    expect(latest.comment).toBe('Corrected the OT.');
-    expect(latest.submittedAt).toBe(again.submittedAt);
-    expect(latest.rows.filter((row) => row.recorded)).toHaveLength(2);
-    const periods = await harness.repos.attendance.listSubmittedPeriods(SIPHO as never, FROM, TO);
-    expect(periods).toHaveLength(1);
-    // The lines themselves were never deleted; outside days stay open as before.
-    expect((await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(1)))).date).toBe(day(1));
-    expect(before.id).toBeDefined();
-    expect((await events('timesheet_submitted')).length).toBe(2);
+    // A line changed afterwards changes the working copy only — never the submission.
+    await saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id });
+    const still = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
+    expect(still.rows.find((row) => row.recorded)?.overtimeHours).toBe(1.5);
+
+    // The same dates again: refused — a change after submitting is a correction.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
+    const kept = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
+    expect(kept?.snapshot).toEqual(sent.snapshot);
+    expect(kept?.submittedAt).toBe(sent.submittedAt);
+    expect((await events('timesheet_submitted')).length).toBe(1);
   });
 
-  it('TS-OVERLAP-1: overlapping periods are saved and sent; each replaces the overlapping one, so every day has ONE current submission', async () => {
+  it('TS-OVERLAP-1: dates overlapping an earlier submission replace it for the office; the earlier one is KEPT', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const first = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    // The comment of an overlapping period saves; nothing is refused.
-    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, day(10), day(0), 'Covers the shutdown week');
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Covers the shutdown week');
     const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0));
     expect(wider.comment).toBe('Covers the shutdown week');
-    let current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
+    const current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
     expect(current.map((period) => period.id)).toEqual([wider.id]);
-    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.supersededAt).toBeTruthy();
-    // The same narrower period sent again: current again, and the wider one replaced in turn.
-    const again = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    expect(again.id).toBe(first.id);
-    current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
-    expect(current.map((period) => period.id)).toEqual([first.id]);
-    // Lines are never touched by any of it, and stay editable and removable.
+    const replaced = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
+    expect(replaced?.supersededAt).toBeTruthy();
+    // Kept exactly as it was submitted, and still listed — marked replaced.
+    expect(replaced?.snapshot).toEqual(first.snapshot);
+    const listed = await listTimesheetSubmissions(harness.as(master), SIPHO);
+    expect(listed.map((row) => [row.id, row.current])).toEqual([[wider.id, true], [first.id, false]]);
+    // Lines are never touched by any of it.
     const lines = await harness.repos.attendance.listEntries(SIPHO, day(30), day(0));
     expect(lines.map((entry) => entry.date)).toEqual([day(4)]);
-    // The office is told each time, and the audit names what was replaced.
     const trail = (await harness.repos.activity.list()).filter((event) => event.type === 'timesheet_submitted');
     expect(trail.some((event) => event.detail.includes('replaces the overlapping submission'))).toBe(true);
     // A disjoint period is simply another current submission.
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(25)));
     await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(26), day(24));
     expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0))).length).toBe(2);
-    // And the view says which current submissions a wider range shares days with.
-    const sheet = await loadTimesheet(harness.as(sipho), SIPHO, day(30), day(0));
-    expect(sheet.period.overlapsSent.length).toBe(2);
   });
 
-  it('validates the period: From after To refused, at most 92 days; a To after today is allowed (MONTH-END-OFF-1)', async () => {
+  it('validates only the dates themselves: From after To refused; any length, any end — a future To included', async () => {
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, FROM)).rejects.toMatchObject({ violations: [{ code: 'invalid_range' }] });
     const tomorrow = (() => { const d = new Date(`${businessToday()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
-    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(2), tomorrow)).toMatchObject({ from: day(2), to: tomorrow });
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(120), day(0))).rejects.toMatchObject({ violations: [{ code: 'range_too_long' }] });
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(1), tomorrow)).toMatchObject({ from: day(1), to: tomorrow });
+    // TS-PAPER: longer than 92 days.
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(150), day(20))).toMatchObject({ from: day(150), to: day(20) });
     // A one-day period is a period.
-    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(20), day(20))).toMatchObject({ from: day(20), to: day(20) });
+    expect(await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(200), day(200))).toMatchObject({ from: day(200), to: day(200) });
   });
 
   it('tells the office — every active Master and Coordinator, once — only after the submission is saved', async () => {
@@ -371,7 +355,7 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
       for (const id of officeIds) total += (await harness.repos.notifications.list(id)).filter((n) => n.type === 'timesheet_submitted').length;
       return total;
     };
-    // A refused send notifies nobody.
+    // A refused submission notifies nobody.
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, TO, FROM)).rejects.toBeDefined();
     expect(await count()).toBe(0);
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
@@ -381,8 +365,10 @@ describe('TS-02 / TS-03 / TS-14 — Send to office, for the chosen period', () =
     expect(one?.title).toContain('Sipho');
     expect(one?.body).toContain(formatDayAndDate(FROM));
     expect(one?.link).toBe('/timesheets');
-    // Sending again (RESUBMIT-1) tells the office once more — about the replacement; nor is a technician told.
-    await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    // The same dates again are refused, so nobody is told twice; the next period tells them again.
+    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toBeDefined();
+    expect(await count()).toBe(officeIds.length);
+    await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(1), day(0));
     expect(await count()).toBe(officeIds.length * 2);
     expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_submitted')).toBe(false);
   });
@@ -399,7 +385,7 @@ describe('TS-11 / PDF-01…03 — Preview and the PDF Layout', () => {
 
   it('prints Time Sheet, the Technician Name, the Period, EXACTLY the seven columns and the Comments box', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4), { customerName: '', workshop: true, overtimeHours: 2, doubleHours: 1, calloutAmount: 45000, internalKm: 10, customerKm: 37.5 }));
-    await saveTimesheetPeriodComment(harness.as(sipho), SIPHO, FROM, TO, 'Bench work all day.');
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Bench work all day.');
     const document = await loadTimesheetDocument(harness.as(sipho), SIPHO, FROM, TO);
     const text = pdfPlainText(renderTimesheetPdf(document, { generatedAt: '2026-10-28T10:00:00.000Z' }).bytes);
     for (const expected of [

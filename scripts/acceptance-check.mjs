@@ -213,7 +213,7 @@ await check('the Senior Tech is listed for main and helper standby — never app
 /* ---- Timesheets ----------------------------------------------------------- */
 await check('the timesheet line form has no Shared call-out tick; it says the amount is your own share', async () => {
   await as('Sipho Mahlangu');
-  await go(`/timesheets?from=${shift(today, -6)}&to=${today}`);
+  await go('/timesheets');
   await press(page.getByTestId('add-timesheet-line').first());
   const form = page.getByTestId('timesheet-line-form');
   await form.waitFor({ timeout: 15000 });
@@ -232,8 +232,9 @@ await check('overlapping periods are sent; the later replaces the earlier for th
   const first = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -10), to: shift(today, -2) });
   const second = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -5), to: today });
   if (first.status !== 200 || second.status !== 200) fail(`the sends answered ${first.status} and ${second.status} ${JSON.stringify(second.json?.error ?? '')}`);
-  // A wider range overlapping the current submission: the page says sending replaces it.
-  await go(`/timesheets?from=${shift(today, -12)}&to=${today}`);
+  // Dates overlapping the last submission: the page says submitting replaces it (the earlier one is kept).
+  await go('/timesheets');
+  await page.getByTestId('timesheet-from').fill(shift(today, -12));
   await page.getByTestId('timesheet-period-overlap').filter({ hasText: 'replaces' }).waitFor({ timeout: 15000 });
   const sheet = (await call('GET', `/api/timesheets/${me}?from=${shift(today, -10)}&to=${today}`)).json?.data;
   if (sheet !== undefined && sheet !== null) {

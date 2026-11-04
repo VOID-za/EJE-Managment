@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -476,5 +476,30 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       (select site_id::text from jobs where id = ${B.siteLessNote}) as site,
       (select purpose from job_media where id = ${B.referencePhoto}) as purpose`);
     expect(state).toEqual({ site: null, purpose: 'delivery_note_reference' });
+  });
+
+  /*
+   * 0050, which the live release (89668e8) has never heard of: a submitted
+   * timesheet longer than 92 days, the open sheet's comment, and a
+   * technician's month submitted as attendance only (TS-PAPER).
+   */
+  it('writes the rows only this release can (0050): a 152-day submission, a working comment, an attendance-only month', async () => {
+    const B = ROLLBACK_0050;
+    const tech = asUserId(IDS.technician);
+    const attendance = new PostgresAttendanceRepository(db);
+    const at = '2027-09-01T08:00:00.000Z';
+    const sent = await attendance.submitPeriod({
+      id: B.longPeriod, userId: tech, from: B.longFrom, to: B.longTo, comment: 'Long period', updatedBy: tech, updatedAt: at,
+      submittedAt: at, submittedBy: tech, snapshot: { technicianName: 'Sipho', from: B.longFrom, to: B.longTo, comment: 'Long period', entries: [] },
+    });
+    expect(sent?.submittedAt).not.toBeNull();
+    await attendance.saveWorkingComment({ userId: tech, comment: 'Still filling it in', updatedBy: tech, updatedAt: at });
+    const payroll = new PostgresPayrollRepository(db);
+    const month = await payroll.createSubmission({
+      id: B.attendanceOnlyMonth, userId: tech, month: B.month, timesheetPeriodId: null,
+      attendance: { technicianName: 'Sipho', month: B.month, days: [] },
+      submittedAt: at, submittedBy: tech,
+    });
+    expect(month?.timesheetPeriodId).toBeNull();
   });
 });

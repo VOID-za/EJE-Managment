@@ -186,7 +186,7 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (6ec5655) against a database at 0049
+      - name: Rollback compatibility — the live release (89668e8) against a database at 0050
         run: bash scripts/release/rollback-compat.sh
 
   browser:
@@ -410,6 +410,24 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run acceptance-check
+
+      # TS-PAPER (4 November 2026): the timesheet as a piece of paper — filled in,
+      # submitted on payday for the dates confirmed, read by the office — at the
+      # three sizes it is used on.
+      - name: Timesheets as paper — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run timesheets-paper-check
+
+      - name: Timesheets as paper — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run timesheets-paper-check
+
+      - name: Timesheets as paper — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run timesheets-paper-check
 
       - name: Integrations regression — desktop (simulated providers)
         env:

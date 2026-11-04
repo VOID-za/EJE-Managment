@@ -149,31 +149,25 @@ await check('Attendance: a submitted month is changed and submitted again; the n
 });
 
 /* ---- Timesheets ---------------------------------------------------------- */
-await check('Timesheets: no Whose timesheet block; From and To remembered; sent, and sent again', async () => {
+await check('Timesheets: no Whose timesheet block; submitted once for its dates, never overwritten; the next sheet starts the day after (TS-PAPER)', async () => {
   await as('Elmarie Coetzee');
   await go('/timesheets');
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
+  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 20000 });
   if ((await page.getByTestId('timesheet-person').count()) !== 0 || (await page.getByLabel('Whose timesheet').count()) !== 0) fail('the Whose timesheet block is still there');
   const from = PREVIOUS_MONTH_START;
   await page.getByTestId('timesheet-from').fill(from);
   await page.getByTestId('timesheet-to').fill(today);
   await page.getByTestId('timesheet-period-label').waitFor({ timeout: 15000 });
   await noPageOverflow('Timesheets');
-  await go('/dashboard');
-  await go('/timesheets');
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 20000 });
-  const shownFrom = await page.getByTestId('timesheet-from').inputValue();
-  const shownTo = await page.getByTestId('timesheet-to').inputValue();
-  if (shownFrom !== from || shownTo !== today) fail(`after returning the page shows ${shownFrom} … ${shownTo}`);
   const me = (await call('GET', '/api/auth/me')).json.data.user.id;
   const sent = await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today });
-  if (sent.status !== 200) fail(`sending answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
+  if (sent.status !== 200) fail(`submitting answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
   const again = await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today });
-  if (again.status !== 200) fail(`sending again answered ${again.status}`);
+  if (again.status !== 422) fail(`the same dates again answered ${again.status}`);
   await go('/timesheets');
-  await page.getByText(/^Sent to office /u).first().waitFor({ timeout: 20000 });
-  // FORMS-PAGES-1: the page shows Preview and Print only — sending is on Monthly Forms.
-  if ((await page.getByTestId('timesheet-send').count()) !== 0) fail('the Timesheets page still offers Send');
+  await page.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
+  const next = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  if ((await page.getByTestId('timesheet-from').inputValue()) !== next) fail(`the next sheet starts on ${await page.getByTestId('timesheet-from').inputValue()}`);
   return `${from} → ${today}`;
 });
 

@@ -72,7 +72,8 @@ describe('the office keeps its OWN forms, and only its own', () => {
       await coordinator.post(`/api/timesheets/${COORDINATOR}/entries`, line),
       await coordinator.get(`/api/timesheets/${COORDINATOR}?from=${today}&to=${today}`),
       await coordinator.post(`/api/timesheets/${COORDINATOR}/period/submit`, { from: `${month}-01`, to: `${month}-01` }),
-      await coordinator.post(`/api/timesheets/${COORDINATOR}/period/comment`, { from: `${month}-01`, to: `${month}-01`, comment: 'x' }),
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/working/comment`, { comment: 'x' }),
+      await coordinator.get(`/api/timesheets/${COORDINATOR}/working`),
       await coordinator.post(`/api/timesheets/${COORDINATOR}/comment`, { date: today, comment: 'x' }),
     ]) {
       expect(answer.status, JSON.stringify(answer.error)).toBe(403);
@@ -87,7 +88,7 @@ describe('the office keeps its OWN forms, and only its own', () => {
 
   it('refuses every write to a technician’s timesheet, with the technician’s id in the path', async () => {
     refused(await master.post(`/api/timesheets/${technician.id}/entries`, line));
-    refused(await master.post(`/api/timesheets/${technician.id}/period/comment`, { from: `${month}-01`, to: `${month}-01`, comment: 'not mine' }));
+    refused(await master.post(`/api/timesheets/${technician.id}/working/comment`, { comment: 'not mine' }));
     refused(await master.post(`/api/timesheets/${technician.id}/period/submit`, { from: `${month}-01`, to: `${month}-01` }));
     refused(await coordinator.post(`/api/timesheets/${technician.id}/entries`, line));
   });

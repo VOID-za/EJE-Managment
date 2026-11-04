@@ -4065,26 +4065,23 @@ await step('a technician records their own absence with its reason; their timesh
   await page.locator(`[data-testid="my-attendance-day"][data-date="${today}"][data-status="absent"]`).getByText('Absent — Sick Leave').waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 15000 });
   if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error('a technician’s own timesheet still offers Export CSV');
   await page.getByTestId('timesheet-preview').waitFor({ timeout: 5000 });
   await signInAsMasterIfNeeded();
 });
 
-await step('the Master’s Timesheets page is their own: no Whose timesheet block, From and To kept, oldest day first (TS-WHOSE-OFF-1, TS-04)', async () => {
+await step('the Master’s Timesheets page: their own sheet, Submit with From and To, and every technician’s submissions (TS-PAPER)', async () => {
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 10000 });
   if ((await page.getByTestId('timesheet-person').count()) !== 0) throw new Error('the Whose timesheet block is still on the page');
   if ((await page.getByLabel('Whose timesheet').count()) !== 0) throw new Error('the Whose timesheet selector is still on the page');
   await page.getByTestId('timesheet-from').waitFor({ timeout: 5000 });
   await page.getByTestId('timesheet-to').waitFor({ timeout: 5000 });
   // Their own sheet: a Master keeps a timesheet, so lines can be added.
   if ((await page.getByTestId('add-timesheet-line').count()) === 0) throw new Error('the Master is not offered their own timesheet');
-  // TS-04/TS-05: oldest day first, each with its day of the week.
-  const dates = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
-  if (dates.length > 1 && [...dates].sort().join() !== dates.join()) throw new Error('the timesheet is not oldest-first');
-  const firstLabel = await page.getByTestId('timesheet-day-label').first().innerText();
-  if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) /u.test(firstLabel)) throw new Error(`no day of the week: ${firstLabel}`);
+  // The office's list of everybody's submissions.
+  await page.getByTestId('timesheet-office').waitFor({ timeout: 10000 });
   // A From after the To is said on the screen, not sent to the server.
   const from = await page.getByLabel('From').inputValue();
   await page.getByLabel('From').fill('2099-01-01');
@@ -4097,28 +4094,18 @@ await step('the Master’s Timesheets page is their own: no Whose timesheet bloc
 
 /*
  * THE 30 OCTOBER 2026 TIMESHEET FREEZE, AS A TECHNICIAN MET IT. The line form
- * was drawn under the day equal to the date being TYPED; a date field reports
- * an empty value the moment part of the date is cleared (Backspace), so the
- * form — and the field being typed in — vanished, and nothing after that
- * responded. Reproduced here exactly that way (Backspace in Date), then every
- * field filled by typing, an earlier field edited again, saved, reopened and
- * read back after a reload and from the server. With Technician permissions.
+ * once vanished when part of the date was cleared (a date field then reports
+ * an empty value) and nothing responded after that. Reproduced here exactly
+ * that way (Backspace in Date), then every field filled by typing, an earlier
+ * field edited again, saved, reopened and read back after a reload and from
+ * the server. With Technician permissions. TS-PAPER: any date may be typed.
  */
 await step('a technician types a whole timesheet line, clearing and retyping the date, and it is saved exactly as typed (the timesheet freeze)', async () => {
   await signInAs(page, 'Deon Botha');
-  /*
-   * TEN DAYS ENDING TODAY, named in the address. The default period is the
-   * current month, which on the 1st has one day and this step needs six — the
-   * step failed every first of the month (found 1 November 2026).
-   */
   const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-day').first().waitFor({ timeout: 15000 });
-  const days = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
-  if (days.length < 6) throw new Error(`the period has ${days.length} days; the step needs six`);
-  const opened = days[1];
-  const target = days[4];
-  await page.locator(`[data-testid="timesheet-day"][data-date="${opened}"]`).getByTestId('add-timesheet-line').click();
+  const target = sast(-4);
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('add-timesheet-line').click();
   const form = page.getByTestId('timesheet-line-form');
   await form.waitFor({ timeout: 5000 });
 
@@ -4132,11 +4119,9 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await form.getByText('Enter the whole date', { exact: false }).waitFor({ timeout: 3000 });
   if (await form.getByTestId('save-timesheet-line').isEnabled()) throw new Error('Save line was enabled with half a date');
 
-  // Retype it as another day: the form stays where it was opened, still answering.
+  // Retype it as another day: the form stays, still answering.
   await date.fill(target);
   if ((await form.count()) !== 1) throw new Error('the form moved or vanished when the date changed');
-  const formDay = await form.evaluate((node) => node.closest('[data-testid="timesheet-day"]')?.getAttribute('data-date'));
-  if (formDay !== opened) throw new Error(`the form jumped from ${opened} to ${formDay}`);
 
   // Every field, typed like a person types.
   const typeInto = async (label, text) => {
@@ -4168,10 +4153,9 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await form.getByTestId('save-timesheet-line').click();
   await form.waitFor({ state: 'detached', timeout: 15000 });
 
-  // It landed on the day it was dated, and reads back exactly as typed — after a reload too.
+  // It is on the sheet under its date, and reads back exactly as typed — after a reload too.
   const check = async (when) => {
-    const day = page.locator(`[data-testid="timesheet-day"][data-date="${target}"]`);
-    const line = day.getByTestId('timesheet-line').filter({ hasText: 'Kruger Engineering' });
+    const line = page.locator(`[data-testid="timesheet-line"][data-date="${target}"]`).filter({ hasText: 'Kruger Engineering' });
     await line.waitFor({ timeout: 10000 });
     await line.getByRole('button', { name: 'Edit' }).click();
     const reopened = page.getByTestId('timesheet-line-form');
@@ -4184,15 +4168,15 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   };
   await check('after saving');
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await check('after leaving and coming back');
 
   // And the server holds exactly that.
-  const stored = await page.evaluate(async ({ base, from, to }) => {
+  const stored = await page.evaluate(async ({ base }) => {
     const me = (await (await fetch(`${base}/api/auth/me`)).json()).data.user.id;
-    const sheet = (await (await fetch(`${base}/api/timesheets/${me}?from=${from}&to=${to}`)).json()).data;
-    return sheet.days.flatMap((day) => day.entries ?? []).filter((entry) => entry.customerName === 'Kruger Engineering');
-  }, { base: BASE, from: days[0], to: days.at(-1) });
+    const sheet = (await (await fetch(`${base}/api/timesheets/${me}/working`)).json()).data;
+    return sheet.entries.filter((entry) => entry.customerName === 'Kruger Engineering');
+  }, { base: BASE });
   if (stored.length !== 1) throw new Error(`${stored.length} stored lines for the customer`);
   const [line] = stored;
   if (line.date !== target || line.overtimeHours !== 3 || line.doubleHours !== 1.25 || line.calloutAmount !== 45000 || line.calloutShared !== false || line.internalKm !== 12.5 || line.customerKm !== 30) {
@@ -4200,15 +4184,16 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   }
 });
 
-await step('a technician enters Workshop with OT, a call-out amount and km, saves, and sends the month to the office (TS-02…TS-14)', async () => {
+await step('a technician enters Workshop with OT, a call-out amount and km, writes the comment, and SUBMITS the timesheet for its dates (TS-PAPER)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 10000 });
+  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 10000 });
   const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
-  const todayRow = page.locator(`[data-testid="timesheet-day"][data-date="${today}"]`);
-  await todayRow.getByTestId('add-timesheet-line').click();
+  await page.getByTestId('add-timesheet-line').click();
   const form = page.getByTestId('timesheet-line-form');
   if ((await form.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
+  await form.getByTestId('timesheet-line-date').fill(today);
+  // Workshop needs no customer (TS-PAPER).
   await form.getByLabel('Customer or Workshop').selectOption('__workshop__');
   await form.getByLabel('OT (hours)').fill('2');
   await form.getByLabel('D/T (hours)').fill('0.5');
@@ -4216,65 +4201,52 @@ await step('a technician enters Workshop with OT, a call-out amount and km, save
   await form.getByLabel('Int Km').fill('12.5');
   await form.getByLabel('Cust Km').fill('0');
   await form.getByTestId('save-timesheet-line').click();
-  await todayRow.getByTestId('timesheet-line').filter({ hasText: 'Workshop' }).waitFor({ timeout: 10000 });
-  await todayRow.getByText('R 450,00').first().waitFor({ timeout: 5000 }).catch(async () => {
-    const text = await todayRow.innerText();
-    if (!/450[,.]00/u.test(text)) throw new Error(`the call-out amount is not shown: ${text}`);
-  });
+  const row = page.locator(`[data-testid="timesheet-line"][data-date="${today}"]`).filter({ hasText: 'Workshop' });
+  await row.waitFor({ timeout: 10000 });
+  if (!/450[,.]00/u.test(await row.innerText())) throw new Error(`the call-out amount is not shown: ${await row.innerText()}`);
 
-  // The From/To dates ARE the period (the owner, 28 October 2026).
-  await page.getByTestId('timesheet-period-label').waitFor({ timeout: 10000 });
   await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week.');
   await page.getByTestId('timesheet-save').click();
   await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
 
-  // FORMS-PAGES-1 (2 November 2026): the Timesheets page shows Preview and Print only; sending is on Monthly Forms.
-  if ((await page.getByTestId('timesheet-send').count()) !== 0) throw new Error('the Timesheets page still offers Send');
   if ((await page.getByTestId('timesheet-print').count()) !== 1) throw new Error('the Timesheets page has no Print');
   await page.getByTestId('timesheet-preview').click();
-  const preview = page.getByTestId('document-preview');
-  await preview.waitFor({ timeout: 20000 });
+  await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await viewerDrew('document-preview');
   if ((await page.getByTestId('preview-download').count()) !== 0) throw new Error('the Timesheets preview still offers Download');
   await page.getByTestId('preview-close').click();
-  // The period is sent the way Monthly Forms sends it — through the server's route.
-  const sent = await page.evaluate(async ({ base, from, to }) => {
-    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ from, to }),
-    });
-    return response.status;
-  }, { base: BASE, from: await page.getByTestId('timesheet-from').inputValue(), to: await page.getByTestId('timesheet-to').inputValue() });
-  if (sent !== 200) throw new Error(`sending the period answered ${sent}`);
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.getByText(/^Sent to office /).first().waitFor({ timeout: 15000 });
-  // RESUBMIT-1: a sent period stays editable.
-  if ((await todayRow.getByTestId('add-timesheet-line').count()) === 0) throw new Error('a sent period no longer offers Add line');
+
+  // Submit: To is today (payday), From is proposed; the line is inside them.
+  await page.getByTestId('timesheet-to').fill(today);
+  if ((await row.getAttribute('data-in-period')) !== 'yes') throw new Error('today’s line is not inside the dates being submitted');
+  await page.getByTestId('timesheet-send').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit timesheet' }).click();
+  await page.getByTestId('timesheet-submitted').waitFor({ timeout: 15000 });
+  const submitted = page.locator(`[data-testid="timesheet-submission"][data-to="${today}"]`).first();
+  await submitted.waitFor({ timeout: 10000 });
+  // The comment went with it and the next sheet starts empty of it.
+  if ((await page.getByTestId('timesheet-period-comment').inputValue()) !== '') throw new Error('the comment was not cleared for the next timesheet');
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
   // NOTIF-TABS-2: a timesheet notification is in the Inbox's Monthly Forms subtab.
   await page.getByTestId('inbox-box-monthly_forms').click();
-  await page.getByText('Timesheet sent to the office').first().waitFor({ timeout: 10000 });
+  await page.getByText('submitted a timesheet').first().waitFor({ timeout: 10000 });
 });
 
 /*
- * RESUBMIT-1 (the tester, 2 November 2026): a sent timesheet is corrected by
- * changing it and sending it again; the new submission replaces the one the
- * office has, and the office reads the latest.
+ * TS-PAPER: a submission is never overwritten. The same dates again are
+ * refused (a change is a correction); the office reads exactly what was sent,
+ * from its list, and can export it.
  */
-await step('the technician changes the sent timesheet and sends it again; the office reads the latest submission (RESUBMIT-1)', async () => {
+await step('the same dates cannot be submitted again; the office opens the submission exactly as sent (TS-PAPER)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-table').waitFor({ timeout: 15000 });
-  await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week — corrected.');
-  await page.getByTestId('timesheet-save').click();
-  await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
-  const from = await page.getByTestId('timesheet-from').inputValue();
-  const to = await page.getByTestId('timesheet-to').inputValue();
-  // Sent again the way Monthly Forms sends it; the new submission replaces the old.
-  const resent = await page.evaluate(async ({ base, from, to }) => {
+  const last = page.locator('[data-testid="timesheet-submission"][data-current="yes"]').first();
+  await last.waitFor({ timeout: 15000 });
+  const from = await last.getAttribute('data-from');
+  const to = await last.getAttribute('data-to');
+  const again = await page.evaluate(async ({ base, from, to }) => {
     const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
@@ -4282,13 +4254,21 @@ await step('the technician changes the sent timesheet and sends it again; the of
     });
     return response.status;
   }, { base: BASE, from, to });
-  if (resent !== 200) throw new Error(`sending again answered ${resent}`);
+  if (again !== 422) throw new Error(`submitting the same dates again answered ${again}`);
   await signInAsMasterIfNeeded();
-  const read = await page.evaluate(async ({ base, from, to }) => {
-    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period?from=${from}&to=${to}`);
-    return response.json();
-  }, { base: BASE, from, to });
-  if (read?.data?.comment !== 'Workshop rebuilds all week — corrected.') throw new Error(`the office reads "${read?.data?.comment}"`);
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  const office = page.getByTestId('timesheet-office');
+  const row = office.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${to}"]`).filter({ hasText: 'Sipho' }).first();
+  await row.waitFor({ timeout: 15000 });
+  await row.getByTestId('timesheet-submission-csv').waitFor({ timeout: 5000 });
+  await row.getByTestId('timesheet-submission-view').click();
+  await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
+  await page.getByTestId('preview-close').click();
+  const read = await page.evaluate(async ({ base }) => (await (await fetch(`${base}/api/timesheets/submissions?userId=user-tech-sipho`)).json()).data, { base: BASE });
+  const current = read.find((item) => item.from === from && item.to === to);
+  if (current === undefined || current.current !== true) throw new Error(`the office's list: ${JSON.stringify(read)}`);
+  const document = await page.evaluate(async ({ base, id }) => (await (await fetch(`${base}/api/timesheets/submissions/${id}`)).json()).data, { base: BASE, id: current.id });
+  if (document.comment !== 'Workshop rebuilds all week.') throw new Error(`the office reads "${document.comment}"`);
 });
 
 /*
@@ -4550,7 +4530,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   if ((await acknowledge.count()) > 0) await acknowledge.check();
   const send = card.getByTestId('monthly-forms-submit');
   await send.click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit attendance' }).click();
   await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
   await card.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
   // RESUBMIT-1: the submitted month is offered again, and submitting again replaces it.
@@ -4607,28 +4587,45 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
 });
 
 /*
- * PAY-01…PAY-08: MONTHLY FORMS. The technician previews last month's timesheet
- * and attendance (the actual documents, one page each, named by the rule) and
- * submits both together; the office sees the month, prepares the Finance
- * package, reviews the exact attachments and sends ONE email (the
- * demonstration's email is simulated — it reaches the demo outbox only).
+ * PAY-01…PAY-08: MONTHLY FORMS, with TS-PAPER (4 November 2026). The
+ * technician's timesheet is submitted by payday from the Timesheets page — here
+ * one ending in last month, through its route — and the month's forms carry
+ * the attendance; the office sees the month, prepares the Finance package
+ * (the payday timesheet ending in the month, and the attendance), reviews the
+ * exact attachments and sends ONE email (the demonstration's email is
+ * simulated — it reaches the demo outbox only).
  */
-await step('a technician previews and submits last month’s timesheet and attendance together; the office sends Finance one email (PAY-01…08)', async () => {
+await step('a technician submits last month’s payday timesheet and attendance; the office sends Finance one email with both (PAY-01…08, TS-PAPER)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  const [year, monthNumber] = today.split('-').map(Number);
+  const previous = monthNumber === 1 ? `${year - 1}-12` : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
+  const lastDay = new Date(Date.UTC(Number(previous.slice(0, 4)), Number(previous.slice(5, 7)), 0)).toISOString().slice(0, 10);
   await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  const sentTimesheet = await page.evaluate(async ({ base, from, to }) => {
+    await fetch(`${base}/api/timesheets/user-tech-sipho/entries`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ date: from, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0 }),
+    });
+    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ from, to }),
+    });
+    return response.status;
+  }, { base: BASE, from: `${previous}-01`, to: lastDay });
+  if (sentTimesheet !== 200) throw new Error(`the payday timesheet answered ${sentTimesheet}`);
+
   const forms = page.getByTestId('monthly-forms');
   await forms.waitFor({ timeout: 15000 });
-  const timesheetFile = await page.getByTestId('monthly-timesheet-file').innerText();
   const attendanceFile = await page.getByTestId('monthly-attendance-file').innerText();
-  if (!/^SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf/u.test(timesheetFile)) throw new Error(`timesheet file name: ${timesheetFile}`);
   if (!/^SIPHO ATTEN [A-Z]+\.pdf/u.test(attendanceFile)) throw new Error(`attendance file name: ${attendanceFile}`);
+  // The month says where the timesheet goes instead.
+  await page.getByTestId('monthly-forms-timesheet-note').waitFor({ timeout: 5000 });
 
   await page.getByTestId('monthly-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
-  await preview.waitFor({ timeout: 20000 });
-  await viewerDrew('document-preview');
-  await page.getByTestId('preview-close').click();
-  await page.getByTestId('monthly-timesheet-preview').click();
   await preview.waitFor({ timeout: 20000 });
   await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
@@ -4640,7 +4637,7 @@ await step('a technician previews and submits last month’s timesheet and atten
     await acknowledge.check();
   }
   await page.getByTestId('monthly-forms-submit').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit attendance' }).click();
   await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
   await page.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
   if (!/again/u.test(await page.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again (RESUBMIT-1)');
@@ -4652,13 +4649,14 @@ await step('a technician previews and submits last month’s timesheet and atten
   await page.getByTestId('finance-recipient').getByText('finance@eje-demo.co.za').waitFor({ timeout: 5000 });
   const siphoRow = page.getByTestId('finance-row').filter({ hasText: 'Sipho' });
   if ((await siphoRow.getAttribute('data-status')) !== 'ready') throw new Error(`Sipho's month is ${await siphoRow.getAttribute('data-status')}`);
+  if (!/Timesheet submitted:/u.test(await siphoRow.innerText())) throw new Error(`Sipho's row does not name the payday timesheet: ${await siphoRow.innerText()}`);
   await siphoRow.getByTestId('finance-select').check();
   await page.getByTestId('finance-prepare').click();
   const item = page.locator('[data-testid="finance-package-item"][data-status="prepared"]');
   await item.waitFor({ timeout: 30000 });
   const files = await item.getByTestId('finance-attachment').allInnerTexts();
   if (files.length !== 2) throw new Error(`${files.length} attachments prepared, expected 2`);
-  if (!files.some((text) => text.includes(timesheetFile.split(' · ')[0])) || !files.some((text) => text.includes(attendanceFile.split(' · ')[0]))) {
+  if (!files.some((text) => /SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf/u.test(text)) || !files.some((text) => text.includes(attendanceFile.split(' · ')[0]))) {
     throw new Error(`attachments: ${files.join(' | ')}`);
   }
   for (const pages of await item.getByTestId('finance-attachment-pages').allInnerTexts()) {

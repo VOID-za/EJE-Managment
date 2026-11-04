@@ -93,12 +93,10 @@ await resetDemonstration(page, BASE);
 await signInAs(page, 'Deon Botha');
 
 await step('technician: the timesheet freeze, by touch — clear the date, retype it, the form stays and answers', async () => {
-  // Ten days ending today: the default (this month) has one day on the 1st.
   const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-day').first().waitFor({ timeout: 15000 });
-  const days = await page.getByTestId('timesheet-day').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-date')));
-  await page.locator(`[data-testid="timesheet-day"][data-date="${days[1]}"]`).getByTestId('add-timesheet-line').tap();
+  const days = [sast(-9), sast(-8), sast(-7), sast(-6)];
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('add-timesheet-line').tap();
   const form = page.getByTestId('timesheet-line-form');
   await form.waitFor({ timeout: 5000 });
   const date = form.getByTestId('timesheet-line-date');

@@ -30,51 +30,66 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     startTestServer();
   });
 
-  it('sends once, then the period is read-only for the technician; the office is notified and reads the submitted version', async () => {
+  it('TS-PAPER over HTTP: the open sheet, its comment, Submit for the dates confirmed; the submission is immutable and the office reads it', async () => {
     const today = businessToday();
     const from = shift(today, -2);
-    const period = `from=${from}&to=${today}`;
     const technician = await signedInAs(DEMO_USERS.technician);
     const added = await technician.post<{ entry: { id: string } }>('/api/timesheets/user-tech-sipho/entries', {
       date: today, customerName: '', workshop: true, overtimeHours: 2, doubleHours: 0, calloutAmount: 0,
     });
     expect(added.status, JSON.stringify(added.error)).toBe(200);
-    expect((await technician.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'Bench days.' })).status).toBe(200);
+    // A future day and a line with no customer at all are lines like any other.
+    const future = await technician.post<{ entry: { id: string } }>('/api/timesheets/user-tech-sipho/entries', {
+      date: shift(today, 10), customerName: '', overtimeHours: 1, doubleHours: 0,
+    });
+    expect(future.status, JSON.stringify(future.error)).toBe(200);
+    expect((await technician.post('/api/timesheets/user-tech-sipho/working/comment', { comment: 'Bench days.' })).status).toBe(200);
+    const working = await technician.get<{ entries: readonly { id: string }[]; comment: string; suggested: { from: string; to: string } }>('/api/timesheets/user-tech-sipho/working');
+    expect(working.status).toBe(200);
+    expect(working.data.comment).toBe('Bench days.');
+    expect(working.data.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([added.data.entry.id, future.data.entry.id]));
 
-    const sent = await technician.post<{ period: { submittedAt: string; from: string; to: string } }>('/api/timesheets/user-tech-sipho/period/submit', { from, to: today });
+    const sent = await technician.post<{ period: { id: string; submittedAt: string; from: string; to: string; snapshot: { comment: string } } }>('/api/timesheets/user-tech-sipho/period/submit', { from, to: today });
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    expect(sent.data.period).toMatchObject({ from, to: today });
+    expect(sent.data.period).toMatchObject({ from, to: today, snapshot: { comment: 'Bench days.' } });
+    // The same dates again: refused — never overwritten.
+    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(422);
+    // The future line stays on the sheet for the next period; the comment is cleared.
+    const after = await technician.get<{ entries: readonly { id: string }[]; comment: string; suggested: { from: string } }>('/api/timesheets/user-tech-sipho/working');
+    expect(after.data.entries.map((entry) => entry.id)).toEqual([future.data.entry.id]);
+    expect(after.data.comment).toBe('');
+    expect(after.data.suggested.from).toBe(shift(today, 1));
 
-    // RESUBMIT-1: the lines stay editable and the same period may be sent again
-    // (replacing the submission). TS-OVERLAP-1: a DIFFERENT period sharing a day is sent too, and replaces it.
-    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -5), to: from })).status).toBe(200);
-    expect((await technician.post('/api/timesheets/user-tech-sipho/entries', {
-      date: today, customerName: 'X', overtimeHours: 1, doubleHours: 0,
-    })).status).toBe(200);
-    expect((await technician.post(`/api/timesheets/user-tech-sipho/entries/${added.data.entry.id}/remove`, {})).status).toBe(200);
-    expect((await technician.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'changed' })).status).toBe(200);
-    const again = await technician.post<{ period: { submittedAt: string; snapshot: { comment: string } } }>('/api/timesheets/user-tech-sipho/period/submit', { from, to: today });
-    expect(again.status, JSON.stringify(again.error)).toBe(200);
-    expect(again.data.period.snapshot.comment).toBe('changed');
-
-    // The office was told — in-app, through the existing notifications.
+    // The office was told, and reads exactly what was submitted.
     const office = await signedInAs(DEMO_USERS.coordinator);
     const notes = await office.get<{ notifications: readonly { type: string; title: string; link: string | null }[] }>('/api/notifications');
     const told = notes.data.notifications.filter((n) => n.type === 'timesheet_submitted');
-    // Once for each send: the first, the overlapping one (TS-OVERLAP-1) and the one that replaced them.
-    expect(told).toHaveLength(3);
+    expect(told).toHaveLength(1);
     expect(told[0]).toMatchObject({ link: '/timesheets' });
     expect(told[0]!.title).toContain('Sipho');
-
-    // The office reads the LATEST submission, read-only — the earlier one is not kept.
-    const document = await office.get<PeriodDocument>(`/api/timesheets/user-tech-sipho/period?${period}`);
+    const list = await office.get<readonly { id: string; technicianName: string; from: string; to: string; current: boolean }[]>('/api/timesheets/submissions');
+    expect(list.status).toBe(200);
+    expect(list.data.find((row) => row.id === sent.data.period.id)).toMatchObject({ technicianName: 'Sipho Mahlangu', from, to: today, current: true });
+    const document = await office.get<PeriodDocument>(`/api/timesheets/submissions/${sent.data.period.id}`);
     expect(document.status).toBe(200);
-    expect(document.data).toMatchObject({ technicianName: 'Sipho Mahlangu', comment: 'changed', from, to: today });
-    expect(document.data.submittedAt).toBe(again.data.period.submittedAt);
-    expect(document.data.rows.filter((row) => row.recorded).map((row) => row.customer)).toEqual(['X']);
+    expect(document.data).toMatchObject({ technicianName: 'Sipho Mahlangu', comment: 'Bench days.', from, to: today });
+    expect(document.data.submittedAt).toBe(sent.data.period.submittedAt);
+    expect(document.data.rows.filter((row) => row.recorded).map((row) => row.customer)).toEqual(['Workshop']);
+    expect((await office.download(`/api/timesheets/submissions/${sent.data.period.id}/pdf`)).status).toBe(200);
+    const csv = await office.download(`/api/timesheets/submissions/${sent.data.period.id}/export`);
+    expect(csv.status).toBe(200);
+    expect(csv.text).toContain('Workshop');
+    // The technician reads their own submission but cannot export it; the office writes nothing.
+    expect((await technician.get(`/api/timesheets/submissions/${sent.data.period.id}`)).status).toBe(200);
+    expect((await technician.download(`/api/timesheets/submissions/${sent.data.period.id}/export`)).status).toBe(403);
     expect((await office.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(403);
-    expect((await office.post('/api/timesheets/user-tech-sipho/period/comment', { from, to: today, comment: 'x' })).status).toBe(403);
+    expect((await office.post('/api/timesheets/user-tech-sipho/working/comment', { comment: 'x' })).status).toBe(403);
+    // Another technician cannot open Sipho's working sheet or his submission.
+    const riaan = await signedInAs(DEMO_USERS.otherTechnician);
+    expect((await riaan.get('/api/timesheets/user-tech-sipho/working')).status).toBe(403);
+    expect((await riaan.get(`/api/timesheets/submissions/${sent.data.period.id}`)).status).toBe(422);
   });
+
 
   it('the PDF Layout: the owner and the office get it; another technician does not; From after To is refused', async () => {
     const today = businessToday();

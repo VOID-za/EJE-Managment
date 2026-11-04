@@ -38,16 +38,18 @@ describe('what is wrong with a line', () => {
     expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: '2' }))).toEqual({});
   });
 
-  it('asks for the customer when there are hours, a call-out or kilometres — the server’s own words', () => {
-    expect(timesheetDraftProblems(line({ overtime: '2' })).customer).toBe('Say which customer the work was for, or choose Workshop.');
-    expect(timesheetDraftProblems(line({ callout: '450' })).customer).toBeDefined();
-    expect(timesheetDraftProblems(line({ customerKm: '12' })).customer).toBeDefined();
+  it('never requires a customer (TS-PAPER): Workshop, a customer, or neither', () => {
+    expect(timesheetDraftProblems(line({ overtime: '2' }))).toEqual({});
+    expect(timesheetDraftProblems(line({ callout: '450' }))).toEqual({});
+    expect(timesheetDraftProblems(line({ customerKm: '12' }))).toEqual({});
+    expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: '3', internalKm: '20' }))).toEqual({});
     expect(timesheetDraftProblems(line({ overtime: '2', customerName: 'Sasol' }))).toEqual({});
     expect(timesheetDraftProblems(line({ overtime: '2', pick: 'customer-id' }))).toEqual({});
   });
 
-  it('holds hours to quarter hours from 0 to 24', () => {
-    expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: '1.3' })).overtime).toMatch(/quarter hours/u);
+  it('holds hours to 0–24 with two decimals at most (no quarter-hour rule — TS-PAPER)', () => {
+    expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: '1.3' })).overtime).toBeUndefined();
+    expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: '1.333' })).overtime).toMatch(/two decimals/u);
     expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, double: '25' })).double).toMatch(/0 to 24/u);
     expect(timesheetDraftProblems(line({ pick: WORKSHOP_PICK, overtime: 'abc' })).overtime).toBeDefined();
   });

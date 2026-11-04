@@ -17,7 +17,7 @@ import { PostgresCustomerRepository } from '@/data/postgres/customer-repository'
 import { PostgresOutboxRepository } from '@/data/postgres/outbox-repository';
 import { PostgresPayrollRepository } from '@/data/postgres/payroll-repository';
 import { asSiteId } from '@/domain';
-// Each of these exists in 6ec5655 (checked against that commit).
+// Each of these exists in 89668e8 (checked against that commit).
 import { loadJobView } from '@/application/job-view';
 import { readRepositories } from '@/data/backend';
 import { documentPhotos } from '@/lib/job-card/model';
@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (6ec5655), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (89668e8), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 6ec5655, and it does: each of these was checked against that commit.
+ * in 89668e8, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -103,6 +103,15 @@ const INTEGRATIONS = {
   outbox: '00000000-0000-4000-8000-0000000006c1',
 } as const;
 
+// A copy of ROLLBACK_0050 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0050 = {
+  longPeriod: '00000000-0000-4000-8000-000000000aa1',
+  longFrom: '2027-04-01',
+  longTo: '2027-08-31',
+  attendanceOnlyMonth: '00000000-0000-4000-8000-000000000ab1',
+  month: '2027-03',
+} as const;
+
 // A copy of ROLLBACK_0049 in `src/ops/release/rollback-fixture.ts`.
 const BATCH_0049 = {
   siteLessNote: '00000000-0000-4000-8000-0000000009a1',
@@ -153,15 +162,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 6ec5655 shipped up to 0048; this release adds 0049.
-    expect(shipped).toHaveLength(49);
-    expect(shipped.at(-1)).toBe('0048_acceptance_delivery_notes');
-    expect(shipped).not.toContain('0049_tr_photo_delivery_note_site');
+    // 89668e8 shipped up to 0049; this release adds 0050.
+    expect(shipped).toHaveLength(50);
+    expect(shipped.at(-1)).toBe('0049_tr_photo_delivery_note_site');
+    expect(shipped).not.toContain('0050_timesheets_paper');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0049 applied beyond what the live release ships.
-    expect(applied).toBe(50);
+    // 0050 applied beyond what the live release ships.
+    expect(applied).toBe(51);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -469,17 +478,16 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
   });
 
   /*
-   * 0049, WHICH THIS CODE HAS NEVER HEARD OF — and what it makes of each row
-   * (docs/rollback-4606315.md §9).
+   * 0049, WHICH THIS CODE KNOWS (9fa858f added it): the site-less Delivery
+   * Note opens, and the reference photo stays internal and off the job card.
    */
-  it('meets the 0049 rows: the site-less Delivery Note is read but has no job view; the reference photo stays internal and off the job card', async () => {
+  it('reads the 0049 rows as what they are: the site-less Delivery Note opens; the reference photo stays internal and off the job card', async () => {
     const B = BATCH_0049;
     const jobs = new PostgresJobRepository(db);
-    // A Delivery Note with no site: the row reads, but this code cannot build the job's view (its screen would not open).
     const note = await jobs.findById(asJobId(B.siteLessNote));
     expect(note?.jobType).toBe('delivery_note');
     expect(note?.siteId ?? null).toBeNull();
-    expect(await loadJobView(readRepositories(db), note!.jobNumber)).toBeNull();
+    expect((await loadJobView(readRepositories(db), note!.jobNumber))?.job.id).toBe(B.siteLessNote);
     // The reference photo: read as an ordinary INTERNAL photo — so never on this code's job card either.
     const repair = (await jobs.list()).find((candidate) => candidate.jobType === 'test_and_repair')!;
     const photo = repair.photos.find((item) => item.id === B.referencePhoto);
@@ -490,5 +498,27 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     const [kept] = await db.execute<{ purpose: string }>(sql`select purpose from job_media where id = ${B.referencePhoto}`);
     expect(kept?.purpose).toBe('delivery_note_reference');
     await expect(db.execute(sql`update job_media set visibility = 'customer_facing' where id = ${B.referencePhoto}`)).rejects.toThrow();
+  });
+
+  /*
+   * 0050, WHICH THIS CODE HAS NEVER HEARD OF (TS-PAPER): a submitted period
+   * longer than its own 92-day rule, a technician's attendance-only month, and
+   * the working-comment table it does not know. It reads them all; nothing of
+   * its own writes is refused.
+   */
+  it('meets the 0050 rows: the long submission and the attendance-only month read; the working comment is simply unseen', async () => {
+    const B = BATCH_0050;
+    const attendance = new PostgresAttendanceRepository(db);
+    const sent = await attendance.listSubmittedPeriods(asUserId(IDS.technician), B.longFrom, B.longTo);
+    expect(sent.map((period) => [period.id, period.from, period.to])).toEqual([[B.longPeriod, B.longFrom, B.longTo]]);
+    const march = await new PostgresPayrollRepository(db).listSubmissions(B.month);
+    expect(march.map((submission) => [submission.id, submission.timesheetPeriodId])).toEqual([[B.attendanceOnlyMonth, null]]);
+    // Its own writes still work beside them: a timesheet line on a day of the long period.
+    const saved = await attendance.saveEntry({
+      id: '00000000-0000-4000-8000-000000000ac1', userId: asUserId(IDS.technician), date: '2027-05-03', customerId: null, customerName: 'Rollback probe', workshop: false,
+      normalHours: 0, overtimeHours: 1, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
+      updatedBy: asUserId(IDS.technician), updatedAt: '2027-09-02T08:00:00.000Z',
+    });
+    expect(saved.overtimeHours).toBe(1);
   });
 });

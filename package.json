@@ -39,6 +39,7 @@
     "tester-fixes-check": "node scripts/tester-fixes-check.mjs",
     "batch-check": "node scripts/batch-check.mjs",
     "acceptance-check": "node scripts/acceptance-check.mjs",
+    "timesheets-paper-check": "node scripts/timesheets-paper-check.mjs",
     "retention": "tsx src/ops/retention.ts",
     "integrations-regression": "node scripts/integrations-regression.mjs",
     "responsive-check": "node scripts/responsive-check.mjs",

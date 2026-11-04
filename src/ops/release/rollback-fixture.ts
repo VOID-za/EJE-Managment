@@ -89,3 +89,17 @@ export const ROLLBACK_0049 = {
   siteLessNote: '00000000-0000-4000-8000-0000000009a1',
   referencePhoto: '00000000-0000-4000-8000-0000000009b2',
 } as const;
+
+/**
+ * The rows only the release after 89668e8 can write (migration 0050, TS-PAPER):
+ * a submitted timesheet period longer than 92 days, the open sheet's comment,
+ * and a technician's month submitted as attendance only. Copied into the probe
+ * as `BATCH_0050`.
+ */
+export const ROLLBACK_0050 = {
+  longPeriod: '00000000-0000-4000-8000-000000000aa1',
+  longFrom: '2027-04-01',
+  longTo: '2027-08-31',
+  attendanceOnlyMonth: '00000000-0000-4000-8000-000000000ab1',
+  month: '2027-03',
+} as const;

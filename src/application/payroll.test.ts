@@ -85,9 +85,14 @@ const line = (date: string, overrides: Record<string, unknown> = {}) => ({
 
 const events = async (type: string) => (await harness.repos.activity.list()).filter((event) => event.type === type);
 
-/** A technician fills in and submits the month. */
+/**
+ * A technician fills in and submits their month: the timesheet on payday from
+ * the Timesheets page (TS-PAPER — here a period ending in the month), then the
+ * monthly forms, which carry the attendance.
+ */
 const submitFor = async (user: User) => {
   await saveTimesheetEntry(harness.as(user), user.id, line(`${MONTH}-03`));
+  await submitTimesheetPeriod(harness.as(user), user.id, FROM, TO);
   await recordAttendance(harness.as(user), { userId: user.id, date: `${MONTH}-07`, status: 'absent', absenceReason: 'sick_leave', note: 'Clinic' });
   return submitMonth(harness.as(user), user.id, MONTH, { confirmUnrecorded: true });
 };
@@ -163,19 +168,16 @@ describe('PAY-01/04 — the monthly attendance form', () => {
 });
 
 describe('PAY-02 — submitting the month: timesheet and attendance together, once', () => {
-  it('sends the timesheet for exactly the month and freezes the attendance; one office notification; audited', async () => {
+  it('freezes the attendance and carries NO timesheet (TS-PAPER: timesheets are submitted by payday); one office notification; audited', async () => {
     const submission = await submitFor(sipho);
     expect(submission.month).toBe(MONTH);
-    const period = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
-    expect(period?.submittedAt).not.toBeNull();
-    expect(submission.timesheetPeriodId).toBe(period!.id);
+    expect(submission.timesheetPeriodId).toBeNull();
     expect(submission.attendance.days.find((day) => day.date === `${MONTH}-07`)).toMatchObject({ status: 'absent', absenceReason: 'sick_leave' });
     expect(await events('monthly_forms_submitted')).toHaveLength(1);
     const office = (await harness.repos.users.list()).filter((u) => (u.role === 'master' || u.role === 'coordinator') && u.active);
     for (const person of office) {
-      const notes = (await harness.repos.notifications.list(person.id)).filter((n) => n.type === 'timesheet_submitted');
+      const notes = (await harness.repos.notifications.list(person.id)).filter((n) => n.type === 'timesheet_submitted' && /attendance/u.test(n.title));
       expect(notes).toHaveLength(1);
-      expect(notes[0]?.title).toMatch(/timesheet and attendance/u);
     }
   });
 
@@ -210,28 +212,20 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(0);
   });
 
-  it('TS-OVERLAP-1: a month that shares days with a different sent period is submitted, and REPLACES it for the office', async () => {
+  it('TS-PAPER: the month never sends, takes over or replaces a timesheet — a payday submission stays exactly as it is', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(`${MONTH}-03`));
-    const week = await submitTimesheetPeriod(harness.as(sipho), SIPHO, `${MONTH}-01`, `${MONTH}-07`);
+    const payday = await submitTimesheetPeriod(harness.as(sipho), SIPHO, `${MONTH}-01`, `${MONTH}-07`);
     const forms = await loadMonthlyForms(harness.as(sipho), SIPHO, MONTH);
-    expect(forms.problems.join(' ')).not.toMatch(/already sent/u);
+    expect(forms.timesheetRequired).toBe(false);
+    expect(forms.timesheet.versionInForce).toMatch(/Timesheets page by payday/u);
     const submission = await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
-    // One current submission for every day of the month: the month's own.
+    expect(submission.timesheetPeriodId).toBeNull();
     const current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO);
-    expect(current.map((period) => period.id)).toEqual([submission.timesheetPeriodId]);
-    // The week is kept, not deleted — only no longer current.
-    const kept = await harness.repos.attendance.findPeriod(SIPHO, `${MONTH}-01`, `${MONTH}-07`);
-    expect(kept?.id).toBe(week.id);
-    expect(kept?.supersededAt).toBeTruthy();
-    // The line itself is untouched.
+    expect(current.map((period) => period.id)).toEqual([payday.id]);
+    expect((await harness.repos.attendance.findPeriod(SIPHO, `${MONTH}-01`, `${MONTH}-07`))?.supersededAt ?? null).toBeNull();
+    // No calendar-month period was created.
+    expect(await harness.repos.attendance.findPeriod(SIPHO, FROM, TO)).toBeNull();
     expect((await harness.repos.attendance.listEntries(SIPHO, FROM, TO)).map((entry) => entry.date)).toEqual([`${MONTH}-03`]);
-  });
-
-  it('an exact month period already sent is used, not sent again', async () => {
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(`${MONTH}-03`));
-    const period = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
-    const submission = await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
-    expect(submission.timesheetPeriodId).toBe(period.id);
   });
 
   it('after submission the PERSON may change their own days and submit again, which replaces the submission; the office still may not (RESUBMIT-1, ATT-OWN-1)', async () => {
@@ -294,10 +288,11 @@ describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
     await expect(loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO)).resolves.toBeDefined();
   });
 
-  it('a Master submits both, like a technician', async () => {
+  it('a Master keeps a timesheet like a technician: submitted by payday, printed in the month it ends (TS-PAPER)', async () => {
     const submission = await submitFor(master);
-    expect(submission.timesheetPeriodId).not.toBeNull();
-    expect((await loadMonthlyForms(harness.as(master), master.id, MONTH)).timesheetRequired).toBe(true);
+    expect(submission.timesheetPeriodId).toBeNull();
+    const view = await loadPayrollMonth(harness.as(coordinator), MONTH);
+    expect(view.rows.find((row) => row.technician.id === master.id)?.timesheetVersion).toMatch(/^Timesheet submitted: /u);
   });
 
   it('the Finance package carries one PDF — the attendance — for a Coordinator, and two for the others', async () => {
@@ -306,7 +301,8 @@ describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
     await submitFor(sipho);
     const view = await loadPayrollMonth(harness.as(master), MONTH);
     expect(view.rows.find((row) => row.technician.id === COORD)).toMatchObject({ status: 'ready', timesheetRequired: false });
-    expect(view.rows.find((row) => row.technician.id === SIPHO)).toMatchObject({ timesheetRequired: true });
+    // TS-PAPER: nobody's month carries a timesheet now; Sipho's payday submission ending in it is printed.
+    expect(view.rows.find((row) => row.technician.id === SIPHO)).toMatchObject({ timesheetRequired: false, timesheetVersion: expect.stringMatching(/^Timesheet submitted: /u) as unknown });
     const alone = await prepareFinancePackage(harness.as(master), MONTH, [COORD]);
     expect(alone.attachments.map((attachment) => attachment.kind)).toEqual(['attendance']);
     await discardFinancePackage(harness.as(master), alone.id);

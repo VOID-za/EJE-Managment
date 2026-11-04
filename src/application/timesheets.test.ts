@@ -99,11 +99,15 @@ describe('a technician’s own manual timesheet', () => {
     // NT is no longer entered at all (TS-07).
     await expect(refuse(line(day(0), { normalHours: 1 }))).rejects.toMatchObject({ violations: [{ code: 'nt_not_entered' }] });
     await expect(refuse(line(day(0), { overtimeHours: 25 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_overtime_hours' }] });
-    await expect(refuse(line(day(0), { doubleHours: 1.1 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_double_hours' }] });
+    // Hundredths are what is stored: two decimals at most (TS-PAPER — no quarter-hour rule).
+    await expect(refuse(line(day(0), { doubleHours: 1.111 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_double_hours' }] });
     await expect(refuse(line(day(0), { calloutAmount: 1.5 }))).rejects.toMatchObject({ violations: [{ code: 'invalid_callout_amount' }] });
-    await expect(refuse(line(day(0), { customerName: '  ' }))).rejects.toMatchObject({ violations: [{ code: 'customer_required' }] });
-    await expect(refuse(line(day(-1)))).rejects.toMatchObject({ violations: [{ code: 'date_in_future' }] });
     await expect(refuse(line('2026-02-30'))).rejects.toMatchObject({ violations: [{ code: 'invalid_date' }] });
+    await expect(refuse(line('0202-10-05'))).rejects.toMatchObject({ violations: [{ code: 'invalid_date' }] });
+    // TS-PAPER: no customer is required, and a future day is a day like any other.
+    await expect(refuse(line(day(0), { customerName: '  ' }))).resolves.toMatchObject({ customerName: '', workshop: false });
+    await expect(refuse(line(day(-1)))).resolves.toMatchObject({ date: day(-1) });
+    await expect(refuse(line(day(0), { doubleHours: 1.1 }))).resolves.toMatchObject({ doubleHours: 1.1 });
   });
 
   it('takes the customer’s name from the register when one is chosen', async () => {

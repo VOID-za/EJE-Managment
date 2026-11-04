@@ -252,11 +252,14 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
       date: today, customerName: '', workshop: true, overtimeHours: 1, doubleHours: 0,
     })).status).toBe(200);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/comment`, { from, to: today, comment: 'Workshop days.' })).status).toBe(200);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/working/comment`, { comment: 'Workshop days.' })).status).toBe(200);
     const sent = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today });
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    // RESUBMIT-1: the same period may be sent again — it replaces the submission, still ONE row.
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(200);
+    // TS-PAPER: the same dates again are refused — a submission is never overwritten.
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(422);
+    // The open sheet's comment went into the snapshot and is cleared for the next sheet (migration 0050).
+    const [working] = await db.select().from(schema.timesheetWorkingComments).where(eq(schema.timesheetWorkingComments.userId, IDS.technician));
+    expect(working?.comment).toBe('');
 
     const rows = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician));
     expect(rows).toHaveLength(1);
@@ -264,9 +267,9 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(rows[0]?.submittedAt).not.toBeNull();
     expect((rows[0]?.snapshot as { entries: unknown[] }).entries).toHaveLength(1);
 
-    // The office was notified once per send, through the existing notifications table.
+    // The office was notified once, through the existing notifications table.
     const told = await db.select().from(schema.notifications).where(eq(schema.notifications.type, 'timesheet_submitted'));
-    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.coordinator, IDS.master, IDS.master].sort());
+    expect(told.map((row) => row.recipientId).sort()).toEqual([IDS.coordinator, IDS.master].sort());
 
     // The guard trigger: a sent period may be sent again, never moved, un-sent, deleted or overlapped (migration 0046).
     expect(await postgresMessage(
@@ -285,13 +288,15 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
         submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
       }),
     )).toContain('overlaps a period already sent');
-    // From after To is refused by the table itself.
+    // From after To is refused by the table itself (migration 0050: any length otherwise).
     expect(await postgresMessage(
       db.insert(schema.timesheetPeriods).values({
         id: crypto.randomUUID(), userId: IDS.technician, periodFrom: today, periodTo: shift(today, -3),
         updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
       }),
-    )).toContain('timesheet_periods_range_valid');
+    )).toContain('timesheet_periods_range_ordered');
+    // TS-PAPER: longer than 92 days — the December holidays, the finance administrator's leave.
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: shift(today, -160), to: shift(today, -10) })).status).toBe(200);
   });
 
   it('0038 carries a month 0037 may hold across as the period it covered, exactly', async () => {
@@ -400,6 +405,9 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, {
       date: `${month}-03`, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0,
     })).status).toBe(200);
+    // TS-PAPER: the timesheet is submitted by payday (here a period ending in the month); the month is the attendance.
+    const lastDay = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: `${month}-01`, to: lastDay })).status).toBe(200);
     const submitted = await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true });
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
     // RESUBMIT-1: submitted again — it replaces the submission, still ONE row.
@@ -408,6 +416,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(submissions).toHaveLength(1);
     const [row] = submissions;
     expect(row?.month).toBe(month);
+    // Migration 0050: a technician's month without a timesheet is accepted by the database.
+    expect(row?.timesheetPeriodId).toBeNull();
     // My Monthly Forms' history, read from PostgreSQL (30 October 2026): that month, with its files.
     const history = await tech.get<readonly { month: string; fileNames: { attendance: string } }[]>(`/api/payroll/${IDS.technician}/history`);
     expect(history.status).toBe(200);
