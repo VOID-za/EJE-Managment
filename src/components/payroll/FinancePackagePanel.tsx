@@ -164,7 +164,7 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                       <br />
                     </>
                   ) : (
-                    <span className="block text-steel-500" data-testid="payroll-attendance-only">Attendance only — no timesheet</span>
+                    <span className="block text-steel-500" data-testid="payroll-attendance-only">{row.timesheetVersion}</span>
                   )}
                   {row.fileNames.attendance}
                 </td>

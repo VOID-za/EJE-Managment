@@ -88,7 +88,8 @@ export type TimesheetDraftField = 'customer' | 'overtime' | 'double' | 'callout'
 const hoursProblem = (label: string, typed: string): string | null => {
   const value = parseTyped(typed);
   if (!Number.isFinite(value) || value < 0 || value > TIMESHEET_MAX_HOURS_PER_DAY) return `${label}: enter hours from 0 to 24.`;
-  if (Math.abs(value * 4 - Math.round(value * 4)) > 1e-9) return `${label}: use quarter hours (0.25 = 15 minutes).`;
+  // TS-PAPER: any hours to two decimals (what is stored); no quarter-hour rule.
+  if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-6) return `${label}: two decimals at most, for example 1.5.`;
   return null;
 };
 
@@ -128,13 +129,7 @@ export const timesheetDraftProblems = (draft: TimesheetDraft): Partial<Record<Ti
   const customerKm = kmProblem('Cust Km', draft.customerKm);
   if (customerKm !== null) problems.customerKm = customerKm;
 
-  const workshop = draft.pick === WORKSHOP_PICK;
-  const named = draft.customerName.trim().length > 0 || (draft.pick.length > 0 && !workshop);
-  const anything =
-    (draft.keepNormal ?? 0) + (draft.keepCallouts ?? 0) +
-    [draft.overtime, draft.double, draft.internalKm, draft.customerKm].reduce((total, typed) => total + (parseTyped(typed) || 0), 0) +
-    (Number.isFinite(cents) ? cents : 0) > 0;
-  if (anything && !workshop && !named) problems.customer = 'Say which customer the work was for, or choose Workshop.';
+  // TS-PAPER: a customer is never required — Workshop, a customer, or neither.
   return problems;
 };
 

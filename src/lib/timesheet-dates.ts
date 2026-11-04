@@ -48,26 +48,18 @@ export const formatPeriod = (from: string, to: string): string =>
   from === to ? formatDayAndDate(from) : `${formatDayAndDate(from)} – ${formatDayAndDate(to)}`;
 
 /**
- * The range the timesheet page opens on: the first of the current month to
- * today. Every visit starts here — the filters are not remembered — and that
- * reset touches only the two filter boxes, never a saved line.
+ * Why a submission's From/To cannot be used, or null when it can. TS-PAPER:
+ * any length — only two real dates, From on or before To. The server asks again.
  */
-export const defaultTimesheetRange = (today: string): { readonly from: string; readonly to: string } => ({
-  from: `${today.slice(0, 7)}-01`,
-  to: today,
-});
-
-/**
- * Why a From/To pair cannot be shown, or null when it can. The screen asks
- * this before querying; the server asks the same questions again.
- */
-export const timesheetRangeProblem = (from: string, to: string, maxDays: number): string | null => {
-  if (!isCalendarDay(from) || !isCalendarDay(to)) return 'Choose both a From and a To date.';
+export const timesheetRangeProblem = (from: string, to: string): string | null => {
+  if (!isTimesheetDay(from) || !isTimesheetDay(to)) return 'Choose both a From and a To date.';
   if (from > to) return 'From must be on or before To.';
-  const days = (utcDay(to).getTime() - utcDay(from).getTime()) / 86_400_000 + 1;
-  if (days > maxDays) return `Choose at most ${maxDays} days.`;
   return null;
 };
+
+/** The number of calendar days From…To, both included. */
+export const daysInPeriod = (from: string, to: string): number =>
+  (utcDay(to).getTime() - utcDay(from).getTime()) / 86_400_000 + 1;
 
 /**
  * Why the date typed on a timesheet LINE cannot be saved, or null when it can.
@@ -79,9 +71,11 @@ export const timesheetRangeProblem = (from: string, to: string, maxDays: number)
  * them (the 30 October 2026 freeze — see the timesheets page). The server asks
  * its own questions again on Save.
  */
-export const lineDateProblem = (date: string, from: string, to: string, today: string): string | null => {
-  if (!isCalendarDay(date)) return 'Enter the whole date (day, month and year).';
-  if (date > today) return 'That day has not happened yet.';
-  if (date < from || date > to) return `Choose a day in this timesheet: ${formatPeriod(from, to)}.`;
-  return null;
-};
+export const lineDateProblem = (date: string): string | null =>
+  // TS-PAPER: any real date — past, future, before the last payday. The years
+  // 2000–2099 only so a year still being typed ("0202") is not taken for one.
+  isTimesheetDay(date) ? null : 'Enter the whole date (day, month and year).';
+
+/** A real calendar day this century: what a timesheet line's date may be. */
+export const isTimesheetDay = (value: string): boolean =>
+  isCalendarDay(value) && value >= '2000-01-01' && value <= '2099-12-31';

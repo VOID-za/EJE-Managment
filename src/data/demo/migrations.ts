@@ -725,6 +725,12 @@ const v39ToV40 = (data: Loose): Loose => ({
   standbyDaySwaps: Array.isArray(data.standbyDaySwaps) ? data.standbyDaySwaps : [],
 });
 
+/** TS-PAPER (4 November 2026): the open sheet's comment, one per person. */
+const v40ToV41 = (data: Loose): Loose => ({
+  ...data,
+  timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
+});
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -758,6 +764,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   37: v37ToV38,
   38: v38ToV39,
   39: v39ToV40,
+  40: v40ToV41,
 };
 
 /**

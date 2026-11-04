@@ -1,5 +1,5 @@
 import { isUuid } from './identifiers';
-import { and, asc, eq, gte, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
 import {
   asCustomerId,
   asUserId,
@@ -12,6 +12,7 @@ import {
   type TimesheetSubmissionSnapshot,
   type AttendanceStatus,
   type TimesheetComment,
+  type TimesheetWorkingComment,
   type UserId,
 } from '@/domain';
 import type { AttendanceRepository } from '@/data/repositories';
@@ -373,6 +374,56 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .where(and(eq(schema.timesheetPeriods.id, period.id), isNotNull(schema.timesheetPeriods.submittedAt)))
       .returning();
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
+  }
+
+  async findPeriodById(id: string): Promise<TimesheetPeriod | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, id)).limit(1);
+    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
+  }
+
+  async listSubmissions(userId: UserId | null): Promise<readonly TimesheetPeriod[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetPeriods)
+      .where(
+        and(
+          isNotNull(schema.timesheetPeriods.submittedAt),
+          ...(userId === null ? [] : [eq(schema.timesheetPeriods.userId, userId)]),
+        ),
+      )
+      .orderBy(desc(schema.timesheetPeriods.periodTo), desc(schema.timesheetPeriods.submittedAt));
+    return rows.map(toDomainPeriod);
+  }
+
+  async findWorkingComment(userId: UserId): Promise<TimesheetWorkingComment | null> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetWorkingComments)
+      .where(eq(schema.timesheetWorkingComments.userId, userId))
+      .limit(1);
+    const row = rows[0];
+    return row === undefined
+      ? null
+      : { userId: asUserId(row.userId), comment: row.comment, updatedBy: asUserId(row.updatedBy), updatedAt: row.updatedAt };
+  }
+
+  async saveWorkingComment(comment: TimesheetWorkingComment): Promise<TimesheetWorkingComment> {
+    const rows = await this.db
+      .insert(schema.timesheetWorkingComments)
+      .values({ userId: comment.userId, comment: comment.comment, updatedBy: comment.updatedBy })
+      .onConflictDoUpdate({
+        target: schema.timesheetWorkingComments.userId,
+        set: {
+          comment: comment.comment,
+          updatedBy: comment.updatedBy,
+          updatedAt: sql`now()`,
+          version: sql`${schema.timesheetWorkingComments.version} + 1`,
+        },
+      })
+      .returning();
+    const row = rows[0]!;
+    return { userId: asUserId(row.userId), comment: row.comment, updatedBy: asUserId(row.updatedBy), updatedAt: row.updatedAt };
   }
 
   async deleteCorrections(periodId: string): Promise<void> {

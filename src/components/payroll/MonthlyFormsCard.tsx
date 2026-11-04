@@ -144,6 +144,11 @@ export const MonthlyFormsCard = ({
       <p className="mt-1 text-xs text-steel-500">
         Files are named by the name on documents “{state.technician.documentName}” (set by the office in Administration → Users).
       </p>
+      {!state.timesheetRequired && focus !== 'attendance' && (
+        <p className="mt-3 text-sm text-steel-600" data-testid="monthly-forms-timesheet-note">
+          Timesheet: {state.timesheet.versionInForce}.
+        </p>
+      )}
       {focus === 'attendance' || !state.timesheetRequired ? (
         <div className="mt-3">{documentCard('attendance')}</div>
       ) : (

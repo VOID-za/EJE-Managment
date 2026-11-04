@@ -29,6 +29,10 @@ const hours = (value: number): string => value.toFixed(2);
  * render): Save and Send to office save the open line first from it, and the
  * form starts from it (`initial`) if it is ever drawn in a different place.
  *
+ * ANY DATE, ANY CUSTOMER OR NONE (TS-PAPER, 4 November 2026): the date is a
+ * real day — past, future or before the last payday — and Workshop, a customer
+ * or neither may be chosen.
+ *
  * WHAT IS WRONG IS SAID HERE, beside the field and the button that was
  * pressed — never only in the period card at the top of the page, off screen
  * (`timesheetDraftProblems`; the server asks the same questions again).
@@ -37,9 +41,6 @@ export const TimesheetLineForm = ({
   initial,
   onChange,
   storageKey,
-  from,
-  to,
-  today,
   customers,
   customersLoading,
   onSave,
@@ -52,9 +53,6 @@ export const TimesheetLineForm = ({
   readonly onChange: (draft: TimesheetDraft) => void;
   /** Where this device keeps the open line; null keeps nothing. */
   readonly storageKey: string | null;
-  readonly from: string;
-  readonly to: string;
-  readonly today: string;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly customersLoading: boolean;
   /** Saves the line; the refusal's words, or null when it was saved. */
@@ -89,7 +87,7 @@ export const TimesheetLineForm = ({
   };
   const touch = (field: string) => setShown((current) => (current.has(field) ? current : new Set(current).add(field)));
 
-  const dateProblem = lineDateProblem(draft.date, from, to, today);
+  const dateProblem = lineDateProblem(draft.date);
   const problems = timesheetDraftProblems(draft);
   const problemOf = (field: keyof typeof problems) => (shown.has(field) || shown.has('*') ? problems[field] : undefined);
 
@@ -139,8 +137,6 @@ export const TimesheetLineForm = ({
           label="Date"
           type="date"
           value={draft.date}
-          min={from}
-          max={to < today ? to : today}
           error={dateProblem ?? undefined}
           onChange={(event) => change({ ...draft, date: event.target.value })}
           data-testid="timesheet-line-date"
@@ -167,7 +163,7 @@ export const TimesheetLineForm = ({
             maxLength={200}
             autoComplete="off"
             error={problemOf('customer')}
-            hint="Required when there are hours, a call-out or kilometres — or choose Workshop."
+            hint="Optional. Choose Workshop above for workshop work."
             onChange={(event) => change({ ...draft, customerName: event.target.value })}
             onBlur={() => touch('customer')}
             data-testid="timesheet-customer-name"
@@ -190,7 +186,7 @@ export const TimesheetLineForm = ({
           This line was entered before 28 October 2026 with NT {hours(draft.keepNormal ?? 0)} h. NT is no longer recorded; it is kept as it was.
         </p>
       )}
-      <p className="text-xs text-steel-500">Hours in quarter hours (0.25 = 15 minutes). Kilometres to one decimal.</p>
+      <p className="text-xs text-steel-500">Hours to two decimals (1.5 = an hour and a half). Kilometres to one decimal.</p>
       {refusal !== null && (
         <p role="alert" className="text-sm font-medium text-signal-600" data-testid="timesheet-line-refusal">
           {refusal}

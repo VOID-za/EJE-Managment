@@ -90,7 +90,14 @@ import type { ConversationSummary } from '@/application/chat-operations';
 import type { SubmitResult } from '@/application/job-operations';
 import type { JobListRow, JobView } from '@/application/job-view';
 import type { MyAttendance } from '@/application/attendance-operations';
-import type { Timesheet, TimesheetCorrectionView, TimesheetDocument, TimesheetPerson } from '@/application/timesheets';
+import type {
+  Timesheet,
+  TimesheetCorrectionView,
+  TimesheetDocument,
+  TimesheetPerson,
+  TimesheetSubmissionView,
+  WorkingTimesheet,
+} from '@/application/timesheets';
 import type { PendingTimesheetCorrection } from '@/application/timesheet-corrections';
 import type {
   StandbyAssignResult,
@@ -1366,10 +1373,19 @@ export const timesheets = {
       `/api/timesheets/${segment(userId)}/period/pdf${search({ from, to, version: version === 'current' ? undefined : version })}`,
       `time-sheet-${from}-to-${to}${version === 'current' ? '' : `-${version}`}.pdf`,
     ),
-  /** TS-10, TS-12: Save the one comment for the period. Not a submission. */
-  savePeriodComment: (userId: string, from: string, to: string, comment: string) =>
-    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/comment`, { from, to, comment }),
-  /** TS-02, TS-14: Send to office. Once; read-only for the technician afterwards. */
+  /** TS-PAPER: the open sheet — every line not yet submitted, its comment and the dates Submit proposes. */
+  working: (userId: string) => query<WorkingTimesheet>(`/api/timesheets/${segment(userId)}/working`),
+  /** TS-PAPER: Save the open sheet's one comment. Not a submission. */
+  saveWorkingComment: (userId: string, comment: string) =>
+    command<{ comment: string }>(`/api/timesheets/${segment(userId)}/working/comment`, { comment }),
+  /** TS-PAPER: submitted timesheets, the latest first (the office: everybody's, or one person's). */
+  submissions: (userId?: string) => query<readonly TimesheetSubmissionView[]>(`/api/timesheets/submissions${search({ userId })}`),
+  submission: (periodId: string, version = 'current') =>
+    query<TimesheetDocument>(`/api/timesheets/submissions/${segment(periodId)}${search({ version: version === 'current' ? undefined : version })}`),
+  submissionPdf: (periodId: string, fallbackName: string, version = 'current') =>
+    apiDownload(`/api/timesheets/submissions/${segment(periodId)}/pdf${search({ version: version === 'current' ? undefined : version })}`, fallbackName),
+  submissionExportUrl: (periodId: string) => `/api/timesheets/submissions/${segment(periodId)}/export`,
+  /** TS-PAPER: Submit timesheet for the From and To confirmed. A submission is never overwritten. */
   submit: (userId: string, from: string, to: string) =>
     command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, { from, to }),
   /** TS-16: ask to correct a sent timesheet — the reason and the complete corrected period. */

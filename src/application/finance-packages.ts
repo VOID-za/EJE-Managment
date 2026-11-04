@@ -1,6 +1,7 @@
 import {
   FINANCE_PACKAGE_MAX_BYTES,
   can,
+  completesTimesheet,
   userFullName,
   type FinancePackage,
   type FinancePackageAttachment,
@@ -21,7 +22,21 @@ import { audit } from './audit';
 import { WorkflowError } from './errors';
 import { assertPayrollMonth, loadAttendanceDocument } from './attendance-document';
 import { loadMonthlyForms } from './monthly-submissions';
-import { loadTimesheetDocument } from './timesheets';
+import { loadSubmissionDocument, loadTimesheetDocument } from './timesheets';
+import { formatPeriod } from '@/lib/timesheet-dates';
+
+/**
+ * TS-PAPER (4 November 2026): THE TIMESHEETS OF A MONTH ARE THE PAYDAY
+ * SUBMISSIONS ENDING IN IT. A month submitted from now on is attendance only;
+ * its package carries each technician's current timesheet submission(s) whose
+ * To falls in the month (25 Nov → November; 15 Dec → December; 25 Jan →
+ * January). A month already submitted with its calendar-month timesheet keeps
+ * printing that one.
+ */
+const paydayTimesheetsEnding = async (context: OperationContext, technicianId: UserId, month: string) =>
+  (await context.repos.attendance.listSubmissions(technicianId))
+    .filter((period) => (period.supersededAt ?? null) === null && period.to.slice(0, 7) === month)
+    .sort((a, b) => a.to.localeCompare(b.to));
 
 /**
  * THE MONTHLY PAYROLL PACKAGE FOR FINANCE. PAY-05 … PAY-08 (29 October 2026).
@@ -127,10 +142,23 @@ const viewOf = async (context: OperationContext, financePackage: FinancePackage)
 });
 
 /** When this technician's month last changed after submission: an accepted correction, or the office's register correction. */
-const correctedSince = async (context: OperationContext, person: User, month: string, since: IsoDateTime): Promise<boolean> => {
+/**
+ * The timesheet periods a month's package prints for one person: the month's
+ * own (a month submitted with it, before TS-PAPER), or the payday submissions
+ * ending in the month.
+ */
+const timesheetPeriodsOf = async (context: OperationContext, person: User, month: string, monthCarriesTimesheet: boolean) => {
+  if (monthCarriesTimesheet) {
+    const { from, to } = monthBounds(month);
+    const period = await context.repos.attendance.findPeriod(person.id, from, to);
+    return period === null ? [] : [period];
+  }
+  return completesTimesheet(person.role) ? paydayTimesheetsEnding(context, person.id, month) : [];
+};
+
+const correctedSince = async (context: OperationContext, person: User, month: string, monthCarriesTimesheet: boolean, since: IsoDateTime): Promise<boolean> => {
   const { from, to } = monthBounds(month);
-  const period = await context.repos.attendance.findPeriod(person.id, from, to);
-  if (period !== null) {
+  for (const period of await timesheetPeriodsOf(context, person, month, monthCarriesTimesheet)) {
     const corrections = await context.repos.attendance.listCorrections(period.id);
     if (corrections.some((correction) => correction.status === 'accepted' && (correction.decidedAt ?? '') > since)) return true;
   }
@@ -164,17 +192,22 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       .filter((financePackage) => financePackage.attachments.some((attachment) => attachment.technicianId === person.id))
       .sort((a, b) => (b.sentAt ?? '').localeCompare(a.sentAt ?? ''))[0];
     const submission = submitted.get(person.id) ?? null;
+    const periods = await timesheetPeriodsOf(context, person, month, forms.timesheetRequired);
+    let correctionPending = forms.timesheet.correctionPending;
+    for (const period of periods) {
+      if ((await context.repos.attendance.listCorrections(period.id)).some((correction) => correction.status === 'pending')) correctionPending = true;
+    }
     let status: PayrollRowStatus;
     let detail: string;
     if (submission === null) {
       status = 'not_submitted';
       detail = 'Not submitted yet';
-    } else if (forms.timesheet.correctionPending) {
+    } else if (correctionPending) {
       status = 'correction_pending';
       detail = 'A timesheet correction is waiting for the office’s decision';
     } else if (lastSent !== undefined && lastSent.sentAt !== null) {
       // RESUBMIT-1: a month submitted again after it went to Finance can be sent again too.
-      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
+      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, forms.timesheetRequired, lastSent.sentAt));
       status = corrected ? 'corrected_after_sent' : 'sent';
       detail = corrected
         ? `Corrected after it was sent to Finance on ${lastSent.sentAt.slice(0, 10)} — can be sent again, marked CORRECTED`
@@ -193,7 +226,11 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       submittedAt: submission?.submittedAt ?? null,
       fileNames: forms.fileNames,
       timesheetRequired: forms.timesheetRequired,
-      timesheetVersion: forms.timesheet.versionInForce,
+      timesheetVersion: forms.timesheetRequired || !completesTimesheet(person.role)
+        ? forms.timesheet.versionInForce
+        : periods.length === 0
+          ? 'No timesheet submitted ending in this month'
+          : `Timesheet${periods.length === 1 ? '' : 's'} submitted: ${periods.map((period) => formatPeriod(period.from, period.to)).join('; ')}`,
       attendanceChangedAfterSubmission: forms.attendance.changedAfterSubmission.length,
       unrecordedWeekdays: submission === null ? forms.attendance.unrecordedWeekdays.length : submission.attendance.days.filter((day) => day.status === null).length,
       sentIn: lastSent === undefined || lastSent.sentAt === null ? null : { packageId: lastSent.id, sentAt: lastSent.sentAt },
@@ -250,12 +287,17 @@ export const prepareFinancePackage = async (
     }
     const { from, to } = monthBounds(month);
     const correctedResend = row.status === 'corrected_after_sent';
-    let timesheet = null;
+    const sheets: { readonly document: Awaited<ReturnType<typeof loadTimesheetDocument>>; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
     let attendance;
     try {
       if (row.timesheetRequired) {
         const timesheetDocument = await loadTimesheetDocument(context, technicianId, from, to);
-        timesheet = { document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) };
+        sheets.push({ document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) });
+      } else if (completesTimesheet(row.technician.role)) {
+        for (const period of await paydayTimesheetsEnding(context, row.technician.id, month)) {
+          const timesheetDocument = await loadSubmissionDocument(context, period.id);
+          sheets.push({ document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) });
+        }
       }
       const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
       attendance = { document: attendanceDocument, rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }) };
@@ -266,7 +308,8 @@ export const prepareFinancePackage = async (
       throw cause;
     }
     for (const [kind, rendered, versionLabel] of [
-      ...(timesheet === null ? [] : [['timesheet', timesheet.rendered, timesheet.document.versionLabel || 'Original submission'] as const]),
+      // Two payday submissions ending in one month: the second file is numbered, never confused with the first.
+      ...sheets.map((sheet, index) => ['timesheet', index === 0 ? sheet.rendered : { ...sheet.rendered, fileName: sheet.rendered.fileName.replace(/.pdf$/u, ` ${index + 1}.pdf`) }, sheet.document.versionLabel || 'Original submission'] as const),
       ['attendance', attendance.rendered, attendance.document.versionLabel] as const,
     ]) {
       if (rendered.pageCount !== 1) {

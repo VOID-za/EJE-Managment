@@ -13,6 +13,7 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  TimesheetWorkingComment,
   MonthlySubmission,
   FinancePackage,
   FinancePackageStatus,
@@ -1438,6 +1439,30 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return saved;
   }
 
+  findPeriodById(id: string): Promise<TimesheetPeriod | null> {
+    return Promise.resolve(this.context.read().timesheetPeriods.find((row) => row.id === id) ?? null);
+  }
+
+  listSubmissions(userId: UserId | null): Promise<readonly TimesheetPeriod[]> {
+    return Promise.resolve(
+      this.context
+        .read()
+        .timesheetPeriods.filter((row) => row.submittedAt !== null && (userId === null || row.userId === userId))
+        .sort((x, y) => y.to.localeCompare(x.to) || (y.submittedAt ?? '').localeCompare(x.submittedAt ?? '')),
+    );
+  }
+
+  findWorkingComment(userId: UserId): Promise<TimesheetWorkingComment | null> {
+    return Promise.resolve((this.context.read().timesheetWorkingComments ?? []).find((row) => row.userId === userId) ?? null);
+  }
+
+  saveWorkingComment(comment: TimesheetWorkingComment): Promise<TimesheetWorkingComment> {
+    this.context.commit((draft) => {
+      draft.timesheetWorkingComments = [...(draft.timesheetWorkingComments ?? []).filter((row) => row.userId !== comment.userId), comment];
+    });
+    return Promise.resolve(comment);
+  }
+
   findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
     return Promise.resolve(
       this.context.read().timesheetPeriods.find((row) => row.userId === userId && row.from === from && row.to === to) ?? null,
@@ -1623,10 +1648,7 @@ class DemoPayrollRepository implements PayrollRepository {
       const [year, month] = submission.month.split('-').map(Number) as [number, number];
       const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
       if (submission.timesheetPeriodId === null) {
-        // Attendance only: a Coordinator's month (TS-ROLE-1), as migration 0043's guard.
-        if (draft.users.find((user) => user.id === submission.userId)?.role !== 'coordinator') {
-          throw new Error(`a monthly submission without a timesheet is a Coordinator's only (${submission.month})`);
-        }
+        // Attendance only: anybody's month (TS-PAPER), as migration 0050's guard.
       } else {
         const period = draft.timesheetPeriods.find((row) => row.id === submission.timesheetPeriodId);
         if (

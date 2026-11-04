@@ -29,12 +29,23 @@ import {
 import { businessToday } from '@/lib/business-time';
 import { csvFileName, toCsv, type CsvColumn } from '@/lib/csv';
 import { formatCurrency } from '@/lib/format';
-import { formatDayAndDate, formatPeriod, weekdayOf } from '@/lib/timesheet-dates';
+import { formatDayAndDate, formatPeriod, isTimesheetDay, weekdayOf } from '@/lib/timesheet-dates';
 import { documentNameOf, timesheetPeriodFileName } from '@/lib/payroll-files';
 import type { OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
-import { assertRecordableDate, isCalendarDate } from './attendance-operations';
+import { assertRecordableDate } from './attendance-operations';
+
+/*
+ * TS-PAPER (the owner, 4 November 2026): "stop treating Timesheets like a
+ * complicated application and start treating it like a digital piece of
+ * paper. The technician maintains it. The technician submits it on payday.
+ * EJE records and preserves it." What that changed is in docs/timesheets-paper.md:
+ * a line may be on any real date (no period, no future-date or 92-day rule),
+ * with Workshop, a customer or neither; the open sheet is every line not yet
+ * submitted; on payday the technician confirms From and To and submits; a
+ * submission is never overwritten — a change after it is a correction.
+ */
 
 /**
  * A TECHNICIAN'S TIMESHEET — COMPLETELY MANUAL. TIMESHEET-2 (27 October 2026),
@@ -87,8 +98,6 @@ import { assertRecordableDate, isCalendarDate } from './attendance-operations';
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
-/** The longest range one timesheet view covers: a quarter. Longer is a report. */
-export const TIMESHEET_MAX_DAYS = 92;
 
 export type TimesheetPerson = Pick<User, 'id' | 'firstName' | 'lastName' | 'role' | 'jobTitle'>;
 
@@ -290,20 +299,13 @@ const assertOwner = (context: OperationContext, technicianId: UserId): void => {
 };
 
 const assertRange = (from: string, to: string): void => {
-  if (!isCalendarDate(from) || !isCalendarDate(to)) {
+  if (!isTimesheetDay(from) || !isTimesheetDay(to)) {
     throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
   }
   if (from > to) {
     throw refuse('The range ends before it starts.', 'invalid_range', 'Choose a From on or before the To.');
   }
-  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
-  if (days > TIMESHEET_MAX_DAYS) {
-    throw refuse(
-      'That range is too long for one timesheet.',
-      'range_too_long',
-      `A timesheet covers at most ${TIMESHEET_MAX_DAYS} days.`,
-    );
-  }
+  // TS-PAPER: no longest period — a pay period ends on the real payday.
 };
 
 /**
@@ -316,20 +318,15 @@ const assertPeriod = (_context: OperationContext, from: string, to: string): voi
 };
 
 /**
- * A timesheet line for a day that has not happened. Its own sentence: the
- * shared date check speaks of attendance, which read wrongly here (found on
- * the live site, 28 October 2026).
+ * A timesheet line's date: a real calendar day, and nothing more. TS-PAPER
+ * (4 November 2026) removed the future-date rule and the rule that a line be
+ * inside the period on screen — the technician records the day they mean.
  */
-const assertTimesheetDate = (context: OperationContext, date: string): void => {
-  const today = businessToday(new Date(context.services.clock.now()));
-  if (isCalendarDate(date) && date > today) {
-    throw refuse(
-      'A timesheet line cannot be entered for a day that has not happened.',
-      'date_in_future',
-      `Today is ${today}. Enter the day on or after it happens.`,
-    );
+const assertTimesheetDate = (_context: OperationContext, date: string): void => {
+  // A real day this century — malformed input, not a business rule.
+  if (!isTimesheetDay(date)) {
+    throw refuse('That is not a date.', 'invalid_date', 'Give the day as YYYY-MM-DD.');
   }
-  assertRecordableDate(date, today);
 };
 
 /**
@@ -549,14 +546,13 @@ export interface TimesheetEntryInput {
   readonly customerKm?: number | undefined;
 }
 
-const HOURS_STEP = 0.25;
-
 const assertHours = (label: string, value: number, code: string): void => {
   if (!Number.isFinite(value) || value < 0 || value > TIMESHEET_MAX_HOURS_PER_DAY) {
     throw refuse(`${label} must be between 0 and 24 hours.`, code, `Enter ${label.toLowerCase()} as hours, 0 to 24.`);
   }
-  if (Math.abs(value / HOURS_STEP - Math.round(value / HOURS_STEP)) > 1e-9) {
-    throw refuse(`${label} must be in quarter hours.`, code, 'Use steps of 0.25 hours (15 minutes).');
+  // Hundredths are what the column holds (TS-PAPER: no quarter-hour rule).
+  if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-6) {
+    throw refuse(`${label} takes two decimals at most.`, code, 'For example 1.5 or 2.25.');
   }
 };
 
@@ -668,15 +664,7 @@ export const normaliseTimesheetLine = async (
   if (customerName.length > TIMESHEET_CUSTOMER_LIMIT) {
     throw refuse('That customer name is too long.', 'customer_too_long', `Keep it to ${TIMESHEET_CUSTOMER_LIMIT} characters.`);
   }
-  const anything =
-    normalHours + input.overtimeHours + input.doubleHours + callouts + calloutAmount + internalKm + customerKm > 0;
-  if (anything && !workshop && customerName.length === 0) {
-    throw refuse(
-      'Say which customer the work was for, or choose Workshop.',
-      'customer_required',
-      'Choose a customer or Workshop for any line with hours, a call-out or kilometres.',
-    );
-  }
+  // TS-PAPER: a customer is never required — Workshop, a customer, or neither.
 
   return {
     customerId, customerName, workshop, normalHours, overtimeHours: input.overtimeHours,
@@ -860,100 +848,54 @@ export const saveTimesheetComment = async (
 };
 
 
-/**
- * SAVE: the one comment for the whole timesheet period. TS-10, TS-12. The
- * owner only, for any period (TS-OVERLAP-1: overlapping a sent one is fine).
- * An unchanged comment writes nothing. Saving is never a submission.
- */
-export const saveTimesheetPeriodComment = async (
-  context: OperationContext,
-  technicianId: string,
-  from: string,
-  to: string,
-  text: string,
-): Promise<TimesheetPeriod> => {
-  const id = asUserId(technicianId);
-  assertOwner(context, id);
-  assertPeriod(context, from, to);
-  const comment = text.trim();
-  if (comment.length > TIMESHEET_PERIOD_COMMENT_LIMIT) {
-    throw refuse(
-      'That comment is too long.',
-      'comment_too_long',
-      `Keep it to ${TIMESHEET_PERIOD_COMMENT_LIMIT} characters.`,
-    );
-  }
-  const existing = await context.repos.attendance.findPeriod(id, from, to);
-  if (existing !== null && existing.comment === comment) return existing;
-
-  const saved = await context.repos.attendance.savePeriodComment({
-    id: existing?.id ?? context.services.ids.next('tsp'),
-    userId: id,
-    from,
-    to,
-    comment,
-    updatedBy: context.actor.id,
-    updatedAt: context.services.clock.now(),
-    submittedAt: null,
-    submittedBy: null,
-    snapshot: null,
-  });
-  if (saved === null) {
-    throw refuse('The comment could not be saved.', 'comment_not_saved', 'Reload the timesheet.');
-  }
-  await audit(context, {
-    jobId: null,
-    type: 'timesheet_comment_saved',
-    summary: `Timesheet comment ${existing === null || existing.comment === '' ? 'added' : 'changed'}: ${userFullName(context.actor)}'s timesheet for ${formatPeriod(from, to)}`,
-    detail: `Written by ${userFullName(context.actor)}.`,
-    changes: [{ field: 'Comment', from: existing?.comment ?? '', to: comment }],
-  });
-  return saved;
-};
 
 /**
- * SEND TO OFFICE. TS-02, TS-03, TS-14 — for the period the technician chose.
+ * SUBMIT TIMESHEET — on payday, for the From and To the technician confirms.
+ * TS-PAPER (4 November 2026), on TS-02/TS-03/TS-14 and TS-OVERLAP-1.
  *
- * The owner sends one period, once. What is sent is FROZEN in the submission:
- * every line inside the period and the comment, exactly as they stand. Any
- * earlier CURRENT submission sharing a day with it is superseded first, in
- * the same unit of work (TS-OVERLAP-1), so no day is ever in two current
- * submissions — the database's trigger refuses that too. The repository sets the
- * submission only where none exists, so a double tap, a retry or two tabs
- * produce one submission and one refusal.
+ * Every line dated From…To and the sheet's comment are frozen in an immutable
+ * snapshot, with who submitted it and when. The period may be any length and
+ * end on any day — the real payday. Lines dated outside it stay on the
+ * technician's sheet for the next one, and the comment is cleared for it.
  *
- * THE OFFICE IS TOLD AFTER, AND ONLY AFTER, THE SUBMISSION IS SAVED: every
- * active Master and Coordinator, through the existing in-app notifications
- * (`notifyOffice`). A refused send notifies nobody, and a replayed request is
- * answered from the idempotency store without running this again — so a
- * double click never notifies twice. Audited with who and when.
+ * A SUBMISSION IS NEVER OVERWRITTEN (was RESUBMIT-1, which replaced the
+ * snapshot and deleted its corrections): the same dates submitted again are
+ * refused — a change after submitting is a correction, decided by the office,
+ * with the original kept. Dates that OVERLAP an earlier current submission
+ * replace it for the office (TS-OVERLAP-1): the earlier one is kept, marked
+ * replaced, in the same unit of work, so no day is in two current
+ * submissions — the database's trigger refuses that too.
+ *
+ * THE OFFICE IS TOLD AFTER, AND ONLY AFTER, THE SUBMISSION IS SAVED (every
+ * active Master and Coordinator, in-app). A refused submission notifies
+ * nobody, and a replayed request is answered from the idempotency store.
  */
 export const submitTimesheetPeriod = async (
   context: OperationContext,
   technicianId: string,
   from: string,
   to: string,
-  /** PAY-02: a monthly submission tells the office once itself, about both documents. */
   options: { readonly notify?: boolean } = {},
 ): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
   assertPeriod(context, from, to);
   const technician = await findTechnician(context, id);
-  const [entries, existing] = await Promise.all([
+  const [entries, existing, working] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
+    context.repos.attendance.findWorkingComment(id),
   ]);
+  if (existing !== null && existing.submittedAt !== null) {
+    throw refuse(
+      `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
+      'timesheet_already_submitted',
+      'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets and ask for a correction.',
+    );
+  }
   const now = context.services.clock.now();
-  const comment = existing?.comment ?? '';
-  /*
-   * SENT AGAIN: THE NEW SUBMISSION REPLACES THE LAST ONE. RESUBMIT-1. Nothing of
-   * the earlier submission is kept — its snapshot is overwritten and any
-   * correction recorded against it removed — and the lines themselves are
-   * untouched. The office reads the latest submission, as before.
-   */
-  const resending = existing !== null && existing.submittedAt !== null;
-  // TS-OVERLAP-1: every other current submission sharing a day is replaced by this one.
+  // The open sheet's comment; a comment saved on these exact dates before TS-PAPER otherwise.
+  const comment = working !== null ? working.comment : existing?.comment ?? '';
   const replaced = await context.repos.attendance.supersedeOverlappingPeriods({
     userId: id,
     from,
@@ -964,8 +906,7 @@ export const submitTimesheetPeriod = async (
   });
   let saved: TimesheetPeriod | null;
   try {
-    if (resending) await context.repos.attendance.deleteCorrections(existing.id);
-    saved = await context.repos.attendance[resending ? 'resubmitPeriod' : 'submitPeriod']({
+    saved = await context.repos.attendance.submitPeriod({
       id: existing?.id ?? context.services.ids.next('tsp'),
       userId: id,
       from,
@@ -978,33 +919,215 @@ export const submitTimesheetPeriod = async (
       snapshot: { technicianName: userFullName(technician), from, to, comment, entries },
     });
   } catch (cause) {
-    // Another send for an overlapping period got there in between (the database's guard): say so plainly.
+    // Another submission for overlapping dates got there in between (the database's guard): say so plainly.
     if (cause instanceof Error && /overlaps a period already sent/u.test(`${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}`)) {
-      throw refuse('Another submission for these dates was being sent at the same time.', 'timesheet_send_conflict', 'Reload the timesheet and send it again.');
+      throw refuse('Another submission for these dates was being sent at the same time.', 'timesheet_send_conflict', 'Reload the timesheet and submit it again.');
     }
     throw cause;
   }
   if (saved === null) {
     throw refuse(
-      `The timesheet for ${formatPeriod(from, to)} has already been sent to the office.`,
-      'timesheet_submitted',
-      'It was sent once; the office has it.',
+      `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
+      'timesheet_already_submitted',
+      'It was submitted once; the office has it.',
     );
+  }
+  if (working !== null && working.comment !== '') {
+    await context.repos.attendance.saveWorkingComment({ userId: id, comment: '', updatedBy: context.actor.id, updatedAt: now });
   }
   const label = formatPeriod(from, to);
   await audit(context, {
     jobId: null,
     type: 'timesheet_submitted',
-    summary: `Timesheet ${resending ? 'sent again — replaces the earlier submission' : 'sent to the office'}: ${userFullName(technician)}, ${label}`,
-    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} sent by ${userFullName(context.actor)}.${resending ? ' The earlier submission is replaced; only this one is kept.' : ''}${replaced.length > 0 ? ` It replaces the overlapping submission${replaced.length === 1 ? '' : 's'} ${replaced.map((period) => formatPeriod(period.from, period.to)).join('; ')}, which the office no longer reads.` : ''}`,
+    summary: `Timesheet submitted: ${userFullName(technician)}, ${label}`,
+    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} submitted by ${userFullName(context.actor)}.${comment === '' ? '' : ' With its comment.'}${replaced.length > 0 ? ` It replaces the overlapping submission${replaced.length === 1 ? '' : 's'} ${replaced.map((period) => formatPeriod(period.from, period.to)).join('; ')}, which ${replaced.length === 1 ? 'is' : 'are'} kept and which the office no longer reads.` : ''}`,
   });
   if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',
-    title: `${userFullName(technician)} sent a timesheet to the office`,
-    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}. Open Timesheets, choose ${userFullName(technician)} and these dates to read the version that was sent.`,
+    title: `${userFullName(technician)} submitted a timesheet`,
+    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}.${replaced.length > 0 ? ' It replaces an earlier submission for some of these days.' : ''} Open Timesheets → Submitted timesheets to read it.`,
     link: '/timesheets',
   });
   return saved;
+};
+
+const addDays = (iso: string, days: number): IsoDate =>
+  new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+/** One line of the open sheet, and — when its date is inside a current submission it is not part of — which. */
+export interface WorkingTimesheetEntry extends TimesheetEntry {
+  readonly outsideSubmitted: { readonly from: IsoDate; readonly to: IsoDate } | null;
+}
+
+/** One submission as the lists show it. */
+export interface TimesheetSubmissionView {
+  readonly id: string;
+  readonly technicianId: UserId;
+  readonly technicianName: string;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly label: string;
+  readonly submittedAt: IsoDateTime;
+  readonly submittedByName: string | null;
+  readonly lineCount: number;
+  /** False once a later submission for overlapping dates replaced it (TS-OVERLAP-1). */
+  readonly current: boolean;
+  readonly replacedAt: IsoDateTime | null;
+  /** "Original submission" or "Correction 2, accepted …". */
+  readonly versionInForce: string;
+  readonly correctionPending: boolean;
+}
+
+/** THE TECHNICIAN'S OPEN SHEET. TS-PAPER. */
+export interface WorkingTimesheet {
+  readonly technician: TimesheetPerson;
+  readonly editable: boolean;
+  readonly today: IsoDate;
+  /** Every line not part of a current submission, any date, oldest first. */
+  readonly entries: readonly WorkingTimesheetEntry[];
+  readonly comment: string;
+  /** Day comments written before TS-10, on the open sheet's dates. History. */
+  readonly dayComments: readonly { readonly date: IsoDate; readonly comment: string }[];
+  /** The dates the page proposes for Submit: the day after the last submission, to today. */
+  readonly suggested: { readonly from: IsoDate; readonly to: IsoDate };
+  readonly lastSubmission: { readonly from: IsoDate; readonly to: IsoDate; readonly submittedAt: IsoDateTime } | null;
+  /** This person's submissions, the latest first. */
+  readonly submissions: readonly TimesheetSubmissionView[];
+}
+
+const submissionViews = async (
+  context: OperationContext,
+  periods: readonly TimesheetPeriod[],
+): Promise<readonly TimesheetSubmissionView[]> => {
+  const names = new Map<string, string | null>();
+  const named = async (userId: UserId | null): Promise<string | null> => {
+    if (userId === null) return null;
+    if (!names.has(userId)) names.set(userId, await nameOf(context, userId));
+    return names.get(userId) ?? null;
+  };
+  return Promise.all(
+    periods.map(async (period): Promise<TimesheetSubmissionView> => {
+      const corrections = await context.repos.attendance.listCorrections(period.id);
+      const inForce = versionInForce(period, corrections);
+      return {
+        id: period.id,
+        technicianId: period.userId,
+        technicianName: period.snapshot?.technicianName ?? (await named(period.userId)) ?? '',
+        from: period.from,
+        to: period.to,
+        label: formatPeriod(period.from, period.to),
+        submittedAt: period.submittedAt!,
+        submittedByName: await named(period.submittedBy),
+        lineCount: inForce.snapshot.entries.length,
+        current: (period.supersededAt ?? null) === null,
+        replacedAt: period.supersededAt ?? null,
+        versionInForce: await versionLabel(context, inForce.correction),
+        correctionPending: corrections.some((correction) => correction.status === 'pending'),
+      };
+    }),
+  );
+};
+
+/**
+ * THE OPEN SHEET: every line the technician has written that is not part of a
+ * current submission — any date, past or future — with the sheet's comment and
+ * the dates Submit will propose. Read by the owner (and the office).
+ */
+export const loadWorkingTimesheet = async (context: OperationContext, technicianId: string): Promise<WorkingTimesheet> => {
+  const id = asUserId(technicianId);
+  assertMayRead(context, id);
+  const technician = await findTechnician(context, id);
+  const today = businessToday(new Date(context.services.clock.now()));
+  const [entries, submitted, working, dayComments] = await Promise.all([
+    context.repos.attendance.listEntries(id, '0001-01-01', '9999-12-31'),
+    context.repos.attendance.listSubmissions(id),
+    context.repos.attendance.findWorkingComment(id),
+    context.repos.attendance.listComments(id, '0001-01-01', '9999-12-31'),
+  ]);
+  const current = submitted.filter((period) => (period.supersededAt ?? null) === null);
+  // What each current submission holds now: the lines of its version in force.
+  const held = await Promise.all(
+    current.map(async (period) => ({
+      period,
+      ids: new Set(versionInForce(period, await context.repos.attendance.listCorrections(period.id)).snapshot.entries.map((entry) => entry.id)),
+    })),
+  );
+  const open = entries
+    .flatMap((entry): WorkingTimesheetEntry[] => {
+      const covering = held.find(({ period }) => period.from <= entry.date && entry.date <= period.to);
+      if (covering === undefined) return [{ ...entry, outsideSubmitted: null }];
+      if (covering.ids.has(entry.id)) return [];
+      return [{ ...entry, outsideSubmitted: { from: covering.period.from, to: covering.period.to } }];
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || a.updatedAt.localeCompare(b.updatedAt));
+  const last = current.reduce<TimesheetPeriod | null>((latest, period) => (latest === null || period.to > latest.to ? period : latest), null);
+  const from = last !== null ? addDays(last.to, 1) : open[0]?.date ?? today;
+  const openDates = new Set(open.map((entry) => entry.date));
+  return {
+    technician: personOf(technician),
+    editable: context.actor.id === id,
+    today,
+    entries: open,
+    comment: working?.comment ?? '',
+    dayComments: dayComments.filter((day) => openDates.has(day.date)).map((day) => ({ date: day.date, comment: day.comment })),
+    suggested: { from, to: today >= from ? today : from },
+    lastSubmission: last === null ? null : { from: last.from, to: last.to, submittedAt: last.submittedAt! },
+    submissions: await submissionViews(context, submitted),
+  };
+};
+
+/** SAVE the open sheet's one comment. The owner only; an unchanged comment writes nothing. */
+export const saveWorkingTimesheetComment = async (
+  context: OperationContext,
+  technicianId: string,
+  text: string,
+): Promise<{ readonly comment: string }> => {
+  const id = asUserId(technicianId);
+  assertOwner(context, id);
+  const comment = text.trim();
+  if (comment.length > TIMESHEET_PERIOD_COMMENT_LIMIT) {
+    throw refuse('That comment is too long.', 'comment_too_long', `Keep it to ${TIMESHEET_PERIOD_COMMENT_LIMIT} characters.`);
+  }
+  const existing = await context.repos.attendance.findWorkingComment(id);
+  if ((existing?.comment ?? '') === comment) return { comment };
+  await context.repos.attendance.saveWorkingComment({ userId: id, comment, updatedBy: context.actor.id, updatedAt: context.services.clock.now() });
+  await audit(context, {
+    jobId: null,
+    type: 'timesheet_comment_saved',
+    summary: `Timesheet comment ${(existing?.comment ?? '') === '' ? 'added' : comment === '' ? 'cleared' : 'changed'}: ${userFullName(context.actor)}'s open timesheet`,
+    detail: `Written by ${userFullName(context.actor)}.`,
+    changes: [{ field: 'Comment', from: existing?.comment ?? '', to: comment }],
+  });
+  return { comment };
+};
+
+/**
+ * SUBMITTED TIMESHEETS, the latest first. The office (`timesheets.viewAll`):
+ * everybody's, or one person's; anybody else: their own only.
+ */
+export const listTimesheetSubmissions = async (
+  context: OperationContext,
+  technicianId?: string,
+): Promise<readonly TimesheetSubmissionView[]> => {
+  if (technicianId === undefined) {
+    const everybody = can(context.actor.role, 'timesheets.viewAll');
+    return submissionViews(context, await context.repos.attendance.listSubmissions(everybody ? null : context.actor.id));
+  }
+  const id = asUserId(technicianId);
+  assertMayRead(context, id);
+  return submissionViews(context, await context.repos.attendance.listSubmissions(id));
+};
+
+/** A submitted period by its id, for somebody allowed to read it; refused like a missing one otherwise. */
+const findSubmission = async (context: OperationContext, periodId: string): Promise<TimesheetPeriod> => {
+  const period = await context.repos.attendance.findPeriodById(periodId);
+  if (period === null || period.submittedAt === null) {
+    throw refuse('That submitted timesheet does not exist.', 'submission_not_found', 'Reload the list.');
+  }
+  if (!can(context.actor.role, 'timesheets.viewAll') && period.userId !== context.actor.id) {
+    throw refuse('That submitted timesheet does not exist.', 'submission_not_found', 'Reload the list.');
+  }
+  return period;
 };
 
 /** One row of the PDF Layout's table. */
@@ -1120,10 +1243,11 @@ export const loadTimesheetDocument = async (
   assertMayRead(context, id);
   assertRange(from, to);
   const technician = await findTechnician(context, id);
-  const [row, records, settings] = await Promise.all([
+  const [row, records, settings, working] = await Promise.all([
     context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
     context.repos.settings.get(),
+    context.repos.attendance.findWorkingComment(id),
   ]);
   const sentRow = row?.submittedAt != null ? row : null;
   const corrections = sentRow === null ? [] : await context.repos.attendance.listCorrections(sentRow.id);
@@ -1168,7 +1292,8 @@ export const loadTimesheetDocument = async (
     to,
     periodLabel: formatPeriod(from, to),
     rows,
-    comment: snapshot !== null ? snapshot.comment : row?.comment ?? '',
+    // A draft prints the open sheet's comment (TS-PAPER), or one saved on these dates before it.
+    comment: snapshot !== null ? snapshot.comment : working !== null ? working.comment : row?.comment ?? '',
     totals: {
       overtimeHours: round2(total((r) => r.overtimeHours)),
       doubleHours: round2(total((r) => r.doubleHours)),
@@ -1189,6 +1314,16 @@ export const loadTimesheetDocument = async (
         reason: record.absenceReason === null ? 'Absent (reason not recorded)' : ABSENCE_REASON_LABELS[record.absenceReason],
       })),
   };
+};
+
+/** TS-PAPER. One submission as its PDF Layout prints it — current or replaced, any version. */
+export const loadSubmissionDocument = async (
+  context: OperationContext,
+  periodId: string,
+  version: 'current' | 'original' | number = 'current',
+): Promise<TimesheetDocument> => {
+  const period = await findSubmission(context, periodId);
+  return loadTimesheetDocument(context, period.userId, period.from, period.to, version);
 };
 
 /** One spreadsheet row: a line, or an unrecorded day said as such. */
@@ -1298,6 +1433,38 @@ export const exportTimesheet = async (
     rowCount: rows.length,
     columns: timesheetExportColumns,
   };
+};
+
+/**
+ * TS-PAPER. One submission as a spreadsheet — exactly the lines of its version
+ * in force, one row a line — for the office's records (TS-CSV-OFF-1: the
+ * office's only).
+ */
+export const exportTimesheetSubmission = async (
+  context: OperationContext,
+  periodId: string,
+): Promise<{ fileName: string; csv: string; rowCount: number; columns: readonly string[] }> => {
+  if (!can(context.actor.role, 'timesheets.viewAll')) {
+    throw refuse(
+      'Only the office exports a timesheet as a spreadsheet.',
+      'not_permitted',
+      'Your timesheet can be previewed, printed and downloaded as its PDF.',
+    );
+  }
+  const period = await findSubmission(context, periodId);
+  const inForce = versionInForce(period, await context.repos.attendance.listCorrections(period.id));
+  const label = inForce.correction === null ? 'Sent — original' : `Sent — correction ${inForce.correction.sequence} accepted`;
+  const { days } = buildTimesheetDays({
+    from: period.from,
+    to: period.to,
+    entries: inForce.snapshot.entries,
+    comments: [],
+    attendance: new Map(),
+    lockedRanges: [{ from: period.from, to: period.to, label }],
+  });
+  const rows = timesheetExportRows({ days: days.filter((day) => day.recorded) });
+  const stem = `eje-timesheet-${inForce.snapshot.technicianName}-${period.from}-to`.toLowerCase().replace(/[^a-z0-9-]+/gu, '-');
+  return { fileName: csvFileName(stem, period.to), csv: toCsv(TIMESHEET_COLUMNS, rows), rowCount: rows.length, columns: timesheetExportColumns };
 };
 
 /**

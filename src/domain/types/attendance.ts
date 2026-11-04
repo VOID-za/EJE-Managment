@@ -187,6 +187,17 @@ export interface TimesheetPeriod {
   readonly supersededBy?: UserId | null;
 }
 
+/**
+ * THE OPEN SHEET'S COMMENT. TS-PAPER (4 November 2026): one per person, for the
+ * timesheet they are filling in now; submitting copies it into the snapshot.
+ */
+export interface TimesheetWorkingComment {
+  readonly userId: UserId;
+  readonly comment: string;
+  readonly updatedBy: UserId;
+  readonly updatedAt: IsoDateTime;
+}
+
 /** What was sent to the office, frozen. */
 export interface TimesheetSubmissionSnapshot {
   readonly technicianName: string;

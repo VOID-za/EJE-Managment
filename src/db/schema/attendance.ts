@@ -207,10 +207,8 @@ export const timesheetPeriods = pgTable(
   (table) => [
     uniqueIndex('timesheet_periods_user_range_key').on(table.userId, table.periodFrom, table.periodTo),
     index('timesheet_periods_user_idx').on(table.userId, table.periodFrom),
-    check(
-      'timesheet_periods_range_valid',
-      sql`${table.periodFrom} <= ${table.periodTo} and ${table.periodTo} - ${table.periodFrom} < 92`,
-    ),
+    // TS-PAPER (0050): any length — a pay period ends on the real payday, however far away.
+    check('timesheet_periods_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
     check('timesheet_periods_comment_bounded', sql`char_length(${table.comment}) <= 2000`),
     check(
       'timesheet_periods_submission_whole',
@@ -227,6 +225,30 @@ export const timesheetPeriods = pgTable(
  * once by the office. One pending per period; write-once after the decision;
  * never deleted — the trigger `timesheet_corrections_guard` enforces it.
  */
+/**
+ * THE OPEN SHEET'S COMMENT. TS-PAPER, migration 0050 (4 November 2026).
+ *
+ * One row per person: the comment on the timesheet they are filling in now,
+ * whatever dates it will be submitted for. Submitting copies it into the
+ * snapshot and clears it for the next sheet.
+ */
+export const timesheetWorkingComments = pgTable(
+  'timesheet_working_comments',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    comment: text('comment').notNull().default(''),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [check('timesheet_working_comments_bounded', sql`char_length(${table.comment}) <= 2000`)],
+);
+
 export const timesheetCorrections = pgTable(
   'timesheet_corrections',
   {

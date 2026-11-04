@@ -20,7 +20,7 @@ import {
   findPayrollPerson,
   unrecordedWeekdays,
 } from './attendance-document';
-import { submitTimesheetPeriod, versionInForce } from './timesheets';
+import { versionInForce } from './timesheets';
 
 /**
  * A TECHNICIAN'S MONTHLY SUBMISSION. PAY-02 (29 October 2026).
@@ -45,6 +45,13 @@ import { submitTimesheetPeriod, versionInForce } from './timesheets';
  * have none — a public holiday — but it is never sent unnoticed). Submitted
  * once: a retry, a double tap or a second tab gets one submission and one
  * refusal. The office is notified, once, after it is saved; it is audited.
+ *
+ * TS-PAPER (the owner, 4 November 2026): TIMESHEETS FOLLOW PAYDAY, NOT THE
+ * CALENDAR. A month submitted from now on carries the ATTENDANCE only, for
+ * everybody; each technician submits their timesheet from the Timesheets page
+ * for their real pay period. A month already submitted with its calendar-month
+ * timesheet keeps it — shown, and kept when the month is submitted again —
+ * and that timesheet is never sent again from here.
  *
  * A COORDINATOR'S MONTH IS ATTENDANCE ONLY (TS-ROLE-1, the tester, 1 November
  * 2026): Coordinators keep no timesheet, so their submission carries the
@@ -108,7 +115,8 @@ export const loadMonthlyForms = async (
     context.repos.attendance.listRecords(from, to, person.id),
   ]);
   const days = attendanceSnapshotDays(month, records);
-  const timesheetRequired = submission === null ? completesTimesheet(person.role) : submission.timesheetPeriodId !== null;
+  // TS-PAPER: only a month already submitted with its timesheet still carries one.
+  const timesheetRequired = submission !== null && submission.timesheetPeriodId !== null;
   const exactSent = timesheetRequired && period !== null && period.submittedAt !== null ? period : null;
   const corrections = exactSent === null ? [] : await context.repos.attendance.listCorrections(exactSent.id);
   const blocking = timesheetRequired ? sent.filter((other) => exactSent === null || other.id !== exactSent.id) : [];
@@ -139,7 +147,10 @@ export const loadMonthlyForms = async (
     timesheet: {
       sent: exactSent !== null,
       versionInForce:
-        !timesheetRequired ? 'Not required — the Office keeps no timesheet' :
+        !timesheetRequired
+          ? completesTimesheet(person.role)
+            ? 'Submitted from the Timesheets page by payday, for the real pay period — not with the monthly forms'
+            : 'Not required — the Office keeps no timesheet' :
         exactSent === null ? 'Not sent yet' : versionInForce(exactSent, corrections).correction === null ? 'Original submission' : `Correction ${versionInForce(exactSent, corrections).correction!.sequence} accepted`,
       correctionPending: corrections.some((correction) => correction.status === 'pending'),
       blockingPeriods: blocking.map((other) => formatPeriod(other.from, other.to)),
@@ -198,10 +209,8 @@ export const submitMonth = async (
    * themselves are not touched.
    */
   const previous = await context.repos.payroll.findSubmission(person.id, month);
-  let period = state.timesheetRequired ? await context.repos.attendance.findPeriod(person.id, state.from, state.to) : null;
-  if (state.timesheetRequired && (period === null || period.submittedAt === null || previous !== null)) {
-    period = await submitTimesheetPeriod(context, technicianId, state.from, state.to, { notify: false });
-  }
+  // TS-PAPER: no timesheet is sent from here; a month that already carries one keeps that very period.
+  const period = state.timesheetRequired ? await context.repos.attendance.findPeriod(person.id, state.from, state.to) : null;
   const now = context.services.clock.now();
   const next = {
     id: previous?.id ?? context.services.ids.next('msb'),

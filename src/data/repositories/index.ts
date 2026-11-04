@@ -37,6 +37,7 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  TimesheetWorkingComment,
   MonthlySubmission,
   FinancePackage,
   FinancePackageStatus,
@@ -604,6 +605,16 @@ export interface AttendanceRepository {
    * the period was not sent.
    */
   resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
+  /** TS-PAPER. One submitted period by its id (current or replaced), or null. */
+  findPeriodById(id: string): Promise<TimesheetPeriod | null>;
+  /**
+   * TS-PAPER. Every SUBMITTED period — current and replaced — of one person,
+   * or of everybody when `userId` is null; the latest To first.
+   */
+  listSubmissions(userId: UserId | null): Promise<readonly TimesheetPeriod[]>;
+  /** TS-PAPER. The comment on the sheet a person is filling in now. */
+  findWorkingComment(userId: UserId): Promise<TimesheetWorkingComment | null>;
+  saveWorkingComment(comment: TimesheetWorkingComment): Promise<TimesheetWorkingComment>;
   /** RESUBMIT-1. Removes every correction of a period that is being sent again. */
   deleteCorrections(periodId: string): Promise<void>;
   /** TS-16. One period's corrections, oldest (sequence 1) first. */

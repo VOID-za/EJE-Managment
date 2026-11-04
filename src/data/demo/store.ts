@@ -27,6 +27,7 @@ import type {
   TimesheetEntry,
   TimesheetPeriod,
   TimesheetCorrection,
+  TimesheetWorkingComment,
   MonthlySubmission,
   FinancePackage,
   IssuedDeliveryNote,
@@ -141,6 +142,8 @@ export interface DemoDatabase {
   timesheetPeriods: TimesheetPeriod[];
   /** Corrections of sent periods. TS-16. */
   timesheetCorrections: TimesheetCorrection[];
+  /** The open sheet's comment, one per person. TS-PAPER. */
+  timesheetWorkingComments: TimesheetWorkingComment[];
   /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
   standbyEligibility: StandbyEligibility[];
   standbyWeeks: StandbyWeek[];
@@ -265,7 +268,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
  */
-export const SCHEMA_VERSION = 40;
+export const SCHEMA_VERSION = 41;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -326,6 +329,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   timesheetPeriods: [],
   timesheetCorrections: [],
   // Empty, and honestly so: who may stand by and the schedule are the office's to enter.
+  timesheetWorkingComments: [],
   standbyEligibility: [],
   standbyWeeks: [],
   standbySwapRequests: [],

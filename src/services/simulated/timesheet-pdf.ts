@@ -87,13 +87,15 @@ export interface RenderedTimesheet {
 
 export const renderTimesheetPdf = (doc: TimesheetDocument, options: TimesheetPdfOptions): RenderedTimesheet => {
   let lastDate = '';
+  // A period may be any length; past ~11 months a day without its year could be read twice.
+  const yearless = Date.parse(`${doc.to}T00:00:00Z`) - Date.parse(`${doc.from}T00:00:00Z`) < 330 * 86_400_000;
   const rows: FormRow[] = doc.rows.map((row) => {
     const showDate = row.date !== lastDate;
     lastDate = row.date;
     const cells = timesheetPdfCells(row, showDate);
-    // In two panels the date drops its year — the Period line above gives it,
-    // and a period is at most 92 days, so a day is never ambiguous.
-    return { cells, compact: { date: cells.date.replace(/ \d{4}$/u, '') }, muted: !row.recorded, groupStart: showDate };
+    // In two panels the date drops its year — the Period line above gives it —
+    // unless the period is long enough for a day to be ambiguous without it (TS-PAPER).
+    return { cells, compact: { date: yearless ? cells.date.replace(/ \d{4}$/u, '') : cells.date }, muted: !row.recorded, groupStart: showDate };
   });
 
   const recordedOnly = timesheetRecordedOnlyNote(doc);
