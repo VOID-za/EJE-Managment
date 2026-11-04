@@ -143,3 +143,7 @@ Recovery is the same as §5 and §6: `stage-release.ps1 -Rollback` returns the c
 | **Submissions refused as "same dates"** | The old code would send the same dates again and overwrite (RESUBMIT-1). | Old behaviour returns while rolled back. |
 
 Recovery is the same as §5 and §6. Nothing in 0050 needs undoing to roll back.
+
+## 11. The TS-PAPER follow-up (no migration, 4 November 2026)
+
+**No migration**: the database stays at 0050. **The rollback target is `46096ac` (v1.1.0)**; the CI rollback check runs `46096ac`'s own code against a database at 0050 and finds it working. Rolled back, v1.1.0's behaviour returns: a partial overlap would again replace the whole earlier submission, Finance would again print a legacy calendar month beside its replacement, and a timesheet over ~190 lines would again have no PDF. Nothing written by the follow-up needs undoing.

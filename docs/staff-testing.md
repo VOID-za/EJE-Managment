@@ -727,6 +727,10 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/timesheets-paper-che
 | V7 | Office, on a desktop: Timesheets → Submitted timesheets — every technician | The submission is listed; View, PDF and Export CSV work | yes | yes | NOT TESTED |
 | V8 | Corrections on a submission: the technician asks, the office accepts | The corrected version is in force; the original is still viewable | yes (service and HTTP) | — | NOT TESTED |
 | V9 | My Monthly Forms for the month | Attendance only, with the note that the timesheet goes from the Timesheets page by payday | yes | yes | NOT TESTED |
+| V10 | Choose dates covering only part of a submitted timesheet | Said in red, naming it; Submit is not offered | yes | yes (acceptance-check) | NOT TESTED |
+| V11 | Choose dates covering all of it; Submit | The dialog says it REPLACES it; *Replace and submit*; the old one is listed as replaced | yes | yes (acceptance-check) | NOT TESTED |
+| V12 | On a submission: View original; on a corrected one also View corrected version | Each opens and is labelled | yes | yes | NOT TESTED |
+| V13 | Print a long timesheet (over ~190 lines) on the office printer | Every page has the headings and Page X of Y; the totals are on the last page | yes (text and totals) | yes (preview) | NOT TESTED — **the printer** |
 
 ## Physical-device acceptance still outstanding (all of it, in one place)
 

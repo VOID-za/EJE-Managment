@@ -74,3 +74,24 @@ Nothing is deleted or rewritten: entries, NT, call-out counts, day comments,
 periods, snapshots, superseded submissions, corrections, monthly submissions
 and audit events stay exactly as stored. The unique key on
 (person, From, To) is kept so the live release can still be rolled back to.
+
+## Follow-up to v1.1.0 (TS-PAPER-6…8, 4 November 2026)
+
+The v1.1.0 investigation found that a partial overlap replaced a whole earlier
+submission and left its other days out of payroll, that a legacy calendar
+month could be printed beside its replacement, that a corrected-then-replaced
+original had no View on screen, and that a timesheet over ~190 lines had no
+PDF. The follow-up:
+
+- **Replacement is lossless.** Dates covering only part of a current
+  submission are refused (`timesheet_partial_overlap`), naming it. Dates
+  covering all of it need the technician's confirmation
+  (`timesheet_replace_unconfirmed` otherwise) and then replace it — the
+  original kept, marked replaced. A submission with a correction is not
+  replaced (`timesheet_replace_corrected`): the correction lives on the
+  submission, not on the sheet's lines. The repository replaces only what the
+  new dates cover.
+- **Finance has one rule:** every current submission whose To is in the month.
+- **View original** on every submission; **View corrected version** when one
+  is in force; a replaced submission takes no correction (`timesheet_replaced`).
+- **Multi-page PDF** when one page would need type under 7 pt.

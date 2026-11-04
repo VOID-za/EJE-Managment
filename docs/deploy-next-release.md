@@ -32,6 +32,17 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## NEXT RELEASE — the Timesheets follow-up, from `claude/timesheets-paper-fixes` (prepared 4 November 2026, NOT RUN — awaiting the owner's authorisation)
+
+No migration (`-ExpectPending none`). The version is assigned by the release: the commits since v1.1.0 include a `feat` (the multi-page PDF), so **v1.2.0**.
+
+```
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha <full sha> -CheckOnly -ExpectPending none -SshExe C:\Windows\System32\OpenSSH\ssh.exe
+powershell -ExecutionPolicy Bypass -File deploy\release\stage-release.ps1 -Sha <full sha> -ExpectPending none -SshExe C:\Windows\System32\OpenSSH\ssh.exe
+```
+
+Rollback target after it: `46096ac` (`docs/rollback-4606315.md` §11).
+
 ## RELEASED — `46096ac` = v1.1.0, timesheets as a piece of paper (4 November 2026)
 
 Released 4 November 2026 08:14:34 UTC from branch `claude/timesheets-paper` through `stage-release.ps1 -ExpectPending 0050_timesheets_paper`. The release assigned **v1.1.0** itself (`version: v1.1.0 (after 1.0.0; commit 46096ac)` — a `feat` since v1.0.0).
