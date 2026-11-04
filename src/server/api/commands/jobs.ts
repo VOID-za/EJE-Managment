@@ -16,6 +16,7 @@ import {
   getJobTypeDefinition,
   isJobTechnician,
   redactRefusalsForViewer,
+  resolveChecklistToStart,
   technicianHistoryFrom,
   userFullName,
   type Job,
@@ -219,17 +220,41 @@ const resolveRecipient = async (
   };
 };
 
-/** The template a job's checklist is answered against, resolved from the job. */
+/** The template a STARTED checklist is answered against: the version it recorded. */
 const checklistTemplate = async (context: CommandContext, job: Job) => {
-  const template =
-    job.checklist === null
-      ? await context.repos.checklistTemplates.findForJobType(job.jobType)
-      : await context.repos.checklistTemplates.findByVersion(
-          job.checklist.templateId,
-          job.checklist.templateVersion,
-        );
+  if (job.checklist === null) {
+    throw new WorkflowError('The checklist has not been started for this job.');
+  }
+  const template = await context.repos.checklistTemplates.findByVersion(
+    job.checklist.templateId,
+    job.checklist.templateVersion,
+  );
   if (template === null) throw notFound('That checklist is no longer held.');
   return template;
+};
+
+/**
+ * THE CHECKLIST A START OPENS. CHK-SRC-1.
+ *
+ * Installation has one and it simply opens. Service has two — Milling Machine
+ * / Machining Centre and Lathe — and a start that does not name one is
+ * refused: the choice is the technician's, and there is no generic Service
+ * checklist to open instead. A named checklist that is not current for the
+ * job's type is refused too, never swapped for one that is.
+ */
+const checklistToStart = async (
+  context: CommandContext,
+  job: Job,
+  requestedTemplateId: string | undefined,
+) => {
+  const options = await context.repos.checklistTemplates.listCurrentForJobType(job.jobType);
+  const resolution = resolveChecklistToStart(options, requestedTemplateId);
+  if (!resolution.ok) {
+    throw new WorkflowError(resolution.message, [
+      { code: resolution.code, message: resolution.message },
+    ]);
+  }
+  return resolution.template;
 };
 
 /**
@@ -623,8 +648,17 @@ export const JOB_COMMANDS: CommandRegistry = {
     (context, job, input) => jobs.saveCompletionReport(context.operation, job, input),
   ),
 
-  start_checklist: simple(async (context, job) =>
-    jobs.startChecklist(context.operation, job, await checklistTemplate(context, job)),
+  start_checklist: withInput(
+    z.object({ templateId: z.string().min(1).max(100).optional() }).strict(),
+    async (context, job, { templateId }) =>
+      // A second start is a no-op on the checklist already started, whatever it names.
+      job.checklist !== null
+        ? job
+        : jobs.startChecklist(
+            context.operation,
+            job,
+            await checklistToStart(context, job, templateId),
+          ),
   ),
 
   /**
@@ -646,12 +680,13 @@ export const JOB_COMMANDS: CommandRegistry = {
         measurement: z.number().nullable().optional(),
         text: text(4000).optional(),
         notes: text(4000).optional(),
+        fieldValues: z.record(z.string().min(1).max(40), text(200)).optional(),
         templateId: z.string().min(1).max(100).optional(),
         templateVersion: z.string().min(1).max(40).optional(),
         expectedAnsweredAt: z.string().min(10).max(40).nullable().optional(),
       })
       .strict(),
-    (
+    async (
       context,
       job,
       { itemId, templateId, templateVersion, expectedAnsweredAt, ...answer },
@@ -710,11 +745,18 @@ export const JOB_COMMANDS: CommandRegistry = {
         );
       }
 
-      return jobs.answerChecklistItem(context.operation, job, itemId, answer, {
-        ...(templateId === undefined ? {} : { templateId }),
-        ...(templateVersion === undefined ? {} : { templateVersion }),
-        ...(expectedAnsweredAt === undefined ? {} : { expectedAnsweredAt }),
-      });
+      return jobs.answerChecklistItem(
+        context.operation,
+        job,
+        itemId,
+        answer,
+        {
+          ...(templateId === undefined ? {} : { templateId }),
+          ...(templateVersion === undefined ? {} : { templateVersion }),
+          ...(expectedAnsweredAt === undefined ? {} : { expectedAnsweredAt }),
+        },
+        job.checklist === null ? undefined : await checklistTemplate(context, job),
+      );
     },
   ),
 

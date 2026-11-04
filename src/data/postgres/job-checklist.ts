@@ -42,6 +42,7 @@ const toDomainResponse = (
   measurement: row.measurement === null ? null : Number(row.measurement),
   text: row.textAnswer,
   notes: row.notes,
+  fieldValues: row.fieldValues,
   photos: photos.map((photo) => ({
     id: asAttachmentId(photo.id),
     kind: 'photo' as const,
@@ -120,6 +121,7 @@ export const loadChecklists = async (
     byJob.set(instance.jobId, {
       templateId: asChecklistTemplateId(checklistId),
       templateVersion: version,
+      checklistKind: instance.checklistKind,
       responses: mine.map((row) =>
         toDomainResponse(
           row.checklist_answers,
@@ -182,6 +184,8 @@ export const writeChecklist = async (db: DatabaseExecutor, job: Job): Promise<vo
       id: instanceId,
       jobId: job.id as string,
       versionId,
+      // The trigger refuses a kind that is not the version's own checklist's.
+      checklistKind: checklist.checklistKind ?? null,
       startedAt: sql`now()`,
       startedBy: job.primaryTechnicianId,
       completedAt: checklist.completedAt,
@@ -236,6 +240,7 @@ const replaceAnswers = async (
         measurement: response.measurement === null ? null : String(response.measurement),
         textAnswer: response.text,
         notes: response.notes,
+        fieldValues: response.fieldValues ?? {},
         answeredAt: response.answeredAt,
         answeredBy: response.answeredBy,
       };

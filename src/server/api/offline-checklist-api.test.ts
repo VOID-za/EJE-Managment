@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { installationChecklist } from '@/data/checklists/source-checklists';
 import { DEMO_USERS, signedInAs, startTestServer, type ApiTestClient } from '@/test/api-harness';
 
 /**
@@ -42,9 +43,13 @@ const NEW_JOB = {
   deliveryNote: '',
 } as const;
 
-/** Two items from the seeded installation template. */
-const ITEM = 'inst-1';
-const OTHER_ITEM = 'inst-3';
+/**
+ * Two rows of the Installation checklist a new installation job now opens
+ * (CHK-SRC-1): 1 "Tightness check on all electrical connections" and
+ * 3 "Check electrical voltage - Transformer".
+ */
+const ITEM = installationChecklist.sections[0]!.items[0]!.id;
+const OTHER_ITEM = installationChecklist.sections[0]!.items[2]!.id;
 
 interface Response {
   readonly itemId: string;
@@ -95,7 +100,7 @@ describe('a checklist answer a tablet held offline', () => {
 
   const instance = () => ({
     templateId: job.checklist?.templateId ?? '',
-    templateVersion: job.checklist?.templateVersion ?? '1.0-DEMO',
+    templateVersion: job.checklist?.templateVersion ?? '1.0',
   });
 
   const answer = (
@@ -232,7 +237,7 @@ describe('a checklist answer a tablet held offline', () => {
       itemId: ITEM,
       choice: 'pass',
       templateId: 'template-that-is-not-on-this-job',
-      templateVersion: job.checklist?.templateVersion ?? '1.0-DEMO',
+      templateVersion: job.checklist?.templateVersion ?? '1.0',
       expectedAnsweredAt: null,
     });
 

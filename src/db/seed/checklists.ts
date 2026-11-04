@@ -84,7 +84,9 @@ export const installationTemplate: ChecklistTemplate = {
       'Completed on every installation before the machine is handed to the customer. Photographic evidence is required at the marked steps.',
     jobTypeCode: 'installation',
     version: INSTALLATION_TEMPLATE_VERSION,
-    status: 'current',
+    // CHK-SRC-1: migration 0051 issues the business's own checklists; this
+    // demonstration wording is kept only because seeded jobs answered it.
+    status: 'archived',
     sourceDocument: 'DEMO CONTENT — pending replacement with the approved EJE document',
     updatedAt: timeAgo(120, 9),
     sections: [
@@ -137,7 +139,9 @@ export const serviceTemplate: ChecklistTemplate = {
       'Completed on every service. The measurement steps record what was found, not what was expected.',
     jobTypeCode: 'service',
     version: SERVICE_TEMPLATE_VERSION,
-    status: 'current',
+    // CHK-SRC-1: migration 0051 issues the business's own checklists; this
+    // demonstration wording is kept only because seeded jobs answered it.
+    status: 'archived',
     sourceDocument: 'DEMO CONTENT — pending replacement with the approved EJE document',
     updatedAt: timeAgo(120, 9),
     sections: [

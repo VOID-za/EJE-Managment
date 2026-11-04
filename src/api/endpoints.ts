@@ -697,7 +697,9 @@ export const jobs = {
   cancelCompletion: (jobId: string) => jobAction(jobId, 'cancel_completion'),
   startCompletion: (jobId: string) => jobAction(jobId, 'start_completion'),
   saveReport: (jobId: string, report: unknown) => jobAction(jobId, 'save_report', report),
-  startChecklist: (jobId: string) => jobAction(jobId, 'start_checklist'),
+  /** CHK-SRC-1: Service names the checklist chosen (Milling or Lathe); Installation names none. */
+  startChecklist: (jobId: string, templateId?: string) =>
+    jobAction(jobId, 'start_checklist', templateId === undefined ? {} : { templateId }),
   answerChecklist: (jobId: string, input: unknown) => jobAction(jobId, 'answer_checklist', input),
   /**
    * ATTACHES CHECKLIST EVIDENCE, BYTES AND ALL. CHK-EVIDENCE-1.

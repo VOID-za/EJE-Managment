@@ -461,42 +461,93 @@ const collection = (sheet: Sheet, model: JobCardModel): void => {
 const checklist = (sheet: Sheet, model: JobCardModel): void => {
   if (model.checklist === null) return;
 
-  sheet.sectionTitle(model.checklist.title);
-  sheet.paragraph(model.checklist.summary, { size: SIZE.small, colour: MUTED, leading: GAP.line });
+  const list = model.checklist;
+  sheet.sectionTitle(list.title);
+  // CHK-SRC-1: the source document's own title, and the checklist chosen.
+  if (list.documentTitle !== null) {
+    sheet.paragraph(list.documentTitle, { size: SIZE.small, colour: INK, leading: GAP.line, font: 'bold' });
+  }
+  if (list.checklistType !== null) {
+    sheet.paragraph(list.checklistType, { size: SIZE.small, colour: BODY, leading: GAP.line, font: 'bold' });
+  }
+  sheet.paragraph(list.summary, { size: SIZE.small, colour: MUTED, leading: GAP.line });
   sheet.move(5);
 
-  for (const section of model.checklist.sections) {
-    // A section heading alone at the foot of a page helps nobody.
-    sheet.need(GAP.line * 3);
-    sheet.pdf.text(MARGIN, sheet.cursor, section.title.toUpperCase(), {
-      font: 'bold',
-      size: SIZE.small,
-      colour: BODY,
-      tracking: 0.45,
-    });
-    sheet.move(6);
-    sheet.rule(RULE, 0.6);
+  // The source's header lines, filled from the job; a blank stays blank.
+  for (const line of list.header) {
+    sheet.need(GAP.line + 2);
+    sheet.pdf.text(MARGIN, sheet.cursor, line.label, { font: 'bold', size: SIZE.small, colour: BODY });
+    sheet.pdf.text(MARGIN + 110, sheet.cursor, line.value, { size: SIZE.small, colour: INK });
     sheet.move(GAP.line);
+  }
+  if (list.header.length > 0) sheet.move(4);
+
+  const NUMBER_WIDTH = 18;
+  for (const section of list.sections) {
+    if (section.title.length > 0) {
+      // A section heading alone at the foot of a page helps nobody.
+      sheet.need(GAP.line * 3);
+      sheet.pdf.text(MARGIN, sheet.cursor, section.title.toUpperCase(), {
+        font: 'bold',
+        size: SIZE.small,
+        colour: BODY,
+        tracking: 0.45,
+      });
+      sheet.move(6);
+      sheet.rule(RULE, 0.6);
+      sheet.move(GAP.line);
+    }
 
     for (const item of section.items) {
       const answerWidth = textWidth(item.answer, SIZE.body, 'bold');
       // A long text answer gets its own line rather than colliding with the
       // question, which is what made the on-screen and PDF versions differ.
       const inline = answerWidth < 150;
-      const questionWidth = inline ? CONTENT_WIDTH - answerWidth - 18 : CONTENT_WIDTH;
-      const lines = PdfBuilder.wrap(item.text, questionWidth, SIZE.body);
+      const questionWidth =
+        (inline ? CONTENT_WIDTH - answerWidth - 18 : CONTENT_WIDTH) - NUMBER_WIDTH;
+      // A line the source starts on its own stays on its own.
+      const lines = item.text
+        .split('\n')
+        .flatMap((part) => PdfBuilder.wrap(part, questionWidth, SIZE.body));
+      const extraLines = [
+        ...(item.sourceNote.length > 0 ? [item.sourceNote] : []),
+        ...(item.readings.length > 0 ? [item.readings] : []),
+      ].flatMap((line) => PdfBuilder.wrap(line, CONTENT_WIDTH - NUMBER_WIDTH, SIZE.small));
       const noteLines =
         item.note.length > 0
           ? PdfBuilder.wrap(`Note: ${item.note}`, CONTENT_WIDTH - 12, SIZE.tiny)
           : [];
 
-      sheet.need((lines.length + noteLines.length + (inline ? 0 : 1)) * GAP.line + 8);
+      sheet.need(
+        (lines.length +
+          extraLines.length +
+          noteLines.length +
+          (inline ? 0 : 1) +
+          (item.groupHeading.length > 0 ? 1 : 0)) *
+          GAP.line +
+          8,
+      );
+      if (item.groupHeading.length > 0) {
+        sheet.pdf.text(MARGIN, sheet.cursor, item.groupHeading, {
+          font: 'bold',
+          size: SIZE.body,
+          colour: INK,
+        });
+        sheet.move(GAP.line);
+      }
       const rowTop = sheet.cursor;
 
+      if (item.number.length > 0) {
+        sheet.pdf.text(MARGIN, rowTop, item.number, { size: SIZE.body, colour: MUTED });
+      }
       lines.forEach((line, index) => {
-        sheet.pdf.text(MARGIN, sheet.cursor, line, { size: SIZE.body, colour: BODY });
+        sheet.pdf.text(MARGIN + NUMBER_WIDTH, sheet.cursor, line, { size: SIZE.body, colour: BODY });
         if (index < lines.length - 1) sheet.move(GAP.line);
       });
+      for (const line of extraLines) {
+        sheet.move(GAP.line);
+        sheet.pdf.text(MARGIN + NUMBER_WIDTH, sheet.cursor, line, { size: SIZE.small, colour: BODY });
+      }
 
       if (inline) {
         sheet.pdf.text(RIGHT - answerWidth, rowTop, item.answer, {
@@ -527,6 +578,26 @@ const checklist = (sheet: Sheet, model: JobCardModel): void => {
       sheet.move(GAP.line - 2);
     }
     sheet.move(6);
+  }
+
+  for (const note of list.notes) {
+    sheet.paragraph(note, { size: SIZE.small, colour: BODY, leading: GAP.line });
+  }
+  if (list.closing.length > 0) {
+    sheet.need(GAP.line * 2);
+    sheet.pdf.text(MARGIN, sheet.cursor, list.closing, { font: 'bold', size: SIZE.body, colour: INK });
+    sheet.move(GAP.line + 2);
+  }
+  for (const line of list.signatures) {
+    const value = line.value.length > 0 ? line.value : '—';
+    const valueLines = PdfBuilder.wrap(value, CONTENT_WIDTH - 150, SIZE.small);
+    sheet.need(valueLines.length * GAP.line + 2);
+    sheet.pdf.text(MARGIN, sheet.cursor, line.label, { font: 'bold', size: SIZE.small, colour: BODY });
+    valueLines.forEach((text, index) => {
+      sheet.pdf.text(MARGIN + 150, sheet.cursor, text, { size: SIZE.small, colour: INK });
+      if (index < valueLines.length - 1) sheet.move(GAP.line);
+    });
+    sheet.move(GAP.line);
   }
   sheet.move(GAP.section - 6);
 };

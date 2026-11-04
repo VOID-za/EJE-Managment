@@ -58,6 +58,8 @@ import type {
 } from '@/domain';
 import {
   calculateJobTotals,
+  checklistOptions,
+  orderChecklistOptions,
   isOcrJobClaimable,
   isOutboxSendable,
   isSearchableState,
@@ -957,13 +959,12 @@ class DemoChecklistTemplateRepository implements ChecklistTemplateRepository {
     return Promise.resolve(this.context.read().checklistTemplates);
   }
 
-  findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null> {
-    const match = this.context
-      .read()
-      .checklistTemplates.find(
-        (template) => template.jobTypeCode === jobTypeCode && template.status === 'current',
-      );
-    return Promise.resolve(match ?? null);
+  listCurrentForJobType(jobTypeCode: string): Promise<readonly ChecklistTemplate[]> {
+    return Promise.resolve(
+      orderChecklistOptions(
+        checklistOptions(this.context.read().checklistTemplates, jobTypeCode),
+      ),
+    );
   }
 
   findByVersion(

@@ -1,4 +1,5 @@
 import type { DemoDatabase } from './store';
+import { sourceChecklists } from '@/data/checklists/source-checklists';
 
 /**
  * Migrations for the persisted demonstration dataset.
@@ -731,6 +732,32 @@ const v40ToV41 = (data: Loose): Loose => ({
   timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
 });
 
+/**
+ * CHK-SRC-1 (4 November 2026): the business's three checklists. Added as new
+ * families, current; the demonstration wording still current for Installation
+ * and Service is ARCHIVED — withdrawn from new jobs, never edited, so a job
+ * that answered it still renders it. The same as PostgreSQL migration 0051.
+ */
+const v41ToV42 = (data: Loose): Loose => {
+  const templates = rows(data, 'checklistTemplates');
+  const held = new Set(templates.map((template) => `${text(template.id)}@${text(template.version)}`));
+  return {
+    ...data,
+    checklistTemplates: [
+      ...templates.map((template) =>
+        template.status === 'current' &&
+        (template.kind === undefined || template.kind === null) &&
+        (template.jobTypeCode === 'installation' || template.jobTypeCode === 'service')
+          ? { ...template, status: 'archived' }
+          : template,
+      ),
+      ...sourceChecklists
+        .filter((template) => !held.has(`${template.id}@${template.version}`))
+        .map((template) => ({ ...template }) as unknown as Loose),
+    ],
+  };
+};
+
 const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   8: v8ToV9,
   9: v9ToV10,
@@ -765,6 +792,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   38: v38ToV39,
   39: v39ToV40,
   40: v40ToV41,
+  41: v41ToV42,
 };
 
 /**

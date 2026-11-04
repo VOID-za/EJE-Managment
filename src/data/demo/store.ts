@@ -267,8 +267,11 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * From v8 onwards a mismatch is MIGRATED rather than discarded — see
  * `./migrations`. Only a snapshot older than that is re-seeded, and only
  * because the shapes before it are no longer described anywhere.
+ *
+ * v42 added the business's three checklists (CHK-SRC-1) and archived the
+ * demonstration wording they replace.
  */
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
 
 interface PersistedEnvelope {
   readonly version: number;

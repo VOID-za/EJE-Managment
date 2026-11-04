@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { installationChecklist } from '@/data/checklists/source-checklists';
 import { ApiTestClient, DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
 
 /**
@@ -43,8 +44,12 @@ const NEW_JOB = {
   deliveryNote: '',
 } as const;
 
-/** `inst-2` is the item the seeded template marks `photoRequired`. */
-const PHOTO_ITEM = 'inst-2';
+/**
+ * Row 2 of the Installation checklist a new installation job now opens
+ * (CHK-SRC-1). The source checklists mark no row photo-required; evidence may
+ * still be attached to a row, and stays on that row and that version.
+ */
+const PHOTO_ITEM = installationChecklist.sections[0]!.items[1]!.id;
 
 interface JobBody {
   readonly id: string;
@@ -156,7 +161,7 @@ describe('attaching evidence to a checklist item', () => {
     // The INSTANCE carries the version, so the evidence is bound to the
     // wording the technician actually answered — a later version of the
     // checklist cannot re-point it.
-    expect(checklist.templateVersion).toBe('1.0-DEMO');
+    expect(checklist.templateVersion).toBe('1.0');
     const answered = checklist.responses.find((response) => response.itemId === PHOTO_ITEM);
     expect(answered?.photos.map((photo) => photo.caption)).toEqual(['Levelling']);
     // And no other item picked it up.

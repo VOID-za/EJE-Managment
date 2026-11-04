@@ -1,4 +1,5 @@
 import { asChecklistTemplateId, type ChecklistTemplate } from '@/domain';
+import { sourceChecklists } from '@/data/checklists/source-checklists';
 import { timeOffset } from './reference';
 
 /**
@@ -25,6 +26,12 @@ import { timeOffset } from './reference';
  * `ChecklistTemplateRepository` and a change to `loadJobView`.
  */
 
+/**
+ * CHK-SRC-1 (4 November 2026): the demonstration wording above is ARCHIVED —
+ * kept because seeded jobs answered it and must keep rendering it — and the
+ * business's three checklists, transcribed from the source documents, are the
+ * ones issued (`src/data/checklists/source-checklists.ts`).
+ */
 export const seedChecklistTemplates: readonly ChecklistTemplate[] = [
   {
     id: asChecklistTemplateId('chk-installation-v1'),
@@ -33,7 +40,8 @@ export const seedChecklistTemplates: readonly ChecklistTemplate[] = [
       'Completed for every installation job before hand-over to the customer. Photographic evidence is required at the marked steps.',
     jobTypeCode: 'installation',
     version: '1.0-DEMO',
-    status: 'current',
+    // CHK-SRC-1: superseded by the business's own Installation checklist.
+    status: 'archived',
     sourceDocument: 'DEMO CONTENT — pending replacement with approved EJE/WD Hearn document',
     updatedAt: timeOffset(-60, 9),
     sections: [
@@ -435,7 +443,8 @@ export const seedChecklistTemplates: readonly ChecklistTemplate[] = [
       'Completed for every scheduled service. Findings recorded here drive the recommendations on the job card.',
     jobTypeCode: 'service',
     version: '2.0-DEMO',
-    status: 'current',
+    // CHK-SRC-1: superseded by the Service — Milling and Service — Lathe checklists.
+    status: 'archived',
     sourceDocument: 'DEMO CONTENT — pending replacement with approved EJE/WD Hearn document',
     updatedAt: timeOffset(-30, 9),
     sections: [
@@ -632,4 +641,5 @@ export const seedChecklistTemplates: readonly ChecklistTemplate[] = [
       },
     ],
   },
+  ...sourceChecklists,
 ];

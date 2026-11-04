@@ -4,6 +4,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -15,6 +16,7 @@ import { checklistResponseType, checklistVersionStatus, passFailNa } from './enu
 import { jobs } from './jobs';
 import { jobTypes } from './settings';
 import { users } from './identity';
+import type { ChecklistField, ChecklistLayout } from '@/domain';
 
 /**
  * A checklist's identity, independent of any version of its wording.
@@ -32,10 +34,23 @@ export const checklists = pgTable(
     jobTypeCode: text('job_type_code')
       .notNull()
       .references(() => jobTypes.code),
+    /**
+     * Which of the business's checklists this is — 'installation',
+     * 'service_milling', 'service_lathe' — or null (CHK-SRC-1, 0051). Frozen
+     * by trigger once a job has used the checklist.
+     */
+    kind: text('kind'),
+    /** What the Service choice screen calls it; '' for a checklist simply issued. */
+    selectionLabel: text('selection_label').notNull().default(''),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index('checklists_job_type_idx').on(table.jobTypeCode)],
+  (table) => [
+    index('checklists_job_type_idx').on(table.jobTypeCode),
+    uniqueIndex('checklists_kind_key')
+      .on(table.kind)
+      .where(sql`${table.kind} is not null`),
+  ],
 );
 
 /**
@@ -65,6 +80,8 @@ export const checklistVersions = pgTable(
      * without any model change.
      */
     sourceDocument: text('source_document').notNull().default(''),
+    /** What the source prints around the rows (CHK-SRC-1). Frozen once used. */
+    layout: jsonb('layout').$type<ChecklistLayout>(),
     publishedAt: instant('published_at'),
     publishedBy: uuid('published_by').references(() => users.id),
     archivedAt: instant('archived_at'),
@@ -121,6 +138,14 @@ export const checklistQuestions = pgTable(
     expectedMin: numeric('expected_min', { precision: 14, scale: 4 }),
     expectedMax: numeric('expected_max', { precision: 14, scale: 4 }),
     position: integer('position').notNull(),
+    /** As printed in the source's number column; '' for an unnumbered row. CHK-SRC-1. */
+    number: text('number').notNull().default(''),
+    /** A label the source prints once across several rows. */
+    groupLabel: text('group_label').notNull().default(''),
+    /** The labelled blanks in the row's Comments column. */
+    fields: jsonb('fields').$type<readonly ChecklistField[]>().notNull().default([]),
+    /** What the transcription says about the row's source, e.g. handwritten. */
+    sourceNote: text('source_note').notNull().default(''),
   },
   (table) => [
     uniqueIndex('checklist_questions_position_key').on(table.sectionId, table.position),
@@ -130,6 +155,7 @@ export const checklistQuestions = pgTable(
       sql`${table.expectedMin} is null or ${table.expectedMax} is null or ${table.expectedMax} >= ${table.expectedMin}`,
     ),
     // A range only means something on a measurement.
+    check('checklist_questions_fields_array', sql`jsonb_typeof(${table.fields}) = 'array'`),
     check(
       'checklist_questions_range_only_for_measurement',
       sql`${table.responseType} = 'measurement'
@@ -157,6 +183,11 @@ export const checklistInstances = pgTable(
     versionId: uuid('version_id')
       .notNull()
       .references(() => checklistVersions.id, { onDelete: 'restrict' }),
+    /**
+     * The checklist chosen — 'service_milling' / 'service_lathe' — or issued.
+     * A trigger keeps it equal to the kind of the version's checklist.
+     */
+    checklistKind: text('checklist_kind'),
     startedAt: instant('started_at'),
     startedBy: uuid('started_by').references(() => users.id),
     completedAt: instant('completed_at'),
@@ -198,12 +229,21 @@ export const checklistAnswers = pgTable(
     measurement: numeric('measurement', { precision: 14, scale: 4 }),
     textAnswer: text('text_answer').notNull().default(''),
     notes: text('notes').notNull().default(''),
+    /** Values typed into the row's labelled blanks, by field id. CHK-SRC-1. */
+    fieldValues: jsonb('field_values')
+      .$type<Readonly<Record<string, string>>>()
+      .notNull()
+      .default({}),
     answeredAt: instant('answered_at'),
     answeredBy: uuid('answered_by').references(() => users.id),
   },
   (table) => [
     uniqueIndex('checklist_answers_question_key').on(table.instanceId, table.questionId),
     index('checklist_answers_instance_idx').on(table.instanceId),
+    check(
+      'checklist_answers_field_values_object',
+      sql`jsonb_typeof(${table.fieldValues}) = 'object'`,
+    ),
     check(
       'checklist_answers_fail_needs_note',
       sql`${table.choice} is distinct from 'fail' or btrim(${table.notes}) <> ''`,

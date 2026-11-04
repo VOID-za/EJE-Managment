@@ -122,7 +122,7 @@ describeDb('checklists in PostgreSQL', () => {
 
     it('offers only the current version to a new job of that type', async () => {
       await templates.save(version1());
-      const current = await templates.findForJobType('service');
+      const [current] = await templates.listCurrentForJobType('service');
       expect(current?.version).toBe('1.0');
 
       // Publishing v2.0 archives v1.0 first; one version per checklist may be
@@ -130,9 +130,10 @@ describeDb('checklists in PostgreSQL', () => {
       await templates.save({ ...version1(), status: 'archived' });
       await templates.save(version2());
 
-      const after = await templates.findForJobType('service');
-      expect(after?.version).toBe('2.0');
-      expect(after?.sections[0]?.title).toBe('Spindle and drawbar');
+      const after = await templates.listCurrentForJobType('service');
+      expect(after).toHaveLength(1);
+      expect(after[0]?.version).toBe('2.0');
+      expect(after[0]?.sections[0]?.title).toBe('Spindle and drawbar');
     });
 
     it('still resolves the exact wording a historical job answered', async () => {

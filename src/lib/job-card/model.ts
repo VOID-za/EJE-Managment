@@ -8,7 +8,9 @@ import {
   currentRefusal,
   customerFacingNotes,
   evaluateChecklist,
+  formatFieldValues,
   getJobTypeDefinition,
+  siteAddressLine,
   jobScheduleWindow,
   labourRateLabel,
   machineDisplayName,
@@ -16,8 +18,10 @@ import {
   showsPricesOnCollectionDocument,
   signatoryLabelsFor,
   userFullName,
+  type ChecklistHeaderSource,
   type ChecklistItem,
   type ChecklistResponse,
+  type ChecklistSignatureRole,
   type ChecklistTemplate,
   type Contact,
   type Customer,
@@ -66,9 +70,17 @@ export interface ChargeRow {
 }
 
 export interface ChecklistItemLine {
+  /** The source's own number for the row, '' when it prints none. CHK-SRC-1. */
+  readonly number: string;
+  /** A label the source prints once over a run of rows — shown on the first. */
+  readonly groupHeading: string;
   readonly text: string;
   readonly answer: string;
   readonly note: string;
+  /** What was typed in the row's printed blanks: "R 400 · S 401 · T 399". */
+  readonly readings: string;
+  /** e.g. "Handwritten on the supplied source." */
+  readonly sourceNote: string;
 }
 
 export interface JobCardModel {
@@ -145,10 +157,21 @@ export interface JobCardModel {
   readonly checklist: {
     readonly title: string;
     readonly summary: string;
+    /** The source document's own printed title, or null on earlier wording. CHK-SRC-1. */
+    readonly documentTitle: string | null;
+    /** "Service checklist: Lathe" — the checklist the technician chose. */
+    readonly checklistType: string | null;
+    /** The source's header lines, filled from the job. */
+    readonly header: readonly LabelValue[];
     readonly sections: readonly {
       readonly title: string;
       readonly items: readonly ChecklistItemLine[];
     }[];
+    /** The source's printed instructions, and its closing line if any. */
+    readonly notes: readonly string[];
+    readonly closing: string;
+    /** The source's sign-off lines, with what the job holds for each. */
+    readonly signatures: readonly LabelValue[];
   } | null;
 
   /**
@@ -275,6 +298,79 @@ const receivedOf = (job: JobCardModelInput['job']): JobCardModel['received'] => 
       : []),
   ];
   return rows.length === 0 ? null : { rows };
+};
+
+/**
+ * A source header line's value, from the job. CHK-SRC-1. The paper prints a
+ * blank; the job already knows the answer, so nothing is retyped — and what the
+ * job does not know (no machine, no invoice yet) stays blank, as on paper.
+ */
+const checklistHeaderValue = (
+  source: ChecklistHeaderSource,
+  record: {
+    readonly job: Job;
+    readonly customer: Customer;
+    readonly site: Site;
+    readonly contact: Contact | null;
+    readonly machine: Machine | null;
+  },
+): string => {
+  const { job, customer, site, contact, machine } = record;
+  switch (source) {
+    case 'quote_number':
+      return job.quoteNumber;
+    case 'invoice_number':
+      return job.invoice?.number ?? '';
+    case 'customer':
+      return customer.name;
+    case 'site_address':
+      return siteAddressLine(site);
+    case 'contact':
+      return contact === null ? '' : `${contact.firstName} ${contact.lastName}`.trim();
+    case 'machine_make':
+      return machine?.manufacturer ?? '';
+    case 'machine_model':
+      return machine?.model ?? '';
+    case 'machine_control':
+      return machine?.controlSystem ?? '';
+    case 'serial_number':
+      return machine?.serialNumber ?? '';
+    case 'date':
+      return job.checklist?.completedAt == null ? '' : formatDate(job.checklist.completedAt);
+  }
+};
+
+/**
+ * What a source sign-off line holds on THIS job. EJE takes one signature — the
+ * customer's, on the job card that carries the checklist — and records who
+ * completed the checklist; it does not capture an engineer's drawn signature,
+ * and does not pretend to.
+ */
+const checklistSignatureValue = (
+  role: ChecklistSignatureRole,
+  job: Job,
+  users: readonly User[],
+): string => {
+  const completedBy =
+    job.checklist?.completedBy == null
+      ? null
+      : (users.find((user) => user.id === job.checklist?.completedBy) ?? null);
+  switch (role) {
+    case 'engineer_name':
+      return completedBy === null ? '' : userFullName(completedBy);
+    case 'engineer_signature':
+      return completedBy === null || job.checklist?.completedAt == null
+        ? ''
+        : `Checklist completed in EJE by ${userFullName(completedBy)}, ${formatDateTime(job.checklist.completedAt)}`;
+    case 'customer_name':
+      return job.signature === null
+        ? ''
+        : `${job.signature.customerName} ${job.signature.customerSurname}`.trim();
+    case 'customer_signature':
+      return job.signature === null
+        ? ''
+        : `Signed on this job card, ${formatDateTime(job.signature.signedAt)} (see Customer acceptance)`;
+  }
 };
 
 const answerFor = (item: ChecklistItem, response: ChecklistResponse | undefined): string => {
@@ -586,6 +682,27 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
         ? null
         : {
             title: `${checklistTemplate.name} (version ${job.checklist.templateVersion} — as completed)`,
+            documentTitle: checklistTemplate.layout?.title ?? null,
+            checklistType:
+              (checklistTemplate.selectionLabel ?? '').length > 0
+                ? `${definition.label} checklist: ${checklistTemplate.selectionLabel}`
+                : null,
+            header: (checklistTemplate.layout?.headerFields ?? []).map((field) => ({
+              label: field.label,
+              value: checklistHeaderValue(field.source, {
+                job,
+                customer,
+                site,
+                contact,
+                machine,
+              }),
+            })),
+            notes: checklistTemplate.layout?.notes ?? [],
+            closing: checklistTemplate.layout?.closing ?? '',
+            signatures: (checklistTemplate.layout?.signatures ?? []).map((line) => ({
+              label: line.label,
+              value: checklistSignatureValue(line.role, job, users),
+            })),
             summary: [
               `${progress.answered} of ${progress.total} items answered`,
               ...(progress.failedItems > 0 ? [`${progress.failedItems} failed`] : []),
@@ -595,12 +712,19 @@ export const buildJobCardModel = (input: JobCardModelInput): JobCardModel => {
             ].join(' · '),
             sections: checklistTemplate.sections.map((section) => ({
               title: section.title,
-              items: section.items.map((item) => {
+              items: section.items.map((item, index) => {
                 const response = responses.get(item.id);
+                const group = item.group ?? '';
+                const firstOfGroup =
+                  group.length > 0 && (section.items[index - 1]?.group ?? '') !== group;
                 return {
+                  number: group.length > 0 ? '' : (item.number ?? ''),
+                  groupHeading: firstOfGroup ? `${item.number ?? ''} ${group}`.trim() : '',
                   text: item.text,
                   answer: answerFor(item, response),
                   note: response?.notes.trim() ?? '',
+                  readings: formatFieldValues(item, response),
+                  sourceNote: item.sourceNote ?? '',
                 };
               }),
             })),

@@ -499,3 +499,42 @@ describe('v34 -> v35: monthly submissions and Finance packages (29 October 2026)
     expect(migrated.timesheetPeriods).toEqual([]);
   });
 });
+
+describe('v41 -> v42: the business’s own checklists (CHK-SRC-1, 4 November 2026)', () => {
+  const demoInstallation = {
+    id: 'chk-installation-v1',
+    name: 'Machine Installation & Commissioning Checklist',
+    jobTypeCode: 'installation',
+    version: '1.0-DEMO',
+    status: 'current',
+    sections: [{ id: 's', title: 'Site', description: '', items: [] }],
+  };
+  const demoService = { ...demoInstallation, id: 'chk-service', jobTypeCode: 'service', version: '2.0-DEMO' };
+  const answered = { id: 'job-1', checklist: { templateId: 'chk-service', templateVersion: '2.0-DEMO', responses: [{ itemId: 'x', choice: 'pass' }] } };
+
+  const migrate = () =>
+    migrateDatabase(41, { checklistTemplates: [demoInstallation, demoService], jobs: [answered] }, SCHEMA_VERSION) as unknown as {
+      checklistTemplates: { id: string; version: string; status: string; kind?: string | null; sections: unknown }[];
+      jobs: unknown[];
+    };
+
+  it('archives the demonstration wording without editing it, and issues the three source checklists', () => {
+    const migrated = migrate();
+    const byKey = new Map(migrated.checklistTemplates.map((template) => [`${template.id}@${template.version}`, template]));
+    expect(byKey.get('chk-installation-v1@1.0-DEMO')).toEqual({ ...demoInstallation, status: 'archived' });
+    expect(byKey.get('chk-service@2.0-DEMO')).toEqual({ ...demoService, status: 'archived' });
+    expect(
+      migrated.checklistTemplates.filter((template) => template.status === 'current').map((template) => template.kind),
+    ).toEqual(['installation', 'service_milling', 'service_lathe']);
+  });
+
+  it('leaves every job’s answered checklist exactly as it was', () => {
+    expect(migrate().jobs).toEqual([answered]);
+  });
+
+  it('does not add them twice', () => {
+    const once = migrate();
+    const twice = migrateDatabase(41, once, SCHEMA_VERSION) as unknown as { checklistTemplates: unknown[] };
+    expect(twice.checklistTemplates).toHaveLength(once.checklistTemplates.length);
+  });
+});

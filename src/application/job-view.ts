@@ -20,6 +20,7 @@ import {
   canSeeDraftJobs,
   withoutHiddenDrafts,
   can,
+  checklistChoiceRequired,
   getJobTypeDefinition,
   jobVisibilityFor,
   isJobAtOrPastCompletion,
@@ -98,9 +99,19 @@ export interface JobView {
    * For a job that already carries a completed or in-progress checklist this is
    * the exact version recorded on the instance, NOT the current template — a
    * historical job card must show the wording the customer saw. For a job with
-   * no checklist yet it is the current template for the job type.
+   * no checklist yet it is the one checklist issued for the job type — or NULL
+   * when the technician must choose (Service: Milling or Lathe), in which case
+   * `checklistOptions` holds the choices. CHK-SRC-1.
    */
   readonly checklistTemplate: ChecklistTemplate | null;
+  /**
+   * The checklists a job with none started may start, in the order the choice
+   * screen lists them. Empty once one is started, and for a job type with no
+   * checklist.
+   */
+  readonly checklistOptions: readonly ChecklistTemplate[];
+  /** Whether the technician must choose among `checklistOptions` first. */
+  readonly checklistChoiceRequired: boolean;
   /**
    * WHAT THE CUSTOMER HAS ASKED FOR ON THIS JOB, newest first. CUST-CR.
    *
@@ -265,12 +276,18 @@ export const loadJobView = async (
           job.checklist.templateVersion,
         );
 
+  const checklistOptions =
+    job.checklist === null && definition.checklistRequired
+      ? await repos.checklistTemplates.listCurrentForJobType(job.jobType)
+      : [];
+  const choiceRequired = checklistChoiceRequired(checklistOptions);
+
   const checklistTemplate =
     job.checklist !== null
       ? historical
-      : definition.checklistRequired
-        ? await repos.checklistTemplates.findForJobType(job.jobType)
-        : null;
+      : choiceRequired
+        ? null
+        : (checklistOptions[0] ?? null);
 
   const checklistVersionMissing = job.checklist !== null && historical === null;
 
@@ -340,6 +357,8 @@ export const loadJobView = async (
     rateSource: { mode: rateSource.mode, problem: getJobTypeDefinition(job.jobType).priced ? rateSource.problem : null },
     users,
     checklistTemplate,
+    checklistOptions,
+    checklistChoiceRequired: choiceRequired,
     checklistVersionMissing,
     customerRequests,
     corrections: corrections.map(({ documentStorageKey: _key, ...rest }) => rest),

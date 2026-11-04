@@ -134,6 +134,7 @@ export type ActivityEventType =
   | 'callout_changed'
   /** The test bench fee ticked or unticked on a job. BENCH-1. */
   | 'test_bench_changed'
+  | 'checklist_started'
   | 'checklist_completed'
   | 'moved_to_awaiting_spares'
   | 'returned_to_in_progress'

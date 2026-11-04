@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   asChecklistTemplateId,
+  orderChecklistOptions,
   type ChecklistItem,
   type ChecklistSection,
   type ChecklistTemplate,
@@ -30,6 +31,10 @@ const toDomainItem = (row: QuestionRow): ChecklistItem => ({
     row.expectedMin === null || row.expectedMax === null
       ? null
       : { min: bound(row.expectedMin)!, max: bound(row.expectedMax)! },
+  number: row.number,
+  group: row.groupLabel,
+  fields: row.fields,
+  sourceNote: row.sourceNote,
 });
 
 /**
@@ -64,8 +69,12 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
     return this.assemble(rows);
   }
 
-  /** The wording a NEW job of this type must complete: the current version. */
-  async findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null> {
+  /**
+   * The wording a NEW job of this type may be started on: every current
+   * version. One for Installation; two for Service (Milling, Lathe), which the
+   * technician chooses between — see `resolveChecklistToStart`. CHK-SRC-1.
+   */
+  async listCurrentForJobType(jobTypeCode: string): Promise<readonly ChecklistTemplate[]> {
     const rows = await this.db
       .select({ checklist: schema.checklists, version: schema.checklistVersions })
       .from(schema.checklistVersions)
@@ -79,9 +88,8 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
           eq(schema.checklistVersions.status, 'current'),
         ),
       )
-      .limit(1);
-    const assembled = await this.assemble(rows);
-    return assembled[0] ?? null;
+      .orderBy(asc(schema.checklists.name));
+    return orderChecklistOptions(await this.assemble(rows));
   }
 
   async findByVersion(
@@ -114,6 +122,8 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
         name: template.name,
         description: template.description,
         jobTypeCode: template.jobTypeCode,
+        kind: template.kind ?? null,
+        selectionLabel: template.selectionLabel ?? '',
       })
       .onConflictDoUpdate({
         target: schema.checklists.id,
@@ -121,6 +131,8 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
           name: template.name,
           description: template.description,
           jobTypeCode: template.jobTypeCode,
+          kind: template.kind ?? null,
+          selectionLabel: template.selectionLabel ?? '',
           updatedAt: sql`now()`,
         },
       });
@@ -145,6 +157,7 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
         version: template.version,
         status: template.status,
         sourceDocument: template.sourceDocument,
+        layout: template.layout ?? null,
         publishedAt: template.status === 'current' ? template.updatedAt : null,
         archivedAt: template.status === 'archived' ? template.updatedAt : null,
       })
@@ -153,6 +166,7 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
         set: {
           status: template.status,
           sourceDocument: template.sourceDocument,
+          layout: template.layout ?? null,
           publishedAt:
             template.status === 'current'
               ? sql`coalesce(${schema.checklistVersions.publishedAt}, now())`
@@ -227,6 +241,10 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
             ? String(item.expectedRange.max)
             : null,
         position,
+        number: item.number ?? '',
+        groupLabel: item.group ?? '',
+        fields: item.fields ?? [],
+        sourceNote: item.sourceNote ?? '',
       })),
     );
     if (questions.length > 0) await this.db.insert(schema.checklistQuestions).values(questions);
@@ -269,6 +287,9 @@ export class PostgresChecklistTemplateRepository implements ChecklistTemplateRep
       version: version.version,
       status: version.status,
       sourceDocument: version.sourceDocument,
+      kind: checklist.kind,
+      selectionLabel: checklist.selectionLabel,
+      layout: version.layout,
       sections: sectionsFor(version.id).map((section) => ({
         id: section.id,
         title: section.title,

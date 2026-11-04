@@ -25,3 +25,4 @@ export * from './pricing/totals';
 export * from './pricing/snapshot-lines';
 export * from './checklist/validation';
 export * from './checklist/versioning';
+export * from './checklist/selection';

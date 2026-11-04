@@ -15,8 +15,10 @@ import {
   checkSchedule,
   checkReadyForSubmission,
   checkSignatureOutcome,
+  cleanFieldValues,
   emptyChecklistResponse,
   evaluateChecklist,
+  findTemplateItem,
   cancelJobRefusal,
   cancellationReasonLabel,
   deleteJobRefusal,
@@ -2223,7 +2225,14 @@ export const saveCompletionReport = async (
   return saved;
 };
 
-/** Creates an empty checklist instance bound to the current template version. */
+/**
+ * Creates an empty checklist instance bound to the template version chosen.
+ *
+ * WHICH template is the caller's to resolve (`resolveChecklistToStart`): for
+ * Service it is the one the technician chose, Milling or Lathe, and the server
+ * refuses a start without a choice. The choice is recorded on the instance
+ * (`checklistKind`) and on the trail. CHK-SRC-1.
+ */
 export const startChecklist = async (
   context: OperationContext,
   job: Job,
@@ -2232,21 +2241,37 @@ export const startChecklist = async (
   assertEditable(context, job);
   assertCanCapture(context, job);
   if (job.checklist !== null) return job;
+  if (template.jobTypeCode !== job.jobType || template.status !== 'current') {
+    throw new WorkflowError(`That checklist is not issued for ${job.jobNumber}.`, [
+      {
+        code: 'checklist_selection_invalid',
+        message: 'Only a current checklist for this job type can be started.',
+      },
+    ]);
+  }
 
   const responses = template.sections.flatMap((section) =>
     section.items.map((item) => emptyChecklistResponse(item.id)),
   );
 
-  return context.repos.jobs.save({
+  const saved = await context.repos.jobs.save({
     ...job,
     checklist: {
       templateId: template.id,
       templateVersion: template.version,
+      checklistKind: template.kind ?? null,
       responses,
       completedAt: null,
       completedBy: null,
     },
   });
+  await audit(context, {
+    jobId: job.id,
+    type: 'checklist_started',
+    summary: `Checklist started: ${template.name}`,
+    detail: `${template.name} (version ${template.version}) started by ${userFullName(context.actor)}.`,
+  });
+  return saved;
 };
 
 export interface ChecklistAnswer {
@@ -2255,6 +2280,8 @@ export interface ChecklistAnswer {
   readonly measurement?: number | null;
   readonly text?: string;
   readonly notes?: string;
+  /** The row's labelled blanks, by field id — merged into what is held. CHK-SRC-1. */
+  readonly fieldValues?: Readonly<Record<string, string>>;
   readonly photos?: readonly Attachment[];
 }
 
@@ -2341,6 +2368,12 @@ export const answerChecklistItem = async (
   itemId: string,
   answer: ChecklistAnswer,
   expectation: ChecklistExpectation = {},
+  /**
+   * The wording the instance was started on. When given — the API always
+   * gives it — an answer to an item that is not on it, or to a blank the row
+   * does not print, is refused rather than stored. CHK-SRC-1.
+   */
+  template?: ChecklistTemplate,
 ): Promise<Job> => {
   assertEditable(context, job);
   assertCanCapture(context, job);
@@ -2353,6 +2386,33 @@ export const answerChecklistItem = async (
   assertChecklistUnchanged(job, job.checklist, existing, expectation);
   const base: ChecklistResponse = existing ?? emptyChecklistResponse(itemId);
 
+  let fieldValues = base.fieldValues ?? {};
+  if (template !== undefined) {
+    const item = findTemplateItem(template, itemId);
+    if (item === undefined) {
+      throw new WorkflowError(`That item is not on ${job.jobNumber}'s checklist.`, [
+        {
+          code: 'checklist_item_unknown',
+          message: `${template.name} (version ${template.version}) has no such item.`,
+        },
+      ]);
+    }
+    if (answer.fieldValues !== undefined) {
+      const cleaned = cleanFieldValues(item, { ...fieldValues, ...answer.fieldValues });
+      if (cleaned.unknown.length > 0) {
+        throw new WorkflowError('That row does not have those blanks.', [
+          {
+            code: 'checklist_field_unknown',
+            message: `Not on this row: ${cleaned.unknown.join(', ')}.`,
+          },
+        ]);
+      }
+      fieldValues = cleaned.values;
+    }
+  } else if (answer.fieldValues !== undefined) {
+    fieldValues = { ...fieldValues, ...answer.fieldValues };
+  }
+
   const updated: ChecklistResponse = {
     ...base,
     choice: answer.choice !== undefined ? answer.choice : base.choice,
@@ -2360,6 +2420,7 @@ export const answerChecklistItem = async (
     measurement: answer.measurement !== undefined ? answer.measurement : base.measurement,
     text: answer.text !== undefined ? answer.text : base.text,
     notes: answer.notes !== undefined ? answer.notes : base.notes,
+    fieldValues,
     photos: answer.photos !== undefined ? answer.photos : base.photos,
     answeredAt: now,
     answeredBy: context.actor.id,

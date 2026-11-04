@@ -32,6 +32,21 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## NEXT RELEASE — the business's own checklists and the Service choice (CHK-SRC-1…4, 4 November 2026)
+
+Branch `claude/source-checklists`. **One migration: `0051_source_checklists`** — release with `stage-release.ps1 -ExpectPending 0051_source_checklists`. Version: a `feat` commit, so the release assigns the next MINOR (v1.3.0).
+
+**What 0051 does to the live database** (reviewed line by line; `source-checklists.db.test.ts` runs it on PostgreSQL 16):
+- adds columns, every one defaulted (`checklists.kind`, `selection_label`; `checklist_versions.layout`; `checklist_questions.number`, `group_label`, `fields`, `source_note`; `checklist_answers.field_values`; `checklist_instances.checklist_kind`) — no existing row is rewritten;
+- extends the immutability guards (a used version's layout, section headings and kind are frozen), and adds a trigger keeping a checklist's recorded kind equal to its version's (a writer that sends none has it filled in — so the release before this one still works against it);
+- **archives** the two demonstration versions still current for Installation and Service (`status` only; the guard permits exactly that) — the 10 jobs that answered them (7 completed, 3 in progress: EJE-2007, EJE-2011, EJE-2077) keep their version, answers and documents unchanged;
+- inserts the three source checklists, version 1.0, current.
+
+**Before:** fresh backup, verify, key check and restore test (the release does all four); record the checklist fingerprint — `select v.id, v.status, count(q.*) from checklist_versions v left join checklist_sections s on s.version_id = v.id left join checklist_questions q on q.section_id = s.id group by 1,2` and an md5 over `checklist_instances`/`checklist_answers`/`checklist_answer_photos` rows.
+**After:** the same fingerprint for every row that existed before is identical; three new versions current with 36, 39 and 41 questions; the two demonstration versions archived; health, version, Administration → Checklists, the Service choice, both Service checklists, Installation and a checklist PDF checked live **read-only or on a disposable job, then cancelled**; service log free of errors.
+
+**Rolling back** (`stage-release.ps1 -Rollback`) returns the CODE to `f693747`; the database stays at 0051, which that code runs against: it ignores the new columns, and the kind trigger fills in what it does not send. What changes while rolled back: a Service job started then is given one of the two Service checklists **without being asked**, and the new screens are gone. Nothing recorded is lost either way. Putting the demonstration wording back in issue is a data change, not part of a rollback, and is not recommended.
+
 ## RELEASED — `f693747` = v1.2.0, the Timesheets follow-up (4 November 2026)
 
 Authorised by the owner on 4 November 2026. Released 10:36:58 UTC (healthy 10:37:01) from branch `claude/timesheets-paper-fixes` through `stage-release.ps1 -ExpectPending none`. Version assigned by the release: **v1.2.0** (after 1.1.0). Before it: host `srv2000625`, serving `46096ac` v1.1.0, firewall script unchanged (`ee451ac`), ufw active.

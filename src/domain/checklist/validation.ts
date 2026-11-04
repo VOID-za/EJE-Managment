@@ -94,6 +94,16 @@ export const isMeasurementOutOfRange = (
   );
 };
 
+/**
+ * How a message names a row: its printed number and group with its wording,
+ * on one line — "7 Check all oil levels: Hydraulic Oil" — because "Hydraulic
+ * Oil" alone does not say which row of the paper is meant. CHK-SRC-1.
+ */
+export const checklistItemLabel = (item: ChecklistItem): string =>
+  [item.number ?? '', item.group ?? '', item.text.replace(/\s*\n\s*/gu, ' ')]
+    .filter((part) => part.length > 0)
+    .join(' ');
+
 export const evaluateChecklist = (
   template: ChecklistTemplate,
   instance: ChecklistInstance | null,
@@ -112,6 +122,7 @@ export const evaluateChecklist = (
       total += 1;
       const response = responsesById.get(item.id);
       const itemAnswered = isChecklistItemAnswered(item, response);
+      const label = checklistItemLabel(item);
 
       if (itemAnswered) {
         answered += 1;
@@ -126,7 +137,7 @@ export const evaluateChecklist = (
               : item.responseType === 'text'
                 ? 'text_missing'
                 : 'unanswered',
-          message: `"${item.text}" has not been answered.`,
+          message: `"${label}" has not been answered.`,
         });
       }
 
@@ -142,7 +153,7 @@ export const evaluateChecklist = (
           sectionId: section.id,
           itemText: item.text,
           reason: 'note_required',
-          message: `"${item.text}" was not passed and needs a note explaining what was found.`,
+          message: `"${label}" was not passed and needs a note explaining what was found.`,
         });
       }
 
@@ -152,7 +163,7 @@ export const evaluateChecklist = (
           sectionId: section.id,
           itemText: item.text,
           reason: 'photo_required',
-          message: `"${item.text}" requires a photo.`,
+          message: `"${label}" requires a photo.`,
         });
       }
     }

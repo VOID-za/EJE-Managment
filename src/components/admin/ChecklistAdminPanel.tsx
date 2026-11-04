@@ -7,6 +7,7 @@ import {
   compareVersions,
   editInPlaceRefusal,
   jobTypeLabel,
+  orderChecklistOptions,
   type ChecklistItem,
   type ChecklistResponseType,
   type ChecklistSection,
@@ -27,6 +28,7 @@ import {
   TextField,
 } from '@/components/ui';
 import { AdminNotice } from './AdminNotice';
+import { ChecklistContents } from './ChecklistContents';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
 import { checklists } from '@/api/endpoints';
 import { useOperation } from '@/hooks/useOperation';
@@ -65,10 +67,35 @@ export const ChecklistAdminPanel = ({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ChecklistTemplate | null>(null);
   const [archiving, setArchiving] = useState<ChecklistTemplate | null>(null);
-
-  const ordered = [...templates].sort(
-    (a, b) => a.name.localeCompare(b.name) || compareVersions(b.version, a.version),
+  // Which versions are opened to read in full; the current ones start open.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        templates
+          .filter((template) => template.status === 'current')
+          .map((template) => `${template.id}@${template.version}`),
+      ),
   );
+
+  /*
+   * CHK-SRC-1: the checklists issued to new jobs first, in the order the
+   * business uses them (Installation, Service — Milling, Service — Lathe),
+   * then drafts, then the archived versions kept for the job cards that
+   * answered them.
+   */
+  const byStatus = (status: ChecklistTemplate['status']) =>
+    status === 'current' ? 0 : status === 'draft' ? 1 : 2;
+  const ordered = [
+    ...orderChecklistOptions(templates.filter((template) => template.status === 'current')),
+    ...[...templates]
+      .filter((template) => template.status !== 'current')
+      .sort(
+        (a, b) =>
+          byStatus(a.status) - byStatus(b.status) ||
+          a.name.localeCompare(b.name) ||
+          compareVersions(b.version, a.version),
+      ),
+  ];
 
   return (
     <div className="space-y-5">
@@ -94,8 +121,11 @@ export const ChecklistAdminPanel = ({
 
       {ordered.map((template) => {
         const locked = !canEditInPlace(template, usage);
+        const key = `${template.id}@${template.version}`;
+        const open = opened.has(key);
+        const rows = template.sections.reduce((total, section) => total + section.items.length, 0);
         return (
-          <Card key={`${template.id}-${template.version}`}>
+          <Card key={`${template.id}-${template.version}`} data-testid="checklist-admin-card">
             <CardHeader
               title={template.name}
               description={template.description}
@@ -111,6 +141,19 @@ export const ChecklistAdminPanel = ({
               }
             />
 
+            {template.status === 'archived' && (
+              <p className="mt-3 text-xs text-steel-500">
+                Not issued to new jobs. Kept so every job that answered this version still shows
+                exactly what was answered.
+              </p>
+            )}
+            {(template.selectionLabel ?? '').length > 0 && (
+              <p className="mt-3 text-xs text-steel-600">
+                Offered on the Service choice screen as{' '}
+                <span className="font-semibold">{template.selectionLabel}</span>.
+              </p>
+            )}
+
             <ul className="mt-4 divide-y divide-steel-100">
               {template.sections.length === 0 ? (
                 <li className="py-2.5 text-sm text-steel-500 italic">
@@ -123,7 +166,7 @@ export const ChecklistAdminPanel = ({
                       {index + 1}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-steel-800">
-                      {section.title}
+                      {section.title.length > 0 ? section.title : '(no section heading)'}
                     </span>
                     <span className="tabular text-xs text-steel-400">
                       {section.items.length} items
@@ -132,6 +175,31 @@ export const ChecklistAdminPanel = ({
                 ))
               )}
             </ul>
+
+            {template.sections.length > 0 && (
+              <div className="mt-3">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={open}
+                  onClick={() =>
+                    setOpened((current) => {
+                      const next = new Set(current);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                >
+                  {open ? 'Hide the items' : `Show all ${rows} items`}
+                </Button>
+                {open && (
+                  <div className="mt-3 rounded-[var(--radius-control)] border border-steel-200 p-3">
+                    <ChecklistContents template={template} />
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-steel-100 pt-3 text-xs text-steel-500">
               <span>

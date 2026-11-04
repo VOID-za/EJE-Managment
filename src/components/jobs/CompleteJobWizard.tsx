@@ -146,7 +146,12 @@ export const CompleteJobWizard = ({
     ];
     // Only where the job type actually requires one. A breakdown or a test and
     // repair has no checklist, so it is not given an empty step to walk past.
-    if (definition.checklistRequired && view.checklistTemplate !== null) {
+    // CHK-SRC-1: a Service job with none started has OPTIONS and no template
+    // yet — the step opens on the Milling / Lathe choice.
+    if (
+      definition.checklistRequired &&
+      (view.checklistTemplate !== null || view.checklistOptions.length > 0)
+    ) {
       all.push({
         id: 'checklist',
         title: 'Checklist',
@@ -185,7 +190,7 @@ export const CompleteJobWizard = ({
       },
     );
     return all;
-  }, [correcting, definition, labels, view.checklistTemplate]);
+  }, [correcting, definition, labels, view.checklistTemplate, view.checklistOptions]);
 
   const [index, setIndex] = useState(0);
 
@@ -756,10 +761,11 @@ export const CompleteJobWizard = ({
         </div>
       )}
 
-      {step.id === 'checklist' && view.checklistTemplate !== null && (
+      {step.id === 'checklist' && (
         <ChecklistRunner
           job={job}
           template={view.checklistTemplate}
+          options={view.checklistOptions}
           editable
           onChanged={onChanged}
         />

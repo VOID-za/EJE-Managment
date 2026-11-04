@@ -10,6 +10,7 @@ import {
 import { WorkflowError } from './errors';
 import { buildHarness, seedUser, type Harness } from './test-harness';
 import { asChecklistTemplateId, canEditInPlace, type ChecklistTemplate } from '@/domain';
+import { latheServiceChecklist } from '@/data/checklists/source-checklists';
 
 /**
  * Checklist administration.
@@ -46,8 +47,8 @@ describe('creating and issuing a checklist', () => {
     });
 
     expect(created.status).toBe('draft');
-    const issued = await harness.repos.checklistTemplates.findForJobType('breakdown');
-    expect(issued).toBeNull();
+    const issued = await harness.repos.checklistTemplates.listCurrentForJobType('breakdown');
+    expect(issued).toEqual([]);
   });
 
   it('refuses to issue a checklist with no items', async () => {
@@ -95,12 +96,40 @@ describe('creating and issuing a checklist', () => {
     const issued = await publishTemplate(harness.as(elmarie), withItems);
 
     expect(issued.status).toBe('current');
-    const forService = await harness.repos.checklistTemplates.findForJobType('service');
-    expect(forService?.id).toBe(issued.id);
+    const forService = await harness.repos.checklistTemplates.listCurrentForJobType('service');
+    expect(forService.map((template) => template.id)).toContain(issued.id);
 
-    // The previously current version is archived, not removed.
+    // The demonstration wording it would have replaced is archived, not removed.
     const previous = await templateNamed(harness, 'chk-service', '2.0-DEMO');
     expect(previous.status).toBe('archived');
+  });
+
+  /*
+   * CHK-SRC-1. Service has two checklists, Milling and Lathe. Publishing a new
+   * Lathe version supersedes the Lathe version — and ONLY it. It used to
+   * archive every current checklist of the job type, which would have
+   * silently withdrawn the Milling checklist.
+   */
+  it('a new Lathe version supersedes the Lathe version and leaves Milling issued', async () => {
+    const lathe = await templateNamed(harness, latheServiceChecklist.id, '1.0');
+    const draft = await startNewVersion(harness.as(elmarie), lathe);
+    expect(draft.version).toBe('2.0');
+    expect(draft.kind).toBe('service_lathe');
+    // The same wording, under ids of its own: the copy is a new version.
+    const texts = (template: ChecklistTemplate) =>
+      template.sections.flatMap((section) => section.items.map((item) => item.text));
+    expect(texts(draft)).toEqual(texts(lathe));
+    const ids = (template: ChecklistTemplate) =>
+      template.sections.flatMap((section) => [section.id, ...section.items.map((item) => item.id)]);
+    expect(ids(draft).some((id) => ids(lathe).includes(id))).toBe(false);
+    await publishTemplate(harness.as(elmarie), draft);
+
+    const current = await harness.repos.checklistTemplates.listCurrentForJobType('service');
+    expect(current.map((template) => `${template.kind}@${template.version}`)).toEqual([
+      'service_milling@1.0',
+      'service_lathe@2.0',
+    ]);
+    expect((await templateNamed(harness, latheServiceChecklist.id, '1.0')).status).toBe('archived');
   });
 
   it('refuses a technician administering checklists', async () => {
@@ -182,7 +211,13 @@ describe('starting a new version', () => {
 
     expect(draft.status).toBe('draft');
     expect(draft.version).not.toBe(used.version);
-    expect(draft.sections).toEqual(used.sections);
+    // The same wording under new ids — the copy is a new version (CHK-SRC-1).
+    const wording = (template: ChecklistTemplate) =>
+      template.sections.map(({ id: _section, items, ...section }) => ({
+        ...section,
+        items: items.map(({ id: _item, ...item }) => item),
+      }));
+    expect(wording(draft)).toEqual(wording(used));
 
     const original = await templateNamed(harness, 'chk-service', '1.0-DEMO');
     expect(original.sections).toEqual(used.sections);

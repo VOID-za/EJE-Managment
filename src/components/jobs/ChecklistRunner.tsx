@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import {
+  checklistChoiceLabel,
+  checklistChoiceRequired,
   evaluateChecklist,
   isChecklistItemAnswered,
   isMeasurementOutOfRange,
@@ -61,6 +63,154 @@ const answerLabel = (item: ChecklistItem, response: ChecklistResponse): string =
  *  - progress and outstanding items are always visible.
  */
 export const ChecklistRunner = ({
+  job,
+  template,
+  options = [],
+  editable,
+  onChanged,
+}: {
+  readonly job: Job;
+  /**
+   * The wording the job's checklist is on — or, for a job with none started,
+   * the one checklist issued. NULL when the technician must choose first
+   * (Service: Milling or Lathe); `options` are the choices. CHK-SRC-1.
+   */
+  readonly template: ChecklistTemplate | null;
+  readonly options?: readonly ChecklistTemplate[];
+  readonly editable: boolean;
+  readonly onChanged: () => void;
+}) => {
+  if (job.checklist === null && (template === null || checklistChoiceRequired(options))) {
+    return (
+      <ChecklistChoice job={job} options={options} editable={editable} onChanged={onChanged} />
+    );
+  }
+  if (template === null) return null;
+  return (
+    <ChecklistForm job={job} template={template} editable={editable} onChanged={onChanged} />
+  );
+};
+
+/**
+ * "WHICH SERVICE CHECKLIST DO YOU NEED TO COMPLETE?" CHK-SRC-1.
+ *
+ * Shown before a Service checklist opens, and nothing opens until one is
+ * chosen: there is no default, no "skip", and no generic Service checklist.
+ * The choice is sent with the start, and the server refuses a start without
+ * one — this screen is the way to make it, not the rule.
+ */
+const ChecklistChoice = ({
+  job,
+  options,
+  editable,
+  onChanged,
+}: {
+  readonly job: Job;
+  readonly options: readonly ChecklistTemplate[];
+  readonly editable: boolean;
+  readonly onChanged: () => void;
+}) => {
+  const operation = useOperation();
+  const [chosen, setChosen] = useState<string | null>(null);
+  const selected = options.find((option) => option.id === chosen) ?? null;
+
+  if (options.length === 0) {
+    return (
+      <Card>
+        <p className="text-sm text-steel-600">
+          No checklist is issued for this job type. The office must publish one first.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="py-2" data-testid="checklist-choice">
+        <h3 className="text-lg font-semibold text-steel-900">
+          {job.jobType === 'service'
+            ? 'Which Service checklist do you need to complete?'
+            : 'Which checklist do you need to complete?'}
+        </h3>
+        <p className="mt-1 text-sm text-steel-500">
+          Choose one to continue. It cannot be changed once the checklist is started.
+        </p>
+        <fieldset className="mt-4" disabled={!editable || operation.running}>
+          <legend className="sr-only">Checklist</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {options.map((option, index) => {
+              const active = chosen === option.id;
+              const rows = option.sections.reduce(
+                (total, section) => total + section.items.length,
+                0,
+              );
+              return (
+                <label
+                  key={`${option.id}-${option.version}`}
+                  data-testid={`checklist-choice-${option.kind ?? option.id}`}
+                  className={cn(
+                    'flex min-h-20 cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border-2 p-4 transition-colors',
+                    active
+                      ? 'border-eje-500 bg-eje-50'
+                      : 'border-steel-200 bg-surface hover:border-steel-400',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name={`checklist-choice-${job.id}`}
+                    value={option.id}
+                    checked={active}
+                    onChange={() => setChosen(option.id)}
+                    className="mt-1 size-5 shrink-0 accent-eje-600"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-base font-semibold text-steel-900">
+                      {index + 1}. {checklistChoiceLabel(option)}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-steel-500">
+                      {option.layout?.title ?? option.name} · {rows} items · version{' '}
+                      {option.version}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+        {editable ? (
+          <Button
+            size="lg"
+            className="mt-5"
+            disabled={selected === null}
+            loading={operation.running}
+            data-testid="checklist-choice-continue"
+            onClick={async () => {
+              if (selected === null) return;
+              const ok = await operation.run(() => jobs.startChecklist(job.id, selected.id));
+              if (ok) onChanged();
+            }}
+          >
+            {selected === null
+              ? 'Open checklist'
+              : `Open the ${checklistChoiceLabel(selected)} checklist`}
+          </Button>
+        ) : (
+          <p className="mt-5 text-sm text-steel-500">
+            This checklist has not been started and the job is no longer editable.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+/** True on the first row of a run the source labels once ("Check all oil levels:"). */
+const groupStarts = (items: readonly ChecklistItem[], index: number): boolean => {
+  const group = items[index]?.group ?? '';
+  return group.length > 0 && (index === 0 || (items[index - 1]?.group ?? '') !== group);
+};
+
+const ChecklistForm = ({
   job,
   template,
   editable,
@@ -133,6 +283,7 @@ export const ChecklistRunner = ({
         draft.measurement !== undefined ? draft.measurement : (existing?.measurement ?? null),
       text: draft.text !== undefined ? draft.text : (existing?.text ?? ''),
       notes: draft.notes !== undefined ? draft.notes : (existing?.notes ?? ''),
+      fieldValues: { ...(existing?.fieldValues ?? {}), ...(draft.fieldValues ?? {}) },
       photos: existing?.photos ?? [],
       answeredAt: null,
       answeredBy: null,
@@ -159,6 +310,7 @@ export const ChecklistRunner = ({
         measurement: candidate.measurement,
         text: candidate.text,
         notes: candidate.notes,
+        fieldValues: candidate.fieldValues,
         /*
          * WHAT THIS ANSWER IS AN ANSWER TO. The instance it was given on, and
          * the answer it replaces. The server refuses the capture if either has
@@ -271,6 +423,13 @@ export const ChecklistRunner = ({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-semibold text-steel-900">{template.name}</h3>
+              {(template.selectionLabel ?? '').length > 0 && (
+                <span data-testid="checklist-kind">
+                  <Badge tone="blue" size="sm">
+                    {template.selectionLabel}
+                  </Badge>
+                </span>
+              )}
               <Badge tone={template.status === 'archived' ? 'amber' : 'neutral'} size="sm">
                 Version {template.version}
               </Badge>
@@ -280,6 +439,11 @@ export const ChecklistRunner = ({
                 </Badge>
               )}
             </div>
+            {template.layout != null && (
+              <p className="mt-0.5 text-xs font-semibold tracking-wide text-steel-500">
+                {template.layout.title}
+              </p>
+            )}
             <p className="mt-1 text-sm text-steel-500">
               {progress.answered} of {progress.total} answered
               {progress.failedItems > 0 && (
@@ -298,9 +462,8 @@ export const ChecklistRunner = ({
           <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-eje-700">
             <Icon name="warning" className="mt-0.5 size-3.5 shrink-0" />
             <span>
-              This job was completed against version {template.version}, which has since been
-              superseded. It is shown here exactly as the customer saw it. New jobs use the current
-              version.
+              This checklist is on version {template.version}, which has since been superseded.
+              It is shown exactly as it was answered. New checklists use the current version.
             </span>
           </p>
         )}
@@ -341,22 +504,28 @@ export const ChecklistRunner = ({
 
       {template.sections.map((section, sectionIndex) => (
         <Card key={section.id} padded={false}>
-          <header className="border-b border-steel-100 px-5 py-4">
-            <div className="flex items-center gap-2.5">
-              <span className="tabular flex size-7 items-center justify-center rounded-full bg-steel-900 text-xs font-bold text-white">
-                {sectionIndex + 1}
-              </span>
-              <h4 className="text-sm font-semibold text-steel-900">{section.title}</h4>
-            </div>
-            {section.description.length > 0 && (
-              <p className="mt-1.5 pl-9 text-sm text-steel-500">{section.description}</p>
-            )}
-          </header>
+          {(section.title.length > 0 || section.description.length > 0) && (
+            <header className="border-b border-steel-100 px-5 py-4">
+              <div className="flex items-center gap-2.5">
+                {/* A source document numbers its own rows; its sections are named, not numbered. */}
+                {template.layout == null && (
+                  <span className="tabular flex size-7 items-center justify-center rounded-full bg-steel-900 text-xs font-bold text-white">
+                    {sectionIndex + 1}
+                  </span>
+                )}
+                <h4 className="text-sm font-semibold text-steel-900">{section.title}</h4>
+              </div>
+              {section.description.length > 0 && (
+                <p className="mt-1.5 pl-9 text-sm text-steel-500">{section.description}</p>
+              )}
+            </header>
+          )}
 
           <ul className="divide-y divide-steel-100">
-            {section.items.map((item) => (
+            {section.items.map((item, itemIndex) => (
               <ChecklistItemRow
                 key={item.id}
+                groupHeading={groupStarts(section.items, itemIndex)}
                 item={item}
                 response={responses.get(item.id)}
                 editable={editable && !completed}
@@ -452,9 +621,33 @@ export const ChecklistRunner = ({
         </Card>
       )}
 
-      <p className="px-1 text-xs text-steel-400">
-        Demonstration content. The production system preserves the exact wording of the approved
-        EJE / WD Hearn checklist documents. Source: {template.sourceDocument}
+      {template.layout != null &&
+        (template.layout.notes.length > 0 || template.layout.closing.length > 0) && (
+          <Card>
+            {template.layout.notes.map((note) => (
+              <p key={note} className="text-sm text-steel-700">
+                {note}
+              </p>
+            ))}
+            {template.layout.closing.length > 0 && (
+              <p className="mt-2 text-sm font-bold tracking-wide text-steel-900">
+                {template.layout.closing}
+              </p>
+            )}
+          </Card>
+        )}
+
+      {template.layout != null && (
+        <p className="px-1 text-xs text-steel-500">
+          {template.layout.signatures.map((signature) => signature.label).join(' · ')}: the
+          engineer and the customer sign on the job card that carries this checklist.
+        </p>
+      )}
+
+      <p className="px-1 text-xs text-steel-400" data-testid="checklist-source">
+        {template.kind == null
+          ? `Earlier demonstration wording, not an EJE source document. Source: ${template.sourceDocument}`
+          : `Source: ${template.sourceDocument}`}
       </p>
 
       <ConfirmDialog
@@ -490,6 +683,7 @@ export const ChecklistRunner = ({
 
 const ChecklistItemRow = ({
   item,
+  groupHeading = false,
   response,
   editable,
   busy,
@@ -504,6 +698,8 @@ const ChecklistItemRow = ({
   failed: uploadFailed,
 }: {
   readonly item: ChecklistItem;
+  /** True on the first row of a group the source labels once ("Check all oil levels:"). */
+  readonly groupHeading?: boolean;
   readonly response: ChecklistResponse | undefined;
   readonly editable: boolean;
   readonly busy: boolean;
@@ -528,6 +724,9 @@ const ChecklistItemRow = ({
   );
   const [text, setText] = useState(response?.text ?? '');
   const [notes, setNotes] = useState(response?.notes ?? '');
+  const [fieldValues, setFieldValues] = useState<Readonly<Record<string, string>>>(
+    response?.fieldValues ?? {},
+  );
   /*
    * THE ANSWER THIS ROW IS COLLECTING WHILE THERE IS NO SIGNAL. OFF-CHK-1.
    *
@@ -545,7 +744,13 @@ const ChecklistItemRow = ({
 
   const commit = (value: ChecklistAnswer) => {
     if (offline) {
-      setDraft((current) => ({ ...current, ...value }));
+      setDraft((current) => ({
+        ...current,
+        ...value,
+        ...(value.fieldValues === undefined
+          ? {}
+          : { fieldValues: { ...(current.fieldValues ?? {}), ...value.fieldValues } }),
+      }));
       setHoldError(null);
       return;
     }
@@ -560,6 +765,7 @@ const ChecklistItemRow = ({
       draft.measurement !== undefined ? draft.measurement : (response?.measurement ?? null),
     text: draft.text !== undefined ? draft.text : (response?.text ?? ''),
     notes: draft.notes !== undefined ? draft.notes : (response?.notes ?? ''),
+    fieldValues: { ...(response?.fieldValues ?? {}), ...(draft.fieldValues ?? {}) },
     photos: response?.photos ?? [],
     answeredAt: response?.answeredAt ?? null,
     answeredBy: response?.answeredBy ?? null,
@@ -595,12 +801,34 @@ const ChecklistItemRow = ({
       data-testid={`checklist-item-${item.id}`}
       className={cn('px-5 py-4', failed && 'bg-signal-50/40')}
     >
+      {groupHeading && (
+        <p className="mb-2 flex gap-2 text-sm font-semibold text-steel-900" data-testid="checklist-group">
+          <span className="tabular w-6 shrink-0 text-steel-500">{item.number}</span>
+          {item.group}
+        </p>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-steel-900">
-            {item.text}
-            {item.required && <span className="ml-1 text-signal-500">*</span>}
+          <p className="flex gap-2 text-sm font-medium text-steel-900">
+            {/* The source's own number; a grouped row's number is on its group heading. */}
+            {(item.number !== undefined || (item.group ?? '').length > 0) && (
+              <span className="tabular w-6 shrink-0 text-steel-500" data-testid="checklist-number">
+                {(item.group ?? '').length > 0 ? '' : item.number}
+              </span>
+            )}
+            <span className="whitespace-pre-line">
+              {item.text}
+              {item.required && <span className="ml-1 text-signal-500">*</span>}
+            </span>
           </p>
+          {(item.sourceNote ?? '').length > 0 && (
+            <p
+              className="mt-1 ml-8 inline-block rounded bg-amber-eje-50 px-1.5 py-0.5 text-xs font-medium text-amber-eje-800"
+              data-testid="checklist-source-note"
+            >
+              {item.sourceNote}
+            </p>
+          )}
           {item.helpText.length > 0 && (
             <p className="mt-0.5 text-xs text-steel-500">{item.helpText}</p>
           )}
@@ -697,6 +925,35 @@ const ChecklistItemRow = ({
           </div>
         )}
 
+        {(item.fields ?? []).length > 0 && (
+          <div className="mt-3 flex flex-wrap items-end gap-3" data-testid="checklist-fields">
+            {(item.fields ?? []).map((field) => (
+              <label key={field.id} className="block">
+                <span className="mb-1 block text-xs font-semibold text-steel-600">
+                  {[field.label, field.unit].filter((part) => part.length > 0).join(' ')}
+                  <span className="ml-1 font-normal text-steel-400">optional</span>
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={fieldValues[field.id] ?? ''}
+                  disabled={!editable || busy}
+                  onChange={(event) =>
+                    setFieldValues((current) => ({ ...current, [field.id]: event.target.value }))
+                  }
+                  onBlur={() => {
+                    const value = (fieldValues[field.id] ?? '').trim();
+                    if (value === (response?.fieldValues?.[field.id] ?? '')) return;
+                    commit({ fieldValues: { [field.id]: value } });
+                  }}
+                  data-testid={`checklist-field-${item.id}-${field.id}`}
+                  className="tabular h-12 w-32 rounded-[var(--radius-control)] border border-steel-300 px-3 text-base focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none disabled:bg-steel-50"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
         {item.responseType === 'text' && (
           <textarea
             rows={2}
@@ -781,7 +1038,8 @@ const ChecklistItemRow = ({
         </div>
       )}
 
-      {item.photoRequired && (
+      {/* Evidence a row holds is shown even where the row does not require it. */}
+      {(item.photoRequired || (response?.photos ?? []).length > 0) && (
         <div className="mt-3 space-y-2">
           {/*
             THE EVIDENCE, AS EVIDENCE. CHK-EVIDENCE-1.
@@ -800,7 +1058,7 @@ const ChecklistItemRow = ({
               ))}
             </ul>
           )}
-          {editable && (
+          {editable && item.photoRequired && (
             <div className="flex flex-wrap items-center gap-2">
               <PhotoCaptureButtons
                 size="sm"

@@ -380,6 +380,18 @@ const sectionSchema = z
               .object({ min: z.number(), max: z.number() })
               .strict()
               .nullable(),
+            // CHK-SRC-1: what the source prints with the row, kept through an edit.
+            number: text(20).optional(),
+            group: text(200).optional(),
+            fields: z
+              .array(
+                z
+                  .object({ id: z.string().min(1).max(40), label: text(60), unit: text(40) })
+                  .strict(),
+              )
+              .max(10)
+              .optional(),
+            sourceNote: text(300).optional(),
           })
           .strict(),
       )

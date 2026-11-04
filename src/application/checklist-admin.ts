@@ -142,10 +142,18 @@ export const publishTemplate = async (
     ]);
   }
 
+  /*
+   * WHAT A NEW VERSION SUPERSEDES: its own SLOT — the same job type and the
+   * same kind of checklist. It used to be every current checklist of the job
+   * type, which was right while each type had one; Service now has two
+   * (Milling and Lathe, CHK-SRC-1), and publishing a new Lathe version must not
+   * withdraw the Milling checklist.
+   */
   const all = await context.repos.checklistTemplates.list();
   const superseded = all.filter(
     (candidate) =>
       candidate.jobTypeCode === template.jobTypeCode &&
+      (candidate.kind ?? null) === (template.kind ?? null) &&
       candidate.status === 'current' &&
       !(candidate.id === template.id && candidate.version === template.version),
   );
@@ -192,11 +200,24 @@ export const startNewVersion = async (
     version = nextVersion(version);
   }
 
+  /*
+   * THE COPY IS NEW WORDING, SO IT HAS NEW IDS. Sections and questions are
+   * keyed by id — primary keys in PostgreSQL — and the copy used to carry the
+   * original's, so saving it collided with the version it was copied from and
+   * a new version could not be started at all on the live database. Answers
+   * belong to a question id, which is what keeps them on the version they
+   * answered. CHK-SRC-1.
+   */
   const draft: ChecklistTemplate = {
     ...template,
     version,
     status: 'draft',
     updatedAt: context.services.clock.now(),
+    sections: template.sections.map((section) => ({
+      ...section,
+      id: context.services.ids.next('chks'),
+      items: section.items.map((item) => ({ ...item, id: context.services.ids.next('chki') })),
+    })),
   };
 
   const saved = await context.repos.checklistTemplates.save(draft);

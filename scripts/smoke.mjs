@@ -2506,12 +2506,16 @@ await step('checklist blocks signature until complete (EJE-1053 service job)', a
 
 await step('checklist runner works', async () => {
   await page.getByRole('tab', { name: 'Checklist' }).click();
-  await page.getByRole('button', { name: 'Start checklist' }).click();
-  await page.getByText('Safety Systems').waitFor({ timeout: 8000 });
+  // CHK-SRC-1: a Service job asks which checklist first — there is no generic
+  // Service checklist to start.
+  await page.getByText('Which Service checklist do you need to complete?').waitFor({ timeout: 8000 });
+  await page.getByTestId('checklist-choice-service_milling').click();
+  await page.getByTestId('checklist-choice-continue').click();
+  await page.getByText('PREVENTATIVE MAINTENANCE CHECKLIST - MACHINING CENTRE').waitFor({ timeout: 8000 });
   await page.getByRole('button', { name: 'Pass', exact: true }).first().click();
   await page.getByText(/1 of \d+ answered/).waitFor({ timeout: 8000 });
-  // A new service job must pick up the CURRENT checklist revision.
-  await page.getByText('Version 2.0-DEMO').waitFor({ timeout: 8000 });
+  // A new service job picks up the CURRENT checklist revision: the source's, not the demonstration's.
+  await page.getByText('Version 1.0', { exact: true }).waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/06-checklist.png`, fullPage: false });
 });
 
@@ -6267,18 +6271,30 @@ await step('checklist evidence is a real file, stored and served back', async ()
   if ((await start.count()) > 0) {
     await start.click();
   }
-  // The photograph controls appear only on the items the template marks
-  // `photoRequired`, which is the only place evidence belongs.
-  const input = page
-    .locator('[data-testid^="checklist-photo-"][data-testid$="-gallery"]')
-    .first();
-  await input.waitFor({ state: 'attached', timeout: 15000 });
-
-  await input.setInputFiles({
-    name: 'bearing-condition.png',
-    mimeType: 'image/png',
-    buffer: pngBytes('bearing condition'),
-  });
+  /*
+   * CHK-SRC-1. The installation checklist is now the business's own, and the
+   * paper marks no row as needing a photograph — so no row offers the camera.
+   * The evidence route is unchanged, and this proves it the same way: real
+   * bytes sent to a row of the checklist the job opened, stored, and served
+   * back through the authenticated route. The row then shows what it holds.
+   */
+  const firstRow = page.locator('[data-testid^="checklist-item-"]').first();
+  await firstRow.waitFor({ timeout: 15000 });
+  const itemId = (await firstRow.getAttribute('data-testid')).replace('checklist-item-', '');
+  const uploaded = await page.evaluate(
+    async ([jobNumber, item, bytes]) => {
+      const view = await (await fetch(`/api/jobs/${jobNumber}`)).json();
+      const jobId = view.data.view.job.id;
+      const form = new FormData();
+      form.append('file', new File([new Uint8Array(bytes)], 'bearing-condition.png', { type: 'image/png' }));
+      const response = await fetch(`/api/jobs/${jobId}/checklist/${item}/photo`, { method: 'POST', body: form });
+      return response.status;
+    },
+    ['EJE-1050', itemId, [...pngBytes('bearing condition')]],
+  );
+  if (uploaded !== 200) throw new Error(`the evidence upload answered ${uploaded}`);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: /^Checklist/ }).click();
 
   // THE BROWSER DECODES WHAT IT FETCHED. A tile that renders proves the bytes
   // went up, were stored, and came back through the authenticated route.

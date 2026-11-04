@@ -135,7 +135,7 @@ describe('returning a job to Open', () => {
 
   it('keeps checklist progress', async () => {
     // EJE-1053 is a service job already in Completion, so it is workable as is.
-    const template = (await harness.repos.checklistTemplates.findForJobType('service'))!;
+    const template = (await harness.repos.checklistTemplates.listCurrentForJobType('service'))[0]!;
     let job = (await harness.repos.jobs.findByJobNumber('EJE-1053'))!;
     job = await harness.repos.jobs.save({ ...job, primaryTechnicianId: sipho.id });
     job = await startChecklist(harness.as(sipho), job, template);

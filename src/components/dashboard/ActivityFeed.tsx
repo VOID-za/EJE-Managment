@@ -27,6 +27,7 @@ const ICONS: Partial<Record<ActivityEvent['type'], IconName>> = {
   // reads as an edit — neither is another "line captured".
   line_item_removed: 'trash',
   callout_changed: 'edit',
+  checklist_started: 'check',
   checklist_completed: 'check',
   moved_to_awaiting_spares: 'warning',
   returned_to_in_progress: 'refresh',

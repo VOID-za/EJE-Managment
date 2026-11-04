@@ -269,29 +269,77 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
       {model.checklist !== null && (
         <section className="mt-6">
           <SectionTitle>{model.checklist.title}</SectionTitle>
+          {model.checklist.documentTitle !== null && (
+            <p className="text-xs font-bold tracking-wide text-steel-800">
+              {model.checklist.documentTitle}
+            </p>
+          )}
+          {model.checklist.checklistType !== null && (
+            <p
+              className="text-xs font-semibold text-steel-700"
+              data-testid="job-card-checklist-type"
+            >
+              {model.checklist.checklistType}
+            </p>
+          )}
           <p className="mb-2 text-xs text-steel-500">
             {model.checklist.summary}
           </p>
 
-          {model.checklist.sections.map((section) => (
-            <div key={section.title} className="mb-3">
-              <p className="border-b border-steel-200 pb-1 text-xs font-bold tracking-wide text-steel-700 uppercase">
-                {section.title}
-              </p>
+          {model.checklist.header.length > 0 && (
+            <dl className="mb-3 grid grid-cols-1 gap-x-6 gap-y-0.5 text-xs sm:grid-cols-2">
+              {model.checklist.header.map((line) => (
+                <div key={line.label} className="flex gap-2">
+                  <dt className="shrink-0 font-semibold text-steel-600">
+                    {line.label}
+                  </dt>
+                  <dd className="text-steel-800">{line.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          {model.checklist.sections.map((section, sectionIndex) => (
+            <div key={`${sectionIndex}-${section.title}`} className="mb-3">
+              {section.title.length > 0 && (
+                <p className="border-b border-steel-200 pb-1 text-xs font-bold tracking-wide text-steel-700 uppercase">
+                  {section.title}
+                </p>
+              )}
               <ul className="mt-1">
-                {section.items.map((item) => (
+                {section.items.map((item, itemIndex) => (
                   <li
-                    key={item.text}
+                    key={`${itemIndex}-${item.text}`}
                     className="border-b border-steel-100 py-1.5 text-xs"
                   >
+                    {item.groupHeading.length > 0 && (
+                      <p className="mb-1 font-semibold text-steel-800">
+                        {item.groupHeading}
+                      </p>
+                    )}
                     <div className="flex items-start justify-between gap-3">
-                      <span className="flex-1 text-steel-700">{item.text}</span>
+                      <span className="flex flex-1 gap-2 text-steel-700">
+                        <span className="tabular w-5 shrink-0 text-steel-500">
+                          {item.number}
+                        </span>
+                        <span className="whitespace-pre-line">{item.text}</span>
+                      </span>
                       <span className="shrink-0 font-semibold">
                         {item.answer}
                       </span>
                     </div>
+                    {item.sourceNote.length > 0 && (
+                      <p className="mt-0.5 pl-7 text-xs text-amber-eje-800 italic">
+                        {item.sourceNote}
+                      </p>
+                    )}
+                    {item.readings.length > 0 && (
+                      <p className="mt-0.5 pl-7 text-xs text-steel-700">
+                        {item.readings}
+                      </p>
+                    )}
                     {item.note.length > 0 && (
-                      <p className="mt-0.5 text-xs text-steel-500">
+                      <p className="mt-0.5 pl-7 text-xs text-steel-500">
                         Note: {item.note}
                       </p>
                     )}
@@ -300,6 +348,29 @@ export const JobCardDocument = ({ view }: { readonly view: JobView }) => {
               </ul>
             </div>
           ))}
+
+          {model.checklist.notes.map((note) => (
+            <p key={note} className="mt-1 text-xs text-steel-700">
+              {note}
+            </p>
+          ))}
+          {model.checklist.closing.length > 0 && (
+            <p className="mt-2 text-xs font-bold tracking-wide text-steel-900">
+              {model.checklist.closing}
+            </p>
+          )}
+          {model.checklist.signatures.length > 0 && (
+            <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-0.5 text-xs sm:grid-cols-2">
+              {model.checklist.signatures.map((line) => (
+                <div key={line.label} className="flex gap-2">
+                  <dt className="shrink-0 font-semibold text-steel-600">
+                    {line.label}
+                  </dt>
+                  <dd className="text-steel-800">{line.value || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </section>
       )}
 

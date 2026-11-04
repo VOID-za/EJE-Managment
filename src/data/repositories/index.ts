@@ -474,8 +474,12 @@ export interface DocumentRepository {
 
 export interface ChecklistTemplateRepository {
   list(): Promise<readonly ChecklistTemplate[]>;
-  /** The template a NEW job of this type must complete: the current version. */
-  findForJobType(jobTypeCode: string): Promise<ChecklistTemplate | null>;
+  /**
+   * Every current version a NEW checklist on this job type may be started
+   * from — one for Installation, two for Service (Milling, Lathe). The
+   * technician chooses when there is a choice (`resolveChecklistToStart`).
+   */
+  listCurrentForJobType(jobTypeCode: string): Promise<readonly ChecklistTemplate[]>;
   /**
    * The exact version recorded against a completed checklist.
    *

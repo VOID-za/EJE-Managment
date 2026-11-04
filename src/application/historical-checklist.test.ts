@@ -21,13 +21,14 @@ const buildRepos = (): RepositoryBundle => {
 const SERVICE_TEMPLATE = asChecklistTemplateId('chk-service');
 
 describe('checklist template resolution', () => {
-  it('returns version 2.0 as the current template for a new service job', async () => {
+  it('offers a new service job the Milling and Lathe checklists, never the demonstration wording', async () => {
     const repos = buildRepos();
-    const current = await repos.checklistTemplates.findForJobType('service');
+    const current = await repos.checklistTemplates.listCurrentForJobType('service');
 
-    expect(current).not.toBeNull();
-    expect(current?.version).toBe('2.0-DEMO');
-    expect(current?.status).toBe('current');
+    expect(current.map((template) => template.kind)).toEqual(['service_milling', 'service_lathe']);
+    // CHK-SRC-1: 2.0-DEMO is archived, kept for the jobs that answered it.
+    const demo = await repos.checklistTemplates.findByVersion(SERVICE_TEMPLATE, '2.0-DEMO');
+    expect(demo?.status).toBe('archived');
   });
 
   it('can still retrieve the archived version 1.0 by version', async () => {
@@ -63,7 +64,7 @@ describe('a historical job renders the version it was answered against', () => {
   it('renders the version 1.0 wording, which differs from version 2.0', async () => {
     const repos = buildRepos();
     const view = await loadJobView(repos, 'EJE-1044');
-    const current = await repos.checklistTemplates.findForJobType('service');
+    const current = await repos.checklistTemplates.findByVersion(SERVICE_TEMPLATE, '2.0-DEMO');
 
     const historicalItem = view?.checklistTemplate?.sections
       .flatMap((section) => section.items)
@@ -82,7 +83,7 @@ describe('a historical job renders the version it was answered against', () => {
   it('does not show items that were only added in version 2.0', async () => {
     const repos = buildRepos();
     const view = await loadJobView(repos, 'EJE-1044');
-    const current = await repos.checklistTemplates.findForJobType('service');
+    const current = await repos.checklistTemplates.findByVersion(SERVICE_TEMPLATE, '2.0-DEMO');
 
     const historicalIds = (view?.checklistTemplate?.sections ?? [])
       .flatMap((section) => section.items)
@@ -99,7 +100,7 @@ describe('a historical job renders the version it was answered against', () => {
   it('keeps the acceptance range that applied at the time', async () => {
     const repos = buildRepos();
     const view = await loadJobView(repos, 'EJE-1044');
-    const current = await repos.checklistTemplates.findForJobType('service');
+    const current = await repos.checklistTemplates.findByVersion(SERVICE_TEMPLATE, '2.0-DEMO');
 
     const historicalRange = view?.checklistTemplate?.sections
       .flatMap((section) => section.items)
@@ -116,20 +117,30 @@ describe('a historical job renders the version it was answered against', () => {
 });
 
 describe('a new service job uses the current version', () => {
-  it('resolves EJE-1049 to version 2.0 because it has no checklist yet', async () => {
+  /*
+   * CHK-SRC-1. A service job with no checklist yet is not handed one: it is
+   * offered the Milling and Lathe checklists, and the technician chooses.
+   */
+  it('offers EJE-1049 the Milling and Lathe checklists because it has none yet', async () => {
     const repos = buildRepos();
     const view = await loadJobView(repos, 'EJE-1049');
 
     expect(view).not.toBeNull();
     expect(view?.job.checklist).toBeNull();
-    expect(view?.checklistTemplate?.version).toBe('2.0-DEMO');
+    expect(view?.checklistTemplate).toBeNull();
+    expect(view?.checklistChoiceRequired).toBe(true);
+    expect(view?.checklistOptions.map((option) => option.kind)).toEqual([
+      'service_milling',
+      'service_lathe',
+    ]);
   });
 
-  it('resolves EJE-1053 to version 2.0 for the same reason', async () => {
+  it('offers EJE-1053 the same choice, for the same reason', async () => {
     const repos = buildRepos();
     const view = await loadJobView(repos, 'EJE-1053');
 
     expect(view?.job.checklist).toBeNull();
-    expect(view?.checklistTemplate?.version).toBe('2.0-DEMO');
+    expect(view?.checklistTemplate).toBeNull();
+    expect(view?.checklistOptions.map((option) => option.version)).toEqual(['1.0', '1.0']);
   });
 });

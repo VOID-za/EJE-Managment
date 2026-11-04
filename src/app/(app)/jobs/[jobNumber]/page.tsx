@@ -519,10 +519,11 @@ const JobDetailPage = ({
             title="Checklist version unavailable"
             message={`This job was completed against checklist version ${job.checklist?.templateVersion ?? 'unknown'}, which is no longer held. The answers are preserved on the job, but the wording cannot be shown. It is deliberately not rendered against the current version.`}
           />
-        ) : view.checklistTemplate !== null ? (
+        ) : view.checklistTemplate !== null || view.checklistOptions.length > 0 ? (
           <ChecklistRunner
             job={job}
             template={view.checklistTemplate}
+            options={view.checklistOptions}
             editable={editable}
             onChanged={refresh}
           />
