@@ -32,6 +32,17 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## NEXT RELEASE — timesheets as a piece of paper, from `claude/timesheets-paper` (prepared 4 November 2026)
+
+One migration: `0050_timesheets_paper` (additive — `docs/rollback-4606315.md` §10). The version is assigned by the release (a `feat` commit since v1.0.0: **v1.1.0**).
+
+```
+powershell -ExecutionPolicy Bypass -File deployeleasestage-release.ps1 -Sha <full sha> -CheckOnly -ExpectPending 0050_timesheets_paper -SshExe C:WindowsSystem32OpenSSHssh.exe
+powershell -ExecutionPolicy Bypass -File deployeleasestage-release.ps1 -Sha <full sha> -ExpectPending 0050_timesheets_paper -SshExe C:WindowsSystem32OpenSSHssh.exe
+```
+
+After it: `timesheet_periods_range_ordered` present and `timesheet_periods_range_valid` gone; `timesheet_working_comments` empty; every existing entry, period, snapshot, correction and monthly submission identical.
+
 ## RELEASED — `89668e8` = v1.0.0, semantic versions for every release (3 November 2026)
 
 Released 3 November 2026 21:16:54 UTC (healthy 21:16:56) from branch `claude/semantic-versioning` through `stage-release.ps1 -ExpectPending none`. **The first release with a semantic version: v1.0.0** (no version was recorded before it; earlier releases are known by commit only).

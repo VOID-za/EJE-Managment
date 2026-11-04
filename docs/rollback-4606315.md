@@ -128,3 +128,18 @@ Released in `9fa858f` on 3 November 2026 at 18:08 UTC. **Backup before 0049:** `
 | **A delivery-note reference photo** | Read as an ordinary **internal** photo, so it stays off `6ec5655`'s job card too. The purpose survives a save, and making it customer-facing is refused by the database. | Only the label is lost. |
 
 Recovery is the same as §5 and §6: `stage-release.ps1 -Rollback` returns the code only, and a database restore goes into a new database and loses everything since the pre-0049 backup.
+
+## 10. Migration 0050 — timesheets as a piece of paper (4 November 2026)
+
+**What 0050 changes (additive):** the 92-day check on `timesheet_periods` is replaced by From ≤ To (`timesheet_periods_range_ordered`); a new table `timesheet_working_comments` holds each person's open-sheet comment; `guard_monthly_submission()` allows a month without a timesheet for anybody (it allowed it for Coordinators only). No row is rewritten or deleted.
+
+**The rollback target after this release is `89668e8` (v1.0.0).** The CI rollback check runs `89668e8`'s own code against a database at 0050 holding a 152-day submitted period, an open-sheet comment and a technician's attendance-only month. It finds:
+
+| 0050 data | Under `89668e8` | Risk while rolled back |
+|---|---|---|
+| **A submitted period longer than 92 days** | Listed and read like any other submission. | Opening exactly that range on the old Timesheets page is refused by the old code's own 92-day rule (the data is untouched). |
+| **An open-sheet comment** (`timesheet_working_comments`) | Not read — the old code does not know the table. | The comment a technician typed on the new sheet is not shown on the old page; it is still stored and reappears after a forward-fix. |
+| **A technician's attendance-only month** | Read; the month shows no timesheet, as a Coordinator's does. | None. |
+| **Submissions refused as "same dates"** | The old code would send the same dates again and overwrite (RESUBMIT-1). | Old behaviour returns while rolled back. |
+
+Recovery is the same as §5 and §6. Nothing in 0050 needs undoing to roll back.

@@ -712,6 +712,22 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs
 | U7 | A Delivery Note with a site chosen | The site is kept | yes | — | NOT TESTED |
 | U8 | Complete a Delivery Note | No Additional Charges section; parts, collection, signature and issue as before | yes (a charge is refused by the server and the database) | yes | NOT TESTED |
 
+## V. Timesheets as a piece of paper (4 November 2026)
+
+Automated at 1440, 768 (touch) and 390 (touch) — `scripts/timesheets-paper-check.mjs` (9/9 at each size on the development PC before release; in CI) — and the owner's twenty scenarios in `src/application/timesheets-paper.test.ts`.
+
+| # | Do this | Pass looks like | Automated | Browser ×3 | Physical |
+|---|---|---|---|---|---|
+| V1 | As a technician on a **phone**: Add line for today with a customer, OT and Cust Km; save; close the app; reopen | The line is on the sheet, every field shown, nothing off-screen | yes | yes | NOT TESTED |
+| V2 | Add two more lines on the same day — another customer, then Workshop with no customer | All three on the day; Workshop needs no customer | yes | yes | NOT TESTED |
+| V3 | Add a line dated last month and one next week | Both saved; the earlier one says it is outside the dates | yes | yes | NOT TESTED |
+| V4 | On the **tablet**: Edit a line, Remove a line | The change shows at once | yes | yes | NOT TESTED |
+| V5 | Write the comment; Save comment; Submit on payday: check From and To, Preview, Submit timesheet | The confirmation names the next sheet's first day; the comment is cleared; the submission is listed | yes | yes | NOT TESTED |
+| V6 | Try to submit the same dates again | Refused: ask for a correction | yes | yes | NOT TESTED |
+| V7 | Office, on a desktop: Timesheets → Submitted timesheets — every technician | The submission is listed; View, PDF and Export CSV work | yes | yes | NOT TESTED |
+| V8 | Corrections on a submission: the technician asks, the office accepts | The corrected version is in force; the original is still viewable | yes (service and HTTP) | — | NOT TESTED |
+| V9 | My Monthly Forms for the month | Attendance only, with the note that the timesheet goes from the Timesheets page by payday | yes | yes | NOT TESTED |
+
 ## Physical-device acceptance still outstanding (all of it, in one place)
 
 Nothing in this list can be done by automation; each stays open until a person has done it on the real device.
@@ -728,6 +744,7 @@ Nothing in this list can be done by automation; each stays open until a person h
 | The standby calendar | Q1–Q8 | #96 |
 | The tester’s critical fixes | R1–R10 | #97–#108 |
 | The next critical batch | S1–S13 | #109–#120 |
+| Timesheets as a piece of paper | V1–V9 | TS-PAPER |
 | The physical acceptance follow-up | T1–T13 | #121–#127 |
 | Test & Repair photo; simpler Delivery Note | U1–U8 | #128, #129 |
 
