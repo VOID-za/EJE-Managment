@@ -177,9 +177,11 @@ const TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
    * so the office handles it straight to `awaiting_po`. The old edge to
    * `closed` is gone: a confirmed delivery no longer closes anything.
    */
-  awaiting_delivery: ['awaiting_po'],
-  // The office marks it handled; the invoice is being raised in Sage.
-  office_handling: ['awaiting_po'],
+  awaiting_delivery: ['awaiting_po', 'awaiting_invoice_no'],
+  // The office marks it handled; the invoice is being raised in Sage. PO-FLOW-1:
+  // a job that already has its customer's PO number goes straight on to
+  // Awaiting Invoice No — Awaiting PO is for a job WITHOUT one.
+  office_handling: ['awaiting_po', 'awaiting_invoice_no'],
   // INV-FLOW-1: only a recorded PO number moves it on — never an invoice number.
   awaiting_po: ['awaiting_invoice_no'],
   // Only a recorded invoice number moves it on.

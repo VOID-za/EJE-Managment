@@ -343,25 +343,24 @@ await check('Signature: shown again at its own proportions, and drawn in the iss
 });
 
 /* ---- Invoicing ------------------------------------------------------------- */
-await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) → Awaiting Invoice No → Invoiced, then in Closed Jobs (INVOICED-CLOSED-1)', async () => {
+await check('Invoicing: a job raised with its PO is Handled → Awaiting Invoice No → Invoiced (PO-FLOW-1), then in Closed Jobs (INVOICED-CLOSED-1)', async () => {
   await as('Elmarie Coetzee');
   await go('/jobs/EJE-1058');
   const panel = page.getByTestId('office-lifecycle');
   await panel.waitFor({ timeout: 20000 });
-  await press(panel.getByTestId('mark-handled'));
-  await panel.getByTestId('po-number').waitFor({ timeout: 15000 });
   const jobId = (await call('GET', '/api/jobs/EJE-1058')).json.data.view.job.id;
-  const skipped = await call('POST', `/api/jobs/${jobId}/record_invoice`, { invoiceNumber: 'INV-SKIP' });
-  if (skipped.status !== 422) fail(`an invoice number at Awaiting PO answered ${skipped.status}`);
-  await press(panel.getByTestId('save-po-number'));
-  await panel.getByText("Enter the customer's PO number", { exact: false }).waitFor({ timeout: 10000 });
-  await panel.getByTestId('po-number').fill('PO-CHECK-1058');
-  await press(panel.getByTestId('save-po-number'));
+  // An invoice number before handling is refused: no office step is skipped.
+  const early = await call('POST', `/api/jobs/${jobId}/record_invoice`, { invoiceNumber: 'INV-SKIP' });
+  if (early.status !== 422) fail(`an invoice number before handling answered ${early.status}`);
+  // PO-FLOW-1: EJE-1058 was raised with its PO (PO-44988), so handling skips Awaiting PO.
+  await press(panel.getByTestId('mark-handled'));
   await panel.getByTestId('invoice-number').waitFor({ timeout: 15000 });
+  if ((await panel.getByTestId('po-number').count()) !== 0) fail('a job with its PO was asked for one');
   await go('/notifications?tab=awaiting_invoice_no');
   const row = page.getByTestId('awaiting-invoice-EJE-1058');
   await row.waitFor({ timeout: 20000 });
-  await row.getByText('Purchase Order:PO-CHECK-1058').waitFor({ timeout: 5000 });
+  const rowText = await row.innerText();
+  if (!rowText.replace(/\s+/g, ' ').includes('PO-44988')) fail(`the Awaiting Invoice row does not show the PO: ${rowText.replace(/\s+/g, ' ').slice(0, 160)}`);
   await press(row.getByRole('button', { name: 'Save' }));
   await row.getByText('Enter the invoice number from Sage', { exact: false }).waitFor({ timeout: 10000 });
   await row.getByTestId('invoice-number-EJE-1058').fill('INV-CHECK-1058');
@@ -373,7 +372,7 @@ await check('Invoicing: Handled → Awaiting PO (no invoice number accepted) →
   const invoiced = page.getByTestId('closed-status-EJE-1058').first();
   await invoiced.waitFor({ timeout: 20000 });
   await invoiced.getByText('Invoice INV-CHECK-1058').waitFor({ timeout: 5000 });
-  await invoiced.getByText('Purchase Order:PO-CHECK-1058').waitFor({ timeout: 5000 }); // NOTIF-PO-LABEL-1 (2 November 2026)
+  await invoiced.getByText('Purchase Order:PO-44988').waitFor({ timeout: 5000 }); // NOTIF-PO-LABEL-1; PO-FLOW-1: the PO it was raised with
   await invoiced.getByText('Invoiced').waitFor({ timeout: 5000 });
   await noPageOverflow('Closed Jobs');
 });

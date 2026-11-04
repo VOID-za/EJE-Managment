@@ -19,7 +19,9 @@ const FIELD_JOB = {
   priority: 'urgent',
   scheduledDate: null,
   scheduledEndDate: null,
-  orderNumber: 'PO-73001',
+  // No PO when raised: these tests walk the Awaiting PO path. PO-FLOW-1 below
+  // raises jobs WITH one.
+  orderNumber: '',
   referenceNumber: '',
   faultDescription: 'Coolant pump alarming.',
   additionalTechnicianIds: [],
@@ -41,9 +43,9 @@ const userId = async (client: ApiTestClient, email: string): Promise<string> =>
   ).data.users.find((user) => user.email === email)?.id ?? '';
 
 /** Raises, works, signs and submits a job through the real routes. */
-const submittedJob = async (master: ApiTestClient, tech: ApiTestClient): Promise<Job> => {
+const submittedJob = async (master: ApiTestClient, tech: ApiTestClient, orderNumber = ''): Promise<Job> => {
   const techId = await userId(master, DEMO_USERS.technician);
-  const job = (await master.post<Job>('/api/jobs', { ...FIELD_JOB, primaryTechnicianId: techId })).data;
+  const job = (await master.post<Job>('/api/jobs', { ...FIELD_JOB, orderNumber, primaryTechnicianId: techId })).data;
   expect((await tech.post(`/api/jobs/${job.id}/accept`)).status).toBe(200);
   await tech.post(`/api/jobs/${job.id}/add_labour`, {
     date: '2026-10-20',
@@ -250,5 +252,75 @@ describe('a parts job, over the API', () => {
       expect(answer.status, action).toBe(422);
       expect(codes(answer), action).toContain('not_applicable_to_job_type');
     }
+  });
+});
+
+/**
+ * PO-FLOW-1 — THE JOB'S OWN PO DECIDES. A job raised with the customer's PO
+ * (its customer order number) used to go to Awaiting PO anyway when the office
+ * handled it. The server now reads the stored PO: with one, Handled goes
+ * straight to Awaiting Invoice No and records it; without one, Awaiting PO.
+ */
+describe('PO-FLOW-1: handling a job that already has its PO', () => {
+  beforeEach(() => {
+    startTestServer();
+  });
+
+  it('skips Awaiting PO when the PO was entered when the job was raised, and keeps it through to Invoiced', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech, '  PO-73001 ');
+    expect(job.orderNumber.trim()).toBe('PO-73001');
+    const handled = await master.post<Job>(`/api/jobs/${job.id}/handle_office`, {});
+    expect(handled.status).toBe(200);
+    const read = await jobOf(master, job.jobNumber);
+    expect(read.status).toBe('awaiting_invoice_no');
+    expect(read.purchaseOrder?.number).toBe('PO-73001');
+    expect((await master.post(`/api/jobs/${job.id}/record_invoice`, { invoiceNumber: 'INV-1' })).status).toBe(200);
+    const invoiced = await jobOf(master, job.jobNumber);
+    expect(invoiced.status).toBe('invoiced');
+    expect(invoiced.purchaseOrder?.number).toBe('PO-73001');
+    expect(invoiced.orderNumber.trim()).toBe('PO-73001');
+  });
+
+  it('skips Awaiting PO when the office enters the PO while handling', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech);
+    expect((await master.post(`/api/jobs/${job.id}/handle_office`, { poNumber: ' PO-HANDLED-9 ' })).status).toBe(200);
+    const read = await jobOf(master, job.jobNumber);
+    expect(read.status).toBe('awaiting_invoice_no');
+    expect(read.purchaseOrder?.number).toBe('PO-HANDLED-9');
+  });
+
+  it('goes to Awaiting PO with no PO, or a whitespace-only one, and on when the PO is added later', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech, '   ');
+    expect((await master.post(`/api/jobs/${job.id}/handle_office`, { poNumber: '  ' })).status).toBe(200);
+    expect((await jobOf(master, job.jobNumber)).status).toBe('awaiting_po');
+    expect((await master.post(`/api/jobs/${job.id}/record_po`, { poNumber: 'PO-LATER' })).status).toBe(200);
+    const read = await jobOf(master, job.jobNumber);
+    expect(read.status).toBe('awaiting_invoice_no');
+    expect(read.purchaseOrder?.number).toBe('PO-LATER');
+  });
+
+  it('refuses an unusable PO typed while handling, and changes nothing', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech);
+    const refused = await master.post(`/api/jobs/${job.id}/handle_office`, { poNumber: 'PO\nBAD' });
+    expect(refused.status).toBe(422);
+    expect(codes(refused)).toContain('po_number_invalid');
+    expect((await jobOf(master, job.jobNumber)).status).toBe('office_handling');
+  });
+
+  it('is still the office’s alone', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech, 'PO-73001');
+    const refused = await tech.post(`/api/jobs/${job.id}/handle_office`, {});
+    expect(refused.status).not.toBe(200);
+    expect((await jobOf(master, job.jobNumber)).status).toBe('office_handling');
   });
 });

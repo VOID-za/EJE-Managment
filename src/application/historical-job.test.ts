@@ -64,7 +64,10 @@ const handOverAndIssue = async (
     ...context,
     actor: seedUsers.find((user) => user.id === 'user-master-elmarie')!,
   };
-  const closed = await recordInvoiceNumber(office, await recordPurchaseOrder(office, await handleJobCard(office, delivered), 'PO-HIST-1'), 'INV-HIST-1');
+  // PO-FLOW-1: a job raised with its PO skips Awaiting PO.
+  const handledJob = await handleJobCard(office, delivered);
+  const withPo = handledJob.status === 'awaiting_po' ? await recordPurchaseOrder(office, handledJob, 'PO-HIST-1') : handledJob;
+  const closed = await recordInvoiceNumber(office, withPo, 'INV-HIST-1');
   return { ...issued, job: closed };
 };
 

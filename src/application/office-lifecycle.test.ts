@@ -47,10 +47,15 @@ const codesOf = async (attempt: Promise<unknown>): Promise<readonly string[]> =>
 const withPo = (harness: Harness, job: Job, number = 'PO-TEST'): Promise<Job> =>
   recordPurchaseOrder(harness.as(master), job, number);
 
-const submitted = async (harness: Harness, jobNumber = 'EJE-1048'): Promise<Job> => {
-  const opened = await harness.repos.jobs.findByJobNumber(jobNumber);
+/**
+ * A seeded job worked, signed and submitted. With NO PO by default — the
+ * Awaiting PO path these tests walk; PO-FLOW-1 passes one.
+ */
+const submitted = async (harness: Harness, jobNumber = 'EJE-1048', orderNumber = ''): Promise<Job> => {
+  const seeded = await harness.repos.jobs.findByJobNumber(jobNumber);
+  const opened = await harness.repos.jobs.save({ ...seeded!, orderNumber });
   const context = harness.as(technician);
-  let job = await acceptJob(context, opened!);
+  let job = await acceptJob(context, opened);
   job = await addLabour(context, job, { date: '2026-10-20', rateType: 'normal', hours: 2, description: '' });
   job = await saveCompletionReport(context, job, {
     ...job.completionReport,
@@ -404,9 +409,11 @@ describe('BD-22: a refusal resolved Without Customer Signature goes to the offic
   const REASON = 'The planner disputes the hours and will not sign.';
 
   const refused = async (harness: Harness): Promise<Job> => {
-    const opened = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    // No PO when raised: this walks the Awaiting PO path (PO-FLOW-1).
+    const seeded = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    const opened = await harness.repos.jobs.save({ ...seeded!, orderNumber: '' });
     const context = harness.as(technician);
-    let job = await acceptJob(context, opened!);
+    let job = await acceptJob(context, opened);
     job = await addLabour(context, job, { date: '2026-10-20', rateType: 'normal', hours: 2, description: '' });
     job = await saveCompletionReport(context, job, {
       ...job.completionReport,
@@ -516,5 +523,58 @@ describe('the same invoice number on more than one job card', () => {
     expect(a.invoice?.number).toBe('INV-SHARED-7');
     expect(b.invoice?.number).toBe('INV-SHARED-7');
     expect(b.invoice?.recordedBy).toBe(coordinator.id);
+  });
+});
+
+describe('PO-FLOW-1: the stored PO decides whether a handled job waits for one', () => {
+  let harness: Harness;
+  beforeEach(() => {
+    harness = buildHarness();
+  });
+
+  it('goes straight to Awaiting Invoice No when the job was raised with its PO, recording it once and auditing it', async () => {
+    const job = await submitted(harness, 'EJE-1048', ' PO-RAISED-1 ');
+    const handled = await handleJobCard(harness.as(master), job);
+    expect(handled.status).toBe('awaiting_invoice_no');
+    expect(handled.purchaseOrder?.number).toBe('PO-RAISED-1');
+    expect(handled.purchaseOrder?.recordedBy).toBe(master.id);
+    expect(handled.officeHandling?.handledBy).toBe(master.id);
+    const trail = await harness.repos.activity.list(job.id);
+    expect(trail.map((event) => event.type)).toEqual(expect.arrayContaining(['job_office_handled', 'job_po_recorded']));
+    // A PO step is never offered twice.
+    expect(await codesOf(recordPurchaseOrder(harness.as(master), handled, 'PO-OTHER'))).toContain('po_already_recorded');
+    const invoiced = await recordInvoiceNumber(harness.as(master), handled, 'INV-PO-1');
+    expect(invoiced.status).toBe('invoiced');
+    expect(invoiced.purchaseOrder?.number).toBe('PO-RAISED-1');
+  });
+
+  it('uses a PO entered while handling, and refuses an unusable one with nothing changed', async () => {
+    const job = await submitted(harness);
+    expect(await codesOf(handleJobCard(harness.as(master), job, 'POX'))).toContain('po_number_invalid');
+    expect((await harness.repos.jobs.findById(job.id))?.status).toBe('office_handling');
+    const handled = await handleJobCard(harness.as(master), job, '  PO-DESK-2 ');
+    expect(handled.status).toBe('awaiting_invoice_no');
+    expect(handled.purchaseOrder?.number).toBe('PO-DESK-2');
+  });
+
+  it('waits in Awaiting PO with no PO or a whitespace-only one, and moves on when it arrives', async () => {
+    const job = await submitted(harness, 'EJE-1048', '    ');
+    const handled = await handleJobCard(harness.as(master), job, '   ');
+    expect(handled.status).toBe('awaiting_po');
+    expect(handled.purchaseOrder).toBeNull();
+    const withOne = await recordPurchaseOrder(harness.as(master), handled, 'PO-LATE-3');
+    expect(withOne.status).toBe('awaiting_invoice_no');
+  });
+
+  it('is refused to a technician, PO or not', async () => {
+    const job = await submitted(harness, 'EJE-1048', 'PO-RAISED-4');
+    expect(await codesOf(handleJobCard(harness.as(technician), job))).toContain('not_permitted');
+    expect((await harness.repos.jobs.findById(job.id))?.status).toBe('office_handling');
+  });
+
+  it('the workflow allows Office Handling straight to Awaiting Invoice No, and nothing else new', () => {
+    expect(canTransition('office_handling', 'awaiting_invoice_no')).toBe(true);
+    expect(canTransition('office_handling', 'invoiced')).toBe(false);
+    expect(canTransition('awaiting_po', 'invoiced')).toBe(false);
   });
 });

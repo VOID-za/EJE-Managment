@@ -547,16 +547,16 @@ describeDb('a signed job card can be submitted on PostgreSQL', () => {
     expect((await master.post(`/api/jobs/${id}/handle_office`, {})).status).toBe(200);
     const blank = await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: '' });
     expect(blank.status).toBe(422);
-    const po = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
-    expect(po[0]?.status).toBe('awaiting_po');
-    expect(po[0]?.officeHandledAt).not.toBeNull();
-    expect(po[0]?.invoiceNumber).toBeNull();
-    // INV-FLOW-1: an invoice number does not stand in for the PO; the PO number first.
-    expect((await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: 'INV-PG-73' })).status).toBe(422);
-    expect((await master.post(`/api/jobs/${id}/record_po`, { poNumber: 'PO-PG-73' })).status).toBe(200);
+    // PO-FLOW-1: the job was raised with its customer's PO (PO-81000), so
+    // handling it records that PO and goes straight to Awaiting Invoice No —
+    // on the real schema, whose checks require the PO and the handling stamp.
     const awaitingInvoice = await db.select().from(schema.jobs).where(eq(schema.jobs.id, id));
     expect(awaitingInvoice[0]?.status).toBe('awaiting_invoice_no');
-    expect(awaitingInvoice[0]?.poNumber).toBe('PO-PG-73');
+    expect(awaitingInvoice[0]?.officeHandledAt).not.toBeNull();
+    expect(awaitingInvoice[0]?.poNumber).toBe('PO-81000');
+    expect(awaitingInvoice[0]?.invoiceNumber).toBeNull();
+    // The PO is never replaced.
+    expect((await master.post(`/api/jobs/${id}/record_po`, { poNumber: 'PO-PG-73' })).status).toBe(422);
     expect(
       (await master.post(`/api/jobs/${id}/record_invoice`, { invoiceNumber: 'INV-PG-73' })).status,
     ).toBe(200);

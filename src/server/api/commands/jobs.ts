@@ -905,7 +905,11 @@ export const JOB_COMMANDS: CommandRegistry = {
    * and judged by the operation, which refuses a blank one and leaves the job
    * Awaiting PO. Both are the office's (`jobs.officeHandling`).
    */
-  handle_office: simple((context, job) => handleJobCard(context.operation, job)),
+  // PO-FLOW-1: a PO number typed while handling is optional; the job's own is used when present.
+  handle_office: withInput(
+    z.object({ poNumber: z.string().max(200).optional() }).strict(),
+    (context, job, { poNumber }) => handleJobCard(context.operation, job, poNumber),
+  ),
   // INV-FLOW-1: Awaiting PO -> Awaiting Invoice No, on the PO number only.
   record_po: command({
     schema: z.object({ poNumber: z.string().max(500) }).strict(),

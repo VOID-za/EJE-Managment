@@ -109,8 +109,10 @@ export const finishOfficeLifecycle = async (
   poNumber = 'PO-TEST-1',
 ): Promise<Job> => {
   // INV-FLOW-1: Handled -> Awaiting PO -> Awaiting Invoice No -> Invoiced.
+  // PO-FLOW-1: a job that already has its PO skips Awaiting PO.
   const handled = await handleJobCard(context, job);
-  const withPo = await recordPurchaseOrder(context, handled, poNumber);
+  const withPo =
+    handled.status === 'awaiting_po' ? await recordPurchaseOrder(context, handled, poNumber) : handled;
   return recordInvoiceNumber(context, withPo, invoiceNumber);
 };
 

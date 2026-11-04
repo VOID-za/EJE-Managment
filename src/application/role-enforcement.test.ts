@@ -352,6 +352,9 @@ describe('issuing a job card', () => {
   // Issue #73: the submission hands it to the office; a delivery report does
   // not close it, and the technician cannot take the office steps.
   it('is done by the technician, goes to the office, and only the office invoices it', async () => {
+    // No PO when raised, so the office's PO step is there to be refused (PO-FLOW-1).
+    const raised = await harness.repos.jobs.findByJobNumber('EJE-1048');
+    await harness.repos.jobs.save({ ...raised!, orderNumber: '' });
     const signed = await workAndSign('EJE-1048');
     const context = harness.as(sipho);
 

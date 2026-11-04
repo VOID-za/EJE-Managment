@@ -45,15 +45,31 @@ export const OfficeLifecyclePanel = ({
   const office = can(currentUser.role, 'jobs.officeHandling');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  const [poNumber, setPoNumber] = useState('');
+  // PO-FLOW-1: a job raised with its customer order number offers it here.
+  const [poNumber, setPoNumber] = useState(job.purchaseOrder === null ? job.orderNumber.trim() : '');
   const [poError, setPoError] = useState<string | null>(null);
   const nameOf = (id: string) => {
     const user = users.find((candidate) => candidate.id === id);
     return user === undefined ? 'Unknown user' : userFullName(user);
   };
 
+  // PO-FLOW-1: the job's own PO (its customer order number) or one typed here
+  // sends it straight to Awaiting Invoice No; the server decides, from what is stored.
+  const existingPo =
+    job.purchaseOrder?.number ??
+    (job.orderNumber.trim().length > 0 && poNumberProblem(job.orderNumber) === null ? job.orderNumber.trim() : null);
+  const [handlingPo, setHandlingPo] = useState('');
   const handle = async () => {
-    if (await operation.run(() => jobs.handleOffice(job.id))) onChanged();
+    const typed = handlingPo.trim();
+    if (typed.length > 0) {
+      const problem = poNumberProblem(typed);
+      setPoError(problem);
+      if (problem !== null) return;
+    }
+    if (await operation.run(() => jobs.handleOffice(job.id, typed.length > 0 ? typed : undefined))) {
+      setHandlingPo('');
+      onChanged();
+    }
   };
 
   // INV-FLOW-1: Awaiting PO leaves only on a PO number.
@@ -91,7 +107,7 @@ export const OfficeLifecyclePanel = ({
     <Card className="mb-5" data-testid="office-lifecycle">
       <CardHeader
         title="Office handling and invoicing"
-        description="After the technician submits, the office handles the job card, records the customer's PO number, raises the invoice in Sage and records its number here: Handled → Awaiting PO → Awaiting Invoice No → Invoiced."
+        description="After the technician submits, the office handles the job card, raises the invoice in Sage and records its number here: Handled → Awaiting Invoice No → Invoiced. A job with no PO number waits in Awaiting PO until it has one."
         action={
           <Badge tone={job.status === 'invoiced' ? 'green' : 'amber'} size="sm">
             {stage}
@@ -142,12 +158,33 @@ export const OfficeLifecyclePanel = ({
       />
 
       {office && isAwaitingOfficeHandling(job.status) && (
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          {existingPo === null && (
+            <div className="min-w-[14rem] flex-1">
+              <TextField
+                label="PO number (optional)"
+                value={handlingPo}
+                maxLength={MAX_PO_NUMBER_LENGTH}
+                error={poError ?? undefined}
+                hint="If the customer's PO is known now, enter it and the job goes straight to Awaiting Invoice No."
+                onChange={(event) => {
+                  setHandlingPo(event.target.value);
+                  if (poError !== null) setPoError(null);
+                }}
+                data-testid="handling-po-number"
+              />
+            </div>
+          )}
           <Button loading={operation.running} onClick={() => void handle()} data-testid="mark-handled">
             Mark handled
           </Button>
-          <p className="text-sm text-steel-600">
-            Moves the job to Awaiting PO. The signed job card, its document and its history are not changed.
+          <p className="basis-full text-sm text-steel-600" data-testid="handling-next-stage">
+            {existingPo !== null
+              ? `This job already has PO ${existingPo}, so it moves straight to Awaiting Invoice No.`
+              : handlingPo.trim().length > 0
+                ? 'With this PO number it moves straight to Awaiting Invoice No.'
+                : 'With no PO number it moves to Awaiting PO.'}{' '}
+            The signed job card, its document and its history are not changed.
           </p>
         </div>
       )}

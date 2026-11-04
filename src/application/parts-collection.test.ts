@@ -10,6 +10,7 @@ import {
 import { loadJobView } from './job-view';
 import type { OperationContext } from './context';
 import { handleJobCard, recordInvoiceNumber, recordPurchaseOrder } from './office-lifecycle';
+import { WorkflowError } from './errors';
 import { createDemoRepositories } from '@/data/demo/repositories';
 import { DemoStore } from '@/data/demo/demo-store';
 import { SimulatedEmailService } from '@/services/simulated/email';
@@ -247,9 +248,13 @@ describe('the courier collection document', () => {
     // office like any submission; handling and the invoice finish it.
     const delivered = await confirmJobCardDelivery(harness.master, issued.job);
     expect(delivered.status).toBe('office_handling');
+    // PO-FLOW-1: a parts collection always carries its order number, which is
+    // the customer's PO — so handling it goes straight to Awaiting Invoice No.
     const handled = await handleJobCard(harness.master, delivered);
-    const withPo = await recordPurchaseOrder(harness.master, handled, 'PO-PARTS-1');
-    expect((await recordInvoiceNumber(harness.master, withPo, 'INV-PARTS-1')).status).toBe('invoiced');
+    expect(handled.status).toBe('awaiting_invoice_no');
+    expect(handled.purchaseOrder?.number).toBe(delivered.orderNumber.trim());
+    await expect(recordPurchaseOrder(harness.master, handled, 'PO-PARTS-1')).rejects.toBeInstanceOf(WorkflowError);
+    expect((await recordInvoiceNumber(harness.master, handled, 'INV-PARTS-1')).status).toBe('invoiced');
   });
 });
 

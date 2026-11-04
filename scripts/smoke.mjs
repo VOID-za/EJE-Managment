@@ -2400,15 +2400,13 @@ await step('the office handles a submitted job and invoices it, from the job pag
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   const panel = page.getByTestId('office-lifecycle');
   await panel.waitFor({ timeout: 10000 });
+  // PO-FLOW-1: EJE-1048 was raised with the customer's PO (PO-88123), so
+  // handling it skips Awaiting PO and records that PO — the panel says so first.
+  await panel.getByTestId('handling-next-stage').getByText('already has PO PO-88123', { exact: false }).waitFor({ timeout: 8000 });
   await panel.getByTestId('mark-handled').click();
-  await panel.getByText('Awaiting PO').first().waitFor({ timeout: 10000 });
-
-  // INV-FLOW-1: Awaiting PO takes the PO number — a blank one is refused and says why.
-  await panel.getByTestId('save-po-number').click();
-  await panel.getByText("Enter the customer's PO number", { exact: false }).waitFor({ timeout: 8000 });
-  await panel.getByTestId('po-number').fill('PO-SMOKE-1048');
-  await panel.getByTestId('save-po-number').click();
   await panel.getByText('Awaiting Invoice No').first().waitFor({ timeout: 10000 });
+  await panel.getByText('PO-88123', { exact: false }).first().waitFor({ timeout: 8000 });
+  if ((await panel.getByTestId('save-po-number').count()) !== 0) throw new Error('a job with its PO was asked for one');
 
   // Saving with no invoice number keeps it Awaiting Invoice No, and says why.
   await panel.getByTestId('save-invoice-number').click();

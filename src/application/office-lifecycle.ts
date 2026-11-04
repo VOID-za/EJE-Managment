@@ -50,7 +50,25 @@ const stored = async (context: OperationContext, job: Job): Promise<Job> =>
   (await context.repos.jobs.findById(job.id)) ?? job;
 
 /**
- * OFFICE HANDLING -> AWAITING PO. The office has taken the job card on.
+ * THE PO NUMBER A JOB ALREADY HAS, if it has a usable one. PO-FLOW-1.
+ *
+ * In order: one the office records while handling it; one already recorded
+ * against the job; the customer order number taken when the job was raised
+ * ("Customer order number", e.g. PO-88123) — which is the customer's PO, and
+ * was being ignored, so a job raised WITH its PO still went to Awaiting PO.
+ * Blank or whitespace-only is no PO at all.
+ */
+export const knownPoNumber = (job: Job, given?: string): string | null => {
+  for (const candidate of [given ?? '', job.purchaseOrder?.number ?? '', job.orderNumber]) {
+    if (candidate.trim().length > 0 && poNumberProblem(candidate) === null) return candidate.trim();
+  }
+  return null;
+};
+
+/**
+ * OFFICE HANDLING -> AWAITING PO, or straight on to AWAITING INVOICE NO when
+ * the job already has its PO number (PO-FLOW-1). The office has taken the job
+ * card on.
  *
  * Accepts `office_handling` and its legacy name `awaiting_delivery` — a job
  * submitted before this lifecycle existed is a signed job card waiting on the
@@ -58,9 +76,25 @@ const stored = async (context: OperationContext, job: Job): Promise<Job> =>
  * `job_submitted` notice for the job is marked handled with it, so the job
  * leaves every Inbox at once.
  */
-export const handleJobCard = async (context: OperationContext, given: Job): Promise<Job> => {
+export const handleJobCard = async (
+  context: OperationContext,
+  given: Job,
+  /** A PO number the office types while handling it. Optional. */
+  poNumber?: string,
+): Promise<Job> => {
   assertOffice(context, 'mark a job card handled');
   const job = await stored(context, given);
+  if (poNumber !== undefined && poNumber.trim().length > 0) {
+    const problem = poNumberProblem(poNumber);
+    if (problem !== null) throw refuse(`${job.jobNumber} needs a usable PO number.`, 'po_number_invalid', problem);
+    if (job.purchaseOrder !== null && job.purchaseOrder.number !== poNumber.trim()) {
+      throw refuse(
+        `${job.jobNumber} already has a PO number.`,
+        'po_already_recorded',
+        `PO ${job.purchaseOrder.number} is recorded for it, and a PO number is never replaced.`,
+      );
+    }
+  }
   if (!isAwaitingOfficeHandling(job.status) || !canTransition(job.status, 'awaiting_po')) {
     throw refuse(
       `${job.jobNumber} is not waiting for office handling.`,
@@ -69,18 +103,48 @@ export const handleJobCard = async (context: OperationContext, given: Job): Prom
     );
   }
   const now = context.services.clock.now();
+  const po = knownPoNumber(job, poNumber);
+  if (po === null) {
+    const saved = await context.repos.jobs.save({
+      ...job,
+      status: 'awaiting_po',
+      officeHandling: { handledBy: context.actor.id, handledAt: now },
+    });
+    await context.repos.notifications.markHandledForJob(job.id, 'job_submitted');
+    await audit(context, {
+      jobId: job.id,
+      type: 'job_office_handled',
+      summary: 'Job card handled by the office',
+      detail: `${userFullName(context.actor)} handled the submitted job card. ${job.jobNumber} has no PO number, so it is awaiting the customer's PO and its invoice number.`,
+    });
+    return saved;
+  }
+
+  // PO-FLOW-1: the job has its PO — record it (once; never replaced) and go on.
+  const recordedNow = job.purchaseOrder === null;
   const saved = await context.repos.jobs.save({
     ...job,
-    status: 'awaiting_po',
+    status: 'awaiting_invoice_no',
     officeHandling: { handledBy: context.actor.id, handledAt: now },
+    purchaseOrder: job.purchaseOrder ?? { number: po, recordedBy: context.actor.id, recordedAt: now },
   });
   await context.repos.notifications.markHandledForJob(job.id, 'job_submitted');
   await audit(context, {
     jobId: job.id,
     type: 'job_office_handled',
     summary: 'Job card handled by the office',
-    detail: `${userFullName(context.actor)} handled the submitted job card. ${job.jobNumber} is awaiting the customer's PO and its invoice number.`,
+    detail: `${userFullName(context.actor)} handled the submitted job card. ${job.jobNumber} already has PO ${po}, so it is awaiting its invoice number.`,
   });
+  if (recordedNow) {
+    const source = poNumber !== undefined && poNumber.trim() === po ? 'entered while handling it' : "taken from the job's customer order number";
+    await audit(context, {
+      jobId: job.id,
+      type: 'job_po_recorded',
+      summary: `PO recorded — ${po}`,
+      detail: `PO ${po} for ${job.jobNumber}, ${source}.`,
+      changes: [{ field: 'purchaseOrder.number', from: null, to: po }],
+    });
+  }
   return saved;
 };
 

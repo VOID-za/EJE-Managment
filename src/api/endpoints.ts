@@ -460,7 +460,7 @@ export const reads = {
   jobs: () => query<{ rows: readonly JobListRow[]; closedCount: number }>('/api/jobs'),
   job: (jobNumber: string) => query<JobScreen>(`/api/jobs/${segment(jobNumber)}`),
   jobForm: () => query<JobFormData>('/api/jobs/form'),
-  closedJobs: (filters: ClosedJobFilters) =>
+  closedJobs: (filters: ClosedJobFilters, page = 1) =>
     query<ClosedJobsPage>(
       `/api/jobs/closed${search({
         term: filters.term,
@@ -471,6 +471,7 @@ export const reads = {
         closedFrom: filters.closedFrom,
         closedTo: filters.closedTo,
         outcome: filters.outcome ?? 'all',
+        page: String(page),
       })}`,
     ),
   customers: () => query<readonly CustomerRow[]>('/api/customers'),
@@ -577,7 +578,9 @@ export const jobs = {
     }),
   accept: (jobId: string) => jobAction(jobId, 'accept'),
   /** Issue #73: the office has the submitted job card. Office Handling -> Awaiting PO. */
-  handleOffice: (jobId: string) => jobAction(jobId, 'handle_office'),
+  /** PO-FLOW-1: a PO number typed while handling is optional. */
+  handleOffice: (jobId: string, poNumber?: string) =>
+    jobAction(jobId, 'handle_office', poNumber === undefined ? {} : { poNumber }),
   /** Issue #73: the invoice number from Sage. Awaiting PO -> Invoiced. */
   recordPo: (jobId: string, poNumber: string) => jobAction(jobId, 'record_po', { poNumber }),
   recordInvoice: (jobId: string, invoiceNumber: string) =>
