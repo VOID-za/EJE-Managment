@@ -432,8 +432,9 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
       snapshot: { technicianName: 'Sipho Mahlangu', from, to, comment: '', entries: [] },
     });
     await attendance.submitPeriod(period(B.earlyPeriod, '2027-01-01', '2027-01-31'));
-    await attendance.supersedeOverlappingPeriods({ userId: tech, from: '2027-01-15', to: '2027-02-14', exceptId: null, at, by: tech });
-    await attendance.submitPeriod(period(B.latePeriod, '2027-01-15', '2027-02-14'));
+    // The later submission covers every day of the earlier one (TS-PAPER-7: only then is it replaced).
+    await attendance.supersedeOverlappingPeriods({ userId: tech, from: '2027-01-01', to: '2027-02-14', exceptId: null, at, by: tech });
+    await attendance.submitPeriod(period(B.latePeriod, '2027-01-01', '2027-02-14'));
     const standby = new PostgresStandbyRepository(db);
     await standby.saveEligibility({ userId: asUserId(IDS.master), main: true, helper: true, apprentice: false, updatedBy: asUserId(IDS.coordinator), updatedAt: at });
     await standby.createWeeks([{

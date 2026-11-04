@@ -104,20 +104,24 @@ describeDb('migration 0048 — Delivery Notes, overlapping timesheets, Senior Te
     snapshot: { technicianName: 'Sipho Mahlangu', from, to, comment: '', entries: [] },
   });
 
-  it('TS-OVERLAP-1: an overlapping submission supersedes the earlier one; one current per day; nothing deleted', async () => {
+  it('TS-OVERLAP-1 / TS-PAPER-7: a submission covering the earlier one supersedes it (a partial one never does); one current per day; nothing deleted', async () => {
     const attendance = new PostgresAttendanceRepository(db);
     const first = (await attendance.submitPeriod(period('2026-10-01', '2026-10-31')))!;
     // Without superseding first, the guard refuses a second current submission for the same days.
     expect(await refusal(attendance.submitPeriod(period('2026-10-15', '2026-11-14')))).toMatch(/overlaps a period already sent/u);
-    const replaced = await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-10-15', to: '2026-11-14', exceptId: null, at: NOW, by: TECH });
+    // TS-PAPER-7: dates covering only part of it replace nothing — the partial submission stays refused.
+    expect(await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-10-15', to: '2026-11-14', exceptId: null, at: NOW, by: TECH })).toEqual([]);
+    expect(await refusal(attendance.submitPeriod(period('2026-10-15', '2026-11-14')))).toMatch(/overlaps a period already sent/u);
+    // Dates covering ALL of it replace it.
+    const replaced = await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: null, at: NOW, by: TECH });
     expect(replaced.map((row) => row.id)).toEqual([first.id]);
-    const second = (await attendance.submitPeriod(period('2026-10-15', '2026-11-14')))!;
+    const second = (await attendance.submitPeriod(period('2026-09-26', '2026-11-14')))!;
     expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([second.id]);
     // Kept, not deleted; and current again only by being SENT again.
     expect((await attendance.findPeriod(TECH, '2026-10-01', '2026-10-31'))?.supersededAt).toBeTruthy();
     expect(await refusal(db.execute(sql`update timesheet_periods set superseded_at = null where id = ${first.id}`))).toMatch(/current again only when it is sent again/u);
     expect(await refusal(db.execute(sql`delete from timesheet_periods where id = ${first.id}`))).toMatch(/cannot be deleted/u);
-    await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-10-01', to: '2026-10-31', exceptId: first.id, at: NOW, by: TECH });
+    await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: first.id, at: NOW, by: TECH });
     const again = await attendance.resubmitPeriod({ ...first, submittedAt: new Date(Date.now() + 1000).toISOString() });
     expect(again?.supersededAt ?? null).toBeNull();
     expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([first.id]);
