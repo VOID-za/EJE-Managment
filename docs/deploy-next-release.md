@@ -32,6 +32,14 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## NEXT RELEASE — office repairs: PO, Closed Jobs, Jobs filters (PO-FLOW-1, ARCHIVE-1, JOBS-FILTER-1, 4 November 2026)
+
+Branch `claude/office-repairs` (from the live `75c3b6b` line). **No migration** — release with `stage-release.ps1 -ExpectPending none`. `feat` commits, so the release assigns the next MINOR (v1.4.0). The checklist release (0051, CHK-SRC) is unchanged.
+
+**What changes on the live system:** a job handled from now on with a PO on it goes to Awaiting Invoice No instead of Awaiting PO (its PO recorded and audited). Jobs already in Awaiting PO stay there until the office records the PO (the form is pre-filled with their order number). No stored row is rewritten.
+
+**Rolling back** (`stage-release.ps1 -Rollback`) returns the code to `75c3b6b`; with no migration the database is unchanged. Jobs the new code handled straight to Awaiting Invoice No are ordinary Awaiting Invoice No jobs to the old code (PO recorded, handling stamped).
+
 ## RELEASED — `75c3b6b` = v1.3.0, the business's own checklists and the Service choice (CHK-SRC-1…4, 4 November 2026)
 
 Released 17:46:36 UTC from branch `claude/source-checklists` through `stage-release.ps1 -ExpectPending 0051_source_checklists` after CI run 41871774913 (68/68: unit, lint, types, build, PostgreSQL, rollback compatibility f693747→0051, every browser suite). Version assigned: **v1.3.0**. Before it: host `srv2000625`, serving `f693747` v1.2.0, healthy.
