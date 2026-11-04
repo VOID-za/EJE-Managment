@@ -551,7 +551,11 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect((await loadJobView(readRepositories(db), lathe!.jobNumber))?.checklistTemplate?.id).toBe(B.latheChecklist);
 
     // What this code issues to a new job: a current source checklist, never the archived demonstration wording.
-    const templates = readRepositories(db).checklistTemplates;
+    // `findForJobType` is the LIVE release's method (this release replaced it with
+    // `listCurrentForJobType`); this file runs inside the live checkout.
+    const templates = readRepositories(db).checklistTemplates as unknown as {
+      findForJobType(code: string): Promise<{ id: string; version: string } | null>;
+    };
     const forInstallation = await templates.findForJobType('installation');
     expect(forInstallation?.id).toBe(B.installationChecklist);
     const forService = await templates.findForJobType('service');
@@ -561,7 +565,7 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     const allocated = await jobs.allocateJobNumber();
     const fresh = jobFixture(allocated.jobNumber, {
       jobType: 'installation', status: 'in_progress', primaryTechnicianId: asUserId(IDS.technician),
-      checklist: { templateId: forInstallation!.id, templateVersion: '1.0', responses: [], completedAt: null, completedBy: null },
+      checklist: { templateId: forInstallation!.id as never, templateVersion: '1.0', responses: [], completedAt: null, completedBy: null },
     });
     await jobs.save(fresh);
     const [started] = await db.execute<{ kind: string }>(sql`select checklist_kind as kind from checklist_instances where job_id = ${fresh.id}`);
