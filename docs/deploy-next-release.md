@@ -32,9 +32,14 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
-## NEXT RELEASE — office repairs: PO, Closed Jobs, Jobs filters (PO-FLOW-1, ARCHIVE-1, JOBS-FILTER-1, 4 November 2026)
+## RELEASED — `ad0f3c8` = v1.4.0, office repairs: PO, Closed Jobs, Jobs filters (PO-FLOW-1, ARCHIVE-1, JOBS-FILTER-1, 4 November 2026)
 
-Branch `claude/office-repairs` (from the live `75c3b6b` line). **No migration** — release with `stage-release.ps1 -ExpectPending none`. `feat` commits, so the release assigns the next MINOR (v1.4.0). The checklist release (0051, CHK-SRC) is unchanged.
+Released 21:52:29 UTC from branch `claude/office-repairs` through `stage-release.ps1 -ExpectPending none` after CI run 41913416752 (**74/74**: unit, lint, types, build, PostgreSQL, rollback compatibility, every browser suite incl. `office-filters-check` at three sizes) and an independent review whose findings were fixed. **No migration** (52 applied). Version assigned: **v1.4.0**. Before it: `75c3b6b` v1.3.0, healthy. The checklist release (0051, CHK-SRC) is unchanged.
+
+- **Fresh backup, proven before the switch:** `/var/backups/eje/eje-eje_production-2026-11-04T21-52-14Z` — aes-256-gcm, key `23dba6772da10057`; both artefacts intact and authentic; key check MATCH; **restore test** into a scratch database (jobs 112, users 7, customers 10, machines 18, final documents 57, job media 28, signatures 71, audit events 2 116), then dropped — RESTORE-TESTED.
+- **Data identical before and after** (fingerprints): signatures 71, final documents 57, checklist instances 10 and answers 96, checklist versions and questions, timesheet periods 15 and entries 35, monthly submissions 7, Finance packages 0, every job in the office stages with its status and PO, EJE-2011 and EJE-2106 (status and `updated_at`), audit events 2 116.
+- **Live, read only** (desktop and phone, 6/6): Jobs — search and the status tabs visible, Advanced filters folded and holding Status, Job type, Priority, assigned-to-me; Closed Jobs — filters folded, newest finished first (EJE-2112, EJE-2106, EJE-2032, …), pages answer; EJE-2113 (Office Handling, no PO) — the panel says it will go to Awaiting PO, nothing pressed. Health ok, email `refuse`, demonstration on; 0 errors in the service log; backup timers healthy.
+- **Not done on production, deliberately:** handling a job (it writes) — proved in CI, locally, and in the browser suites.
 
 **What changes on the live system:** a job handled from now on with a PO on it goes to Awaiting Invoice No instead of Awaiting PO (its PO recorded and audited). Jobs already in Awaiting PO stay there until the office records the PO (the form is pre-filled with their order number). No stored row is rewritten.
 
