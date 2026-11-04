@@ -357,6 +357,10 @@ describeDb('the source checklists in PostgreSQL (CHK-SRC-1)', () => {
 
       await jobs.save({ ...job, checklist: complete('Battery replaced.') });
       expect((await jobs.findById(job.id))?.checklist?.completedAt).not.toBeNull();
+
+      // Nor can a checklist be written ALREADY complete with an unexplained Fail in it.
+      const born = await jobOf('service', complete(''));
+      await expect(jobs.save(born)).rejects.toThrow();
     });
 
     it('fills in the kind for a writer that sends none (the release before, after a rollback)', async () => {

@@ -193,6 +193,27 @@ DROP TRIGGER IF EXISTS checklist_instances_fail_needs_note ON checklist_instance
 CREATE TRIGGER checklist_instances_fail_needs_note
   BEFORE UPDATE OF completed_at ON checklist_instances
   FOR EACH ROW EXECUTE FUNCTION checklist_instances_fail_needs_note();--> statement-breakpoint
+-- …and the other way in: an unexplained Fail written INTO a checklist already
+-- completed (an instance inserted complete, then its answers). The answers
+-- guard (0002) covers only UPDATE and DELETE; this covers the INSERT.
+CREATE OR REPLACE FUNCTION checklist_answers_fail_needs_note()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.choice = 'fail' AND btrim(NEW.notes) = '' AND EXISTS (
+    SELECT 1 FROM checklist_instances i WHERE i.id = NEW.instance_id AND i.completed_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'A completed checklist cannot hold a failed item with no note.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+DROP TRIGGER IF EXISTS checklist_answers_fail_needs_note ON checklist_answers;--> statement-breakpoint
+CREATE TRIGGER checklist_answers_fail_needs_note
+  BEFORE INSERT ON checklist_answers
+  FOR EACH ROW EXECUTE FUNCTION checklist_answers_fail_needs_note();--> statement-breakpoint
 
 -- 5 (before 4, so nothing is ever briefly issued twice). Withdraw the
 --    demonstration wording from NEW jobs. Status only — the guard permits

@@ -150,6 +150,28 @@ export const publishTemplate = async (
    * withdraw the Milling checklist.
    */
   const all = await context.repos.checklistTemplates.list();
+  /*
+   * A JOB TYPE WITH THE BUSINESS'S OWN CHECKLISTS TAKES NO OTHER KIND. CHK-SRC-2.
+   * Installation and Service are issued as the source checklists, each of a
+   * kind; issuing a checklist of NO kind beside them — the archived
+   * demonstration wording, or a new one — would put a generic checklist back
+   * on the Service choice screen. A revision of a source checklist is a new
+   * version of it ("New version"), which keeps its kind.
+   */
+  if (
+    (template.kind ?? null) === null &&
+    all.some(
+      (candidate) => candidate.jobTypeCode === template.jobTypeCode && (candidate.kind ?? null) !== null,
+    )
+  ) {
+    throw new WorkflowError(`${template.name} cannot be issued: this job type uses the source checklists.`, [
+      {
+        code: 'checklist_kind_required',
+        message:
+          'Revise one of the source checklists with "New version" instead; a checklist of no kind would be offered beside them.',
+      },
+    ]);
+  }
   const superseded = all.filter(
     (candidate) =>
       candidate.jobTypeCode === template.jobTypeCode &&

@@ -63,11 +63,11 @@ describe('creating and issuing a checklist', () => {
     ).rejects.toBeInstanceOf(WorkflowError);
   });
 
-  it('issues a completed draft and archives what it replaces', async () => {
+  it('issues a completed draft for a job type without source checklists', async () => {
     const draft = await createTemplate(harness.as(elmarie), {
       name: 'Replacement Service Checklist',
       description: '',
-      jobTypeCode: 'service',
+      jobTypeCode: 'breakdown',
       sourceDocument: 'EJE approved wording',
     });
     const withItems: ChecklistTemplate = {
@@ -96,12 +96,32 @@ describe('creating and issuing a checklist', () => {
     const issued = await publishTemplate(harness.as(elmarie), withItems);
 
     expect(issued.status).toBe('current');
-    const forService = await harness.repos.checklistTemplates.listCurrentForJobType('service');
-    expect(forService.map((template) => template.id)).toContain(issued.id);
+    const forBreakdown = await harness.repos.checklistTemplates.listCurrentForJobType('breakdown');
+    expect(forBreakdown.map((template) => template.id)).toEqual([issued.id]);
+  });
 
-    // The demonstration wording it would have replaced is archived, not removed.
-    const previous = await templateNamed(harness, 'chk-service', '2.0-DEMO');
-    expect(previous.status).toBe('archived');
+  /*
+   * CHK-SRC-2. Installation and Service are issued as the source checklists;
+   * a checklist of no kind — a new one, or the archived demonstration wording
+   * re-issued — would be offered as a generic checklist beside them.
+   */
+  it('refuses to issue a checklist of no kind beside the source checklists, new or archived', async () => {
+    const draft = await createTemplate(harness.as(elmarie), {
+      name: 'Generic Service Checklist',
+      description: '',
+      jobTypeCode: 'service',
+      sourceDocument: '',
+    });
+    const withItems: ChecklistTemplate = {
+      ...draft,
+      sections: [{ id: 'sec-g', title: 'Safety', description: '', items: [{ id: 'item-g', text: 'Isolated', helpText: '', responseType: 'pass_fail_na', required: true, photoRequired: false, unit: null, expectedRange: null }] }],
+    };
+    await saveTemplateDraft(harness.as(elmarie), withItems);
+    await expect(publishTemplate(harness.as(elmarie), withItems)).rejects.toBeInstanceOf(WorkflowError);
+    const demo = await templateNamed(harness, 'chk-service', '2.0-DEMO');
+    await expect(publishTemplate(harness.as(elmarie), demo)).rejects.toBeInstanceOf(WorkflowError);
+    const current = await harness.repos.checklistTemplates.listCurrentForJobType('service');
+    expect(current.map((template) => template.kind)).toEqual(['service_milling', 'service_lathe']);
   });
 
   /*
@@ -172,14 +192,16 @@ describe('a version a job has completed against', () => {
   });
 
   it('still renders on the job that used it after a new version is issued', async () => {
-    const used = await templateNamed(harness, 'chk-service', '1.0-DEMO');
+    // CHK-SRC-2: a new version of a SOURCE checklist (the demonstration wording
+    // can no longer be issued beside them).
+    const used = await templateNamed(harness, latheServiceChecklist.id, '1.0');
     const draft = await startNewVersion(harness.as(elmarie), used);
     await publishTemplate(harness.as(elmarie), draft);
 
     // The historical read path: resolve by the version stored on the job.
     const resolved = await harness.repos.checklistTemplates.findByVersion(
-      asChecklistTemplateId('chk-service'),
-      '1.0-DEMO',
+      latheServiceChecklist.id,
+      '1.0',
     );
     expect(resolved).not.toBeNull();
     expect(resolved?.sections).toEqual(used.sections);
