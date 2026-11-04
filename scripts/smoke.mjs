@@ -105,6 +105,20 @@ page.on('console', (msg) => {
 });
 page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
 
+/**
+ * JOBS-FILTER-1 / ARCHIVE-1: the Jobs and Closed Jobs filters fold away, closed
+ * by default. Opens whichever folded section is on the page before a step
+ * operates a filter inside it.
+ */
+const openFilters = async () => {
+  for (const id of ['jobs-advanced-toggle', 'closed-advanced-toggle']) {
+    const toggle = page.getByTestId(id);
+    if ((await toggle.count()) > 0 && (await toggle.first().getAttribute('aria-expanded')) === 'false') {
+      await toggle.first().click();
+    }
+  }
+};
+
 const step = async (name, fn) => {
   const before = errors.length;
   try {
@@ -2419,7 +2433,7 @@ await step('the office handles a submitted job and invoices it, from the job pag
   // Persisted: a fresh load reads it back from the server, read-only.
   await page.goto(`${BASE}/jobs/EJE-1048`, { waitUntil: 'networkidle' });
   await page.getByTestId('office-lifecycle').getByText('INV-SMOKE-1048').waitFor({ timeout: 10000 });
-  await page.getByTestId('office-lifecycle').getByText('PO-SMOKE-1048', { exact: false }).waitFor({ timeout: 10000 });
+  await page.getByTestId('office-lifecycle').getByText('PO-88123', { exact: false }).first().waitFor({ timeout: 10000 }); // PO-FLOW-1
   await page.getByText('Read-only — invoiced', { exact: false }).first().waitFor({ timeout: 8000 });
   await page.screenshot({ path: `${shots}/05b-invoiced.png`, fullPage: false });
 });
@@ -4303,7 +4317,7 @@ await step('the technician: no New Job or Download CSV, My Jobs and the new filt
   if (chips.includes('Open work')) throw new Error('the Open work filter is still offered');
   // My Jobs: every row is the technician's own, and the count is what the button said.
   const said = Number((await page.getByTestId('jobs-my-jobs').innerText()).replace(/\D+/gu, ''));
-  await page.getByLabel('Status').selectOption('all');
+  await (await openFilters(), page.getByLabel('Status')).selectOption('all');
   await page.getByTestId('jobs-my-jobs').click();
   await page.waitForTimeout(300);
   if ((await page.getByTestId('jobs-my-jobs').getAttribute('aria-pressed')) !== 'true') throw new Error('My Jobs did not switch on');
@@ -4375,7 +4389,7 @@ await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, 
     const said = Number((await page.getByTestId(testid).innerText()).replace(/\D+/gu, ''));
     await page.getByTestId(testid).click();
     await page.waitForTimeout(300);
-    if ((await page.getByLabel('Status').inputValue()) !== value) throw new Error(`${value}: the Status box says ${await page.getByLabel('Status').inputValue()}`);
+    if ((await (await openFilters(), page.getByLabel('Status')).inputValue()) !== value) throw new Error(`${value}: the Status box says ${await (await openFilters(), page.getByLabel('Status')).inputValue()}`);
     const shown = await tableJobCount();
     if (shown !== said) throw new Error(`${value}: the filter said ${said} and showed ${shown}`);
   }
@@ -4964,7 +4978,7 @@ await step('the Jobs screen offers the lists the office asks for by name', async
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-'),
     { timeout: 10000 },
   );
-  const selected = await page.getByLabel('Status').inputValue();
+  const selected = await (await openFilters(), page.getByLabel('Status')).inputValue();
   if (selected !== 'awaiting_spares') {
     throw new Error(`the Awaiting spares quick filter left the Status filter on ${selected}`);
   }
@@ -5078,7 +5092,7 @@ await step('the archive filters by customer, job type and technician', async () 
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await page.getByRole('table').waitFor({ timeout: 10000 });
 
-  await page.getByLabel('Job type').selectOption('installation');
+  await (await openFilters(), page.getByLabel('Job type')).selectOption('installation');
   await page.waitForFunction(
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1039')
       && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1044'),
@@ -5086,7 +5100,7 @@ await step('the archive filters by customer, job type and technician', async () 
   );
 
   await page.getByRole('button', { name: 'Clear filters' }).click();
-  await page.getByLabel('Technician').selectOption('user-tech-deon');
+  await (await openFilters(), page.getByLabel('Technician')).selectOption('user-tech-deon');
   await page.waitForFunction(
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1057')
       && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1039'),
@@ -5094,7 +5108,7 @@ await step('the archive filters by customer, job type and technician', async () 
   );
 
   await page.getByRole('button', { name: 'Clear filters' }).click();
-  await page.getByLabel('Customer').selectOption('cust-abc');
+  await (await openFilters(), page.getByLabel('Customer')).selectOption('cust-abc');
   await page.waitForFunction(
     () => !(document.querySelector('table')?.innerText ?? '').includes('EJE-1039'),
     { timeout: 10000 },
@@ -5132,7 +5146,7 @@ await step('the archive filters by the date the job was closed', async () => {
   }, BASE);
   if (closedTo === '') throw new Error('could not read the day EJE-1044 was closed');
 
-  await page.getByLabel('Closed to').fill(closedTo);
+  await (await openFilters(), page.getByLabel('Closed to')).fill(closedTo);
   await page.waitForFunction(
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1044')
       && !(document.querySelector('table')?.innerText ?? '').includes('EJE-1062'),
@@ -5714,7 +5728,7 @@ await step('the calendar filters answer a planner\'s three questions', async () 
   }
 
   // Narrowed to one job type.
-  await page.getByLabel('Job type').selectOption('service');
+  await (await openFilters(), page.getByLabel('Job type')).selectOption('service');
   await page.waitForTimeout(500);
   if ((await page.locator('a[href="/jobs/EJE-1048"]').count()) !== 0) {
     throw new Error('a breakdown survived the Service job-type filter');
@@ -5740,7 +5754,7 @@ await step('the calendar filters answer a planner\'s three questions', async () 
   if (wrong.length > 0) throw new Error(`the Service filter showed ${wrong.join(', ')}`);
 
   await page.getByRole('button', { name: 'All', exact: true }).click();
-  await page.getByLabel('Job type').selectOption('all');
+  await (await openFilters(), page.getByLabel('Job type')).selectOption('all');
 });
 
 await step('the legend survives the declutter', async () => {

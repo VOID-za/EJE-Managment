@@ -566,6 +566,18 @@ describe('PO-FLOW-1: the stored PO decides whether a handled job waits for one',
     expect(withOne.status).toBe('awaiting_invoice_no');
   });
 
+  it('lets the office refuse an order number that is not a PO ("TBC"): it waits in Awaiting PO, and the real PO moves it on', async () => {
+    const job = await submitted(harness, 'EJE-1048', 'TBC');
+    const queue = await loadOfficeQueue(harness.repos, master);
+    expect(queue?.handling.find((row) => row.jobNumber === 'EJE-1048')?.poOnHandling).toBe('TBC');
+    const handled = await handleJobCard(harness.as(master), job, undefined, true);
+    expect(handled.status).toBe('awaiting_po');
+    expect(handled.purchaseOrder).toBeNull();
+    const real = await recordPurchaseOrder(harness.as(master), handled, 'PO-REAL-5');
+    expect(real.purchaseOrder?.number).toBe('PO-REAL-5');
+    expect(real.orderNumber).toBe('TBC');
+  });
+
   it('is refused to a technician, PO or not', async () => {
     const job = await submitted(harness, 'EJE-1048', 'PO-RAISED-4');
     expect(await codesOf(handleJobCard(harness.as(technician), job))).toContain('not_permitted');

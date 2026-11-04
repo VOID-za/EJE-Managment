@@ -58,8 +58,18 @@ const stored = async (context: OperationContext, job: Job): Promise<Job> =>
  * was being ignored, so a job raised WITH its PO still went to Awaiting PO.
  * Blank or whitespace-only is no PO at all.
  */
-export const knownPoNumber = (job: Job, given?: string): string | null => {
-  for (const candidate of [given ?? '', job.purchaseOrder?.number ?? '', job.orderNumber]) {
+export const knownPoNumber = (
+  job: Pick<Job, 'purchaseOrder' | 'orderNumber'>,
+  given?: string,
+  /**
+   * The office says the order number is NOT the customer's PO ("TBC", "to
+   * follow", a quote reference): it is ignored, and the job waits for its PO.
+   * The order number is free text, and a PO once recorded is never replaced —
+   * so this is the office's way out before it becomes one. PO-FLOW-1.
+   */
+  declineOrderNumber = false,
+): string | null => {
+  for (const candidate of [given ?? '', job.purchaseOrder?.number ?? '', declineOrderNumber ? '' : job.orderNumber]) {
     if (candidate.trim().length > 0 && poNumberProblem(candidate) === null) return candidate.trim();
   }
   return null;
@@ -81,6 +91,8 @@ export const handleJobCard = async (
   given: Job,
   /** A PO number the office types while handling it. Optional. */
   poNumber?: string,
+  /** The office says the job's order number is not its PO. */
+  declineOrderNumber = false,
 ): Promise<Job> => {
   assertOffice(context, 'mark a job card handled');
   const job = await stored(context, given);
@@ -103,7 +115,7 @@ export const handleJobCard = async (
     );
   }
   const now = context.services.clock.now();
-  const po = knownPoNumber(job, poNumber);
+  const po = knownPoNumber(job, poNumber, declineOrderNumber);
   if (po === null) {
     const saved = await context.repos.jobs.save({
       ...job,
@@ -268,6 +280,12 @@ export interface OfficeQueueRow {
   readonly officeHandling: Job['officeHandling'];
   readonly invoice: Job['invoice'];
   readonly purchaseOrder: Job['purchaseOrder'];
+  /**
+   * PO-FLOW-1: the PO that handling this job would record — its order number,
+   * when that is usable — so the queue can say so before the office presses
+   * Mark handled. Null when it would wait in Awaiting PO.
+   */
+  readonly poOnHandling: string | null;
 }
 
 /** The office queue, by lifecycle step. Invoiced is the most recent first. */
@@ -318,6 +336,7 @@ export const loadOfficeQueue = async (
     officeHandling: job.officeHandling,
     invoice: job.invoice,
     purchaseOrder: job.purchaseOrder,
+    poOnHandling: knownPoNumber(job),
   });
   const oldestFirst = (a: string | null | undefined, b: string | null | undefined) =>
     (a ?? '').localeCompare(b ?? '');

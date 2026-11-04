@@ -579,8 +579,11 @@ export const jobs = {
   accept: (jobId: string) => jobAction(jobId, 'accept'),
   /** Issue #73: the office has the submitted job card. Office Handling -> Awaiting PO. */
   /** PO-FLOW-1: a PO number typed while handling is optional. */
-  handleOffice: (jobId: string, poNumber?: string) =>
-    jobAction(jobId, 'handle_office', poNumber === undefined ? {} : { poNumber }),
+  handleOffice: (jobId: string, poNumber?: string, declineOrderNumber = false) =>
+    jobAction(jobId, 'handle_office', {
+      ...(poNumber === undefined ? {} : { poNumber }),
+      ...(declineOrderNumber ? { declineOrderNumber } : {}),
+    }),
   /** Issue #73: the invoice number from Sage. Awaiting PO -> Invoiced. */
   recordPo: (jobId: string, poNumber: string) => jobAction(jobId, 'record_po', { poNumber }),
   recordInvoice: (jobId: string, invoiceNumber: string) =>

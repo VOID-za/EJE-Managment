@@ -45,8 +45,7 @@ export const OfficeLifecyclePanel = ({
   const office = can(currentUser.role, 'jobs.officeHandling');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  // PO-FLOW-1: a job raised with its customer order number offers it here.
-  const [poNumber, setPoNumber] = useState(job.purchaseOrder === null ? job.orderNumber.trim() : '');
+  const [poNumber, setPoNumber] = useState('');
   const [poError, setPoError] = useState<string | null>(null);
   const nameOf = (id: string) => {
     const user = users.find((candidate) => candidate.id === id);
@@ -59,14 +58,14 @@ export const OfficeLifecyclePanel = ({
     job.purchaseOrder?.number ??
     (job.orderNumber.trim().length > 0 && poNumberProblem(job.orderNumber) === null ? job.orderNumber.trim() : null);
   const [handlingPo, setHandlingPo] = useState('');
-  const handle = async () => {
-    const typed = handlingPo.trim();
+  const handle = async (declineOrderNumber = false) => {
+    const typed = declineOrderNumber ? '' : handlingPo.trim();
     if (typed.length > 0) {
       const problem = poNumberProblem(typed);
       setPoError(problem);
       if (problem !== null) return;
     }
-    if (await operation.run(() => jobs.handleOffice(job.id, typed.length > 0 ? typed : undefined))) {
+    if (await operation.run(() => jobs.handleOffice(job.id, typed.length > 0 ? typed : undefined, declineOrderNumber))) {
       setHandlingPo('');
       onChanged();
     }
@@ -176,11 +175,22 @@ export const OfficeLifecyclePanel = ({
             </div>
           )}
           <Button loading={operation.running} onClick={() => void handle()} data-testid="mark-handled">
-            Mark handled
+            {existingPo !== null && job.purchaseOrder === null ? `Mark handled with PO ${existingPo}` : 'Mark handled'}
           </Button>
+          {/* PO-FLOW-1: the order number is free text — "TBC" is not a PO, and a PO is never replaced. */}
+          {existingPo !== null && job.purchaseOrder === null && (
+            <Button
+              variant="secondary"
+              loading={operation.running}
+              onClick={() => void handle(true)}
+              data-testid="mark-handled-await-po"
+            >
+              Not the PO — wait for it
+            </Button>
+          )}
           <p className="basis-full text-sm text-steel-600" data-testid="handling-next-stage">
             {existingPo !== null
-              ? `This job already has PO ${existingPo}, so it moves straight to Awaiting Invoice No.`
+              ? `This job already has PO ${existingPo}, so it moves straight to Awaiting Invoice No and that PO is recorded for good. If "${existingPo}" is not the customer's PO, choose "Not the PO — wait for it".`
               : handlingPo.trim().length > 0
                 ? 'With this PO number it moves straight to Awaiting Invoice No.'
                 : 'With no PO number it moves to Awaiting PO.'}{' '}
@@ -203,7 +213,11 @@ export const OfficeLifecyclePanel = ({
               value={poNumber}
               maxLength={MAX_PO_NUMBER_LENGTH}
               error={poError ?? undefined}
-              hint="The customer's purchase order. Saving it moves the job to Awaiting Invoice No."
+              hint={
+                job.orderNumber.trim().length > 0
+                  ? `The customer's purchase order. The job's order number is "${job.orderNumber.trim()}" — type it here only if it is the PO. Saving moves the job to Awaiting Invoice No.`
+                  : "The customer's purchase order. Saving it moves the job to Awaiting Invoice No."
+              }
               onChange={(event) => {
                 setPoNumber(event.target.value);
                 if (poError !== null) setPoError(null);

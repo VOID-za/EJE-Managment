@@ -315,6 +315,16 @@ describe('PO-FLOW-1: handling a job that already has its PO', () => {
     expect((await jobOf(master, job.jobNumber)).status).toBe('office_handling');
   });
 
+  it('lets the office say the order number is not the PO, through the route', async () => {
+    const master = await signedInAs(DEMO_USERS.master);
+    const tech = await signedInAs(DEMO_USERS.technician);
+    const job = await submittedJob(master, tech, 'to follow');
+    expect((await master.post(`/api/jobs/${job.id}/handle_office`, { declineOrderNumber: true })).status).toBe(200);
+    const read = await jobOf(master, job.jobNumber);
+    expect(read.status).toBe('awaiting_po');
+    expect(read.purchaseOrder).toBeNull();
+  });
+
   it('is still the office’s alone', async () => {
     const master = await signedInAs(DEMO_USERS.master);
     const tech = await signedInAs(DEMO_USERS.technician);

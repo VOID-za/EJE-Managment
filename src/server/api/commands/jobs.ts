@@ -907,8 +907,15 @@ export const JOB_COMMANDS: CommandRegistry = {
    */
   // PO-FLOW-1: a PO number typed while handling is optional; the job's own is used when present.
   handle_office: withInput(
-    z.object({ poNumber: z.string().max(200).optional() }).strict(),
-    (context, job, { poNumber }) => handleJobCard(context.operation, job, poNumber),
+    z
+      .object({
+        poNumber: z.string().max(200).optional(),
+        // The office says the order number is not the customer's PO.
+        declineOrderNumber: z.boolean().optional(),
+      })
+      .strict(),
+    (context, job, { poNumber, declineOrderNumber }) =>
+      handleJobCard(context.operation, job, poNumber, declineOrderNumber ?? false),
   ),
   // INV-FLOW-1: Awaiting PO -> Awaiting Invoice No, on the PO number only.
   record_po: command({

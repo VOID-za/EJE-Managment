@@ -80,19 +80,39 @@ const HandlingRow = ({
     <Card data-testid={`office-handling-${row.jobNumber}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <JobHeading row={row} />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge tone="amber" size="sm">
             {jobStatusLabel(row.status)}
           </Badge>
+          {/* PO-FLOW-1: say which PO handling records, and let the office refuse it. */}
+          {row.poOnHandling !== null && (
+            <Badge tone="blue" size="sm">
+              PO {row.poOnHandling} on the job
+            </Badge>
+          )}
           <Button
             size="sm"
             loading={operation.running}
             onClick={async () => {
               if (await operation.run(() => jobs.handleOffice(row.jobId))) onChanged();
             }}
+            data-testid={`queue-mark-handled-${row.jobNumber}`}
           >
-            Mark handled
+            {row.poOnHandling !== null ? `Mark handled with PO ${row.poOnHandling}` : 'Mark handled'}
           </Button>
+          {row.poOnHandling !== null && (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={operation.running}
+              onClick={async () => {
+                if (await operation.run(() => jobs.handleOffice(row.jobId, undefined, true))) onChanged();
+              }}
+              data-testid={`queue-mark-handled-await-po-${row.jobNumber}`}
+            >
+              Not the PO — wait for it
+            </Button>
+          )}
         </div>
       </div>
       {operation.error !== null && (
