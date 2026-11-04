@@ -3626,6 +3626,7 @@ await step('a Master can add a customer, with its first site', async () => {
 
 await step('the new customer is selectable when raising a job', async () => {
   await page.goto(`${BASE}/jobs/new`, { waitUntil: 'networkidle' });
+  await openFilters(); // JOBS-FILTER-1: the Status filter is in the folded section
   const options = await page.locator('select').first().locator('option').allTextContents();
   if (!options.some((option) => option.includes('Zenith Precision Works'))) {
     throw new Error('a newly created customer was not offered on the new job screen');
@@ -5004,6 +5005,7 @@ await step('the Jobs page shows no Master Review count, filter or badge', async 
 });
 
 await step('a job left in the retired stage is listed under Review, not Master Review', async () => {
+  await openFilters();
   await page.locator('select').first().selectOption({ label: 'Review' });
   await page.waitForFunction(
     () => (document.querySelector('table')?.innerText ?? '').includes('EJE-1055'),
