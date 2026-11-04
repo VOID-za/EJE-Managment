@@ -8,3 +8,6 @@ deploy/**   text eol=lf
 # Third-party code vendored unchanged (pdf.js, PDF-VIEW-1): kept byte-for-byte as
 # published, so it still matches the registry checksum in its README.
 public/vendor/** -text
+
+# Binary documents: never line-ending converted (a PDF with CRLF inserted is corrupt).
+*.pdf binary
