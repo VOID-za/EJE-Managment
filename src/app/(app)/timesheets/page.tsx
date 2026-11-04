@@ -224,7 +224,7 @@ const TimesheetsPage = () => {
       return;
     }
     const ok = await operation.run(async () => {
-      await timesheets.submit(personId, from, to);
+      await timesheets.submit(personId, from, to, replacing.length > 0);
     });
     setConfirming(false);
     if (!ok) return;
@@ -243,7 +243,17 @@ const TimesheetsPage = () => {
   const inside = rangeProblem === null ? entries.filter((entry) => from <= entry.date && entry.date <= to) : [];
   const outside = entries.length - inside.length;
   const total = (pick: (entry: WorkingTimesheetEntry) => number) => inside.reduce((sum, entry) => sum + pick(entry), 0);
-  const overlapsLast = data?.lastSubmission !== null && data?.lastSubmission !== undefined && rangeProblem === null && from <= data.lastSubmission.to;
+  /*
+   * TS-PAPER-7: the current submissions these dates share a day with. Covering
+   * only part of one is refused (its other days would fall out of payroll);
+   * covering all of it replaces it — said here, and confirmed in the dialog.
+   */
+  const overlapping = rangeProblem === null ? (data?.submissions ?? []).filter((submission) => submission.current && submission.from <= to && submission.to >= from) : [];
+  const partial = overlapping.filter((submission) => !(from <= submission.from && submission.to <= to));
+  const corrected = overlapping.filter((submission) => submission.correctionPending || submission.versionInForce.startsWith('Correction'));
+  const replacing = partial.length === 0 && corrected.length === 0 ? overlapping : [];
+  const blocked = partial.length > 0 || corrected.length > 0;
+  const named = (list: typeof overlapping) => list.map((submission) => `${submission.label} (${submission.lineCount} line${submission.lineCount === 1 ? '' : 's'})`).join('; ');
 
   return (
     <>
@@ -274,8 +284,8 @@ const TimesheetsPage = () => {
       <ConfirmDialog
         open={confirming}
         title={`Submit your timesheet for ${rangeProblem === null ? formatPeriod(from, to) : 'these dates'}?`}
-        message={`${inside.length} line${inside.length === 1 ? '' : 's'} from ${rangeProblem === null ? formatPeriod(from, to) : ''} and your comment will be sent to the office and kept exactly as sent.${outside > 0 ? ` ${outside} line${outside === 1 ? '' : 's'} outside these dates stay on your timesheet.` : ''}${overlapsLast ? ' These dates overlap your last submission: this one replaces it for the office (the earlier one is kept).' : ''} After submitting, a change is made by asking for a correction.`}
-        confirmLabel="Submit timesheet"
+        message={`${inside.length} line${inside.length === 1 ? '' : 's'} from ${rangeProblem === null ? formatPeriod(from, to) : ''} and your comment will be sent to the office and kept exactly as sent.${outside > 0 ? ` ${outside} line${outside === 1 ? '' : 's'} outside these dates stay on your timesheet.` : ''}${replacing.length > 0 ? ` It REPLACES your submitted timesheet for ${named(replacing)}: the office will read this one instead; the earlier one is kept exactly as submitted.` : ''} After submitting, a change is made by asking for a correction.`}
+        confirmLabel={replacing.length > 0 ? 'Replace and submit' : 'Submit timesheet'}
         busy={operation.running}
         onConfirm={() => void submit()}
         onCancel={() => setConfirming(false)}
@@ -474,9 +484,19 @@ const TimesheetsPage = () => {
                       <span>Int Km <strong className="tabular-nums">{kilometres(total((entry) => entry.internalKm))}</strong></span>
                       <span>Cust Km <strong className="tabular-nums">{kilometres(total((entry) => entry.customerKm))}</strong></span>
                     </div>
-                    {overlapsLast && data.lastSubmission !== null && (
-                      <p role="status" className="mt-2 text-sm text-amber-eje-700" data-testid="timesheet-period-overlap">
-                        These dates overlap your last submission ({formatPeriod(data.lastSubmission.from, data.lastSubmission.to)}). Submitting replaces it for the office; the earlier one is kept. To fix a submitted timesheet instead, use Corrections below.
+                    {partial.length > 0 && (
+                      <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="timesheet-period-overlap" data-kind="partial">
+                        These dates cover only part of your submitted timesheet for {named(partial)}. Submitting them would leave the rest of it out of your submitted timesheets, so they cannot be submitted. Start after it ends, choose dates that cover all of it, or use Corrections on that submission below.
+                      </p>
+                    )}
+                    {partial.length === 0 && corrected.length > 0 && (
+                      <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="timesheet-period-overlap" data-kind="corrected">
+                        Your submitted timesheet for {named(corrected)} has a correction, so it cannot be replaced. Change it with another correction below, or start after it ends.
+                      </p>
+                    )}
+                    {replacing.length > 0 && (
+                      <p role="status" className="mt-2 text-sm text-amber-eje-700" data-testid="timesheet-period-overlap" data-kind="replace">
+                        These dates cover all of your submitted timesheet for {named(replacing)}. Submitting replaces it for the office; it is kept exactly as submitted. You will be asked to confirm.
                       </p>
                     )}
                   </>
@@ -488,7 +508,7 @@ const TimesheetsPage = () => {
                   <Button variant="secondary" disabled={rangeProblem !== null} leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('print')} data-testid="timesheet-print">
                     Print
                   </Button>
-                  <Button disabled={rangeProblem !== null || open !== null} onClick={() => setConfirming(true)} data-testid="timesheet-send">
+                  <Button disabled={rangeProblem !== null || open !== null || blocked} onClick={() => setConfirming(true)} data-testid="timesheet-send">
                     Submit timesheet
                   </Button>
                 </div>

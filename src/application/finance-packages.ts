@@ -22,16 +22,20 @@ import { audit } from './audit';
 import { WorkflowError } from './errors';
 import { assertPayrollMonth, loadAttendanceDocument } from './attendance-document';
 import { loadMonthlyForms } from './monthly-submissions';
-import { loadSubmissionDocument, loadTimesheetDocument } from './timesheets';
+import { loadSubmissionDocument, type TimesheetDocument } from './timesheets';
 import { formatPeriod } from '@/lib/timesheet-dates';
 
 /**
- * TS-PAPER (4 November 2026): THE TIMESHEETS OF A MONTH ARE THE PAYDAY
- * SUBMISSIONS ENDING IN IT. A month submitted from now on is attendance only;
- * its package carries each technician's current timesheet submission(s) whose
- * To falls in the month (25 Nov → November; 15 Dec → December; 25 Jan →
- * January). A month already submitted with its calendar-month timesheet keeps
- * printing that one.
+ * THE TIMESHEETS OF A MONTH: every CURRENT submission whose To falls in it.
+ * TS-PAPER (4 November 2026), made the one rule by TS-PAPER-7: 25 Nov →
+ * November; 15 Dec → December; 25 Jan → January — and a calendar-month
+ * timesheet submitted before TS-PAPER is a submission ending on its month's
+ * last day, printed for its month while it is current. Once a later submission
+ * has replaced it (one that covers every one of its days), the replacement is
+ * printed instead, for the month IT ends in, and the replaced one is never
+ * printed again. Current submissions never share a day (the database refuses
+ * it) and each ends in exactly one month, so across the months every submitted
+ * line is printed once: none missing, none twice.
  */
 const paydayTimesheetsEnding = async (context: OperationContext, technicianId: UserId, month: string) =>
   (await context.repos.attendance.listSubmissions(technicianId))
@@ -147,18 +151,12 @@ const viewOf = async (context: OperationContext, financePackage: FinancePackage)
  * own (a month submitted with it, before TS-PAPER), or the payday submissions
  * ending in the month.
  */
-const timesheetPeriodsOf = async (context: OperationContext, person: User, month: string, monthCarriesTimesheet: boolean) => {
-  if (monthCarriesTimesheet) {
-    const { from, to } = monthBounds(month);
-    const period = await context.repos.attendance.findPeriod(person.id, from, to);
-    return period === null ? [] : [period];
-  }
-  return completesTimesheet(person.role) ? paydayTimesheetsEnding(context, person.id, month) : [];
-};
+const timesheetPeriodsOf = async (context: OperationContext, person: User, month: string) =>
+  paydayTimesheetsEnding(context, person.id, month);
 
-const correctedSince = async (context: OperationContext, person: User, month: string, monthCarriesTimesheet: boolean, since: IsoDateTime): Promise<boolean> => {
+const correctedSince = async (context: OperationContext, person: User, month: string, since: IsoDateTime): Promise<boolean> => {
   const { from, to } = monthBounds(month);
-  for (const period of await timesheetPeriodsOf(context, person, month, monthCarriesTimesheet)) {
+  for (const period of await timesheetPeriodsOf(context, person, month)) {
     const corrections = await context.repos.attendance.listCorrections(period.id);
     if (corrections.some((correction) => correction.status === 'accepted' && (correction.decidedAt ?? '') > since)) return true;
   }
@@ -192,7 +190,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       .filter((financePackage) => financePackage.attachments.some((attachment) => attachment.technicianId === person.id))
       .sort((a, b) => (b.sentAt ?? '').localeCompare(a.sentAt ?? ''))[0];
     const submission = submitted.get(person.id) ?? null;
-    const periods = await timesheetPeriodsOf(context, person, month, forms.timesheetRequired);
+    const periods = await timesheetPeriodsOf(context, person, month);
     let correctionPending = forms.timesheet.correctionPending;
     for (const period of periods) {
       if ((await context.repos.attendance.listCorrections(period.id)).some((correction) => correction.status === 'pending')) correctionPending = true;
@@ -207,7 +205,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       detail = 'A timesheet correction is waiting for the office’s decision';
     } else if (lastSent !== undefined && lastSent.sentAt !== null) {
       // RESUBMIT-1: a month submitted again after it went to Finance can be sent again too.
-      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, forms.timesheetRequired, lastSent.sentAt));
+      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
       status = corrected ? 'corrected_after_sent' : 'sent';
       detail = corrected
         ? `Corrected after it was sent to Finance on ${lastSent.sentAt.slice(0, 10)} — can be sent again, marked CORRECTED`
@@ -226,7 +224,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       submittedAt: submission?.submittedAt ?? null,
       fileNames: forms.fileNames,
       timesheetRequired: forms.timesheetRequired,
-      timesheetVersion: forms.timesheetRequired || !completesTimesheet(person.role)
+      timesheetVersion: periods.length === 0 && !completesTimesheet(person.role)
         ? forms.timesheet.versionInForce
         : periods.length === 0
           ? 'No timesheet submitted ending in this month'
@@ -285,19 +283,14 @@ export const prepareFinancePackage = async (
     if (!row.selectable) {
       throw refuse(`${row.technician.name} cannot be included.`, `payroll_${row.status}`, row.detail);
     }
-    const { from, to } = monthBounds(month);
     const correctedResend = row.status === 'corrected_after_sent';
-    const sheets: { readonly document: Awaited<ReturnType<typeof loadTimesheetDocument>>; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
+    const sheets: { readonly document: TimesheetDocument; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
     let attendance;
     try {
-      if (row.timesheetRequired) {
-        const timesheetDocument = await loadTimesheetDocument(context, technicianId, from, to);
+      // TS-PAPER-7: the one rule — every current submission ending in the month, in its version in force.
+      for (const period of await paydayTimesheetsEnding(context, row.technician.id, month)) {
+        const timesheetDocument = await loadSubmissionDocument(context, period.id);
         sheets.push({ document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) });
-      } else if (completesTimesheet(row.technician.role)) {
-        for (const period of await paydayTimesheetsEnding(context, row.technician.id, month)) {
-          const timesheetDocument = await loadSubmissionDocument(context, period.id);
-          sheets.push({ document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) });
-        }
       }
       const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
       attendance = { document: attendanceDocument, rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }) };
@@ -312,8 +305,9 @@ export const prepareFinancePackage = async (
       ...sheets.map((sheet, index) => ['timesheet', index === 0 ? sheet.rendered : { ...sheet.rendered, fileName: sheet.rendered.fileName.replace(/.pdf$/u, ` ${index + 1}.pdf`) }, sheet.document.versionLabel || 'Original submission'] as const),
       ['attendance', attendance.rendered, attendance.document.versionLabel] as const,
     ]) {
-      if (rendered.pageCount !== 1) {
-        throw refuse(`${row.technician.name}’s ${kind} is not one page.`, 'form_not_one_page', 'Every payroll form must be exactly one page.');
+      // TS-PAPER-6: a timesheet may run to several pages; every other payroll form is one page.
+      if (kind !== 'timesheet' && rendered.pageCount !== 1) {
+        throw refuse(`${row.technician.name}’s ${kind} is not one page.`, 'form_not_one_page', 'Every payroll form except a timesheet must be exactly one page.');
       }
       const fileName = correctedResend ? correctedFileName(rendered.fileName) : rendered.fileName;
       if (attachments.some((attachment) => attachment.fileName === fileName)) {

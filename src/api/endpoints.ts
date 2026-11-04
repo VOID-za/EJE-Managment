@@ -1386,8 +1386,8 @@ export const timesheets = {
     apiDownload(`/api/timesheets/submissions/${segment(periodId)}/pdf${search({ version: version === 'current' ? undefined : version })}`, fallbackName),
   submissionExportUrl: (periodId: string) => `/api/timesheets/submissions/${segment(periodId)}/export`,
   /** TS-PAPER: Submit timesheet for the From and To confirmed. A submission is never overwritten. */
-  submit: (userId: string, from: string, to: string) =>
-    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, { from, to }),
+  submit: (userId: string, from: string, to: string, replace = false) =>
+    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, replace ? { from, to, replace: true } : { from, to }),
   /** TS-16: ask to correct a sent timesheet — the reason and the complete corrected period. */
   requestCorrection: (
     userId: string,

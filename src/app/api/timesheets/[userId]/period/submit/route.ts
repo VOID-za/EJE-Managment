@@ -11,13 +11,15 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM
  */
 export const POST = writeRoute({
   operation: 'timesheets.submit',
-  schema: z.object({ from: day, to: day }).strict(),
+  // TS-PAPER-7: `replace` — the technician confirmed that these dates replace a submission they cover.
+  schema: z.object({ from: day, to: day, replace: z.boolean().optional() }).strict(),
   handler: async (context) => ({
     period: await submitTimesheetPeriod(
       context.operation,
       context.params.userId ?? '',
       context.input.from,
       context.input.to,
+      { replace: context.input.replace === true },
     ),
   }),
 });

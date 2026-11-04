@@ -98,6 +98,14 @@ const findSentPeriod = async (context: OperationContext, technicianId: UserId, f
     throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
   }
   const period = await context.repos.attendance.findPeriod(technicianId, from, to);
+  // TS-PAPER-8: a submission a later one replaced is history — it is read, never corrected.
+  if (period !== null && (period.supersededAt ?? null) !== null) {
+    throw refuse(
+      `Your timesheet for ${formatPeriod(from, to)} was replaced by a later submission.`,
+      'timesheet_replaced',
+      'Ask for the correction on the submission that replaced it.',
+    );
+  }
   if (period === null || period.submittedAt === null || period.snapshot === null) {
     throw refuse(
       `The timesheet for ${formatPeriod(from, to)} has not been sent to the office.`,

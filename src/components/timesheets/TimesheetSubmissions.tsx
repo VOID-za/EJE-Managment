@@ -46,11 +46,12 @@ export const TimesheetSubmissions = ({
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly onChanged: () => void;
 }) => {
-  const [viewing, setViewing] = useState<TimesheetSubmissionView | null>(null);
+  // Which submission is open, and which version of it: the version in force, or the original snapshot.
+  const [viewing, setViewing] = useState<{ readonly submission: TimesheetSubmissionView; readonly version: 'current' | 'original' } | null>(null);
   const [correcting, setCorrecting] = useState<string | null>(null);
   const office = showTechnician;
-  const document = useQuery(`timesheets:submission:${viewing?.id ?? 'none'}`, () =>
-    viewing === null ? Promise.resolve(null) : timesheets.submission(viewing.id),
+  const document = useQuery(`timesheets:submission:${viewing?.submission.id ?? 'none'}:${viewing?.version ?? ''}`, () =>
+    viewing === null ? Promise.resolve(null) : timesheets.submission(viewing.submission.id, viewing.version),
   );
 
   if (error !== null) return <QueryFailure code={errorCode ?? null} message={error} onRetry={onRetry} />;
@@ -70,9 +71,9 @@ export const TimesheetSubmissions = ({
       {viewing !== null && (
         <DocumentPreviewDialog
           open
-          title={`Time Sheet — ${viewing.technicianName} — ${viewing.label}`}
-          description={`Submitted ${formatDateTime(viewing.submittedAt)}${viewing.submittedByName === null ? '' : ` by ${viewing.submittedByName}`}. ${viewing.versionInForce}${viewing.current ? '' : ' — replaced by a later submission'}.`}
-          loadPdf={() => timesheets.submissionPdf(viewing.id, `time-sheet-${viewing.from}-to-${viewing.to}.pdf`)}
+          title={`Time Sheet — ${viewing.submission.technicianName} — ${viewing.submission.label}${viewing.version === 'original' ? ' — ORIGINAL SUBMISSION' : ''}`}
+          description={`Submitted ${formatDateTime(viewing.submission.submittedAt)}${viewing.submission.submittedByName === null ? '' : ` by ${viewing.submission.submittedByName}`}. ${viewing.version === 'original' ? 'The original snapshot, exactly as submitted.' : `The version in force: ${viewing.submission.versionInForce}.`}${viewing.submission.current ? '' : ' Replaced by a later submission.'}`}
+          loadPdf={() => timesheets.submissionPdf(viewing.submission.id, `time-sheet-${viewing.submission.from}-to-${viewing.submission.to}${viewing.version === 'original' ? '-original' : ''}.pdf`, viewing.version)}
           renderHtml={() => (document.data === null || document.data === undefined ? null : <TimesheetDocumentView document={document.data} />)}
           onClose={() => setViewing(null)}
         />
@@ -108,9 +109,17 @@ export const TimesheetSubmissions = ({
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setViewing(submission)} data-testid="timesheet-submission-view">
-                  View
+                {/* TS-PAPER-8: the original snapshot, always; the corrected version beside it when there is one. */}
+                <Button size="sm" variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setViewing({ submission, version: 'original' })} data-testid="timesheet-submission-view-original">
+                  View original
                 </Button>
+                {submission.versionInForce.startsWith('Correction') ? (
+                  <Button size="sm" variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setViewing({ submission, version: 'current' })} data-testid="timesheet-submission-view">
+                    View corrected version
+                  </Button>
+                ) : (
+                  <span className="sr-only" data-testid="timesheet-submission-view-same">The original is the version in force.</span>
+                )}
                 <ExportPdfButton
                   href={`/api/timesheets/submissions/${encodeURIComponent(submission.id)}/pdf`}
                   fallbackName={`time-sheet-${submission.from}-to-${submission.to}.pdf`}

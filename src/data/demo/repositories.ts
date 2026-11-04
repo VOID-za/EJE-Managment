@@ -1491,7 +1491,9 @@ class DemoAttendanceRepository implements AttendanceRepository {
       draft.timesheetPeriods = draft.timesheetPeriods.map((row) => {
         const replaced =
           row.userId === input.userId && row.submittedAt !== null && (row.supersededAt ?? null) === null &&
-          row.from <= input.to && row.to >= input.from && row.id !== input.exceptId;
+          row.from <= input.to && row.to >= input.from && row.id !== input.exceptId &&
+          // TS-PAPER-7: only a submission these dates cover in full is ever replaced.
+          row.from >= input.from && row.to <= input.to;
         if (!replaced) return row;
         const next: TimesheetPeriod = { ...row, supersededAt: input.at, supersededBy: input.by };
         superseded.push(next);

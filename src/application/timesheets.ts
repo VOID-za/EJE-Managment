@@ -861,10 +861,17 @@ export const saveTimesheetComment = async (
  * A SUBMISSION IS NEVER OVERWRITTEN (was RESUBMIT-1, which replaced the
  * snapshot and deleted its corrections): the same dates submitted again are
  * refused — a change after submitting is a correction, decided by the office,
- * with the original kept. Dates that OVERLAP an earlier current submission
- * replace it for the office (TS-OVERLAP-1): the earlier one is kept, marked
- * replaced, in the same unit of work, so no day is in two current
- * submissions — the database's trigger refuses that too.
+ * with the original kept.
+ *
+ * REPLACING NEVER DROPS A DAY (TS-PAPER-7, the owner, 4 November 2026). Dates
+ * that share a day with an earlier current submission must cover EVERY day of
+ * it — then, and only when the technician confirms it (`replace`), the new
+ * submission replaces it for the office: the earlier one is kept, marked
+ * replaced, its snapshot untouched. Dates that cover only part of it are
+ * refused, naming it, because the days left outside would fall out of payroll
+ * with nobody choosing that. The repository replaces only submissions the new
+ * dates cover, so two submissions racing cannot drop a day either: a partial
+ * one left standing makes the database refuse the overlap.
  *
  * THE OFFICE IS TOLD AFTER, AND ONLY AFTER, THE SUBMISSION IS SAVED (every
  * active Master and Coordinator, in-app). A refused submission notifies
@@ -875,22 +882,52 @@ export const submitTimesheetPeriod = async (
   technicianId: string,
   from: string,
   to: string,
-  options: { readonly notify?: boolean } = {},
+  options: { readonly notify?: boolean; readonly replace?: boolean } = {},
 ): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
   assertPeriod(context, from, to);
   const technician = await findTechnician(context, id);
-  const [entries, existing, working] = await Promise.all([
+  const [entries, existing, working, current] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.findWorkingComment(id),
+    context.repos.attendance.listSubmittedPeriods(id, from, to),
   ]);
   if (existing !== null && existing.submittedAt !== null) {
     throw refuse(
       `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
       'timesheet_already_submitted',
       'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets and ask for a correction.',
+    );
+  }
+  const overlapping = current.filter((period) => period.id !== existing?.id);
+  const partial = overlapping.filter((period) => !(from <= period.from && period.to <= to));
+  if (partial.length > 0) {
+    const named = partial.map((period) => formatPeriod(period.from, period.to)).join('; ');
+    throw refuse(
+      `These dates cover only part of your submitted timesheet for ${named}.`,
+      'timesheet_partial_overlap',
+      `Submitting them would leave the rest of ${named} out of your submitted timesheets. Start after it ends, choose dates that cover all of it to replace it, or open it under Submitted timesheets and ask for a correction.`,
+    );
+  }
+  // A correction lives on its submission, not on the sheet's lines: replacing a corrected (or
+  // correction-pending) submission from the lines would quietly undo or orphan it.
+  for (const period of overlapping) {
+    if ((await context.repos.attendance.listCorrections(period.id)).length > 0) {
+      throw refuse(
+        `Your submitted timesheet for ${formatPeriod(period.from, period.to)} has a correction, so it cannot be replaced.`,
+        'timesheet_replace_corrected',
+        'Change it with another correction under Submitted timesheets, or choose dates that start after it ends.',
+      );
+    }
+  }
+  if (overlapping.length > 0 && options.replace !== true) {
+    const named = overlapping.map((period) => `${formatPeriod(period.from, period.to)} (${period.snapshot?.entries.length ?? 0} line${period.snapshot?.entries.length === 1 ? '' : 's'})`).join('; ');
+    throw refuse(
+      `These dates would replace your submitted timesheet for ${named}.`,
+      'timesheet_replace_unconfirmed',
+      'Confirm that the new submission replaces it. The earlier one is kept exactly as it was submitted, marked replaced.',
     );
   }
   const now = context.services.clock.now();
@@ -1279,6 +1316,10 @@ export const loadTimesheetDocument = async (
     }
   } else if (version !== 'current') {
     throw refuse('This timesheet has not been sent to the office.', 'timesheet_not_sent', 'Only a sent timesheet has versions.');
+  }
+  // TS-PAPER-8: a submission a later one replaced says so, whichever version of it is read.
+  if (sentRow !== null && (sentRow.supersededAt ?? null) !== null) {
+    versionText = `${versionText} — replaced by a later submission on ${sentRow.supersededAt!.slice(0, 10)}`;
   }
   const entries = snapshot !== null ? snapshot.entries : await context.repos.attendance.listEntries(id, from, to);
   const rows = buildTimesheetDocumentRows(from, to, entries);

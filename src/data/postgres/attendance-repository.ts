@@ -321,6 +321,9 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
           isNull(schema.timesheetPeriods.supersededAt),
           lte(schema.timesheetPeriods.periodFrom, input.to),
           gte(schema.timesheetPeriods.periodTo, input.from),
+          // TS-PAPER-7: only a submission these dates cover in full is ever replaced.
+          gte(schema.timesheetPeriods.periodFrom, input.from),
+          lte(schema.timesheetPeriods.periodTo, input.to),
           ...(input.exceptId !== null && isUuid(input.exceptId) ? [ne(schema.timesheetPeriods.id, input.exceptId)] : []),
         ),
       )
