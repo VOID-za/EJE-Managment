@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (ad0f3c8, v1.4.0), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (cf6fe86, v1.5.0), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in ad0f3c8, and it does: each of these was checked against that commit.
+ * in cf6fe86, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -183,15 +183,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // ad0f3c8 (v1.4.0) shipped up to 0051; this release adds 0052.
-    expect(shipped).toHaveLength(52);
-    expect(shipped.at(-1)).toBe('0051_source_checklists');
-    expect(shipped).not.toContain('0052_payroll_submissions');
+    // cf6fe86 (v1.5.0) shipped up to 0052; this release adds 0053.
+    expect(shipped).toHaveLength(53);
+    expect(shipped.at(-1)).toBe('0052_payroll_submissions');
+    expect(shipped).not.toContain('0053_timesheet_line_removals');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0052 applied beyond what the live release ships.
-    expect(applied).toBe(53);
+    // 0053 applied beyond what the live release ships.
+    expect(applied).toBe(54);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -594,12 +594,11 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
    * 0052, WHICH THIS CODE HAS NEVER HEARD OF (PAYROLL-ONE-1): payroll
    * submissions for a period, two timesheet periods with the same dates (one
    * replaced), a stored PDF name, a draft line. It reads its timesheets, the
-   * current one included, and its own line writes still work. ITS OWN "Submit
-   * timesheet" names the old full unique key in ON CONFLICT, which 0052
-   * replaced by one for current rows: refused, writing nothing — the one
-   * limitation recorded in docs/deploy-next-release.md.
+   * current one included, and its own line writes still work — v1.5.0 wrote
+   * these rows itself, so its period submission (ON CONFLICT on the current
+   * row) works too. And 0053, which it has never heard of, changes none of it.
    */
-  it('meets the 0052 rows: reads both periods with the same dates, still writes lines; its old Submit is refused and writes nothing', async () => {
+  it('meets the 0052 rows: reads both periods with the same dates, still writes lines and periods (and 0053 changes nothing for it)', async () => {
     const B = BATCH_0052;
     const attendance = new PostgresAttendanceRepository(db);
     const tech = asUserId(IDS.technician);
@@ -615,12 +614,13 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     });
     expect(saved.overtimeHours).toBe(1);
     const before = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
-    await expect(attendance.submitPeriod({
+    const sent = await attendance.submitPeriod({
       id: '00000000-0000-4000-8000-000000000ce1', userId: tech, from: '2028-03-01', to: '2028-03-25', comment: '',
       updatedBy: tech, updatedAt: '2028-03-26T08:00:00.000Z', submittedAt: '2028-03-26T08:00:00.000Z', submittedBy: tech,
       snapshot: { technicianName: 'Sipho', from: '2028-03-01', to: '2028-03-25', comment: '', entries: [] },
-    })).rejects.toThrow();
+    });
+    expect(sent?.id).toBe('00000000-0000-4000-8000-000000000ce1');
     const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
-    expect(after[0]?.n).toBe(before[0]?.n);
+    expect(Number(after[0]?.n)).toBe(Number(before[0]?.n) + 1);
   });
 });
