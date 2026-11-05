@@ -42,7 +42,7 @@ export const useTimesheetAutosave = (personId: string | null, onSaved: () => voi
         const { line } = await timesheets.saveLine(personId, input, options);
         return { id: line.id, revision: line.revision };
       },
-      removeLine: (id) => timesheets.removeLine(personId, id),
+      removeLine: (id, options) => timesheets.removeLine(personId, id, options),
       saveComment: (comment, expected, options) => timesheets.saveWorkingComment(personId, comment, expected, options),
       classify,
       storageKey: `eje:timesheet-autosave:${personId}`,

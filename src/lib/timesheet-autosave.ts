@@ -63,7 +63,7 @@ export interface TimesheetAutosaverOptions {
     input: { readonly id: string; readonly date: string | null; readonly typed: TimesheetLineTyped; readonly expectedRevision: string | null },
     options: { readonly keepalive: boolean },
   ) => Promise<SavedLine>;
-  readonly removeLine: (id: string) => Promise<unknown>;
+  readonly removeLine: (id: string, options: { readonly keepalive: boolean }) => Promise<unknown>;
   readonly saveComment: (comment: string, expected: string, options: { readonly keepalive: boolean }) => Promise<unknown>;
   readonly classify: (cause: unknown) => SendFailure;
   readonly storageKey: string | null;
@@ -176,6 +176,9 @@ export class TimesheetAutosaver {
           .catch(() => undefined);
       } else if (change.kind === 'comment') {
         void this.options.saveComment(change.comment, change.base, { keepalive: true }).catch(() => undefined);
+      } else {
+        // A removal tapped just before leaving goes too (asked again, it changes nothing).
+        void this.options.removeLine(change.id, { keepalive: true }).catch(() => undefined);
       }
     }
   }
@@ -245,7 +248,7 @@ export class TimesheetAutosaver {
       );
       this.revisions.set(change.id, saved.revision);
     } else if (change.kind === 'remove') {
-      await this.options.removeLine(change.id);
+      await this.options.removeLine(change.id, { keepalive: false });
       this.revisions.delete(change.id);
     } else {
       await this.options.saveComment(change.comment, change.base, { keepalive: false });

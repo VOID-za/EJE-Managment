@@ -223,6 +223,8 @@ await check('a timesheet line has no Shared call-out tick; the page says the amo
   if (!/own share|YOUR share/iu.test(hint) || !/divided/iu.test(hint)) fail(`the hint reads "${hint}"`);
   await noPageOverflow('the timesheet');
   await press(line.getByTestId('remove-timesheet-line'));
+  // The removal is on the server before the next check uses the forms.
+  await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
 });
 
 /** PAYROLL-ONE-1: both forms for the period, as My Monthly Forms submits them — naming the revision it read. */

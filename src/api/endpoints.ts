@@ -1419,8 +1419,8 @@ export const timesheets = {
     input: { readonly id: string; readonly date: string | null; readonly typed: TimesheetLineTyped; readonly expectedRevision: string | null },
     options: { readonly keepalive?: boolean } = {},
   ) => apiPost<{ line: WorkingTimesheetLine }>(`/api/timesheets/${segment(userId)}/lines`, input, newIdempotencyKey(), options),
-  removeLine: (userId: string, lineId: string) =>
-    command<{ removed: boolean }>(`/api/timesheets/${segment(userId)}/lines/${segment(lineId)}/remove`),
+  removeLine: (userId: string, lineId: string, options: { readonly keepalive?: boolean } = {}) =>
+    apiPost<{ removed: boolean }>(`/api/timesheets/${segment(userId)}/lines/${segment(lineId)}/remove`, {}, newIdempotencyKey(), options),
   /** TS-PAPER: submitted timesheets, the latest first (the office: everybody's, or one person's). */
   submissions: (userId?: string) => query<readonly TimesheetSubmissionView[]>(`/api/timesheets/submissions${search({ userId })}`),
   submission: (periodId: string, version = 'current') =>
