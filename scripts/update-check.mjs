@@ -228,7 +228,11 @@ try {
     await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
     const comment = page.getByTestId('timesheet-period-comment');
     await comment.waitFor({ timeout: 15000 });
+    // PAYROLL-ONE-1: the timesheet saves itself, so the work is unsaved only while it cannot reach the server —
+    // the signal dropped: every save of the comment fails as a lost connection, and the change is kept on the device.
+    await page.route('**/api/timesheets/*/working/comment', (route) => route.abort('internetdisconnected'));
     await comment.fill('Typed and not saved — must survive the update offer');
+    await page.getByTestId('autosave-status').and(page.locator('[data-state="offline"]')).waitFor({ timeout: 15000 });
     await page.route('**/api/health', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -239,13 +243,14 @@ try {
     await notice.getByTestId('app-update-now').click();
     const dialog = page.getByRole('dialog');
     await dialog.getByText('Update with unsaved work on this screen?').waitFor({ timeout: 5000 });
-    if (!(await dialog.innerText()).includes('a timesheet line or comment being typed')) throw new Error(`the dialog does not name the work: ${await dialog.innerText()}`);
+    if (!(await dialog.innerText()).includes('timesheet changes still being saved')) throw new Error(`the dialog does not name the work: ${await dialog.innerText()}`);
     await page.screenshot({ path: `${shots}/3-unsaved.png` });
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.waitForTimeout(2000);
     if (documentLoads !== loadsBefore) throw new Error('the page reloaded although Cancel was chosen');
     if ((await comment.inputValue()) !== 'Typed and not saved — must survive the update offer') throw new Error('the typing was lost');
     await page.unroute('**/api/health');
+    await page.unroute('**/api/timesheets/*/working/comment');
   });
 
   await step('no page errors throughout', async () => {
