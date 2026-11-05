@@ -1,7 +1,7 @@
 # Payroll forms — Timesheets, Attendance and My Monthly Forms (PAYROLL-ONE-1)
 
-Decided by the owner on 5 November 2026 and implemented in the release after
-v1.4.0 (migration 0052). This replaces the "Submit timesheet" of TS-PAPER
+Decided by the owner on 5 November 2026; released as **v1.5.0** (`cf6fe86`,
+migration 0052) the same day. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
 earlier proposal (`docs/payroll-single-submission-proposal.md`) is kept as
 history; where the two differ, this document is what the system does.
