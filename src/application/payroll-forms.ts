@@ -248,9 +248,12 @@ export const loadPayrollForms = async (
   ]);
   // The office reads anybody's lines; the person reads their own (only a role that keeps a timesheet has any).
   const lines: readonly WorkingTimesheetLine[] = timesheetRequired ? await loadWorkingLines(context, person.id) : [];
-  const inDates = lines.filter((line) => line.date !== null && from <= line.date && line.date <= to);
+  const within = (date: string | null | undefined) => date != null && from <= date && date <= to;
+  const inDates = lines.filter((line) => within(line.date));
+  // A stored line being moved by a draft is in these dates by EITHER date: its stored copy would be frozen by them.
+  const touching = lines.filter((line) => within(line.date) || within(line.entry?.date));
   // A draft with no date could be meant for any period: it is in the way of every submission.
-  const incomplete = [...inDates, ...lines.filter((line) => line.date === null)].filter((line) => !line.complete);
+  const incomplete = [...touching, ...lines.filter((line) => line.date === null && !within(line.entry?.date))].filter((line) => !line.complete);
   const complete = inDates.filter((line) => line.complete && line.entry !== null).map((line) => line.entry!);
   const sum = (pick: (entry: (typeof complete)[number]) => number) => complete.reduce((total, entry) => total + pick(entry), 0);
 
@@ -284,6 +287,33 @@ export const loadPayrollForms = async (
   }
 
   const problems: string[] = [];
+  /*
+   * NEVER THE SAME DAYS TO FINANCE TWICE (the review of 5 November 2026). A
+   * submission already in a SENT Finance package may be replaced only by one
+   * for the same Finance month — that package then goes again marked
+   * CORRECTED. Replaced by dates ending in another month, its days would reach
+   * Finance a second time, unmarked; refused, naming the package.
+   */
+  for (const overlap of replaces) {
+    const sentMonth = overlap.kind === 'monthly' ? overlap.from.slice(0, 7) : financeMonthOf(overlap.to);
+    if (sentMonth === financeMonthOf(to)) continue;
+    const packages = await context.repos.payroll.listPackages(sentMonth);
+    const sent = packages.find((item) => item.status === 'sent' && item.attachments.some((attachment) => attachment.technicianId === person.id));
+    if (sent !== undefined) {
+      problems.push(
+        `Your ${overlap.label} went to Finance in the ${monthTitle(sentMonth)} package on ${(sent.sentAt ?? '').slice(0, 10)}. ` +
+          `A replacement ending in ${monthTitle(financeMonthOf(to))} would send those days again: choose dates ending in ${monthTitle(sentMonth)}, or ask the office.`,
+      );
+    }
+  }
+  // A person who keeps no timesheet now, but submitted one before for these days: the office decides, not a replacement.
+  if (!timesheetRequired) {
+    for (const period of current.periods) {
+      if (relation(from, to, period) !== 'apart') {
+        problems.push(`A timesheet was submitted for ${formatPeriod(period.from, period.to)}, when you kept one. Ask the office before submitting attendance only for these days.`);
+      }
+    }
+  }
   for (const line of incomplete) {
     problems.push(`Timesheet line ${line.date === null ? 'with no date' : `on ${formatDayAndDate(line.date)}`} is not complete: ${line.problems.map((problem) => problem.message).join(' ')}`);
   }
@@ -292,6 +322,9 @@ export const loadPayrollForms = async (
   }
   for (const overlap of partialOverlaps) {
     problems.push(`These dates cover only part of your submitted ${overlap.label}. Choose dates that start after it ends, or that cover all of it to replace it.`);
+  }
+  if (timesheetRequired && sameFileName(names.names.timesheet, names.names.attendance)) {
+    problems.push(`Both PDFs are called “${names.names.timesheet}”. Rename one, so they cannot overwrite each other when saved.`);
   }
   for (const overlap of correctedInTheWay) {
     problems.push(`Your submitted ${overlap.label} has a correction, so it cannot be replaced. Choose dates that start after it ends.`);
@@ -353,7 +386,7 @@ export const loadPayrollForms = async (
       JSON.stringify({
         from,
         to,
-        lines: inDates.map((line) => [line.id, line.revision, line.complete]),
+        lines: touching.map((line) => [line.id, line.revision, line.complete]),
         undated: lines.filter((line) => line.date === null).map((line) => [line.id, line.revision]),
         comment: state.timesheet?.comment ?? null,
         days,
@@ -548,6 +581,10 @@ export const submitPayrollForms = async (
       'timesheet_replace_corrected',
       'Change it with another correction under Submitted timesheets, or choose dates that start after it ends.',
     );
+  }
+  // Anything else the screen lists as stopping it (both PDFs named the same, days already sent to Finance, …).
+  if (state.problems.length > 0) {
+    throw refuse('These forms cannot be submitted yet.', 'payroll_forms_blocked', state.problems.join(' '));
   }
   if (state.needs.confirmReplace && input.confirmReplace !== true) {
     throw refuse(

@@ -462,6 +462,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return toLineDraft(rows[0]);
   }
 
+  async lockLine(id: string): Promise<void> {
+    await this.db.execute(sql`select pg_advisory_xact_lock(hashtext('timesheet_line:' || ${id}))`);
+  }
+
   async deleteLineDraft(id: string): Promise<void> {
     if (!isUuid(id)) return;
     await this.db.delete(schema.timesheetLineDrafts).where(eq(schema.timesheetLineDrafts.id, id));

@@ -1297,13 +1297,18 @@ export const loadTimesheetDocument = async (
   to: string,
   /** TS-16. 'current' (the version in force), 'original', or a correction's sequence. */
   version: 'current' | 'original' | 'working' | number = 'current',
+  /**
+   * PAYROLL-ONE-1: the very submission meant, when it is known by its id. A replaced submission
+   * may share its dates with its replacement, so the dates alone would find the replacement.
+   */
+  exact?: TimesheetPeriod,
 ): Promise<TimesheetDocument> => {
   const id = asUserId(technicianId);
   assertMayRead(context, id);
   assertRange(from, to);
   const technician = await findTechnician(context, id);
   const [row, records, settings, working] = await Promise.all([
-    context.repos.attendance.findPeriod(id, from, to),
+    exact !== undefined ? Promise.resolve(exact) : context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
     context.repos.settings.get(),
     context.repos.attendance.findWorkingComment(id),
@@ -1387,7 +1392,7 @@ export const loadSubmissionDocument = async (
   version: 'current' | 'original' | number = 'current',
 ): Promise<TimesheetDocument> => {
   const period = await findSubmission(context, periodId);
-  return loadTimesheetDocument(context, period.userId, period.from, period.to, version);
+  return loadTimesheetDocument(context, period.userId, period.from, period.to, version, period);
 };
 
 /** One spreadsheet row: a line, or an unrecorded day said as such. */

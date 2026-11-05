@@ -623,6 +623,8 @@ export interface AttendanceRepository {
   /** Writes the draft with this id (creating it, or replacing what it held). */
   saveLineDraft(draft: TimesheetLineDraft): Promise<TimesheetLineDraft>;
   deleteLineDraft(id: string): Promise<void>;
+  /** Serialises saves of one line for the rest of the unit of work (a transaction lock in PostgreSQL). */
+  lockLine(id: string): Promise<void>;
   /** RESUBMIT-1. Removes every correction of a period that is being sent again. */
   deleteCorrections(periodId: string): Promise<void>;
   /** TS-16. One period's corrections, oldest (sequence 1) first. */

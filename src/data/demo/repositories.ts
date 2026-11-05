@@ -1488,6 +1488,11 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(lineDraft);
   }
 
+  lockLine(_id: string): Promise<void> {
+    // One request at a time in memory: nothing to lock.
+    return Promise.resolve();
+  }
+
   deleteLineDraft(id: string): Promise<void> {
     this.context.commit((draft) => {
       draft.timesheetLineDrafts = (draft.timesheetLineDrafts ?? []).filter((row) => row.id !== id);

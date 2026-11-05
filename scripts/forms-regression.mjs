@@ -521,6 +521,7 @@ await check('Timesheets: a malformed number is said beside it and kept as a Draf
   await page.keyboard.press('Tab');
   await sheetSaved();
   await page.waitForFunction((id) => document.querySelector(`[data-testid="timesheet-line"][data-line-id="${id}"]`)?.getAttribute('data-state') === 'draft', draftId, { timeout: 15000 });
+  await lineById(draftId).getByTestId('timesheet-line-problems').scrollIntoViewIfNeeded();
   const seen = await page.evaluate((id) => [...document.querySelectorAll(`[data-testid="timesheet-line"][data-line-id="${id}"] [role="alert"], [data-testid="timesheet-line"][data-line-id="${id}"] [id$="-error"], [data-testid="timesheet-line"][data-line-id="${id}"] [data-testid="timesheet-line-problems"]`)].some((element) => {
     const box = element.getBoundingClientRect();
     return box.height > 0 && box.bottom > 0 && box.top < window.innerHeight;

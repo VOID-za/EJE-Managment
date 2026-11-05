@@ -31,6 +31,9 @@ import { RETRY_MS } from './attendance-autosave';
  */
 
 export const COMMENT_KEY = '__comment__';
+
+const sameTyped = (a: TimesheetLineTyped, b: TimesheetLineTyped): boolean =>
+  (Object.keys(a) as (keyof TimesheetLineTyped)[]).every((key) => String(a[key]).trim() === String(b[key]).trim());
 export const TIMESHEET_DEBOUNCE_MS = 800;
 
 export type TimesheetChange =
@@ -43,9 +46,11 @@ export type TimesheetChange =
       readonly base: string | null;
       readonly version: number;
       readonly refused?: string;
+      /** Sent when the connection dropped: it may have been saved, so the revision named may be old. */
+      readonly unsure?: { readonly date: string | null; readonly typed: TimesheetLineTyped };
     }
   | { readonly kind: 'remove'; readonly id: string; readonly version: number; readonly refused?: string }
-  | { readonly kind: 'comment'; readonly id: typeof COMMENT_KEY; readonly comment: string; readonly base: string; readonly version: number; readonly refused?: string };
+  | { readonly kind: 'comment'; readonly id: typeof COMMENT_KEY; readonly comment: string; readonly base: string; readonly version: number; readonly refused?: string; readonly unsure?: string };
 
 /** What a save of a line answered: the revision the next save must name. */
 export interface SavedLine {
@@ -71,6 +76,12 @@ export interface TimesheetAutosaverOptions {
   /** A run of saves finished with at least one saved: reload what is on screen. */
   readonly onSaved: () => void;
   readonly onConflict: (id: string, message: string) => void;
+  /**
+   * What the server holds now — asked only when a save refused as stale had been sent before
+   * on a connection that dropped: if the server holds exactly what was sent then, the save had
+   * gone through and its answer was lost, and the newer typing is sent on from it.
+   */
+  readonly current?: (id: string) => Promise<{ readonly revision: string; readonly date?: string | null; readonly typed?: TimesheetLineTyped; readonly comment?: string } | null>;
 }
 
 type ChangeInput =
@@ -106,7 +117,9 @@ export class TimesheetAutosaver {
     let next: TimesheetChange;
     if (input.kind === 'line') {
       const base = previous?.kind === 'line' ? previous.base : this.revisions.get(id) ?? input.base;
-      next = { kind: 'line', id, date: input.date, typed: input.typed, base, version };
+      // A save that may have gone through before the connection dropped stays remembered while more is typed.
+      const unsure = previous?.kind === 'line' ? previous.unsure : undefined;
+      next = { kind: 'line', id, date: input.date, typed: input.typed, base, version, ...(unsure === undefined ? {} : { unsure }) };
     } else if (input.kind === 'remove') {
       // A line added here and never saved simply goes: there is nothing on the server to remove.
       if (previous?.kind === 'line' && previous.base === null && !this.revisions.has(id)) {
@@ -118,7 +131,8 @@ export class TimesheetAutosaver {
       next = { kind: 'remove', id, version };
     } else {
       const base = previous?.kind === 'comment' ? previous.base : this.savedComment ?? input.base;
-      next = { kind: 'comment', id: COMMENT_KEY, comment: input.comment, base, version };
+      const unsure = previous?.kind === 'comment' ? previous.unsure : undefined;
+      next = { kind: 'comment', id: COMMENT_KEY, comment: input.comment, base, version, ...(unsure === undefined ? {} : { unsure }) };
     }
     this.pending.set(id, next);
     this.write();
@@ -271,8 +285,30 @@ export class TimesheetAutosaver {
           if (this.disposed) return;
           const failure = this.options.classify(cause);
           if (failure.kind === 'network') {
+            // It may have been saved before the connection dropped: remembered, so a stale refusal can be told from a real one.
+            const current = this.pending.get(next.id);
+            if (current?.kind === 'line' && next.kind === 'line') this.pending.set(next.id, { ...current, unsure: { date: next.date, typed: next.typed } });
+            else if (current?.kind === 'comment' && next.kind === 'comment') this.pending.set(next.id, { ...current, unsure: next.comment });
+            this.write();
             this.goOffline();
             break;
+          }
+          if (failure.kind === 'conflict' && (next.kind === 'line' || next.kind === 'comment') && next.unsure !== undefined && this.options.current !== undefined) {
+            const held = await this.options.current(next.id).catch(() => null);
+            const ours =
+              held !== null &&
+              (next.kind === 'line'
+                ? held.typed !== undefined && sameTyped(held.typed, next.unsure.typed) && (held.date ?? null) === next.unsure.date
+                : held.comment === next.unsure);
+            const current = this.pending.get(next.id);
+            if (ours && current !== undefined && (current.kind === 'line' || current.kind === 'comment')) {
+              // Our own lost save: the newer typing goes on from it.
+              const { unsure: _unsure, ...rest } = current;
+              this.pending.set(next.id, { ...rest, base: rest.kind === 'line' ? held.revision : held.comment ?? rest.base } as TimesheetChange);
+              this.revisions.set(next.id, held.revision);
+              this.write();
+              continue;
+            }
           }
           if (failure.kind === 'conflict') {
             // The newer version wins; the screen reloads it and says so.

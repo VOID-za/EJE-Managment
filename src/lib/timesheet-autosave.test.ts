@@ -143,6 +143,52 @@ describe('TimesheetAutosaver', () => {
     expect(saver.pendingFor(COMMENT_KEY)).toBeNull();
   });
 
+  it('a save whose answer was lost is recognised: the newer typing goes on from it instead of being dropped as stale', async () => {
+    let server: { revision: string; typed: TimesheetLineTyped } = { revision: 'r0', typed: typed('1') };
+    let dropAnswer = true;
+    const timers: { run: () => void }[] = [];
+    const conflicts: string[] = [];
+    const sent: { overtime: string; expected: string | null }[] = [];
+    const saver = new TimesheetAutosaver({
+      saveLine: async (input) => {
+        sent.push({ overtime: input.typed.overtime, expected: input.expectedRevision });
+        if (input.expectedRevision !== server.revision) throw new Conflict();
+        server = { revision: `r${sent.length}`, typed: input.typed };
+        // Saved — and the answer lost on the way back.
+        if (dropAnswer) {
+          dropAnswer = false;
+          throw new NetworkDown();
+        }
+        return { id: input.id, revision: server.revision };
+      },
+      removeLine: async () => undefined,
+      saveComment: async () => undefined,
+      classify: (cause): SendFailure => (cause instanceof NetworkDown ? { kind: 'network', message: 'offline' } : { kind: 'conflict', message: 'newer' }),
+      current: async () => ({ revision: server.revision, date: '2026-11-03', typed: server.typed }),
+      storageKey: null,
+      setTimer: (run) => { timers.push({ run }); return timers.length; },
+      clearTimer: () => undefined,
+      onChange: () => undefined,
+      onSaved: () => undefined,
+      onConflict: (_id, message) => conflicts.push(message),
+    });
+    const tick = async () => {
+      const timer = timers.pop();
+      timers.length = 0;
+      timer?.run();
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    };
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('2'), base: 'r0' });
+    await tick();
+    expect(saver.state().kind).toBe('offline');
+    // More typing while the connection is down.
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('3'), base: 'r0' });
+    await tick();
+    expect(conflicts).toEqual([]);
+    expect(server.typed.overtime).toBe('3');
+    expect(saver.unsavedCount).toBe(0);
+  });
+
   it('keeps the queue on the device: a reload gives it back and sends it', async () => {
     const stored = new Map<string, string>();
     const first = setup({}, stored);

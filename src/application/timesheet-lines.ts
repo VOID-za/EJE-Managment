@@ -143,8 +143,10 @@ export const loadWorkingLines = async (context: OperationContext, technicianId: 
       : serverProblems(context, id, draft.id, draft.date, draft.typed);
   const lines: WorkingTimesheetLine[] = await Promise.all(
     entries.map(async (entry) => {
-      const draft = byId.get(entry.id) ?? null;
-      return lineOf(entry, draft, submittedOf(entry.id), await draftProblems(draft));
+      const submitted = submittedOf(entry.id);
+      // A submitted line is shown as submitted; a draft left over it (never possible once it is submitted) is not.
+      const draft = submitted === null ? byId.get(entry.id) ?? null : null;
+      return lineOf(entry, draft, submitted, await draftProblems(draft));
     }),
   );
   const entryIds = new Set(entries.map((entry) => entry.id));
@@ -198,6 +200,8 @@ export const saveTimesheetLine = async (
 ): Promise<WorkingTimesheetLine> => {
   const userId = asUserId(technicianId);
   assertOwner(context, userId);
+  // Two saves of one line (two devices) never both pass the revision check: the second waits, then sees the first.
+  await context.repos.attendance.lockLine(input.id);
   const [entry, draft] = await Promise.all([
     context.repos.attendance.findEntry(input.id),
     context.repos.attendance.findLineDraft(input.id),
@@ -314,6 +318,11 @@ export const removeTimesheetLine = async (
   if (!mine(entry) && !mine(draft)) return { removed: false };
   if (mine(entry)) {
     const held = (await currentSubmittedLines(context, userId)).find(({ entries }) => entries.some((line) => line.id === lineId));
+    if (held !== undefined && mine(draft)) {
+      // Only the unfinished typing over it goes; the submitted line stays exactly as submitted.
+      await context.repos.attendance.deleteLineDraft(lineId);
+      return { removed: true };
+    }
     if (held !== undefined) {
       throw refuse(
         `This line is part of your submitted timesheet for ${formatPeriod(held.period.from, held.period.to)}.`,

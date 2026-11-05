@@ -434,3 +434,63 @@ describe('one document all the way: preview = PDF = snapshot = Finance', () => {
     await refusedWith(prepareFinancePackage(harness.as(master), '2026-11', [SIPHO]), 'package_open');
   });
 });
+
+describe('the independent review’s findings (5 November 2026), fixed', () => {
+  it('a stored line moved by a draft blocks the dates it would leave — its old copy is never frozen unseen', async () => {
+    const stored = await line('2026-11-05', typed('1', 'L-MOVED'));
+    // Moved to December and left incomplete: the stored copy is still dated 5 November.
+    await line('2026-12-03', typed('abc', 'L-MOVED'), stored.id, stored.revision);
+    const state = await formsOf('2026-11-01', '2026-11-25');
+    expect(state.timesheet?.incomplete.map((item) => item.id)).toEqual([stored.id]);
+    await refusedWith(submit('2026-11-01', '2026-11-25'), 'timesheet_lines_incomplete');
+  });
+
+  it('a draft left over a submitted line can always be discarded; the submitted line stays', async () => {
+    const saved = await line('2026-11-05', typed('1'));
+    await submit('2026-11-01', '2026-11-25');
+    // As if a draft had been left over it before (never possible now through the screen).
+    await harness.repos.attendance.saveLineDraft({ id: saved.id, userId: SIPHO, date: '2026-11-05', typed: typed('x'), updatedBy: SIPHO, updatedAt: clock.now() });
+    expect((await loadWorkingLines(harness.as(sipho), SIPHO)).find((candidate) => candidate.id === saved.id)).toMatchObject({ complete: true, submitted: { from: '2026-11-01' } });
+    expect(await removeTimesheetLine(harness.as(sipho), SIPHO, saved.id)).toEqual({ removed: true });
+    expect(await harness.repos.attendance.findLineDraft(saved.id)).toBeNull();
+    expect(await harness.repos.attendance.findEntry(saved.id)).not.toBeNull();
+  });
+
+  it('a replaced submission opened by its id shows ITS snapshot, not its same-dates replacement', async () => {
+    await line('2026-11-05', typed('1', 'L-FIRST'));
+    const first = await submit('2026-11-01', '2026-11-25');
+    await line('2026-11-06', typed('1', 'L-SECOND'));
+    const second = await submit('2026-11-01', '2026-11-25', { confirmReplace: true });
+    const original = await loadSubmissionDocument(harness.as(master), first.timesheetPeriodId!);
+    expect(original.rows.map((row) => row.customer)).toEqual(['L-FIRST']);
+    expect(original.versionLabel).toMatch(/replaced by a later submission/u);
+    const replacement = await loadSubmissionDocument(harness.as(master), second.timesheetPeriodId!);
+    expect(replacement.rows.map((row) => row.customer).sort()).toEqual(['L-FIRST', 'L-SECOND']);
+  });
+
+  it('both PDFs may not end up with one name, whichever way it came about', async () => {
+    await line('2026-11-05', typed('1'));
+    const defaults = (await formsOf('2026-11-01', '2026-11-25')).defaultNames;
+    await renamePayrollDocument(harness.as(sipho), SIPHO, 'timesheet', defaults.attendance);
+    const state = await formsOf('2026-11-01', '2026-11-25');
+    expect(state.canSubmit).toBe(false);
+    expect(state.problems.join(' ')).toMatch(/Both PDFs are called/u);
+    await refusedWith(submit('2026-11-01', '2026-11-25'), 'payroll_forms_blocked');
+  });
+
+  it('days already SENT to Finance are never sent again by a replacement ending in another month; the same month may be corrected', async () => {
+    const { sendFinancePackage } = await import('./finance-packages');
+    await line('2026-10-05', typed('1'));
+    await submit('2026-10-01', '2026-10-31');
+    const prepared = await prepareFinancePackage(harness.as(master), '2026-10', [SIPHO]);
+    await sendFinancePackage(harness.as(master), prepared.id);
+    const across = await formsOf('2026-10-01', '2026-11-25');
+    expect(across.problems.join(' ')).toMatch(/went to Finance in the October 2026 package/u);
+    await refusedWith(submit('2026-10-01', '2026-11-25', { confirmReplace: true }), 'payroll_forms_blocked');
+    // The same Finance month: allowed (later), and the office sees it as corrected after sending.
+    clock.at = '2026-11-26T07:00:00.000Z';
+    await submit('2026-09-28', '2026-10-31', { confirmReplace: true });
+    const october = await loadPayrollMonth(harness.as(master), '2026-10');
+    expect(october.rows.find((row) => row.technician.id === SIPHO)?.status).toBe('corrected_after_sent');
+  });
+});

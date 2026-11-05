@@ -87,7 +87,6 @@ const FROM = twoBack;
 const TO = shift(today, -1);
 const inPeriod = [FROM, shift(FROM, 8), shift(TO, -2)];
 const lines = (date) => page.locator(`[data-testid="timesheet-line"][data-date="${date}"]`);
-const status = () => page.getByTestId('autosave-status');
 
 /** Opens Timesheets on exactly the period. */
 const openTimesheets = async () => {
