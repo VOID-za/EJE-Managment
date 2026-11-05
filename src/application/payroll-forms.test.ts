@@ -559,3 +559,24 @@ describe('two devices, one line — PAYROLL-ONE-1 follow-ups (5 November 2026)',
     expect(lines).toHaveLength(1);
   });
 });
+
+describe('the second autosave review (5 November 2026), fixed', () => {
+  it('REVIEW #4a: a draft typed back to the stored values still moves the revision on — an older copy elsewhere is refused', async () => {
+    const stored = await line('2026-11-15', typed('2'));
+    clock.at = new Date(Date.parse(clock.at) + 1000).toISOString();
+    const draft = await line('2026-11-15', typed('abc'), stored.id, stored.revision);
+    const back = await line('2026-11-15', typed('2'), stored.id, draft.revision);
+    expect(back.complete).toBe(true);
+    expect(back.revision > draft.revision).toBe(true);
+    await refusedWith(line('2026-11-15', typed('7'), stored.id, stored.revision), 'timesheet_line_changed');
+  });
+
+  it('REVIEW #4b: a line written back after its removal (an earlier release, after a rollback) can be changed again', async () => {
+    const first = await line('2026-11-16', typed('1', 'BACK'));
+    await removeTimesheetLine(harness.as(sipho), SIPHO, first.id);
+    // What v1.5.0 would do against a database at 0053: write the id again, knowing nothing of the removal.
+    await harness.repos.attendance.saveEntry({ ...first.entry!, updatedAt: clock.now() });
+    const again = (await loadWorkingLines(harness.as(sipho), SIPHO)).find((candidate) => candidate.id === first.id)!;
+    expect((await line('2026-11-16', typed('3', 'BACK'), first.id, again.revision)).complete).toBe(true);
+  });
+});

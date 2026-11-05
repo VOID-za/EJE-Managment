@@ -688,7 +688,7 @@ export const saveTimesheetEntry = async (
    * PAYROLL-ONE-1: the id a NEW line takes (the screen's), and the moment to stamp it with — later than the
    * revision it replaces, so two saves in one millisecond never share a revision.
    */
-  options: { readonly newId?: string; readonly updatedAt?: string } = {},
+  options: { readonly newId?: string; readonly updatedAt?: string; readonly alwaysWrite?: boolean } = {},
 ): Promise<TimesheetEntry> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
@@ -744,7 +744,8 @@ export const saveTimesheetEntry = async (
     'date', 'customerId', 'customerName', 'workshop', 'overtimeHours', 'doubleHours',
     'calloutAmount', 'calloutShared', 'internalKm', 'customerKm',
   ];
-  if (existing !== null && fields.every(same)) return existing;
+  // PAYROLL-ONE-1: a line whose draft is being completed is written even with its old values, so its revision moves on.
+  if (existing !== null && fields.every(same) && options.alwaysWrite !== true) return existing;
 
   const saved = await context.repos.attendance.saveEntry(entry);
   const subject = `${userFullName(context.actor)}'s timesheet for ${entry.date}`;

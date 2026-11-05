@@ -302,7 +302,7 @@ const saveLineHeld = async (
       internalKm: parseTyped(input.typed.internalKm),
       customerKm: parseTyped(input.typed.customerKm),
     },
-    { newId: input.id, updatedAt: now },
+    { newId: input.id, updatedAt: now, alwaysWrite: draft !== null },
   );
   if (draft !== null) await context.repos.attendance.deleteLineDraft(draft.id);
   return lineOf(stored, null, null);
@@ -390,7 +390,9 @@ export const saveTimesheetLine = async (
   const release = await context.repos.attendance.lockLine(input.id);
   try {
     const removed = await context.repos.attendance.findLineRemoval(input.id);
-    if (removed !== null && removed.userId === context.actor.id) {
+    const back = removed === null ? false : (await context.repos.attendance.findEntry(input.id)) !== null || (await context.repos.attendance.findLineDraft(input.id)) !== null;
+    // A line that exists again after its removal (written back by an earlier release after a rollback) is simply the line now.
+    if (removed !== null && removed.userId === context.actor.id && !back) {
       throw refuse(
         'This line was removed, so the change was not saved.',
         'timesheet_line_removed',

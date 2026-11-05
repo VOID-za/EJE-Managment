@@ -107,6 +107,7 @@ export class TimesheetAutosaver {
   private inFlight = false;
   /** The change being sent right now: it may reach the server whatever happens to it here. */
   private sending: string | null = null;
+  private sendingChange: TimesheetChange | null = null;
   private again = false;
   private lastSavedAt: string | null = null;
   private offlineUntil: string | null = null;
@@ -175,6 +176,24 @@ export class TimesheetAutosaver {
 
   /** The page is being left: what is waiting is sent with `keepalive`; the queue stays on the device until seen saved. */
   leave(): void {
+    /*
+     * Whatever is sent now with keepalive — and the save still in flight, whose
+     * answer this page will never read — may be saved. Each is remembered as
+     * possibly saved, on the device, so the next visit recognises its own work
+     * instead of taking it for another device's (the recovery in `flush`).
+     */
+    for (const [id, change] of this.pending) {
+      if (change.refused !== undefined) continue;
+      const inFlight = this.sendingChange?.id === id ? this.sendingChange : null;
+      if (change.kind === 'line') {
+        const sent = [...(inFlight?.kind === 'line' ? [{ date: inFlight.date, typed: inFlight.typed }] : []), { date: change.date, typed: change.typed }];
+        this.pending.set(id, { ...change, unsure: [...(change.unsure ?? []), ...sent].slice(-UNSURE_KEPT) });
+      } else if (change.kind === 'comment') {
+        const sent = [...(inFlight?.kind === 'comment' ? [inFlight.comment] : []), change.comment];
+        this.pending.set(id, { ...change, unsure: [...(change.unsure ?? []), ...sent].slice(-UNSURE_KEPT) });
+      }
+    }
+    this.write();
     for (const change of this.pending.values()) {
       if (change.refused !== undefined) continue;
       if (change.kind === 'line') {
@@ -205,7 +224,7 @@ export class TimesheetAutosaver {
     return this.pending.get(id) ?? null;
   }
 
-  /** Lines added on this screen and not yet on the server. */
+  /** Lines added on this device and not (known to be) on the server yet — after a reload too. */
   newLines(): readonly Extract<TimesheetChange, { kind: 'line' }>[] {
     return [...this.pending.values()].filter(
       (change): change is Extract<TimesheetChange, { kind: 'line' }> => change.kind === 'line' && change.base === null && !this.revisions.has(change.id),
@@ -282,6 +301,7 @@ export class TimesheetAutosaver {
         if (next === undefined) break;
         try {
           this.sending = next.id;
+          this.sendingChange = next;
           await this.send(next);
           if (this.disposed) return;
           savedAny = true;
@@ -326,6 +346,11 @@ export class TimesheetAutosaver {
               continue;
             }
           }
+          if (failure.kind === 'conflict' && this.pending.get(next.id)?.kind === 'remove' && this.pending.get(next.id)?.version !== next.version) {
+            // The save lost to a newer version, but the person has since removed the line: the removal goes on.
+            this.revisions.delete(next.id);
+            continue;
+          }
           if (failure.kind === 'conflict') {
             // The newer version wins; the screen reloads it and says so — and what was typed here, which was not saved.
             const lost = this.pending.get(next.id) ?? next;
@@ -346,6 +371,7 @@ export class TimesheetAutosaver {
     } finally {
       this.inFlight = false;
       this.sending = null;
+      this.sendingChange = null;
     }
     if (savedAny) this.options.onSaved();
     this.options.onChange();

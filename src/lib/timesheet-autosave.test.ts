@@ -245,6 +245,66 @@ describe('TimesheetAutosaver', () => {
     expect(lost[0]).toMatchObject({ kind: 'line', typed: { overtime: '7' } });
   });
 
+  it('REVIEW #1: leaving the page mid-save — the next visit recognises its own work instead of calling it another device\'s', async () => {
+    const stored = new Map<string, string>();
+    let server: { revision: string; typed: TimesheetLineTyped } = { revision: 'r0', typed: typed('1') };
+    let hold: (() => void) | null = null;
+    const first = setup({
+      // v1 reaches the server and commits, but this page never reads the answer (it is left).
+      saveLine: (input) => new Promise((resolve) => {
+        server = { revision: 'r1', typed: input.typed };
+        hold = () => resolve({ id: input.id, revision: 'r1' });
+      }),
+    }, stored);
+    first.saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('2'), base: 'r0' });
+    await first.tick();
+    first.saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('3'), base: 'r0' });
+    first.saver.leave();
+    first.saver.dispose();
+    (hold as (() => void) | null)?.();
+    const conflicts: string[] = [];
+    const second = setup({
+      saveLine: async (input) => {
+        if (input.expectedRevision !== server.revision) throw new Conflict();
+        server = { revision: 'r2', typed: input.typed };
+        return { id: input.id, revision: 'r2' };
+      },
+      current: async () => ({ revision: server.revision, date: '2026-11-03', typed: server.typed }),
+      onConflict: (_id, message) => conflicts.push(message),
+    }, stored);
+    await second.tick();
+    expect(conflicts).toEqual([]);
+    expect(server.typed.overtime).toBe('3');
+  });
+
+  it('REVIEW #3: a removal tapped while a save is out is still made when that save loses to a newer version', async () => {
+    let release: () => void = () => undefined;
+    const removed: string[] = [];
+    const conflicts: string[] = [];
+    const timers: { run: () => void }[] = [];
+    const saver = new TimesheetAutosaver({
+      saveLine: () => new Promise((_resolve, reject) => { release = () => reject(new Conflict()); }),
+      removeLine: async (id) => { removed.push(id); },
+      saveComment: async () => undefined,
+      classify: (cause): SendFailure => (cause instanceof Conflict ? { kind: 'conflict', message: 'newer' } : { kind: 'refused', message: 'x' }),
+      storageKey: null,
+      setTimer: (run) => { timers.push({ run }); return timers.length; },
+      clearTimer: () => undefined,
+      onChange: () => undefined,
+      onSaved: () => undefined,
+      onConflict: (_id, message) => conflicts.push(message),
+    });
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-05', typed: typed('2'), base: 'r0' }, 0);
+    timers.pop()?.run();
+    await Promise.resolve();
+    saver.change({ kind: 'remove', id: 'L1' });
+    release();
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    expect(removed).toEqual(['L1']);
+    expect(conflicts).toEqual([]);
+    expect(saver.unsavedCount).toBe(0);
+  });
+
   it('saves the comment with what the screen last showed, so another tab is not overwritten', async () => {
     const { saver, comments, tick } = setup();
     saver.change({ kind: 'comment', comment: 'Bench days', base: '' });

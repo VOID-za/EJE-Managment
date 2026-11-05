@@ -106,10 +106,22 @@ const TimesheetsPage = () => {
   const serverLines = lines.data ?? [];
   const known = new Set(serverLines.map((line) => line.id));
   // The server's lines, then those added here: shown while they wait to be saved or once saved (until the reload brings them).
-  const all: readonly EditableLine[] = [
-    ...serverLines,
-    ...added.filter((line) => !known.has(line.id) && (saver?.pendingFor(line.id) != null || saver?.revisionOf(line.id) != null)),
-  ].filter((line) => saver?.pendingFor(line.id)?.kind !== 'remove');
+  const addedHere = added.filter((line) => !known.has(line.id) && (saver?.pendingFor(line.id) != null || saver?.revisionOf(line.id) != null));
+  const shownIds = new Set([...known, ...addedHere.map((line) => line.id)]);
+  // A line added on this device and still waiting in its queue (offline, refused, or from before a reload) is shown, so it can be fixed or removed.
+  const queued: EditableLine[] = (saver?.newLines() ?? [])
+    .filter((change) => !shownIds.has(change.id))
+    .map((change) => ({
+      id: change.id,
+      date: change.date,
+      typed: change.typed,
+      revision: null,
+      complete: false,
+      problems: [],
+      historical: { normalHours: 0, callouts: 0 },
+      submitted: null,
+    }));
+  const all: readonly EditableLine[] = [...serverLines, ...addedHere, ...queued].filter((line) => saver?.pendingFor(line.id)?.kind !== 'remove');
 
   const addLine = (date: string) => {
     const line: EditableLine = {

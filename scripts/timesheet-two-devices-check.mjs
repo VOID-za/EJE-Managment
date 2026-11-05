@@ -148,6 +148,32 @@ await check('LEAVING at once: typed on A and the page left immediately — still
   if ((await copies(A.page).count()) !== 1) fail('a second copy appeared');
 });
 
+await check('a NEW line typed while saving is cut off is still on the screen after a reload — and saved when the connection is back', async () => {
+  const day = shift(-5);
+  await open(B.page);
+  await B.page.route('**/api/timesheets/*/lines', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+  const before = await B.page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).count();
+  await press(B.page, B.page.getByTestId(`add-timesheet-line-${day}`));
+  await B.page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [day, before], { timeout: 10000 });
+  const queuedId = await B.page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).nth(before).getAttribute('data-line-id');
+  await lineOn(B.page, queuedId).getByTestId('timesheet-customer-name').fill('Queued On The Device');
+  await lineOn(B.page, queuedId).getByTestId('timesheet-overtime').fill('1.5');
+  await B.page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'offline', null, { timeout: 20000 });
+  await B.page.reload({ waitUntil: 'networkidle' });
+  await B.page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  const shown = lineOn(B.page, queuedId);
+  await shown.waitFor({ timeout: 10000 });
+  if ((await shown.getByTestId('timesheet-customer-name').inputValue()) !== 'Queued On The Device') fail('the queued line is not shown as typed after the reload');
+  await B.page.unroute('**/api/timesheets/*/lines');
+  await B.page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await press(B.page, B.page.getByTestId('autosave-retry')).catch(() => undefined);
+  await saved(B.page);
+  const server = await held(B.page, queuedId);
+  if (server.length !== 1 || server[0].overtime !== '1.5') fail(`the server holds ${JSON.stringify(server)}`);
+  await press(B.page, lineOn(B.page, queuedId).getByTestId('remove-timesheet-line'));
+  await saved(B.page);
+});
+
 await check('SAVE/REMOVE: A removes the line; B, still showing it, types into it — refused, told, and the line stays removed on both', async () => {
   await open(B.page);
   await press(A.page, lineOn(A.page, id).getByTestId('remove-timesheet-line'));
