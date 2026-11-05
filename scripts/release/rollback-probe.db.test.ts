@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (cf6fe86, v1.5.0), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (e9fe38a, v1.5.1), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in cf6fe86, and it does: each of these was checked against that commit.
+ * in e9fe38a, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -183,18 +183,39 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // cf6fe86 (v1.5.0) shipped up to 0052; this release adds 0053.
-    expect(shipped).toHaveLength(53);
-    expect(shipped.at(-1)).toBe('0052_payroll_submissions');
-    expect(shipped).not.toContain('0053_timesheet_line_removals');
+    // e9fe38a (v1.5.1) shipped up to 0053; this release (v1.5.2) adds no migration.
+    expect(shipped).toHaveLength(54);
+    expect(shipped.at(-1)).toBe('0053_timesheet_line_removals');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0053 applied beyond what the live release ships.
+    // Exactly what the live release ships: nothing beyond it.
     expect(applied).toBe(54);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
+  });
+
+  /*
+   * v1.5.2 RECORDS A `basis` ON EVERY FINANCE PACKAGE ATTACHMENT (the stored
+   * manifest). The live code reads a package carrying it, and lists it.
+   */
+  it('reads a Finance package prepared by v1.5.2 (its manifest carries basis)', async () => {
+    const payroll = new PostgresPayrollRepository(db);
+    const id = '00000000-0000-4000-8000-0000000015b2';
+    const manifest = [{
+      technicianId: IDS.technician, technicianName: 'Sipho', kind: 'attendance', fileName: 'Rollback probe 1.5.2.pdf',
+      storageKey: 'finance-packages/probe/01-attendance.pdf', sha256: 'a'.repeat(64), sizeBytes: 10, pageCount: 1,
+      versionLabel: 'As submitted', correctedResend: false, basis: 'period:probe',
+    }];
+    await db.execute(sql`insert into finance_packages (id, month, status, recipient, manifest, attachment_count, total_bytes, prepared_by, prepared_at)
+      values (${id}, '2029-01', 'prepared', 'payroll@finance.example.test', ${JSON.stringify(manifest)}::jsonb, 1, 10, ${IDS.master}, now())`);
+    const found = await payroll.findPackage(id);
+    expect(found?.status).toBe('prepared');
+    // Discarded again (an allowed move), so the probe leaves no open package behind.
+    await db.execute(sql`update finance_packages set status = 'discarded' where id = ${id}`);
+    expect(found?.attachments[0]?.fileName).toBe('Rollback probe 1.5.2.pdf');
+    expect((await payroll.listPackages('2029-01')).map((financePackage) => financePackage.id)).toContain(id);
   });
 
   it('reads every indexing state the new release wrote', async () => {
