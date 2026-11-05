@@ -1,6 +1,9 @@
 'use client';
 
 import type { CurrentStandbyWeek, DaySwapView, StandbyDayOptions } from '@/application/standby-days';
+import type { PayrollFormsState, PayrollSubmissionView, SubmitPayrollFormsInput } from '@/application/payroll-forms';
+import type { WorkingTimesheetLine } from '@/application/timesheet-lines';
+import type { PayrollSubmission, TimesheetLineTyped } from '@/domain';
 import type { StandbyDayPair } from '@/domain';
 import type { CustomerRates, PricingInputs } from '@/domain';
 import type {
@@ -16,8 +19,6 @@ import type {
   StaffAvailabilityRow,
   TimesheetComment,
   TimesheetEntry,
-  TimesheetPeriod,
-  MonthlySubmission,
   CustomerDocument,
   ActivityEvent,
   AppNotification,
@@ -1346,8 +1347,27 @@ export const payroll = {
     apiDownload(`/api/payroll/${segment(userId)}/${segment(month)}/timesheet/pdf`, fallbackName),
   attendancePdf: (userId: string, month: string, fallbackName: string, version: 'current' | 'submitted' = 'current') =>
     apiDownload(`/api/payroll/${segment(userId)}/${segment(month)}/attendance/pdf${search({ version: version === 'current' ? undefined : version })}`, fallbackName),
-  submit: (userId: string, month: string, confirmUnrecorded: boolean) =>
-    command<{ submission: MonthlySubmission }>(`/api/payroll/${segment(userId)}/${segment(month)}/submit`, { confirmUnrecorded }),
+  /** PAYROLL-ONE-1: both forms for exactly From–To, and what stops their submission. */
+  periodForms: (userId: string, from: string, to: string) =>
+    query<PayrollFormsState>(`/api/payroll/forms/${segment(userId)}${search({ from, to })}`),
+  /** Every submission — for a period, or a month before PAYROLL-ONE-1 — current and replaced, newest first. */
+  periodHistory: (userId: string) => query<readonly PayrollSubmissionView[]>(`/api/payroll/forms/${segment(userId)}/history`),
+  periodDocument: <T>(userId: string, kind: 'timesheet' | 'attendance', from: string, to: string) =>
+    query<T>(`/api/payroll/forms/${segment(userId)}/${kind}${search({ from, to })}`),
+  periodPdfUrl: (userId: string, kind: 'timesheet' | 'attendance', from: string, to: string) =>
+    `/api/payroll/forms/${segment(userId)}/${kind}/pdf${search({ from, to })}`,
+  periodPdf: (userId: string, kind: 'timesheet' | 'attendance', from: string, to: string, fallbackName: string) =>
+    apiDownload(`/api/payroll/forms/${segment(userId)}/${kind}/pdf${search({ from, to })}`, fallbackName),
+  /** Rename a working PDF; '' goes back to the default. Submits and locks nothing. */
+  rename: (userId: string, kind: 'timesheet' | 'attendance', name: string) =>
+    command<{ fileName: string; custom: boolean }>(`/api/payroll/forms/${segment(userId)}/rename`, { kind, name }),
+  /** SUBMIT BOTH FORMS TOGETHER. One key per attempt: a double tap or a retry is one submission. */
+  submitPeriod: (userId: string, input: SubmitPayrollFormsInput, idempotencyKey: string) =>
+    apiPost<{ submission: PayrollSubmission }>(`/api/payroll/forms/${segment(userId)}/submit`, input, idempotencyKey),
+  submittedPdfUrl: (submissionId: string, kind: 'timesheet' | 'attendance') =>
+    `/api/payroll/submissions/${segment(submissionId)}/${kind}/pdf`,
+  submittedPdf: (submissionId: string, kind: 'timesheet' | 'attendance', fallbackName: string) =>
+    apiDownload(`/api/payroll/submissions/${segment(submissionId)}/${kind}/pdf`, fallbackName),
   month: (month: string) => query<PayrollMonthView>(`/api/payroll/months/${segment(month)}`),
   prepare: (month: string, technicianIds: readonly string[]) =>
     command<{ package: FinancePackageView }>('/api/payroll/packages', { month, technicianIds }),
@@ -1383,9 +1403,24 @@ export const timesheets = {
     ),
   /** TS-PAPER: the open sheet — every line not yet submitted, its comment and the dates Submit proposes. */
   working: (userId: string) => query<WorkingTimesheet>(`/api/timesheets/${segment(userId)}/working`),
-  /** TS-PAPER: Save the open sheet's one comment. Not a submission. */
-  saveWorkingComment: (userId: string, comment: string) =>
-    command<{ comment: string }>(`/api/timesheets/${segment(userId)}/working/comment`, { comment }),
+  /** TS-PAPER: Save the open sheet's one comment. Not a submission. PAYROLL-ONE-1: `expected` — what the screen showed. */
+  saveWorkingComment: (userId: string, comment: string, expected?: string, options: { readonly keepalive?: boolean } = {}) =>
+    apiPost<{ comment: string }>(
+      `/api/timesheets/${segment(userId)}/working/comment`,
+      expected === undefined ? { comment } : { comment, expected },
+      newIdempotencyKey(),
+      options,
+    ),
+  /** PAYROLL-ONE-1: every line of the sheet, complete and draft. */
+  lines: (userId: string) => query<readonly WorkingTimesheetLine[]>(`/api/timesheets/${segment(userId)}/lines`),
+  /** PAYROLL-ONE-1: save one line as typed (complete → the line; not yet → its draft). */
+  saveLine: (
+    userId: string,
+    input: { readonly id: string; readonly date: string | null; readonly typed: TimesheetLineTyped; readonly expectedRevision: string | null },
+    options: { readonly keepalive?: boolean } = {},
+  ) => apiPost<{ line: WorkingTimesheetLine }>(`/api/timesheets/${segment(userId)}/lines`, input, newIdempotencyKey(), options),
+  removeLine: (userId: string, lineId: string) =>
+    command<{ removed: boolean }>(`/api/timesheets/${segment(userId)}/lines/${segment(lineId)}/remove`),
   /** TS-PAPER: submitted timesheets, the latest first (the office: everybody's, or one person's). */
   submissions: (userId?: string) => query<readonly TimesheetSubmissionView[]>(`/api/timesheets/submissions${search({ userId })}`),
   submission: (periodId: string, version = 'current') =>
@@ -1393,9 +1428,6 @@ export const timesheets = {
   submissionPdf: (periodId: string, fallbackName: string, version = 'current') =>
     apiDownload(`/api/timesheets/submissions/${segment(periodId)}/pdf${search({ version: version === 'current' ? undefined : version })}`, fallbackName),
   submissionExportUrl: (periodId: string) => `/api/timesheets/submissions/${segment(periodId)}/export`,
-  /** TS-PAPER: Submit timesheet for the From and To confirmed. A submission is never overwritten. */
-  submit: (userId: string, from: string, to: string, replace = false) =>
-    command<{ period: TimesheetPeriod }>(`/api/timesheets/${segment(userId)}/period/submit`, replace ? { from, to, replace: true } : { from, to }),
   /** TS-16: ask to correct a sent timesheet — the reason and the complete corrected period. */
   requestCorrection: (
     userId: string,

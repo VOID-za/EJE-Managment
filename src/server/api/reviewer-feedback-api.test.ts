@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { businessToday } from '@/lib/business-time';
-import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
+import { DEMO_USERS, signedInAs, startTestServer, submitForms } from '@/test/api-harness';
 
 /**
  * THE REVIEWER'S CHANGES THROUGH THE REAL ROUTES (28 October 2026).
@@ -49,10 +49,13 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     expect(working.data.comment).toBe('Bench days.');
     expect(working.data.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([added.data.entry.id, future.data.entry.id]));
 
-    const sent = await technician.post<{ period: { id: string; submittedAt: string; from: string; to: string; snapshot: { comment: string } } }>('/api/timesheets/user-tech-sipho/period/submit', { from, to: today });
+    // PAYROLL-ONE-1: submitted with the attendance, on My Monthly Forms.
+    const sent = await submitForms<{ period: { id: string; submittedAt: string; from: string; to: string; snapshot: { comment: string } } }>(technician, 'user-tech-sipho', from, today);
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
     expect(sent.data.period).toMatchObject({ from, to: today, snapshot: { comment: 'Bench days.' } });
-    // The same dates again: refused — never overwritten.
+    // The same dates again: refused unless the replacement is confirmed — never overwritten.
+    expect((await submitForms(technician, 'user-tech-sipho', from, today)).status).toBe(422);
+    // The old Submit on the Timesheets page is retired.
     expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(422);
     // The future line stays on the sheet for the next period; the comment is cleared.
     const after = await technician.get<{ entries: readonly { id: string }[]; comment: string; suggested: { from: string } }>('/api/timesheets/user-tech-sipho/working');
@@ -65,7 +68,7 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     const notes = await office.get<{ notifications: readonly { type: string; title: string; link: string | null }[] }>('/api/notifications');
     const told = notes.data.notifications.filter((n) => n.type === 'timesheet_submitted');
     expect(told).toHaveLength(1);
-    expect(told[0]).toMatchObject({ link: '/timesheets' });
+    expect(told[0]).toMatchObject({ link: '/payroll' });
     expect(told[0]!.title).toContain('Sipho');
     const list = await office.get<readonly { id: string; technicianName: string; from: string; to: string; current: boolean }[]>('/api/timesheets/submissions');
     expect(list.status).toBe(200);
@@ -82,7 +85,7 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     // The technician reads their own submission but cannot export it; the office writes nothing.
     expect((await technician.get(`/api/timesheets/submissions/${sent.data.period.id}`)).status).toBe(200);
     expect((await technician.download(`/api/timesheets/submissions/${sent.data.period.id}/export`)).status).toBe(403);
-    expect((await office.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(403);
+    expect((await submitForms(office, 'user-tech-sipho', from, today)).status).toBe(403);
     expect((await office.post('/api/timesheets/user-tech-sipho/working/comment', { comment: 'x' })).status).toBe(403);
     // Another technician cannot open Sipho's working sheet or his submission.
     const riaan = await signedInAs(DEMO_USERS.otherTechnician);
@@ -106,7 +109,7 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     const other = await signedInAs(DEMO_USERS.otherTechnician);
     expect((await other.download(`/api/timesheets/user-tech-sipho/period/pdf?${period}`)).status).toBe(403);
     expect((await other.get(`/api/timesheets/user-tech-sipho/period?${period}`)).status).toBe(403);
-    expect((await other.post('/api/timesheets/user-tech-sipho/period/submit', { from: shift(today, -6), to: today })).status).toBe(403);
+    expect((await submitForms(other, 'user-tech-sipho', shift(today, -6), today)).status).toBe(403);
     expect((await technician.get(`/api/timesheets/user-tech-sipho/period?from=${today}&to=${shift(today, -6)}`)).status).toBe(422);
     // Opening it wrote nothing: the period is still a draft.
     expect((await office.get<PeriodDocument>(`/api/timesheets/user-tech-sipho/period?${period}`)).data.submittedAt).toBeNull();
@@ -175,7 +178,7 @@ describe('correcting a sent timesheet over HTTP (TS-16)', () => {
       date: to, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0, calloutAmount: 0,
     });
     expect(added.status, JSON.stringify(added.error)).toBe(200);
-    expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to })).status).toBe(200);
+    expect((await submitForms(technician, 'user-tech-sipho', from, to)).status).toBe(200);
 
     const body = {
       from,

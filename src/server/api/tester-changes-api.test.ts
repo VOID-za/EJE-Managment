@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { businessToday } from '@/lib/business-time';
-import { monthOfDate, previousMonth } from '@/lib/payroll-files';
-import { DEMO_USERS, signedInAs, startTestServer, type ApiTestClient } from '@/test/api-harness';
+import { monthBounds, monthOfDate, previousMonth } from '@/lib/payroll-files';
+import { DEMO_USERS, signedInAs, startTestServer, submitForms, type ApiTestClient } from '@/test/api-harness';
 
 /**
  * THE TESTER'S CHANGES OF 30 OCTOBER 2026, THROUGH THE REAL ROUTES. A screen
@@ -73,10 +73,13 @@ describe('the tester’s changes over HTTP', () => {
 
     // The Coordinator submits HER OWN month (My Monthly Forms), once.
     const me = await idOf(coordinator);
-    const submitted = await coordinator.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true });
+    // PAYROLL-ONE-1: her forms for the period — attendance only; a Coordinator keeps no timesheet.
+    const { from, to } = monthBounds(MONTH);
+    const submitted = await submitForms<{ submission: { timesheetRequired: boolean; timesheetPeriodId: string | null } }>(coordinator, me, from, to);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    // RESUBMIT-1: submitting again replaces the submission.
-    expect((await coordinator.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(200);
+    expect(submitted.data.submission).toMatchObject({ timesheetRequired: false, timesheetPeriodId: null });
+    // The same dates again replace it, once confirmed; the first is kept.
+    expect((await submitForms(coordinator, me, from, to, { confirmReplace: true })).status).toBe(200);
 
     const master = await signedInAs(DEMO_USERS.master);
     const after = await master.get<{ rows: readonly { technician: { id: string }; submittedAt: string | null; status: string; selectable: boolean }[] }>(`/api/payroll/months/${MONTH}`);
@@ -98,16 +101,17 @@ describe('the tester’s changes over HTTP', () => {
   it('keeps each person’s monthly history: their own, or the office’s view; never another technician’s', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const me = await idOf(technician);
-    expect((await technician.get<readonly unknown[]>(`/api/payroll/${me}/history`)).data).toEqual([]);
-    expect((await technician.post(`/api/payroll/${me}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(200);
-    const history = await technician.get<readonly { month: string; fileNames: { attendance: string } }[]>(`/api/payroll/${me}/history`);
+    expect((await technician.get<readonly unknown[]>(`/api/payroll/forms/${me}/history`)).data).toEqual([]);
+    const { from, to } = monthBounds(MONTH);
+    expect((await submitForms(technician, me, from, to)).status).toBe(200);
+    const history = await technician.get<readonly { from: string; to: string; financeMonth: string; current: boolean; fileNames: { attendance: string } }[]>(`/api/payroll/forms/${me}/history`);
     expect(history.status).toBe(200);
-    expect(history.data.map((entry) => entry.month)).toEqual([MONTH]);
+    expect(history.data.map((entry) => [entry.from, entry.to, entry.financeMonth, entry.current])).toEqual([[from, to, MONTH, true]]);
     expect(history.data[0]?.fileNames.attendance).toMatch(/ ATTEN [A-Z]+\.pdf$/u);
 
     const other = await signedInAs(DEMO_USERS.otherTechnician);
-    expect((await other.get(`/api/payroll/${me}/history`)).status).toBe(403);
-    expect((await (await signedInAs(DEMO_USERS.coordinator)).get(`/api/payroll/${me}/history`)).status).toBe(200);
+    expect((await other.get(`/api/payroll/forms/${me}/history`)).status).toBe(403);
+    expect((await (await signedInAs(DEMO_USERS.coordinator)).get(`/api/payroll/forms/${me}/history`)).status).toBe(200);
   });
 
   it('carries a technician’s message to the office and the reply back, kept in the conversation; a stranger cannot read it', async () => {

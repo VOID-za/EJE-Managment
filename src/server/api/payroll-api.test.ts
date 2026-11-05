@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { businessToday } from '@/lib/business-time';
 import { monthBounds, monthOfDate, previousMonth } from '@/lib/payroll-files';
 import { pdfPageTexts } from '@/lib/pdf/inspect';
-import { DEMO_USERS, signedInAs, startTestServer } from '@/test/api-harness';
+import { DEMO_USERS, signedInAs, startTestServer, submitForms } from '@/test/api-harness';
 
 /**
  * PAY-01 … PAY-08 THROUGH THE REAL ROUTES. A client that never loads the
@@ -45,14 +45,16 @@ describe('monthly payroll over HTTP', () => {
     // TS-PAPER: the timesheet is submitted by payday from the Timesheets page; the month carries the attendance.
     const { from, to } = monthBounds(MONTH);
     expect((await technician.post(`/api/timesheets/${SIPHO}/entries`, { date: `${MONTH}-03`, customerName: 'ABC', overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
-    expect((await technician.post(`/api/timesheets/${SIPHO}/period/submit`, { from, to })).status).toBe(200);
-    expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, {})).status).toBe(422); // weekdays unconfirmed
-    const submitted = await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true });
+    // PAYROLL-ONE-1: both forms together for the period, on My Monthly Forms; the old Submit is retired.
+    expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(422);
+    expect((await submitForms(technician, SIPHO, from, to, { confirmUnrecorded: false })).status).toBe(422); // weekdays unconfirmed
+    const submitted = await submitForms(technician, SIPHO, from, to);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    // RESUBMIT-1: submitting again replaces the submission — still one.
-    expect((await technician.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(200);
+    // The same dates again: only as a confirmed replacement, the first kept — still one current submission.
+    expect((await submitForms(technician, SIPHO, from, to)).status).toBe(422);
+    expect((await submitForms(technician, SIPHO, from, to, { confirmReplace: true })).status).toBe(200);
     const master = await signedInAs(DEMO_USERS.master);
-    expect((await master.post(`/api/payroll/${SIPHO}/${MONTH}/submit`, { confirmUnrecorded: true })).status).toBe(403);
+    expect((await submitForms(master, SIPHO, from, to, { confirmReplace: true })).status).toBe(403);
 
     expect((await technician.get(`/api/payroll/months/${MONTH}`)).status).toBe(403);
     expect((await technician.post('/api/payroll/packages', { month: MONTH, technicianIds: [SIPHO] })).status).toBe(403);

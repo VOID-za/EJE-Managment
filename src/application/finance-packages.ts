@@ -6,6 +6,7 @@ import {
   type FinancePackage,
   type FinancePackageAttachment,
   type IsoDateTime,
+  type PayrollSubmission,
   type PayrollDocumentKind,
   type User,
   type UserId,
@@ -24,6 +25,7 @@ import { assertPayrollMonth, loadAttendanceDocument } from './attendance-documen
 import { loadMonthlyForms } from './monthly-submissions';
 import { loadSubmissionDocument, type TimesheetDocument } from './timesheets';
 import { formatPeriod } from '@/lib/timesheet-dates';
+import { loadSubmittedPayrollDocument } from './payroll-forms';
 
 /**
  * THE TIMESHEETS OF A MONTH: every CURRENT submission whose To falls in it.
@@ -95,6 +97,21 @@ export type PayrollRowStatus =
   | 'sent'
   | 'corrected_after_sent';
 
+/** PAYROLL-ONE-1: one payroll submission a month's package carries for a person. */
+export interface PayrollMonthSubmission {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly label: string;
+  /** "Timesheet and attendance", or "Attendance only — no timesheet required". */
+  readonly type: string;
+  readonly timesheetRequired: boolean;
+  readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+  readonly submittedAt: IsoDateTime;
+  /** True when it replaced an earlier submission (kept, and no longer counted). */
+  readonly replacesEarlier: boolean;
+}
+
 export interface PayrollMonthRow {
   readonly technician: { readonly id: UserId; readonly name: string; readonly documentName: string; readonly active: boolean; readonly role: UserRole };
   readonly status: PayrollRowStatus;
@@ -111,6 +128,8 @@ export interface PayrollMonthRow {
   readonly sentIn: { readonly packageId: string; readonly sentAt: IsoDateTime } | null;
   /** May be ticked for a new package. */
   readonly selectable: boolean;
+  /** PAYROLL-ONE-1: the CURRENT payroll submissions whose Finance month (the month of To) is this one. */
+  readonly submissions: readonly PayrollMonthSubmission[];
 }
 
 export interface FinancePackageView extends FinancePackage {
@@ -168,19 +187,24 @@ const correctedSince = async (context: OperationContext, person: User, month: st
 export const loadPayrollMonth = async (context: OperationContext, month: string): Promise<PayrollMonthView> => {
   assertFinance(context);
   assertPayrollMonth(month);
-  const [users, submissions, packages, settings] = await Promise.all([
+  const [users, submissions, packages, settings, periodSubmissions] = await Promise.all([
     context.repos.users.list(),
     context.repos.payroll.listSubmissions(month),
     context.repos.payroll.listPackages(month),
     context.repos.settings.get(),
+    context.repos.payroll.listPayrollSubmissionsForMonth(month),
   ]);
-  const submitted = new Map(submissions.map((submission) => [submission.userId, submission]));
+  // PAYROLL-ONE-1: a replaced submission is kept and never counted again; only the current ones are.
+  const submitted = new Map(submissions.filter((submission) => (submission.supersededAt ?? null) === null).map((submission) => [submission.userId, submission]));
+  const currentPeriods = periodSubmissions.filter((submission) => (submission.supersededAt ?? null) === null);
+  const allReplaced = new Set(periodSubmissions.map((submission) => submission.supersededBySubmission).filter((id) => id !== null));
+  const replacedMonthly = new Set(submissions.map((submission) => submission.supersededBySubmission ?? null).filter((id) => id !== null));
   const sentPackages = packages.filter((financePackage) => financePackage.status === 'sent');
   // EVERY USER — Masters, Coordinators and Technicians (the tester, 30 October
   // 2026): everybody on the payroll submits a month. A disabled user still
   // appears for a month they submitted, so nothing submitted is ever hidden.
   const people = users
-    .filter((user) => user.active || submitted.has(user.id))
+    .filter((user) => user.active || submitted.has(user.id) || currentPeriods.some((submission) => submission.userId === user.id))
     .sort((a, b) => a.firstName.localeCompare(b.firstName) || a.lastName.localeCompare(b.lastName));
 
   const rows: PayrollMonthRow[] = [];
@@ -189,7 +213,11 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     const lastSent = sentPackages
       .filter((financePackage) => financePackage.attachments.some((attachment) => attachment.technicianId === person.id))
       .sort((a, b) => (b.sentAt ?? '').localeCompare(a.sentAt ?? ''))[0];
-    const submission = submitted.get(person.id) ?? null;
+    const legacy = submitted.get(person.id) ?? null;
+    const mine = currentPeriods.filter((submission) => submission.userId === person.id);
+    const latest = [legacy?.submittedAt ?? null, ...mine.map((submission) => submission.submittedAt)].filter((at): at is string => at !== null).sort().at(-1) ?? null;
+    // Either kind of submission makes the month submitted; `submission` keeps its old meaning (the legacy month) below.
+    const submission = legacy === null && mine.length === 0 ? null : { submittedAt: latest!, attendance: legacy?.attendance ?? null };
     const periods = await timesheetPeriodsOf(context, person, month);
     let correctionPending = forms.timesheet.correctionPending;
     for (const period of periods) {
@@ -214,7 +242,10 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       status = 'ready';
       detail = 'Submitted — ready to include';
     }
-    if (submission !== null && forms.attendance.changedAfterSubmission.length > 0) {
+    for (const period of mine) {
+      detail += `; ${formatPeriod(period.from, period.to)}: ${period.timesheetRequired ? 'timesheet and attendance' : 'attendance only — no timesheet required'}`;
+    }
+    if (legacy !== null && forms.attendance.changedAfterSubmission.length > 0) {
       detail += `; attendance corrected by the office after submission (${forms.attendance.changedAfterSubmission.length} day(s))`;
     }
     rows.push({
@@ -222,17 +253,33 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       status,
       detail,
       submittedAt: submission?.submittedAt ?? null,
-      fileNames: forms.fileNames,
-      timesheetRequired: forms.timesheetRequired,
+      fileNames: mine.length > 0 && legacy === null
+        ? { timesheet: mine.map((period) => period.fileNames.timesheet).filter((name) => name !== '').join(', '), attendance: mine.map((period) => period.fileNames.attendance).join(', ') }
+        : forms.fileNames,
+      timesheetRequired: forms.timesheetRequired || mine.some((period) => period.timesheetRequired),
       timesheetVersion: periods.length === 0 && !completesTimesheet(person.role)
         ? forms.timesheet.versionInForce
         : periods.length === 0
           ? 'No timesheet submitted ending in this month'
           : `Timesheet${periods.length === 1 ? '' : 's'} submitted: ${periods.map((period) => formatPeriod(period.from, period.to)).join('; ')}`,
       attendanceChangedAfterSubmission: forms.attendance.changedAfterSubmission.length,
-      unrecordedWeekdays: submission === null ? forms.attendance.unrecordedWeekdays.length : submission.attendance.days.filter((day) => day.status === null).length,
+      unrecordedWeekdays:
+        submission === null
+          ? forms.attendance.unrecordedWeekdays.length
+          : [...(legacy?.attendance.days ?? []), ...mine.flatMap((period) => period.attendance.days)].filter((day) => day.status === null).length,
       sentIn: lastSent === undefined || lastSent.sentAt === null ? null : { packageId: lastSent.id, sentAt: lastSent.sentAt },
       selectable: status === 'ready' || status === 'corrected_after_sent',
+      submissions: mine.map((period) => ({
+        id: period.id,
+        from: period.from,
+        to: period.to,
+        label: formatPeriod(period.from, period.to),
+        type: period.timesheetRequired ? 'Timesheet and attendance' : 'Attendance only — no timesheet required',
+        timesheetRequired: period.timesheetRequired,
+        fileNames: period.fileNames,
+        submittedAt: period.submittedAt,
+        replacesEarlier: allReplaced.has(period.id) || replacedMonthly.has(period.id),
+      })),
     });
   }
   return {
@@ -277,6 +324,8 @@ export const prepareFinancePackage = async (
   const now = context.services.clock.now();
   const packageId = context.services.ids.next('fpk');
   const attachments: FinancePackageAttachment[] = [];
+  // Names people chose themselves (PAYROLL-ONE-1): another person's may be the same, and is told apart by whose it is.
+  const chosenNames = new Set<string>();
   for (const technicianId of unique) {
     const row = month_.rows.find((candidate) => candidate.technician.id === technicianId);
     if (row === undefined) throw refuse('That person is not a technician on this month’s list.', 'unknown_technician', 'Reload the month.');
@@ -285,15 +334,32 @@ export const prepareFinancePackage = async (
     }
     const correctedResend = row.status === 'corrected_after_sent';
     const sheets: { readonly document: TimesheetDocument; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
-    let attendance;
+    const attendances: { readonly rendered: { readonly fileName: string; readonly bytes: Uint8Array; readonly pageCount: number }; readonly versionLabel: string }[] = [];
+    // PAYROLL-ONE-1: this person's current payroll submissions of the month, each with the names it went under.
+    const periodsOfMonth: readonly PayrollSubmission[] = (await context.repos.payroll.listPayrollSubmissionsForMonth(month)).filter(
+      (submission) => submission.userId === row.technician.id && (submission.supersededAt ?? null) === null,
+    );
     try {
       // TS-PAPER-7: the one rule — every current submission ending in the month, in its version in force.
       for (const period of await paydayTimesheetsEnding(context, row.technician.id, month)) {
         const timesheetDocument = await loadSubmissionDocument(context, period.id);
-        sheets.push({ document: timesheetDocument, rendered: renderTimesheetPdf(timesheetDocument, { generatedAt: now }) });
+        const half = periodsOfMonth.find((submission) => submission.timesheetPeriodId === period.id);
+        const document = half === undefined ? timesheetDocument : { ...timesheetDocument, fileName: half.fileNames.timesheet };
+        if (half !== undefined) chosenNames.add(half.fileNames.timesheet);
+        sheets.push({ document, rendered: renderTimesheetPdf(document, { generatedAt: now }) });
       }
-      const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
-      attendance = { document: attendanceDocument, rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }) };
+      // The calendar month's attendance, when it was submitted the way it was before PAYROLL-ONE-1 (and is still current).
+      const legacy = await context.repos.payroll.findSubmission(row.technician.id, month);
+      if (legacy !== null && (legacy.supersededAt ?? null) === null) {
+        const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
+        attendances.push({ rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }), versionLabel: attendanceDocument.versionLabel });
+      }
+      // A period's attendance: exactly the PDF stored when it was submitted, under its name.
+      for (const submission of periodsOfMonth) {
+        const stored = await loadSubmittedPayrollDocument(context, submission.id, 'attendance');
+        chosenNames.add(stored.fileName);
+        attendances.push({ rendered: { fileName: stored.fileName, bytes: stored.bytes, pageCount: stored.pageCount }, versionLabel: `As submitted for ${formatPeriod(submission.from, submission.to)}` });
+      }
     } catch (cause) {
       if (cause instanceof OnePageOverflow) {
         throw refuse(`${row.technician.name}’s forms do not fit on one page.`, 'form_too_long_for_one_page', `${cause.message} Shorten the longest comments or notes.`);
@@ -303,14 +369,18 @@ export const prepareFinancePackage = async (
     for (const [kind, rendered, versionLabel] of [
       // Two payday submissions ending in one month: the second file is numbered, never confused with the first.
       ...sheets.map((sheet, index) => ['timesheet', index === 0 ? sheet.rendered : { ...sheet.rendered, fileName: sheet.rendered.fileName.replace(/.pdf$/u, ` ${index + 1}.pdf`) }, sheet.document.versionLabel || 'Original submission'] as const),
-      ['attendance', attendance.rendered, attendance.document.versionLabel] as const,
+      ...attendances.map((attendance) => ['attendance', attendance.rendered, attendance.versionLabel] as const),
     ]) {
       // TS-PAPER-6: a timesheet may run to several pages; every other payroll form is one page.
       if (kind !== 'timesheet' && rendered.pageCount !== 1) {
         throw refuse(`${row.technician.name}’s ${kind} is not one page.`, 'form_not_one_page', 'Every payroll form except a timesheet must be exactly one page.');
       }
-      const fileName = correctedResend ? correctedFileName(rendered.fileName) : rendered.fileName;
-      if (attachments.some((attachment) => attachment.fileName === fileName)) {
+      let fileName = correctedResend ? correctedFileName(rendered.fileName) : rendered.fileName;
+      // A name a person chose may be another person's too ("Timesheet.pdf"): it is told apart by whose it is.
+      if (chosenNames.has(rendered.fileName) && attachments.some((attachment) => attachment.fileName.toLowerCase() === fileName.toLowerCase())) {
+        fileName = `${row.technician.name} - ${fileName}`;
+      }
+      if (attachments.some((attachment) => attachment.fileName.toLowerCase() === fileName.toLowerCase())) {
         throw refuse(
           `Two attachments would both be called ${fileName}.`,
           'duplicate_file_name',

@@ -273,7 +273,7 @@ export const assertKeepsTimesheet = (context: OperationContext): void => {
 };
 
 /** Office: anybody's timesheet. Everybody else: their own and nobody else's. */
-const assertMayRead = (context: OperationContext, technicianId: UserId): void => {
+export const assertMayRead = (context: OperationContext, technicianId: UserId): void => {
   // Their own sheet is only for a role that keeps one (TS-ROLE-1).
   if (context.actor.id === technicianId) assertKeepsTimesheet(context);
   if (can(context.actor.role, 'timesheets.viewAll')) return;
@@ -286,7 +286,7 @@ const assertMayRead = (context: OperationContext, technicianId: UserId): void =>
 };
 
 /** Only the technician whose timesheet it is enters or corrects it — and only a role that keeps one. */
-const assertOwner = (context: OperationContext, technicianId: UserId): void => {
+export const assertOwner = (context: OperationContext, technicianId: UserId): void => {
   if (context.actor.id === technicianId) {
     assertKeepsTimesheet(context);
     return;
@@ -347,7 +347,7 @@ const personOf = (user: User): TimesheetPerson => ({
   jobTitle: user.jobTitle,
 });
 
-const findTechnician = async (context: OperationContext, id: UserId): Promise<User> => {
+export const findTechnician = async (context: OperationContext, id: UserId): Promise<User> => {
   const technician = await context.repos.users.findById(id);
   if (technician === null) {
     throw refuse('That person is not a user of the system.', 'unknown_user', 'Choose a technician.');
@@ -683,6 +683,8 @@ export const saveTimesheetEntry = async (
   context: OperationContext,
   technicianId: string,
   input: TimesheetEntryInput,
+  /** PAYROLL-ONE-1: the id a NEW line takes — the one the screen gave it, so a retried save never makes two. */
+  options: { readonly newId?: string } = {},
 ): Promise<TimesheetEntry> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
@@ -715,7 +717,7 @@ export const saveTimesheetEntry = async (
   }
 
   const entry: TimesheetEntry = {
-    id: existing?.id ?? context.services.ids.next('tse'),
+    id: existing?.id ?? options.newId ?? context.services.ids.next('tse'),
     userId: id,
     date: input.date,
     customerId,
@@ -882,26 +884,41 @@ export const submitTimesheetPeriod = async (
   technicianId: string,
   from: string,
   to: string,
-  options: { readonly notify?: boolean; readonly replace?: boolean } = {},
+  options: {
+    readonly notify?: boolean;
+    readonly replace?: boolean;
+    /**
+     * PAYROLL-ONE-1 (the owner, 5 November 2026): a complete replacement may
+     * have the very same dates. With `replace`, the submission for exactly
+     * these dates is replaced like any other it covers — kept, marked
+     * replaced — and a NEW one is written beside it. Without, refused as before.
+     */
+    readonly replaceSameDates?: boolean;
+  } = {},
 ): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
   assertPeriod(context, from, to);
   const technician = await findTechnician(context, id);
-  const [entries, existing, working, current] = await Promise.all([
+  const [entries, found, working, current] = await Promise.all([
     context.repos.attendance.listEntries(id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.findWorkingComment(id),
     context.repos.attendance.listSubmittedPeriods(id, from, to),
   ]);
-  if (existing !== null && existing.submittedAt !== null) {
+  // A replaced row with these dates is history, not this period's row.
+  const existing = found !== null && (found.supersededAt ?? null) === null ? found : null;
+  const sameDates = existing !== null && existing.submittedAt !== null ? existing : null;
+  if (sameDates !== null && !(options.replaceSameDates === true && options.replace === true)) {
     throw refuse(
       `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
       'timesheet_already_submitted',
       'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets and ask for a correction.',
     );
   }
-  const overlapping = current.filter((period) => period.id !== existing?.id);
+  // The unsent row these dates already have (a comment saved before TS-PAPER), which submitting fills in.
+  const draftRow = sameDates === null ? existing : null;
+  const overlapping = current.filter((period) => period.id !== draftRow?.id);
   const partial = overlapping.filter((period) => !(from <= period.from && period.to <= to));
   if (partial.length > 0) {
     const named = partial.map((period) => formatPeriod(period.from, period.to)).join('; ');
@@ -932,25 +949,25 @@ export const submitTimesheetPeriod = async (
   }
   const now = context.services.clock.now();
   // The open sheet's comment; a comment saved on these exact dates before TS-PAPER otherwise.
-  const comment = working !== null ? working.comment : existing?.comment ?? '';
+  const comment = working !== null ? working.comment : draftRow?.comment ?? '';
   const replaced = await context.repos.attendance.supersedeOverlappingPeriods({
     userId: id,
     from,
     to,
-    exceptId: existing?.id ?? null,
+    exceptId: draftRow?.id ?? null,
     at: now,
     by: context.actor.id,
   });
   let saved: TimesheetPeriod | null;
   try {
     saved = await context.repos.attendance.submitPeriod({
-      id: existing?.id ?? context.services.ids.next('tsp'),
+      id: draftRow?.id ?? context.services.ids.next('tsp'),
       userId: id,
       from,
       to,
       comment,
-      updatedBy: existing?.updatedBy ?? context.actor.id,
-      updatedAt: existing?.updatedAt ?? now,
+      updatedBy: draftRow?.updatedBy ?? context.actor.id,
+      updatedAt: draftRow?.updatedAt ?? now,
       submittedAt: now,
       submittedBy: context.actor.id,
       snapshot: { technicianName: userFullName(technician), from, to, comment, entries },
@@ -1118,6 +1135,8 @@ export const saveWorkingTimesheetComment = async (
   context: OperationContext,
   technicianId: string,
   text: string,
+  /** PAYROLL-ONE-1: the comment the screen was showing; a save from an older one is refused, not written over a newer. */
+  expected?: string,
 ): Promise<{ readonly comment: string }> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
@@ -1127,6 +1146,9 @@ export const saveWorkingTimesheetComment = async (
   }
   const existing = await context.repos.attendance.findWorkingComment(id);
   if ((existing?.comment ?? '') === comment) return { comment };
+  if (expected !== undefined && expected.trim() !== (existing?.comment ?? '')) {
+    throw refuse('The comment was changed somewhere else since you opened it.', 'timesheet_comment_changed', 'The newer comment is shown. Make your change again on it.');
+  }
   await context.repos.attendance.saveWorkingComment({ userId: id, comment, updatedBy: context.actor.id, updatedAt: context.services.clock.now() });
   await audit(context, {
     jobId: null,
@@ -1274,7 +1296,7 @@ export const loadTimesheetDocument = async (
   from: string,
   to: string,
   /** TS-16. 'current' (the version in force), 'original', or a correction's sequence. */
-  version: 'current' | 'original' | number = 'current',
+  version: 'current' | 'original' | 'working' | number = 'current',
 ): Promise<TimesheetDocument> => {
   const id = asUserId(technicianId);
   assertMayRead(context, id);
@@ -1286,7 +1308,8 @@ export const loadTimesheetDocument = async (
     context.repos.settings.get(),
     context.repos.attendance.findWorkingComment(id),
   ]);
-  const sentRow = row?.submittedAt != null ? row : null;
+  // PAYROLL-ONE-1: 'working' is the lines as they stand — what submitting these dates would freeze — even where a submission has them.
+  const sentRow = version !== 'working' && row?.submittedAt != null ? row : null;
   const corrections = sentRow === null ? [] : await context.repos.attendance.listCorrections(sentRow.id);
   const inForce = sentRow === null ? null : versionInForce(sentRow, corrections);
   let snapshot: TimesheetSubmissionSnapshot | null = inForce?.snapshot ?? null;
@@ -1314,7 +1337,7 @@ export const loadTimesheetDocument = async (
     } else {
       versionText = await versionLabel(context, inForce.correction);
     }
-  } else if (version !== 'current') {
+  } else if (version !== 'current' && version !== 'working') {
     throw refuse('This timesheet has not been sent to the office.', 'timesheet_not_sent', 'Only a sent timesheet has versions.');
   }
   // TS-PAPER-8: a submission a later one replaced says so, whichever version of it is read.

@@ -1,25 +1,15 @@
 import { z } from 'zod';
-import { submitTimesheetPeriod } from '@/application/timesheets';
+import { refuseRetiredSubmission } from '@/application/payroll-forms';
 import { writeRoute } from '@/server/api/handler';
 
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD');
-
 /**
- * SEND TO OFFICE for the chosen period (TS-02, TS-14). Once: a second send, or
- * a period sharing a day with one already sent, is refused; the office is
- * notified only when the submission has been saved.
+ * RETIRED (PAYROLL-ONE-1, the owner, 5 November 2026): a timesheet is no
+ * longer submitted on its own from the Timesheets page. It is submitted with
+ * the attendance, for the same From–To, on My Monthly Forms. Refused here,
+ * whatever an old screen sends, so there is one submission point.
  */
 export const POST = writeRoute({
   operation: 'timesheets.submit',
-  // TS-PAPER-7: `replace` — the technician confirmed that these dates replace a submission they cover.
-  schema: z.object({ from: day, to: day, replace: z.boolean().optional() }).strict(),
-  handler: async (context) => ({
-    period: await submitTimesheetPeriod(
-      context.operation,
-      context.params.userId ?? '',
-      context.input.from,
-      context.input.to,
-      { replace: context.input.replace === true },
-    ),
-  }),
+  schema: z.object({}).passthrough(),
+  handler: async () => refuseRetiredSubmission('timesheet'),
 });

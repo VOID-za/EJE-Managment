@@ -221,7 +221,8 @@ export const submitMonth = async (
     submittedAt: now,
     submittedBy: context.actor.id,
   };
-  const saved = previous === null ? await context.repos.payroll.createSubmission(next) : await context.repos.payroll.replaceSubmission(next);
+  // PAYROLL-ONE-1 (0052): a submission is never rewritten in place any more — the month stays as it was submitted.
+  const saved = previous === null ? await context.repos.payroll.createSubmission(next) : null;
   if (saved === null) {
     throw refuse(`${state.monthLabel} has already been submitted to the office.`, 'month_submitted', 'It was submitted once; the office has it.');
   }

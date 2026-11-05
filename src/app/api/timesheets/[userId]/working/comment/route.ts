@@ -6,6 +6,6 @@ import { writeRoute } from '@/server/api/handler';
 /** TS-PAPER. The open sheet's one comment; submitting copies it into the snapshot. */
 export const POST = writeRoute({
   operation: 'timesheets.workingComment',
-  schema: z.object({ comment: z.string().max(TIMESHEET_PERIOD_COMMENT_LIMIT) }).strict(),
-  handler: async (context) => saveWorkingTimesheetComment(context.operation, context.params.userId ?? '', context.input.comment),
+  schema: z.object({ comment: z.string().max(TIMESHEET_PERIOD_COMMENT_LIMIT), expected: z.string().max(TIMESHEET_PERIOD_COMMENT_LIMIT).optional() }).strict(),
+  handler: async (context) => saveWorkingTimesheetComment(context.operation, context.params.userId ?? '', context.input.comment, context.input.expected),
 });

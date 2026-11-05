@@ -54,7 +54,8 @@ const state = async () => ({
 });
 /** The month's Finance package: the attendance submitted, prepared, every timesheet attachment read, then discarded. */
 const packageOf = async (month: string) => {
-  await submitMonth(harness.as(sipho), SIPHO, month, { confirmUnrecorded: true });
+  // A month submitted before PAYROLL-ONE-1 is never submitted again (0052).
+  if ((await harness.repos.payroll.findSubmission(SIPHO, month)) === null) await submitMonth(harness.as(sipho), SIPHO, month, { confirmUnrecorded: true });
   const prepared = await prepareFinancePackage(harness.as(master), month, [SIPHO]);
   const sheets: { file: string; pages: number; tags: string[] }[] = [];
   for (const attachment of prepared.attachments.filter((item) => item.kind === 'timesheet')) {

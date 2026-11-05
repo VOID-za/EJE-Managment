@@ -181,14 +181,10 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     }
   });
 
-  it('submitted again: the new submission REPLACES the current one — one row, no history kept (RESUBMIT-1)', async () => {
+  it('PAYROLL-ONE-1: a month submitted is kept exactly as it was — never rewritten in place (RESUBMIT-1 retired)', async () => {
     const first = await submitFor(sipho);
-    const again = await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
-    expect(again.id).toBe(first.id);
-    expect(again.submittedAt >= first.submittedAt).toBe(true);
-    expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(1);
-    // Its timesheet half is still ONE sent period, sent again.
-    expect(await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).toHaveLength(1);
+    await expect(submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
+    expect(await harness.repos.payroll.listSubmissions(MONTH)).toEqual([first]);
   });
 
   it('only the technician themselves; not another technician, not the office', async () => {
@@ -228,7 +224,7 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect((await harness.repos.attendance.listEntries(SIPHO, FROM, TO)).map((entry) => entry.date)).toEqual([`${MONTH}-03`]);
   });
 
-  it('after submission the PERSON may change their own days and submit again, which replaces the submission; the office still may not (RESUBMIT-1, ATT-OWN-1)', async () => {
+  it('after submission the PERSON may change their own days — the submitted copy stays as it went; the office still may not (ATT-OWN-1)', async () => {
     await submitFor(sipho);
     const before = await harness.repos.attendance.listRecords(FROM, TO, SIPHO);
     await recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' });
@@ -239,11 +235,9 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     }
     // Until it is submitted again, the office's copy is the one submitted.
     expect((await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted')).rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
-    // Submitted again: the new submission replaces it, and carries the 14th.
-    await submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true });
-    const submitted = await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted');
-    expect(submitted.rows.map((row) => row.date)).toEqual([`${MONTH}-07`, `${MONTH}-14`]);
-    expect(submitted.inForce).toBe(true);
+    // PAYROLL-ONE-1: never rewritten — a replacement is a payroll submission for the period, the month kept.
+    await expect(submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
+    expect((await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted')).rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
     expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(1);
     // The underlying attendance records were never deleted.
     expect((await harness.repos.attendance.listRecords(FROM, TO, SIPHO)).length).toBe(before.length + 1);
@@ -267,11 +261,10 @@ describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
     expect(await harness.repos.attendance.findPeriod(COORD, FROM, TO)).toBeNull();
     const [notice] = (await harness.repos.notifications.list(master.id)).filter((n) => n.type === 'timesheet_submitted');
     expect(notice?.title).toMatch(/: attendance$/u);
-    // Editable and submittable again, like anybody's (RESUBMIT-1).
+    // Her days stay hers to change; the month as submitted is kept (PAYROLL-ONE-1: never rewritten).
     await recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' });
-    const again = await submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true });
-    expect(again.id).toBe(submission.id);
-    expect(again.timesheetPeriodId).toBeNull();
+    await expect(submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
+    expect((await harness.repos.payroll.findSubmission(COORD, MONTH))?.id).toBe(submission.id);
   });
 
   it('a Coordinator cannot enter, open, send or correct a timesheet of their own', async () => {

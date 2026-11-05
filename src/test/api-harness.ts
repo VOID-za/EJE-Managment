@@ -414,3 +414,28 @@ export const signedInAs = async (email: string): Promise<ApiTestClient> => {
   }
   return client;
 };
+
+/**
+ * SUBMIT A PERSON'S FORMS THE WAY MY MONTHLY FORMS DOES (PAYROLL-ONE-1): read
+ * the forms for From–To, then submit them naming the revision just read. The
+ * confirmations a screen ticks are given unless a test says otherwise — except
+ * `confirmReplace`, which a test asks for when it means to replace.
+ */
+export const submitForms = async <T = { submission: { id: string; timesheetPeriodId: string | null }; period: { id: string; from: string; to: string; snapshot: { comment: string; entries: readonly { id: string; customerName: string }[] } } | null }>(
+  client: ApiTestClient,
+  userId: string,
+  from: string,
+  to: string,
+  confirm: { readonly confirmUnrecorded?: boolean; readonly confirmNoLines?: boolean; readonly confirmReplace?: boolean } = {},
+): Promise<ApiResponse<T>> => {
+  const forms = await client.get<{ revision: string }>(`/api/payroll/forms/${userId}?from=${from}&to=${to}`);
+  if (forms.status !== 200) return forms as unknown as ApiResponse<T>;
+  return client.post<T>(`/api/payroll/forms/${userId}/submit`, {
+    from,
+    to,
+    revision: forms.data.revision,
+    confirmUnrecorded: confirm.confirmUnrecorded ?? true,
+    confirmNoLines: confirm.confirmNoLines ?? true,
+    confirmReplace: confirm.confirmReplace ?? false,
+  });
+};

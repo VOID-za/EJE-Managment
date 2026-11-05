@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEMO_USERS, signedInAs, startTestServer, type ApiTestClient } from '@/test/api-harness';
+import { DEMO_USERS, signedInAs, startTestServer, submitForms, type ApiTestClient } from '@/test/api-harness';
 import { businessToday } from '@/lib/business-time';
 import { previousMonth, monthOfDate } from '@/lib/payroll-files';
 
@@ -71,13 +71,18 @@ describe('the office keeps its OWN forms, and only its own', () => {
     for (const answer of [
       await coordinator.post(`/api/timesheets/${COORDINATOR}/entries`, line),
       await coordinator.get(`/api/timesheets/${COORDINATOR}?from=${today}&to=${today}`),
-      await coordinator.post(`/api/timesheets/${COORDINATOR}/period/submit`, { from: `${month}-01`, to: `${month}-01` }),
+      // PAYROLL-ONE-1: a line saved as typed, and the name of a timesheet PDF.
+      await coordinator.post(`/api/timesheets/${COORDINATOR}/lines`, { id: '00000000-0000-4000-8000-00000000c001', date: today, typed: { pick: '', customerName: 'x', overtime: '1', double: '0', callout: '0', internalKm: '0', customerKm: '0' }, expectedRevision: null }),
       await coordinator.post(`/api/timesheets/${COORDINATOR}/working/comment`, { comment: 'x' }),
       await coordinator.get(`/api/timesheets/${COORDINATOR}/working`),
       await coordinator.post(`/api/timesheets/${COORDINATOR}/comment`, { date: today, comment: 'x' }),
     ]) {
       expect(answer.status, JSON.stringify(answer.error)).toBe(403);
     }
+    // A Coordinator renames no timesheet PDF: she keeps none.
+    refused(await coordinator.post(`/api/payroll/forms/${COORDINATOR}/rename`, { kind: 'timesheet', name: 'Mine.pdf' }));
+    // The Timesheets page's old Submit is retired for everybody.
+    expect((await coordinator.post(`/api/timesheets/${COORDINATOR}/period/submit`, { from: `${month}-01`, to: `${month}-01` })).status).toBe(422);
     // Still reads a technician's sheet — the office's review.
     expect((await coordinator.get(`/api/timesheets/${technician.id}?from=${today}&to=${today}`)).status).toBe(200);
     // And a technician cannot export a CSV of their own sheet (TS-CSV-OFF-1); the office can.
@@ -90,6 +95,8 @@ describe('the office keeps its OWN forms, and only its own', () => {
     refused(await master.post(`/api/timesheets/${technician.id}/entries`, line));
     refused(await master.post(`/api/timesheets/${technician.id}/working/comment`, { comment: 'not mine' }));
     refused(await master.post(`/api/timesheets/${technician.id}/period/submit`, { from: `${month}-01`, to: `${month}-01` }));
+    refused(await master.post(`/api/timesheets/${technician.id}/lines`, { id: '00000000-0000-4000-8000-00000000c002', date: today, typed: { pick: '', customerName: 'x', overtime: '1', double: '0', callout: '0', internalKm: '0', customerKm: '0' }, expectedRevision: null }));
+    refused(await master.post(`/api/payroll/forms/${technician.id}/rename`, { kind: 'timesheet', name: 'Theirs.pdf' }));
     refused(await coordinator.post(`/api/timesheets/${technician.id}/entries`, line));
   });
 
@@ -106,6 +113,12 @@ describe('the office keeps its OWN forms, and only its own', () => {
   it('refuses submitting anybody else’s month, though the office can read it', async () => {
     refused(await master.post(`/api/payroll/${technician.id}/${month}/submit`, { confirmUnrecorded: true }));
     refused(await coordinator.post(`/api/payroll/${me.id}/${month}/submit`, { confirmUnrecorded: true }));
+    // PAYROLL-ONE-1: the office reads anybody's forms for a period and submits none but its own.
+    expect((await submitForms(master, technician.id, `${month}-01`, `${month}-28`)).status).toBe(403);
+    expect((await submitForms(coordinator, me.id, `${month}-01`, `${month}-28`)).status).toBe(403);
+    const forms = await master.get<{ readonly owner: boolean; readonly canSubmit: boolean }>(`/api/payroll/forms/${technician.id}?from=${month}-01&to=${month}-28`);
+    expect(forms.status).toBe(200);
+    expect(forms.data).toMatchObject({ owner: false, canSubmit: false });
 
     const theirs = await master.get<{ readonly owner: boolean; readonly canSubmit: boolean }>(`/api/payroll/${technician.id}/${month}`);
     expect(theirs.status).toBe(200);
@@ -131,6 +144,10 @@ describe('a technician’s own forms are theirs alone', () => {
     refused(await sipho.post('/api/attendance', { userId: riaan.id, date: today, status: 'present', note: '' }));
     refused(await sipho.post(`/api/timesheets/${riaan.id}/entries`, line));
     refused(await sipho.post(`/api/payroll/${riaan.id}/${month}/submit`, { confirmUnrecorded: true }));
+    refused(await submitForms(sipho, riaan.id, `${month}-01`, `${month}-28`));
+    refused(await sipho.get(`/api/payroll/forms/${riaan.id}/history`));
+    refused(await sipho.post(`/api/payroll/forms/${riaan.id}/rename`, { kind: 'attendance', name: 'Riaan.pdf' }));
+    refused(await sipho.download(`/api/payroll/forms/${riaan.id}/attendance/pdf?from=${month}-01&to=${month}-28`));
     refused(await sipho.get(`/api/payroll/${riaan.id}/${month}`));
 
     expect((await sipho.post('/api/attendance', { userId: self!.id, date: today, status: 'present', note: '' })).status).toBe(200);

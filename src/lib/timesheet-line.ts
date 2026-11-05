@@ -3,6 +3,7 @@ import {
   TIMESHEET_MAX_HOURS_PER_DAY,
   TIMESHEET_MAX_KM_PER_LINE,
   type TimesheetEntry,
+  type TimesheetLineTyped,
 } from '@/domain';
 
 /**
@@ -175,4 +176,80 @@ export const keptTimesheetDraft = (key: string): KeptTimesheetDraft | null => {
   } catch {
     return null;
   }
+};
+
+/**
+ * A LINE AS TYPED, AND WHAT IT STILL NEEDS. PAYROLL-ONE-1 (the owner,
+ * 5 November 2026): every line saves itself as it is typed; a line that is not
+ * complete yet is KEPT ON THE SERVER as a draft — never thrown away, never
+ * silently cut — shown with what it needs, and the forms cannot be submitted
+ * while one is in their dates.
+ *
+ * A line is complete when it has a date, every number is one the server
+ * stores (the field rules above), and it says something: a customer, Workshop,
+ * or a value above zero. An EMPTY line — no customer, not Workshop, every
+ * value zero — is the line just added and not filled in yet; it is a draft
+ * until it is filled in or removed. (A customer with zero hours is a recorded
+ * day with no hours, as it has always been; TS-PAPER's "a customer is never
+ * required" stands.) The server adds the two rules only it can check: the
+ * customer is in the register, and the day's lines stay within 24 hours.
+ */
+export type TimesheetLineField = TimesheetDraftField | 'date' | 'line';
+
+export interface TimesheetLineProblem {
+  readonly field: TimesheetLineField;
+  readonly message: string;
+}
+
+export const emptyTimesheetLineTyped = (): TimesheetLineTyped => ({
+  pick: '',
+  customerName: '',
+  overtime: '0',
+  double: '0',
+  callout: '0',
+  internalKm: '0',
+  customerKm: '0',
+});
+
+/** What the screen shows for a stored line. Pure. */
+export const typedOfEntry = (entry: TimesheetEntry): TimesheetLineTyped => ({
+  pick: entry.workshop ? WORKSHOP_PICK : entry.customerId ?? '',
+  customerName: entry.workshop ? '' : entry.customerName,
+  overtime: String(entry.overtimeHours),
+  double: String(entry.doubleHours),
+  callout: (entry.calloutAmount / 100).toFixed(2),
+  internalKm: String(entry.internalKm),
+  customerKm: String(entry.customerKm),
+});
+
+/** Two typed lines that say the same thing (blank and 0 are the same number; 450 and 450.00 the same amount). */
+export const sameTypedLine = (a: TimesheetLineTyped, b: TimesheetLineTyped): boolean => {
+  const number = (x: string, y: string) => {
+    const left = parseTyped(x);
+    const right = parseTyped(y);
+    return Number.isNaN(left) || Number.isNaN(right) ? x.trim() === y.trim() : left === right;
+  };
+  return (
+    a.pick === b.pick && a.customerName.trim() === b.customerName.trim() &&
+    number(a.overtime, b.overtime) && number(a.double, b.double) && number(a.callout, b.callout) &&
+    number(a.internalKm, b.internalKm) && number(a.customerKm, b.customerKm)
+  );
+};
+
+/** Every problem of a typed line that the browser can see. Pure; the server asks the same, and more. */
+export const timesheetLineProblems = (date: string | null, typed: TimesheetLineTyped): readonly TimesheetLineProblem[] => {
+  const problems: TimesheetLineProblem[] = [];
+  if (date === null || date === '' || !/^\d{4}-\d{2}-\d{2}$/u.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+    problems.push({ field: 'date', message: 'Date: choose the day of this line.' });
+  }
+  const fields = timesheetDraftProblems({ ...emptyTimesheetDraft(date ?? ''), ...typed, calloutShared: false });
+  for (const [field, message] of Object.entries(fields) as [TimesheetDraftField, string][]) problems.push({ field, message });
+  const customerSaid = typed.pick === WORKSHOP_PICK || typed.pick.length > 0 || typed.customerName.trim().length > 0;
+  const valueSaid = [typed.overtime, typed.double, typed.callout, typed.internalKm, typed.customerKm].some((value) => parseTyped(value) > 0);
+  if (!customerSaid && !valueSaid && problems.length === 0) {
+    problems.push({ field: 'line', message: 'Empty line: choose the customer or Workshop and enter what you worked, or remove the line.' });
+  }
+  if (typed.customerName.trim().length > 200) problems.push({ field: 'customer', message: 'Customer: keep the name to 200 characters.' });
+  return problems;
 };

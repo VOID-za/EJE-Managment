@@ -8,7 +8,7 @@ import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
 import { businessToday } from '@/lib/business-time';
 import { hashPassword } from '@/server/auth/passwords';
-import { ApiTestClient, startPostgresTestServer } from '@/test/api-harness';
+import { ApiTestClient, startPostgresTestServer, submitForms } from '@/test/api-harness';
 
 /**
  * ATTEND-1 AND TIMESHEET-1, ON REAL POSTGRESQL (migration 0033).
@@ -109,10 +109,13 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       date: today, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0,
     })).status).toBe(403);
     expect((await coordinator.post('/api/attendance', { userId: IDS.coordinator, date: `${month}-07`, status: 'present', note: '' })).status).toBe(200);
-    const submitted = await coordinator.post(`/api/payroll/${IDS.coordinator}/${month}/submit`, { confirmUnrecorded: true });
+    // The calendar month's Submit is retired (PAYROLL-ONE-1); her forms go for the period, attendance only.
+    expect((await coordinator.post(`/api/payroll/${IDS.coordinator}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(422);
+    const lastOfMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    const submitted = await submitForms(coordinator, IDS.coordinator, `${month}-01`, lastOfMonth);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    const [row] = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.coordinator));
-    expect(row?.timesheetPeriodId).toBeNull();
+    const [row] = await db.select().from(schema.payrollSubmissions).where(eq(schema.payrollSubmissions.userId, IDS.coordinator));
+    expect(row).toMatchObject({ timesheetRequired: false, timesheetPeriodId: null, timesheetFileName: '', financeMonth: month });
     expect(await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.coordinator))).toHaveLength(0);
 
     // Migration 0050 (TS-PAPER): the month is the attendance for everybody — a technician's
@@ -253,10 +256,10 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       date: today, customerName: '', workshop: true, overtimeHours: 1, doubleHours: 0,
     })).status).toBe(200);
     expect((await tech.post(`/api/timesheets/${IDS.technician}/working/comment`, { comment: 'Workshop days.' })).status).toBe(200);
-    const sent = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today });
+    const sent = await submitForms(tech, IDS.technician, from, today);
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    // TS-PAPER: the same dates again are refused — a submission is never overwritten.
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to: today })).status).toBe(422);
+    // The same dates again are refused unless the replacement is confirmed — a submission is never overwritten.
+    expect((await submitForms(tech, IDS.technician, from, today)).status).toBe(422);
     // The open sheet's comment went into the snapshot and is cleared for the next sheet (migration 0050).
     const [working] = await db.select().from(schema.timesheetWorkingComments).where(eq(schema.timesheetWorkingComments.userId, IDS.technician));
     expect(working?.comment).toBe('');
@@ -296,7 +299,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       }),
     )).toContain('timesheet_periods_range_ordered');
     // TS-PAPER: longer than 92 days — the December holidays, the finance administrator's leave.
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: shift(today, -160), to: shift(today, -10) })).status).toBe(200);
+    expect((await submitForms(tech, IDS.technician, shift(today, -160), shift(today, -10))).status).toBe(200);
   });
 
   it('0038 carries a month 0037 may hold across as the period it covered, exactly', async () => {
@@ -327,7 +330,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       date: to, customerName: 'ABC Engineering', overtimeHours: 2, doubleHours: 0,
     });
     expect(added.status, JSON.stringify(added.error)).toBe(200);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from, to })).status).toBe(200);
+    expect((await submitForms(tech, IDS.technician, from, to)).status).toBe(200);
     const [sentBefore] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician));
 
     const body = {
@@ -407,36 +410,43 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     })).status).toBe(200);
     // TS-PAPER: the timesheet is submitted by payday (here a period ending in the month); the month is the attendance.
     const lastDay = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: `${month}-01`, to: lastDay })).status).toBe(200);
-    const submitted = await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true });
-    expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    // RESUBMIT-1: submitted again — it replaces the submission, still ONE row.
-    expect((await tech.post(`/api/payroll/${IDS.technician}/${month}/submit`, { confirmUnrecorded: true })).status).toBe(200);
-    const submissions = await db.select().from(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.userId, IDS.technician));
-    expect(submissions).toHaveLength(1);
-    const [row] = submissions;
-    expect(row?.month).toBe(month);
-    // Migration 0050: a technician's month without a timesheet is accepted by the database.
-    expect(row?.timesheetPeriodId).toBeNull();
-    // My Monthly Forms' history, read from PostgreSQL (30 October 2026): that month, with its files.
-    const history = await tech.get<readonly { month: string; fileNames: { attendance: string } }[]>(`/api/payroll/${IDS.technician}/history`);
+    // PAYROLL-ONE-1: the timesheet and the attendance together for the period, once.
+    expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay)).status).toBe(200);
+    // Again: refused unless confirmed; confirmed, it replaces — the first kept, ONE current.
+    expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay)).status).toBe(422);
+    expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay, { confirmReplace: true })).status).toBe(200);
+    const submissions = await db.select().from(schema.payrollSubmissions).where(eq(schema.payrollSubmissions.userId, IDS.technician));
+    expect(submissions).toHaveLength(2);
+    expect(submissions.filter((submission) => submission.supersededAt === null)).toHaveLength(1);
+    const row = submissions.find((submission) => submission.supersededAt === null);
+    expect(row?.financeMonth).toBe(month);
+    expect(row?.timesheetPeriodId).not.toBeNull();
+    // My Monthly Forms' history, read from PostgreSQL: both submissions, the replaced one kept.
+    const history = await tech.get<readonly { from: string; current: boolean; fileNames: { attendance: string } }[]>(`/api/payroll/forms/${IDS.technician}/history`);
     expect(history.status).toBe(200);
-    expect(history.data.map((entry) => entry.month)).toEqual([month]);
+    expect(history.data.map((entry) => entry.current).sort()).toEqual([false, true]);
     expect(history.data[0]?.fileNames.attendance).toMatch(/ ATTEN [A-Z]+\.pdf$/u);
 
-    // The database refuses: moving it to another month, a delete, a second row, a submission not backed by the exact sent month.
+    // The database refuses (migration 0052): rewriting the submission, a delete, a month sharing its days.
     expect(await postgresMessage(
-      db.update(schema.monthlySubmissions).set({ month: '2000-01' }).where(eq(schema.monthlySubmissions.id, row!.id)),
-    )).toContain('never moved');
-    expect(await postgresMessage(db.delete(schema.monthlySubmissions).where(eq(schema.monthlySubmissions.id, row!.id)))).toContain('cannot be deleted');
+      db.update(schema.payrollSubmissions).set({ attendanceFileName: 'Other.pdf' }).where(eq(schema.payrollSubmissions.id, row!.id)),
+    )).toContain('kept exactly as submitted');
+    expect(await postgresMessage(db.delete(schema.payrollSubmissions).where(eq(schema.payrollSubmissions.id, row!.id)))).toContain('cannot be deleted');
+    expect(await postgresMessage(
+      db.insert(schema.monthlySubmissions).values({
+        id: crypto.randomUUID(), userId: IDS.technician, month, timesheetPeriodId: null,
+        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
+      }),
+    )).toContain('shares days with a payroll submission');
+    // The old month's own rule still holds for a month nobody submitted by period.
     const [draft] = await db.insert(schema.timesheetPeriods).values({
-      id: crypto.randomUUID(), userId: IDS.coordinator, periodFrom: `${month}-01`, periodTo: `${month}-05`,
-      updatedBy: IDS.coordinator, commentedAt: new Date().toISOString(),
+      id: crypto.randomUUID(), userId: IDS.master, periodFrom: `${month}-01`, periodTo: `${month}-05`,
+      updatedBy: IDS.master, commentedAt: new Date().toISOString(),
     }).returning();
     expect(await postgresMessage(
       db.insert(schema.monthlySubmissions).values({
-        id: crypto.randomUUID(), userId: IDS.coordinator, month, timesheetPeriodId: draft!.id,
-        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.coordinator,
+        id: crypto.randomUUID(), userId: IDS.master, month, timesheetPeriodId: draft!.id,
+        attendanceSnapshot: {}, submittedAt: new Date().toISOString(), submittedBy: IDS.master,
       }),
     )).toContain('sent timesheet for exactly');
 
@@ -546,21 +556,21 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     for (const [date, tag] of [['2026-11-05', 'L-1105'], ['2026-11-22', 'L-1122'], ['2026-12-10', 'L-1210']] as const) {
       expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date, customerName: tag, overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
     }
-    const first = await tech.post<{ period: { id: string; snapshot: unknown } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-11-01', to: '2026-11-25' });
+    const first = await submitForms<{ period: { id: string; snapshot: unknown } }>(tech, IDS.technician, '2026-11-01', '2026-11-25');
     expect(first.status, JSON.stringify(first.error)).toBe(200);
     const rows = () => db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician)).orderBy(schema.timesheetPeriods.periodFrom);
     const entries = () => db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician)).orderBy(schema.timesheetEntries.id);
     const before = { periods: await rows(), entries: await entries() };
 
     // The owner's example: 20 Nov – 15 Dec covers only part of 1–25 Nov.
-    const partial = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-11-20', to: '2026-12-15', replace: true });
+    const partial = await submitForms(tech, IDS.technician, '2026-11-20', '2026-12-15', { confirmReplace: true });
     expect(partial.status).toBe(422);
-    expect(partial.error?.violations?.[0]?.code).toBe('timesheet_partial_overlap');
+    expect(partial.error?.violations?.[0]?.code).toBe('payroll_partial_overlap');
     expect({ periods: await rows(), entries: await entries() }).toEqual(before);
 
     // Covering all of it: refused without the confirmation, accepted with it; the original kept.
-    expect((await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-10-26', to: '2026-12-15' })).status).toBe(422);
-    const covering = await tech.post<{ period: { id: string; snapshot: { entries: { customerName: string }[] } } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-10-26', to: '2026-12-15', replace: true });
+    expect((await submitForms(tech, IDS.technician, '2026-10-26', '2026-12-15')).status).toBe(422);
+    const covering = await submitForms<{ period: { id: string; snapshot: { entries: { customerName: string }[] } } }>(tech, IDS.technician, '2026-10-26', '2026-12-15', { confirmReplace: true });
     expect(covering.status, JSON.stringify(covering.error)).toBe(200);
     expect(covering.data.period.snapshot.entries.map((entry) => entry.customerName).sort()).toEqual(['L-1105', 'L-1122', 'L-1210']);
     const [kept] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
@@ -592,12 +602,12 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       const date = new Date(start + Math.floor(index / 3) * 86_400_000).toISOString().slice(0, 10);
       expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date, customerName: `Customer ${index}`, overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
     }
-    const sent = await tech.post<{ period: { id: string } }>(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-09-01', to: '2026-11-30' });
+    const sent = await submitForms<{ period: { id: string } }>(tech, IDS.technician, '2026-09-01', '2026-11-30');
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
     const pdf = await tech.download(`/api/timesheets/submissions/${sent.data.period.id}/pdf`);
     expect(pdf.status).toBe(200);
     expect(pdf.text).toMatch(/Page 1 of [2-9]/u);
-    const replacement = await tech.post(`/api/timesheets/${IDS.technician}/period/submit`, { from: '2026-08-01', to: '2026-12-31', replace: true });
+    const replacement = await submitForms(tech, IDS.technician, '2026-08-01', '2026-12-31', { confirmReplace: true });
     expect(replacement.status, JSON.stringify(replacement.error)).toBe(200);
     const original = await tech.get<{ rows: unknown[]; versionLabel: string }>(`/api/timesheets/submissions/${sent.data.period.id}?version=original`);
     expect(original.status).toBe(200);

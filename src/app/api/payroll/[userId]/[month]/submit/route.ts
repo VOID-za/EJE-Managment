@@ -1,15 +1,15 @@
 import { z } from 'zod';
-import { submitMonth } from '@/application/monthly-submissions';
+import { refuseRetiredSubmission } from '@/application/payroll-forms';
 import { writeRoute } from '@/server/api/handler';
 
 /**
- * SUBMIT THE MONTH (PAY-02): the timesheet and the attendance together, once.
- * The technician's own; `confirmUnrecorded` when weekdays have no attendance.
+ * RETIRED (PAYROLL-ONE-1, the owner, 5 November 2026): a calendar month is no
+ * longer submitted, and a submission is never rewritten in place. The forms
+ * are submitted together for the real From–To on My Monthly Forms. The months
+ * already submitted stay, readable, exactly as they were.
  */
 export const POST = writeRoute({
   operation: 'payroll.month.submit',
-  schema: z.object({ confirmUnrecorded: z.boolean().optional() }).strict(),
-  handler: async (context) => ({
-    submission: await submitMonth(context.operation, context.params.userId ?? '', context.params.month ?? '', context.input),
-  }),
+  schema: z.object({}).passthrough(),
+  handler: async () => refuseRetiredSubmission('month'),
 });
