@@ -545,11 +545,16 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     });
     await attendance.submitPeriod(period(B.replacedPeriod));
     await payroll.createPayrollSubmission(submission(B.replacedSubmission, B.replacedPeriod));
-    // The complete replacement, same dates: the first kept beside it (one CURRENT row per person and dates).
-    await attendance.supersedeOverlappingPeriods({ userId: tech, from: B.from, to: B.to, exceptId: null, at, by: tech });
-    expect(await attendance.submitPeriod(period(B.currentPeriod))).not.toBeNull();
-    await payroll.replacePayrollSubmissions({ userId: tech, ids: [B.replacedSubmission], at, by: tech, bySubmission: B.currentSubmission });
-    expect(await payroll.createPayrollSubmission(submission(B.currentSubmission, B.currentPeriod))).not.toBeNull();
+    // The complete replacement, same dates, in ONE transaction as the application writes it (the
+    // "replaced by" link is checked at commit): the first kept beside it, one CURRENT row per dates.
+    await db.transaction(async (tx) => {
+      const txAttendance = new PostgresAttendanceRepository(tx);
+      const txPayroll = new PostgresPayrollRepository(tx);
+      await txAttendance.supersedeOverlappingPeriods({ userId: tech, from: B.from, to: B.to, exceptId: null, at, by: tech });
+      expect(await txAttendance.submitPeriod(period(B.currentPeriod))).not.toBeNull();
+      await txPayroll.replacePayrollSubmissions({ userId: tech, ids: [B.replacedSubmission], at, by: tech, bySubmission: B.currentSubmission });
+      expect(await txPayroll.createPayrollSubmission(submission(B.currentSubmission, B.currentPeriod))).not.toBeNull();
+    });
     await payroll.saveDocumentName({ userId: tech, kind: 'timesheet', fileName: 'Sipho Ünïcode.pdf', updatedBy: tech, updatedAt: at });
     await attendance.saveLineDraft({
       id: B.draftLine, userId: tech, date: '2028-02-03', updatedBy: tech, updatedAt: at,
