@@ -450,20 +450,20 @@ jobs:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run checklists-source-check
 
-      - name: Timesheets as paper — desktop
+      - name: Payroll forms (PAYROLL-ONE-1) — desktop
         env:
           EJE_FORMS_VIEWPORT: 1440x900
-        run: npm run timesheets-paper-check
+        run: npm run payroll-forms-check
 
-      - name: Timesheets as paper — tablet portrait, by touch
+      - name: Payroll forms (PAYROLL-ONE-1) — tablet portrait, by touch
         env:
           EJE_FORMS_VIEWPORT: 768x1024:touch
-        run: npm run timesheets-paper-check
+        run: npm run payroll-forms-check
 
-      - name: Timesheets as paper — phone, by touch
+      - name: Payroll forms (PAYROLL-ONE-1) — phone, by touch
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
-        run: npm run timesheets-paper-check
+        run: npm run payroll-forms-check
 
       - name: Integrations regression — desktop (simulated providers)
         env:

@@ -92,34 +92,40 @@ await resetDemonstration(page, BASE);
 /* ------------------------------------------------------------------ */
 await signInAs(page, 'Deon Botha');
 
-await step('technician: the timesheet freeze, by touch — clear the date, retype it, the form stays and answers', async () => {
+// PAYROLL-ONE-1: a timesheet line is typed straight into the line and saves itself — no form to open, no Save.
+let lineId = null;
+const typedLine = () => page.locator(`[data-testid="timesheet-line"][data-line-id="${lineId}"]`);
+await step('technician: the timesheet freeze, by touch — clear the date, retype it, the line stays and answers', async () => {
   const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-  const days = [sast(-9), sast(-8), sast(-7), sast(-6)];
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('add-timesheet-line').tap();
-  const form = page.getByTestId('timesheet-line-form');
-  await form.waitFor({ timeout: 5000 });
-  const date = form.getByTestId('timesheet-line-date');
+  const day = sast(-6);
+  await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  const before = await page.locator('[data-testid="timesheet-line"]').count();
+  await page.getByTestId(`add-timesheet-line-${day}`).tap();
+  await page.waitForFunction((n) => document.querySelectorAll('[data-testid="timesheet-line"]').length > n, before, { timeout: 5000 });
+  lineId = await page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).last().getAttribute('data-line-id');
+  const date = typedLine().getByTestId('timesheet-line-date');
   await date.tap();
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);
-  if ((await form.count()) !== 1) throw new Error('the line form vanished when the date was cleared');
-  await date.fill(days[3]);
-  await form.getByLabel('Customer', { exact: true }).tap();
+  if ((await typedLine().count()) !== 1) throw new Error('the line vanished when the date was cleared');
+  await typedLine().getByTestId('timesheet-line-date').fill(day);
+  await typedLine().getByTestId('timesheet-customer-name').tap();
   await page.keyboard.type('Kruger Engineering Midrand', { delay: 10 });
-  if ((await form.count()) !== 1) throw new Error('the form vanished while typing');
+  if ((await typedLine().count()) !== 1) throw new Error('the line vanished while typing');
 });
 
-await step('technician: turn the tablet with a timesheet line half typed — every value stays, Save line stays reachable', async () => {
-  const form = page.getByTestId('timesheet-line-form');
+await step('technician: turn the tablet with a timesheet line half typed — every value stays, the line saves itself', async () => {
   await rotate(async (shape) => {
-    if ((await form.count()) !== 1) throw new Error(`the line form is gone in ${shape}`);
-    const customer = await form.getByLabel('Customer', { exact: true }).inputValue();
+    if ((await typedLine().count()) !== 1) throw new Error(`the line is gone in ${shape}`);
+    const customer = await typedLine().getByTestId('timesheet-customer-name').inputValue();
     if (customer !== 'Kruger Engineering Midrand') throw new Error(`in ${shape} the customer reads "${customer}"`);
-    await tappable(form.getByTestId('save-timesheet-line'), `Save line (${shape})`);
+    await tappable(typedLine().getByTestId('remove-timesheet-line'), `Remove line (${shape})`);
   });
-  await form.getByTestId('save-timesheet-line').tap();
-  await form.waitFor({ state: 'detached', timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  if ((await typedLine().getByTestId('timesheet-customer-name').inputValue()) !== 'Kruger Engineering Midrand') throw new Error('the line was not saved');
 });
 
 await step('technician: turn the tablet with a message half typed — the text stays, Send stays reachable', async () => {

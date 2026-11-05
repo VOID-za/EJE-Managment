@@ -49,27 +49,48 @@ export const TimesheetLineEditor = ({
   readonly saver: TimesheetAutosaver | null;
   readonly editable: boolean;
 }) => {
-  const [typed, setTyped] = useState<TimesheetLineTyped>(line.typed);
-  const [date, setDate] = useState<string>(line.date ?? '');
+  /*
+   * WHERE THE TYPING STARTS: a change still waiting in the autosaver, when there is one — the screen may have
+   * been rebuilt (a reload of the list) while it waits, and the server's copy is then older than what was typed.
+   */
+  const waiting = saver?.pendingFor(line.id);
+  const start = waiting?.kind === 'line' ? { typed: waiting.typed, date: waiting.date ?? '' } : { typed: line.typed, date: line.date ?? '' };
+  const [typed, setTyped] = useState<TimesheetLineTyped>(start.typed);
+  const [date, setDate] = useState<string>(start.date);
   const shownRevision = useRef(line.revision);
+  // The latest values typed, updated at once: two quick changes never build on a copy from before the first.
+  const latest = useRef<{ typed: TimesheetLineTyped; date: string }>(start);
   const pending = saver?.pendingFor(line.id) ?? null;
 
-  // The server's newer line (a reload, a conflict) replaces what is shown — only when nothing typed here waits.
+  // The server's newer line (a reload, a conflict) replaces what is shown — only when nothing typed here waits,
+  // and never an OLDER copy fetched while a save was still on its way (the saver knows the revision it last saved).
+  const savedRevision = saver?.revisionOf(line.id) ?? null;
   useEffect(() => {
-    if (line.revision === shownRevision.current || pending !== null) return;
+    if (line.revision === shownRevision.current) return;
+    // Asked of the saver NOW, not as it was at render: a keystroke may have landed between the render and this effect.
+    if (saver?.pendingFor(line.id) != null) return;
+    const saved = saver?.revisionOf(line.id) ?? null;
+    if (saved !== null && saved !== line.revision) return;
     shownRevision.current = line.revision;
+    latest.current = { typed: line.typed, date: line.date ?? '' };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the server's newer line arrived; nothing typed here is waiting.
     setTyped(line.typed);
     setDate(line.date ?? '');
-  }, [line.revision, line.typed, line.date, pending]);
+  }, [line.revision, line.typed, line.date, pending, savedRevision, saver, line.id]);
 
-  const change = (next: TimesheetLineTyped, nextDate: string = date) => {
+  const change = (patch: Partial<TimesheetLineTyped>, nextDate?: string) => {
+    const next = { ...latest.current.typed, ...patch };
+    const day = nextDate ?? latest.current.date;
+    latest.current = { typed: next, date: day };
     setTyped(next);
-    setDate(nextDate);
-    saver?.change({ kind: 'line', id: line.id, date: nextDate === '' ? null : nextDate, typed: next, base: line.revision });
+    setDate(day);
+    saver?.change({ kind: 'line', id: line.id, date: day === '' ? null : day, typed: next, base: line.revision });
   };
 
   const live = timesheetLineProblems(date === '' ? null : date, typed);
-  const problems = pending !== null ? live : line.problems;
+  // Saved here more recently than the copy on screen (the list has not reloaded yet): what was typed is what was saved.
+  const ahead = pending !== null || (savedRevision !== null && savedRevision !== line.revision);
+  const problems = ahead ? live : line.problems;
   const problemOf = (field: TimesheetLineField) => problems.find((problem) => problem.field === field)?.message;
   const status = line.submitted !== null
     ? 'submitted'
@@ -77,7 +98,7 @@ export const TimesheetLineEditor = ({
       ? 'failed'
       : pending !== null
         ? 'saving'
-        : line.complete && problems.length === 0
+        : (ahead ? live.length === 0 : line.complete) && problems.length === 0
           ? 'saved'
           : 'draft';
 
@@ -111,7 +132,7 @@ export const TimesheetLineEditor = ({
       autoComplete="off"
       value={typed[field]}
       error={problemOf(field)}
-      onChange={(event) => change({ ...typed, [field]: event.target.value })}
+      onChange={(event) => change({ [field]: event.target.value })}
       onBlur={() => saver?.flushNow()}
       data-testid={testId}
     />
@@ -131,7 +152,7 @@ export const TimesheetLineEditor = ({
           type="date"
           value={date}
           error={problemOf('date')}
-          onChange={(event) => change(typed, event.target.value)}
+          onChange={(event) => change({}, event.target.value)}
           data-testid="timesheet-line-date"
         />
         <SelectField
@@ -142,7 +163,8 @@ export const TimesheetLineEditor = ({
           onChange={(event) => {
             const value = event.target.value;
             const picked = customers.find((customer) => customer.id === value);
-            change({ ...typed, pick: value, customerName: value === WORKSHOP_PICK ? '' : picked?.name ?? (typed.pick === WORKSHOP_PICK ? '' : typed.customerName) });
+            const before = latest.current.typed;
+            change({ pick: value, customerName: value === WORKSHOP_PICK ? '' : picked?.name ?? (before.pick === WORKSHOP_PICK ? '' : before.customerName) });
           }}
         />
         {typed.pick !== WORKSHOP_PICK && (
@@ -152,7 +174,7 @@ export const TimesheetLineEditor = ({
             maxLength={200}
             autoComplete="off"
             error={problemOf('customer')}
-            onChange={(event) => change({ ...typed, customerName: event.target.value })}
+            onChange={(event) => change({ customerName: event.target.value })}
             onBlur={() => saver?.flushNow()}
             data-testid="timesheet-customer-name"
           />

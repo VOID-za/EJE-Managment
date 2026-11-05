@@ -211,50 +211,59 @@ await check('the Senior Tech is listed for main and helper standby — never app
 });
 
 /* ---- Timesheets ----------------------------------------------------------- */
-await check('the timesheet line form has no Shared call-out tick; it says the amount is your own share', async () => {
+await check('a timesheet line has no Shared call-out tick; the page says the amount is your own share', async () => {
   await as('Sipho Mahlangu');
   await go('/timesheets');
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   await press(page.getByTestId('add-timesheet-line').first());
-  const form = page.getByTestId('timesheet-line-form');
-  await form.waitFor({ timeout: 15000 });
-  if ((await form.getByTestId('timesheet-callout-shared').count()) !== 0) fail('the Shared call-out tick is still there');
-  const hint = await form.getByTestId('timesheet-callout-hint').innerText();
+  const line = page.locator('[data-testid="timesheet-line"]').last();
+  await line.waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('timesheet-callout-shared').count()) !== 0) fail('the Shared call-out tick is still there');
+  const hint = await page.getByTestId('timesheet-callout-hint').innerText();
   if (!/own share|YOUR share/iu.test(hint) || !/divided/iu.test(hint)) fail(`the hint reads "${hint}"`);
-  await noPageOverflow('the timesheet line form');
-  await press(form.getByRole('button', { name: 'Cancel', exact: true }));
+  await noPageOverflow('the timesheet');
+  await press(line.getByTestId('remove-timesheet-line'));
 });
 
-await check('overlapping dates: part of a submission is refused on screen and by the server; all of it replaces it once confirmed; the lines stay (TS-PAPER-7)', async () => {
+/** PAYROLL-ONE-1: both forms for the period, as My Monthly Forms submits them — naming the revision it read. */
+const submitForms = async (me, from, to, extra = {}) => {
+  const forms = await call('GET', `/api/payroll/forms/${me}?from=${from}&to=${to}`);
+  if (forms.status !== 200) return forms;
+  return call('POST', `/api/payroll/forms/${me}/submit`, { from, to, revision: forms.json.data.revision, confirmUnrecorded: true, confirmNoLines: true, ...extra });
+};
+
+await check('overlapping dates: part of a submission is refused on screen and by the server; all of it replaces it once confirmed; the original stays (PAYROLL-ONE-1, TS-PAPER-7)', async () => {
   await as('Sipho Mahlangu');
   const me = 'user-tech-sipho';
   const line = await call('POST', `/api/timesheets/${me}/entries`, { date: shift(today, -3), customerName: 'Acceptance', overtimeHours: 1, doubleHours: 0 });
   if (line.status !== 200) fail(`saving a line answered ${line.status}`);
-  const first = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -10), to: shift(today, -2) });
+  const first = await submitForms(me, shift(today, -10), shift(today, -2));
   if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
-  const partial = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -5), to: today });
-  if (partial.status !== 422 || partial.json?.error?.violations?.[0]?.code !== 'timesheet_partial_overlap') fail(`a partial overlap answered ${partial.status} ${JSON.stringify(partial.json?.error ?? '')}`);
+  const partial = await submitForms(me, shift(today, -5), today, { confirmReplace: true });
+  if (partial.status !== 422 || partial.json?.error?.violations?.[0]?.code !== 'payroll_partial_overlap') fail(`a partial overlap answered ${partial.status} ${JSON.stringify(partial.json?.error ?? '')}`);
   // On screen: part of it is said, and Submit waits.
-  await go('/timesheets');
-  await page.getByTestId('timesheet-from').fill(shift(today, -5));
-  await page.getByTestId('timesheet-to').fill(today);
-  await page.locator('[data-testid="timesheet-period-overlap"][data-kind="partial"]').waitFor({ timeout: 15000 });
-  if (await page.getByTestId('timesheet-send').isEnabled()) fail('Submit is offered for a partial overlap');
+  await go(`/payroll/mine?from=${shift(today, -5)}&to=${today}`);
+  await page.getByTestId('monthly-forms-problems').filter({ hasText: 'only part of' }).waitFor({ timeout: 15000 });
+  if (await page.getByTestId('monthly-forms-submit').isEnabled()) fail('Submit is offered for a partial overlap');
   // All of it: said as a replacement, and confirmed in the dialog as one.
-  await page.getByTestId('timesheet-from').fill(shift(today, -12));
-  await page.locator('[data-testid="timesheet-period-overlap"][data-kind="replace"]').filter({ hasText: 'replaces' }).waitFor({ timeout: 15000 });
-  await press(page.getByTestId('timesheet-send'));
+  await go(`/payroll/mine?from=${shift(today, -12)}&to=${today}`);
+  await page.getByTestId('monthly-forms-replaces').waitFor({ timeout: 15000 });
+  if (await page.getByTestId('monthly-forms-submit').isEnabled()) fail('Submit is offered before the replacement is confirmed');
+  await page.getByTestId('monthly-forms-confirm-replace').check();
+  if ((await page.getByTestId('monthly-forms-acknowledge').count()) > 0) await page.getByTestId('monthly-forms-acknowledge').check();
+  await press(page.getByTestId('monthly-forms-submit'));
   await page.getByRole('dialog').getByRole('button', { name: 'Replace and submit' }).waitFor({ timeout: 5000 });
   await press(page.getByRole('dialog').getByRole('button', { name: 'Cancel' }));
-  const unconfirmed = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -12), to: today });
+  const unconfirmed = await submitForms(me, shift(today, -12), today);
   if (unconfirmed.status !== 422) fail(`a replacement without confirmation answered ${unconfirmed.status}`);
-  const replaced = await call('POST', `/api/timesheets/${me}/period/submit`, { from: shift(today, -12), to: today, replace: true });
+  const replaced = await submitForms(me, shift(today, -12), today, { confirmReplace: true });
   if (replaced.status !== 200) fail(`the confirmed replacement answered ${replaced.status} ${JSON.stringify(replaced.json?.error ?? '')}`);
   const list = (await call('GET', `/api/timesheets/submissions?userId=${me}`)).json?.data ?? [];
   const earlier = list.find((row) => row.from === shift(today, -10) && row.to === shift(today, -2));
   if (earlier?.current !== false) fail('the replaced submission is not kept as replaced');
   const original = await call('GET', `/api/timesheets/submissions/${earlier.id}?version=original`);
   if (!original.json?.data?.rows?.some((row) => row.customer === 'Acceptance')) fail('the replaced original is not readable in full');
-  await noPageOverflow('the timesheet');
+  await noPageOverflow('My Monthly Forms');
 });
 
 

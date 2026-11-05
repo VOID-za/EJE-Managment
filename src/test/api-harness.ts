@@ -87,10 +87,13 @@ const matchRoute = (pathname: string): Match => {
           return null;
         }
       }
-      return { file: route.file, params, literals };
+      // As Next.js: a static segment beats a dynamic one at the FIRST place two routes differ
+      // (/payroll/submissions/x/timesheet/pdf is the submissions route, not /payroll/[userId]/[month]/timesheet/pdf).
+      const shape = route.segments.map((segment) => (segment.startsWith('[') ? '1' : '0')).join('');
+      return { file: route.file, params, literals, shape };
     })
-    .filter((candidate): candidate is Match & { literals: number } => candidate !== null)
-    .sort((a, b) => b.literals - a.literals);
+    .filter((candidate): candidate is Match & { literals: number; shape: string } => candidate !== null)
+    .sort((a, b) => a.shape.localeCompare(b.shape) || b.literals - a.literals);
 
   const best = candidates[0];
   if (best === undefined) throw new Error(`No API route matches ${pathname}.`);

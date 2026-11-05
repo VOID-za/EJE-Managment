@@ -4109,35 +4109,37 @@ await step('the Master’s Timesheets page: their own sheet, Submit with From an
 });
 
 /*
- * THE 30 OCTOBER 2026 TIMESHEET FREEZE, AS A TECHNICIAN MET IT. The line form
- * once vanished when part of the date was cleared (a date field then reports
- * an empty value) and nothing responded after that. Reproduced here exactly
- * that way (Backspace in Date), then every field filled by typing, an earlier
- * field edited again, saved, reopened and read back after a reload and from
- * the server. With Technician permissions. TS-PAPER: any date may be typed.
+ * THE 30 OCTOBER 2026 TIMESHEET FREEZE, AS A TECHNICIAN MET IT — on the line
+ * that is typed in place (PAYROLL-ONE-1). The line once vanished when part of
+ * the date was cleared (a date field then reports an empty value). Reproduced
+ * here exactly that way (Backspace in Date), then every field filled by
+ * typing, an earlier field edited again, and read back after leaving the page
+ * and from the server. Nothing is pressed to save: it saves itself.
  */
 await step('a technician types a whole timesheet line, clearing and retyping the date, and it is saved exactly as typed (the timesheet freeze)', async () => {
   await signInAs(page, 'Deon Botha');
   const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
   const target = sast(-4);
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('add-timesheet-line').click();
-  const form = page.getByTestId('timesheet-line-form');
-  await form.waitFor({ timeout: 5000 });
+  await page.goto(`${BASE}/timesheets?from=${sast(-10)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  await page.getByTestId(`add-timesheet-line-${target}`).click();
+  const added = page.locator(`[data-testid="timesheet-line"][data-date="${target}"]`).last();
+  await added.waitFor({ timeout: 5000 });
+  const id = await added.getAttribute('data-line-id');
+  const form = page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`);
 
   // THE FAILURE: clear part of the date. The browser now reports an empty date.
   const date = form.getByTestId('timesheet-line-date');
   await date.click();
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);
-  if ((await form.count()) !== 1) throw new Error('the line form vanished when the date was cleared (the freeze)');
+  if ((await form.count()) !== 1) throw new Error('the line vanished when the date was cleared (the freeze)');
   if ((await date.inputValue()) !== '') throw new Error(`clearing the date left "${await date.inputValue()}" — the reproduction did not happen`);
-  await form.getByText('Enter the whole date', { exact: false }).waitFor({ timeout: 3000 });
-  if (await form.getByTestId('save-timesheet-line').isEnabled()) throw new Error('Save line was enabled with half a date');
+  await form.getByText('choose the day of this line', { exact: false }).first().waitFor({ timeout: 3000 });
 
-  // Retype it as another day: the form stays, still answering.
+  // Retype it: the line stays, still answering.
   await date.fill(target);
-  if ((await form.count()) !== 1) throw new Error('the form moved or vanished when the date changed');
+  if ((await form.count()) !== 1) throw new Error('the line moved or vanished when the date changed');
 
   // Every field, typed like a person types.
   const typeInto = async (label, text) => {
@@ -4155,9 +4157,9 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await typeInto('Callout (R)', '450');
   await typeInto('Int Km', '12.5');
   await typeInto('Cust Km', '30');
-  // TS-CALLOUT-2: no Shared tick; the hint says the amount is the technician's own share.
-  if ((await form.getByTestId('timesheet-callout-shared').count()) !== 0) throw new Error('the Shared call-out tick is still on the form');
-  await form.getByTestId('timesheet-callout-hint').waitFor({ timeout: 5000 });
+  // TS-CALLOUT-2: no Shared tick; the page says the amount is the technician's own share.
+  if ((await form.getByTestId('timesheet-callout-shared').count()) !== 0) throw new Error('the Shared call-out tick is still on the line');
+  await page.getByTestId('timesheet-callout-hint').waitFor({ timeout: 5000 });
   // An earlier field corrected after the later ones: nothing else moves or resets.
   await typeInto('OT (hours)', '3');
   for (const [label, expected] of [['Customer', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
@@ -4165,27 +4167,18 @@ await step('a technician types a whole timesheet line, clearing and retyping the
     if (value !== expected) throw new Error(`${label} became "${value}" after OT was edited`);
   }
   if ((await date.inputValue()) !== target) throw new Error('the date changed by itself');
+  // Nothing to press: it saves itself.
+  if ((await page.getByTestId('save-timesheet-line').count()) !== 0) throw new Error('a Save line button is still on the page');
+  await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
 
-  await form.getByTestId('save-timesheet-line').click();
-  await form.waitFor({ state: 'detached', timeout: 15000 });
-
-  // It is on the sheet under its date, and reads back exactly as typed — after a reload too.
-  const check = async (when) => {
-    const line = page.locator(`[data-testid="timesheet-line"][data-date="${target}"]`).filter({ hasText: 'Kruger Engineering' });
-    await line.waitFor({ timeout: 10000 });
-    await line.getByRole('button', { name: 'Edit' }).click();
-    const reopened = page.getByTestId('timesheet-line-form');
-    await reopened.waitFor({ timeout: 5000 });
-    const read = async (label) => reopened.getByLabel(label, { exact: true }).inputValue();
-    const values = { date: await reopened.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
-    const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30' };
-    if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`${when}: reopened as ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
-    await reopened.getByRole('button', { name: 'Cancel', exact: true }).click();
-  };
-  await check('after saving');
+  // It reads back exactly as typed after leaving and coming back.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await check('after leaving and coming back');
+  await page.goto(`${BASE}/timesheets?from=${sast(-10)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
+  await form.waitFor({ timeout: 10000 });
+  const read = async (label) => form.getByLabel(label, { exact: true }).inputValue();
+  const values = { date: await form.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
+  const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30' };
+  if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`after coming back: ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
 
   // And the server holds exactly that.
   const stored = await page.evaluate(async ({ base }) => {
@@ -4200,30 +4193,27 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   }
 });
 
-await step('a technician enters Workshop with OT, a call-out amount and km, writes the comment, and SUBMITS the timesheet for its dates (TS-PAPER)', async () => {
+await step('a technician enters Workshop with OT, a call-out amount and km, writes the comment, and SUBMITS both forms on My Monthly Forms (PAYROLL-ONE-1)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 10000 });
   const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
-  await page.getByTestId('add-timesheet-line').click();
-  const form = page.getByTestId('timesheet-line-form');
-  if ((await form.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
-  await form.getByTestId('timesheet-line-date').fill(today);
-  // Workshop needs no customer (TS-PAPER).
-  await form.getByLabel('Customer or Workshop').selectOption('__workshop__');
-  await form.getByLabel('OT (hours)').fill('2');
-  await form.getByLabel('D/T (hours)').fill('0.5');
-  await form.getByLabel('Callout (R)').fill('450');
-  await form.getByLabel('Int Km').fill('12.5');
-  await form.getByLabel('Cust Km').fill('0');
-  await form.getByTestId('save-timesheet-line').click();
-  const row = page.locator(`[data-testid="timesheet-line"][data-date="${today}"]`).filter({ hasText: 'Workshop' });
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  await page.getByTestId('timesheet-to').fill(today);
+  await page.getByTestId('timesheet-from').fill(today);
+  await page.getByTestId(`add-timesheet-line-${today}`).click();
+  const row = page.locator(`[data-testid="timesheet-line"][data-date="${today}"]`).last();
   await row.waitFor({ timeout: 10000 });
-  if (!/450[,.]00/u.test(await row.innerText())) throw new Error(`the call-out amount is not shown: ${await row.innerText()}`);
-
+  if ((await row.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
+  // Workshop needs no customer (TS-PAPER).
+  await row.getByLabel('Customer or Workshop').selectOption('__workshop__');
+  await row.getByLabel('OT (hours)').fill('2');
+  await row.getByLabel('D/T (hours)').fill('0.5');
+  await row.getByLabel('Callout (R)').fill('450');
+  await row.getByLabel('Int Km').fill('12.5');
+  await row.getByLabel('Cust Km').fill('0');
   await page.getByTestId('timesheet-period-comment').fill('Workshop rebuilds all week.');
-  await page.getByTestId('timesheet-save').click();
-  await page.getByTestId('timesheet-saved').waitFor({ timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
+  if ((await page.getByTestId('timesheet-send').count()) !== 0) throw new Error('the Timesheets page still has Submit');
 
   if ((await page.getByTestId('timesheet-print').count()) !== 1) throw new Error('the Timesheets page has no Print');
   await page.getByTestId('timesheet-preview').click();
@@ -4232,30 +4222,36 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   if ((await page.getByTestId('preview-download').count()) !== 0) throw new Error('the Timesheets preview still offers Download');
   await page.getByTestId('preview-close').click();
 
-  // Submit: To is today (payday), From is proposed; the line is inside them.
-  await page.getByTestId('timesheet-to').fill(today);
-  if ((await row.getAttribute('data-in-period')) !== 'yes') throw new Error('today’s line is not inside the dates being submitted');
-  await page.getByTestId('timesheet-send').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit timesheet' }).click();
-  await page.getByTestId('timesheet-submitted').waitFor({ timeout: 15000 });
-  const submitted = page.locator(`[data-testid="timesheet-submission"][data-to="${today}"]`).first();
-  await submitted.waitFor({ timeout: 10000 });
-  // The comment went with it and the next sheet starts empty of it.
+  // My Monthly Forms: the period proposed (the day after the last submission), To today; both forms together.
+  await page.getByTestId('timesheet-to-monthly-forms').click();
+  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
+  for (const box of ['monthly-forms-acknowledge', 'monthly-forms-no-lines']) {
+    if ((await page.getByTestId(box).count()) > 0) await page.getByTestId(box).check();
+  }
+  if ((await page.getByTestId('monthly-forms-problems').count()) > 0) throw new Error(`cannot submit: ${await page.getByTestId('monthly-forms-problems').innerText()}`);
+  await page.getByTestId('monthly-forms-submit').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
+  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  await page.locator(`[data-testid="my-monthly-history-row"][data-to="${today}"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
+  // The comment went with it, and the next sheet starts without it.
+  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
   if ((await page.getByTestId('timesheet-period-comment').inputValue()) !== '') throw new Error('the comment was not cleared for the next timesheet');
+  await page.locator(`[data-testid="timesheet-submission"][data-to="${today}"]`).first().waitFor({ timeout: 10000 });
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
   // NOTIF-TABS-2: a timesheet notification is in the Inbox's Monthly Forms subtab.
   await page.getByTestId('inbox-box-monthly_forms').click();
-  await page.getByText('submitted a timesheet').first().waitFor({ timeout: 10000 });
+  await page.getByText('submitted timesheet and attendance').first().waitFor({ timeout: 10000 });
 });
 
 /*
- * TS-PAPER: a submission is never overwritten. The same dates again are
- * refused (a change is a correction); the office reads exactly what was sent,
- * from its list, and can export it.
+ * A submission is never overwritten. The same dates again are refused unless
+ * the replacement is confirmed; the old Submit on Timesheets is retired; the
+ * office reads exactly what was sent, from its list, and can export it.
  */
-await step('the same dates cannot be submitted again; the office opens the submission exactly as sent (TS-PAPER)', async () => {
+await step('the same dates cannot be submitted again unconfirmed; the office opens the submission exactly as sent (PAYROLL-ONE-1)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   const last = page.locator('[data-testid="timesheet-submission"][data-current="yes"]').first();
@@ -4263,14 +4259,19 @@ await step('the same dates cannot be submitted again; the office opens the submi
   const from = await last.getAttribute('data-from');
   const to = await last.getAttribute('data-to');
   const again = await page.evaluate(async ({ base, from, to }) => {
-    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
+    const post = (url, body) => fetch(`${base}${url}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ from, to }),
-    });
-    return response.status;
+      body: JSON.stringify(body),
+    }).then((response) => response.status);
+    const forms = (await (await fetch(`${base}/api/payroll/forms/user-tech-sipho?from=${from}&to=${to}`)).json()).data;
+    return {
+      unconfirmed: await post('/api/payroll/forms/user-tech-sipho/submit', { from, to, revision: forms.revision, confirmUnrecorded: true, confirmNoLines: true }),
+      retired: await post('/api/timesheets/user-tech-sipho/period/submit', { from, to }),
+    };
   }, { base: BASE, from, to });
-  if (again !== 422) throw new Error(`submitting the same dates again answered ${again}`);
+  if (again.unconfirmed !== 422) throw new Error(`submitting the same dates again answered ${again.unconfirmed}`);
+  if (again.retired !== 422) throw new Error(`the retired Submit timesheet answered ${again.retired}`);
   await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   const office = page.getByTestId('timesheet-office');
@@ -4408,7 +4409,7 @@ await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, 
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   const own = page.getByTestId('my-monthly-forms');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
-  if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('CHRISTENE ATTEN ')) throw new Error('the Coordinator’s own form is not hers');
+  if (!/^CHRISTENE Atten/iu.test(await own.getByTestId('monthly-attendance-file').innerText())) throw new Error('the Coordinator’s own form is not hers');
   for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-forms-submit']) await own.getByTestId(id).waitFor({ timeout: 5000 });
   if ((await page.getByTestId('team-register-heading').count()) !== 0 || (await page.getByTestId('attendance-register').count()) !== 0) {
     throw new Error('the Coordinator still has the Team register');
@@ -4480,7 +4481,13 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   await page.goto(`${BASE}/attendance`, { waitUntil: 'networkidle' });
   await page.getByTestId('attendance-preview').waitFor({ timeout: 15000 });
   if ((await page.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error('the Attendance page still offers Submit');
-  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const lastMonth = await page.evaluate(() => {
+    const [y, m] = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }).split('-').map(Number);
+    const first = new Date(Date.UTC(m === 1 ? y - 1 : y, m === 1 ? 11 : m - 2, 1));
+    const last = new Date(Date.UTC(y, m - 1, 0));
+    return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10), month: first.toISOString().slice(0, 7) };
+  });
+  await page.goto(`${BASE}/payroll/mine?from=${lastMonth.from}&to=${lastMonth.to}`, { waitUntil: 'networkidle' });
   const section = page.getByTestId('my-monthly-forms');
   await section.waitFor({ timeout: 15000 });
   const card = section.getByTestId('monthly-forms');
@@ -4541,29 +4548,31 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   if (shared.name !== fileName || shared.type !== 'application/pdf') throw new Error(`exported ${shared.name} (${shared.type})`);
   if ((shared.text.match(/\/Type\s*\/Page(?!s)/gu) ?? []).length !== 1) throw new Error('the exported PDF is not one page');
 
-  // Submit: the timesheet and the attendance together.
-  const acknowledge = card.getByTestId('monthly-forms-acknowledge');
-  if ((await acknowledge.count()) > 0) await acknowledge.check();
+  // Submit: the timesheet and the attendance together (PAYROLL-ONE-1).
+  for (const box of ['monthly-forms-acknowledge', 'monthly-forms-no-lines']) {
+    if ((await card.getByTestId(box).count()) > 0) await card.getByTestId(box).check();
+  }
   const send = card.getByTestId('monthly-forms-submit');
   await send.click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit attendance' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /^Submit (both|attendance)$/u }).click();
   await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
-  await card.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
-  // RESUBMIT-1: the submitted month is offered again, and submitting again replaces it.
-  if (!/again/u.test(await card.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again');
-  const month = await section.getByTestId('my-monthly-month').inputValue();
-  const again = await page.evaluate(async ({ base, month }) => {
+  await page.locator(`[data-testid="my-monthly-history-row"][data-from="${lastMonth.from}"][data-to="${lastMonth.to}"][data-current="yes"]`).waitFor({ timeout: 10000 });
+  const month = lastMonth.month;
+  // Submitting the same period again is only a confirmed, complete replacement — the first is kept.
+  const again = await page.evaluate(async ({ base, from, to }) => {
     const me = await (await fetch(`${base}/api/auth/me`)).json().catch(() => null);
     const id = me?.data?.user?.id;
-    const response = await fetch(`${base}/api/payroll/${id}/${month}/submit`, {
+    const forms = (await (await fetch(`${base}/api/payroll/forms/${id}?from=${from}&to=${to}`)).json()).data;
+    const post = (extra) => fetch(`${base}/api/payroll/forms/${id}/submit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `smoke-again-${Date.now()}` },
-      body: JSON.stringify({ confirmUnrecorded: true }),
-    });
-    return { id, status: response.status };
-  }, { base: BASE, month });
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `smoke-again-${Date.now()}-${Math.random()}` },
+      body: JSON.stringify({ from, to, revision: forms.revision, confirmUnrecorded: true, confirmNoLines: true, ...extra }),
+    }).then((response) => response.status);
+    return { id, unconfirmed: await post({}), confirmed: await post({ confirmReplace: true }) };
+  }, { base: BASE, from: lastMonth.from, to: lastMonth.to });
   if (typeof again.id !== 'string') throw new Error('could not read the signed-in technician');
-  if (again.status !== 200) throw new Error(`a second submission answered ${again.status}`);
+  if (again.unconfirmed !== 422) throw new Error(`an unconfirmed second submission answered ${again.unconfirmed}`);
+  if (again.confirmed !== 200) throw new Error(`the confirmed replacement answered ${again.confirmed}`);
 
   // The office reads the month on EJE Monthly Forms (ATT-OWN-1): the status, the
   // form opened read-only, and no Send for another person's month.
@@ -4574,9 +4583,12 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
     const row = page.getByTestId('finance-row').filter({ hasText: 'Naledi' });
     await row.waitFor({ timeout: 15000 });
     if ((await row.getAttribute('data-status')) !== 'ready') throw new Error(`Naledi's month is ${await row.getAttribute('data-status')} to ${who}`);
+    // PAYROLL-ONE-1: the period submitted, its type, and its PDFs exactly as they went.
+    await row.getByTestId('payroll-period-submission').first().waitFor({ timeout: 10000 });
+    await row.getByTestId('payroll-submitted-attendance').first().waitFor({ timeout: 5000 });
     await row.getByRole('button', { name: 'View forms' }).click();
     const officeCard = page.getByTestId('monthly-forms');
-    await officeCard.getByTestId('monthly-forms-submitted').waitFor({ timeout: 15000 });
+    await officeCard.waitFor({ timeout: 15000 });
     await officeCard.getByTestId('monthly-attendance-preview').waitFor({ timeout: 5000 });
     await officeCard.getByTestId('monthly-attendance-download').waitFor({ timeout: 5000 });
     if ((await officeCard.getByTestId('monthly-forms-submit').count()) !== 0) throw new Error(`${who} was offered Send for a technician`);
@@ -4592,7 +4604,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   const own = page.getByTestId('my-monthly-forms');
   await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
   if ((await own.getByTestId('monthly-attendance-status').count()) !== 0) throw new Error('a technician was shown the office month list');
-  if (!(await own.getByTestId('monthly-attendance-file').innerText()).startsWith('SIPHO ATTEN ')) throw new Error('a technician was shown another person’s form');
+  if (!/^SIPHO Atten/iu.test(await own.getByTestId('monthly-attendance-file').innerText())) throw new Error('a technician was shown another person’s form');
   const refused = await page.evaluate(async ({ base, id, month }) => {
     const forms = await fetch(`${base}/api/payroll/${id}/${month}`);
     const pdf = await fetch(`${base}/api/payroll/${id}/${month}/attendance/pdf`);
@@ -4617,28 +4629,20 @@ await step('a technician submits last month’s payday timesheet and attendance;
   const [year, monthNumber] = today.split('-').map(Number);
   const previous = monthNumber === 1 ? `${year - 1}-12` : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
   const lastDay = new Date(Date.UTC(Number(previous.slice(0, 4)), Number(previous.slice(5, 7)), 0)).toISOString().slice(0, 10);
-  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
-  const sentTimesheet = await page.evaluate(async ({ base, from, to }) => {
-    await fetch(`${base}/api/timesheets/user-tech-sipho/entries`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ date: from, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0 }),
-    });
-    const response = await fetch(`${base}/api/timesheets/user-tech-sipho/period/submit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ from, to }),
-    });
-    return response.status;
-  }, { base: BASE, from: `${previous}-01`, to: lastDay });
-  if (sentTimesheet !== 200) throw new Error(`the payday timesheet answered ${sentTimesheet}`);
-
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  const line = await page.evaluate(async ({ base, from }) => (await fetch(`${base}/api/timesheets/user-tech-sipho/entries`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+    body: JSON.stringify({ date: from, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0 }),
+  })).status, { base: BASE, from: `${previous}-01` });
+  if (line !== 200) throw new Error(`the timesheet line answered ${line}`);
+  // PAYROLL-ONE-1: both forms for the whole of last month, from My Monthly Forms.
+  await page.goto(`${BASE}/payroll/mine?from=${previous}-01&to=${lastDay}`, { waitUntil: 'networkidle' });
   const forms = page.getByTestId('monthly-forms');
   await forms.waitFor({ timeout: 15000 });
   const attendanceFile = await page.getByTestId('monthly-attendance-file').innerText();
   if (!/^SIPHO ATTEN [A-Z]+\.pdf/u.test(attendanceFile)) throw new Error(`attendance file name: ${attendanceFile}`);
-  // The month says where the timesheet goes instead.
-  await page.getByTestId('monthly-forms-timesheet-note').waitFor({ timeout: 5000 });
+  if (!/^SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf$/u.test(await page.getByTestId('monthly-timesheet-file').innerText())) throw new Error('the timesheet is not named for the To month');
 
   await page.getByTestId('monthly-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
@@ -4653,10 +4657,9 @@ await step('a technician submits last month’s payday timesheet and attendance;
     await acknowledge.check();
   }
   await page.getByTestId('monthly-forms-submit').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit attendance' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
   await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
-  await page.getByTestId('monthly-forms-submitted').waitFor({ timeout: 10000 });
-  if (!/again/u.test(await page.getByTestId('monthly-forms-submit').innerText())) throw new Error('a submitted month is not offered again (RESUBMIT-1)');
+  await page.locator(`[data-testid="my-monthly-history-row"][data-from="${previous}-01"][data-current="yes"]`).waitFor({ timeout: 10000 });
 
   await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });

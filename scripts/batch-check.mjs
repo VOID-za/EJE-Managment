@@ -272,12 +272,13 @@ await check('Attendance: From and To top-right, no Month selector, Preview and P
   await noPageOverflow('Attendance');
 });
 
-await check('Timesheets: Preview, Print and Submit on the page; the file is named for the To month', async () => {
+await check('Timesheets: Preview and Print on the page, no Submit (PAYROLL-ONE-1); the file is named for the To month', async () => {
   await as('Sipho Mahlangu');
   await go('/timesheets');
   await page.getByTestId('timesheet-sheet').waitFor({ timeout: 20000 });
-  // TS-PAPER: the technician submits their own timesheet from here, on payday.
-  await page.getByTestId('timesheet-send').waitFor({ timeout: 5000 });
+  // PAYROLL-ONE-1: the timesheet is submitted with the attendance on My Monthly Forms — nothing is submitted here.
+  if ((await page.getByTestId('timesheet-send').count()) !== 0) fail('the Timesheets page still has Submit');
+  await page.getByTestId('timesheet-to-monthly-forms').waitFor({ timeout: 5000 });
   for (const id of ['timesheet-preview', 'timesheet-print']) await page.getByTestId(id).waitFor({ timeout: 5000 });
   if ((await page.getByText(/attendance form|Edit my attendance/iu).count()) !== 0) fail('the Timesheets page carries attendance controls');
   await press(page.getByTestId('timesheet-preview'));
@@ -292,20 +293,23 @@ await check('Timesheets: Preview, Print and Submit on the page; the file is name
   return name;
 });
 
-await check('Monthly Forms: Download, Preview, Print and Submit — and this month may be submitted before it ends', async () => {
+await check('Monthly Forms: both forms with Download, Save, Preview, Print and Rename, one Submit — and a period may be submitted before its month ends', async () => {
   await as('Sipho Mahlangu');
-  await go('/payroll/mine');
+  const from = `${today.slice(0, 7)}-01`;
+  await go(`/payroll/mine?from=${from}&to=${today}`);
   const forms = page.getByTestId('my-monthly-forms');
   await forms.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  // TS-PAPER: the month is the attendance; the timesheet is submitted by payday from the Timesheets page.
-  for (const id of ['monthly-forms-timesheet-note', 'monthly-attendance-download', 'monthly-attendance-preview', 'monthly-attendance-print', 'monthly-forms-submit']) {
-    await forms.getByTestId(id).waitFor({ timeout: 10000 });
+  // PAYROLL-ONE-1: the timesheet and the attendance, submitted together for the period.
+  for (const kind of ['timesheet', 'attendance']) {
+    for (const action of ['download', 'export', 'preview', 'print', 'rename']) await forms.getByTestId(`monthly-${kind}-${action}`).waitFor({ timeout: 10000 });
   }
-  await forms.getByTestId('my-monthly-month').fill(today.slice(0, 7));
   await forms.getByTestId('monthly-forms-submit').waitFor({ timeout: 20000 });
   if ((await page.getByText(/has not ended/iu).count()) !== 0) fail('the month-end restriction is still shown');
-  const submitted = await call('POST', `/api/payroll/user-tech-sipho/${today.slice(0, 7)}/submit`, { confirmUnrecorded: true });
-  if (submitted.status !== 200) fail(`submitting this month answered ${submitted.status} ${JSON.stringify(submitted.json?.error ?? '')}`);
+  const state = await call('GET', `/api/payroll/forms/user-tech-sipho?from=${from}&to=${today}`);
+  const submitted = await call('POST', '/api/payroll/forms/user-tech-sipho/submit', {
+    from, to: today, revision: state.json?.data?.revision, confirmUnrecorded: true, confirmNoLines: true,
+  });
+  if (submitted.status !== 200) fail(`submitting this month so far answered ${submitted.status} ${JSON.stringify(submitted.json?.error ?? '')}`);
   await noPageOverflow('Monthly Forms');
 });
 

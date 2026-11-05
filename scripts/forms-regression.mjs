@@ -445,83 +445,97 @@ await check('PDF: a library document (uploaded, stored bytes)', async () => {
   return `${pages} page`;
 });
 
-/* ---- 5. Timesheets: the whole month, by a technician (TS-PAPER) -------- */
+/* ---- 5. Timesheets: the whole month, by a technician (PAYROLL-ONE-1: typed in place, saving itself) -------- */
 await as('Sipho Mahlangu');
 const lineRow = (date) => page.locator(`[data-testid="timesheet-line"][data-date="${date}"]`);
-const lineForm = () => page.getByTestId('timesheet-line-form');
+const lineById = (id) => page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`);
+const sheetSaved = () =>
+  page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 20000 });
+/** Adds a line on a day and returns its id. */
+const addLineOn = async (date) => {
+  const before = await lineRow(date).count();
+  await press(page.getByTestId(`add-timesheet-line-${date}`));
+  await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [date, before], { timeout: 10000 });
+  return lineRow(date).nth(before).getAttribute('data-line-id');
+};
 let openDays = [];
-await check('Timesheets: every working day of last month entered through the screen, and all reopen', async () => {
+let monthFrom = '';
+let monthTo = '';
+await check('Timesheets: every working day of last month entered through the screen, saved by itself, and all reopen', async () => {
   /*
    * THE WHOLE PREVIOUS MONTH — the month a technician might complete all at
-   * once on payday. TS-PAPER: one sheet, any date; each line is dated in the form.
+   * once on payday. Each line is typed into its day; nothing is pressed to save.
    */
   const now = await today();
   const [year, month] = now.split('-').map(Number);
   const first = new Date(Date.UTC(month === 1 ? year - 1 : year, month === 1 ? 11 : month - 2, 1));
   const last = new Date(Date.UTC(year, month - 1, 0));
+  monthFrom = first.toISOString().slice(0, 10);
+  monthTo = last.toISOString().slice(0, 10);
   openDays = [];
   for (let at = first.getTime(); at <= last.getTime(); at += 86_400_000) {
     const date = new Date(at);
     if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) openDays.push(date.toISOString().slice(0, 10));
   }
-  await go('/timesheets');
-  await page.getByTestId('timesheet-sheet').waitFor({ timeout: 20000 });
+  await go(`/timesheets?from=${monthFrom}&to=${monthTo}`);
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   for (const [index, date] of openDays.entries()) {
-    await press(page.getByTestId('add-timesheet-line'));
-    await lineForm().getByTestId('timesheet-line-date').fill(date);
-    if (index % 3 === 0) await lineForm().getByTestId('timesheet-customer-pick').selectOption('__workshop__');
-    else await lineForm().getByTestId('timesheet-customer-name').fill(`Customer ${index}`);
-    await lineForm().getByTestId('timesheet-overtime').fill(String((index % 4) * 0.25));
-    await lineForm().getByTestId('timesheet-callout').fill(index % 7 === 0 ? '450' : '0');
-    await lineForm().getByTestId('timesheet-internal-km').fill(String(index));
-    await press(lineForm().getByTestId('save-timesheet-line'));
-    await page.waitForFunction((d) => document.querySelector(`[data-testid="timesheet-line"][data-date="${d}"]`) !== null && document.querySelector('[data-testid="timesheet-line-form"]') === null, date, { timeout: 15000 });
+    const row = lineById(await addLineOn(date));
+    if (index % 3 === 0) await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
+    else await row.getByTestId('timesheet-customer-name').fill(`Customer ${index}`);
+    await row.getByTestId('timesheet-overtime').fill(String((index % 4) * 0.25 + 0.25));
+    await row.getByTestId('timesheet-callout').fill(index % 7 === 0 ? '450' : '0');
+    await row.getByTestId('timesheet-internal-km').fill(String(index));
   }
+  await sheetSaved();
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-table').waitFor();
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   const lines = await page.locator('[data-testid="timesheet-line"]').evaluateAll((rows, days) => rows.filter((row) => days.includes(row.dataset.date)).length, openDays);
   if (lines < openDays.length) fail(`${lines} of ${openDays.length} lines after reopening`);
+  if ((await page.locator('[data-testid="timesheet-line"][data-state="draft"]').count()) !== 0) fail('a line was left as a draft');
   await noPageOverflow('Timesheets');
   return `${openDays.length} days`;
 });
 await check('Timesheets: a saved line is edited and moved to another day', async () => {
   const before = await lineRow(openDays[2]).count();
-  await press(lineRow(openDays[1]).getByRole('button', { name: 'Edit' }).first());
-  await lineForm().getByTestId('timesheet-line-date').fill(openDays[2]);
-  await lineForm().getByTestId('timesheet-overtime').fill('2');
-  await press(lineForm().getByTestId('save-timesheet-line'));
+  const id = await lineRow(openDays[1]).first().getAttribute('data-line-id');
+  await lineById(id).getByTestId('timesheet-overtime').fill('2');
+  await lineById(id).getByTestId('timesheet-line-date').fill(openDays[2]);
+  await sheetSaved();
   await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length === n, [openDays[2], before + 1], { timeout: 15000 });
 });
-await check('Timesheets: changing the Submit dates while a line is open never loses it', async () => {
-  await press(page.getByTestId('add-timesheet-line'));
-  await lineForm().getByTestId('timesheet-overtime').fill('1.5');
+await check('Timesheets: changing the period while a line is being typed never loses it', async () => {
+  const id = await addLineOn(openDays[5]);
+  await lineById(id).getByTestId('timesheet-overtime').fill('1.5');
   await page.getByTestId('timesheet-from').fill(openDays[5]);
-  if ((await lineForm().count()) !== 1) fail('the open line went away');
-  if ((await lineForm().getByTestId('timesheet-overtime').inputValue()) !== '1.5') fail('the typed value was lost');
-  await press(lineForm().getByTestId('cancel-timesheet-line'));
+  if ((await lineById(id).count()) !== 1) fail('the line went away');
+  if ((await lineById(id).getByTestId('timesheet-overtime').inputValue()) !== '1.5') fail('the typed value was lost');
+  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await sheetSaved();
+  await page.getByTestId('timesheet-from').fill(monthFrom);
 });
-await check('Timesheets: a malformed number is said beside it, on screen; a line without a customer saves (TS-PAPER)', async () => {
-  await press(page.getByTestId('add-timesheet-line'));
-  await lineForm().getByTestId('timesheet-line-date').fill(openDays[openDays.length - 1]);
-  await lineForm().getByTestId('timesheet-overtime').fill('abc');
-  // Leaving the field says what is wrong with it beside it (and moves the button below it).
+let draftId = null;
+await check('Timesheets: a malformed number is said beside it and kept as a Draft; a line without a customer saves (TS-PAPER)', async () => {
+  draftId = await addLineOn(openDays[openDays.length - 1]);
+  await lineById(draftId).getByTestId('timesheet-overtime').fill('abc');
   await page.keyboard.press('Tab');
-  await press(lineForm().getByTestId('save-timesheet-line'));
-  const seen = await page.evaluate(() => [...document.querySelectorAll('[data-testid="timesheet-line-form"] [role="alert"], [data-testid="timesheet-line-form"] [id$="-error"], [data-testid="timesheet-line-refusal"]')].some((element) => {
+  await sheetSaved();
+  await page.waitForFunction((id) => document.querySelector(`[data-testid="timesheet-line"][data-line-id="${id}"]`)?.getAttribute('data-state') === 'draft', draftId, { timeout: 15000 });
+  const seen = await page.evaluate((id) => [...document.querySelectorAll(`[data-testid="timesheet-line"][data-line-id="${id}"] [role="alert"], [data-testid="timesheet-line"][data-line-id="${id}"] [id$="-error"], [data-testid="timesheet-line"][data-line-id="${id}"] [data-testid="timesheet-line-problems"]`)].some((element) => {
     const box = element.getBoundingClientRect();
     return box.height > 0 && box.bottom > 0 && box.top < window.innerHeight;
-  }));
+  }), draftId);
   if (!seen) fail('the reason is not on screen');
   if ((await page.getByText('Say which customer the work was for', { exact: false }).count()) !== 0) fail('a customer is still demanded');
-  await lineForm().getByTestId('timesheet-overtime').fill('2');
+  await lineById(draftId).getByTestId('timesheet-overtime').fill('2');
+  await sheetSaved();
 });
-await check('Timesheets: a half-typed line survives a reload and is offered back', async () => {
-  await lineForm().getByTestId('timesheet-customer-name').fill('Kept on the device');
+await check('Timesheets: a half-typed line survives a reload — it is on the server, not only the device', async () => {
+  await lineById(draftId).getByTestId('timesheet-customer-name').fill('Kept on the server');
+  await sheetSaved();
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByTestId('timesheet-line-restored').waitFor({ timeout: 15000 });
-  if ((await lineForm().getByTestId('timesheet-customer-name').inputValue()) !== 'Kept on the device') fail('the line was not restored');
-  await press(lineForm().getByTestId('save-timesheet-line'));
-  await lineForm().waitFor({ state: 'detached', timeout: 15000 });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  if ((await lineById(draftId).getByTestId('timesheet-customer-name').inputValue()) !== 'Kept on the server') fail('the line was not kept');
 });
 await check('Timesheets: typing in a line costs what a bare input costs, with a month on screen', async () => {
   await page.evaluate(() => {
@@ -529,7 +543,7 @@ await check('Timesheets: typing in a line costs what a bare input costs, with a 
     input.id = 'bare-input';
     document.querySelector('main').prepend(input);
   });
-  await press(page.getByTestId('add-timesheet-line'));
+  const id = await addLineOn(openDays[3]);
   const cost = (selector) => page.evaluate(async (target) => {
     const element = document.querySelector(target);
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -545,22 +559,23 @@ await check('Timesheets: typing in a line costs what a bare input costs, with a 
     return costs[Math.floor(costs.length / 2)];
   }, selector);
   const bare = await cost('#bare-input');
-  const line = await cost('[data-testid="timesheet-customer-name"]');
+  const line = await cost(`[data-testid="timesheet-line"][data-line-id="${id}"] [data-testid="timesheet-customer-name"]`);
   if (line > bare * 1.5 + 4) fail(`${line.toFixed(1)} ms a key in the line, ${bare.toFixed(1)} ms in a bare input`);
-  await press(lineForm().getByTestId('cancel-timesheet-line'));
+  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await sheetSaved();
   return `${line.toFixed(1)} vs ${bare.toFixed(1)} ms per key`;
 });
-await check('Timesheets: the comment saves and reopens', async () => {
+await check('Timesheets: the comment saves itself and reopens', async () => {
   await page.getByTestId('timesheet-period-comment').fill('Forms regression comment');
-  await press(page.getByTestId('timesheet-save'));
-  await page.getByTestId('timesheet-saved').waitFor({ timeout: 15000 });
+  await sheetSaved();
   await page.reload({ waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   if ((await page.getByTestId('timesheet-period-comment').inputValue()) !== 'Forms regression comment') fail('the comment did not reopen');
 });
-await check('PDF: the Time Sheet for the dates to submit (Preview and Print on the page)', async () =>
+await check('PDF: the Time Sheet for the period (Preview and Print on the page)', async () =>
   previewWorks(() => press(page.getByTestId('timesheet-preview')), ['Date', 'Customer', 'Cust Km'], async () => {
     const me = (await get('/api/auth/me')).json.data.user.id;
-    return `/api/timesheets/${me}/period/pdf?from=${await page.getByTestId('timesheet-from').inputValue()}&to=${await page.getByTestId('timesheet-to').inputValue()}`;
+    return `/api/payroll/forms/${me}/timesheet/pdf?from=${await page.getByTestId('timesheet-from').inputValue()}&to=${await page.getByTestId('timesheet-to').inputValue()}`;
   }));
 
 
@@ -659,12 +674,9 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Sipho Mahlangu', '
     await go('/payroll/mine');
     const title = await page.getByTestId('monthly-forms-title').innerText();
     if (!title.includes(first)) fail(`the forms are "${title}"`);
-    for (const id of ['monthly-attendance-preview', 'monthly-forms-edit-attendance', 'monthly-forms-timesheet-note']) {
+    // PAYROLL-ONE-1: both forms, each with its actions, submitted together.
+    for (const id of ['monthly-attendance-preview', 'monthly-forms-edit-attendance', 'monthly-timesheet-preview', 'monthly-timesheet-download', 'monthly-timesheet-rename', 'monthly-forms-edit-timesheet', 'monthly-forms-submit']) {
       if ((await page.getByTestId(id).count()) === 0) fail(`no ${id}`);
-    }
-    // TS-PAPER: the month is the attendance; the timesheet is submitted by payday from the Timesheets page.
-    for (const id of ['monthly-timesheet-preview', 'monthly-timesheet-download', 'monthly-forms-edit-timesheet']) {
-      if ((await page.getByTestId(id).count()) !== 0) fail(`the month still offers ${id}`);
     }
     await noPageOverflow('My Monthly Forms');
   });
@@ -683,6 +695,12 @@ await check('My Monthly Forms: the server refuses every write to another person�
     'timesheet line': await post(`/api/timesheets/${sipho.id}/entries`, { date: now, customerName: 'X', workshop: false, overtimeHours: 1, doubleHours: 0, calloutAmount: 0, internalKm: 0, customerKm: 0 }),
     'timesheet send': await post(`/api/timesheets/${sipho.id}/period/submit`, { from: `${month}-01`, to: `${month}-01` }),
     'month submit': await post(`/api/payroll/${sipho.id}/${month}/submit`, { confirmUnrecorded: true }),
+    'forms submit': await post(`/api/payroll/forms/${sipho.id}/submit`, {
+      from: `${month}-01`, to: `${month}-28`,
+      revision: (await get(`/api/payroll/forms/${sipho.id}?from=${month}-01&to=${month}-28`)).json?.data?.revision ?? 'x',
+    }),
+    'forms rename': await post(`/api/payroll/forms/${sipho.id}/rename`, { kind: 'attendance', name: 'Not mine' }),
+    'line save': await post(`/api/timesheets/${sipho.id}/lines`, { id: crypto.randomUUID(), date: now, typed: { pick: '', customerName: 'X', overtime: '1', double: '0', callout: '0', internalKm: '0', customerKm: '0' }, expectedRevision: null }),
   };
   for (const [what, answer] of Object.entries(attempts)) if (answer.status < 400 || answer.status >= 500) fail(`${what} answered ${answer.status}`);
   const theirs = (await get(`/api/payroll/${sipho.id}/${month}`)).json.data;
@@ -704,8 +722,12 @@ await check('PDF: a Finance package attachment (stored file)', async () => {
   const now = await today();
   const month = `${Number(now.slice(5, 7)) === 1 ? Number(now.slice(0, 4)) - 1 : now.slice(0, 4)}-${String(Number(now.slice(5, 7)) - 1 || 12).padStart(2, '0')}`;
   await as('Sipho Mahlangu');
-  const people = (await get('/api/timesheets')).json.data;
-  const submitted = await post(`/api/payroll/${people[0].id}/${month}/submit`, { confirmUnrecorded: true });
+  // PAYROLL-ONE-1: his forms for the month, submitted together from My Monthly Forms' route.
+  const me = (await get('/api/auth/me')).json.data.user.id;
+  const from = `${month}-01`;
+  const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const state = (await get(`/api/payroll/forms/${me}?from=${from}&to=${to}`)).json?.data;
+  const submitted = await post(`/api/payroll/forms/${me}/submit`, { from, to, revision: state?.revision, confirmUnrecorded: true, confirmNoLines: true });
   if (submitted.status !== 200) fail(`BLOCKED: Sipho's month could not be submitted in the demonstration (${submitted.status} ${JSON.stringify(submitted.json?.error)?.slice(0, 120)})`);
   await as('Elmarie Coetzee');
   // A TEST recipient address in the demonstration only: preparing sends nothing.
@@ -744,12 +766,14 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
     await go('/timesheets');
     await page.getByTestId('timesheet-sheet').waitFor({ timeout: 20000 });
     if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
-    const addLine = page.getByTestId('add-timesheet-line').first();
-    await press(addLine);
-    await lineForm().getByTestId('timesheet-customer-pick').selectOption('__workshop__');
-    await lineForm().getByTestId('timesheet-overtime').fill('1');
-    await press(lineForm().getByTestId('save-timesheet-line'));
-    await lineForm().waitFor({ state: 'detached', timeout: 15000 });
+    await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+    const before = await page.locator('[data-testid="timesheet-line"]').count();
+    await press(page.getByTestId('add-timesheet-line').first());
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="timesheet-line"]').length > n, before, { timeout: 10000 });
+    const row = page.locator('[data-testid="timesheet-line"]').nth(before);
+    await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
+    await row.getByTestId('timesheet-overtime').fill('1');
+    await sheetSaved();
     if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) fail('Export CSV is on the Timesheets page');
   });
 }

@@ -129,22 +129,30 @@ await check('Attendance: the period PDF is named for both months and has no Note
   return name;
 });
 
-await check('Attendance: a submitted month is changed and submitted again; the new submission replaces it', async () => {
+/** PAYROLL-ONE-1: both forms for the period, as My Monthly Forms submits them — naming the revision it read. */
+const submitForms = async (me, from, to, extra = {}) => {
+  const forms = await call('GET', `/api/payroll/forms/${me}?from=${from}&to=${to}`);
+  if (forms.status !== 200) return forms;
+  return call('POST', `/api/payroll/forms/${me}/submit`, { from, to, revision: forms.json.data.revision, confirmUnrecorded: true, confirmNoLines: true, ...extra });
+};
+const PREVIOUS_MONTH_END = new Date(Date.UTC(Number(PREVIOUS_MONTH.slice(0, 4)), Number(PREVIOUS_MONTH.slice(5, 7)), 0)).toISOString().slice(0, 10);
+
+await check('Attendance: a submitted period is changed and submitted again only as a confirmed replacement; the first is kept (PAYROLL-ONE-1)', async () => {
   const me = (await call('GET', '/api/auth/me')).json.data.user.id;
-  const first = await call('POST', `/api/payroll/${me}/${PREVIOUS_MONTH}/submit`, { confirmUnrecorded: true });
+  const first = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END);
   if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
   const day = `${PREVIOUS_MONTH}-15`;
   const changed = await call('POST', '/api/attendance', { userId: me, date: day, status: 'absent', absenceReason: 'leave', note: '' });
-  if (changed.status !== 200) fail(`changing a submitted month answered ${changed.status}`);
-  await go('/payroll/mine');
-  const submit = page.getByTestId('monthly-forms-submit').first();
-  await submit.waitFor({ timeout: 20000 });
-  if (!/again/u.test(await submit.innerText())) fail(`the button reads "${await submit.innerText()}"`);
-  const second = await call('POST', `/api/payroll/${me}/${PREVIOUS_MONTH}/submit`, { confirmUnrecorded: true });
-  if (second.status !== 200) fail(`the second submission answered ${second.status}`);
-  const submitted = await call('GET', `/api/payroll/${me}/${PREVIOUS_MONTH}/attendance?version=submitted`);
-  const rows = submitted.json?.data?.rows ?? [];
-  if (!rows.some((row) => row.date === day && row.status === 'Absent')) fail('the office’s copy does not carry the change');
+  if (changed.status !== 200) fail(`changing a submitted day answered ${changed.status}`);
+  await go(`/payroll/mine?from=${PREVIOUS_MONTH_START}&to=${PREVIOUS_MONTH_END}`);
+  await page.getByTestId('monthly-forms-replaces').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('monthly-forms-confirm-replace').count()) !== 1) fail('no explicit confirmation for the replacement');
+  if ((await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END)).status !== 422) fail('a replacement went without its confirmation');
+  const second = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END, { confirmReplace: true });
+  if (second.status !== 200) fail(`the replacement answered ${second.status}`);
+  if (!second.json.data.submission.attendance.days.some((row) => row.date === day && row.status === 'absent')) fail('the replacement does not carry the change');
+  const history = (await call('GET', `/api/payroll/forms/${me}/history`)).json.data;
+  if (history.filter((entry) => entry.current).length !== 1 || history.filter((entry) => !entry.current).length !== 1) fail('the first submission was not kept beside its replacement');
   await noPageOverflow('My Monthly Forms');
 });
 
@@ -160,14 +168,17 @@ await check('Timesheets: no Whose timesheet block; submitted once for its dates,
   await page.getByTestId('timesheet-period-label').waitFor({ timeout: 15000 });
   await noPageOverflow('Timesheets');
   const me = (await call('GET', '/api/auth/me')).json.data.user.id;
-  const sent = await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today });
+  // PAYROLL-ONE-1: the Timesheets page submits nothing; the forms go together from My Monthly Forms.
+  if ((await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today })).status !== 422) fail('the old Submit timesheet still answers');
+  const sent = await submitForms(me, from, today);
   if (sent.status !== 200) fail(`submitting answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
-  const again = await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today });
+  const again = await submitForms(me, from, today);
   if (again.status !== 422) fail(`the same dates again answered ${again.status}`);
   await go('/timesheets');
   await page.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
   const next = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-  if ((await page.getByTestId('timesheet-from').inputValue()) !== next) fail(`the next sheet starts on ${await page.getByTestId('timesheet-from').inputValue()}`);
+  const proposed = (await call('GET', `/api/payroll/forms/${me}?from=${today}&to=${today}`)).json.data.suggested.from;
+  if (proposed !== next) fail(`the next period starts on ${proposed}`);
   return `${from} → ${today}`;
 });
 

@@ -39,7 +39,6 @@
     "tester-fixes-check": "node scripts/tester-fixes-check.mjs",
     "batch-check": "node scripts/batch-check.mjs",
     "acceptance-check": "node scripts/acceptance-check.mjs",
-    "timesheets-paper-check": "node scripts/timesheets-paper-check.mjs",
     "checklists-source-check": "node scripts/checklists-source-check.mjs",
     "office-filters-check": "node scripts/office-filters-check.mjs",
     "retention": "tsx src/ops/retention.ts",
@@ -55,7 +54,8 @@
     "backup:restore-test": "tsx src/db/backup/restore-test.ts",
     "backup:escrow-check": "tsx src/db/backup/escrow-check.ts",
     "dump:inspect": "tsx src/db/backup/inspect-dump.ts",
-    "library:ocr": "tsx src/ops/library-ocr.ts"
+    "library:ocr": "tsx src/ops/library-ocr.ts",
+    "payroll-forms-check": "node scripts/payroll-forms-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",

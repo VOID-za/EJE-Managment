@@ -279,6 +279,12 @@ const TimesheetsPage = () => {
                   </Button>
                 </div>
 
+                {/* TS-CALLOUT-2 (3 November 2026): no Shared tick — the amount IS the technician's own share. */}
+                <p className="mt-2 text-sm text-steel-700" data-testid="timesheet-callout-hint">
+                  Callout (R): enter only YOUR share of the call-out (e.g. R500 of a R1 000 call-out shared by two). Nothing is divided automatically.
+                  Hours to two decimals (1.5 = an hour and a half); kilometres to one decimal.
+                </p>
+
                 {outside.length > 0 && (
                   <p className="mt-3 rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 px-3 py-2 text-sm text-steel-700" data-testid="timesheet-outside">
                     {outside.length} line{outside.length === 1 ? ' is' : 's are'} dated outside {formatPeriod(from, to)} ({[...new Set(outside.map((line) => line.date!))].sort().slice(0, 4).map(formatDayAndDate).join(', ')}{outside.length > 4 ? ', …' : ''}). Nothing is lost:
