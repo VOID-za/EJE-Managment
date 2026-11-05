@@ -3,7 +3,7 @@
 Decided by the owner on 5 November 2026; released as **v1.5.0** (`cf6fe86`,
 migration 0052) the same day, the autosave follow-ups as **v1.5.1** (`e9fe38a`,
 migration 0053) — **accepted by the owner on 5 November 2026** — and the
-completion audit's fixes as **v1.5.2** (no migration). Release records:
+completion audit's fixes as **v1.5.2** (`835eaaa`, no migration), deployed the same day. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The

@@ -32,6 +32,74 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## RELEASED — `835eaaa` = v1.5.2, the payroll completion (PAYROLL-ONE-1 and every payroll requirement, 5 November 2026)
+
+Released 21:44:27 UTC (switched; healthy 21:44:29) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending none` (a code-only release — the database was not touched) after the read-only check passed. Before it: `e9fe38a` v1.5.1, healthy, 54 migrations, kept as the rollback target. **The owner accepted the payroll implementation as released in v1.5.1 on 5 November 2026**; this release carries the whole-repository payroll completion audit's fixes. What the system does: `docs/payroll-forms.md`.
+
+- **The audit:**
+  - **Open items checked:** every open issue (no open PRs), every branch (none holds work not in this release), the payroll code, routes, permissions, documents and tests, the physical test sheet, and production. Each payroll requirement was checked against the scope and the code.
+  - **Scope rows:** 48 now read DONE (owner's acceptance) and 23 SUPERSEDED, each with the reason. The device checks were rewritten to what only a person can judge.
+- **Fixed, each with a regression test:**
+  - **Finance:** a package is sent only while it is what is current. Each attachment records its `basis` (the person's current submissions and accepted corrections), and Send refuses a stale package with `package_out_of_date`; nothing is sent.
+    - **Before:** a period submitted between Prepare and Send never reached Finance while the month read "Sent"; a replacement made in between sent the replaced forms.
+    - **"Sent" now:** a month reads Sent only for what the package carried.
+  - **Monthly attendance submitted before PAYROLL-ONE-1:** it goes to Finance **as submitted**. Before, it was drawn from the register as it stood and labelled an office correction.
+  - **The office never writes a technician's timesheet:** its write of a day comment is refused.
+  - **Reserved device names:** refused with any extension (`CON.a.pdf`).
+  - **A submitted timesheet's PDF:** it keeps its submitted name wherever it is opened.
+  - **Attendance changed after submission:** told to the office.
+  - **A lost Submit answer:** pressing Submit again replays the same request.
+  - **The Attendance page:** it says when a linked period was shortened to its 92 days.
+  - **Wording:** stale text fixed.
+  - **Dead code:** a dead component removed.
+- **Independent review** of the final diff: nothing blocking. Three low findings were fixed: the shortened-period notice, a gateway-hidden answer keeping its key, and the office card's wording.
+  - The fourth needs no fix. A month sent by v1.5.1 and resent by v1.5.2 would carry the attendance as submitted. Production has never sent a Finance package (`finance_packages` 0), so no such month exists.
+- **CI** run 42108507281 on `835eaaa`: **80/80 steps, 3/3 jobs**.
+  - **Unit:** 3 967 passed, 5 skipped.
+  - **PostgreSQL integration:** 510 passed. 15 skipped: the 13 rollback-prepare tests run as their own step (13/13), and 2 need the OCR engine. The new Finance test runs through the routes.
+  - **Rollback compatibility:** the live `e9fe38a` against this release's database, 17/17, including reading a v1.5.2 Finance manifest.
+  - **Every browser suite at desktop, tablet and phone:** among them payroll-forms, two-devices and the new `payroll-views-check`.
+  - The smoke suite and the update notice.
+- **Local, on the final code:**
+  - Unit: 3 953 passed.
+  - **At desktop, all passing:**
+    - payroll-forms 14/14;
+    - payroll-views 14/14;
+    - two-devices 7/7;
+    - forms-regression 44/44;
+    - acceptance;
+    - tester fixes 12/12;
+    - batch 12/12;
+    - office filters.
+  - **At tablet:** payroll-forms 14/14, payroll-views 14/14, two-devices 7/7.
+  - **At phone:** payroll-views 14/14.
+  - **Stopped early:** the local run was halted by Claude Code when the machine ran low on memory, during tablet forms-regression. The rest ran in CI on the exact commit (above).
+- **Fresh backup, proven before the switch:** `/var/backups/eje/eje-eje_production-2026-11-05T21-44-13Z`.
+  - **Encryption:** aes-256-gcm, key `23dba6772da10057`. Both artefacts intact and authentic. Key check MATCH.
+  - **Restore test:** into a scratch database, then dropped — RESTORE-TESTED. Contents: jobs 112, users 7, customers 10, machines 18, final documents 57, job media 29, signatures 71, audit events 2 214, 202 documents unpacked.
+  - **Missing storage keys:** the same 17 that were already missing are recorded in its manifest.
+- **Migrations:** none. Still 54.
+- **Data before and after:** **identical in every fingerprinted table.** These were:
+  - signatures and final documents;
+  - checklists;
+  - timesheet periods 15 and lines 40;
+  - monthly submissions 7;
+  - payroll submissions 0, PDF names 1, drafts 0, line removals 0;
+  - attendance 98, corrections 0, comments 2;
+  - Finance packages 0;
+  - every office-stage job, EJE-2011 and EJE-2106;
+  - users 7;
+  - the audit count.
+  
+  The read-only checks afterwards added exactly 11 audit rows, all their own demonstration sign-ins (`user_signed_in`), and nothing else.
+- **Live, read only:**
+  - **Payroll check:** 12/12 on its first run (desktop and phone; Cloudflare's injected `/cdn-cgi/rum` beacons were excluded from its write detector from the start).
+  - **Application sweep:** every top-level page as the Senior Tech, the Office and a technician (demonstration users; never Mike), at desktop and phone — all 200, no page error, no application write. The EJE-2011 (signed) and EJE-2106 (invoiced, read-only) job cards and Closed Jobs open intact.
+  - **Server state:** health ok, v1.5.2, database reachable, email `refuse`, demonstration mode on, 0 errors in the service log, backup timers active.
+- **Not done on production, deliberately:** any save, removal, submission, rename, correction or Finance package. Each is proved in CI, locally and in the browser suites. No email or WhatsApp message was sent.
+
+**Rolling back** (`stage-release.ps1 -Rollback`) returns the code to `e9fe38a` (v1.5.1). Nothing in the database changes, because v1.5.2 has no migration. The `basis` it adds to a Finance manifest is ignored by v1.5.1 (CI rollback probe). Against v1.5.1, a package prepared by v1.5.2 would be sent without the currency check, as before.
+
 ## RELEASED — `e9fe38a` = v1.5.1, the timesheet autosave follow-ups and two devices on one line (PAYROLL-ONE-1, 5 November 2026)
 
 Released 19:58:44 UTC (switched; healthy 19:58:47) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending 0053_timesheet_line_removals` after the read-only check passed. Before it: `cf6fe86` v1.5.0, healthy, 53 migrations — kept as the rollback target. What changed: `docs/payroll-forms.md` ("Two devices, one line").
