@@ -119,12 +119,15 @@ describeDb('migration 0048 — Delivery Notes, overlapping timesheets, Senior Te
     expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([second.id]);
     // Kept, not deleted; and current again only by being SENT again.
     expect((await attendance.findPeriod(TECH, '2026-10-01', '2026-10-31'))?.supersededAt).toBeTruthy();
-    expect(await refusal(db.execute(sql`update timesheet_periods set superseded_at = null where id = ${first.id}`))).toMatch(/current again only when it is sent again/u);
+    // PAYROLL-ONE-1 (0052): a replaced submission stays replaced — it is never made current again in place.
+    expect(await refusal(db.execute(sql`update timesheet_periods set superseded_at = null where id = ${first.id}`))).toMatch(/stays replaced/u);
     expect(await refusal(db.execute(sql`delete from timesheet_periods where id = ${first.id}`))).toMatch(/cannot be deleted/u);
-    await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: first.id, at: NOW, by: TECH });
-    const again = await attendance.resubmitPeriod({ ...first, submittedAt: new Date(Date.now() + 1000).toISOString() });
-    expect(again?.supersededAt ?? null).toBeNull();
-    expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([first.id]);
+    // And a complete replacement with the very same dates keeps the original beside it (one CURRENT row per dates).
+    expect((await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: null, at: NOW, by: TECH })).map((row) => row.id)).toEqual([second.id]);
+    const third = (await attendance.submitPeriod({ ...period('2026-09-26', '2026-11-14'), id: crypto.randomUUID() }))!;
+    expect(third.id).not.toBe(second.id);
+    expect((await attendance.findPeriod(TECH, '2026-09-26', '2026-11-14'))?.id).toBe(third.id);
+    expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([third.id]);
   });
 
   it('STANDBY-ELIG-2: a Senior Tech stands in a main place, never an apprentice place', async () => {

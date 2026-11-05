@@ -120,3 +120,20 @@ export const ROLLBACK_0051 = {
   /** Installation 2, "Check electrical voltage" — R / S / T. */
   voltageRow: 'f59a9e7a-1331-51c0-81b1-07019a1a8dc4',
 } as const;
+
+/**
+ * The rows only the release after ad0f3c8 (v1.4.0) can write (migration 0052,
+ * PAYROLL-ONE-1): a payroll submission for a From–To period with its sent
+ * timesheet, REPLACED by a second one with the very same dates (two rows with
+ * those dates, one current), a stored PDF name and a draft line. Copied into
+ * the probe as `BATCH_0052`.
+ */
+export const ROLLBACK_0052 = {
+  replacedSubmission: '00000000-0000-4000-8000-000000000ca1',
+  currentSubmission: '00000000-0000-4000-8000-000000000ca2',
+  replacedPeriod: '00000000-0000-4000-8000-000000000cb1',
+  currentPeriod: '00000000-0000-4000-8000-000000000cb2',
+  draftLine: '00000000-0000-4000-8000-000000000cc1',
+  from: '2028-01-01',
+  to: '2028-01-25',
+} as const;

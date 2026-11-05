@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, date, index, integer, jsonb, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, date, index, integer, jsonb, numeric, pgTable, primaryKey, text, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { createdAt, instant, primaryId, rowVersion, updatedAt } from './columns';
 import { users } from './identity';
 import { customers } from './customers';
@@ -205,7 +205,10 @@ export const timesheetPeriods = pgTable(
     version: rowVersion(),
   },
   (table) => [
-    uniqueIndex('timesheet_periods_user_range_key').on(table.userId, table.periodFrom, table.periodTo),
+    // PAYROLL-ONE-1 (0052): one CURRENT row per person and dates; a replaced one is kept beside its replacement.
+    uniqueIndex('timesheet_periods_user_range_current_key')
+      .on(table.userId, table.periodFrom, table.periodTo)
+      .where(sql`${table.supersededAt} is null`),
     index('timesheet_periods_user_idx').on(table.userId, table.periodFrom),
     // TS-PAPER (0050): any length — a pay period ends on the real payday, however far away.
     check('timesheet_periods_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
@@ -318,6 +321,10 @@ export const monthlySubmissions = pgTable(
     submittedBy: uuid('submitted_by')
       .notNull()
       .references(() => users.id),
+    // PAYROLL-ONE-1 (0052): replaced, once, by a payroll submission covering all of the month.
+    supersededAt: instant('superseded_at'),
+    supersededBy: uuid('superseded_by').references(() => users.id),
+    supersededBySubmission: uuid('superseded_by_submission').references((): AnyPgColumn => payrollSubmissions.id),
     createdAt: createdAt(),
   },
   (table) => [
@@ -371,5 +378,119 @@ export const financePackages = pgTable(
       'finance_packages_sent_whole',
       sql`(${table.status} = 'sent') = (${table.sentAt} is not null and ${table.sentBy} is not null and ${table.providerMessageId} is not null)`,
     ),
+  ],
+);
+
+/**
+ * A PERSON'S PAYROLL FORMS, SUBMITTED TOGETHER FOR A FROM–TO PERIOD.
+ * PAYROLL-ONE-1, migration 0052 (the owner, 5 November 2026).
+ *
+ * The timesheet (the sent period it names, for exactly these dates) and the
+ * attendance frozen as it stood, with the file names they went under and the
+ * PDFs stored at that moment. The Finance month is the month of To. Write-once
+ * (`payroll_submissions_guard`): only marked replaced, once, by a later
+ * submission covering all of it; one current submission per person for any day.
+ */
+export const payrollSubmissions = pgTable(
+  'payroll_submissions',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    financeMonth: text('finance_month').notNull(),
+    timesheetRequired: boolean('timesheet_required').notNull(),
+    timesheetPeriodId: uuid('timesheet_period_id').references(() => timesheetPeriods.id, { onDelete: 'restrict' }),
+    attendanceSnapshot: jsonb('attendance_snapshot').notNull(),
+    timesheetFileName: text('timesheet_file_name').notNull(),
+    attendanceFileName: text('attendance_file_name').notNull(),
+    documents: jsonb('documents').notNull(),
+    submittedAt: instant('submitted_at').notNull(),
+    submittedBy: uuid('submitted_by')
+      .notNull()
+      .references(() => users.id),
+    supersededAt: instant('superseded_at'),
+    supersededBy: uuid('superseded_by').references(() => users.id),
+    supersededBySubmission: uuid('superseded_by_submission').references((): AnyPgColumn => payrollSubmissions.id),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('payroll_submissions_user_idx').on(table.userId, table.periodFrom),
+    index('payroll_submissions_finance_month_idx').on(table.financeMonth),
+    uniqueIndex('payroll_submissions_timesheet_key').on(table.timesheetPeriodId),
+    uniqueIndex('payroll_submissions_current_range_key')
+      .on(table.userId, table.periodFrom, table.periodTo)
+      .where(sql`${table.supersededAt} is null`),
+    check('payroll_submissions_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
+    check('payroll_submissions_range_bounded', sql`${table.periodTo} - ${table.periodFrom} < 366`),
+    check('payroll_submissions_finance_month_of_to', sql`${table.financeMonth} = to_char(${table.periodTo}, 'YYYY-MM')`),
+    check('payroll_submissions_timesheet_whole', sql`${table.timesheetRequired} = (${table.timesheetPeriodId} is not null)`),
+    check(
+      'payroll_submissions_file_names_bounded',
+      sql`char_length(${table.attendanceFileName}) between 5 and 120 and (char_length(${table.timesheetFileName}) between 5 and 120 or (not ${table.timesheetRequired} and ${table.timesheetFileName} = ''))`,
+    ),
+    check(
+      'payroll_submissions_superseded_whole',
+      sql`(${table.supersededAt} is null and ${table.supersededBy} is null and ${table.supersededBySubmission} is null) or (${table.supersededAt} is not null and ${table.supersededBy} is not null and ${table.supersededBySubmission} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * THE NAME A PERSON GAVE A WORKING PDF. PAYROLL-ONE-1, migration 0052.
+ * One per person per document (timesheet, attendance); metadata only — the
+ * stored files' keys are always the server's. Cleared when the forms are
+ * submitted: the submission keeps the names it went with. The full rules are
+ * `pdfFileNameProblem` (src/lib/pdf-file-name.ts); the check is the backstop.
+ */
+export const payrollDocumentNames = pgTable(
+  'payroll_document_names',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    kind: text('kind').notNull(),
+    fileName: text('file_name').notNull(),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    primaryKey({ name: 'payroll_document_names_pk', columns: [table.userId, table.kind] }),
+    check('payroll_document_names_kind_known', sql`${table.kind} in ('timesheet', 'attendance')`),
+  ],
+);
+
+/**
+ * A TIMESHEET LINE TYPED BUT NOT COMPLETE YET. PAYROLL-ONE-1, migration 0052.
+ * Exactly what was typed, kept on the server so it survives a reload, another
+ * device or signing out; shown with what it still needs, and blocking the
+ * submission until it is completed or removed. Its id is the line's: once it
+ * is complete it is written as that timesheet entry and the draft goes.
+ */
+export const timesheetLineDrafts = pgTable(
+  'timesheet_line_drafts',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    workDate: date('work_date'),
+    typed: jsonb('typed').notNull(),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: rowVersion(),
+  },
+  (table) => [
+    index('timesheet_line_drafts_user_idx').on(table.userId, table.workDate),
+    check('timesheet_line_drafts_typed_bounded', sql`octet_length(${table.typed}::text) <= 4000`),
   ],
 );

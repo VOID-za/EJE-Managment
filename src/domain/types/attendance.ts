@@ -247,3 +247,36 @@ export const TIMESHEET_MAX_CALLOUT_CENTS = 100_000_000;
 export const TIMESHEET_MAX_KM_PER_LINE = 10_000;
 export const TIMESHEET_PERIOD_COMMENT_LIMIT = 2000;
 export const WORKSHOP_LABEL = 'Workshop';
+
+/**
+ * A TIMESHEET LINE AS IT WAS TYPED. PAYROLL-ONE-1 (5 November 2026). Strings,
+ * exactly as typed, so a line that is not complete yet can be kept on the
+ * server without rewriting a character of it.
+ */
+export interface TimesheetLineTyped {
+  /** A customer id, `__workshop__`, or '' for a typed name (or none). */
+  readonly pick: string;
+  readonly customerName: string;
+  readonly overtime: string;
+  readonly double: string;
+  /** Rand, as typed. */
+  readonly callout: string;
+  readonly internalKm: string;
+  readonly customerKm: string;
+}
+
+/**
+ * A LINE NOT COMPLETE YET, kept on the server (migration 0052). It has the id
+ * of the line it is: a new line's, or the stored entry it is changing — which
+ * keeps its last complete values until this one is complete. Never part of a
+ * submission; a submission is refused while one is in its dates.
+ */
+export interface TimesheetLineDraft {
+  readonly id: string;
+  readonly userId: UserId;
+  /** Null while no date is chosen. */
+  readonly date: IsoDate | null;
+  readonly typed: TimesheetLineTyped;
+  readonly updatedBy: UserId;
+  readonly updatedAt: IsoDateTime;
+}

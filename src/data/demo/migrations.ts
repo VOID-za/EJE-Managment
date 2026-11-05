@@ -732,6 +732,14 @@ const v40ToV41 = (data: Loose): Loose => ({
   timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
 });
 
+/** PAYROLL-ONE-1 (5 November 2026): new, empty collections, as PostgreSQL migration 0052. Nothing existing is rewritten. */
+const v42ToV43 = (data: Loose): Loose => ({
+  ...data,
+  timesheetLineDrafts: Array.isArray(data.timesheetLineDrafts) ? data.timesheetLineDrafts : [],
+  payrollSubmissions: Array.isArray(data.payrollSubmissions) ? data.payrollSubmissions : [],
+  payrollDocumentNames: Array.isArray(data.payrollDocumentNames) ? data.payrollDocumentNames : [],
+});
+
 /**
  * CHK-SRC-1 (4 November 2026): the business's three checklists. Added as new
  * families, current; the demonstration wording still current for Installation
@@ -793,6 +801,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   39: v39ToV40,
   40: v40ToV41,
   41: v41ToV42,
+  42: v42ToV43,
 };
 
 /**

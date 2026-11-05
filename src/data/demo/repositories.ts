@@ -14,6 +14,10 @@ import type {
   TimesheetPeriod,
   TimesheetCorrection,
   TimesheetWorkingComment,
+  TimesheetLineDraft,
+  PayrollSubmission,
+  PayrollDocumentName,
+  PayrollDocumentKind,
   MonthlySubmission,
   FinancePackage,
   FinancePackageStatus,
@@ -77,6 +81,7 @@ import type {
   AttendanceRepository,
   DeliveryNoteRepository,
   PayrollRepository,
+  PayrollReplacement,
   AvailabilityRepository,
   ChatRepository,
   MachineRepository,
@@ -1464,10 +1469,36 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(comment);
   }
 
-  findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
+  listLineDrafts(userId: UserId): Promise<readonly TimesheetLineDraft[]> {
     return Promise.resolve(
-      this.context.read().timesheetPeriods.find((row) => row.userId === userId && row.from === from && row.to === to) ?? null,
+      (this.context.read().timesheetLineDrafts ?? [])
+        .filter((row) => row.userId === userId)
+        .sort((a, b) => (a.date ?? '9999-99-99').localeCompare(b.date ?? '9999-99-99') || a.updatedAt.localeCompare(b.updatedAt)),
     );
+  }
+
+  findLineDraft(id: string): Promise<TimesheetLineDraft | null> {
+    return Promise.resolve((this.context.read().timesheetLineDrafts ?? []).find((row) => row.id === id) ?? null);
+  }
+
+  saveLineDraft(lineDraft: TimesheetLineDraft): Promise<TimesheetLineDraft> {
+    this.context.commit((draft) => {
+      draft.timesheetLineDrafts = [...(draft.timesheetLineDrafts ?? []).filter((row) => row.id !== lineDraft.id), lineDraft];
+    });
+    return Promise.resolve(lineDraft);
+  }
+
+  deleteLineDraft(id: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.timesheetLineDrafts = (draft.timesheetLineDrafts ?? []).filter((row) => row.id !== id);
+    });
+    return Promise.resolve();
+  }
+
+  findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
+    // PAYROLL-ONE-1: a replaced period may share its dates with its replacement; the current one is the one meant.
+    const rows = this.context.read().timesheetPeriods.filter((row) => row.userId === userId && row.from === from && row.to === to);
+    return Promise.resolve(rows.find((row) => (row.supersededAt ?? null) === null) ?? rows[0] ?? null);
   }
 
   listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]> {
@@ -1520,25 +1551,6 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(saved);
   }
 
-  resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
-    let saved: TimesheetPeriod | null = null;
-    this.context.commit((draft) => {
-      const existing = draft.timesheetPeriods.find((row) => row.id === period.id);
-      if (existing === undefined || existing.submittedAt === null) return;
-      const next: TimesheetPeriod = {
-        ...existing,
-        comment: period.comment,
-        submittedAt: period.submittedAt,
-        submittedBy: period.submittedBy,
-        snapshot: period.snapshot,
-        supersededAt: null,
-        supersededBy: null,
-      };
-      draft.timesheetPeriods = draft.timesheetPeriods.map((row) => (row === existing ? next : row));
-      saved = next;
-    });
-    return Promise.resolve(saved);
-  }
 
   deleteCorrections(periodId: string): Promise<void> {
     this.context.commit((draft) => {
@@ -1551,7 +1563,7 @@ class DemoAttendanceRepository implements AttendanceRepository {
     let saved: TimesheetPeriod | null = null;
     this.context.commit((draft) => {
       const existing = draft.timesheetPeriods.find(
-        (row) => row.userId === period.userId && row.from === period.from && row.to === period.to,
+        (row) => row.userId === period.userId && row.from === period.from && row.to === period.to && (row.supersededAt ?? null) === null,
       );
       if (existing !== undefined && existing.submittedAt !== null) return;
       // As the database's trigger does: a sent period may not overlap another CURRENT one (TS-OVERLAP-1:
@@ -1613,6 +1625,107 @@ const OPEN_PACKAGE: readonly FinancePackageStatus[] = ['prepared', 'sending', 'f
 class DemoPayrollRepository implements PayrollRepository {
   constructor(private readonly context: DemoContext) {}
 
+  replaceMonthlySubmissions(input: PayrollReplacement): Promise<readonly MonthlySubmission[]> {
+    const replaced: MonthlySubmission[] = [];
+    this.context.commit((draft) => {
+      draft.monthlySubmissions = draft.monthlySubmissions.map((row) => {
+        if (row.userId !== input.userId || !input.ids.includes(row.id) || (row.supersededAt ?? null) !== null) return row;
+        const next: MonthlySubmission = { ...row, supersededAt: input.at, supersededBy: input.by, supersededBySubmission: input.bySubmission };
+        replaced.push(next);
+        return next;
+      });
+    });
+    return Promise.resolve(replaced);
+  }
+
+  listPayrollSubmissionsFor(userId: UserId): Promise<readonly PayrollSubmission[]> {
+    return Promise.resolve(
+      (this.context.read().payrollSubmissions ?? [])
+        .filter((row) => row.userId === userId)
+        .sort((a, b) => b.to.localeCompare(a.to) || b.submittedAt.localeCompare(a.submittedAt)),
+    );
+  }
+
+  listPayrollSubmissionsForMonth(financeMonth: string): Promise<readonly PayrollSubmission[]> {
+    return Promise.resolve(
+      (this.context.read().payrollSubmissions ?? [])
+        .filter((row) => row.financeMonth === financeMonth)
+        .sort((a, b) => a.to.localeCompare(b.to) || a.submittedAt.localeCompare(b.submittedAt)),
+    );
+  }
+
+  findPayrollSubmission(id: string): Promise<PayrollSubmission | null> {
+    return Promise.resolve((this.context.read().payrollSubmissions ?? []).find((row) => row.id === id) ?? null);
+  }
+
+  /** As the database's guard: the timesheet half sent and current for exactly these dates; no current day twice. */
+  createPayrollSubmission(submission: PayrollSubmission): Promise<PayrollSubmission | null> {
+    let saved: PayrollSubmission | null = null;
+    this.context.commit((draft) => {
+      const rows = draft.payrollSubmissions ?? [];
+      const current = rows.filter((row) => row.userId === submission.userId && (row.supersededAt ?? null) === null);
+      if (current.some((row) => row.from === submission.from && row.to === submission.to)) return;
+      if (submission.financeMonth !== submission.to.slice(0, 7)) throw new Error('the Finance month is the month of To');
+      if (submission.timesheetRequired !== (submission.timesheetPeriodId !== null)) throw new Error('a required timesheet names its period');
+      if (submission.timesheetPeriodId !== null) {
+        const period = draft.timesheetPeriods.find((row) => row.id === submission.timesheetPeriodId);
+        if (
+          period === undefined || period.userId !== submission.userId || period.submittedAt === null ||
+          (period.supersededAt ?? null) !== null || period.from !== submission.from || period.to !== submission.to
+        ) {
+          throw new Error('a payroll submission needs the same person\'s current sent timesheet for exactly its dates');
+        }
+      }
+      if (current.some((row) => row.from <= submission.to && row.to >= submission.from)) {
+        throw new Error('payroll submission overlaps one already made');
+      }
+      const monthOverlap = draft.monthlySubmissions.some((row) => {
+        if (row.userId !== submission.userId || (row.supersededAt ?? null) !== null) return false;
+        const [year, month] = row.month.split('-').map(Number) as [number, number];
+        const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+        return `${row.month}-01` <= submission.to && last >= submission.from;
+      });
+      if (monthOverlap) throw new Error('payroll submission overlaps a monthly submission already made');
+      saved = submission;
+      draft.payrollSubmissions = [...rows, submission];
+    });
+    return Promise.resolve(saved);
+  }
+
+  replacePayrollSubmissions(input: PayrollReplacement): Promise<readonly PayrollSubmission[]> {
+    const replaced: PayrollSubmission[] = [];
+    this.context.commit((draft) => {
+      draft.payrollSubmissions = (draft.payrollSubmissions ?? []).map((row) => {
+        if (row.userId !== input.userId || !input.ids.includes(row.id) || (row.supersededAt ?? null) !== null) return row;
+        const next: PayrollSubmission = { ...row, supersededAt: input.at, supersededBy: input.by, supersededBySubmission: input.bySubmission };
+        replaced.push(next);
+        return next;
+      });
+    });
+    return Promise.resolve(replaced);
+  }
+
+  listDocumentNames(userId: UserId): Promise<readonly PayrollDocumentName[]> {
+    return Promise.resolve((this.context.read().payrollDocumentNames ?? []).filter((row) => row.userId === userId));
+  }
+
+  saveDocumentName(name: PayrollDocumentName): Promise<PayrollDocumentName> {
+    this.context.commit((draft) => {
+      draft.payrollDocumentNames = [
+        ...(draft.payrollDocumentNames ?? []).filter((row) => !(row.userId === name.userId && row.kind === name.kind)),
+        name,
+      ];
+    });
+    return Promise.resolve(name);
+  }
+
+  deleteDocumentName(userId: UserId, kind: PayrollDocumentKind): Promise<void> {
+    this.context.commit((draft) => {
+      draft.payrollDocumentNames = (draft.payrollDocumentNames ?? []).filter((row) => !(row.userId === userId && row.kind === kind));
+    });
+    return Promise.resolve();
+  }
+
   findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null> {
     return Promise.resolve(
       this.context.read().monthlySubmissions.find((row) => row.userId === userId && row.month === month) ?? null,
@@ -1632,18 +1745,6 @@ class DemoPayrollRepository implements PayrollRepository {
     );
   }
 
-  async replaceSubmission(submission: MonthlySubmission): Promise<MonthlySubmission> {
-    let saved: MonthlySubmission | null = null;
-    this.context.commit((draft) => {
-      const existing = draft.monthlySubmissions.find(
-        (row) => row.id === submission.id && row.userId === submission.userId && row.month === submission.month,
-      );
-      if (existing === undefined) throw new Error(`no submission ${submission.id} to replace`);
-      saved = { ...existing, attendance: submission.attendance, submittedAt: submission.submittedAt, submittedBy: submission.submittedBy };
-      draft.monthlySubmissions = draft.monthlySubmissions.map((row) => (row === existing ? saved! : row));
-    });
-    return saved!;
-  }
 
   async createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null> {
     let saved: MonthlySubmission | null = null;

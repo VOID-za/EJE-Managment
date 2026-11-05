@@ -38,7 +38,11 @@ import type {
   TimesheetPeriod,
   TimesheetCorrection,
   TimesheetWorkingComment,
+  TimesheetLineDraft,
   MonthlySubmission,
+  PayrollSubmission,
+  PayrollDocumentName,
+  PayrollDocumentKind,
   FinancePackage,
   FinancePackageStatus,
   IssuedDeliveryNote,
@@ -603,12 +607,6 @@ export interface AttendanceRepository {
    * period that would overlap another is refused by the database itself.
    */
   submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
-  /**
-   * RESUBMIT-1. Sends an already-sent period again: its snapshot, comment and
-   * submission stamp are replaced; its dates and owner never change. Null when
-   * the period was not sent.
-   */
-  resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null>;
   /** TS-PAPER. One submitted period by its id (current or replaced), or null. */
   findPeriodById(id: string): Promise<TimesheetPeriod | null>;
   /**
@@ -619,6 +617,12 @@ export interface AttendanceRepository {
   /** TS-PAPER. The comment on the sheet a person is filling in now. */
   findWorkingComment(userId: UserId): Promise<TimesheetWorkingComment | null>;
   saveWorkingComment(comment: TimesheetWorkingComment): Promise<TimesheetWorkingComment>;
+  /** PAYROLL-ONE-1. A person's timesheet lines typed but not complete yet, oldest date first (no date last). */
+  listLineDrafts(userId: UserId): Promise<readonly TimesheetLineDraft[]>;
+  findLineDraft(id: string): Promise<TimesheetLineDraft | null>;
+  /** Writes the draft with this id (creating it, or replacing what it held). */
+  saveLineDraft(draft: TimesheetLineDraft): Promise<TimesheetLineDraft>;
+  deleteLineDraft(id: string): Promise<void>;
   /** RESUBMIT-1. Removes every correction of a period that is being sent again. */
   deleteCorrections(periodId: string): Promise<void>;
   /** TS-16. One period's corrections, oldest (sequence 1) first. */
@@ -892,12 +896,6 @@ export interface PayrollRepository {
   listSubmissionsFor(userId: UserId): Promise<readonly MonthlySubmission[]>;
   /** Null when this technician's month was already submitted — one per month. */
   createSubmission(submission: MonthlySubmission): Promise<MonthlySubmission | null>;
-  /**
-   * RESUBMIT-1. Replaces the month's current submission in place — the new
-   * attendance snapshot and submission stamp; the person, month and timesheet
-   * period never change. No earlier copy is kept.
-   */
-  replaceSubmission(submission: MonthlySubmission): Promise<MonthlySubmission>;
   findPackage(id: string): Promise<FinancePackage | null>;
   /** Every package for the month, newest first. */
   listPackages(month: string): Promise<readonly FinancePackage[]>;
@@ -913,6 +911,34 @@ export interface PayrollRepository {
     to: FinancePackageStatus,
     patch: Partial<Pick<FinancePackage, 'sentBy' | 'sendStartedAt' | 'sentAt' | 'providerMessageId' | 'providerState' | 'failureReason' | 'failureKind' | 'attempts'>>,
   ): Promise<FinancePackage | null>;
+  /**
+   * PAYROLL-ONE-1. Marks these CURRENT monthly submissions of the person
+   * replaced by `bySubmission` — only those still current; what they hold is
+   * never touched. Returns the ones it marked.
+   */
+  replaceMonthlySubmissions(input: PayrollReplacement): Promise<readonly MonthlySubmission[]>;
+  /** PAYROLL-ONE-1. One person's payroll submissions — current and replaced — the latest To first. */
+  listPayrollSubmissionsFor(userId: UserId): Promise<readonly PayrollSubmission[]>;
+  /** Every payroll submission — current and replaced — whose Finance month is this one. */
+  listPayrollSubmissionsForMonth(financeMonth: string): Promise<readonly PayrollSubmission[]>;
+  findPayrollSubmission(id: string): Promise<PayrollSubmission | null>;
+  /** Null when a current submission of the person for exactly these dates already exists. */
+  createPayrollSubmission(submission: PayrollSubmission): Promise<PayrollSubmission | null>;
+  /** Marks these CURRENT payroll submissions of the person replaced; returns the ones it marked. */
+  replacePayrollSubmissions(input: PayrollReplacement): Promise<readonly PayrollSubmission[]>;
+  /** The names a person gave their working PDFs. */
+  listDocumentNames(userId: UserId): Promise<readonly PayrollDocumentName[]>;
+  saveDocumentName(name: PayrollDocumentName): Promise<PayrollDocumentName>;
+  deleteDocumentName(userId: UserId, kind: PayrollDocumentKind): Promise<void>;
+}
+
+/** Which current submissions a payroll submission replaces. */
+export interface PayrollReplacement {
+  readonly userId: UserId;
+  readonly ids: readonly string[];
+  readonly at: string;
+  readonly by: UserId;
+  readonly bySubmission: string;
 }
 
 export interface DeliveryNoteRepository {

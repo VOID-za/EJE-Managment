@@ -28,7 +28,7 @@ export interface AttendanceSnapshot {
   readonly days: readonly AttendanceSnapshotDay[];
 }
 
-export interface MonthlySubmission {
+export interface MonthlySubmission extends Partial<MonthlySubmissionReplacement> {
   readonly id: string;
   readonly userId: UserId;
   readonly month: PayrollMonth;
@@ -91,3 +91,73 @@ export const FINANCE_PACKAGE_MAX_BYTES = 3 * 1024 * 1024;
 
 /** A technician's name on documents: at most this long. */
 export const DOCUMENT_NAME_LIMIT = 30;
+
+/**
+ * A MONTHLY SUBMISSION'S REPLACEMENT. PAYROLL-ONE-1 (migration 0052): a month
+ * submitted before payroll forms were submitted for a From–To period is kept
+ * as it was; a payroll submission covering every day of it replaces it, once.
+ */
+export interface MonthlySubmissionReplacement {
+  readonly supersededAt: IsoDateTime | null;
+  readonly supersededBy: UserId | null;
+  readonly supersededBySubmission: string | null;
+}
+
+/** The attendance of a From–To period as it stood when it was submitted. */
+export interface AttendancePeriodSnapshot {
+  readonly technicianName: string;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly days: readonly AttendanceSnapshotDay[];
+}
+
+/** A PDF stored when the forms were submitted: exactly what went, under the name it went with. */
+export interface PayrollSubmissionDocument {
+  readonly kind: PayrollDocumentKind;
+  readonly fileName: string;
+  readonly storageKey: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly pageCount: number;
+}
+
+/**
+ * A PERSON'S PAYROLL FORMS, SUBMITTED TOGETHER. PAYROLL-ONE-1 (the owner,
+ * 5 November 2026), migration 0052.
+ *
+ * One submission from My Monthly Forms for one From–To period: the timesheet
+ * (the sent timesheet period for exactly those dates) and the attendance,
+ * frozen as they stood, with the file names they went under and the PDFs
+ * stored at that moment. `timesheetRequired` false is an attendance-only
+ * submission of a person who keeps no timesheet — recorded as such, never an
+ * empty timesheet. The FINANCE MONTH is the month of To. Never changed; a
+ * later submission covering every one of its days replaces it, and it is kept.
+ */
+export interface PayrollSubmission extends MonthlySubmissionReplacement {
+  readonly id: string;
+  readonly userId: UserId;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  /** "2026-11" for 24 Oct – 25 Nov 2026. */
+  readonly financeMonth: PayrollMonth;
+  readonly timesheetRequired: boolean;
+  readonly timesheetPeriodId: string | null;
+  readonly attendance: AttendancePeriodSnapshot;
+  /** The names the documents were submitted under. The timesheet's is '' when none was required. */
+  readonly fileNames: { readonly timesheet: string; readonly attendance: string };
+  readonly documents: readonly PayrollSubmissionDocument[];
+  readonly submittedAt: IsoDateTime;
+  readonly submittedBy: UserId;
+}
+
+/** The name a person gave one of their WORKING payroll PDFs. */
+export interface PayrollDocumentName {
+  readonly userId: UserId;
+  readonly kind: PayrollDocumentKind;
+  readonly fileName: string;
+  readonly updatedBy: UserId;
+  readonly updatedAt: IsoDateTime;
+}
+
+/** The longest From–To period one payroll submission covers: a year (the database's check). */
+export const PAYROLL_PERIOD_MAX_DAYS = 366;

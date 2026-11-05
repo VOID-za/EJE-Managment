@@ -321,6 +321,8 @@ export type ActivityEventType =
   | 'timesheet_entry_added'
   | 'timesheet_entry_corrected'
   | 'timesheet_entry_removed'
+  /** PAYROLL-ONE-1: a line typed but not complete yet, kept on the server as a draft. */
+  | 'timesheet_entry_draft'
   /** TS-02/TS-03: a technician sent a month's timesheet to the office; read-only from then. */
   | 'timesheet_submitted'
   /** TS-16: a correction of a sent timesheet was asked for, accepted or rejected. */
@@ -339,6 +341,9 @@ export type ActivityEventType =
   | 'standby_swap_cancelled'
   /** PAY-02: a technician submitted the month's timesheet and attendance together. */
   | 'monthly_forms_submitted'
+  /** PAYROLL-ONE-1: the timesheet and attendance submitted together for a From–To period; a working PDF renamed. */
+  | 'payroll_forms_submitted'
+  | 'payroll_document_renamed'
   /** PAY-05…08: the monthly Finance package, prepared, sent, failed or discarded. */
   | 'finance_package_prepared'
   | 'finance_package_sent'

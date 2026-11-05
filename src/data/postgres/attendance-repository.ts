@@ -13,6 +13,8 @@ import {
   type AttendanceStatus,
   type TimesheetComment,
   type TimesheetWorkingComment,
+  type TimesheetLineDraft,
+  type TimesheetLineTyped,
   type UserId,
 } from '@/domain';
 import type { AttendanceRepository } from '@/data/repositories';
@@ -24,6 +26,16 @@ type CommentRow = typeof schema.timesheetComments.$inferSelect;
 type EntryRow = typeof schema.timesheetEntries.$inferSelect;
 type PeriodRow = typeof schema.timesheetPeriods.$inferSelect;
 type CorrectionRow = typeof schema.timesheetCorrections.$inferSelect;
+type DraftRow = typeof schema.timesheetLineDrafts.$inferSelect;
+
+const toLineDraft = (row: DraftRow): TimesheetLineDraft => ({
+  id: row.id,
+  userId: asUserId(row.userId),
+  date: row.workDate,
+  typed: row.typed as TimesheetLineTyped,
+  updatedBy: asUserId(row.updatedBy),
+  updatedAt: row.updatedAt,
+});
 
 const toDomainCorrection = (row: CorrectionRow): TimesheetCorrection => ({
   id: row.id,
@@ -280,6 +292,8 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
           eq(schema.timesheetPeriods.periodTo, to),
         ),
       )
+      // PAYROLL-ONE-1 (0052): a replaced period may share its dates with its replacement; the current one is meant.
+      .orderBy(sql`${schema.timesheetPeriods.supersededAt} is not null`)
       .limit(1);
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }
@@ -347,6 +361,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       })
       .onConflictDoUpdate({
         target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
+        targetWhere: isNull(schema.timesheetPeriods.supersededAt),
         set: {
           comment: period.comment,
           updatedBy: period.updatedBy,
@@ -360,24 +375,6 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }
 
-  async resubmitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
-    const rows = await this.db
-      .update(schema.timesheetPeriods)
-      .set({
-        comment: period.comment,
-        submittedAt: period.submittedAt,
-        submittedBy: period.submittedBy,
-        snapshot: period.snapshot,
-        // Sent again: current again, if a later overlapping submission had replaced it.
-        supersededAt: null,
-        supersededBy: null,
-        updatedAt: sql`now()`,
-        version: sql`${schema.timesheetPeriods.version} + 1`,
-      })
-      .where(and(eq(schema.timesheetPeriods.id, period.id), isNotNull(schema.timesheetPeriods.submittedAt)))
-      .returning();
-    return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
-  }
 
   async findPeriodById(id: string): Promise<TimesheetPeriod | null> {
     if (!isUuid(id)) return null;
@@ -429,6 +426,47 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return { userId: asUserId(row.userId), comment: row.comment, updatedBy: asUserId(row.updatedBy), updatedAt: row.updatedAt };
   }
 
+  async listLineDrafts(userId: UserId): Promise<readonly TimesheetLineDraft[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.timesheetLineDrafts)
+      .where(eq(schema.timesheetLineDrafts.userId, userId))
+      .orderBy(sql`${schema.timesheetLineDrafts.workDate} asc nulls last`, asc(schema.timesheetLineDrafts.updatedAt));
+    return rows.map(toLineDraft);
+  }
+
+  async findLineDraft(id: string): Promise<TimesheetLineDraft | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db.select().from(schema.timesheetLineDrafts).where(eq(schema.timesheetLineDrafts.id, id)).limit(1);
+    return rows[0] === undefined ? null : toLineDraft(rows[0]);
+  }
+
+  async saveLineDraft(draft: TimesheetLineDraft): Promise<TimesheetLineDraft> {
+    const rows = await this.db
+      .insert(schema.timesheetLineDrafts)
+      .values({ id: draft.id, userId: draft.userId, workDate: draft.date, typed: draft.typed, updatedBy: draft.updatedBy, updatedAt: draft.updatedAt })
+      .onConflictDoUpdate({
+        target: schema.timesheetLineDrafts.id,
+        set: {
+          workDate: draft.date,
+          typed: draft.typed,
+          updatedBy: draft.updatedBy,
+          updatedAt: draft.updatedAt,
+          version: sql`${schema.timesheetLineDrafts.version} + 1`,
+        },
+        // A draft is only ever its own person's: an id of somebody else's is never overwritten.
+        setWhere: eq(schema.timesheetLineDrafts.userId, draft.userId),
+      })
+      .returning();
+    if (rows[0] === undefined) throw new Error(`timesheet line draft ${draft.id} belongs to somebody else`);
+    return toLineDraft(rows[0]);
+  }
+
+  async deleteLineDraft(id: string): Promise<void> {
+    if (!isUuid(id)) return;
+    await this.db.delete(schema.timesheetLineDrafts).where(eq(schema.timesheetLineDrafts.id, id));
+  }
+
   async deleteCorrections(periodId: string): Promise<void> {
     if (!isUuid(periodId)) return;
     // The guard trigger allows this delete only inside a resubmission (migration 0046).
@@ -453,6 +491,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       })
       .onConflictDoUpdate({
         target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
+        targetWhere: isNull(schema.timesheetPeriods.supersededAt),
         set: {
           submittedAt: period.submittedAt,
           submittedBy: period.submittedBy,

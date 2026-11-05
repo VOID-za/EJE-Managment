@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (f693747), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (ad0f3c8, v1.4.0), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in f693747, and it does: each of these was checked against that commit.
+ * in ad0f3c8, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -101,6 +101,17 @@ const INTEGRATIONS = {
   templateVersion: '00000000-0000-4000-8000-0000000006a2',
   email: '00000000-0000-4000-8000-0000000006b1',
   outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
+// A copy of ROLLBACK_0052 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0052 = {
+  replacedSubmission: '00000000-0000-4000-8000-000000000ca1',
+  currentSubmission: '00000000-0000-4000-8000-000000000ca2',
+  replacedPeriod: '00000000-0000-4000-8000-000000000cb1',
+  currentPeriod: '00000000-0000-4000-8000-000000000cb2',
+  draftLine: '00000000-0000-4000-8000-000000000cc1',
+  from: '2028-01-01',
+  to: '2028-01-25',
 } as const;
 
 // A copy of ROLLBACK_0051 in `src/ops/release/rollback-fixture.ts`.
@@ -172,15 +183,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // f693747 (v1.2.0) shipped up to 0050; this release adds 0051.
-    expect(shipped).toHaveLength(51);
-    expect(shipped.at(-1)).toBe('0050_timesheets_paper');
-    expect(shipped).not.toContain('0051_source_checklists');
+    // ad0f3c8 (v1.4.0) shipped up to 0051; this release adds 0052.
+    expect(shipped).toHaveLength(52);
+    expect(shipped.at(-1)).toBe('0051_source_checklists');
+    expect(shipped).not.toContain('0052_payroll_submissions');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0051 applied beyond what the live release ships.
-    expect(applied).toBe(52);
+    // 0052 applied beyond what the live release ships.
+    expect(applied).toBe(53);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -551,15 +562,14 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect((await loadJobView(readRepositories(db), lathe!.jobNumber))?.checklistTemplate?.id).toBe(B.latheChecklist);
 
     // What this code issues to a new job: a current source checklist, never the archived demonstration wording.
-    // `findForJobType` is the LIVE release's method (this release replaced it with
-    // `listCurrentForJobType`); this file runs inside the live checkout.
+    // `listCurrentForJobType` is the live release's (ad0f3c8) method; this file runs inside the live checkout.
     const templates = readRepositories(db).checklistTemplates as unknown as {
-      findForJobType(code: string): Promise<{ id: string; version: string } | null>;
+      listCurrentForJobType(code: string): Promise<readonly { id: string; version: string }[]>;
     };
-    const forInstallation = await templates.findForJobType('installation');
+    const forInstallation = (await templates.listCurrentForJobType('installation'))[0];
     expect(forInstallation?.id).toBe(B.installationChecklist);
-    const forService = await templates.findForJobType('service');
-    expect(forService?.version).toBe('1.0');
+    const forService = await templates.listCurrentForJobType('service');
+    expect(forService.map((template) => template.version)).toEqual(['1.0', '1.0']);
 
     // Its own writes: a checklist started on a new job (no kind sent — the trigger fills it in)…
     const allocated = await jobs.allocateJobNumber();
@@ -578,5 +588,39 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     };
     await expect(jobs.save(failed)).rejects.toThrow();
     expect((await jobs.findById(asJobId(B.latheJob)))?.checklist?.completedAt).toBeNull();
+  });
+
+  /*
+   * 0052, WHICH THIS CODE HAS NEVER HEARD OF (PAYROLL-ONE-1): payroll
+   * submissions for a period, two timesheet periods with the same dates (one
+   * replaced), a stored PDF name, a draft line. It reads its timesheets, the
+   * current one included, and its own line writes still work. ITS OWN "Submit
+   * timesheet" names the old full unique key in ON CONFLICT, which 0052
+   * replaced by one for current rows: refused, writing nothing — the one
+   * limitation recorded in docs/deploy-next-release.md.
+   */
+  it('meets the 0052 rows: reads both periods with the same dates, still writes lines; its old Submit is refused and writes nothing', async () => {
+    const B = BATCH_0052;
+    const attendance = new PostgresAttendanceRepository(db);
+    const tech = asUserId(IDS.technician);
+    const current = await attendance.listSubmittedPeriods(tech, B.from, B.to);
+    expect(current.map((period) => period.id)).toEqual([B.currentPeriod]);
+    const all = (await attendance.listSubmissions(tech)).filter((period) => period.from === B.from && period.to === B.to);
+    expect(all.map((period) => period.id).sort()).toEqual([B.replacedPeriod, B.currentPeriod].sort());
+    expect(await attendance.findPeriod(tech, B.from, B.to)).not.toBeNull();
+    const saved = await attendance.saveEntry({
+      id: '00000000-0000-4000-8000-000000000cd1', userId: tech, date: '2028-02-04', customerId: null, customerName: 'Rollback probe 0052', workshop: false,
+      normalHours: 0, overtimeHours: 1, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
+      updatedBy: tech, updatedAt: '2028-02-04T08:00:00.000Z',
+    });
+    expect(saved.overtimeHours).toBe(1);
+    const before = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
+    await expect(attendance.submitPeriod({
+      id: '00000000-0000-4000-8000-000000000ce1', userId: tech, from: '2028-03-01', to: '2028-03-25', comment: '',
+      updatedBy: tech, updatedAt: '2028-03-26T08:00:00.000Z', submittedAt: '2028-03-26T08:00:00.000Z', submittedBy: tech,
+      snapshot: { technicianName: 'Sipho', from: '2028-03-01', to: '2028-03-25', comment: '', entries: [] },
+    })).rejects.toThrow();
+    const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
+    expect(after[0]?.n).toBe(before[0]?.n);
   });
 });

@@ -92,23 +92,18 @@ describeDb('migration 0046 — the tester’s fixes of 2 November 2026', () => {
     return { attendance, sent: sent! };
   };
 
-  it('RESUBMIT-1: a sent timesheet period is sent again in place; never unsent, moved or deleted', async () => {
-    const { attendance, sent } = await sentPeriod();
-    const later = new Date(Date.now() + 1000).toISOString();
-    const again = await attendance.resubmitPeriod({
-      ...sent,
-      comment: 'second',
-      submittedAt: later,
-      snapshot: { ...sent.snapshot!, comment: 'second' },
-    });
-    expect(again?.id).toBe(sent.id);
-    expect(again?.snapshot?.comment).toBe('second');
-    expect(await refusal(db.execute(sql`update timesheet_periods set submitted_at = null, submitted_by = null, snapshot = null where id = ${sent.id}`))).toMatch(/never moved or unsent|submission_whole/u);
-    expect(await refusal(db.execute(sql`update timesheet_periods set period_to = '2026-09-29' where id = ${sent.id}`))).toMatch(/never moved or unsent/u);
+  it('PAYROLL-ONE-1 (0052): a sent timesheet period is final — never re-sent in place, unsent, moved or deleted', async () => {
+    const { sent } = await sentPeriod();
+    // RESUBMIT-1's in-place re-send is gone: its snapshot, comment and stamp never change.
+    expect(await refusal(db.execute(sql`update timesheet_periods set snapshot = '{"entries":[]}'::jsonb where id = ${sent.id}`))).toMatch(/kept exactly as sent/u);
+    expect(await refusal(db.execute(sql`update timesheet_periods set comment = 'second' where id = ${sent.id}`))).toMatch(/kept exactly as sent/u);
+    expect(await refusal(db.execute(sql`update timesheet_periods set submitted_at = now() where id = ${sent.id}`))).toMatch(/kept exactly as sent/u);
+    expect(await refusal(db.execute(sql`update timesheet_periods set submitted_at = null, submitted_by = null, snapshot = null where id = ${sent.id}`))).toMatch(/kept exactly as sent|submission_whole/u);
+    expect(await refusal(db.execute(sql`update timesheet_periods set period_to = '2026-09-29' where id = ${sent.id}`))).toMatch(/kept exactly as sent/u);
     expect(await refusal(db.execute(sql`delete from timesheet_periods where id = ${sent.id}`))).toMatch(/cannot be deleted/u);
   });
 
-  it('RESUBMIT-1: a monthly submission is replaced in place; never moved or deleted', async () => {
+  it('PAYROLL-ONE-1 (0052): a monthly submission is kept exactly as submitted; never rewritten, moved or deleted', async () => {
     const { sent } = await sentPeriod();
     const payroll = new PostgresPayrollRepository(db);
     const created = await payroll.createSubmission({
@@ -120,16 +115,14 @@ describeDb('migration 0046 — the tester’s fixes of 2 November 2026', () => {
       submittedAt: NOW,
       submittedBy: TECH,
     });
-    const replaced = await payroll.replaceSubmission({
-      ...created!,
-      attendance: { technicianName: 'Sipho Mahlangu', month: '2026-09', days: [{ date: '2026-09-01', status: 'present', absenceReason: null, note: '' }] },
-      submittedAt: new Date(Date.now() + 1000).toISOString(),
-    });
-    expect(replaced.id).toBe(created!.id);
-    expect(replaced.attendance.days).toHaveLength(1);
+    // RESUBMIT-1's in-place replacement is gone: what was submitted is never rewritten.
+    expect(await refusal(db.execute(sql`update monthly_submissions set attendance_snapshot = '{}'::jsonb where id = ${created!.id}`))).toMatch(/kept exactly as submitted/u);
+    expect(await refusal(db.execute(sql`update monthly_submissions set submitted_at = now() where id = ${created!.id}`))).toMatch(/kept exactly as submitted/u);
+    // Only marked replaced, by a payroll submission, by somebody, at a time — not half of that.
+    expect(await refusal(db.execute(sql`update monthly_submissions set superseded_at = now() where id = ${created!.id}`))).toMatch(/replaced by a payroll submission/u);
     const rows = await db.execute(sql`select count(*)::int as n from monthly_submissions`);
     expect(Number((rows as unknown as { n: number }[])[0]?.n)).toBe(1);
-    expect(await refusal(db.execute(sql`update monthly_submissions set month = '2026-08' where id = ${created!.id}`))).toMatch(/never moved/u);
+    expect(await refusal(db.execute(sql`update monthly_submissions set month = '2026-08' where id = ${created!.id}`))).toMatch(/kept exactly as submitted/u);
     expect(await refusal(db.execute(sql`delete from monthly_submissions where id = ${created!.id}`))).toMatch(/cannot be deleted/u);
   });
 

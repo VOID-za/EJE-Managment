@@ -28,6 +28,9 @@ import type {
   TimesheetPeriod,
   TimesheetCorrection,
   TimesheetWorkingComment,
+  TimesheetLineDraft,
+  PayrollSubmission,
+  PayrollDocumentName,
   MonthlySubmission,
   FinancePackage,
   IssuedDeliveryNote,
@@ -144,6 +147,10 @@ export interface DemoDatabase {
   timesheetCorrections: TimesheetCorrection[];
   /** The open sheet's comment, one per person. TS-PAPER. */
   timesheetWorkingComments: TimesheetWorkingComment[];
+  /** PAYROLL-ONE-1: timesheet lines typed but not complete yet; payroll forms submitted for a period; working PDF names. */
+  timesheetLineDrafts: TimesheetLineDraft[];
+  payrollSubmissions: PayrollSubmission[];
+  payrollDocumentNames: PayrollDocumentName[];
   /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
   standbyEligibility: StandbyEligibility[];
   standbyWeeks: StandbyWeek[];
@@ -270,8 +277,11 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  *
  * v42 added the business's three checklists (CHK-SRC-1) and archived the
  * demonstration wording they replace.
+ *
+ * v43 added payroll forms submitted together for a period, working PDF names
+ * and timesheet lines kept as drafts (PAYROLL-ONE-1) — empty collections.
  */
-export const SCHEMA_VERSION = 42;
+export const SCHEMA_VERSION = 43;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -333,6 +343,9 @@ export const createSeededDatabase = (): DemoDatabase => ({
   timesheetCorrections: [],
   // Empty, and honestly so: who may stand by and the schedule are the office's to enter.
   timesheetWorkingComments: [],
+  timesheetLineDrafts: [],
+  payrollSubmissions: [],
+  payrollDocumentNames: [],
   standbyEligibility: [],
   standbyWeeks: [],
   standbySwapRequests: [],

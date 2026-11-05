@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -525,5 +525,37 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     ]);
     const [stored] = await db.execute<{ kind: string }>(sql`select checklist_kind as kind from checklist_instances where job_id = ${B.latheJob}`);
     expect(stored?.kind).toBe('service_lathe');
+  });
+
+  it('writes the rows only this release can (0052): a period submission replaced by one with the same dates, a PDF name, a draft line', async () => {
+    const B = ROLLBACK_0052;
+    const tech = asUserId(IDS.technician);
+    const attendance = new PostgresAttendanceRepository(db);
+    const payroll = new PostgresPayrollRepository(db);
+    const at = '2028-01-26T08:00:00.000Z';
+    const period = (id: string) => ({
+      id, userId: tech, from: B.from, to: B.to, comment: '', updatedBy: tech, updatedAt: at, submittedAt: at, submittedBy: tech,
+      snapshot: { technicianName: 'Sipho', from: B.from, to: B.to, comment: '', entries: [] },
+    });
+    const submission = (id: string, periodId: string) => ({
+      id, userId: tech, from: B.from, to: B.to, financeMonth: '2028-01', timesheetRequired: true, timesheetPeriodId: periodId,
+      attendance: { technicianName: 'Sipho', from: B.from, to: B.to, days: [] },
+      fileNames: { timesheet: 'Sipho TS.pdf', attendance: 'Sipho Att.pdf' }, documents: [],
+      submittedAt: at, submittedBy: tech, supersededAt: null, supersededBy: null, supersededBySubmission: null,
+    });
+    await attendance.submitPeriod(period(B.replacedPeriod));
+    await payroll.createPayrollSubmission(submission(B.replacedSubmission, B.replacedPeriod));
+    // The complete replacement, same dates: the first kept beside it (one CURRENT row per person and dates).
+    await attendance.supersedeOverlappingPeriods({ userId: tech, from: B.from, to: B.to, exceptId: null, at, by: tech });
+    expect(await attendance.submitPeriod(period(B.currentPeriod))).not.toBeNull();
+    await payroll.replacePayrollSubmissions({ userId: tech, ids: [B.replacedSubmission], at, by: tech, bySubmission: B.currentSubmission });
+    expect(await payroll.createPayrollSubmission(submission(B.currentSubmission, B.currentPeriod))).not.toBeNull();
+    await payroll.saveDocumentName({ userId: tech, kind: 'timesheet', fileName: 'Sipho Ünïcode.pdf', updatedBy: tech, updatedAt: at });
+    await attendance.saveLineDraft({
+      id: B.draftLine, userId: tech, date: '2028-02-03', updatedBy: tech, updatedAt: at,
+      typed: { pick: '', customerName: '', overtime: 'abc', double: '0', callout: '0', internalKm: '0', customerKm: '0' },
+    });
+    const periods = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods where period_from = ${B.from} and period_to = ${B.to}`);
+    expect(periods[0]?.n).toBe('2');
   });
 });
