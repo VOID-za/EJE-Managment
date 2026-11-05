@@ -775,7 +775,8 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
     await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
     await row.getByTestId('timesheet-overtime').fill('1');
     await sheetSaved();
-    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) fail('Export CSV is on the Timesheets page');
+    // Their OWN sheet has no Export CSV; the office's list of everybody's submissions keeps its per-submission export.
+    if ((await page.getByTestId('timesheet-sheet').getByRole('button', { name: 'Export CSV' }).count()) !== 0) fail('Export CSV is on their own timesheet');
   });
 }
 await check('Timesheets: a technician’s own sheet has no Export CSV, and the server refuses the export (TS-CSV-OFF-1)', async () => {

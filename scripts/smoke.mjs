@@ -4668,7 +4668,8 @@ await step('a technician submits last month’s payday timesheet and attendance;
   await page.getByTestId('finance-recipient').getByText('finance@eje-demo.co.za').waitFor({ timeout: 5000 });
   const siphoRow = page.getByTestId('finance-row').filter({ hasText: 'Sipho' });
   if ((await siphoRow.getAttribute('data-status')) !== 'ready') throw new Error(`Sipho's month is ${await siphoRow.getAttribute('data-status')}`);
-  if (!/Timesheet submitted:/u.test(await siphoRow.innerText())) throw new Error(`Sipho's row does not name the payday timesheet: ${await siphoRow.innerText()}`);
+  // PAYROLL-ONE-1: the row names the period submitted and its type, with its stored PDFs.
+  if (!/Timesheet and attendance/u.test(await siphoRow.innerText())) throw new Error(`Sipho's row does not name the period submitted: ${(await siphoRow.innerText()).replace(/s+/gu, ' ')}`);
   await siphoRow.getByTestId('finance-select').check();
   await page.getByTestId('finance-prepare').click();
   const item = page.locator('[data-testid="finance-package-item"][data-status="prepared"]');

@@ -5,7 +5,7 @@ import { WORKSHOP_LABEL, type TimesheetLineTyped } from '@/domain';
 import { Badge, Button, SelectField, TextField } from '@/components/ui';
 import { formatCurrency } from '@/lib/format';
 import { formatPeriod } from '@/lib/timesheet-dates';
-import { WORKSHOP_PICK, timesheetLineProblems, type TimesheetLineField } from '@/lib/timesheet-line';
+import { WORKSHOP_PICK, sameTypedLine, timesheetLineProblems, type TimesheetLineField } from '@/lib/timesheet-line';
 import type { TimesheetAutosaver } from '@/lib/timesheet-autosave';
 import type { WorkingTimesheetLine } from '@/application/timesheet-lines';
 
@@ -72,8 +72,9 @@ export const TimesheetLineEditor = ({
     const saved = saver?.revisionOf(line.id) ?? null;
     if (saved !== null && saved !== line.revision) return;
     shownRevision.current = line.revision;
+    // The same values as typed (450 and 450.00): what the person typed stays as they typed it.
+    if ((line.date ?? '') === latest.current.date && sameTypedLine(line.typed, latest.current.typed)) return;
     latest.current = { typed: line.typed, date: line.date ?? '' };
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the server's newer line arrived; nothing typed here is waiting.
     setTyped(line.typed);
     setDate(line.date ?? '');
   }, [line.revision, line.typed, line.date, pending, savedRevision, saver, line.id]);
