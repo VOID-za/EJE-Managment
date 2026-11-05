@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button, ButtonLink, Card, ConfirmDialog, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
+import { Badge, Button, Card, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
@@ -11,10 +11,7 @@ import { payroll } from '@/api/endpoints';
 import type { AttendanceDocument } from '@/application/attendance-document';
 import type { TimesheetDocument } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
-import { useOperation } from '@/hooks/useOperation';
 import { formatDateTime } from '@/lib/format';
-import { formatDayAndDate } from '@/lib/timesheet-dates';
-import { monthBounds } from '@/lib/payroll-files';
 
 type Kind = 'timesheet' | 'attendance';
 
@@ -44,19 +41,12 @@ export const MonthlyFormsCard = ({
   userId,
   month,
   focus,
-  onSubmitted,
 }: {
   readonly userId: string;
   readonly month: string;
   readonly focus?: 'attendance';
-  /** Told after a successful submission (My Monthly Forms refreshes its history). */
-  readonly onSubmitted?: () => void;
 }) => {
-  const operation = useOperation();
   const [previewing, setPreviewing] = useState<{ kind: Kind; print: boolean } | null>(null);
-  const [confirm, setConfirm] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
   const forms = useQuery(`payroll:forms:${userId}:${month}`, () => payroll.forms(userId, month));
   const timesheetRequired = forms.data?.timesheetRequired === true;
   // Asked only once the month is known to have a timesheet (TS-ROLE-1).
@@ -69,24 +59,6 @@ export const MonthlyFormsCard = ({
   if (forms.loading || forms.data === null || forms.data === undefined) return <LoadingPanel rows={3} label="Loading the monthly forms" />;
   const state = forms.data;
   const unrecorded = state.attendance.unrecordedWeekdays;
-
-  const submit = async () => {
-    setConfirm(false);
-    const ok = await operation.run(async () => {
-      await payroll.submit(userId, month, unrecorded.length > 0 && acknowledged);
-    });
-    if (ok) {
-      setDone(
-        state.timesheetRequired
-          ? `${state.monthLabel} submitted to the office: ${state.fileNames.timesheet} and ${state.fileNames.attendance}.`
-          : `${state.monthLabel} submitted to the office: ${state.fileNames.attendance}.`,
-      );
-      forms.refetch();
-      timesheet.refetch();
-      attendance.refetch();
-      onSubmitted?.();
-    }
-  };
 
   const documentCard = (kind: Kind) => {
     const fileName = kind === 'timesheet' ? state.fileNames.timesheet : state.fileNames.attendance;
@@ -164,90 +136,11 @@ export const MonthlyFormsCard = ({
         </ul>
       )}
 
-      {/*
-        EDIT YOUR OWN FORMS FROM HERE (TST-MMF-1, the tester, 31 October 2026):
-        every role's own month opens its own timesheet and attendance for
-        editing. Only the OWNER is offered these — the office reading somebody
-        else's card is not, and the server refuses their writes regardless.
-      */}
-      {/* RESUBMIT-1 (the tester, 2 November 2026): a submitted month stays editable and can be
-          submitted again; the new submission replaces the one the office has. */}
-      {state.owner && (
-        <div className="mt-3 flex flex-wrap gap-2" data-testid="monthly-forms-edit">
-          {state.timesheetRequired && (
-            <ButtonLink
-              href={`/timesheets?from=${monthBounds(month).from}&to=${monthBounds(month).to}`}
-              size="sm"
-              variant="secondary"
-              data-testid="monthly-forms-edit-timesheet"
-            >
-              Edit my timesheet for {state.monthLabel}
-            </ButtonLink>
-          )}
-          <ButtonLink href={`/attendance?from=${monthBounds(month).from}&to=${monthBounds(month).to}`} size="sm" variant="secondary" data-testid="monthly-forms-edit-attendance">
-            Edit my attendance for {state.monthLabel}
-          </ButtonLink>
-        </div>
-      )}
-
-      {state.owner && (
-        <div className="mt-3 space-y-2">
-          {unrecorded.length > 0 && state.canSubmit && (
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 py-1 text-sm text-steel-700">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-                className="mt-0.5 size-4.5 rounded border-steel-300 text-eje-600"
-                data-testid="monthly-forms-acknowledge"
-              />
-              No attendance is recorded for {unrecorded.length} weekday{unrecorded.length === 1 ? '' : 's'}. I confirm the attendance is right as it is.
-            </label>
-          )}
-          {unrecorded.length > 0 && state.canSubmit && (
-            // Outside the label, so opening the list never ticks the confirmation.
-            <details className="ml-6.5 text-xs text-steel-500" data-testid="monthly-forms-unrecorded">
-              <summary className="cursor-pointer">Which days</summary>
-              {unrecorded.map(formatDayAndDate).join(', ')}
-            </details>
-          )}
-          <Button
-            disabled={!state.canSubmit || (unrecorded.length > 0 && !acknowledged)}
-            loading={operation.running}
-            onClick={() => setConfirm(true)}
-            data-testid="monthly-forms-submit"
-          >
-            {state.submission !== null
-              ? `Submit ${state.monthLabel} again — replaces the submission the office has`
-              : focus === 'attendance' ? `Send ${state.monthLabel} to the office` : `Submit ${state.monthLabel} to the office`}
-          </Button>
-          {focus === 'attendance' && state.timesheetRequired && (
-            <p className="text-xs text-steel-500" data-testid="monthly-forms-together">
-              Your timesheet for {state.monthLabel} ({state.fileNames.timesheet}) goes with it: the office receives the
-              month&apos;s attendance and timesheet together, once.
-            </p>
-          )}
-        </div>
-      )}
-      {done !== null && <p role="status" className="mt-2 text-sm text-verdant-700" data-testid="monthly-forms-done">{done}</p>}
-      {operation.error !== null && <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid="monthly-forms-error">{operation.error}</p>}
-
-      <ConfirmDialog
-        open={confirm}
-        title={state.submission !== null ? `Submit ${state.monthLabel} again?` : `Submit ${state.monthLabel} to the office?`}
-        message={
-          (state.timesheetRequired
-            ? `Your timesheet (${state.fileNames.timesheet}) and attendance (${state.fileNames.attendance}) go together.`
-            : `Your attendance (${state.fileNames.attendance}) goes to the office.`) +
-          (state.submission !== null
-            ? ' This replaces the submission the office has now; the earlier one is not kept.'
-            : ' You can still change them afterwards and submit again; the new submission replaces this one.')
-        }
-        confirmLabel={state.timesheetRequired ? 'Submit both' : 'Submit attendance'}
-        busy={operation.running}
-        onConfirm={() => void submit()}
-        onCancel={() => setConfirm(false)}
-      />
+      {/* PAYROLL-ONE-1 (5 November 2026): a calendar month is no longer submitted. This card reads a month
+          submitted before, exactly as it was; the forms are now submitted for the real period on My Monthly Forms. */}
+      <p className="mt-3 text-xs text-steel-500" data-testid="monthly-forms-read-only">
+        Read only. Forms are submitted on My Monthly Forms, for the From–To of the pay period.
+      </p>
 
       <DocumentPreviewDialog
         open={previewing !== null}

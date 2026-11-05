@@ -20,11 +20,14 @@ export const AutosaveStatus = ({
   onRetry,
   conflict,
   onDismissConflict,
+  idleText,
 }: {
   readonly state: AutosaveState;
   readonly onRetry: () => void;
   readonly conflict: string | null;
   readonly onDismissConflict: () => void;
+  /** What the line says before anything is changed (PAYROLL-ONE-1: the Timesheets page has its own words). */
+  readonly idleText?: string;
 }) => {
   const tone =
     state.kind === 'failed' || state.kind === 'offline'
@@ -36,7 +39,7 @@ export const AutosaveStatus = ({
           : 'border-steel-200 bg-surface text-steel-700';
   const text =
     state.kind === 'idle'
-      ? 'Changes save automatically as you choose — there is no Save button to press.'
+      ? idleText ?? 'Changes save automatically as you choose — there is no Save button to press.'
       : state.kind === 'waiting'
         ? `Saving shortly — ${plural(state.count)} waiting…`
         : state.kind === 'saving'

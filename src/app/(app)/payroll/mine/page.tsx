@@ -8,7 +8,7 @@ const MyMonthlyFormsPage = () => (
   <>
     <PageHeader
       title="My Monthly Forms"
-      description="Your timesheet and attendance for the month: preview, print or download each as a one-page PDF, then submit both to the office together. Your earlier months are listed below."
+      description="Your timesheet and attendance for your pay period: preview, print, download, save or rename each PDF, then submit both to the office together. Everything you submitted is listed below."
     />
     <MyMonthlyForms />
   </>

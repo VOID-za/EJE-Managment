@@ -167,6 +167,24 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                     <span className="block text-steel-500" data-testid="payroll-attendance-only">{row.timesheetVersion}</span>
                   )}
                   {row.fileNames.attendance}
+                  {/* PAYROLL-ONE-1: each period submitted for this Finance month, its type, and its PDFs exactly as they went. */}
+                  {row.submissions.map((submission) => (
+                    <span key={submission.id} className="mt-1 block" data-testid="payroll-period-submission" data-from={submission.from} data-to={submission.to}>
+                      <span className="font-medium text-steel-800">{submission.label}</span> · {submission.type}
+                      {submission.replacesEarlier ? ' · replaces an earlier submission' : ''}
+                      <span className="mt-0.5 flex flex-wrap gap-1">
+                        {(submission.timesheetRequired ? (['timesheet', 'attendance'] as const) : (['attendance'] as const)).map((kind) => (
+                          <DownloadFileButton
+                            key={kind}
+                            href={payroll.submittedPdfUrl(submission.id, kind)}
+                            fallbackName={submission.fileNames[kind]}
+                            label={submission.fileNames[kind]}
+                            testId={`payroll-submitted-${kind}`}
+                          />
+                        ))}
+                      </span>
+                    </span>
+                  ))}
                 </td>
                 <td className="py-1.5 text-right">
                   <Button size="sm" variant="ghost" onClick={() => onOpenForms(row.technician.id)}>
