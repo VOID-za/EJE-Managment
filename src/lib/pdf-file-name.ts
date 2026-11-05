@@ -48,7 +48,8 @@ export const normalisePdfFileName = (raw: string): PdfFileNameResult => {
     const other = OTHER_EXTENSION.exec(base);
     if (other !== null) return { ok: false, problem: `This is a PDF: its name ends in .pdf, not .${other[1]}.` };
   }
-  if (RESERVED.test(base)) return { ok: false, problem: `“${base}” is a name devices keep for themselves. Choose another.` };
+  // Windows keeps CON, NUL, COM1 … for itself with ANY extension after them too: "CON.a.pdf" is refused like "CON.pdf".
+  if (RESERVED.test(base) || RESERVED.test((base.split('.')[0] ?? '').trim())) return { ok: false, problem: `“${base}” is a name devices keep for themselves. Choose another.` };
   const name = `${base}${EXTENSION}`;
   if ([...name].length > PDF_FILE_NAME_MAX) {
     return { ok: false, problem: `Keep the name to ${PDF_FILE_NAME_MAX} characters, .pdf included (this one has ${[...name].length}).` };

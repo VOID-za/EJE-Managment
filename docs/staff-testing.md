@@ -714,7 +714,7 @@ Automated at 1440, 768 (touch) and 390 (touch) — `scripts/acceptance-check.mjs
 
 ## V. Timesheets as a piece of paper (4 November 2026)
 
-**The printable sheet for doing these on real devices — phone, rugged tablet, office desktop and printer — is `docs/timesheets-physical-test-sheet.md`.** V1–V13 remain NOT TESTED on physical devices until it is completed.
+**The printable sheet for doing these on real devices — phone, rugged tablet, office desktop and printer — is `docs/timesheets-physical-test-sheet.md`.** It was rewritten for the payroll completion (v1.5.2, 5 November 2026): only the checks a person on a real device can judge remain on it; everything else in V1–V13 and O1–O6 is automated at three screen sizes in CI. None of those rows has been done on a real device yet.
 
 Automated at 1440, 768 (touch) and 390 (touch) — `scripts/payroll-forms-check.mjs (since PAYROLL-ONE-1; it replaced timesheets-paper-check)` (9/9 at each size on the development PC before release; in CI) — and the owner's twenty scenarios in `src/application/timesheets-paper.test.ts`.
 

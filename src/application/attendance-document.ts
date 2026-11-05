@@ -38,12 +38,12 @@ import { WorkflowError } from './errors';
  * submission froze still holds every day of the month exactly as it was.
  *
  * VERSIONS. Before the month is submitted it is the register as it stands.
- * Once submitted, the month as it stood is frozen in the submission; the
- * technician can no longer change those days. The office may still correct its
- * own register (ATTEND-1 — audited), and the VERSION IN FORCE is the register:
- * a submitted month whose register has since been corrected says so on the
- * form ("Corrected by the office after submission", with the days), and the
- * submitted version stays readable exactly as it was sent ('submitted').
+ * Once submitted, the month as it stood is frozen in the submission — and that
+ * is what counts (5 November 2026): Finance is sent the submitted version. The
+ * register can still change afterwards (RESUBMIT-1 left the person's own days
+ * editable); the current version then says so ("Changed in the register after
+ * submission", with the days — not part of the submission), and the office's
+ * month view counts those days.
  */
 
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
@@ -77,7 +77,7 @@ export interface AttendanceDocument {
   };
   readonly submittedAt: IsoDateTime | null;
   readonly submittedByName: string | null;
-  /** "Draft — not submitted", "As submitted", "Corrected by the office after submission (2 days)". */
+  /** "Draft — not submitted", "As submitted", "Changed in the register after submission (2 days: …) — not part of the submission". */
   readonly versionLabel: string;
   readonly inForce: boolean;
   /** Days the office changed after the month was submitted. */
@@ -229,9 +229,9 @@ export const loadAttendanceDocument = async (
       submission === null
         ? 'Draft — not submitted'
         : version === 'submitted'
-          ? changed.length === 0 ? 'As submitted' : `As submitted — superseded: the office corrected ${changed.length} day${changed.length === 1 ? '' : 's'} afterwards`
-          : changed.length === 0 ? 'As submitted' : `Corrected by the office after submission (${changed.length} day${changed.length === 1 ? '' : 's'}: ${changed.map(formatDayAndDate).join(', ')})`,
-    inForce: version === 'current' || changed.length === 0,
+          ? 'As submitted'
+          : changed.length === 0 ? 'As submitted' : `Changed in the register after submission (${changed.length} day${changed.length === 1 ? '' : 's'}: ${changed.map(formatDayAndDate).join(', ')}) — not part of the submission`,
+    inForce: version === 'submitted' || changed.length === 0,
     changedAfterSubmission: changed,
   };
 };

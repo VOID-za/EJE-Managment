@@ -9,7 +9,7 @@ import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { businessToday } from '@/lib/business-time';
 import { formatDate } from '@/lib/format';
-import { isCalendarDay, weekdayOf } from '@/lib/timesheet-dates';
+import { formatDayAndDate, isCalendarDay, weekdayOf } from '@/lib/timesheet-dates';
 import { autosaveKey, type AttendanceAnswer } from '@/lib/attendance-autosave';
 import { AbsenceReasonPicker } from './AbsenceReasonPicker';
 import { AutosaveStatus } from './AutosaveStatus';
@@ -50,6 +50,19 @@ const initialRange = (userId: string, today: string): DateRange => {
   }
   const remembered = readRememberedRange('attendance', userId, ATTENDANCE_RANGE_MAX_DAYS);
   return remembered !== null && remembered.to <= today ? remembered : fallback;
+};
+
+/**
+ * The To a link asked for, when the page opened the link's From but had to stop
+ * at its 92 days (a pay period longer than that). Never for a To cut at today,
+ * and never when the link's From was not used.
+ */
+const linkedToBeyond = (shown: DateRange): string | null => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const asked = params.get('to') ?? '';
+  const cappedAt = daysAfter(shown.from, ATTENDANCE_RANGE_MAX_DAYS - 1);
+  return params.get('from') === shown.from && isCalendarDay(asked) && asked > cappedAt && shown.to === cappedAt ? asked : null;
 };
 
 const answerOf = (record: AttendanceRecord | null): AttendanceAnswer => ({
@@ -123,6 +136,7 @@ export const AttendanceRangeFields = ({
 );
 
 export const MyAttendance = ({ range, usable }: { readonly range: DateRange; readonly usable: boolean }) => {
+  const [beyond] = useState(() => linkedToBeyond(range));
   const currentUser = useCurrentUser();
   const { from, to } = range;
   const query = useQuery(`attendance:mine:${currentUser.id}:${from}:${to}`, () =>
@@ -151,6 +165,12 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
           </p>
         </div>
       </div>
+      {usable && beyond !== null && range.to < beyond && (
+        <p className="mt-3 text-sm text-steel-700" data-testid="my-attendance-range-cut">
+          The link asked for {formatDayAndDate(range.from)} to {formatDayAndDate(beyond)}; this page shows at most {ATTENDANCE_RANGE_MAX_DAYS} days at
+          once, so it opened the first {ATTENDANCE_RANGE_MAX_DAYS}. Move From and To to see the rest.
+        </p>
+      )}
       {!usable && (
         <p role="alert" className="mt-3 text-sm font-medium text-signal-600" data-testid="my-attendance-range-error">
           Choose a From date on or before the To date, at most {ATTENDANCE_RANGE_MAX_DAYS} days apart.

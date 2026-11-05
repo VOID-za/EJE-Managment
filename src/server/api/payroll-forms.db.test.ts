@@ -240,4 +240,24 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
     expect(await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, hers))).toHaveLength(1);
   });
 
+  it('FINANCE (audit F1): the stored manifest records what each person\'s files were made from; a submission made after Prepare makes Send refuse, nothing claimed', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const office = await signIn('christene@example-test.co.za');
+    await db.update(schema.systemSettings).set({ financeEmail: 'payroll@finance.example.test' });
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-03', typed: typed('1', 'F1-A'), expectedRevision: null });
+    expect((await submitForms(tech, IDS.technician, '2026-11-01', '2026-11-10')).status).toBe(200);
+    const prepared = await office.post<{ package: { id: string } }>('/api/payroll/packages', { month: '2026-11', technicianIds: [IDS.technician] });
+    expect(prepared.status, JSON.stringify(prepared.error)).toBe(200);
+    const [stored] = await db.select().from(schema.financePackages).where(eq(schema.financePackages.id, prepared.data.package.id));
+    const manifest = stored!.manifest as { basis?: string }[];
+    expect(manifest.every((attachment) => attachment.basis?.includes('period:') === true)).toBe(true);
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-14', typed: typed('2', 'F1-B'), expectedRevision: null });
+    expect((await submitForms(tech, IDS.technician, '2026-11-11', '2026-11-25')).status).toBe(200);
+    const send = await office.post(`/api/payroll/packages/${prepared.data.package.id}/send`, {});
+    expect(send.status).toBe(422);
+    expect(send.error?.violations[0]?.code).toBe('package_out_of_date');
+    const [after] = await db.select().from(schema.financePackages).where(eq(schema.financePackages.id, prepared.data.package.id));
+    expect(after).toMatchObject({ status: 'prepared', attempts: 0 });
+  });
+
 });

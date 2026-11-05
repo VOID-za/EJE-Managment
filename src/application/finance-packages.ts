@@ -21,11 +21,11 @@ import { renderTimesheetPdf } from '@/services/simulated/timesheet-pdf';
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
-import { assertPayrollMonth, loadAttendanceDocument } from './attendance-document';
+import { assertPayrollMonth, attendanceChanges, loadAttendanceDocument } from './attendance-document';
 import { loadMonthlyForms } from './monthly-submissions';
 import { loadSubmissionDocument, type TimesheetDocument } from './timesheets';
 import { formatPeriod } from '@/lib/timesheet-dates';
-import { loadSubmittedPayrollDocument } from './payroll-forms';
+import { attendancePeriodDays, loadSubmittedPayrollDocument } from './payroll-forms';
 
 /**
  * THE TIMESHEETS OF A MONTH: every CURRENT submission whose To falls in it.
@@ -43,6 +43,30 @@ const paydayTimesheetsEnding = async (context: OperationContext, technicianId: U
   (await context.repos.attendance.listSubmissions(technicianId))
     .filter((period) => (period.supersededAt ?? null) === null && period.to.slice(0, 7) === month)
     .sort((a, b) => a.to.localeCompare(b.to));
+
+/**
+ * WHAT A PERSON'S FILES FOR A MONTH ARE MADE FROM (5 November 2026): each
+ * current timesheet submission ending in the month with the corrections
+ * accepted on it, each current payroll submission, and a current calendar-month
+ * submission. Recorded on a package's attachments when it is prepared; a
+ * package whose basis no longer matches is never sent (a submission made,
+ * replaced or corrected between Prepare and Send would otherwise be missed, or
+ * an old version sent in its place), and a sent package counts as "sent" only
+ * for the basis it carried.
+ */
+const basisOf = async (context: OperationContext, technicianId: UserId, month: string): Promise<string> => {
+  const parts: string[] = [];
+  for (const period of await paydayTimesheetsEnding(context, technicianId, month)) {
+    const accepted = (await context.repos.attendance.listCorrections(period.id)).filter((correction) => correction.status === 'accepted').map((correction) => correction.id).sort();
+    parts.push(`timesheet:${period.id}${accepted.length === 0 ? '' : `+${accepted.join('+')}`}`);
+  }
+  for (const submission of await context.repos.payroll.listPayrollSubmissionsForMonth(month)) {
+    if (submission.userId === technicianId && (submission.supersededAt ?? null) === null) parts.push(`period:${submission.id}`);
+  }
+  const legacy = await context.repos.payroll.findSubmission(technicianId, month);
+  if (legacy !== null && (legacy.supersededAt ?? null) === null) parts.push(`month:${legacy.id}`);
+  return parts.sort().join(' ');
+};
 
 /**
  * THE MONTHLY PAYROLL PACKAGE FOR FINANCE. PAY-05 … PAY-08 (29 October 2026).
@@ -216,6 +240,14 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     const legacy = submitted.get(person.id) ?? null;
     const mine = currentPeriods.filter((submission) => submission.userId === person.id);
     const latest = [legacy?.submittedAt ?? null, ...mine.map((submission) => submission.submittedAt)].filter((at): at is string => at !== null).sort().at(-1) ?? null;
+    const basis = await basisOf(context, person.id, month);
+    const sentBasis = lastSent?.attachments.find((attachment) => attachment.technicianId === person.id)?.basis;
+    // A period's attendance changed in the register after it was submitted: said to the office; Finance gets it as submitted.
+    const periodChanges: string[] = [];
+    for (const period of mine) {
+      const records = await context.repos.attendance.listRecords(period.from, period.to, person.id);
+      periodChanges.push(...attendanceChanges(period.attendance.days, attendancePeriodDays(period.from, period.to, records)));
+    }
     // Either kind of submission makes the month submitted; `submission` keeps its old meaning (the legacy month) below.
     const submission = legacy === null && mine.length === 0 ? null : { submittedAt: latest!, attendance: legacy?.attendance ?? null };
     const periods = await timesheetPeriodsOf(context, person, month);
@@ -233,7 +265,10 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       detail = 'A timesheet correction is waiting for the office’s decision';
     } else if (lastSent !== undefined && lastSent.sentAt !== null) {
       // RESUBMIT-1: a month submitted again after it went to Finance can be sent again too.
-      const corrected = submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
+      // What was sent is known exactly when the package recorded its basis; before v1.5.2, by time.
+      const corrected = sentBasis !== undefined
+        ? sentBasis !== basis
+        : submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
       status = corrected ? 'corrected_after_sent' : 'sent';
       detail = corrected
         ? `Corrected after it was sent to Finance on ${lastSent.sentAt.slice(0, 10)} — can be sent again, marked CORRECTED`
@@ -245,8 +280,9 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     for (const period of mine) {
       detail += `; ${formatPeriod(period.from, period.to)}: ${period.timesheetRequired ? 'timesheet and attendance' : 'attendance only — no timesheet required'}`;
     }
-    if (legacy !== null && forms.attendance.changedAfterSubmission.length > 0) {
-      detail += `; attendance corrected by the office after submission (${forms.attendance.changedAfterSubmission.length} day(s))`;
+    const changedDays = (legacy === null ? 0 : forms.attendance.changedAfterSubmission.length) + periodChanges.length;
+    if (changedDays > 0) {
+      detail += `; ${changedDays} attendance day(s) changed in the register after submission — Finance gets the attendance as submitted`;
     }
     rows.push({
       technician: { id: person.id, name: userFullName(person), documentName: documentNameOf(person), active: person.active, role: person.role },
@@ -262,7 +298,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
         : periods.length === 0
           ? 'No timesheet submitted ending in this month'
           : `Timesheet${periods.length === 1 ? '' : 's'} submitted: ${periods.map((period) => formatPeriod(period.from, period.to)).join('; ')}`,
-      attendanceChangedAfterSubmission: forms.attendance.changedAfterSubmission.length,
+      attendanceChangedAfterSubmission: changedDays,
       unrecordedWeekdays:
         submission === null
           ? forms.attendance.unrecordedWeekdays.length
@@ -333,6 +369,7 @@ export const prepareFinancePackage = async (
       throw refuse(`${row.technician.name} cannot be included.`, `payroll_${row.status}`, row.detail);
     }
     const correctedResend = row.status === 'corrected_after_sent';
+    const basis = await basisOf(context, row.technician.id, month);
     const sheets: { readonly document: TimesheetDocument; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
     const attendances: { readonly rendered: { readonly fileName: string; readonly bytes: Uint8Array; readonly pageCount: number }; readonly versionLabel: string }[] = [];
     // PAYROLL-ONE-1: this person's current payroll submissions of the month, each with the names it went under.
@@ -351,7 +388,8 @@ export const prepareFinancePackage = async (
       // The calendar month's attendance, when it was submitted the way it was before PAYROLL-ONE-1 (and is still current).
       const legacy = await context.repos.payroll.findSubmission(row.technician.id, month);
       if (legacy !== null && (legacy.supersededAt ?? null) === null) {
-        const attendanceDocument = await loadAttendanceDocument(context, technicianId, month);
+        // As SUBMITTED: a submitted record is what goes to Finance, never the register as it is now.
+        const attendanceDocument = await loadAttendanceDocument(context, technicianId, month, 'submitted');
         attendances.push({ rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }), versionLabel: attendanceDocument.versionLabel });
       }
       // A period's attendance: exactly the PDF stored when it was submitted, under its name.
@@ -368,7 +406,7 @@ export const prepareFinancePackage = async (
     }
     for (const [kind, rendered, versionLabel] of [
       // Two payday submissions ending in one month: the second file is numbered, never confused with the first.
-      ...sheets.map((sheet, index) => ['timesheet', index === 0 ? sheet.rendered : { ...sheet.rendered, fileName: sheet.rendered.fileName.replace(/.pdf$/u, ` ${index + 1}.pdf`) }, sheet.document.versionLabel || 'Original submission'] as const),
+      ...sheets.map((sheet, index) => ['timesheet', index === 0 ? sheet.rendered : { ...sheet.rendered, fileName: sheet.rendered.fileName.replace(/\.pdf$/u, ` ${index + 1}.pdf`) }, sheet.document.versionLabel || 'Original submission'] as const),
       ...attendances.map((attendance) => ['attendance', attendance.rendered, attendance.versionLabel] as const),
     ]) {
       // TS-PAPER-6: a timesheet may run to several pages; every other payroll form is one page.
@@ -409,6 +447,7 @@ export const prepareFinancePackage = async (
         pageCount: rendered.pageCount,
         versionLabel,
         correctedResend,
+        basis,
       });
     }
   }
@@ -468,6 +507,17 @@ export const sendFinancePackage = async (context: OperationContext, packageId: s
     throw refuse('This package is being sent now.', 'package_sending', 'Wait for the result; it is not sent twice.');
   }
   if (existing.status === 'discarded') throw refuse('This package was discarded.', 'package_discarded', 'Prepare a new one.');
+  for (const technicianId of new Set(existing.attachments.map((attachment) => attachment.technicianId))) {
+    const recorded = existing.attachments.find((attachment) => attachment.technicianId === technicianId)?.basis;
+    if (recorded !== undefined && recorded !== (await basisOf(context, technicianId, existing.month))) {
+      const name = existing.attachments.find((attachment) => attachment.technicianId === technicianId)?.technicianName ?? 'A technician';
+      throw refuse(
+        `${name}’s forms changed after this package was prepared.`,
+        'package_out_of_date',
+        'A submission was made, replaced or corrected since. Nothing was sent. Discard this package and prepare it again, so Finance gets exactly what is current.',
+      );
+    }
+  }
   const readiness = emailReadiness(context);
   if (!readiness.ready) {
     throw refuse('Email cannot be sent from this deployment.', 'email_not_configured', `${readiness.detail} Nothing was sent; the package stays prepared.`);

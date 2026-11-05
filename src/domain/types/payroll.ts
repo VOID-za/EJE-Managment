@@ -54,10 +54,17 @@ export interface FinancePackageAttachment {
   readonly sha256: string;
   readonly sizeBytes: number;
   readonly pageCount: number;
-  /** "Original submission", "Correction 1, accepted …", "Corrected by the office after submission". */
+  /** "Original submission", "Correction 1, accepted …", "As submitted". */
   readonly versionLabel: string;
   /** True when this technician's month was already in a SENT package and is sent again because it was corrected. */
   readonly correctedResend: boolean;
+  /**
+   * WHAT THIS PERSON'S FILES WERE MADE FROM (5 November 2026): every current
+   * submission of the month and the version in force of each timesheet. Send
+   * refuses when it no longer matches, and the month is "sent" only for what
+   * was in it. Absent on packages prepared before v1.5.2.
+   */
+  readonly basis?: string;
 }
 
 export type FinancePackageStatus = 'prepared' | 'sending' | 'sent' | 'failed' | 'discarded';

@@ -1,7 +1,11 @@
 # Payroll forms — Timesheets, Attendance and My Monthly Forms (PAYROLL-ONE-1)
 
 Decided by the owner on 5 November 2026; released as **v1.5.0** (`cf6fe86`,
-migration 0052) the same day. This replaces the "Submit timesheet" of TS-PAPER
+migration 0052) the same day, the autosave follow-ups as **v1.5.1** (`e9fe38a`,
+migration 0053) — **accepted by the owner on 5 November 2026** — and the
+completion audit's fixes as **v1.5.2** (no migration). Release records:
+`docs/deploy-next-release.md`. The device checks that only a person can do:
+`docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
 earlier proposal (`docs/payroll-single-submission-proposal.md`) is kept as
 history; where the two differ, this document is what the system does.
@@ -72,7 +76,19 @@ history; where the two differ, this document is what the system does.
 ## Attendance — unchanged
 
 Present / Absent with its reason, one row per person per day, each choice
-saving itself (ATT-AUTO-1). No Submit (it never had one after FORMS-PAGES-1).
+saving itself (ATT-AUTO-1); Absent is saved only once its reason is chosen.
+No Submit (it never had one after FORMS-PAGES-1). Each person records their
+own days only (ATT-OWN-1); the office reads them. My Monthly Forms' "Edit my
+attendance" opens exactly the period; the page shows at most 92 days at once,
+and a longer period says it opened the first 92.
+
+A day may still be changed after the period was submitted (RESUBMIT-1 left a
+person's own days editable). The submission stays exactly as submitted — that
+is what Finance gets — and the office's month view counts the days changed in
+the register since ("N attendance day(s) changed in the register after
+submission — Finance gets the attendance as submitted"), so a change is never
+silent. A changed period is put right by submitting it again (a confirmed
+complete replacement).
 
 ## My Monthly Forms — the one submission point
 
@@ -102,6 +118,12 @@ saving itself (ATT-AUTO-1). No Submit (it never had one after FORMS-PAGES-1).
 - The **History** lists every submission — current and replaced, and the
   calendar months submitted before this release — with the stored PDFs, under
   their submitted names, exactly as they went.
+- If the answer to Submit is lost (the connection drops after the server
+  made the submission), the page says the submission may not have gone, and
+  reloads the forms: the history then shows it, and Submit is offered only as
+  an explicit replacement. Pressing Submit again before anything changed
+  repeats the very same request (the same idempotency key), which the server
+  answers with the submission it already made — never a second one.
 - The in-memory demonstration store has no transaction; every check runs
   before the first write there too.
 
@@ -119,6 +141,13 @@ saving itself (ATT-AUTO-1). No Submit (it never had one after FORMS-PAGES-1).
   name. It is metadata only — files are stored under keys the server makes.
 - Submitting freezes the names into the submission and resets the working
   names; renaming afterwards never reaches a submitted document.
+- A submitted timesheet keeps its submitted name **wherever it is opened**:
+  My Monthly Forms' History, Timesheets → the submitted timesheets (the
+  technician's and the office's PDF button, original or corrected version),
+  and the Finance package (v1.5.2; before it, the Timesheets PDF button used
+  the default name).
+- A reserved device name is refused with any extension after it too:
+  "CON.pdf" and "CON.a.pdf" alike (v1.5.2).
 
 ## Finance
 
@@ -130,6 +159,52 @@ saving itself (ATT-AUTO-1). No Submit (it never had one after FORMS-PAGES-1).
   type ("Timesheet and attendance" / "Attendance only — no timesheet
   required"), and links the stored PDFs. One open package per month, as
   before; payment rules and rates are unchanged.
+- **A package is sent only while it is what is current** (v1.5.2). When it is
+  prepared, each person's files record what they were made from — every
+  current submission of the month and the corrections accepted on each
+  timesheet (the attachment's `basis`, in the stored manifest). Send checks it
+  again first: if a submission was made, replaced or corrected since, Send is
+  refused (`package_out_of_date`), nothing is sent and the package stays
+  prepared; the office discards it and prepares it again. Without this, a
+  period submitted between Prepare and Send would never have reached Finance
+  while the month read "Sent", or a replaced submission would have been sent
+  in place of its replacement.
+- A month reads **Sent** only for exactly what the sent package carried; any
+  later submission, replacement or accepted correction makes it **Corrected
+  after it was sent** — selectable again, marked CORRECTED. (Packages sent
+  before v1.5.2 carry no basis; for them it is judged by time, as before.)
+- A calendar month submitted before PAYROLL-ONE-1 is sent **as submitted**
+  (v1.5.2); before, its attendance was drawn from the register as it stood,
+  labelled as an office correction.
+- No day goes to Finance twice: current submissions never share a day (the
+  database refuses it), each ends in exactly one Finance month, a submission
+  already sent to Finance cannot be replaced, and a package that is no longer
+  current is never sent.
+
+## Who may do what
+
+| | Technician / Apprentice | Senior Tech (`master`) | Office (`coordinator`) |
+|---|---|---|---|
+| Own timesheet lines and its comment | write | write | — (completes no timesheet, TS-ROLE-1) |
+| Own attendance | write | write | write |
+| Rename and Submit on My Monthly Forms | own: both forms | own: both forms | own: attendance only |
+| Ask for a correction of a submitted timesheet | own | own | — |
+| Accept or reject a correction | — | someone else's | yes |
+| Another person's timesheet, attendance and forms | — | **read only** | **read only** |
+| Monthly payroll and the Finance package (prepare, send, discard) | — | yes | yes |
+
+No role writes another person's timesheet or attendance: v1.5.2 closed the
+one gap, the day comment, which the office could write. A technician never
+reads another's forms (refused by the server). Every route checks it on the server; the screen only hides what is refused.
+
+## Known limitations
+
+- Real Finance email needs EJE's Microsoft 365 credentials (INT-EMAIL, #79);
+  production email is `refuse`, so Send is refused there and the package
+  stays prepared.
+- The physical-device checks in `docs/timesheets-physical-test-sheet.md` are
+  for a person with the real tablet, phone and printer; everything else is
+  automated.
 
 ## Database (migration 0052, additive)
 
@@ -146,7 +221,11 @@ No existing row is updated or deleted by the migration.
 
 ## Recovery
 
-- **Code rollback to v1.4.0** works against 0052 (proved by
+- **Code rollback from v1.5.2 to v1.5.1** (`e9fe38a`) needs nothing of the
+  database (v1.5.2 has no migration; the `basis` it adds to a package's
+  manifest is ignored by v1.5.1). **From v1.5.1 to v1.5.0** (`cf6fe86`): the
+  database stays at 0053, which v1.5.0 never reads (CI rollback probe).
+- *v1.5.0's own note:* **Code rollback to v1.4.0** works against 0052 (proved by
   `scripts/release/rollback-probe.db.test.ts` in CI) with one limitation: the
   old Timesheets page's "Submit timesheet" fails without writing anything (its
   ON CONFLICT names the replaced full unique key). Payroll submissions made by

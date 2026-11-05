@@ -76,7 +76,7 @@ export const MonthlyFormsCard = ({
         {kind === 'attendance' && (
           <p className="mt-1 text-xs text-steel-600">
             {unrecorded.length > 0 ? `${unrecorded.length} weekday${unrecorded.length === 1 ? '' : 's'} not recorded` : 'Every weekday recorded'}
-            {state.attendance.changedAfterSubmission.length > 0 ? ` · corrected by the office after submission (${state.attendance.changedAfterSubmission.length})` : ''}
+            {state.attendance.changedAfterSubmission.length > 0 ? ` · ${state.attendance.changedAfterSubmission.length} day(s) changed in the register after submission — the submission stays as submitted` : ''}
           </p>
         )}
         <div className="mt-2 flex flex-wrap gap-2">

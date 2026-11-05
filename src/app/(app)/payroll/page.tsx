@@ -41,7 +41,7 @@ const PayrollPage = () => {
       <>
         <PageHeader
           title="My Monthly Forms"
-          description="Your timesheet and attendance for the month: preview, print or download each as a one-page PDF, then submit both to the office together."
+          description="Your timesheet and attendance for the pay period you choose (From–To): preview, print, download or rename each PDF, then submit both to the office together."
         />
         <MyMonthlyForms />
       </>

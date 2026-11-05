@@ -12,7 +12,7 @@ import {
  * Strings, exactly as the technician typed them, so nothing they typed is
  * rewritten under their fingers. Kept out of the page so the form that holds
  * one can live in its own component: typing then re-renders the form alone,
- * not the month of lines around it (see `TimesheetLineForm`).
+ * not the month of lines around it.
  */
 export interface TimesheetDraft {
   readonly entryId?: string;

@@ -8,6 +8,7 @@ import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { AttendanceDocumentView } from '@/components/payroll/AttendanceDocumentView';
 import { payroll } from '@/api/endpoints';
+import { ApiRequestError } from '@/api/client';
 import type { AttendanceDocument } from '@/application/attendance-document';
 import type { PayrollFormsState, PayrollSubmissionView } from '@/application/payroll-forms';
 import type { TimesheetDocument } from '@/application/timesheets';
@@ -124,7 +125,14 @@ export const PayrollFormsPanel = ({
   const [noLines, setNoLines] = useState(false);
   const [replace, setReplace] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  const key = useRef<string | null>(null);
+  /*
+   * One idempotency key per submission ATTEMPTED: kept while no answer came
+   * back (a lost connection), so pressing Submit again replays the same
+   * request and the server answers with the submission it already made — never
+   * "already submitted". A different request (other dates, other choices) gets
+   * a new key.
+   */
+  const key = useRef<{ readonly value: string; readonly request: string } | null>(null);
   const state: PayrollFormsState | null = forms.data ?? null;
   const document = useQuery(`payroll:period-doc:${userId}:${from}:${to}:${previewing?.kind ?? 'none'}:${state?.revision ?? ''}`, () =>
     previewing === null ? Promise.resolve(null) : payroll.periodDocument<TimesheetDocument | AttendanceDocument>(userId, previewing.kind, from, to),
@@ -152,23 +160,28 @@ export const PayrollFormsPanel = ({
     (!state.needs.confirmReplace || replace);
 
   const submit = async () => {
-    key.current ??= newKey();
-    const result = await operation.runFor(() =>
-      payroll.submitPeriod(
-        userId,
-        {
-          from,
-          to,
-          revision: state.revision,
-          confirmUnrecorded: state.needs.confirmUnrecorded && acknowledged,
-          confirmNoLines: state.needs.confirmNoLines && noLines,
-          confirmReplace: state.needs.confirmReplace && replace,
-        },
-        key.current!,
-      ),
-    );
+    const body = {
+      from,
+      to,
+      revision: state.revision,
+      confirmUnrecorded: state.needs.confirmUnrecorded && acknowledged,
+      confirmNoLines: state.needs.confirmNoLines && noLines,
+      confirmReplace: state.needs.confirmReplace && replace,
+    };
+    const request = JSON.stringify(body);
+    if (key.current?.request !== request) key.current = { value: newKey(), request };
+    let unanswered = false;
+    const result = await operation.runFor(async () => {
+      try {
+        return await payroll.submitPeriod(userId, body, key.current!.value);
+      } catch (cause) {
+        // No answer the server is known to have given: a lost connection, or a gateway's page in place of the server's reply.
+        unanswered = !(cause instanceof ApiRequestError) || cause.code === 'network' || cause.code === 'internal_error';
+        throw cause;
+      }
+    });
     setConfirming(false);
-    key.current = null;
+    if (!unanswered) key.current = null;
     if (result !== null) {
       setDone(
         `Submitted to the office ${formatDateTime(new Date().toISOString())}: ${state.timesheetRequired ? `${state.fileNames.timesheet} and ` : ''}${state.fileNames.attendance}, for ${state.periodLabel} (Finance month ${state.financeMonthLabel}). They are kept exactly as submitted.`,
@@ -296,7 +309,7 @@ export const PayrollFormsPanel = ({
               I am replacing my earlier submission for these days.
             </label>
           )}
-          <Button disabled={!ready} loading={operation.running} onClick={() => { key.current = newKey(); setConfirming(true); }} data-testid="monthly-forms-submit">
+          <Button disabled={!ready} loading={operation.running} onClick={() => setConfirming(true)} data-testid="monthly-forms-submit">
             {state.timesheetRequired ? 'Submit timesheet and attendance' : 'Submit attendance'}
           </Button>
         </div>

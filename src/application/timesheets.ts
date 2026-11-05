@@ -807,7 +807,8 @@ export const saveTimesheetComment = async (
   text: string,
 ): Promise<TimesheetComment | null> => {
   const id = asUserId(technicianId);
-  assertMayRead(context, id);
+  // The person's own sheet only: the office reads a technician's timesheet, it never writes on it.
+  assertOwner(context, id);
   assertRecordableDate(date, businessToday(new Date(context.services.clock.now())));
   const comment = text.trim();
   if (comment.length > TIMESHEET_COMMENT_LIMIT) {
@@ -1397,7 +1398,10 @@ export const loadSubmissionDocument = async (
   version: 'current' | 'original' | number = 'current',
 ): Promise<TimesheetDocument> => {
   const period = await findSubmission(context, periodId);
-  return loadTimesheetDocument(context, period.userId, period.from, period.to, version, period);
+  const document = await loadTimesheetDocument(context, period.userId, period.from, period.to, version, period);
+  // PAYROLL-ONE-1, decision 6: a timesheet submitted from My Monthly Forms keeps the name it went with, wherever it is opened.
+  const submitted = (await context.repos.payroll.listPayrollSubmissionsFor(period.userId)).find((submission) => submission.timesheetPeriodId === period.id);
+  return submitted === undefined || submitted.fileNames.timesheet === '' ? document : { ...document, fileName: submitted.fileNames.timesheet };
 };
 
 /** One spreadsheet row: a line, or an unrecorded day said as such. */
