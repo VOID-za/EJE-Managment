@@ -2,7 +2,7 @@
 
 For the owner and staff to complete on **real devices** before issue #131 is
 approved. Everything here has passed in automated browsers (Chromium at
-1440×900, 768×1024 touch and 390×844 touch — `scripts/timesheets-paper-check.mjs`,
+1440×900, 768×1024 touch and 390×844 touch — `scripts/payroll-forms-check.mjs (since PAYROLL-ONE-1; it replaced timesheets-paper-check)`,
 `scripts/acceptance-check.mjs`, the smoke suite). **None of it has been done on a
 real phone, the rugged tablet or a real printer.** Mark each row only when it has
 actually been done on the device named.

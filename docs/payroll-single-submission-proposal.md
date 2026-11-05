@@ -1,6 +1,6 @@
 # Timesheets, Attendance and My Monthly Forms as one submission — proposal (4 November 2026)
 
-**Status: NOT IMPLEMENTED. Awaiting the owner's decisions below.** Asked for on
+**Status: SUPERSEDED (5 November 2026).** The owner decided; what the system does is `docs/payroll-forms.md`. Kept as the record of the question. Asked for on
 4 November 2026 (items 4–8 of the repair brief). Nothing in this document has
 changed the system.
 

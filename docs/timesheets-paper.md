@@ -1,5 +1,10 @@
 # Timesheets as a digital piece of paper — before and after (TS-PAPER, 4 November 2026)
 
+> **Superseded in part by PAYROLL-ONE-1 (5 November 2026, `docs/payroll-forms.md`):** lines now save
+> themselves as typed (incomplete ones as server drafts), the Timesheets page has no Submit, and the
+> timesheet is submitted with the attendance for the same From–To on My Monthly Forms. A submission is
+> never rewritten; a complete replacement keeps the original. Corrections (TS-16) are unchanged.
+
 Asked for by the owner on 4 November 2026: "The technician maintains it. The
 technician submits it on payday. EJE records and preserves it."
 
