@@ -35,6 +35,8 @@ export const COMMENT_KEY = '__comment__';
 const sameTyped = (a: TimesheetLineTyped, b: TimesheetLineTyped): boolean =>
   (Object.keys(a) as (keyof TimesheetLineTyped)[]).every((key) => String(a[key]).trim() === String(b[key]).trim());
 export const TIMESHEET_DEBOUNCE_MS = 800;
+/** The possibly-saved sends remembered per line after lost answers. */
+const UNSURE_KEPT = 8;
 
 export type TimesheetChange =
   | {
@@ -46,11 +48,15 @@ export type TimesheetChange =
       readonly base: string | null;
       readonly version: number;
       readonly refused?: string;
-      /** Sent when the connection dropped: it may have been saved, so the revision named may be old. */
-      readonly unsure?: { readonly date: string | null; readonly typed: TimesheetLineTyped };
+      /**
+       * Sent when the connection dropped: each may have been saved, so the revision named may be old.
+       * EVERY such send since the last confirmed save — two lost answers in a row leave the server
+       * holding the first while the second is the latest sent.
+       */
+      readonly unsure?: readonly { readonly date: string | null; readonly typed: TimesheetLineTyped }[];
     }
   | { readonly kind: 'remove'; readonly id: string; readonly version: number; readonly refused?: string }
-  | { readonly kind: 'comment'; readonly id: typeof COMMENT_KEY; readonly comment: string; readonly base: string; readonly version: number; readonly refused?: string; readonly unsure?: string };
+  | { readonly kind: 'comment'; readonly id: typeof COMMENT_KEY; readonly comment: string; readonly base: string; readonly version: number; readonly refused?: string; readonly unsure?: readonly string[] };
 
 /** What a save of a line answered: the revision the next save must name. */
 export interface SavedLine {
@@ -75,7 +81,8 @@ export interface TimesheetAutosaverOptions {
   readonly onChange: () => void;
   /** A run of saves finished with at least one saved: reload what is on screen. */
   readonly onSaved: () => void;
-  readonly onConflict: (id: string, message: string) => void;
+  /** A change refused because the server has a newer one (or the line was removed): the change itself is given, so the person can be told what was not saved. */
+  readonly onConflict: (id: string, message: string, lost: TimesheetChange) => void;
   /**
    * What the server holds now — asked only when a save refused as stale had been sent before
    * on a connection that dropped: if the server holds exactly what was sent then, the save had
@@ -293,8 +300,11 @@ export class TimesheetAutosaver {
           if (failure.kind === 'network') {
             // It may have been saved before the connection dropped: remembered, so a stale refusal can be told from a real one.
             const current = this.pending.get(next.id);
-            if (current?.kind === 'line' && next.kind === 'line') this.pending.set(next.id, { ...current, unsure: { date: next.date, typed: next.typed } });
-            else if (current?.kind === 'comment' && next.kind === 'comment') this.pending.set(next.id, { ...current, unsure: next.comment });
+            if (current?.kind === 'line' && next.kind === 'line') {
+              this.pending.set(next.id, { ...current, unsure: [...(current.unsure ?? []), { date: next.date, typed: next.typed }].slice(-UNSURE_KEPT) });
+            } else if (current?.kind === 'comment' && next.kind === 'comment') {
+              this.pending.set(next.id, { ...current, unsure: [...(current.unsure ?? []), next.comment].slice(-UNSURE_KEPT) });
+            }
             this.write();
             this.goOffline();
             break;
@@ -304,8 +314,8 @@ export class TimesheetAutosaver {
             const ours =
               held !== null &&
               (next.kind === 'line'
-                ? held.typed !== undefined && sameTyped(held.typed, next.unsure.typed) && (held.date ?? null) === next.unsure.date
-                : held.comment === next.unsure);
+                ? held.typed !== undefined && next.unsure.some((sent) => sameTyped(held.typed!, sent.typed) && (held.date ?? null) === sent.date)
+                : next.unsure.some((sent) => held.comment === sent));
             const current = this.pending.get(next.id);
             if (ours && current !== undefined && (current.kind === 'line' || current.kind === 'comment')) {
               // Our own lost save: the newer typing goes on from it.
@@ -317,17 +327,19 @@ export class TimesheetAutosaver {
             }
           }
           if (failure.kind === 'conflict') {
-            // The newer version wins; the screen reloads it and says so.
+            // The newer version wins; the screen reloads it and says so — and what was typed here, which was not saved.
+            const lost = this.pending.get(next.id) ?? next;
             this.pending.delete(next.id);
             this.revisions.delete(next.id);
             if (next.kind === 'comment') this.savedComment = null;
             this.write();
-            this.options.onConflict(next.id, failure.message);
+            this.options.onConflict(next.id, failure.message, lost);
             savedAny = true;
             continue;
           }
           const current = this.pending.get(next.id);
-          if (current !== undefined) this.pending.set(next.id, { ...current, refused: failure.message } as TimesheetChange);
+          // A newer change (more typing, or the line's removal) queued behind it is not what was refused: it is sent as it is.
+          if (current !== undefined && current.version === next.version) this.pending.set(next.id, { ...current, refused: failure.message } as TimesheetChange);
           this.write();
         }
       }
@@ -380,6 +392,10 @@ export class TimesheetAutosaver {
         if (change.kind === 'line') return typeof change.typed === 'object' && change.typed !== null && typeof change.typed.overtime === 'string';
         if (change.kind === 'comment') return typeof change.comment === 'string' && typeof change.base === 'string';
         return change.kind === 'remove';
+      }).map((change) => {
+        // A queue kept by v1.5.0 held ONE possibly-saved send; it is the list's only member now.
+        const unsure = (change as { unsure?: unknown }).unsure;
+        return unsure === undefined || Array.isArray(unsure) ? change : ({ ...change, unsure: [unsure] } as unknown as TimesheetChange);
       });
     } catch {
       return [];

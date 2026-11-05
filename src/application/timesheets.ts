@@ -684,7 +684,11 @@ export const saveTimesheetEntry = async (
   technicianId: string,
   input: TimesheetEntryInput,
   /** PAYROLL-ONE-1: the id a NEW line takes — the one the screen gave it, so a retried save never makes two. */
-  options: { readonly newId?: string } = {},
+  /**
+   * PAYROLL-ONE-1: the id a NEW line takes (the screen's), and the moment to stamp it with — later than the
+   * revision it replaces, so two saves in one millisecond never share a revision.
+   */
+  options: { readonly newId?: string; readonly updatedAt?: string } = {},
 ): Promise<TimesheetEntry> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
@@ -732,7 +736,7 @@ export const saveTimesheetEntry = async (
     internalKm,
     customerKm,
     updatedBy: context.actor.id,
-    updatedAt: context.services.clock.now(),
+    updatedAt: options.updatedAt ?? context.services.clock.now(),
   };
 
   const same = (key: keyof TimesheetEntry): boolean => existing !== null && existing[key] === entry[key];

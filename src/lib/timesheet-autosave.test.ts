@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TimesheetLineTyped } from '@/domain';
 import type { SendFailure } from './attendance-autosave';
-import { COMMENT_KEY, TimesheetAutosaver, type TimesheetAutosaverOptions } from './timesheet-autosave';
+import { COMMENT_KEY, TimesheetAutosaver, type TimesheetAutosaverOptions, type TimesheetChange } from './timesheet-autosave';
 
 /** PAYROLL-ONE-1: the Timesheets page's queue, driven by hand (timers, network, storage). */
 const typed = (overtime: string): TimesheetLineTyped => ({
@@ -158,6 +158,91 @@ describe('TimesheetAutosaver', () => {
     for (let index = 0; index < 20; index += 1) await Promise.resolve();
     expect(removed).toEqual(['NEW']);
     expect(saver.unsavedCount).toBe(0);
+  });
+
+  it('FOLLOW-UP (a): a refused first save does not stall the removal queued behind it — the removal is sent', async () => {
+    let release: () => void = () => undefined;
+    const removed: string[] = [];
+    const timers: { run: () => void }[] = [];
+    const saver = new TimesheetAutosaver({
+      saveLine: () => new Promise((_resolve, reject) => { release = () => reject(new Refused('That day is in a submitted timesheet.')); }),
+      removeLine: async (id) => { removed.push(id); },
+      saveComment: async () => undefined,
+      classify: (cause): SendFailure => ({ kind: 'refused', message: (cause as Error).message }),
+      storageKey: null,
+      setTimer: (run) => { timers.push({ run }); return timers.length; },
+      clearTimer: () => undefined,
+      onChange: () => undefined,
+      onSaved: () => undefined,
+      onConflict: () => undefined,
+    });
+    saver.change({ kind: 'line', id: 'NEW', date: '2026-11-05', typed: typed('1'), base: null }, 0);
+    timers.pop()?.run();
+    await Promise.resolve();
+    saver.change({ kind: 'remove', id: 'NEW' });
+    release();
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    expect(removed).toEqual(['NEW']);
+    expect(saver.state().kind).not.toBe('failed');
+    expect(saver.unsavedCount).toBe(0);
+  });
+
+  it('FOLLOW-UP (c): two lost answers in a row with typing between — the newest typing is sent, not dropped as a conflict', async () => {
+    let server: { revision: string; typed: TimesheetLineTyped } = { revision: 'r0', typed: typed('1') };
+    let drops = 2;
+    const timers: { run: () => void }[] = [];
+    const conflicts: string[] = [];
+    const saver = new TimesheetAutosaver({
+      saveLine: async (input) => {
+        if (input.expectedRevision !== server.revision) throw new Conflict();
+        // The FIRST send is saved; its answer, and the second send itself, are lost.
+        if (drops === 2) server = { revision: 'r1', typed: input.typed };
+        if (drops > 0) {
+          drops -= 1;
+          throw new NetworkDown();
+        }
+        server = { revision: `r-${input.typed.overtime}`, typed: input.typed };
+        return { id: input.id, revision: server.revision };
+      },
+      removeLine: async () => undefined,
+      saveComment: async () => undefined,
+      classify: (cause): SendFailure => (cause instanceof NetworkDown ? { kind: 'network', message: 'offline' } : { kind: 'conflict', message: 'newer' }),
+      current: async () => ({ revision: server.revision, date: '2026-11-03', typed: server.typed }),
+      storageKey: null,
+      setTimer: (run) => { timers.push({ run }); return timers.length; },
+      clearTimer: () => undefined,
+      onChange: () => undefined,
+      onSaved: () => undefined,
+      onConflict: (_id, message) => conflicts.push(message),
+    });
+    const tick = async () => {
+      const timer = timers.pop();
+      timers.length = 0;
+      timer?.run();
+      for (let index = 0; index < 30; index += 1) await Promise.resolve();
+    };
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('2'), base: 'r0' });
+    await tick();
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('3'), base: 'r0' });
+    await tick();
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('4'), base: 'r0' });
+    await tick();
+    expect(conflicts).toEqual([]);
+    expect(server.typed.overtime).toBe('4');
+    expect(saver.unsavedCount).toBe(0);
+  });
+
+  it('a real conflict reports the LATEST typing that was not saved, and a v1.5.0 queue on the device still loads', async () => {
+    const stored = new Map<string, string>([['k', JSON.stringify([{ kind: 'line', id: 'L9', date: '2026-11-03', typed: typed('7'), base: 'r0', version: 3, unsure: { date: '2026-11-03', typed: typed('6') } }])]]);
+    const lost: TimesheetChange[] = [];
+    const { tick } = setup({
+      saveLine: async () => { throw new Conflict(); },
+      current: async () => ({ revision: 'r5', date: '2026-11-03', typed: typed('5') }),
+      onConflict: (_id, _message, change) => lost.push(change),
+    }, stored);
+    await tick();
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toMatchObject({ kind: 'line', typed: { overtime: '7' } });
   });
 
   it('saves the comment with what the screen last showed, so another tab is not overwritten', async () => {

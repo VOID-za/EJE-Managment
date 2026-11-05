@@ -118,4 +118,28 @@ describe('payroll forms over HTTP', () => {
       expect(answer.error?.violations[0]?.code).toBe('submission_moved');
     }
   });
+  it('two devices, one line: save/save racing gives one 200 and one refusal; save/remove never brings a removed line back', async () => {
+    const phone = await signedInAs(DEMO_USERS.technician);
+    const tablet = await signedInAs(DEMO_USERS.technician);
+    for (let round = 0; round < 5; round += 1) {
+      const id = crypto.randomUUID();
+      const date = `${MONTH}-10`;
+      const created = await phone.post<{ line: { revision: string } }>(`/api/timesheets/${SIPHO}/lines`, { id, date, typed: typed('1', `RACE-${round}`), expectedRevision: null });
+      const revision = created.data.line.revision;
+      const answers = await Promise.all([
+        phone.post(`/api/timesheets/${SIPHO}/lines`, { id, date, typed: typed('2', `RACE-${round}`), expectedRevision: revision }),
+        tablet.post(`/api/timesheets/${SIPHO}/lines`, { id, date, typed: typed('3', `RACE-${round}`), expectedRevision: revision }),
+      ]);
+      expect(answers.map((answer) => answer.status).sort(), JSON.stringify(answers.map((answer) => answer.error))).toEqual([200, 422]);
+      const [saved, removed] = await Promise.all([
+        tablet.post(`/api/timesheets/${SIPHO}/lines`, { id, date, typed: typed('9', `RACE-${round}`), expectedRevision: null }),
+        phone.post(`/api/timesheets/${SIPHO}/lines/${id}/remove`, {}),
+      ]);
+      expect(removed.status).toBe(200);
+      expect(saved.status).toBe(422);
+      const lines = await tablet.get<readonly { id: string }[]>(`/api/timesheets/${SIPHO}/lines`);
+      expect(lines.data.some((line) => line.id === id)).toBe(false);
+    }
+  });
+
 });

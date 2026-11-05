@@ -15,6 +15,7 @@ import type {
   TimesheetCorrection,
   TimesheetWorkingComment,
   TimesheetLineDraft,
+  TimesheetLineRemoval,
   PayrollSubmission,
   PayrollDocumentName,
   PayrollDocumentKind,
@@ -1275,6 +1276,9 @@ class DemoAvailabilityRepository implements AvailabilityRepository {
  * database's unique key behaves and how a second row for a day is made
  * impossible here too.
  */
+/** The in-memory line locks, shared by every unit of work in this process. */
+const lineLocks = new Map<string, Promise<void>>();
+
 class DemoAttendanceRepository implements AttendanceRepository {
   constructor(private readonly context: DemoContext) {}
 
@@ -1488,8 +1492,35 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(lineDraft);
   }
 
-  lockLine(_id: string): Promise<void> {
-    // One request at a time in memory: nothing to lock.
+  /**
+   * In memory, two requests interleave at every await, so a line's saves and
+   * removals queue here, one at a time, exactly as PostgreSQL's advisory lock
+   * makes them wait.
+   */
+  async lockLine(id: string): Promise<() => void> {
+    const before = lineLocks.get(id) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const mine = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chained = before.then(() => mine);
+    lineLocks.set(id, chained);
+    await before;
+    return () => {
+      release();
+      if (lineLocks.get(id) === chained) lineLocks.delete(id);
+    };
+  }
+
+  findLineRemoval(id: string): Promise<TimesheetLineRemoval | null> {
+    return Promise.resolve((this.context.read().timesheetLineRemovals ?? []).find((row) => row.id === id) ?? null);
+  }
+
+  recordLineRemoval(removal: TimesheetLineRemoval): Promise<void> {
+    this.context.commit((draft) => {
+      const rows = draft.timesheetLineRemovals ?? [];
+      if (!rows.some((row) => row.id === removal.id)) draft.timesheetLineRemovals = [...rows, removal];
+    });
     return Promise.resolve();
   }
 

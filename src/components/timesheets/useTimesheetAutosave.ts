@@ -5,10 +5,10 @@ import { ApiRequestError } from '@/api/client';
 import { timesheets } from '@/api/endpoints';
 import { useUnsavedWork } from '@/hooks/useUnsavedWork';
 import type { SendFailure } from '@/lib/attendance-autosave';
-import { TimesheetAutosaver } from '@/lib/timesheet-autosave';
+import { TimesheetAutosaver, type TimesheetChange } from '@/lib/timesheet-autosave';
 import { useApp } from '@/providers/AppProvider';
 
-const CONFLICTS = new Set(['timesheet_line_changed', 'timesheet_comment_changed']);
+const CONFLICTS = new Set(['timesheet_line_changed', 'timesheet_comment_changed', 'timesheet_line_removed']);
 
 const classify = (cause: unknown): SendFailure => {
   if (cause instanceof ApiRequestError) {
@@ -20,6 +20,14 @@ const classify = (cause: unknown): SendFailure => {
   }
   return { kind: 'refused', message: cause instanceof Error ? cause.message : 'The change could not be saved.' };
 };
+
+/** What was typed here and not saved, said in the person's own values. */
+const notSaved = (lost: TimesheetChange): string =>
+  lost.kind === 'line'
+    ? `Not saved from this screen: ${lost.date ?? 'no date'}, ${lost.typed.pick === '__workshop__' ? 'Workshop' : lost.typed.customerName.trim() || 'no customer'}, OT ${lost.typed.overtime}, D/T ${lost.typed.double}, call-out R${lost.typed.callout}, Int Km ${lost.typed.internalKm}, Cust Km ${lost.typed.customerKm}.`
+    : lost.kind === 'comment'
+      ? `Not saved from this screen: the comment “${lost.comment.slice(0, 200)}”.`
+      : '';
 
 /**
  * ONE PERSON'S AUTOSAVING TIMESHEET (PAYROLL-ONE-1) — see `TimesheetAutosaver`
@@ -52,7 +60,7 @@ export const useTimesheetAutosave = (personId: string | null, onSaved: () => voi
         invalidate();
         onSaved();
       },
-      onConflict: (_id, message) => setConflict(message),
+      onConflict: (_id, message, lost) => setConflict(`${message} ${notSaved(lost)}`),
       current: async (id) => {
         if (id === '__comment__') {
           const sheet = await timesheets.working(personId);

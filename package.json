@@ -55,7 +55,8 @@
     "backup:escrow-check": "tsx src/db/backup/escrow-check.ts",
     "dump:inspect": "tsx src/db/backup/inspect-dump.ts",
     "library:ocr": "tsx src/ops/library-ocr.ts",
-    "payroll-forms-check": "node scripts/payroll-forms-check.mjs"
+    "payroll-forms-check": "node scripts/payroll-forms-check.mjs",
+    "timesheet-two-devices-check": "node scripts/timesheet-two-devices-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",

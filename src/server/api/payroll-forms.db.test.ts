@@ -168,4 +168,76 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
       expect((await lerato.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-05', typed: typed('2'), expectedRevision: null })).status).toBe(403);
     }
   });
+
+  /*
+   * TWO DEVICES, ONE LINE, AT THE SAME MOMENT — through the real routes, each
+   * request its own transaction (PAYROLL-ONE-1 follow-up, migration 0053).
+   */
+  it('save/save racing from one revision on two devices: exactly one confirmed, the other refused; the stored line is the confirmed one; one row', async () => {
+    const phone = await signIn('sipho@example-test.co.za');
+    const tablet = await signIn('sipho@example-test.co.za');
+    for (let round = 0; round < 6; round += 1) {
+      const id = crypto.randomUUID();
+      const created = await phone.post<{ line: { revision: string } }>(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-10', typed: typed('1', `RACE-${round}`), expectedRevision: null });
+      expect(created.status, JSON.stringify(created.error)).toBe(200);
+      const revision = created.data.line.revision;
+      const [a, b] = await Promise.all([
+        phone.post<{ line: { typed: { overtime: string } } }>(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-10', typed: typed('2', `RACE-${round}`), expectedRevision: revision }),
+        tablet.post<{ line: { typed: { overtime: string } } }>(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-10', typed: typed('3', `RACE-${round}`), expectedRevision: revision }),
+      ]);
+      const statuses = [a.status, b.status].sort();
+      expect(statuses, JSON.stringify([a.error, b.error])).toEqual([200, 422]);
+      const loser = a.status === 422 ? a : b;
+      const winner = a.status === 200 ? a : b;
+      expect(loser.error?.violations[0]?.code).toBe('timesheet_line_changed');
+      const rows = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
+      expect(rows).toHaveLength(1);
+      expect(Number(rows[0]!.overtimeHours)).toBe(Number(winner.data.line.typed.overtime));
+      // Both devices, refreshed, read the same confirmed line.
+      const [onPhone, onTablet] = await Promise.all([phone, tablet].map((device) => device.get<readonly { id: string; typed: { overtime: string } }[]>(`/api/timesheets/${IDS.technician}/lines`)));
+      expect(onPhone!.data.find((line) => line.id === id)?.typed.overtime).toBe(winner.data.line.typed.overtime);
+      expect(onTablet!.data.find((line) => line.id === id)?.typed.overtime).toBe(winner.data.line.typed.overtime);
+    }
+  });
+
+  it('save/remove racing on two devices: a confirmed removal is never reversed; a later save is refused explicitly', async () => {
+    const phone = await signIn('sipho@example-test.co.za');
+    const tablet = await signIn('sipho@example-test.co.za');
+    for (let round = 0; round < 6; round += 1) {
+      const id = crypto.randomUUID();
+      const created = await phone.post<{ line: { revision: string } }>(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-11', typed: typed('1', `GONE-${round}`), expectedRevision: null });
+      const revision = created.data.line.revision;
+      const [saved, removed] = await Promise.all([
+        tablet.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-11', typed: typed('7', `GONE-${round}`), expectedRevision: revision }),
+        phone.post<{ removed: boolean }>(`/api/timesheets/${IDS.technician}/lines/${id}/remove`, {}),
+      ]);
+      expect(removed.status, JSON.stringify(removed.error)).toBe(200);
+      // Whichever came first, the line is gone, and a save that lost the race was told so.
+      expect(await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id))).toHaveLength(0);
+      expect(await db.select().from(schema.timesheetLineDrafts).where(eq(schema.timesheetLineDrafts.id, id))).toHaveLength(0);
+      expect(await db.select().from(schema.timesheetLineRemovals).where(eq(schema.timesheetLineRemovals.id, id))).toHaveLength(1);
+      if (saved.status !== 200) expect(saved.error?.violations[0]?.code).toMatch(/^timesheet_line_(removed|changed)$/u);
+      // A retry from the page left behind (keepalive), or the other device again: still refused, still removed.
+      const late = await tablet.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-11', typed: typed('8', `GONE-${round}`), expectedRevision: null });
+      expect(late.error?.violations[0]?.code).toBe('timesheet_line_removed');
+      expect(await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id))).toHaveLength(0);
+    }
+    // The record of a removal is kept as it is.
+    expect(await postgresMessage(db.execute(sql`delete from timesheet_line_removals`))).toContain('kept as it is');
+  });
+
+  it('a removal that arrives BEFORE the line\'s first save still wins; somebody else\'s id is left alone', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const id = crypto.randomUUID();
+    expect((await tech.post<{ removed: boolean }>(`/api/timesheets/${IDS.technician}/lines/${id}/remove`, {})).data).toEqual({ removed: false });
+    const first = await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-12', typed: typed('1'), expectedRevision: null });
+    expect(first.error?.violations[0]?.code).toBe('timesheet_line_removed');
+    const lerato = await signIn('lerato@example-test.co.za');
+    const hers = crypto.randomUUID();
+    expect((await lerato.post(`/api/timesheets/${IDS.otherTechnician}/lines`, { id: hers, date: '2026-11-12', typed: typed('1'), expectedRevision: null })).status).toBe(200);
+    expect((await tech.post<{ removed: boolean }>(`/api/timesheets/${IDS.technician}/lines/${hers}/remove`, {})).data).toEqual({ removed: false });
+    expect(await db.select().from(schema.timesheetLineRemovals).where(eq(schema.timesheetLineRemovals.id, hers))).toHaveLength(0);
+    expect(await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, hers))).toHaveLength(1);
+  });
+
 });

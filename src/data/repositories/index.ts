@@ -39,6 +39,7 @@ import type {
   TimesheetCorrection,
   TimesheetWorkingComment,
   TimesheetLineDraft,
+  TimesheetLineRemoval,
   MonthlySubmission,
   PayrollSubmission,
   PayrollDocumentName,
@@ -623,8 +624,16 @@ export interface AttendanceRepository {
   /** Writes the draft with this id (creating it, or replacing what it held). */
   saveLineDraft(draft: TimesheetLineDraft): Promise<TimesheetLineDraft>;
   deleteLineDraft(id: string): Promise<void>;
-  /** Serialises saves of one line for the rest of the unit of work (a transaction lock in PostgreSQL). */
-  lockLine(id: string): Promise<void>;
+  /**
+   * Serialises every save and removal of one line: held until the returned
+   * release is called, or the transaction ends (PostgreSQL: an advisory
+   * transaction lock — the release is then a no-op).
+   */
+  lockLine(id: string): Promise<() => void>;
+  /** PAYROLL-ONE-1 (0053): the removal recorded for this line id, if any. */
+  findLineRemoval(id: string): Promise<TimesheetLineRemoval | null>;
+  /** Records a removal; recording it again changes nothing. */
+  recordLineRemoval(removal: TimesheetLineRemoval): Promise<void>;
   /** RESUBMIT-1. Removes every correction of a period that is being sent again. */
   deleteCorrections(periodId: string): Promise<void>;
   /** TS-16. One period's corrections, oldest (sequence 1) first. */

@@ -732,6 +732,12 @@ const v40ToV41 = (data: Loose): Loose => ({
   timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
 });
 
+/** PAYROLL-ONE-1 follow-up: removed line ids, as PostgreSQL migration 0053. Nothing existing is rewritten. */
+const v43ToV44 = (data: Loose): Loose => ({
+  ...data,
+  timesheetLineRemovals: Array.isArray(data.timesheetLineRemovals) ? data.timesheetLineRemovals : [],
+});
+
 /** PAYROLL-ONE-1 (5 November 2026): new, empty collections, as PostgreSQL migration 0052. Nothing existing is rewritten. */
 const v42ToV43 = (data: Loose): Loose => ({
   ...data,
@@ -802,6 +808,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   40: v40ToV41,
   41: v41ToV42,
   42: v42ToV43,
+  43: v43ToV44,
 };
 
 /**

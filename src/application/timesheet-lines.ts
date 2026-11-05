@@ -57,6 +57,16 @@ import { assertMayRead, assertOwner, saveTimesheetEntry, removeTimesheetEntry, v
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
+/** A timestamp as the database writes it, read as an instant ("2026-11-05 18:30:02.725+00" or ISO). */
+const instantOf = (value: string): number => Date.parse(value.includes('T') ? value : value.replace(' ', 'T').replace(/([+-]\d{2})$/u, '$1:00'));
+
+/** `now`, or one millisecond after `previous` when the clock has not moved past it. */
+export const laterThan = (now: string, previous: string | null): string => {
+  if (previous === null) return now;
+  const before = instantOf(previous);
+  return Number.isFinite(before) && Date.parse(now) <= before ? new Date(before + 1).toISOString() : now;
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /** One line of the open sheet as the screen shows it. */
@@ -193,15 +203,13 @@ const serverProblems = async (
  * SAVE ONE LINE AS TYPED: complete → the stored line; not complete → its
  * draft. Returns the line as the screen should now show it.
  */
-export const saveTimesheetLine = async (
+const saveLineHeld = async (
   context: OperationContext,
   technicianId: string,
   input: TimesheetLineInput,
 ): Promise<WorkingTimesheetLine> => {
   const userId = asUserId(technicianId);
   assertOwner(context, userId);
-  // Two saves of one line (two devices) never both pass the revision check: the second waits, then sees the first.
-  await context.repos.attendance.lockLine(input.id);
   const [entry, draft] = await Promise.all([
     context.repos.attendance.findEntry(input.id),
     context.repos.attendance.findLineDraft(input.id),
@@ -243,7 +251,8 @@ export const saveTimesheetLine = async (
   const browserProblems = timesheetLineProblems(date, input.typed);
   const onlyServer = browserProblems.length === 0 ? await serverProblems(context, userId, input.id, date!, input.typed) : [];
   const problems = [...browserProblems, ...onlyServer];
-  const now = context.services.clock.now();
+  // Strictly later than the revision being replaced: two saves in one millisecond never share a revision.
+  const now = laterThan(context.services.clock.now(), revision);
 
   if (problems.length > 0) {
     const kept: TimesheetLineDraft = {
@@ -293,7 +302,7 @@ export const saveTimesheetLine = async (
       internalKm: parseTyped(input.typed.internalKm),
       customerKm: parseTyped(input.typed.customerKm),
     },
-    { newId: input.id },
+    { newId: input.id, updatedAt: now },
   );
   if (draft !== null) await context.repos.attendance.deleteLineDraft(draft.id);
   return lineOf(stored, null, null);
@@ -303,7 +312,7 @@ export const saveTimesheetLine = async (
  * REMOVE ONE LINE — the stored line and any draft of it. Asked again after it
  * is gone, it changes nothing and says so (a retried tap is not an error).
  */
-export const removeTimesheetLine = async (
+const removeLineHeld = async (
   context: OperationContext,
   technicianId: string,
   lineId: string,
@@ -315,7 +324,13 @@ export const removeTimesheetLine = async (
     context.repos.attendance.findLineDraft(lineId),
   ]);
   const mine = (row: { readonly userId: UserId } | null) => row !== null && row.userId === userId;
-  if (!mine(entry) && !mine(draft)) return { removed: false };
+  const removal = { id: lineId, userId, removedBy: context.actor.id, removedAt: context.services.clock.now() };
+  if (!mine(entry) && !mine(draft)) {
+    // Nothing here (yet): the line's first save may still be on its way. The removal is recorded, so that
+    // save is refused when it arrives — unless the id is somebody else's, which is left exactly alone.
+    if (entry === null && draft === null && UUID.test(lineId)) await context.repos.attendance.recordLineRemoval(removal);
+    return { removed: false };
+  }
   if (mine(entry)) {
     const held = (await currentSubmittedLines(context, userId)).find(({ entries }) => entries.some((line) => line.id === lineId));
     if (held !== undefined && mine(draft)) {
@@ -343,5 +358,62 @@ export const removeTimesheetLine = async (
       });
     }
   }
+  // A removed line stays removed: a save of it still on its way, or from another device, is refused (0053).
+  await context.repos.attendance.recordLineRemoval(removal);
   return { removed: true };
+};
+
+/** A save refused because the line was removed: what the person typed, said back to them. */
+const describeTyped = (date: string | null, typed: TimesheetLineTyped): string =>
+  [
+    date === null ? 'no date' : formatDayAndDate(date),
+    typed.pick === WORKSHOP_PICK ? 'Workshop' : typed.customerName.trim() || 'no customer',
+    `OT ${typed.overtime || '0'}`,
+    `D/T ${typed.double || '0'}`,
+    `call-out R${typed.callout || '0'}`,
+    `Int Km ${typed.internalKm || '0'}`,
+    `Cust Km ${typed.customerKm || '0'}`,
+  ].join(', ');
+
+/**
+ * SAVE ONE LINE AS TYPED — one at a time per line (the line's lock, held for
+ * the request), and never a line its owner removed: a save that arrives after
+ * the removal (still on its way, or from another device) is refused, saying
+ * what was typed, instead of writing the line back.
+ */
+export const saveTimesheetLine = async (
+  context: OperationContext,
+  technicianId: string,
+  input: TimesheetLineInput,
+): Promise<WorkingTimesheetLine> => {
+  assertOwner(context, asUserId(technicianId));
+  const release = await context.repos.attendance.lockLine(input.id);
+  try {
+    const removed = await context.repos.attendance.findLineRemoval(input.id);
+    if (removed !== null && removed.userId === context.actor.id) {
+      throw refuse(
+        'This line was removed, so the change was not saved.',
+        'timesheet_line_removed',
+        `It was removed ${removed.removedAt.slice(0, 16).replace('T', ' ')} (on this or another device). What was typed: ${describeTyped(input.date, input.typed)}. Add it again as a new line if it is still needed.`,
+      );
+    }
+    return await saveLineHeld(context, technicianId, input);
+  } finally {
+    release();
+  }
+};
+
+/** REMOVE ONE LINE — under the same lock as its saves, so a removal and a save never interleave. */
+export const removeTimesheetLine = async (
+  context: OperationContext,
+  technicianId: string,
+  lineId: string,
+): Promise<{ readonly removed: boolean }> => {
+  assertOwner(context, asUserId(technicianId));
+  const release = await context.repos.attendance.lockLine(lineId);
+  try {
+    return await removeLineHeld(context, technicianId, lineId);
+  } finally {
+    release();
+  }
 };

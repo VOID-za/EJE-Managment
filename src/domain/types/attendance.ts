@@ -265,6 +265,14 @@ export interface TimesheetLineTyped {
   readonly customerKm: string;
 }
 
+/** A line its owner removed (migration 0053): a later save of its id is refused. */
+export interface TimesheetLineRemoval {
+  readonly id: string;
+  readonly userId: UserId;
+  readonly removedBy: UserId;
+  readonly removedAt: IsoDateTime;
+}
+
 /**
  * A LINE NOT COMPLETE YET, kept on the server (migration 0052). It has the id
  * of the line it is: a new line's, or the stored entry it is changing — which

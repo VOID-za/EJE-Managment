@@ -494,3 +494,20 @@ export const timesheetLineDrafts = pgTable(
     check('timesheet_line_drafts_typed_bounded', sql`octet_length(${table.typed}::text) <= 4000`),
   ],
 );
+
+/**
+ * A REMOVED TIMESHEET LINE STAYS REMOVED. PAYROLL-ONE-1 follow-up, migration
+ * 0053. The id of every line its owner removed; a later save of that id —
+ * one still on its way, or from another device — is refused. Write-once.
+ */
+export const timesheetLineRemovals = pgTable('timesheet_line_removals', {
+  id: uuid('id').primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'restrict' }),
+  removedBy: uuid('removed_by')
+    .notNull()
+    .references(() => users.id),
+  removedAt: instant('removed_at').notNull(),
+  createdAt: createdAt(),
+});

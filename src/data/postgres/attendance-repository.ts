@@ -14,6 +14,7 @@ import {
   type TimesheetComment,
   type TimesheetWorkingComment,
   type TimesheetLineDraft,
+  type TimesheetLineRemoval,
   type TimesheetLineTyped,
   type UserId,
 } from '@/domain';
@@ -462,8 +463,25 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return toLineDraft(rows[0]);
   }
 
-  async lockLine(id: string): Promise<void> {
+  async lockLine(id: string): Promise<() => void> {
     await this.db.execute(sql`select pg_advisory_xact_lock(hashtext('timesheet_line:' || ${id}))`);
+    // Held until the request's transaction ends.
+    return () => undefined;
+  }
+
+  async findLineRemoval(id: string): Promise<TimesheetLineRemoval | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db.select().from(schema.timesheetLineRemovals).where(eq(schema.timesheetLineRemovals.id, id)).limit(1);
+    const row = rows[0];
+    return row === undefined ? null : { id: row.id, userId: asUserId(row.userId), removedBy: asUserId(row.removedBy), removedAt: row.removedAt };
+  }
+
+  async recordLineRemoval(removal: TimesheetLineRemoval): Promise<void> {
+    if (!isUuid(removal.id)) return;
+    await this.db
+      .insert(schema.timesheetLineRemovals)
+      .values({ id: removal.id, userId: removal.userId, removedBy: removal.removedBy, removedAt: removal.removedAt })
+      .onConflictDoNothing();
   }
 
   async deleteLineDraft(id: string): Promise<void> {

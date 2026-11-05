@@ -29,6 +29,7 @@ import type {
   TimesheetCorrection,
   TimesheetWorkingComment,
   TimesheetLineDraft,
+  TimesheetLineRemoval,
   PayrollSubmission,
   PayrollDocumentName,
   MonthlySubmission,
@@ -149,6 +150,8 @@ export interface DemoDatabase {
   timesheetWorkingComments: TimesheetWorkingComment[];
   /** PAYROLL-ONE-1: timesheet lines typed but not complete yet; payroll forms submitted for a period; working PDF names. */
   timesheetLineDrafts: TimesheetLineDraft[];
+  /** PAYROLL-ONE-1 (0053): removed line ids. */
+  timesheetLineRemovals: TimesheetLineRemoval[];
   payrollSubmissions: PayrollSubmission[];
   payrollDocumentNames: PayrollDocumentName[];
   /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
@@ -280,8 +283,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  *
  * v43 added payroll forms submitted together for a period, working PDF names
  * and timesheet lines kept as drafts (PAYROLL-ONE-1) — empty collections.
+ *
+ * v44 added removed timesheet line ids (PAYROLL-ONE-1 follow-up) — empty.
  */
-export const SCHEMA_VERSION = 43;
+export const SCHEMA_VERSION = 44;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -344,6 +349,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   // Empty, and honestly so: who may stand by and the schedule are the office's to enter.
   timesheetWorkingComments: [],
   timesheetLineDrafts: [],
+  timesheetLineRemovals: [],
   payrollSubmissions: [],
   payrollDocumentNames: [],
   standbyEligibility: [],

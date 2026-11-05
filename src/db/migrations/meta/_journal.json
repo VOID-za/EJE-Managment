@@ -372,6 +372,13 @@
       "when": 1794700000000,
       "tag": "0052_payroll_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0053_timesheet_line_removals",
+      "breakpoints": true
     }
   ]
 }

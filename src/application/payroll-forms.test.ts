@@ -494,3 +494,68 @@ describe('the independent review’s findings (5 November 2026), fixed', () => {
     expect(october.rows.find((row) => row.technician.id === SIPHO)?.status).toBe('corrected_after_sent');
   });
 });
+
+describe('two devices, one line — PAYROLL-ONE-1 follow-ups (5 November 2026)', () => {
+  it('save/save racing from one revision: exactly one is confirmed, the other refused explicitly; nothing is silently overwritten', async () => {
+    for (let round = 0; round < 10; round += 1) {
+      const first = await line('2026-11-10', typed('1', `RACE-${round}`));
+      const results = await Promise.allSettled([
+        line('2026-11-10', typed('2', `RACE-${round}`), first.id, first.revision),
+        line('2026-11-10', typed('3', `RACE-${round}`), first.id, first.revision),
+      ]);
+      const confirmed = results.filter((result) => result.status === 'fulfilled');
+      const refused = results.filter((result) => result.status === 'rejected');
+      // When both arrive with the very same revision in the same millisecond, the second sees the first's
+      // revision (the lock), so it is refused — unless it says exactly what the first saved (never here).
+      expect(confirmed).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({ violations: [{ code: 'timesheet_line_changed' }] });
+      const held = await harness.repos.attendance.findEntry(first.id);
+      expect(held?.overtimeHours).toBe((confirmed[0] as PromiseFulfilledResult<{ entry: { overtimeHours: number } | null }>).value.entry?.overtimeHours);
+      expect((await harness.repos.attendance.listEntries(SIPHO, '2026-11-10', '2026-11-10')).filter((entry) => entry.customerName === `RACE-${round}`)).toHaveLength(1);
+      clock.at = new Date(Date.parse(clock.at) + 1000).toISOString();
+    }
+  });
+
+  it('save/remove racing, in either order: a confirmed removal is never reversed, a save after it is refused saying what was typed', async () => {
+    for (const order of ['remove-first', 'save-first'] as const) {
+      const first = await line('2026-11-11', typed('1', `GONE-${order}`));
+      const save = () => line('2026-11-11', typed('5', `GONE-${order}`), first.id, first.revision);
+      const remove = () => removeTimesheetLine(harness.as(sipho), SIPHO, first.id);
+      const results = order === 'remove-first' ? await Promise.allSettled([remove(), save()]) : await Promise.allSettled([save(), remove()]);
+      expect(await harness.repos.attendance.findEntry(first.id)).toBeNull();
+      expect(await harness.repos.attendance.findLineDraft(first.id)).toBeNull();
+      if (order === 'remove-first') {
+        expect((results[1] as PromiseRejectedResult).reason).toMatchObject({ violations: [{ code: 'timesheet_line_removed' }] });
+        expect((results[1] as PromiseRejectedResult).reason.violations[0].message).toMatch(/What was typed: Wed 11 Nov 2026, GONE-remove-first, OT 5/u);
+      }
+      // Asked again later (a retry, a keepalive from a page left): still refused, still removed.
+      await refusedWith(save(), 'timesheet_line_removed');
+      expect(await harness.repos.attendance.findEntry(first.id)).toBeNull();
+      clock.at = new Date(Date.parse(clock.at) + 1000).toISOString();
+    }
+  });
+
+  it('a removal that arrives BEFORE the line\'s first save (a page left with both in the air) still wins', async () => {
+    const id = crypto.randomUUID();
+    expect(await removeTimesheetLine(harness.as(sipho), SIPHO, id)).toEqual({ removed: false });
+    await refusedWith(line('2026-11-12', typed('1'), id, null), 'timesheet_line_removed');
+    expect(await harness.repos.attendance.findEntry(id)).toBeNull();
+    expect(await harness.repos.attendance.findLineDraft(id)).toBeNull();
+  });
+
+  it('removing somebody else\'s line id records nothing and blocks nothing for them', async () => {
+    const his = await line('2026-11-13', typed('1'));
+    expect(await removeTimesheetLine(harness.as(riaan), riaan.id, his.id)).toEqual({ removed: false });
+    expect(await harness.repos.attendance.findLineRemoval(his.id)).toBeNull();
+    expect((await line('2026-11-13', typed('2'), his.id, his.revision)).complete).toBe(true);
+  });
+
+  it('a retry and a refresh never make a second line', async () => {
+    const id = crypto.randomUUID();
+    await line('2026-11-14', typed('1', 'ONCE'), id, null);
+    await line('2026-11-14', typed('1', 'ONCE'), id, null);
+    const lines = (await loadWorkingLines(harness.as(sipho), SIPHO)).filter((candidate) => candidate.typed.customerName === 'ONCE');
+    expect(lines).toHaveLength(1);
+  });
+});
