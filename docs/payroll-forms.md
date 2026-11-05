@@ -42,6 +42,19 @@ history; where the two differ, this document is what the system does.
   newer line is shown — never overwritten. Repeating what a line already says
   is never a conflict, so a retry after a lost answer succeeds. A new line has
   the id the screen gave it, so a retry never makes two.
+- **Two devices, one line** (v1.5.1, migration 0053): saves and removals of a
+  line take that line's lock, and every save gets a revision strictly later
+  than the one it replaces, so of two saves from one revision exactly one is
+  confirmed and the other is refused. A removed line stays removed: its
+  removal is recorded (`timesheet_line_removals`, write-once), and a save that
+  arrives afterwards — from another device, or still on its way from a page
+  that was left — is refused (`timesheet_line_removed`). Either refusal tells
+  the person exactly what they typed that was not saved ("Not saved from this
+  screen: …"). Answers lost to a bad connection, or to leaving the page
+  mid-save, are remembered on the device as possibly saved, so the next visit
+  recognises its own work instead of reporting it as another device's. A new
+  line still waiting on the device (offline, refused, from before a reload)
+  stays on the screen so it can be fixed or removed.
 - **Incomplete lines** — no date, a number the server cannot store (letters,
   more than two decimals of hours, more than 24 hours in a day, …), a
   customer no longer in the register, or an empty line (no customer, not
