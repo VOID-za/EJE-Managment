@@ -133,6 +133,33 @@ describe('TimesheetAutosaver', () => {
     expect(removed).toEqual(['OLD']);
   });
 
+  it('a line removed while its first save is on its way is removed on the server too — no empty draft is left behind', async () => {
+    let release: () => void = () => undefined;
+    const removed: string[] = [];
+    const timers: { run: () => void }[] = [];
+    const saver = new TimesheetAutosaver({
+      saveLine: (input) => new Promise((resolve) => { release = () => resolve({ id: input.id, revision: 'r1' }); }),
+      removeLine: async (id) => { removed.push(id); },
+      saveComment: async () => undefined,
+      classify: (): SendFailure => ({ kind: 'refused', message: 'x' }),
+      storageKey: null,
+      setTimer: (run) => { timers.push({ run }); return timers.length; },
+      clearTimer: () => undefined,
+      onChange: () => undefined,
+      onSaved: () => undefined,
+      onConflict: () => undefined,
+    });
+    saver.change({ kind: 'line', id: 'NEW', date: '2026-11-05', typed: { ...typed('0'), customerName: '' }, base: null }, 0);
+    timers.pop()?.run();
+    await Promise.resolve();
+    // The first save is in flight; the person removes the line.
+    saver.change({ kind: 'remove', id: 'NEW' });
+    release();
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    expect(removed).toEqual(['NEW']);
+    expect(saver.unsavedCount).toBe(0);
+  });
+
   it('saves the comment with what the screen last showed, so another tab is not overwritten', async () => {
     const { saver, comments, tick } = setup();
     saver.change({ kind: 'comment', comment: 'Bench days', base: '' });

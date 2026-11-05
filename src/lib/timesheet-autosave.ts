@@ -98,6 +98,8 @@ export class TimesheetAutosaver {
   private retryTimer: unknown = null;
   private retries = 0;
   private inFlight = false;
+  /** The change being sent right now: it may reach the server whatever happens to it here. */
+  private sending: string | null = null;
   private again = false;
   private lastSavedAt: string | null = null;
   private offlineUntil: string | null = null;
@@ -122,7 +124,7 @@ export class TimesheetAutosaver {
       next = { kind: 'line', id, date: input.date, typed: input.typed, base, version, ...(unsure === undefined ? {} : { unsure }) };
     } else if (input.kind === 'remove') {
       // A line added here and never saved simply goes: there is nothing on the server to remove.
-      if (previous?.kind === 'line' && previous.base === null && !this.revisions.has(id)) {
+      if (previous?.kind === 'line' && previous.base === null && !this.revisions.has(id) && this.sending !== id && previous.unsure === undefined) {
         this.pending.delete(id);
         this.write();
         this.options.onChange();
@@ -269,6 +271,7 @@ export class TimesheetAutosaver {
         const next = [...this.pending.values()].find((change) => change.refused === undefined);
         if (next === undefined) break;
         try {
+          this.sending = next.id;
           await this.send(next);
           if (this.disposed) return;
           savedAny = true;
@@ -327,6 +330,7 @@ export class TimesheetAutosaver {
       }
     } finally {
       this.inFlight = false;
+      this.sending = null;
     }
     if (savedAny) this.options.onSaved();
     this.options.onChange();
