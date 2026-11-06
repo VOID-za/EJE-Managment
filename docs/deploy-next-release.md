@@ -32,6 +32,30 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## RELEASED — `42e6bd4` = v1.6.0, Timesheets by day; everything submitted on My Monthly Forms (TS-DAY-1, TS-EDIT-1, FORMS-HISTORY-1, TS-NOTICE-1, 6 November 2026)
+
+Released 15:53:50 UTC (switched; healthy 15:53:52) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending none` (code only — the database was not touched) after the read-only check passed. Before it: `835eaaa` v1.5.2, healthy, 54 migrations, kept as the rollback target. Asked for by the owner on 6 November 2026; what the system does: `docs/payroll-forms.md`. **Deployed, not approved.**
+
+- **What changed:**
+  - **Day blocks (TS-DAY-1):** each date on Timesheets is one block — collapsed to its date, lines, customers or sites, OT, D/T, call-outs, km and save state; Edit opens it; Add line is inside the day; each line is edited or removed (confirmed) on its own; Change date moves the whole day.
+  - **The data model, checked first:** OT, D/T, call-out and km are on each customer row of EJE's paper Time Sheet (TS-PAPER-1) and NT is no longer entered (TS-07), so they stay on the line. The day's figures are the sum of its lines, never stored — nothing can be counted twice. No migration; no stored, submitted or historical record changes shape.
+  - **The editing defect (TS-EDIT-1):** a saved line's own Date field carried it to another day on the first keystroke, so the field lost its place mid-edit. The date is now the day's.
+  - **Submitted history (FORMS-HISTORY-1):** moved — not hidden — from Timesheets to My Monthly Forms: your submitted timesheets (open as submitted, original and corrected, PDF, Corrections) and, for the office, every technician's (Export CSV, corrections decided). Timesheets and Attendance hold only working data. Notifications link to My Monthly Forms. Server permissions unchanged.
+  - **The save notice (TS-NOTICE-1):** no longer pinned; it scrolls with the page on Timesheets and Attendance.
+- **Independent review** of the diff found one regression and two gaps, fixed in `42e6bd4` with tests: a line changed on another device is shown as the server has it; a refused change to a line submitted elsewhere is listed with Discard; a dateless draft saves its date when the field is left.
+- **CI** run 42239809742 on `42e6bd4`: **83/83 steps, 3/3 jobs** — unit, lint, types and build; PostgreSQL integration; rollback compatibility (the live `835eaaa` against this release's database); every browser suite at desktop, tablet and phone, including the new `timesheet-days-check` (18), `timesheet-two-devices-check` (8, now with two devices on two lines of one day), `payroll-forms-check`, `payroll-views-check`, `forms-regression`, acceptance and smoke.
+- **Local, on the final code:** unit 3 961 passed; desktop — `timesheet-days-check` 18/18, two-devices 8/8, payroll-forms 14/14, payroll-views 14/14, forms-regression 44/44, acceptance 17/17, tester fixes 12/12, tablet interaction 7/7; phone — `timesheet-days-check` 18/18. The full local smoke run was cut short when the computer suspended its network; its timesheet and payroll steps had passed, and it passed in full in CI.
+- **Fresh backup, proven before the switch:** `/var/backups/eje/eje-eje_production-2026-11-06T15-53-33Z` — aes-256-gcm, key `23dba6772da10057`, MATCH; both artefacts intact and authentic; **RESTORE-TESTED** into a scratch database, then dropped (jobs 112, users 7, customers 10, machines 18, final documents 58, job media 29, signatures 72, audit events 2 261; 204 documents unpacked). The same 17 storage keys that were already missing are recorded in its manifest.
+- **Migrations:** none. Still 54.
+- **Data before and after: identical in every fingerprinted table** (signatures 72, final documents 58, checklists, timesheet periods 15 and entries 37, monthly submissions 7, payroll submissions 0, PDF names 1, drafts 1, line removals 4, attendance 100, corrections 0, comments 2, Finance packages 0, the office-stage jobs, EJE-2011 and EJE-2106, users 7). The checks afterwards added exactly 8 audit rows, all their own demonstration sign-ins (`user_signed_in`).
+- **Live, read only:**
+  - **Payroll check:** 12/12 at desktop and phone — Timesheets: closed day blocks, Add line only inside an opened day, the notice not pinned, no submitted history, no Submit; Attendance: no submitted history, the notice not pinned; My Monthly Forms: your submitted timesheets and every technician's (11 historical submissions, matching the server), history, Finance month; the APIs; nothing written, no page error.
+  - **Application sweep:** 18 pages (EJE-2011 and EJE-2106 included) as the Senior Tech, the Office and a demonstration technician (David — never Mike), at desktop and phone: 108 loads, no server error, no page error, no write.
+  - **Server state:** health ok, v1.6.0, database reachable, email `refuse`, demonstration mode on, 0 errors in the service log, backup timers active.
+- **Not done on production, deliberately:** any line typed, saved or removed, any submission, rename, correction or Finance package. Each is proved in CI and locally. No email or WhatsApp message was sent.
+
+**Rolling back** (`stage-release.ps1 -Rollback`) returns the code to `835eaaa` (v1.5.2). Nothing in the database changes, because v1.6.0 has no migration.
+
 ## RELEASED — `835eaaa` = v1.5.2, the payroll completion (PAYROLL-ONE-1 and every payroll requirement, 5 November 2026)
 
 Released 21:44:27 UTC (switched; healthy 21:44:29) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending none` (a code-only release — the database was not touched) after the read-only check passed. Before it: `e9fe38a` v1.5.1, healthy, 54 migrations, kept as the rollback target. **The owner accepted the payroll implementation as released in v1.5.1 on 5 November 2026**; this release carries the whole-repository payroll completion audit's fixes. What the system does: `docs/payroll-forms.md`.

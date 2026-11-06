@@ -5,7 +5,7 @@ migration 0052) the same day, the autosave follow-ups as **v1.5.1** (`e9fe38a`,
 migration 0053) — **accepted by the owner on 5 November 2026** — and the
 completion audit's fixes as **v1.5.2** (`835eaaa`, no migration), deployed the same day; the
 day-by-day Timesheets page and the move of everything submitted to My Monthly
-Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (no migration). Release records:
+Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migration), deployed 6 November 2026 — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
