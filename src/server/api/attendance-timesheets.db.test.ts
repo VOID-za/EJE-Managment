@@ -586,10 +586,10 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(touched).toEqual([]);
     const [current] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
     expect(current?.supersededAt).toBeNull();
-    // And the database still refuses a second current submission sharing a day.
+    // And the database still refuses a second current submission sharing a day (20–25 Nov).
     expect(await postgresMessage(
       db.insert(schema.timesheetPeriods).values({
-        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: '2026-12-01', periodTo: '2027-01-31',
+        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: '2026-11-20', periodTo: '2027-01-31',
         updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
         submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
       }),
