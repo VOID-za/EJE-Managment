@@ -8,7 +8,7 @@ day-by-day Timesheets page and the move of everything submitted to My Monthly
 Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migration), deployed 6 November 2026 — not yet approved; and
 **the form lifecycle** (FORM-LIFECYCLE-1, the owner, 6 November 2026 — each form
 completed on its own page, both submitted to the office together; Present and
-Absent toggle; the six-column timesheet rows) as **v1.7.0** (migration 0054). Release records:
+Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The

@@ -32,6 +32,67 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## RELEASED — `38b75cd` = v1.7.0, the form lifecycle (FORM-LIFECYCLE-1, MMF-SUBMIT-1, FORM-HISTORY-RO-1, ATT-TOGGLE-1, TS-ROW-1, 6 November 2026)
+
+Released 19:20:54 UTC (switched; healthy 19:20:56) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending 0054_payroll_form_completions`, after the read-only check passed. Before it: `42e6bd4` v1.6.0, healthy, 54 migrations, kept as the rollback target. Asked for by the owner on 6 November 2026. What the system does: `docs/payroll-forms.md`, "The form lifecycle". **Deployed, not approved.**
+
+- **What changed:**
+  - **Each form completed on its own page.** *Completed* opens *Complete this form?* (what it does, the dates, the form name to keep or change, Cancel / OK). OK is checked on the server, freezes the content and its PDF (`payroll_form_completions`, write-once), locks the dates on every write path, and moves the form to My Monthly Forms.
+  - **My Monthly Forms.** No pay-period filter. Timesheet, then Attendance, each with Preview / Print / Download / Save PDF of the completed PDF. **Submit to Office** stays disabled, with the reason in words, until both are completed for the same dates. It then makes one atomic submission of both. History at the bottom, read only.
+  - **Present and Absent toggle.** Pressed again, the day is Not recorded.
+  - **Timesheet lines as rows.** Customer | OT | D/T | Callout | Int Km | Cust Km.
+  - **Submitted forms are read only for ever.** They are never resubmitted, which retires TS-PAPER-7's replacement and RESUBMIT-1's editable submitted days.
+- **Independent review** of the diff found the following:
+  - **High:** Submit to Office would have refused every form on PostgreSQL. jsonb reorders object keys, so the "still exactly as completed" check compared text that never matched. Fixed by comparing by value, with a regression test; proven on PostgreSQL in CI.
+  - **Low:** the two forms could be completed at once for different dates. Fixed: both locks are taken in a fixed order.
+  - **Low:** the working comment raced a completion. Fixed: it takes the lock.
+  - **Not fixed, recorded as limitations in `docs/payroll-forms.md`:** a completed form cannot be withdrawn (the owner's rule; a decision is asked for); a To date in the future locks the coming days; a role change leaves a completed timesheet behind; the submitted PDFs are re-rendered from the frozen content.
+- **CI:**
+  - **Run 42271544400 on `38b75cd`: 86/86 steps, 3/3 jobs.**
+  - **Unit:** 3 995 passed.
+  - **PostgreSQL:** 514 passed, including the write-once guard, three racing completions making one, a save racing a completion, every direct edit of a completed form refused, three racing Submit to Office requests making one, and dates already submitted refused.
+  - **Rollback compatibility:** the live `42e6bd4` against a database at 0054. Prepare 14/14, probe 18/18.
+  - **Browser, at desktop, tablet and phone:**
+
+    | Suite | Result |
+    |---|---|
+    | `payroll-lifecycle-check` (new) | 19/19 |
+    | `timesheet-days-check` | 18/18 |
+    | `timesheet-two-devices-check` | 8/8 |
+    | `payroll-forms-check` | 14/14 |
+    | `payroll-views-check` | 14/14 |
+    | forms-regression | 44/44 |
+    | tester fixes, batch | 12/12 each |
+    | acceptance | 13/13 |
+    | standby | 10/10 |
+    | tablet audit | 567 page views |
+
+    Smoke, the tablet PDF and interaction checks and the update notice also passed.
+  - The run on `a55cee9` had the same browser results. One PostgreSQL test still expected the replacement, which this release retires; it was corrected in `38b75cd`.
+- **Fresh backup, proven before the migration:** `/var/backups/eje/eje-eje_production-2026-11-06T19-20-37Z`.
+  - Encryption: aes-256-gcm, key `23dba6772da10057`, MATCH. Both artefacts intact and authentic.
+  - **RESTORE-TESTED** into a scratch database, then dropped. Contents: jobs 112, users 7, customers 10, machines 18, final documents 58, job media 29, signatures 72, audit events 2 275, 204 documents unpacked.
+  - The same 17 storage keys that were already missing are recorded in its manifest.
+- **Migration 0054 applied** (55 now). It is additive: one new table, empty.
+- **Data before and after: identical in every fingerprinted table:**
+  - signatures 72, final documents 58, checklists;
+  - timesheet periods 15 and entries 39, monthly submissions 7, payroll submissions 0, PDF names 1, drafts 0, line removals 4;
+  - attendance 100, corrections 0, comments 2, Finance packages 0;
+  - the office-stage jobs, EJE-2011 and EJE-2106, users 7.
+
+  Only the migration count moved (54 → 55), and the audit gained exactly 8 rows: the checks' own demonstration sign-ins (`user_signed_in`).
+- **Live, read only:**
+  - **Payroll check: 12/12 at desktop and phone.**
+    - Timesheets: day blocks, Completed present (never pressed), the notice not pinned, no submitted history.
+    - Attendance: Completed present, every unrecorded day "Not recorded".
+    - My Monthly Forms: no period filter; Timesheet then Attendance; Submit to Office disabled with "Both forms must be completed"; history; the 11 historical timesheet submissions readable.
+    - The Completed dialog's read-only check and the APIs answer; nothing written; no page error.
+  - **Application sweep:** 18 pages, as Senior Tech, Office and a demonstration technician (never Mike), at desktop and phone. 108 loads, no server error, no page error, no write.
+  - **Server state:** health ok, v1.7.0, database reachable, email `refuse`, demonstration mode on, 0 errors in the service log, backup timers active, rollback target `/opt/eje/releases/42e6bd4` present.
+- **Not done on production, deliberately:** completing, submitting, toggling or saving anything. Each is proved in CI and locally. No email or WhatsApp message was sent.
+
+**Rolling back** (`stage-release.ps1 -Rollback`) returns the code to `42e6bd4` (v1.6.0). Migration 0054 stays; v1.6.0 never reads its table. The limitations of v1.6.0 against it are recorded in `docs/payroll-forms.md` → Recovery: no lock on a completed form's dates, and submission by From–To.
+
 ## RELEASED — `42e6bd4` = v1.6.0, Timesheets by day; everything submitted on My Monthly Forms (TS-DAY-1, TS-EDIT-1, FORMS-HISTORY-1, TS-NOTICE-1, 6 November 2026)
 
 Released 15:53:50 UTC (switched; healthy 15:53:52) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending none` (code only — the database was not touched) after the read-only check passed. Before it: `835eaaa` v1.5.2, healthy, 54 migrations, kept as the rollback target. Asked for by the owner on 6 November 2026; what the system does: `docs/payroll-forms.md`. **Deployed, not approved.**
