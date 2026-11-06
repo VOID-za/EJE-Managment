@@ -252,7 +252,9 @@ const saveLineHeld = async (
     return lineOf(entry, draft, null, known);
   }
   // FORM-LIFECYCLE-1: a completed or submitted timesheet's dates are locked — kept as a draft or as a line alike.
-  await assertDatesOpen(context, userId, 'timesheet', [date, shownDate, entry?.date]);
+  // v1.7.1: the date a working line leaves may be a sent one (a line left over there, never one IN it — refused above).
+  await assertDatesOpen(context, userId, 'timesheet', [date]);
+  await assertDatesOpen(context, userId, 'timesheet', [shownDate, entry?.date].filter((left) => left !== date), { leaving: true });
   if ((input.expectedRevision ?? null) !== revision) {
     throw refuse(
       'This line was changed somewhere else since you opened it.',

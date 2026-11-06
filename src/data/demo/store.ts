@@ -33,6 +33,7 @@ import type {
   PayrollSubmission,
   PayrollDocumentName,
   PayrollFormCompletion,
+  PayrollCorrectionDraft,
   MonthlySubmission,
   FinancePackage,
   IssuedDeliveryNote,
@@ -157,6 +158,8 @@ export interface DemoDatabase {
   payrollDocumentNames: PayrollDocumentName[];
   /** FORM-LIFECYCLE-1 (0054): forms completed on their own, awaiting or submitted. */
   payrollFormCompletions: PayrollFormCompletion[];
+  /** FORM-WITHDRAW-1 (0055): the correction drafts withdrawals opened. */
+  payrollCorrectionDrafts: PayrollCorrectionDraft[];
   /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
   standbyEligibility: StandbyEligibility[];
   standbyWeeks: StandbyWeek[];
@@ -291,7 +294,7 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  *
  * v45 added completed forms awaiting the joint submission (FORM-LIFECYCLE-1) — empty.
  */
-export const SCHEMA_VERSION = 45;
+export const SCHEMA_VERSION = 46;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -358,6 +361,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   payrollSubmissions: [],
   payrollDocumentNames: [],
   payrollFormCompletions: [],
+  payrollCorrectionDrafts: [],
   standbyEligibility: [],
   standbyWeeks: [],
   standbySwapRequests: [],

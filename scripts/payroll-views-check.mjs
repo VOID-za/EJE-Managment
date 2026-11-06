@@ -29,8 +29,9 @@
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut } from './sign-in.mjs';
+import { assertLocalTarget } from './local-target.mjs';
 
-const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+const BASE = assertLocalTarget(process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210');
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
 const [width, height] = shape.split('x').map(Number);
 const touch = mode === 'touch';

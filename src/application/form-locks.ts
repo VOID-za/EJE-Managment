@@ -1,6 +1,6 @@
 import { monthBounds } from '@/lib/payroll-files';
 import { formatPeriod } from '@/lib/timesheet-dates';
-import { type IsoDate, type PayrollDocumentKind, type UserId } from '@/domain';
+import { formAwaits, type IsoDate, type PayrollDocumentKind, type UserId } from '@/domain';
 import type { OperationContext } from './context';
 import { WorkflowError } from './errors';
 
@@ -26,7 +26,11 @@ export interface LockedRange {
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
-/** Every range the person's `kind` form is locked for: the completed form awaiting submission, and what was submitted. */
+/**
+ * Every range the person's `kind` form is locked for: the completed form awaiting submission, and what was submitted.
+ * Only the PERSON's own forms, current ones: a replaced submission, somebody else's, a withdrawn form (FORM-WITHDRAW-1)
+ * or a date merely in the past never locks anything.
+ */
 export const lockedRanges = async (context: OperationContext, userId: UserId, kind: PayrollDocumentKind): Promise<readonly LockedRange[]> => {
   const [completions, payroll, monthly, periods] = await Promise.all([
     context.repos.payroll.listFormCompletions(userId),
@@ -35,7 +39,7 @@ export const lockedRanges = async (context: OperationContext, userId: UserId, ki
     kind === 'timesheet' ? context.repos.attendance.listSubmissions(userId) : Promise.resolve([]),
   ]);
   return [
-    ...completions.filter((form) => form.kind === kind && form.submissionId === null).map((form) => ({ from: form.from, to: form.to, why: 'completed' as const })),
+    ...completions.filter((form) => form.kind === kind && formAwaits(form)).map((form) => ({ from: form.from, to: form.to, why: 'completed' as const })),
     ...payroll.filter((submission) => (submission.supersededAt ?? null) === null).map((submission) => ({ from: submission.from, to: submission.to, why: 'submitted' as const })),
     ...monthly.filter((submission) => (submission.supersededAt ?? null) === null).map((submission) => ({ ...monthBounds(submission.month), why: 'submitted' as const })),
     ...periods
@@ -62,19 +66,27 @@ export const holdFormLock = async (context: OperationContext, userId: UserId, ki
  * Refuses when any of these dates is locked for the person's `kind` form.
  * `form_completed` while the form awaits submission; `form_submitted` once it
  * went to the office. Null dates (a draft with none yet) are open.
+ *
+ * `leaving` (v1.7.1): the dates a WORKING line is taken away from — removed,
+ * or moved to another date. A submitted form does not hold them: the caller
+ * has already refused a line that is IN a submitted timesheet, so a line only
+ * left over on a sent date (typed there before v1.7.0 retired resubmission)
+ * can be removed or moved off, never changed in place. A completed form still
+ * holds its dates — its lines are in it.
  */
 export const assertDatesOpen = async (
   context: OperationContext,
   userId: UserId,
   kind: PayrollDocumentKind,
   dates: readonly (string | null | undefined)[],
+  options: { readonly leaving?: boolean } = {},
 ): Promise<void> => {
   const wanted = dates.filter((date): date is string => typeof date === 'string' && date !== '');
   if (wanted.length === 0) return;
   await holdFormLock(context, userId, kind);
   const ranges = await lockedRanges(context, userId, kind);
   for (const date of wanted) {
-    const locked = ranges.find((range) => range.from <= date && date <= range.to);
+    const locked = ranges.find((range) => range.from <= date && date <= range.to && !(options.leaving === true && range.why === 'submitted'));
     if (locked === undefined) continue;
     const form = kind === 'timesheet' ? 'timesheet' : 'attendance';
     throw locked.why === 'completed'

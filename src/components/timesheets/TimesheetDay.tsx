@@ -27,12 +27,15 @@ const hours = (value: number): string => value.toFixed(2);
 /**
  * ONE DAY OF THE OPEN TIMESHEET (TS-DAY-1, the owner, 6 November 2026).
  *
- * Collapsed, the day is one row: its date, what its lines add up to (OT, D/T,
- * call-outs, kilometres), how many customers or sites, and whether it is
- * saved. Opened (Edit), it holds each customer or site visited that day as its
- * own line, with **Add line** inside the day for the next one — a second line
- * is on the same date and starts empty, so nothing of the first is copied.
- * A line is changed or removed on its own; the day's other lines stay.
+ * Collapsed, the day is one row: its date, the customers or sites worked at
+ * that day BY NAME, and what its lines add up to (OT, D/T, call-out, Int Km,
+ * Cust Km) — v1.7.1: never "1 line · 1 customer/site" — and whether it is
+ * saved; a day with no line says Not recorded, never zeros. Opened (Edit), it
+ * holds each customer or site visited that day as its own line, and under them
+ * **Done** (closes this day only: nothing is completed, submitted or locked,
+ * and what is typed keeps saving), **Add line** and **Change date**. A second
+ * line is on the same date and starts empty, so nothing of the first is
+ * copied. A line is changed or removed on its own; the day's other lines stay.
  *
  * Nothing is stored for the day itself (`summariseDay`): the figures are the
  * sum of its lines, as on the paper Time Sheet, so they cannot be counted
@@ -46,6 +49,7 @@ export const TimesheetDay = ({
   onAdd,
   onMove,
   locked,
+  lockedBy,
   customers,
   saver,
 }: {
@@ -61,6 +65,8 @@ export const TimesheetDay = ({
    * read only: no line is added, changed, moved or removed (the server refuses it too).
    */
   readonly locked: "completed" | "submitted" | null;
+  /** Which form holds the locked date, in words ("Mon 26 Oct 2026 – Wed 4 Nov 2026, submitted on 4 Nov 2026"). */
+  readonly lockedBy?: string;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly saver: TimesheetAutosaver | null;
 }) => {
@@ -73,8 +79,11 @@ export const TimesheetDay = ({
     `OT ${hours(summary.overtime)}`,
     `D/T ${hours(summary.double)}`,
     `Callout ${formatCurrency(summary.callout)}`,
-    `Km ${summary.internalKm.toFixed(1)} int / ${summary.customerKm.toFixed(1)} cust`,
+    `Int Km ${summary.internalKm.toFixed(1)}`,
+    `Cust Km ${summary.customerKm.toFixed(1)}`,
   ];
+  // The customers by name (every one, in line order); a line with no customer yet is not a name.
+  const names = summary.names.length > 0 ? summary.names.join(", ") : "Customer not entered yet";
 
   return (
     <li
@@ -103,14 +112,16 @@ export const TimesheetDay = ({
           {summary.visits === 0 ? (
             <span className="text-steel-400">
               {/* A locked day's lines are in its form, not here: never "Not recorded" for a day that was recorded. */}
-              {locked === 'completed' ? 'In your completed timesheet' : locked === 'submitted' ? 'In a submitted timesheet' : 'Not recorded'}
+              {locked === 'completed'
+                ? `In your completed timesheet${lockedBy === undefined ? '' : ` (${lockedBy})`}`
+                : locked === 'submitted'
+                  ? `Already in your timesheet ${lockedBy ?? ''} — sent to the office`
+                  : 'Not recorded'}
             </span>
           ) : (
             <>
-              <span className="font-medium text-steel-800">
-                {summary.visits} line{summary.visits === 1 ? "" : "s"} ·{" "}
-                {summary.places} customer{summary.places === 1 ? "" : "s"}/site
-                {summary.places === 1 ? "" : "s"}
+              <span className="font-medium break-words text-steel-800" title={names} data-testid="timesheet-day-customers">
+                {names}
               </span>
               <span className="tabular-nums"> · {figures.join(" · ")}</span>
             </>
@@ -124,7 +135,7 @@ export const TimesheetDay = ({
           )}
           {locked === "submitted" && (
             <Badge tone="outline" size="sm">
-              Submitted
+              Sent to the office
             </Badge>
           )}
           {badge !== null && (
@@ -134,19 +145,16 @@ export const TimesheetDay = ({
               </Badge>
             </span>
           )}
-          <span className="inline-flex items-center gap-1 text-sm font-medium text-eje-700">
-            <Icon
-              name={open ? "close" : summary.visits === 0 ? "plus" : "edit"}
-              className="size-4"
-            />
-            {open
-              ? "Close"
-              : locked !== null
-                ? "View"
-                : summary.visits === 0
-                  ? "Add"
-                  : "Edit"}
-          </span>
+          {/* v1.7.1: an open day is closed with Done under its lines — no Close up here. */}
+          {!open && (
+            <span className="inline-flex items-center gap-1 text-sm font-medium text-eje-700">
+              <Icon
+                name={locked !== null ? "document" : summary.visits === 0 ? "plus" : "edit"}
+                className="size-4"
+              />
+              {locked !== null ? "View" : summary.visits === 0 ? "Add" : "Edit"}
+            </span>
+          )}
         </span>
       </button>
 
@@ -162,8 +170,8 @@ export const TimesheetDay = ({
               data-testid="timesheet-day-locked"
             >
               {locked === "completed"
-                ? "This date is in your completed timesheet. It is locked and waits on My Monthly Forms to be submitted to the office."
-                : "This date is in a timesheet submitted to the office. It is read only; a change is asked for as a correction on My Monthly Forms."}
+                ? `This date is in your completed timesheet${lockedBy === undefined ? '' : ` for ${lockedBy}`}. It is locked and waits on My Monthly Forms to be submitted to the office — or withdrawn there, to correct it.`
+                : `This date is already in your timesheet ${lockedBy ?? ''}, which went to the office. It is read only and is not part of the timesheet you are filling in now; a change to it is asked for as a correction on My Monthly Forms.`}
             </p>
           )}
           {locked === null && lines.length === 0 && (
@@ -173,6 +181,14 @@ export const TimesheetDay = ({
             >
               Not recorded. Add a line for each customer, site or Workshop you
               worked at.
+            </p>
+          )}
+          {locked === "submitted" && lines.length > 0 && (
+            <p className="text-sm font-medium text-amber-eje-800" data-testid="timesheet-day-stray">
+              {lines.length === 1 ? "This line was" : `These ${lines.length} lines were`} typed on this date after the
+              timesheet was sent, so {lines.length === 1 ? "it is" : "they are"} not in it and cannot be sent for this
+              date again. Remove {lines.length === 1 ? "it" : "them"}, or move {lines.length === 1 ? "it" : "them"} to a
+              date of this period with Change date.
             </p>
           )}
           {lines.length > 0 && (
@@ -198,14 +214,24 @@ export const TimesheetDay = ({
                       saver={saver}
                       day={date}
                       position={index + 1}
+                      fixed={locked === "submitted"}
                     />
                   ))}
                 </ul>
               </div>
             </div>
           )}
+          {/* Done · Add line · Change date — Done closes this day only; Completed (the whole timesheet) is at the bottom of the page. */}
+          <div className="flex flex-wrap items-end gap-2" data-testid="timesheet-day-actions">
+            <Button
+              variant="secondary"
+              leadingIcon={<Icon name="check" className="size-4" />}
+              onClick={onToggle}
+              data-testid="timesheet-day-done"
+            >
+              Done
+            </Button>
           {locked === null && (
-            <div className="flex flex-wrap items-end gap-2">
               <Button
                 leadingIcon={<Icon name="plus" className="size-4" />}
                 disabled={saver === null}
@@ -214,7 +240,8 @@ export const TimesheetDay = ({
               >
                 Add line
               </Button>
-              {lines.length > 0 && moving === null && (
+          )}
+              {locked !== "completed" && lines.length > 0 && moving === null && (
                 <Button
                   variant="ghost"
                   leadingIcon={<Icon name="calendar" className="size-4" />}
@@ -224,8 +251,7 @@ export const TimesheetDay = ({
                   Change date
                 </Button>
               )}
-            </div>
-          )}
+          </div>
           {moving !== null && (
             <div
               className="flex flex-wrap items-end gap-2 rounded-[var(--radius-control)] border border-steel-200 bg-surface p-3"

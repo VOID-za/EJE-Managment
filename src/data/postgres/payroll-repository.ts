@@ -10,6 +10,7 @@ import {
   type PayrollDocumentKind,
   type PayrollDocumentName,
   type PayrollFormCompletion,
+  type PayrollCorrectionDraft,
   type PayrollSubmission,
   type PayrollSubmissionDocument,
   type UserId,
@@ -24,6 +25,19 @@ type PackageRow = typeof schema.financePackages.$inferSelect;
 type PayrollRow = typeof schema.payrollSubmissions.$inferSelect;
 type NameRow = typeof schema.payrollDocumentNames.$inferSelect;
 type CompletionRow = typeof schema.payrollFormCompletions.$inferSelect;
+type DraftRow = typeof schema.payrollFormCorrectionDrafts.$inferSelect;
+
+const toDraft = (row: DraftRow): PayrollCorrectionDraft => ({
+  id: row.id,
+  userId: asUserId(row.userId),
+  kind: row.kind as PayrollDocumentKind,
+  from: row.periodFrom,
+  to: row.periodTo,
+  withdrawnId: row.withdrawnId,
+  completedId: row.completedId,
+  openedAt: row.openedAt,
+  openedBy: asUserId(row.openedBy),
+});
 
 /** FORM-LIFECYCLE-1: `content` holds the timesheet ({ comment, entries }) or the attendance days. */
 const toCompletion = (row: CompletionRow): PayrollFormCompletion => {
@@ -41,6 +55,9 @@ const toCompletion = (row: CompletionRow): PayrollFormCompletion => {
     completedAt: row.completedAt,
     completedBy: asUserId(row.completedBy),
     submissionId: row.submissionId,
+    withdrawnAt: row.withdrawnAt,
+    withdrawnBy: row.withdrawnBy === null ? null : asUserId(row.withdrawnBy),
+    correctsId: row.correctsId,
   };
 };
 
@@ -275,10 +292,11 @@ export class PostgresPayrollRepository implements PayrollRepository {
         document: completion.document,
         completedAt: completion.completedAt,
         completedBy: completion.completedBy,
+        correctsId: completion.correctsId ?? null,
       })
       .onConflictDoNothing({
         target: [schema.payrollFormCompletions.userId, schema.payrollFormCompletions.kind],
-        where: isNull(schema.payrollFormCompletions.submissionId),
+        where: and(isNull(schema.payrollFormCompletions.submissionId), isNull(schema.payrollFormCompletions.withdrawnAt)),
       })
       .returning();
     return rows[0] === undefined ? null : toCompletion(rows[0]);
@@ -305,9 +323,60 @@ export class PostgresPayrollRepository implements PayrollRepository {
     const rows = await this.db
       .update(schema.payrollFormCompletions)
       .set({ submissionId })
-      .where(and(inArray(schema.payrollFormCompletions.id, valid), isNull(schema.payrollFormCompletions.submissionId)))
+      .where(
+        and(inArray(schema.payrollFormCompletions.id, valid), isNull(schema.payrollFormCompletions.submissionId), isNull(schema.payrollFormCompletions.withdrawnAt)),
+      )
       .returning({ id: schema.payrollFormCompletions.id });
     return rows.length;
+  }
+
+  async withdrawFormCompletion(id: string, withdrawnAt: string, withdrawnBy: UserId): Promise<PayrollFormCompletion | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db
+      .update(schema.payrollFormCompletions)
+      .set({ withdrawnAt, withdrawnBy })
+      .where(
+        and(eq(schema.payrollFormCompletions.id, id), isNull(schema.payrollFormCompletions.submissionId), isNull(schema.payrollFormCompletions.withdrawnAt)),
+      )
+      .returning();
+    return rows[0] === undefined ? null : toCompletion(rows[0]);
+  }
+
+  async createCorrectionDraft(draft: PayrollCorrectionDraft): Promise<PayrollCorrectionDraft | null> {
+    const rows = await this.db
+      .insert(schema.payrollFormCorrectionDrafts)
+      .values({
+        id: draft.id,
+        userId: draft.userId,
+        kind: draft.kind,
+        periodFrom: draft.from,
+        periodTo: draft.to,
+        withdrawnId: draft.withdrawnId,
+        openedAt: draft.openedAt,
+        openedBy: draft.openedBy,
+      })
+      .onConflictDoNothing()
+      .returning();
+    return rows[0] === undefined ? null : toDraft(rows[0]);
+  }
+
+  async listCorrectionDrafts(userId: UserId): Promise<readonly PayrollCorrectionDraft[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.payrollFormCorrectionDrafts)
+      .where(eq(schema.payrollFormCorrectionDrafts.userId, userId))
+      .orderBy(desc(schema.payrollFormCorrectionDrafts.openedAt));
+    return rows.map(toDraft);
+  }
+
+  async completeCorrectionDraft(draftId: string, completedId: string): Promise<boolean> {
+    if (!isUuid(draftId) || !isUuid(completedId)) return false;
+    const rows = await this.db
+      .update(schema.payrollFormCorrectionDrafts)
+      .set({ completedId })
+      .where(and(eq(schema.payrollFormCorrectionDrafts.id, draftId), isNull(schema.payrollFormCorrectionDrafts.completedId)))
+      .returning({ id: schema.payrollFormCorrectionDrafts.id });
+    return rows.length === 1;
   }
 
   async findPackage(id: string): Promise<FinancePackage | null> {

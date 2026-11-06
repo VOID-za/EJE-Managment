@@ -341,4 +341,95 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
     expect(Number(entry!.overtimeHours)).toBe(1);
     expect(await db.select().from(schema.attendance)).toHaveLength(1);
   });
+// FORM-WITHDRAW-1 (0055): Withdraw and Correct — before Submit to Office only, the original kept as completed.
+  const withdraw = (client: ApiTestClient, completionId: string) => client.post<{ id: string; withdrawnAt: string | null }>(`/api/payroll/forms/${IDS.technician}/withdraw`, { completionId });
+
+  it('0055: withdrawn once, never with a submission; never submitted once withdrawn; a correction corrects a withdrawn form of the same dates', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const done = await completeForm<{ id: string }>(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25');
+    expect(done.status, JSON.stringify(done.error)).toBe(200);
+    const id = done.data.id;
+    const [before] = await db.select().from(schema.payrollFormCompletions).where(eq(schema.payrollFormCompletions.id, id));
+    const answer = await withdraw(tech, id);
+    expect(answer.status, JSON.stringify(answer.error)).toBe(200);
+    const [after] = await db.select().from(schema.payrollFormCompletions).where(eq(schema.payrollFormCompletions.id, id));
+    // Exactly as completed: content, document (the PDF's key and hash), name, dates — only the withdrawal recorded.
+    expect({ ...after, withdrawnAt: null, withdrawnBy: null }).toEqual({ ...before, withdrawnAt: null, withdrawnBy: null });
+    expect(after!.withdrawnAt).not.toBeNull();
+    // The database refuses: withdrawing again, un-withdrawing, submitting it, rewriting it, deleting it.
+    expect(await postgresMessage(db.execute(sql`update payroll_form_completions set withdrawn_at = now() where id = ${id}`))).toContain('already withdrawn');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_completions set withdrawn_at = null, withdrawn_by = null where id = ${id}`))).toContain('already withdrawn');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_completions set content = '{}'::jsonb where id = ${id}`))).toContain('kept exactly as it was completed');
+    expect(await postgresMessage(db.execute(sql`delete from payroll_form_completions where id = ${id}`))).toContain('cannot be deleted');
+    // A correction for other dates is refused; the draft is write-once and never deleted.
+    expect(
+      await postgresMessage(
+        db.insert(schema.payrollFormCompletions).values({
+          id: crypto.randomUUID(), userId: IDS.technician, kind: 'attendance', periodFrom: '2026-11-01', periodTo: '2026-11-20', fileName: 'Other dates.pdf',
+          content: {}, document: {}, completedAt: new Date().toISOString(), completedBy: IDS.technician, correctsId: id,
+        }),
+      ),
+    ).toContain('a correction corrects a withdrawn form');
+    const [draft] = await db.select().from(schema.payrollFormCorrectionDrafts);
+    expect(draft).toMatchObject({ withdrawnId: id, completedId: null, periodFrom: '2026-11-01', periodTo: '2026-11-25' });
+    expect(await postgresMessage(db.execute(sql`delete from payroll_form_correction_drafts where id = ${draft!.id}`))).toContain('cannot be deleted');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_correction_drafts set period_to = '2026-11-20' where id = ${draft!.id}`))).toContain('kept as it was opened');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_correction_drafts set completed_id = ${id} where id = ${draft!.id}`))).toContain('completed by the correction of its own withdrawn form');
+    // The correction, completed again: a new row; the draft records it once.
+    const again = await completeForm<{ id: string; correctsId: string | null }>(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25');
+    expect(again.status, JSON.stringify(again.error)).toBe(200);
+    expect(again.data.correctsId).toBe(id);
+    const [closed] = await db.select().from(schema.payrollFormCorrectionDrafts);
+    expect(closed!.completedId).toBe(again.data.id);
+    expect(await postgresMessage(db.execute(sql`update payroll_form_correction_drafts set completed_id = null where id = ${draft!.id}`))).toContain('only its completion is recorded, once');
+  });
+
+  it('three Withdraw requests racing make ONE withdrawal and one draft; the losers write nothing', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    const done = await completeForm<{ id: string }>(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25');
+    const answers = await Promise.all([1, 2, 3].map(() => withdraw(tech, done.data.id)));
+    expect(answers.filter((answer) => answer.status === 200)).toHaveLength(1);
+    for (const answer of answers.filter((candidate) => candidate.status !== 200)) {
+      expect(answer.error?.violations[0]?.code, JSON.stringify(answer.error)).toBe('form_already_withdrawn');
+    }
+    expect(await db.select().from(schema.payrollFormCorrectionDrafts)).toHaveLength(1);
+    expect((await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.type, 'payroll_form_withdrawn'))).length).toBe(1);
+  });
+
+  it('Withdraw and Submit to Office racing: either the forms went (and nothing is withdrawn) or it was withdrawn (and nothing went)', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    await tech.post('/api/attendance', { userId: IDS.technician, date: '2026-11-05', status: 'present', note: '' });
+    const timesheet = await completeForm<{ id: string }>(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25');
+    expect((await completeForm(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25')).status).toBe(200);
+    const [withdrawn, sent] = await Promise.all([withdraw(tech, timesheet.data.id), tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {})]);
+    const submissions = await db.select().from(schema.payrollSubmissions);
+    const [form] = await db.select().from(schema.payrollFormCompletions).where(eq(schema.payrollFormCompletions.id, timesheet.data.id));
+    expect([withdrawn.status, sent.status].filter((status) => status === 200)).toHaveLength(1);
+    if (sent.status === 200) {
+      expect(submissions).toHaveLength(1);
+      expect(form!.withdrawnAt).toBeNull();
+      expect(withdrawn.error?.violations[0]?.code).toBe('form_already_submitted');
+    } else {
+      expect(submissions).toHaveLength(0);
+      expect(form!.submissionId).toBeNull();
+      expect(sent.error?.violations[0]?.code).toBe('submit_timesheet_missing');
+    }
+  });
+
+  it('a submitted form is never withdrawn; another person cannot withdraw a form; nothing changes', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    const timesheet = await completeForm<{ id: string }>(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25');
+    const office = await signIn('christene@example-test.co.za');
+    const foreign = await office.post<unknown>(`/api/payroll/forms/${IDS.technician}/withdraw`, { completionId: timesheet.data.id });
+    expect(foreign.error?.violations[0]?.code, JSON.stringify(foreign.error)).toBe('not_permitted');
+    expect((await completeForm(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25')).status).toBe(200);
+    expect((await tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {})).status).toBe(200);
+    const refused = await withdraw(tech, timesheet.data.id);
+    expect(refused.error?.violations[0]?.code, JSON.stringify(refused.error)).toBe('form_already_submitted');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_completions set withdrawn_at = now(), withdrawn_by = ${IDS.technician} where id = ${timesheet.data.id}`))).toMatch(/withdrawn_or_submitted|cannot be withdrawn/u);
+    expect(await db.select().from(schema.payrollFormCorrectionDrafts)).toHaveLength(0);
+  });
 });

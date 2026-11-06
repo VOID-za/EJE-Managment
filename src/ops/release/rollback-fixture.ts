@@ -129,6 +129,16 @@ export const ROLLBACK_0051 = {
  * the probe as `BATCH_0052`.
  */
 /** FORM-LIFECYCLE-1 (0054): a completed form awaiting submission, and one already submitted. */
+/** 0055 (FORM-WITHDRAW-1): a completed form withdrawn, its correction draft, and the correction completed again. */
+export const ROLLBACK_0055 = {
+  withdrawn: '00000000-0000-4000-8000-000000000ea1',
+  correction: '00000000-0000-4000-8000-000000000ea2',
+  draft: '00000000-0000-4000-8000-000000000ea3',
+  submission: '00000000-0000-4000-8000-000000000ea4',
+  from: '2028-06-01',
+  to: '2028-06-25',
+} as const;
+
 export const ROLLBACK_0054 = {
   awaiting: '00000000-0000-4000-8000-000000000da1',
   submittedForm: '00000000-0000-4000-8000-000000000da2',

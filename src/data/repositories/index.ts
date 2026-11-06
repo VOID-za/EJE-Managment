@@ -45,6 +45,7 @@ import type {
   PayrollDocumentName,
   PayrollDocumentKind,
   PayrollFormCompletion,
+  PayrollCorrectionDraft,
   FinancePackage,
   FinancePackageStatus,
   IssuedDeliveryNote,
@@ -963,6 +964,17 @@ export interface PayrollRepository {
    * never otherwise changed.
    */
   markFormsSubmitted(ids: readonly string[], submissionId: string): Promise<number>;
+  /**
+   * FORM-WITHDRAW-1 (0055). Marks an AWAITING completion withdrawn — never one submitted or already withdrawn
+   * (null then). Nothing else of it changes.
+   */
+  withdrawFormCompletion(id: string, withdrawnAt: string, withdrawnBy: UserId): Promise<PayrollFormCompletion | null>;
+  /** Opens the correction draft of a withdrawn form. Null when that form already has one, or one of the kind is open. */
+  createCorrectionDraft(draft: PayrollCorrectionDraft): Promise<PayrollCorrectionDraft | null>;
+  /** One person's correction drafts, the latest opened first. */
+  listCorrectionDrafts(userId: UserId): Promise<readonly PayrollCorrectionDraft[]>;
+  /** Records the completed correction of an OPEN draft, once; false when it was already completed. */
+  completeCorrectionDraft(draftId: string, completedId: string): Promise<boolean>;
 }
 
 /** Which current submissions a payroll submission replaces. */

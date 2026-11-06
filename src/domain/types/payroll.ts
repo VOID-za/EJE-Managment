@@ -199,4 +199,32 @@ export interface PayrollFormCompletion {
   readonly completedBy: UserId;
   /** The joint submission it went to the office in; null while it awaits. */
   readonly submissionId: string | null;
+  /**
+   * FORM-WITHDRAW-1 (0055): when it was withdrawn before Submit to Office, and by whom — then it no longer
+   * awaits, is never submitted, and stays exactly as completed. Absent (older rows) means not withdrawn.
+   */
+  readonly withdrawnAt?: IsoDateTime | null;
+  readonly withdrawnBy?: UserId | null;
+  /** On a completed CORRECTION: the withdrawn form it corrects. */
+  readonly correctsId?: string | null;
+}
+
+/** Whether a completed form still waits for Submit to Office: not submitted, not withdrawn. */
+export const formAwaits = (form: PayrollFormCompletion): boolean => form.submissionId === null && (form.withdrawnAt ?? null) === null;
+
+/**
+ * FORM-WITHDRAW-1 (0055). The editable draft a withdrawal opens: the withdrawn form's own dates, worked on in the
+ * Timesheets or Attendance page, completed again to a new completed form (`completedId`). Written once, apart from
+ * that one link. At most one is open per person and form.
+ */
+export interface PayrollCorrectionDraft {
+  readonly id: string;
+  readonly userId: UserId;
+  readonly kind: PayrollDocumentKind;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly withdrawnId: string;
+  readonly completedId: string | null;
+  readonly openedAt: IsoDateTime;
+  readonly openedBy: UserId;
 }

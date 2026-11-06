@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { completesTimesheet } from '@/domain';
 import { Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure, TextAreaField, TextField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -39,6 +39,13 @@ const newLineId = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/gu, () => Math.floor(Math.random() * 16).toString(16));
+
+/** The calendar day `days` after `iso` (YYYY-MM-DD). */
+const addDaysIso = (iso: string, days: number): string => {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 
 /** A link's dates (My Monthly Forms opens exactly its period), else the person's last choice here. */
 const linkedRange = (): DateRange | null => {
@@ -105,6 +112,18 @@ const TimesheetsPage = () => {
     if (isUsableRange(next, TIMESHEET_RANGE_MAX_DAYS)) rememberRange('timesheets', user.id, next);
   };
   const usable = range !== null && isUsableRange(range, TIMESHEET_RANGE_MAX_DAYS);
+  /*
+   * FORM-WITHDRAW-1: a completed timesheet withdrawn on My Monthly Forms comes back here as a CORRECTION DRAFT for
+   * its own dates — said at the top, the page opened on those dates once — and is completed again from here.
+   */
+  const draft = completed.data?.drafts.timesheet ?? null;
+  const jumped = useRef<string | null>(null);
+  useEffect(() => {
+    if (draft === null || range === null || jumped.current === draft.id) return;
+    jumped.current = draft.id;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the draft's dates are known once the forms have loaded.
+    if (range.from !== draft.from || range.to !== draft.to) setRange({ from: draft.from, to: draft.to });
+  }, [draft, range]);
 
   const [comment, setComment] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
@@ -203,6 +222,19 @@ const TimesheetsPage = () => {
   const status = saver?.state() ?? { kind: 'idle' as const };
   const awaiting = completed.data?.timesheet ?? null;
   /** A date of the completed timesheet, or of one submitted: read only. */
+  const sentOver = (date: string) => sheet.data?.submissions.find((submission) => submission.current && submission.from <= date && date <= submission.to);
+  /** Which form holds a locked date, in words — the day says it, never just "Submitted". */
+  const lockedByOf = (date: string): string | undefined => {
+    if (awaiting !== null && awaiting.from <= date && date <= awaiting.to) return formatPeriod(awaiting.from, awaiting.to);
+    const sent = sentOver(date);
+    return sent === undefined ? undefined : `for ${sent.label}, submitted on ${formatDayAndDate(sent.submittedAt.slice(0, 10))}`;
+  };
+  /*
+   * v1.7.1: the chosen dates reach into a timesheet already sent to the office. Those days are that timesheet's,
+   * not this one's (a day is never paid twice): said once, at the top, with the date this period can start on.
+   */
+  const sentInRange = usable ? (sheet.data?.submissions ?? []).filter((submission) => submission.current && submission.from <= to && from <= submission.to) : [];
+  const startAfterSent = sentInRange.reduce<string | null>((latest, submission) => (latest === null || submission.to > latest ? submission.to : latest), null);
   const lockOf = (date: string): 'completed' | 'submitted' | null =>
     awaiting !== null && awaiting.from <= date && date <= awaiting.to
       ? 'completed'
@@ -347,6 +379,21 @@ const TimesheetsPage = () => {
                 </Card>
               )}
 
+              {draft !== null && (
+                <div className="mb-5 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-3 text-sm text-steel-800" role="note" data-testid="timesheet-correction-draft">
+                  <p className="font-semibold">Correction draft — timesheet for {draft.periodLabel}</p>
+                  <p className="mt-1">
+                    You withdrew “{draft.withdrawnFileName}” to correct it. It is kept on My Monthly Forms exactly as it was completed; this is a
+                    separate draft with the same lines. Correct it here, then press <strong>Completed</strong> for {draft.periodLabel} — only the
+                    completed correction can be submitted to the office.
+                  </p>
+                  {(range?.from !== draft.from || range?.to !== draft.to) && (
+                    <Button className="mt-2" size="sm" variant="secondary" onClick={() => choose({ from: draft.from, to: draft.to })} data-testid="timesheet-correction-draft-dates">
+                      Show {draft.periodLabel}
+                    </Button>
+                  )}
+                </div>
+              )}
               {justCompleted !== null && (
                 <p role="status" className="mb-5 rounded-[var(--radius-control)] border border-verdant-200 bg-verdant-50 px-3 py-2 text-sm text-verdant-700" data-testid="timesheet-completed-notice">
                   Your timesheet “{justCompleted.fileName}” for {justCompleted.periodLabel} is completed and locked. It is on{' '}
@@ -444,6 +491,22 @@ const TimesheetsPage = () => {
                   </div>
                 )}
 
+                {sentInRange.length > 0 && startAfterSent !== null && (
+                  <div className="mt-4 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-3 text-sm text-steel-800" role="note" data-testid="timesheet-sent-overlap">
+                    <p>
+                      {sentInRange.map((submission) => submission.label).join('; ')}{' '}
+                      {sentInRange.length === 1 ? 'is' : 'are'} already in {sentInRange.length === 1 ? 'a timesheet' : 'timesheets'} you
+                      sent to the office. Those days are read only and are not part of the timesheet you are filling in now. Your
+                      pay period starts after {sentInRange.length === 1 ? 'it' : 'them'}.
+                    </p>
+                    {addDaysIso(startAfterSent, 1) <= to && (
+                      <Button className="mt-2" size="sm" variant="secondary" onClick={() => choose({ from: addDaysIso(startAfterSent, 1), to })} data-testid="timesheet-start-after-sent">
+                        Start the period on {formatDayAndDate(addDaysIso(startAfterSent, 1))}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 {usable && (
                   <ol className="mt-4 divide-y divide-steel-100" data-testid="timesheet-days">
                     {daysOf(from, to).map((date) => {
@@ -458,6 +521,7 @@ const TimesheetsPage = () => {
                           onAdd={() => addLine(date)}
                           onMove={(target) => moveDay(date, target, ofDay)}
                           locked={lockOf(date)}
+                          lockedBy={lockedByOf(date)}
                           customers={customers.data ?? []}
                           saver={saver}
                         />

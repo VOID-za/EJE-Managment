@@ -28,8 +28,9 @@
  */
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut } from './sign-in.mjs';
+import { assertLocalTarget } from './local-target.mjs';
 
-const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+const BASE = assertLocalTarget(process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210');
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
 const [width, height] = shape.split('x').map(Number);
 const touch = mode === 'touch';
@@ -83,6 +84,14 @@ const call = (method, path, body) =>
     },
     [method, path, body],
   );
+/** The SHA-256 of a completed form's stored PDF, as the server serves it. */
+const pdfDigest = (id) =>
+  page.evaluate(async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const digest = await crypto.subtle.digest('SHA-256', await response.arrayBuffer());
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  }, `/api/payroll/completions/${id}/pdf`);
 const me = async () => (await call('GET', '/api/auth/me')).json.data.user.id;
 const codeOf = (answer) => answer.json?.error?.violations?.[0]?.code ?? answer.json?.error?.code ?? null;
 const download = async (locator) => {
@@ -355,6 +364,77 @@ await check('E. the attendance completed on its page (unrecorded weekdays confir
   if (!/Ready to submit/u.test(await page.getByTestId('my-forms-submit-reason').innerText())) fail('the reason does not say Ready to submit');
 });
 
+/* ---- W. Withdraw and Correct (FORM-WITHDRAW-1) ---------------------------- */
+let withdrawnId = null;
+await check('W. Withdraw and Correct explains itself; Cancel changes nothing', async () => {
+  await myForms();
+  const state = (await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data;
+  withdrawnId = state.timesheet?.id ?? null;
+  if (withdrawnId === null) fail('no completed timesheet to withdraw');
+  await press(page.getByTestId('my-forms-timesheet-withdraw'));
+  const dialog = page.getByTestId('withdraw-form-dialog');
+  await dialog.waitFor({ timeout: 10000 });
+  const text = await dialog.innerText();
+  for (const words of ['will not be submitted to the office', 'exactly as it was completed', 'separate draft', 'must be completed again', 'can no longer be withdrawn']) {
+    if (!text.includes(words)) fail(`the dialog does not say "${words}"`);
+  }
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Cancel' }));
+  await dialog.waitFor({ state: 'detached', timeout: 10000 });
+  const after = (await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data;
+  if (after.timesheet?.id !== withdrawnId || after.corrections.length !== 0) fail('Cancel changed something');
+});
+
+await check('W. withdrawn (the first attempt cut off, confirmed again — once): kept as completed, a correction draft opens; Submit is disabled — said why', async () => {
+  const pdfBefore = await pdfDigest(withdrawnId);
+  await page.route('**/api/payroll/forms/*/withdraw', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+  await press(page.getByTestId('my-forms-timesheet-withdraw'));
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Withdraw and Correct' }));
+  await page.getByTestId('my-forms-timesheet-withdraw-failure').waitFor({ timeout: 15000 });
+  await page.unroute('**/api/payroll/forms/*/withdraw');
+  if ((await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data.corrections.length !== 0) fail('a cut-off withdrawal withdrew it');
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Withdraw and Correct' }));
+  await page.getByTestId('my-forms-timesheet-correcting').waitFor({ timeout: 20000 });
+  const state = (await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data;
+  if (state.corrections.length !== 1 || state.corrections[0].state !== 'draft' || state.corrections[0].withdrawn.id !== withdrawnId) fail(`corrections: ${JSON.stringify(state.corrections)}`);
+  if (state.timesheet !== null || state.drafts.timesheet === null) fail('the withdrawn form still awaits, or no draft');
+  if (await page.getByTestId('my-forms-submit').isEnabled()) fail('Submit to Office is enabled with the timesheet withdrawn');
+  if (!/withdrawn to correct it/u.test(await page.getByTestId('my-forms-submit-reason').innerText())) fail(`the reason reads "${await page.getByTestId('my-forms-submit-reason').innerText()}"`);
+  // The Corrections section, apart from the history: the original, readable, exactly as it was.
+  const row = page.locator('[data-testid="my-corrections"] [data-testid="my-corrections-row"]');
+  if ((await row.count()) !== 1 || (await row.getAttribute('data-state')) !== 'draft') fail('the Corrections section does not show the draft');
+  if ((await page.locator('[data-testid="my-monthly-history"] [data-testid="my-corrections-row"]').count()) !== 0) fail('a correction is in the history');
+  const file = await download(row.getByTestId('my-corrections-withdrawn-download'));
+  if (file.suggestedFilename() !== `${NAME}.pdf`) fail(`the original downloads as ${file.suggestedFilename()}`);
+  const pdfAfter = await pdfDigest(withdrawnId);
+  if (pdfBefore === null) fail('the original PDF did not load');
+  if (pdfBefore !== pdfAfter) fail('the original PDF changed');
+  // The server refuses a second withdrawal and a submission around the button.
+  if (codeOf(await call('POST', `/api/payroll/forms/${SIPHO}/withdraw`, { completionId: withdrawnId })) !== 'form_already_withdrawn') fail('a second withdrawal was not refused');
+  if (codeOf(await call('POST', `/api/payroll/forms/${SIPHO}/submit`, {})) !== 'submit_timesheet_missing') fail('a submission with the original withdrawn was not refused');
+});
+
+await check('W. the correction draft on Timesheets: said at the top, its lines editable; completed again — a new form; Submit enabled', async () => {
+  await go('/timesheets');
+  await page.getByTestId('timesheet-correction-draft').waitFor({ timeout: 30000 });
+  await page.waitForFunction(([from, to]) => document.querySelector('[data-testid="timesheet-from"]')?.value === from && document.querySelector('[data-testid="timesheet-to"]')?.value === to, [FROM, TO], { timeout: 15000 });
+  await openDay(D2);
+  const ot = lineById(first).getByTestId('timesheet-overtime');
+  if (!(await ot.isEditable())) fail('the draft\'s line is not editable');
+  await ot.fill('1.75');
+  await sheetSaved();
+  await press(page.getByTestId('timesheet-complete'));
+  const name = page.getByTestId('complete-form-name');
+  await name.waitFor({ timeout: 10000 });
+  if ((await name.inputValue()) !== `${NAME}.pdf`) fail(`the correction proposes "${await name.inputValue()}"`);
+  await press(page.getByTestId('complete-form-ok'));
+  await page.getByTestId('timesheet-completed-notice').waitFor({ timeout: 20000 });
+  const state = (await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data;
+  if (state.timesheet === null || state.timesheet.id === withdrawnId || state.timesheet.correctsId !== withdrawnId) fail(`the correction: ${JSON.stringify(state.timesheet)}`);
+  if (state.corrections[0]?.state !== 'completed') fail('the Corrections section does not show it completed');
+  await myForms();
+  if (!(await page.getByTestId('my-forms-submit').isEnabled())) fail('Submit to Office is not enabled for the correction');
+});
+
 await check('E. Submit to Office cut off before it reached the server: nothing submitted, both still wait; pressed again — submitted once', async () => {
   await page.route('**/api/payroll/forms/*/submit', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
   await press(page.getByTestId('my-forms-submit'));
@@ -373,6 +453,18 @@ await check('E. Submit to Office cut off before it reached the server: nothing s
   if (ours[0].fileNames.timesheet !== `${NAME}.pdf`) fail(`the timesheet went as ${ours[0].fileNames.timesheet}`);
   const again = await call('POST', `/api/payroll/forms/${SIPHO}/submit`, {});
   if (codeOf(again) !== 'payroll_already_submitted') fail(`a further request answered ${codeOf(again)}`);
+});
+
+await check('W. submitted: the correction went (never the withdrawn original); neither can be withdrawn now; History offers no Withdraw', async () => {
+  const state = (await call('GET', `/api/payroll/forms/${SIPHO}/completed`)).json.data;
+  const entry = state.corrections.find((correction) => correction.withdrawn.id === withdrawnId);
+  if (entry?.state !== 'submitted' || entry.replacement === null) fail(`the correction is ${entry?.state}`);
+  if (codeOf(await call('POST', `/api/payroll/forms/${SIPHO}/withdraw`, { completionId: entry.replacement.id })) !== 'form_already_submitted') fail('a submitted form could be withdrawn');
+  if (codeOf(await call('POST', `/api/payroll/forms/${SIPHO}/withdraw`, { completionId: withdrawnId })) !== 'form_already_withdrawn') fail('the original could be withdrawn again');
+  await myForms();
+  if ((await page.getByTestId('my-monthly-history').getByRole('button', { name: /withdraw|edit|delete|reopen|resubmit|modify/iu }).count()) !== 0) fail('the history offers a change');
+  const sent = (await call('GET', `/api/timesheets/${SIPHO}/lines`)).json.data.find((line) => line.id === first);
+  if (Number(sent?.typed.overtime) !== 1.75) fail('the corrected line is not what went');
 });
 
 await check('E. after submitting, nothing awaits: disabled — "Both forms must be completed"; the submitted dates are read only', async () => {

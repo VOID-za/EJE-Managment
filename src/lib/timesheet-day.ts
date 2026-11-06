@@ -1,4 +1,4 @@
-import type { TimesheetLineTyped } from '@/domain';
+import { WORKSHOP_LABEL, type TimesheetLineTyped } from '@/domain';
 import { WORKSHOP_PICK, parseTyped, randToCents } from './timesheet-line';
 
 /**
@@ -22,6 +22,11 @@ export interface DaySummary {
   readonly visits: number;
   /** Different customers, sites or Workshop among them; a visit with no customer named is not counted. */
   readonly places: number;
+  /**
+   * The names of those customers, sites or Workshop, each once, in the order the lines are (v1.7.1: the day's
+   * heading names them — never "1 line · 1 customer/site").
+   */
+  readonly names: readonly string[];
   readonly overtime: number;
   readonly double: number;
   /** Cents. */
@@ -45,6 +50,7 @@ export const placeOf = (typed: TimesheetLineTyped): string | null =>
 /** The day's figures: the sum of what each of its visits says, once each. */
 export const summariseDay = (visits: readonly DayVisit[]): DaySummary => {
   const places = new Set<string>();
+  const names: string[] = [];
   let overtime = 0;
   let double = 0;
   let callout = 0;
@@ -52,14 +58,17 @@ export const summariseDay = (visits: readonly DayVisit[]): DaySummary => {
   let customerKm = 0;
   for (const { typed } of visits) {
     const place = placeOf(typed);
-    if (place !== null) places.add(place);
+    if (place !== null && !places.has(place)) {
+      places.add(place);
+      names.push(typed.pick === WORKSHOP_PICK ? WORKSHOP_LABEL : typed.customerName.trim());
+    }
     overtime = add(overtime, usable(parseTyped(typed.overtime)), 2);
     double = add(double, usable(parseTyped(typed.double)), 2);
     callout += usable(randToCents(typed.callout));
     internalKm = add(internalKm, usable(parseTyped(typed.internalKm)), 1);
     customerKm = add(customerKm, usable(parseTyped(typed.customerKm)), 1);
   }
-  return { visits: visits.length, places: places.size, overtime, double, callout, internalKm, customerKm };
+  return { visits: visits.length, places: places.size, names, overtime, double, callout, internalKm, customerKm };
 };
 
 /** The lines of each date, in the order given; a line with no date is not on any day. */

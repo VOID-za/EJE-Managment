@@ -7,7 +7,7 @@ const visit = (patch: Partial<TimesheetLineTyped>) => ({ typed: { ...emptyTimesh
 
 describe('TS-DAY-1 — one block per day, its figures added up from its lines', () => {
   it('a day with no line is not recorded: nothing is counted', () => {
-    expect(summariseDay([])).toEqual({ visits: 0, places: 0, overtime: 0, double: 0, callout: 0, internalKm: 0, customerKm: 0 });
+    expect(summariseDay([])).toEqual({ visits: 0, places: 0, names: [], overtime: 0, double: 0, callout: 0, internalKm: 0, customerKm: 0 });
   });
 
   it('three visits on one day add up once each — nothing is copied from one line to the next', () => {
@@ -16,7 +16,7 @@ describe('TS-DAY-1 — one block per day, its figures added up from its lines', 
       visit({ pick: WORKSHOP_PICK, overtime: '0.25', double: '2', callout: '0', internalKm: '0', customerKm: '0' }),
       visit({ customerName: 'Bravo Plant', overtime: '0.1', double: '0.2', callout: '250.50', internalKm: '0.1', customerKm: '0.2' }),
     ];
-    expect(summariseDay(day)).toEqual({ visits: 3, places: 3, overtime: 1.85, double: 2.2, callout: 75_050, internalKm: 12.6, customerKm: 30.2 });
+    expect(summariseDay(day)).toEqual({ visits: 3, places: 3, names: ['Acme Mining', 'Workshop', 'Bravo Plant'], overtime: 1.85, double: 2.2, callout: 75_050, internalKm: 12.6, customerKm: 30.2 });
   });
 
   it('the period total of day totals equals the total of the lines (what the PDF and Finance read)', () => {
@@ -40,6 +40,12 @@ describe('TS-DAY-1 — one block per day, its figures added up from its lines', 
   it('the same customer twice is one place; a register pick and a typed name are told apart; an unnamed line is not a place', () => {
     expect(summariseDay([visit({ customerName: 'Acme' }), visit({ customerName: ' acme ' }), visit({ customerName: '' })]).places).toBe(1);
     expect(summariseDay([visit({ pick: 'cust-1', customerName: 'Acme' }), visit({ pick: 'cust-1', customerName: 'Acme' }), visit({ pick: WORKSHOP_PICK })]).places).toBe(2);
+  });
+
+  it('v1.7.1: the heading names each customer once, in line order — several are all named, none dropped', () => {
+    const day = [visit({ customerName: 'Test' }), visit({ customerName: ' Acme Mining ' }), visit({ customerName: 'test' }), visit({ pick: WORKSHOP_PICK }), visit({ customerName: '' }), visit({ customerName: 'Bravo' })];
+    expect(summariseDay(day).names).toEqual(['Test', 'Acme Mining', 'Workshop', 'Bravo']);
+    expect(summariseDay([visit({ customerName: '' })]).names).toEqual([]);
   });
 
   it('a value not yet a number (a draft) adds nothing until it is fixed', () => {

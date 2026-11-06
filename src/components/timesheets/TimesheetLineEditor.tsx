@@ -77,6 +77,7 @@ export const TimesheetLineEditor = ({
   saver,
   day,
   position,
+  fixed = false,
 }: {
   readonly line: EditableLine;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
@@ -85,6 +86,11 @@ export const TimesheetLineEditor = ({
   readonly day?: string;
   /** 1, 2, 3 … within its day. */
   readonly position?: number;
+  /**
+   * v1.7.1: a line left over on a date already sent to the office — shown as it is, not changed there (the
+   * server refuses it); it is removed, or moved to an open date with the day's Change date.
+   */
+  readonly fixed?: boolean;
 }) => {
   /*
    * WHERE THE TYPING STARTS: a change still waiting in the autosaver, when there is one — the screen may have
@@ -158,7 +164,8 @@ export const TimesheetLineEditor = ({
       aria-invalid={problemOf(field) !== undefined}
       inputMode="decimal"
       autoComplete="off"
-      className={`${cell(field)} text-right tabular-nums`}
+      readOnly={fixed}
+      className={`${cell(field)} text-center tabular-nums`}
       value={typed[field]}
       onChange={(event) => change({ [field]: event.target.value })}
       onBlur={() => saver?.flushNow()}
@@ -203,6 +210,7 @@ export const TimesheetLineEditor = ({
           aria-invalid={problemOf('customer') !== undefined}
           list="timesheet-customer-options"
           autoComplete="off"
+          readOnly={fixed}
           maxLength={200}
           placeholder="Customer, site or Workshop"
           className={cell('customer')}
@@ -266,15 +274,19 @@ export const TimesheetLineEditor = ({
 /** The six columns and the line's own state and Remove, side by side; on a phone the day's table scrolls sideways. */
 export const TIMESHEET_ROW_GRID = 'grid grid-cols-[minmax(10rem,2.2fr)_repeat(5,minmax(4.25rem,1fr))_6.5rem] items-center gap-1.5';
 
+const HEADING = 'flex h-full min-w-0 items-center justify-center text-center leading-tight';
+
 /** The column names over a day's lines, aligned with `TIMESHEET_ROW_GRID`. */
 export const TimesheetLineHeader = () => (
-  <div className={`${TIMESHEET_ROW_GRID} border-b border-steel-200 pb-1 text-xs font-semibold text-steel-600`} data-testid="timesheet-columns">
-    <span>Customer</span>
-    <span className="text-right">OT</span>
-    <span className="text-right">D/T</span>
-    <span className="text-right">Callout (R)</span>
-    <span className="text-right">Int Km</span>
-    <span className="text-right">Cust Km</span>
+  // v1.7.1: each heading is centred, across and down, in the very grid column of its field — the same template as
+  // the rows, so they stay over their fields at any width (no offsets).
+  <div className={`${TIMESHEET_ROW_GRID} min-h-9 border-b border-steel-200 pb-1 text-xs font-semibold text-steel-600`} data-testid="timesheet-columns">
+    <span className={HEADING}>Customer</span>
+    <span className={HEADING}>OT</span>
+    <span className={HEADING}>D/T</span>
+    <span className={HEADING}>Callout (R)</span>
+    <span className={HEADING}>Int Km</span>
+    <span className={HEADING}>Cust Km</span>
     <span className="sr-only">State and remove</span>
   </div>
 );

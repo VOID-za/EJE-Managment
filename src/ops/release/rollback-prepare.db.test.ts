@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_0054, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_0054, ROLLBACK_0055, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -592,5 +592,23 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     expect(await payroll.markFormsSubmitted([B.submittedForm], B.submission)).toBe(1);
     const forms = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions`);
     expect(forms[0]?.n).toBe('2');
+  });
+
+  it('writes the rows only this release can (0055): a completed form withdrawn, its correction draft, the correction completed again', async () => {
+    const B = ROLLBACK_0055;
+    const tech = asUserId(IDS.technician);
+    const payroll = new PostgresPayrollRepository(db);
+    const at = '2028-06-26T08:00:00.000Z';
+    const document = { kind: 'attendance' as const, fileName: 'Sipho attendance.pdf', storageKey: 'payroll-completions/probe55/attendance.pdf', sha256: 'c'.repeat(64), sizeBytes: 10, pageCount: 1 };
+    const form = { userId: tech, kind: 'attendance' as const, from: B.from, to: B.to, fileName: 'Sipho attendance.pdf', timesheet: null, attendance: [], document, completedAt: at, completedBy: tech, submissionId: null };
+    expect(await payroll.createFormCompletion({ ...form, id: B.withdrawn })).not.toBeNull();
+    expect(await payroll.withdrawFormCompletion(B.withdrawn, at, tech)).not.toBeNull();
+    expect(
+      await payroll.createCorrectionDraft({ id: B.draft, userId: tech, kind: 'attendance', from: B.from, to: B.to, withdrawnId: B.withdrawn, completedId: null, openedAt: at, openedBy: tech }),
+    ).not.toBeNull();
+    expect(await payroll.createFormCompletion({ ...form, id: B.correction, correctsId: B.withdrawn })).not.toBeNull();
+    expect(await payroll.completeCorrectionDraft(B.draft, B.correction)).toBe(true);
+    const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions where id in (${B.withdrawn}, ${B.correction})`);
+    expect(rows[0]?.n).toBe('2');
   });
 });

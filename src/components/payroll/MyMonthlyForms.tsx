@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Badge, Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, ConfirmDialog, Icon, LoadingPanel, QueryFailure } from '@/components/ui';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
@@ -9,7 +9,7 @@ import { SubmittedTimesheets } from '@/components/payroll/SubmittedTimesheets';
 import { payroll } from '@/api/endpoints';
 import { ApiRequestError, newIdempotencyKey } from '@/api/client';
 import type { PayrollSubmissionView } from '@/application/payroll-forms';
-import type { CompletedFormView } from '@/application/payroll-completions';
+import type { CompletedFormView, CorrectionView, OpenCorrectionDraft } from '@/application/payroll-completions';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { formatDateTime } from '@/lib/format';
@@ -21,11 +21,55 @@ const TITLE: Record<Kind, string> = { timesheet: 'Timesheet', attendance: 'Atten
  * ONE COMPLETED FORM, AWAITING SUBMIT TO OFFICE (FORM-LIFECYCLE-1). Its name,
  * dates and when it was completed; Preview, Print, Download and Save PDF all
  * act on the PDF stored when it was completed — never a live working copy.
- * Nothing here edits it.
+ * Nothing here edits it. WITHDRAW AND CORRECT (FORM-WITHDRAW-1) takes it back
+ * before it is submitted: it stays in the record exactly as completed, and a
+ * correction draft opens on its page, to be completed again.
  */
-const CompletedForm = ({ kind, form, required }: { readonly kind: Kind; readonly form: CompletedFormView | null; readonly required: boolean }) => {
+const CompletedForm = ({
+  kind,
+  form,
+  required,
+  draft,
+  onWithdrawn,
+}: {
+  readonly kind: Kind;
+  readonly form: CompletedFormView | null;
+  readonly required: boolean;
+  /** The correction draft open for this form, when it was withdrawn. */
+  readonly draft: OpenCorrectionDraft | null;
+  readonly onWithdrawn: () => void;
+}) => {
+  const user = useCurrentUser();
   const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
-  const state = !required ? 'not_required' : form === null ? 'not_completed' : 'completed';
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // One key per attempt: a double press, or confirming again after a lost answer, is ONE withdrawal.
+  const key = useRef<{ readonly id: string; readonly key: string } | null>(null);
+  const state = !required ? 'not_required' : form === null ? (draft === null ? 'not_completed' : 'correcting') : 'completed';
+  const page = kind === 'timesheet' ? 'Timesheets' : 'Attendance';
+  const withdraw = async () => {
+    if (form === null || busy) return;
+    if (key.current?.id !== form.id) key.current = { id: form.id, key: newIdempotencyKey() };
+    setBusy(true);
+    setFailure(null);
+    try {
+      await payroll.withdraw(user.id, form.id, key.current.key);
+      key.current = null;
+      setAsking(false);
+      onWithdrawn();
+    } catch (cause) {
+      const unanswered = !(cause instanceof ApiRequestError) || cause.code === 'network' || cause.code === 'internal_error';
+      if (!unanswered) key.current = null;
+      setFailure(
+        unanswered
+          ? 'There was no answer from the server, so the form may or may not have been withdrawn. Confirm again: it is the same request, and it is never withdrawn twice.'
+          : `${cause instanceof Error ? cause.message : 'The form could not be withdrawn.'}${cause instanceof ApiRequestError && cause.violations.length > 0 ? ` ${cause.violations.map((violation) => violation.message).join(' ')}` : ''} Nothing was withdrawn.`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="rounded-[var(--radius-control)] border border-steel-200 p-4" data-testid={`my-forms-${kind}`} data-state={state}>
       <div className="flex flex-wrap items-center gap-2">
@@ -33,7 +77,17 @@ const CompletedForm = ({ kind, form, required }: { readonly kind: Kind; readonly
         {state === 'completed' && <Badge tone="green" size="sm">Completed — awaiting submission</Badge>}
         {state === 'not_completed' && <Badge tone="amber" size="sm">Not completed</Badge>}
         {state === 'not_required' && <Badge tone="outline" size="sm">Not required</Badge>}
+        {state === 'correcting' && <Badge tone="amber" size="sm">Being corrected — not completed</Badge>}
       </div>
+      {state === 'correcting' && draft !== null && (
+        <p className="mt-1 text-sm text-steel-600" data-testid={`my-forms-${kind}-correcting`}>
+          You withdrew “{draft.withdrawnFileName}” on {formatDateTime(draft.withdrawnAt)} to correct it. Correct it on the {page} page
+          ({draft.periodLabel}) and press <strong>Completed</strong> there again — it can be submitted once it is completed.{' '}
+          <ButtonLink href={kind === 'timesheet' ? '/timesheets' : '/attendance'} size="sm" variant="ghost" data-testid={`my-forms-${kind}-open`}>
+            Open {page}
+          </ButtonLink>
+        </p>
+      )}
       {state === 'not_required' && (
         <p className="mt-1 text-sm text-steel-600">The Office keeps no timesheet: only the attendance form is submitted.</p>
       )}
@@ -63,7 +117,37 @@ const CompletedForm = ({ kind, form, required }: { readonly kind: Kind; readonly
             </Button>
             <DownloadFileButton href={payroll.completedPdfUrl(form.id)} fallbackName={form.fileName} label="Download" testId={`my-forms-${kind}-download`} />
             <ExportPdfButton href={payroll.completedPdfUrl(form.id)} fallbackName={form.fileName} label="Save PDF" testId={`my-forms-${kind}-export`} />
+            <Button size="sm" variant="ghost" leadingIcon={<Icon name="edit" className="size-4" />} onClick={() => setAsking(true)} data-testid={`my-forms-${kind}-withdraw`}>
+              Withdraw and Correct
+            </Button>
           </div>
+          {failure !== null && (
+            <p role="alert" className="mt-2 text-sm font-medium text-signal-600" data-testid={`my-forms-${kind}-withdraw-failure`}>
+              {failure}
+            </p>
+          )}
+          <ConfirmDialog
+            open={asking}
+            title={`Withdraw and correct your ${kind === 'timesheet' ? 'timesheet' : 'attendance'}?`}
+            message={
+              <div data-testid="withdraw-form-dialog">
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>“{form.fileName}” ({form.periodLabel}) is withdrawn: it will not be submitted to the office.</li>
+                  <li>It is kept in the record exactly as it was completed — its content and its PDF are not changed.</li>
+                  <li>A separate draft opens with the same {kind === 'timesheet' ? 'lines' : 'days'}, on the {page} page, for you to correct.</li>
+                  <li>The correction must be completed again (Completed) before it can be submitted to the office.</li>
+                  <li>Once forms are submitted to the office, they can no longer be withdrawn.</li>
+                </ul>
+              </div>
+            }
+            confirmLabel="Withdraw and Correct"
+            busy={busy}
+            onCancel={() => {
+              setAsking(false);
+              setFailure(null);
+            }}
+            onConfirm={() => void withdraw()}
+          />
           <DocumentPreviewDialog
             open={previewing !== null}
             autoPrint={previewing === 'print'}
@@ -79,6 +163,58 @@ const CompletedForm = ({ kind, form, required }: { readonly kind: Kind; readonly
 };
 
 /** One past submission: what went, when, and its documents exactly as they went. Read only. */
+/** ONE WITHDRAWAL AND ITS CORRECTION (FORM-WITHDRAW-1): the withdrawn form, read only, and where the correction stands. */
+const CorrectionRow = ({ entry }: { readonly entry: CorrectionView }) => {
+  const [previewing, setPreviewing] = useState<CompletedFormView | null>(null);
+  const label = entry.state === 'draft' ? 'Correction draft — being corrected' : entry.state === 'completed' ? 'Correction completed — awaiting submission' : 'Correction submitted to the office';
+  return (
+    <li className="py-3" data-testid="my-corrections-row" data-kind={entry.kind} data-state={entry.state}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-steel-900">{TITLE[entry.kind]} · {entry.periodLabel}</p>
+        <Badge tone={entry.state === 'draft' ? 'amber' : 'green'} size="sm">{label}</Badge>
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 p-2 text-sm" data-testid="my-corrections-withdrawn">
+          <p className="font-medium break-all text-steel-800">{entry.withdrawn.fileName}</p>
+          <p className="text-xs text-steel-600">
+            Withdrawn {entry.withdrawn.withdrawnAt === null ? '' : formatDateTime(entry.withdrawn.withdrawnAt)}
+            {entry.withdrawnByName === null ? '' : ` by ${entry.withdrawnByName}`} · kept exactly as completed {formatDateTime(entry.withdrawn.completedAt)} · never submitted
+          </p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setPreviewing(entry.withdrawn)} data-testid="my-corrections-withdrawn-preview">Preview</Button>
+            <DownloadFileButton href={payroll.completedPdfUrl(entry.withdrawn.id)} fallbackName={entry.withdrawn.fileName} label="Download" testId="my-corrections-withdrawn-download" />
+          </div>
+        </div>
+        <div className="rounded-[var(--radius-control)] border border-steel-200 p-2 text-sm" data-testid="my-corrections-replacement">
+          {entry.replacement === null ? (
+            <p className="text-steel-600">
+              Its correction is a draft on the {entry.kind === 'timesheet' ? 'Timesheets' : 'Attendance'} page. Complete it there to put it back on this page.
+            </p>
+          ) : (
+            <>
+              <p className="font-medium break-all text-steel-800">{entry.replacement.fileName}</p>
+              <p className="text-xs text-steel-600">
+                The correction, completed {formatDateTime(entry.replacement.completedAt)} · {entry.state === 'submitted' ? 'submitted to the office' : 'awaiting submission'}
+              </p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setPreviewing(entry.replacement)} data-testid="my-corrections-replacement-preview">Preview</Button>
+                <DownloadFileButton href={payroll.completedPdfUrl(entry.replacement.id)} fallbackName={entry.replacement.fileName} label="Download" testId="my-corrections-replacement-download" />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      <DocumentPreviewDialog
+        open={previewing !== null}
+        title={previewing === null ? '' : `${previewing.fileName} — as completed`}
+        description="The PDF stored when it was completed. It cannot be changed."
+        loadPdf={() => payroll.completedPdf(previewing!.id, previewing!.fileName)}
+        onClose={() => setPreviewing(null)}
+      />
+    </li>
+  );
+};
+
 const HistoryRow = ({ entry }: { readonly entry: PayrollSubmissionView }) => {
   const [previewing, setPreviewing] = useState<Kind | null>(null);
   const file = previewing === null ? '' : entry.fileNames[previewing];
@@ -175,8 +311,8 @@ export const MyMonthlyForms = () => {
         ) : (
           <>
             <div className="grid gap-3 lg:grid-cols-2">
-              <CompletedForm kind="timesheet" form={state.timesheet} required={state.timesheetRequired} />
-              <CompletedForm kind="attendance" form={state.attendance} required />
+              <CompletedForm kind="timesheet" form={state.timesheet} required={state.timesheetRequired} draft={state.drafts.timesheet} onWithdrawn={forms.refetch} />
+              <CompletedForm kind="attendance" form={state.attendance} required draft={state.drafts.attendance} onWithdrawn={forms.refetch} />
             </div>
             <div className="mt-4 border-t border-steel-100 pt-4">
               <Button
@@ -213,6 +349,23 @@ export const MyMonthlyForms = () => {
         )}
       </Card>
 
+      {/* CORRECTIONS — apart from the history: what was withdrawn, kept as completed, and its correction. */}
+      <Card className="mb-5" data-testid="my-corrections">
+        <p className="text-sm font-semibold text-steel-900">Corrections</p>
+        <p className="text-xs text-steel-500">
+          Forms you withdrew before submitting them, each kept exactly as it was completed, beside its correction. A submitted form is never withdrawn; a submitted timesheet is corrected under Submitted timesheets.
+        </p>
+        {state === null ? null : state.corrections.length === 0 ? (
+          <p className="mt-3 text-sm text-steel-500" data-testid="my-corrections-empty">No form withdrawn.</p>
+        ) : (
+          <ul className="mt-1 divide-y divide-steel-100">
+            {state.corrections.map((entry) => <CorrectionRow key={entry.draftId} entry={entry} />)}
+          </ul>
+        )}
+      </Card>
+
+      <SubmittedTimesheets />
+
       <Card className="mb-5" data-testid="my-monthly-history">
         <p className="text-sm font-semibold text-steel-900">History</p>
         <p className="text-xs text-steel-500">Everything you submitted to the office, newest first — read only, each document exactly as it went.</p>
@@ -228,8 +381,6 @@ export const MyMonthlyForms = () => {
           </ul>
         )}
       </Card>
-
-      <SubmittedTimesheets />
     </div>
   );
 };

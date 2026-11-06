@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button, Card, Icon } from '@/components/ui';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
@@ -12,6 +12,7 @@ import {
 import { attendance, payroll } from '@/api/endpoints';
 import { CompleteFormDialog } from '@/components/payroll/CompleteFormDialog';
 import { useCurrentUser } from '@/providers/AppProvider';
+import { useQuery } from '@/hooks/useQuery';
 import { formatPeriod } from '@/lib/timesheet-dates';
 
 /**
@@ -29,6 +30,10 @@ import { formatPeriod } from '@/lib/timesheet-dates';
  * attendance for From–To — named, locked and moved to My Monthly Forms, where
  * it is submitted to the office with the timesheet. The page then opens on
  * the next period.
+ *
+ * FORM-WITHDRAW-1: a completed attendance withdrawn on My Monthly Forms comes
+ * back here as a CORRECTION DRAFT for its own dates — said at the top, the
+ * page opened on those dates — and is completed again from here.
  */
 const AttendancePage = () => {
   const { range, usable, choose, today } = useAttendanceRange();
@@ -39,6 +44,15 @@ const AttendancePage = () => {
   const [unsaved, setUnsaved] = useState(0);
   const onUnsaved = useCallback((count: number) => setUnsaved(count), []);
   const label = formatPeriod(range.from, range.to);
+  const forms = useQuery(`payroll:completed:${user.id}`, () => payroll.completed(user.id));
+  const draft = forms.data?.drafts.attendance ?? null;
+  // A correction opens on its own dates, once; the person may still look at other dates.
+  const jumped = useRef<string | null>(null);
+  useEffect(() => {
+    if (draft === null || jumped.current === draft.id) return;
+    jumped.current = draft.id;
+    if (range.from !== draft.from || range.to !== draft.to) choose({ from: draft.from, to: draft.to });
+  }, [draft, range.from, range.to, choose]);
 
   return (
     <>
@@ -46,6 +60,21 @@ const AttendancePage = () => {
         title="Attendance"
         description="Mark yourself Present or Absent for each day — press it again to clear it. Each choice saves by itself. When the period is done, press Completed: the attendance is locked and moves to My Monthly Forms, where both your forms are submitted to the office together."
       />
+{draft !== null && (
+        <div className="mb-5 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-3 text-sm text-steel-800" role="note" data-testid="attendance-correction-draft">
+          <p className="font-semibold">Correction draft — attendance for {draft.periodLabel}</p>
+          <p className="mt-1">
+            You withdrew “{draft.withdrawnFileName}” to correct it. It is kept on My Monthly Forms exactly as it was completed; this is a
+            separate draft with the same days. Correct it here, then press <strong>Completed</strong> for {draft.periodLabel}
+            {' '}— only the completed correction can be submitted to the office.
+          </p>
+          {(range.from !== draft.from || range.to !== draft.to) && (
+            <Button className="mt-2" size="sm" variant="secondary" onClick={() => choose({ from: draft.from, to: draft.to })} data-testid="attendance-correction-draft-dates">
+              Show {draft.periodLabel}
+            </Button>
+          )}
+        </div>
+      )}
       {/* The first block: the period's From and To, top-right — where the Month selector was. */}
       <Card className="mb-5" data-testid="attendance-filters">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -123,6 +152,7 @@ const AttendancePage = () => {
           onCompleted={(form) => {
             setCompleting(false);
             setJustCompleted({ fileName: form.fileName, periodLabel: form.periodLabel });
+            forms.refetch();
             // A clean page for the next period: the day after it, to today.
             void payroll.completed(user.id).then((state) => choose(state.next), () => undefined);
           }}

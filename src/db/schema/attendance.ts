@@ -540,15 +540,52 @@ export const payrollFormCompletions = pgTable(
       .references(() => users.id),
     submissionId: uuid('submission_id').references(() => payrollSubmissions.id, { onDelete: 'restrict' }),
     createdAt: createdAt(),
+    // 0055 (FORM-WITHDRAW-1): withdrawn before Submit to Office — set once, never with a submission.
+    withdrawnAt: instant('withdrawn_at'),
+    withdrawnBy: uuid('withdrawn_by').references(() => users.id),
+    correctsId: uuid('corrects_id').references((): AnyPgColumn => payrollFormCompletions.id, { onDelete: 'restrict' }),
   },
   (table) => [
     index('payroll_form_completions_user_idx').on(table.userId, table.completedAt),
     uniqueIndex('payroll_form_completions_awaiting_key')
       .on(table.userId, table.kind)
-      .where(sql`${table.submissionId} is null`),
+      .where(sql`${table.submissionId} is null and ${table.withdrawnAt} is null`),
+    uniqueIndex('payroll_form_completions_corrects_key').on(table.correctsId).where(sql`${table.correctsId} is not null`),
+    check('payroll_form_completions_withdrawn_together', sql`(${table.withdrawnAt} is null) = (${table.withdrawnBy} is null)`),
+    check('payroll_form_completions_withdrawn_or_submitted', sql`${table.withdrawnAt} is null or ${table.submissionId} is null`),
     check('payroll_form_completions_kind_known', sql`${table.kind} in ('timesheet', 'attendance')`),
     check('payroll_form_completions_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
     check('payroll_form_completions_range_bounded', sql`${table.periodTo} - ${table.periodFrom} < 366`),
     check('payroll_form_completions_file_name_bounded', sql`char_length(${table.fileName}) between 5 and 120`),
+  ],
+);
+
+/** 0055 (FORM-WITHDRAW-1): the correction draft a withdrawal opens. Write-once apart from `completed_id`; guarded in the migration. */
+export const payrollFormCorrectionDrafts = pgTable(
+  'payroll_form_correction_drafts',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    kind: text('kind').notNull(),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    withdrawnId: uuid('withdrawn_id')
+      .notNull()
+      .references(() => payrollFormCompletions.id, { onDelete: 'restrict' }),
+    completedId: uuid('completed_id').references(() => payrollFormCompletions.id, { onDelete: 'restrict' }),
+    openedAt: instant('opened_at').notNull(),
+    openedBy: uuid('opened_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('payroll_form_correction_drafts_withdrawn_key').on(table.withdrawnId),
+    uniqueIndex('payroll_form_correction_drafts_completed_key').on(table.completedId).where(sql`${table.completedId} is not null`),
+    uniqueIndex('payroll_form_correction_drafts_open_key').on(table.userId, table.kind).where(sql`${table.completedId} is null`),
+    check('payroll_form_correction_drafts_kind_known', sql`${table.kind} in ('timesheet', 'attendance')`),
+    check('payroll_form_correction_drafts_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
   ],
 );

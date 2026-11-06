@@ -1374,6 +1374,9 @@ export const payroll = {
   /** OK in the Completed dialog. One key per attempt: a double tap or a retry is one completion. */
   complete: (userId: string, input: CompleteFormInput, idempotencyKey: string) =>
     apiPost<CompletedFormView>(`/api/payroll/forms/${segment(userId)}/complete`, input, idempotencyKey),
+  /** WITHDRAW AND CORRECT (FORM-WITHDRAW-1): a completed form awaiting submission. One key per attempt. */
+  withdraw: (userId: string, completionId: string, idempotencyKey: string) =>
+    apiPost<CompletedFormView>(`/api/payroll/forms/${segment(userId)}/withdraw`, { completionId }, idempotencyKey),
   /** SUBMIT TO OFFICE: both completed forms together. One key per attempt. */
   submitCompleted: (userId: string, idempotencyKey: string) =>
     apiPost<{ submission: PayrollSubmission }>(`/api/payroll/forms/${segment(userId)}/submit`, {}, idempotencyKey),

@@ -346,6 +346,7 @@ export type ActivityEventType =
   | 'payroll_forms_submitted'
   | 'payroll_document_renamed'
   | 'payroll_form_completed'
+  | 'payroll_form_withdrawn'
   /** PAY-05…08: the monthly Finance package, prepared, sent, failed or discarded. */
   | 'finance_package_prepared'
   | 'finance_package_sent'

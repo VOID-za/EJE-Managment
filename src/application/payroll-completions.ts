@@ -2,10 +2,12 @@ import {
   asUserId,
   can,
   completesTimesheet,
+  formAwaits,
   userFullName,
   type IsoDate,
   type IsoDateTime,
   type PayrollDocumentKind,
+  type PayrollCorrectionDraft,
   type PayrollFormCompletion,
   type PayrollSubmission,
   type User,
@@ -52,7 +54,17 @@ import { loadTimesheetDocument } from './timesheets';
  *      transaction. Never one form on its own. Permanently read-only.
  *   4. HISTORY — every submission, read only, with its documents as they went.
  *
- * Nothing here reopens, renames or replaces a completed or submitted form.
+ * WITHDRAW AND CORRECT (FORM-WITHDRAW-1, the owner, 6 November 2026): a form
+ * COMPLETED and still awaiting Submit to Office may be withdrawn by its owner.
+ * The completed form stays in the record exactly as it was completed — content
+ * and PDF never touched — marked withdrawn, so it never counts for or goes in
+ * a submission; a separate CORRECTION DRAFT opens on its dates (one per
+ * withdrawn form), holding its data, worked on in the normal page, and must be
+ * COMPLETED again — a new completed form, linked to the withdrawn one — before
+ * it can be submitted. A submitted form is never withdrawn.
+ *
+ * Nothing here reopens, renames or replaces a submitted form, or changes a
+ * completed one beyond recording, once, its submission or its withdrawal.
  */
 
 const refuse = (message: string, code: string, detail: string): WorkflowError =>
@@ -94,6 +106,10 @@ export interface CompletedFormView {
   /** "4 lines" / "18 present, 1 absent, 2 not recorded". */
   readonly summary: string;
   readonly submissionId: string | null;
+  /** FORM-WITHDRAW-1: withdrawn before Submit to Office (never submitted then). */
+  readonly withdrawnAt: IsoDateTime | null;
+  /** A completed correction: the withdrawn form it corrects. */
+  readonly correctsId: string | null;
 }
 
 const summaryOf = (form: PayrollFormCompletion): string => {
@@ -122,8 +138,36 @@ const viewOf = async (context: OperationContext, form: PayrollFormCompletion): P
     pageCount: form.document.pageCount,
     summary: summaryOf(form),
     submissionId: form.submissionId,
+    withdrawnAt: form.withdrawnAt ?? null,
+    correctsId: form.correctsId ?? null,
   };
 };
+
+/**
+ * One withdrawal, as the Corrections section lists it: the withdrawn form (kept as completed, its PDF readable) and
+ * where its correction stands — a draft being corrected, completed again and awaiting submission, or submitted.
+ */
+export interface CorrectionView {
+  readonly draftId: string;
+  readonly kind: PayrollDocumentKind;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly periodLabel: string;
+  readonly withdrawn: CompletedFormView;
+  readonly withdrawnByName: string | null;
+  readonly state: 'draft' | 'completed' | 'submitted';
+  readonly replacement: CompletedFormView | null;
+}
+
+/** An open correction draft: the page it is corrected on works on these dates. */
+export interface OpenCorrectionDraft {
+  readonly id: string;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly periodLabel: string;
+  readonly withdrawnFileName: string;
+  readonly withdrawnAt: IsoDateTime;
+}
 
 /** Why Submit to Office is (not) offered — said in words under the button, never only a tooltip. */
 export type SubmitReadiness = 'ready' | 'none' | 'timesheet_missing' | 'attendance_missing' | 'periods_differ';
@@ -136,21 +180,32 @@ export interface MyCompletedForms {
   readonly readinessText: string;
   /** The dates a new form starts from: the day after everything completed or submitted, to today. */
   readonly next: { readonly from: IsoDate; readonly to: IsoDate };
+  /** FORM-WITHDRAW-1: the correction draft open for each form, if any — its page works on its dates. */
+  readonly drafts: { readonly timesheet: OpenCorrectionDraft | null; readonly attendance: OpenCorrectionDraft | null };
+  /** Every withdrawal and its correction, the latest first — kept apart from the read-only history. */
+  readonly corrections: readonly CorrectionView[];
 }
 
 const readinessOf = (
   timesheetRequired: boolean,
   timesheet: PayrollFormCompletion | null,
   attendance: PayrollFormCompletion | null,
+  correcting: { readonly timesheet: boolean; readonly attendance: boolean } = { timesheet: false, attendance: false },
 ): { readonly readiness: SubmitReadiness; readonly text: string } => {
+  const attendanceMissing = correcting.attendance
+    ? 'Attendance form not completed: it was withdrawn to correct it. Complete the correction on the Attendance page.'
+    : 'Attendance form not completed. Complete it on the Attendance page.';
+  const timesheetMissing = correcting.timesheet
+    ? 'Timesheet form not completed: it was withdrawn to correct it. Complete the correction on the Timesheets page.'
+    : 'Timesheet form not completed. Complete it on the Timesheets page.';
   if (!timesheetRequired) {
     return attendance === null
-      ? { readiness: 'attendance_missing', text: 'Attendance form not completed. Complete it on the Attendance page.' }
+      ? { readiness: 'attendance_missing', text: attendanceMissing }
       : { readiness: 'ready', text: 'Ready to submit. You keep no timesheet, so your attendance goes on its own.' };
   }
   if (timesheet === null && attendance === null) return { readiness: 'none', text: 'Both forms must be completed — your timesheet and your attendance.' };
-  if (attendance === null) return { readiness: 'attendance_missing', text: 'Attendance form not completed. Complete it on the Attendance page.' };
-  if (timesheet === null) return { readiness: 'timesheet_missing', text: 'Timesheet form not completed. Complete it on the Timesheets page.' };
+  if (attendance === null) return { readiness: 'attendance_missing', text: attendanceMissing };
+  if (timesheet === null) return { readiness: 'timesheet_missing', text: timesheetMissing };
   if (timesheet.from !== attendance.from || timesheet.to !== attendance.to) {
     return {
       readiness: 'periods_differ',
@@ -162,14 +217,20 @@ const readinessOf = (
 
 const addDays = (iso: string, days: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-/** The person's completed forms still waiting for Submit to Office: at most one of each kind. */
+/**
+ * The person's completed forms still waiting for Submit to Office: at most one of each kind — never a withdrawn one
+ * (FORM-WITHDRAW-1) — and the correction draft open for each form.
+ */
 const awaitingOf = async (context: OperationContext, userId: UserId) => {
-  const all = await context.repos.payroll.listFormCompletions(userId);
-  const waiting = all.filter((form) => form.submissionId === null);
+  const [all, drafts] = await Promise.all([context.repos.payroll.listFormCompletions(userId), context.repos.payroll.listCorrectionDrafts(userId)]);
+  const waiting = all.filter(formAwaits);
+  const open = drafts.filter((draft) => draft.completedId === null);
   return {
     all,
+    drafts,
     timesheet: waiting.find((form) => form.kind === 'timesheet') ?? null,
     attendance: waiting.find((form) => form.kind === 'attendance') ?? null,
+    draftOf: (kind: PayrollDocumentKind): PayrollCorrectionDraft | null => open.find((draft) => draft.kind === kind) ?? null,
   };
 };
 
@@ -180,17 +241,47 @@ export const loadMyCompletedForms = async (context: OperationContext, technician
   const person = await findPayrollPerson(context, technicianId);
   const timesheetRequired = completesTimesheet(person.role);
   const [awaiting, current] = await Promise.all([awaitingOf(context, userId), currentSubmissions(context, person)]);
-  const { readiness, text } = readinessOf(timesheetRequired, awaiting.timesheet, awaiting.attendance);
+  const { readiness, text } = readinessOf(timesheetRequired, awaiting.timesheet, awaiting.attendance, {
+    timesheet: awaiting.draftOf('timesheet') !== null,
+    attendance: awaiting.draftOf('attendance') !== null,
+  });
   const today = businessToday(new Date(context.services.clock.now()));
   const latest = [
     ...current.payroll.map((submission) => submission.to),
     ...current.periods.map((period) => period.to),
     ...current.monthly.map((submission) => monthBounds(submission.month).to),
     ...[awaiting.timesheet, awaiting.attendance].filter((form) => form !== null).map((form) => form!.to),
+    ...awaiting.drafts.filter((draft) => draft.completedId === null).map((draft) => draft.to),
   ]
     .sort()
     .at(-1);
   const nextFrom = latest === undefined ? monthBounds(today.slice(0, 7)).from : addDays(latest, 1);
+  const byId = new Map(awaiting.all.map((form) => [form.id, form]));
+  const openView = (kind: PayrollDocumentKind): OpenCorrectionDraft | null => {
+    const draft = awaiting.draftOf(kind);
+    const withdrawn = draft === null ? undefined : byId.get(draft.withdrawnId);
+    return draft === null || withdrawn === undefined
+      ? null
+      : { id: draft.id, from: draft.from, to: draft.to, periodLabel: formatPeriod(draft.from, draft.to), withdrawnFileName: withdrawn.fileName, withdrawnAt: withdrawn.withdrawnAt ?? draft.openedAt };
+  };
+  const corrections: CorrectionView[] = [];
+  for (const draft of awaiting.drafts) {
+    const withdrawn = byId.get(draft.withdrawnId);
+    if (withdrawn === undefined) continue;
+    const replacement = draft.completedId === null ? null : byId.get(draft.completedId) ?? null;
+    const by = withdrawn.withdrawnBy == null ? null : await context.repos.users.findById(withdrawn.withdrawnBy);
+    corrections.push({
+      draftId: draft.id,
+      kind: draft.kind,
+      from: draft.from,
+      to: draft.to,
+      periodLabel: formatPeriod(draft.from, draft.to),
+      withdrawn: await viewOf(context, withdrawn),
+      withdrawnByName: by === null ? null : userFullName(by),
+      state: replacement === null ? 'draft' : replacement.submissionId === null && (replacement.withdrawnAt ?? null) === null ? 'completed' : 'submitted',
+      replacement: replacement === null ? null : await viewOf(context, replacement),
+    });
+  }
   return {
     timesheetRequired,
     timesheet: awaiting.timesheet === null ? null : await viewOf(context, awaiting.timesheet),
@@ -198,6 +289,8 @@ export const loadMyCompletedForms = async (context: OperationContext, technician
     readiness,
     readinessText: text,
     next: { from: nextFrom, to: today >= nextFrom ? today : nextFrom },
+    drafts: { timesheet: openView('timesheet'), attendance: openView('attendance') },
+    corrections,
   };
 };
 
@@ -220,6 +313,7 @@ export interface CompletionCheck {
 
 interface Checked extends CompletionCheck {
   readonly person: User;
+  readonly draft: PayrollCorrectionDraft | null;
   readonly codes: readonly { readonly code: string; readonly message: string; readonly detail: string }[];
   readonly otherName: string | null;
 }
@@ -244,6 +338,14 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
   const add = (code: string, message: string, detail: string) => codes.push({ code, message, detail });
 
   const same = kind === 'timesheet' ? awaiting.timesheet : awaiting.attendance;
+  const draft = awaiting.draftOf(kind);
+  if (draft !== null && (draft.from !== from || draft.to !== to)) {
+    add(
+      'form_correction_period',
+      `You are correcting your ${KIND_LABEL[kind]} for ${formatPeriod(draft.from, draft.to)}.`,
+      `A correction keeps the dates of the form it corrects: complete it for ${formatPeriod(draft.from, draft.to)}.`,
+    );
+  }
   const other = kind === 'timesheet' ? awaiting.attendance : awaiting.timesheet;
   if (same !== null) {
     add('form_already_completed', `Your ${KIND_LABEL[kind]} for ${formatPeriod(same.from, same.to)} is already completed.`, 'It waits on My Monthly Forms. Submit it to the office there before completing the next one.');
@@ -282,6 +384,7 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
   const otherName = other?.fileName ?? null;
   return {
     person,
+    draft,
     codes,
     otherName,
     kind,
@@ -302,7 +405,7 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
 
 /** The Completed dialog's question to the server: may this form be completed for these dates, and under what name. Read only. */
 export const checkFormCompletion = async (context: OperationContext, technicianId: string, kind: string, from: string, to: string): Promise<CompletionCheck> => {
-  const { person: _person, codes: _codes, otherName: _otherName, ...check } = await checkCompletion(context, technicianId, kind, from, to);
+  const { person: _person, draft: _draft, codes: _codes, otherName: _otherName, ...check } = await checkCompletion(context, technicianId, kind, from, to);
   return check;
 };
 
@@ -402,9 +505,16 @@ export const completePayrollForm = async (context: OperationContext, technicianI
     completedAt: now,
     completedBy: context.actor.id,
     submissionId: null,
+    withdrawnAt: null,
+    withdrawnBy: null,
+    correctsId: checked.draft?.withdrawnId ?? null,
   });
   if (saved === null) {
     throw refuse(`Your ${KIND_LABEL[kind]} was just completed.`, 'form_already_completed', 'It was completed once and waits on My Monthly Forms.');
+  }
+  // A correction completed: its draft is closed, once — or this whole request is undone (its transaction).
+  if (checked.draft !== null && !(await context.repos.payroll.completeCorrectionDraft(checked.draft.id, saved.id))) {
+    throw refuse(`Your corrected ${KIND_LABEL[kind]} was just completed.`, 'form_already_completed', 'It was completed once and waits on My Monthly Forms.');
   }
   // The comment went with the timesheet; the next sheet starts without it. The working name went with the form.
   if (kind === 'timesheet' && (timesheet?.comment ?? '') !== '') {
@@ -414,10 +524,88 @@ export const completePayrollForm = async (context: OperationContext, technicianI
   await audit(context, {
     jobId: null,
     type: 'payroll_form_completed',
-    summary: `${kind === 'timesheet' ? 'Timesheet' : 'Attendance'} completed: ${userFullName(person)}, ${formatPeriod(from, to)}`,
-    detail: `“${fileName}” — ${summaryOf(saved)}. Completed by ${userFullName(context.actor)}; locked, awaiting submission to the office.`,
+    summary: `${kind === 'timesheet' ? 'Timesheet' : 'Attendance'} ${checked.draft === null ? 'completed' : 'correction completed'}: ${userFullName(person)}, ${formatPeriod(from, to)}`,
+    detail:
+      `“${fileName}” — ${summaryOf(saved)}. Completed by ${userFullName(context.actor)}; locked, awaiting submission to the office.` +
+      (checked.draft === null ? '' : ` It corrects the withdrawn form ${checked.draft.withdrawnId}, kept exactly as it was completed.`),
   });
   return viewOf(context, saved);
+};
+
+/**
+ * WITHDRAW AND CORRECT (FORM-WITHDRAW-1). The owner withdraws a completed form still awaiting Submit to Office.
+ *
+ * In the request's one transaction, under both form locks (attendance first, as Complete and Submit take them, so
+ * a withdrawal and a submission racing are made one after the other): checked to be the owner's, completed,
+ * awaiting — never submitted, never already withdrawn — and still exactly what was completed; then marked
+ * withdrawn (the database's guard allows only that, once, and never on a submitted form), its correction draft
+ * opened on its dates (one per withdrawn form — a second withdrawal, retried or raced, finds it withdrawn and is
+ * refused), its data given back to the draft (the comment and the name it was completed with), and audited. Its
+ * content and PDF are never touched. If any step fails, nothing is withdrawn.
+ */
+export const withdrawCompletedForm = async (context: OperationContext, technicianId: string, completionId: string): Promise<CompletedFormView> => {
+  const userId = asUserId(technicianId);
+  assertOwnForm(context, userId);
+  await holdFormLock(context, userId, 'attendance');
+  await holdFormLock(context, userId, 'timesheet');
+  const form = await context.repos.payroll.findFormCompletion(completionId);
+  // Somebody else's is refused exactly like one that does not exist.
+  if (form === null || form.userId !== userId) throw refuse('That completed form does not exist.', 'form_not_found', 'Reload My Monthly Forms.');
+  if (form.submissionId !== null) {
+    throw refuse(
+      'This form was submitted to the office, so it cannot be withdrawn.',
+      'form_already_submitted',
+      'A submitted form is read only for good. A submitted timesheet is changed by asking for a correction on My Monthly Forms.',
+    );
+  }
+  if ((form.withdrawnAt ?? null) !== null) {
+    throw refuse('This form was already withdrawn.', 'form_already_withdrawn', 'Its correction is under Corrections on My Monthly Forms.');
+  }
+  const person = await findPayrollPerson(context, technicianId);
+  // Still exactly as completed (its dates were locked): the draft starts from the very same data.
+  if (form.kind === 'timesheet') {
+    const entries = await context.repos.attendance.listEntries(person.id, form.from, form.to);
+    const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    if (!sameContent(sorted, form.timesheet?.entries ?? [])) {
+      throw refuse('Your timesheet changed after it was completed.', 'payroll_form_changed', 'Nothing was withdrawn. Ask the office to look into it.');
+    }
+  } else {
+    const records = await context.repos.attendance.listRecords(form.from, form.to, person.id);
+    if (!sameContent(attendancePeriodDays(form.from, form.to, records), form.attendance)) {
+      throw refuse('Your attendance changed after it was completed.', 'payroll_form_changed', 'Nothing was withdrawn. Ask the office to look into it.');
+    }
+  }
+  const now = context.services.clock.now();
+  const withdrawn = await context.repos.payroll.withdrawFormCompletion(form.id, now, context.actor.id);
+  if (withdrawn === null) throw refuse('This form was just withdrawn or submitted.', 'form_already_withdrawn', 'Reload My Monthly Forms.');
+  const draft = await context.repos.payroll.createCorrectionDraft({
+    id: context.services.ids.next('pfd'),
+    userId,
+    kind: form.kind,
+    from: form.from,
+    to: form.to,
+    withdrawnId: form.id,
+    completedId: null,
+    openedAt: now,
+    openedBy: context.actor.id,
+  });
+  if (draft === null) {
+    // Undone with the request's transaction: never withdrawn without its draft.
+    throw refuse(`A correction of your ${KIND_LABEL[form.kind]} is already open.`, 'correction_draft_open', 'Complete it before withdrawing again.');
+  }
+  // The draft holds the form's data: its lines or days are in their pages already (locked until now); the comment
+  // and the name it was completed with come back, so completing again proposes the same.
+  if (form.kind === 'timesheet' && (form.timesheet?.comment ?? '') !== '') {
+    await context.repos.attendance.saveWorkingComment({ userId, comment: form.timesheet!.comment, updatedBy: context.actor.id, updatedAt: now });
+  }
+  await context.repos.payroll.saveDocumentName({ userId, kind: form.kind, fileName: form.fileName, updatedBy: context.actor.id, updatedAt: now });
+  await audit(context, {
+    jobId: null,
+    type: 'payroll_form_withdrawn',
+    summary: `${form.kind === 'timesheet' ? 'Timesheet' : 'Attendance'} withdrawn to correct: ${userFullName(person)}, ${formatPeriod(form.from, form.to)}`,
+    detail: `“${form.fileName}” (completed ${form.completedAt.slice(0, 16).replace('T', ' ')}) withdrawn before submission by ${userFullName(context.actor)}. Kept exactly as it was completed, PDF included; correction draft ${draft.id} opened for the same dates.`,
+  });
+  return viewOf(context, withdrawn);
 };
 
 /**
@@ -454,7 +642,10 @@ export const submitCompletedForms = async (context: OperationContext, technician
   await holdFormLock(context, userId, 'attendance');
   if (timesheetRequired) await holdFormLock(context, userId, 'timesheet');
   const awaiting = await awaitingOf(context, userId);
-  const { readiness, text } = readinessOf(timesheetRequired, awaiting.timesheet, awaiting.attendance);
+  const { readiness, text } = readinessOf(timesheetRequired, awaiting.timesheet, awaiting.attendance, {
+    timesheet: awaiting.draftOf('timesheet') !== null,
+    attendance: awaiting.draftOf('attendance') !== null,
+  });
   if (readiness !== 'ready') {
     const recent = awaiting.all.find((form) => form.submissionId !== null);
     throw readiness === 'none' && recent !== undefined && awaiting.timesheet === null && awaiting.attendance === null

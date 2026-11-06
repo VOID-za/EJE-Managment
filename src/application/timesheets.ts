@@ -345,6 +345,30 @@ const assertTimesheetDate = (_context: OperationContext, date: string): void => 
 const assertDayOpen = (context: OperationContext, technicianId: UserId, date: string): Promise<void> =>
   assertDatesOpen(context, technicianId, 'timesheet', [date]);
 
+/** Whether this line is IN one of the person's current submitted timesheets (its version in force). */
+const inCurrentSubmission = async (context: OperationContext, technicianId: UserId, entryId: string): Promise<boolean> => {
+  for (const period of await context.repos.attendance.listSubmissions(technicianId)) {
+    if ((period.supersededAt ?? null) !== null) continue;
+    if (versionInForce(period, await context.repos.attendance.listCorrections(period.id)).snapshot.entries.some((entry) => entry.id === entryId)) return true;
+  }
+  return false;
+};
+
+/**
+ * A line taken away from its date (moved or removed): a line IN a submitted timesheet never is; one only left
+ * over on a sent date may leave it (v1.7.1, `assertDatesOpen` → leaving).
+ */
+const assertMayLeave = async (context: OperationContext, technicianId: UserId, entry: TimesheetEntry): Promise<void> => {
+  if (await inCurrentSubmission(context, technicianId, entry.id)) {
+    throw refuse(
+      'This line is part of a timesheet submitted to the office.',
+      'timesheet_line_submitted',
+      'A submitted timesheet is kept exactly as submitted. To change it, ask for a correction under Submitted timesheets on My Monthly Forms.',
+    );
+  }
+  await assertDatesOpen(context, technicianId, 'timesheet', [entry.date], { leaving: true });
+};
+
 const personOf = (user: User): TimesheetPerson => ({
   id: user.id,
   firstName: user.firstName,
@@ -707,7 +731,7 @@ export const saveTimesheetEntry = async (
   }
   await assertDayOpen(context, id, input.date);
   if (existing !== null && existing.date !== input.date) {
-    await assertDayOpen(context, id, existing.date);
+    await assertMayLeave(context, id, existing);
   }
 
   const values = await normaliseTimesheetLine(context, input, existing);
@@ -790,7 +814,7 @@ export const removeTimesheetEntry = async (
   if (existing === null || existing.userId !== id) {
     throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
   }
-  await assertDayOpen(context, id, existing.date);
+  await assertMayLeave(context, id, existing);
   await context.repos.attendance.deleteEntry(existing.id);
   await audit(context, {
     jobId: null,

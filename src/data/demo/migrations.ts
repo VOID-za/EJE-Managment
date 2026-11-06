@@ -732,6 +732,12 @@ const v40ToV41 = (data: Loose): Loose => ({
   timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
 });
 
+/** FORM-WITHDRAW-1: correction drafts, as PostgreSQL migration 0055. Nothing existing is rewritten (a completed form without withdrawnAt is not withdrawn). */
+const v45ToV46 = (data: Loose): Loose => ({
+  ...data,
+  payrollCorrectionDrafts: Array.isArray(data.payrollCorrectionDrafts) ? data.payrollCorrectionDrafts : [],
+});
+
 /** FORM-LIFECYCLE-1: completed forms, as PostgreSQL migration 0054. Nothing existing is rewritten. */
 const v44ToV45 = (data: Loose): Loose => ({
   ...data,
@@ -816,6 +822,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   42: v42ToV43,
   43: v43ToV44,
   44: v44ToV45,
+  45: v45ToV46,
 };
 
 /**

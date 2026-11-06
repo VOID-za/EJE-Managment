@@ -20,6 +20,7 @@ import type {
   PayrollDocumentName,
   PayrollDocumentKind,
   PayrollFormCompletion,
+  PayrollCorrectionDraft,
   MonthlySubmission,
   FinancePackage,
   FinancePackageStatus,
@@ -1775,7 +1776,16 @@ class DemoPayrollRepository implements PayrollRepository {
     let created: PayrollFormCompletion | null = null;
     this.context.commit((draft) => {
       const rows = draft.payrollFormCompletions ?? [];
-      if (rows.some((row) => row.userId === completion.userId && row.kind === completion.kind && row.submissionId === null)) return;
+      if (rows.some((row) => row.userId === completion.userId && row.kind === completion.kind && row.submissionId === null && (row.withdrawnAt ?? null) === null)) return;
+      // As the guard: a correction corrects a withdrawn form of the same person, kind and dates, once.
+      if ((completion.correctsId ?? null) !== null) {
+        const original = rows.find((row) => row.id === completion.correctsId);
+        if (
+          original === undefined || (original.withdrawnAt ?? null) === null || original.userId !== completion.userId ||
+          original.kind !== completion.kind || original.from !== completion.from || original.to !== completion.to
+        ) return;
+        if (rows.some((row) => row.correctsId === completion.correctsId)) return;
+      }
       draft.payrollFormCompletions = [...rows, completion];
       created = completion;
     });
@@ -1797,12 +1807,58 @@ class DemoPayrollRepository implements PayrollRepository {
     let marked = 0;
     this.context.commit((draft) => {
       draft.payrollFormCompletions = (draft.payrollFormCompletions ?? []).map((row) => {
-        if (!ids.includes(row.id) || row.submissionId !== null) return row;
+        if (!ids.includes(row.id) || row.submissionId !== null || (row.withdrawnAt ?? null) !== null) return row;
         marked += 1;
         return { ...row, submissionId };
       });
     });
     return Promise.resolve(marked);
+  }
+
+  /** As the database's guard: only an awaiting form is withdrawn, once. */
+  withdrawFormCompletion(id: string, withdrawnAt: string, withdrawnBy: UserId): Promise<PayrollFormCompletion | null> {
+    let withdrawn: PayrollFormCompletion | null = null;
+    this.context.commit((draft) => {
+      draft.payrollFormCompletions = (draft.payrollFormCompletions ?? []).map((row) => {
+        if (row.id !== id || row.submissionId !== null || (row.withdrawnAt ?? null) !== null) return row;
+        const next: PayrollFormCompletion = { ...row, withdrawnAt, withdrawnBy };
+        withdrawn = next;
+        return next;
+      });
+    });
+    return Promise.resolve(withdrawn);
+  }
+
+  /** As the database's keys: one draft per withdrawn form, one open per person and form. */
+  createCorrectionDraft(draft: PayrollCorrectionDraft): Promise<PayrollCorrectionDraft | null> {
+    let created: PayrollCorrectionDraft | null = null;
+    this.context.commit((store) => {
+      const rows = store.payrollCorrectionDrafts ?? [];
+      const original = (store.payrollFormCompletions ?? []).find((row) => row.id === draft.withdrawnId);
+      if (original === undefined || (original.withdrawnAt ?? null) === null || original.userId !== draft.userId || original.kind !== draft.kind) return;
+      if (rows.some((row) => row.withdrawnId === draft.withdrawnId || (row.userId === draft.userId && row.kind === draft.kind && row.completedId === null))) return;
+      store.payrollCorrectionDrafts = [...rows, draft];
+      created = draft;
+    });
+    return Promise.resolve(created);
+  }
+
+  listCorrectionDrafts(userId: UserId): Promise<readonly PayrollCorrectionDraft[]> {
+    return Promise.resolve(
+      (this.context.read().payrollCorrectionDrafts ?? []).filter((row) => row.userId === userId).sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
+    );
+  }
+
+  completeCorrectionDraft(draftId: string, completedId: string): Promise<boolean> {
+    let done = false;
+    this.context.commit((store) => {
+      store.payrollCorrectionDrafts = (store.payrollCorrectionDrafts ?? []).map((row) => {
+        if (row.id !== draftId || row.completedId !== null) return row;
+        done = true;
+        return { ...row, completedId };
+      });
+    });
+    return Promise.resolve(done);
   }
 
   findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null> {

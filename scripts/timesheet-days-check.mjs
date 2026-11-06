@@ -29,8 +29,9 @@
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
 import { completeAndSubmit } from './payroll-flow.mjs';
+import { assertLocalTarget } from './local-target.mjs';
 
-const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
+const BASE = assertLocalTarget(process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210');
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
 const [width, height] = shape.split('x').map(Number);
 const touch = mode === 'touch';
@@ -149,9 +150,12 @@ await check('lines from before the redesign are on their days, editable; a submi
     if (!(await shown.getByTestId('timesheet-overtime').isEditable())) fail('an earlier line is read-only');
   }
   const day = await summaryOf(shift(today, -20));
-  if (!/2 lines · 2 customers/u.test(day) || !/OT 3\.50/u.test(day)) fail(`the earlier day reads "${day}"`);
+  // v1.7.1: the customers by name, never "2 lines · 2 customers/sites".
+  if (/\b\d+ lines?\b|customers?\/sites?/u.test(day) || !/OT 3\.50/u.test(day)) fail(`the earlier day reads "${day}"`);
   const kept = await summaryOf(shift(today, -30));
-  if (!/In a submitted timesheet/u.test(kept)) fail(`the submitted day reads "${kept}" on Timesheets`);
+  // Which timesheet holds it, in words — never just "Submitted".
+  if (!/Already in your timesheet .* sent to the office/u.test(kept)) fail(`the submitted day reads "${kept}" on Timesheets`);
+  if ((await page.getByTestId('timesheet-sent-overlap').count()) !== 1) fail('the page does not say the chosen dates reach into a timesheet already sent');
   for (const line of submitted) {
     if ((await lineById(line.id).count()) > 0) fail(`the submitted line on ${line.date} is on the Timesheets page`);
   }
@@ -195,7 +199,7 @@ await check('2–3. a day opened: Add line inside it; the day\'s line typed — 
   await page.waitForFunction((d) => document.querySelector(`[data-testid="timesheet-day"][data-date="${d}"]`)?.getAttribute('data-state') === 'saved', DAY, { timeout: 15000 });
   if ((await lineById(first).getAttribute('data-state')) !== 'saved') fail('the line does not say Saved');
   const summary = await summaryOf(DAY);
-  if (!/1 line · 1 customer/u.test(summary) || !/OT 2\.00/u.test(summary)) fail(`the day reads "${summary}"`);
+  if (/\b\d+ lines?\b|customers?\/sites?/u.test(summary) || !/Day Check Alpha/u.test(summary) || !/OT 2\.00/u.test(summary)) fail(`the day reads "${summary}"`);
 });
 
 await check('4–6. reopened after a refresh, the saved line is edited like a new one — and the change is kept', async () => {
@@ -229,7 +233,8 @@ await check('7–8. a second and a third customer under the SAME day: one block,
   if ((await page.locator(`[data-testid="timesheet-day"][data-date="${DAY}"]`).count()) !== 1) fail('a second block for the same date');
   if ((await linesOf(DAY).count()) !== 3) fail(`${await linesOf(DAY).count()} lines under the day`);
   const summary = await summaryOf(DAY);
-  if (!/3 lines · 3 customers/u.test(summary)) fail(`the day reads "${summary}"`);
+  // Every customer of the day by name, in line order — none dropped.
+  if (/\b\d+ lines?\b|customers?\/sites?/u.test(summary) || !summary.includes('Day Check Alpha Site 2, Day Check Bravo, Day Check Charlie')) fail(`the day reads "${summary}"`);
 });
 
 await check('9. the second line edited on its own: the first and third are untouched', async () => {
@@ -263,7 +268,7 @@ await check('10. one line removed after its confirmation (Cancel keeps it); the 
 
 await check('11. the day is its lines added up once; the days add up to the period and to the PDF Finance is sent', async () => {
   const summary = await summaryOf(DAY);
-  if (!/OT 2\.75/u.test(summary) || !/D\/T 2\.25/u.test(summary) || !/Km 0\.0 int \/ 12\.5 cust/u.test(summary)) fail(`the day reads "${summary}"`);
+  if (!/OT 2\.75/u.test(summary) || !/D\/T 2\.25/u.test(summary) || !/Int Km 0\.0/u.test(summary) || !/Cust Km 12\.5/u.test(summary)) fail(`the day reads "${summary}"`);
   if (Math.round(money(summary.split('Callout')[1].split('·')[0]) * 100) !== 45_000) fail(`the day's call-out reads "${summary}"`);
   const document = (await call('GET', `/api/payroll/forms/${await me()}/timesheet?from=${FROM}&to=${TO}`)).json?.data;
   const totals = document?.totals;
@@ -281,6 +286,61 @@ await check('11. the day is its lines added up once; the days add up to the peri
   const period = await page.getByTestId('timesheet-totals').innerText();
   if (!period.includes(`OT ${totals.overtimeHours.toFixed(2)}`)) fail(`the period reads "${period}", the PDF OT ${totals.overtimeHours}`);
   return `day OT 2.75, D/T 2.25, call-out R450; period OT ${totals.overtimeHours.toFixed(2)} = PDF`;
+});
+
+await check('v1.7.1: the headings are centred over their fields; Done · Add line · Change date under the rows; Done closes the day only', async () => {
+  await openSheet();
+  await openDay(DAY);
+  const day = dayOf(DAY);
+  // Measured together, in one go: each heading's centre over its field's centre, and its text centred down its row.
+  const offsets = await day.evaluate((element) => {
+    const heads = [...element.querySelectorAll('[data-testid="timesheet-columns"] > span')].slice(0, 6);
+    const row = element.querySelector('[data-testid="timesheet-line"]');
+    const fields = ['timesheet-customer-name', 'timesheet-overtime', 'timesheet-double', 'timesheet-callout', 'timesheet-internal-km', 'timesheet-customer-km']
+      .map((id) => row?.querySelector(`[data-testid="${id}"]`));
+    return heads.map((head, index) => {
+      const box = head.getBoundingClientRect();
+      const field = fields[index]?.getBoundingClientRect();
+      const text = document.createRange();
+      text.selectNodeContents(head);
+      const words = text.getBoundingClientRect();
+      return {
+        name: head.textContent,
+        across: field === undefined ? 99 : Math.abs(box.left + box.width / 2 - (field.left + field.width / 2)),
+        words: Math.abs(words.left + words.width / 2 - (box.left + box.width / 2)),
+        down: Math.abs(words.top + words.height / 2 - (box.top + box.height / 2)),
+      };
+    });
+  });
+  if (offsets.map((offset) => offset.name).join('|') !== 'Customer|OT|D/T|Callout (R)|Int Km|Cust Km') fail(`the columns are ${offsets.map((offset) => offset.name).join('|')}`);
+  for (const offset of offsets) {
+    if (offset.across > 1.5 || offset.words > 1.5 || offset.down > 1.5) fail(`"${offset.name}" is off centre: ${JSON.stringify(offset)}`);
+  }
+  // No Close up in the heading; Done, Add line, Change date — in that order — under the rows.
+  if (/\bClose\b/u.test(await day.getByTestId('timesheet-day-toggle').innerText())) fail('the heading still says Close');
+  const order = await day.getByTestId('timesheet-day-actions').evaluate((element) => [...element.querySelectorAll('button')].map((button) => button.textContent?.trim()));
+  if (order.slice(0, 3).join('|') !== 'Done|Add line|Change date') fail(`the buttons are ${order.join('|')}`);
+  const before = JSON.stringify((await heldLines()).filter((line) => line.date === DAY).map((line) => [line.id, line.typed]).sort());
+  const forms = (await call('GET', `/api/payroll/forms/${await me()}/completed`)).json?.data;
+  await press(day.getByTestId('timesheet-day-done'));
+  if ((await day.getAttribute('data-open')) !== 'no') fail('Done did not close the day');
+  if ((await dayOf(shift(DAY, -1)).getAttribute('data-open')) === 'yes') fail('Done opened another day');
+  const after = JSON.stringify((await heldLines()).filter((line) => line.date === DAY).map((line) => [line.id, line.typed]).sort());
+  if (after !== before) fail('Done changed the lines');
+  const formsAfter = (await call('GET', `/api/payroll/forms/${await me()}/completed`)).json?.data;
+  if (JSON.stringify(formsAfter?.timesheet ?? null) !== JSON.stringify(forms?.timesheet ?? null) || formsAfter?.readiness !== forms?.readiness) fail('Done completed or submitted something');
+  // Reopened, the lines are there and still editable; an empty day says Not recorded, no zeros.
+  await openDay(DAY);
+  if (!(await linesOf(DAY).first().getByTestId('timesheet-overtime').isEditable())) fail('the day is locked after Done');
+  const empty = page.locator('[data-testid="timesheet-day"][data-state="empty"]').first();
+  if ((await empty.count()) === 1) {
+    const text = await empty.getByTestId('timesheet-day-summary').innerText();
+    if (!/Not recorded/u.test(text) || /OT|0\.00/u.test(text)) fail(`an empty day reads "${text}"`);
+  }
+  // On a phone, only the day's table scrolls sideways — never the page.
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (over > 1) fail(`the page scrolls sideways by ${over}px`);
+  return `centred within ${Math.max(...offsets.map((offset) => Math.max(offset.across, offset.down))).toFixed(2)}px`;
 });
 
 await check('12. a line not complete yet is a Draft that says what it needs; the day says Draft', async () => {
