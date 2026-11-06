@@ -293,7 +293,7 @@ await check('27–28. submitted lines leave Timesheets and cannot be changed the
   }
   for (const date of inPeriod) {
     const summary = await page.locator(`[data-testid="timesheet-day"][data-date="${date}"] [data-testid="timesheet-day-summary"]`).innerText();
-    if (!/submitted timesheet/u.test(summary)) fail(`${date} reads "${summary}"`);
+    if (!/Already in your timesheet .* sent to the office/u.test(summary)) fail(`${date} reads "${summary}"`);
   }
   for (const gone of ['timesheet-submissions', 'timesheet-submission', 'timesheet-office', 'my-submitted-timesheets', 'my-monthly-history', 'timesheet-last-submission']) {
     if ((await page.getByTestId(gone).count()) > 0) fail(`Timesheets still shows ${gone}`);

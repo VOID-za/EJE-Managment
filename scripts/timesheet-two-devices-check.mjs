@@ -246,7 +246,7 @@ await check('ONE DAY, TWO DEVICES, TWO LINES: each edits its own line under the 
     await open(side.page);
     await openDay(side.page, day);
     const summary = await side.page.locator(`[data-testid="timesheet-day"][data-date="${day}"] [data-testid="timesheet-day-summary"]`).innerText();
-    if (!/2 lines/u.test(summary) || !/OT 3\.50/u.test(summary) || !/D\/T 1\.25/u.test(summary)) fail(`the day reads "${summary}"`);
+    if (/\b\d+ lines?\b|customers?\/sites?/u.test(summary) || !/OT 3\.50/u.test(summary) || !/D\/T 1\.25/u.test(summary)) fail(`the day reads "${summary}"`);
   }
   await removeLine(A.page, lineOn(A.page, onA));
   await saved(A.page);
