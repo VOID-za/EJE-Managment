@@ -1,14 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { can, completesTimesheet } from '@/domain';
-import { Badge, Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure, TextAreaField, TextField } from '@/components/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { completesTimesheet } from '@/domain';
+import { Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure, TextAreaField, TextField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { AutosaveStatus } from '@/components/attendance/AutosaveStatus';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
-import { TimesheetLineEditor, type EditableLine } from '@/components/timesheets/TimesheetLineEditor';
-import { TimesheetSubmissions } from '@/components/timesheets/TimesheetSubmissions';
+import { TimesheetDay } from '@/components/timesheets/TimesheetDay';
+import { TimesheetLineEditor, shownLine, type EditableLine } from '@/components/timesheets/TimesheetLineEditor';
 import { useTimesheetAutosave } from '@/components/timesheets/useTimesheetAutosave';
 import { payroll, reads, timesheets } from '@/api/endpoints';
 import type { TimesheetDocument } from '@/application/timesheets';
@@ -19,6 +19,7 @@ import { formatCurrency } from '@/lib/format';
 import { isUsableRange, readRememberedRange, rememberRange, type DateRange } from '@/lib/remembered-range';
 import { daysInPeriod, formatDayAndDate, formatPeriod, isCalendarDay } from '@/lib/timesheet-dates';
 import { COMMENT_KEY } from '@/lib/timesheet-autosave';
+import { groupByDay } from '@/lib/timesheet-day';
 import { emptyTimesheetLineTyped, parseTyped, randToCents } from '@/lib/timesheet-line';
 
 /** The longest period the page lays out day by day; the submission itself may be up to a year. */
@@ -49,31 +50,34 @@ const linkedRange = (): DateRange | null => {
 
 /**
  * TIMESHEETS — WORKING DATA THAT SAVES ITSELF. PAYROLL-ONE-1 (the owner,
- * 5 November 2026), on TS-PAPER (docs/payroll-forms.md).
+ * 5 November 2026), on TS-PAPER (docs/payroll-forms.md); TS-DAY-1 (the owner,
+ * 6 November 2026).
  *
  * The same page as Attendance: the period's From and To top-right, then the
  * period with Preview and Print, then every day of the period, oldest first,
- * with its lines — typed straight into the line, as many a day as needed,
- * Workshop or a customer or neither. Every change saves itself (Saving…,
- * Saved, Save failed + Retry — never "Saved" before the server said so). A
- * line not complete yet is kept on the server as a Draft and says what it
- * needs. There is NO Submit here: the timesheet is submitted with the
- * attendance, for the same From and To, on My Monthly Forms.
+ * each ONE block (`TimesheetDay`): collapsed to its date and what its lines
+ * add up to; opened, a line for each customer, site or Workshop visited, and
+ * Add line inside the day. Every change saves itself (Saving…, Saved, Save
+ * failed + Retry — never "Saved" before the server said so). A line not
+ * complete yet is kept on the server as a Draft and says what it needs. There
+ * is NO Submit here: the timesheet is submitted with the attendance, for the
+ * same From and To, on My Monthly Forms.
+ *
+ * ONLY THE WORKING SHEET IS HERE. A submitted line, the submitted timesheets,
+ * their PDFs and corrections, and the office's list of everybody's are on My
+ * Monthly Forms; the server keeps refusing a change to a submitted line.
  *
  * Kept: Workshop/customer, OT, D/T, call-out amount, internal and customer km,
- * historical NT and call-out counts, the one comment, the submitted timesheets
- * and their corrections, the office's list of everybody's submissions.
+ * historical NT and call-out counts, the one comment.
  */
 const TimesheetsPage = () => {
   const user = useCurrentUser();
   const keeps = completesTimesheet(user.role);
-  const office = can(user.role, 'timesheets.viewAll');
   const personId = keeps ? user.id : null;
   const today = businessToday();
 
   const sheet = useQuery(`timesheets:working:${personId ?? 'none'}`, () => (personId === null ? Promise.resolve(null) : timesheets.working(personId)));
   const lines = useQuery(`timesheets:lines:${personId ?? 'none'}`, () => (personId === null ? Promise.resolve(null) : timesheets.lines(personId)));
-  const everybody = useQuery(`timesheets:submissions:all:${office ? 'yes' : 'no'}`, () => (office ? timesheets.submissions() : Promise.resolve(null)));
   const customers = useQuery('timesheets:customers', () => reads.customers());
 
   const refresh = useCallback(() => {
@@ -102,8 +106,28 @@ const TimesheetsPage = () => {
   const [previewing, setPreviewing] = useState<'preview' | 'print' | null>(null);
   // Lines added on this screen, until the server has them.
   const [added, setAdded] = useState<readonly EditableLine[]>([]);
+  // The day blocks opened (TS-DAY-1): every day starts closed.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  // Sent from My Monthly Forms to fix lines (`fix=1`): the days holding a line not complete yet open, once.
+  const fixChecked = useRef(false);
+  useEffect(() => {
+    if (fixChecked.current || lines.data === null || lines.data === undefined) return;
+    fixChecked.current = true;
+    if (new URLSearchParams(window.location.search).get('fix') !== '1') return;
+    const days = lines.data.filter((line) => line.submitted === null && !line.complete && line.date !== null).map((line) => line.date!);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the days to fix are known once the lines have loaded.
+    setOpened(new Set(days));
+  }, [lines.data]);
+  const openDay = (date: string, open = true) =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (open) next.add(date);
+      else next.delete(date);
+      return next;
+    });
 
-  const serverLines = lines.data ?? [];
+  // Only the working sheet: a line in a current submission is on My Monthly Forms, never here.
+  const serverLines = (lines.data ?? []).filter((line) => line.submitted === null);
   const known = new Set(serverLines.map((line) => line.id));
   // The server's lines, then those added here: shown while they wait to be saved or once saved (until the reload brings them).
   const addedHere = added.filter((line) => !known.has(line.id) && (saver?.pendingFor(line.id) != null || saver?.revisionOf(line.id) != null));
@@ -121,7 +145,16 @@ const TimesheetsPage = () => {
       historical: { normalHours: 0, callouts: 0 },
       submitted: null,
     }));
-  const all: readonly EditableLine[] = [...serverLines, ...addedHere, ...queued].filter((line) => saver?.pendingFor(line.id)?.kind !== 'remove');
+  /*
+   * Each line where it is now: a day moved on this device shows its lines on the new date at once, before the
+   * server has answered, so a line is never typed into under the day it is leaving.
+   */
+  const all: readonly EditableLine[] = [...serverLines, ...addedHere, ...queued]
+    .filter((line) => saver?.pendingFor(line.id)?.kind !== 'remove')
+    .map((line) => {
+      const shown = shownLine(line, saver);
+      return shown.date === line.date ? line : { ...line, date: shown.date };
+    });
 
   const addLine = (date: string) => {
     const line: EditableLine = {
@@ -136,13 +169,24 @@ const TimesheetsPage = () => {
     };
     setAdded((current) => [...current, line]);
     saver?.change({ kind: 'line', id: line.id, date, typed: line.typed, base: null }, 0);
+    openDay(date);
   };
 
   const from = usable ? range!.from : today;
   const to = usable ? range!.to : today;
+
+  /** Change date (TS-DAY-1): every line of the day to the new date, each saved as it is now. */
+  const moveDay = (date: string, target: string, dayLines: readonly EditableLine[]) => {
+    for (const line of dayLines) {
+      saver?.change({ kind: 'line', id: line.id, date: target, typed: shownLine(line, saver).typed, base: line.revision }, 0);
+    }
+    openDay(date, false);
+    if (target >= from && target <= to) openDay(target);
+  };
   const inside = all.filter((line) => line.date !== null && from <= line.date && line.date <= to);
   const undated = all.filter((line) => line.date === null);
-  const outside = all.filter((line) => line.date !== null && (line.date < from || line.date > to) && line.submitted === null);
+  const outside = all.filter((line) => line.date !== null && (line.date < from || line.date > to));
+  const byDay = groupByDay(inside, (line) => line.date);
   const drafts = inside.filter((line) => !line.complete || saver?.pendingFor(line.id) !== null).length;
   const completeInside = inside.filter((line) => line.complete);
   const total = (pick: (line: EditableLine) => number) => completeInside.reduce((sum, line) => sum + pick(line), 0);
@@ -162,13 +206,14 @@ const TimesheetsPage = () => {
         title="Timesheets"
         description={
           keeps
-            ? 'Your timesheet, like the paper one. Type your lines as you go — every change saves by itself. Submit it with your attendance on My Monthly Forms.'
-            : 'Every technician keeps their own timesheet and submits it on My Monthly Forms. Their submissions are below.'
+            ? 'Your timesheet, like the paper one: open a day and add a line for each customer, site or Workshop. Every change saves by itself. Submit it with your attendance on My Monthly Forms, where your submitted timesheets are kept.'
+            : 'Every technician keeps their own timesheet and submits it on My Monthly Forms.'
         }
       />
       {!keeps && (
         <p role="status" className="mb-4 text-sm text-steel-600" data-testid="timesheet-not-required">
-          The Office does not complete a timesheet — only attendance.
+          The Office does not complete a timesheet — only attendance. Everybody&apos;s submitted timesheets are on{' '}
+          <a href="/payroll/mine" className="font-medium text-eje-700 underline">My Monthly Forms</a>.
         </p>
       )}
 
@@ -263,32 +308,19 @@ const TimesheetsPage = () => {
                 </Card>
               )}
 
-              <AutosaveStatus
-                state={status}
-                onRetry={() => saver?.retry()}
-                conflict={conflict}
-                onDismissConflict={dismissConflict}
-                idleText="Every change saves by itself as you type — there is no Save or Submit button on this page."
-              />
-
               <Card className="mb-5" data-testid="timesheet-sheet">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-steel-900">Your timesheet</h2>
-                    <p className="text-sm text-steel-600" data-testid="timesheet-last-submission">
-                      {sheet.data.lastSubmission === null
-                        ? 'You have not submitted a timesheet yet.'
-                        : `Last submitted: ${formatPeriod(sheet.data.lastSubmission.from, sheet.data.lastSubmission.to)}.`}
-                    </p>
-                  </div>
-                  <Button
-                    onClick={() => addLine(today >= from && today <= to ? today : to)}
-                    leadingIcon={<Icon name="plus" className="size-4" />}
-                    disabled={saver === null}
-                    data-testid="add-timesheet-line"
-                  >
-                    Add line
-                  </Button>
+                <h2 className="text-base font-semibold text-steel-900">Your timesheet</h2>
+                <p className="mt-1 text-sm text-steel-600">Open a day (Edit) to add or change its lines — one line for each customer, site or Workshop. A day&apos;s figures are its lines added up.</p>
+
+                {/* Part of the page, not pinned: it scrolls away with the page; each line and day says its own state. */}
+                <div className="mt-3">
+                  <AutosaveStatus
+                    state={status}
+                    onRetry={() => saver?.retry()}
+                    conflict={conflict}
+                    onDismissConflict={dismissConflict}
+                    idleText="Every change saves by itself as you type — there is no Save or Submit button on this page."
+                  />
                 </div>
 
                 {/* TS-CALLOUT-2 (3 November 2026): no Shared tick — the amount IS the technician's own share. */}
@@ -321,7 +353,7 @@ const TimesheetsPage = () => {
                     <p className="text-sm font-semibold text-amber-eje-700">Lines with no date</p>
                     <ul className="mt-2 space-y-2">
                       {undated.map((line) => (
-                        <TimesheetLineEditor key={line.id} line={line} customers={customers.data ?? []} saver={saver} editable />
+                        <TimesheetLineEditor key={line.id} line={line} customers={customers.data ?? []} saver={saver} />
                       ))}
                     </ul>
                   </div>
@@ -330,29 +362,20 @@ const TimesheetsPage = () => {
                 {usable && (
                   <ol className="mt-4 divide-y divide-steel-100" data-testid="timesheet-days">
                     {daysOf(from, to).map((date) => {
-                      const ofDay = inside.filter((line) => line.date === date);
-                      const submittedDay = sheet.data!.submissions.find((submission) => submission.current && submission.from <= date && date <= submission.to);
+                      const ofDay = byDay.get(date) ?? [];
                       return (
-                        <li key={date} className="py-2" data-testid="timesheet-day" data-date={date}>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-sm font-medium text-steel-900">
-                              {formatDayAndDate(date)}
-                              {submittedDay !== undefined && (
-                                <span className="ml-2"><Badge tone="green" size="sm">Submitted</Badge></span>
-                              )}
-                            </span>
-                            <Button size="sm" variant="ghost" leadingIcon={<Icon name="plus" className="size-4" />} disabled={saver === null} onClick={() => addLine(date)} data-testid={`add-timesheet-line-${date}`}>
-                              Add line
-                            </Button>
-                          </div>
-                          {ofDay.length > 0 && (
-                            <ul className="mt-2 space-y-2" data-testid="timesheet-table">
-                              {ofDay.map((line) => (
-                                <TimesheetLineEditor key={line.id} line={line} customers={customers.data ?? []} saver={saver} editable />
-                              ))}
-                            </ul>
-                          )}
-                        </li>
+                        <TimesheetDay
+                          key={date}
+                          date={date}
+                          lines={ofDay}
+                          open={opened.has(date)}
+                          onToggle={() => openDay(date, !opened.has(date))}
+                          onAdd={() => addLine(date)}
+                          onMove={(target) => moveDay(date, target, ofDay)}
+                          submitted={sheet.data!.submissions.some((submission) => submission.current && submission.from <= date && date <= submission.to)}
+                          customers={customers.data ?? []}
+                          saver={saver}
+                        />
                       );
                     })}
                   </ol>
@@ -375,44 +398,11 @@ const TimesheetsPage = () => {
                 </div>
               </Card>
 
-              <Card className="mb-5">
-                <h2 className="mb-2 text-base font-semibold text-steel-900">Your submitted timesheets</h2>
-                <TimesheetSubmissions
-                  user={user}
-                  submissions={sheet.data.submissions}
-                  loading={false}
-                  error={null}
-                  onRetry={sheet.refetch}
-                  showTechnician={false}
-                  customers={customers.data ?? []}
-                  onChanged={refresh}
-                />
-              </Card>
             </>
           )}
         </>
       )}
 
-      {office && (
-        <Card data-testid="timesheet-office">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-steel-900">Submitted timesheets — every technician</h2>
-            <Badge tone="outline" size="sm">Office</Badge>
-          </div>
-          <p className="mb-3 text-sm text-steel-600">Each technician submits their own, with their attendance, on My Monthly Forms. Open one to read it exactly as submitted, download its PDF or export its lines.</p>
-          <TimesheetSubmissions
-            user={user}
-            submissions={everybody.data ?? null}
-            loading={everybody.loading}
-            error={everybody.error}
-            errorCode={everybody.errorCode}
-            onRetry={everybody.refetch}
-            showTechnician
-            customers={customers.data ?? []}
-            onChanged={() => everybody.refetch()}
-          />
-        </Card>
-      )}
     </>
   );
 };

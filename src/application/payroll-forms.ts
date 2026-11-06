@@ -579,7 +579,7 @@ export const submitPayrollForms = async (
     throw refuse(
       `Your submitted ${state.correctedInTheWay.map((overlap) => overlap.label).join('; ')} has a correction, so it cannot be replaced.`,
       'timesheet_replace_corrected',
-      'Change it with another correction under Submitted timesheets, or choose dates that start after it ends.',
+      'Change it with another correction under Submitted timesheets on My Monthly Forms, or choose dates that start after it ends.',
     );
   }
   // Anything else the screen lists as stopping it (both PDFs named the same, days already sent to Finance, …).

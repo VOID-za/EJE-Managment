@@ -366,7 +366,7 @@ describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (T
     const one = (await harness.repos.notifications.list(officeIds[0]!)).find((n) => n.type === 'timesheet_submitted');
     expect(one?.title).toContain('Sipho');
     expect(one?.body).toContain(formatDayAndDate(FROM));
-    expect(one?.link).toBe('/timesheets');
+    expect(one?.link).toBe('/payroll/mine');
     // The same dates again are refused, so nobody is told twice; the next period tells them again.
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toBeDefined();
     expect(await count()).toBe(officeIds.length);

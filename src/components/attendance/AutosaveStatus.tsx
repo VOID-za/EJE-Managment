@@ -7,13 +7,15 @@ import { formatDateTime } from '@/lib/format';
 const plural = (count: number) => `${count} change${count === 1 ? '' : 's'}`;
 
 /**
- * WHETHER ATTENDANCE IS SAVED, ALWAYS IN VIEW. ATT-AUTO-1.
+ * WHETHER ATTENDANCE (OR A TIMESHEET) IS SAVED. ATT-AUTO-1.
  *
  * There is no Save button to press, so this line has to answer the question a
  * Save button answers: is what I chose on the server? Saving…, All changes
  * saved with the time of the last save, kept on this device while offline,
- * or why a change was refused — with Retry. It stays in view under the top bar
- * while a long month is scrolled, and is announced to screen readers.
+ * or why a change was refused — with Retry. It is announced to screen readers.
+ * It is PART OF THE PAGE, not pinned (the owner, 6 November 2026): it scrolls
+ * away with the page, and each day or line says its own Saving, Saved or
+ * Save failed where it is.
  */
 export const AutosaveStatus = ({
   state,
@@ -52,7 +54,7 @@ export const AutosaveStatus = ({
                 ? `No connection — ${plural(state.count)} kept on this device, not yet saved. They save by themselves when the connection is back${state.retryAt === null ? '' : ` (next try ${formatDateTime(state.retryAt)})`}.`
                 : `Save failed — ${state.message} Your change is kept: retry it, or undo it on its day.`;
   return (
-    <div className="sticky top-16 z-20 mb-3" data-testid="autosave-status" data-state={state.kind}>
+    <div className="mb-3" data-testid="autosave-status" data-state={state.kind}>
       <div role="status" aria-live="polite" className={`flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border px-3 py-2 text-sm shadow-sm ${tone}`}>
         <Icon
           name={state.kind === 'saved' ? 'check' : state.kind === 'failed' || state.kind === 'offline' ? 'warning' : 'clock'}

@@ -4087,17 +4087,20 @@ await step('a technician records their own absence with its reason; their timesh
   await signInAsMasterIfNeeded();
 });
 
-await step('the Master’s Timesheets page: their own sheet, Submit with From and To, and every technician’s submissions (TS-PAPER)', async () => {
+await step('the Master’s Timesheets page: their own sheet by day, From and To — and every technician’s submissions on My Monthly Forms, not here (TS-PAPER, TS-DAY-1)', async () => {
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-sheet').waitFor({ timeout: 10000 });
   if ((await page.getByTestId('timesheet-person').count()) !== 0) throw new Error('the Whose timesheet block is still on the page');
   if ((await page.getByLabel('Whose timesheet').count()) !== 0) throw new Error('the Whose timesheet selector is still on the page');
   await page.getByTestId('timesheet-from').waitFor({ timeout: 5000 });
   await page.getByTestId('timesheet-to').waitFor({ timeout: 5000 });
-  // Their own sheet: a Master keeps a timesheet, so lines can be added.
-  if ((await page.getByTestId('add-timesheet-line').count()) === 0) throw new Error('the Master is not offered their own timesheet');
-  // The office's list of everybody's submissions.
-  await page.getByTestId('timesheet-office').waitFor({ timeout: 10000 });
+  // Their own sheet: a Master keeps a timesheet — a block for each day, with Add line inside it.
+  const firstDay = page.getByTestId('timesheet-day').first();
+  await firstDay.getByTestId('timesheet-day-toggle').click();
+  if ((await firstDay.locator('[data-testid^="add-timesheet-line-"]').count()) !== 1) throw new Error('the Master is not offered their own timesheet');
+  await firstDay.getByTestId('timesheet-day-toggle').click();
+  // The office's list of everybody's submissions is on My Monthly Forms (6 November 2026), not here.
+  if ((await page.getByTestId('timesheet-office').count()) !== 0) throw new Error('submitted timesheets are still on the Timesheets page');
   // A From after the To is said on the screen, not sent to the server.
   const from = await page.getByLabel('From').inputValue();
   await page.getByLabel('From').fill('2099-01-01');
@@ -4106,15 +4109,18 @@ await step('the Master’s Timesheets page: their own sheet, Submit with From an
   await page.getByTestId('timesheet-preview').click();
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.getByTestId('preview-close').click();
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  await page.getByTestId('timesheet-office').waitFor({ timeout: 15000 });
 });
 
 /*
  * THE 30 OCTOBER 2026 TIMESHEET FREEZE, AS A TECHNICIAN MET IT — on the line
  * that is typed in place (PAYROLL-ONE-1). The line once vanished when part of
- * the date was cleared (a date field then reports an empty value). Reproduced
- * here exactly that way (Backspace in Date), then every field filled by
- * typing, an earlier field edited again, and read back after leaving the page
- * and from the server. Nothing is pressed to save: it saves itself.
+ * the date was cleared (a date field then reports an empty value). The date is
+ * now the day block's (TS-DAY-1): clearing it in Change date leaves the line
+ * where it is and moves nothing until Move is pressed. Then every field filled
+ * by typing, an earlier field edited again, and read back after leaving the
+ * page and from the server. Nothing is pressed to save: it saves itself.
  */
 await step('a technician types a whole timesheet line, clearing and retyping the date, and it is saved exactly as typed (the timesheet freeze)', async () => {
   await signInAs(page, 'Deon Botha');
@@ -4122,24 +4128,28 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   const target = sast(-4);
   await page.goto(`${BASE}/timesheets?from=${sast(-10)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  const block = page.locator(`[data-testid="timesheet-day"][data-date="${target}"]`);
+  await block.getByTestId('timesheet-day-toggle').click();
   await page.getByTestId(`add-timesheet-line-${target}`).click();
   const added = page.locator(`[data-testid="timesheet-line"][data-date="${target}"]`).last();
   await added.waitFor({ timeout: 5000 });
   const id = await added.getAttribute('data-line-id');
   const form = page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`);
 
-  // THE FAILURE: clear part of the date. The browser now reports an empty date.
-  const date = form.getByTestId('timesheet-line-date');
+  // THE FAILURE: clear part of the date. The browser now reports an empty date — in Change date, the day's own.
+  await block.getByTestId('timesheet-day-move').click();
+  const date = block.getByTestId('timesheet-day-move-date');
   await date.click();
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);
   if ((await form.count()) !== 1) throw new Error('the line vanished when the date was cleared (the freeze)');
   if ((await date.inputValue()) !== '') throw new Error(`clearing the date left "${await date.inputValue()}" — the reproduction did not happen`);
-  await form.getByText('choose the day of this line', { exact: false }).first().waitFor({ timeout: 3000 });
+  if (await block.getByTestId('timesheet-day-move-confirm').isEnabled()) throw new Error('Move is offered with no date');
 
-  // Retype it: the line stays, still answering.
+  // Retype it: the line stays where it is, still answering; nothing moves until Move.
   await date.fill(target);
   if ((await form.count()) !== 1) throw new Error('the line moved or vanished when the date changed');
+  await block.getByRole('button', { name: 'Cancel' }).click();
 
   // Every field, typed like a person types.
   const typeInto = async (label, text) => {
@@ -4151,7 +4161,7 @@ await step('a technician types a whole timesheet line, clearing and retyping the
     if (value !== text) throw new Error(`${label} reads "${value}" after typing "${text}"`);
   };
   await form.getByTestId('timesheet-customer-pick').selectOption({ index: 0 });
-  await typeInto('Customer', 'Kruger Engineering');
+  await typeInto('Customer or site', 'Kruger Engineering');
   await typeInto('OT (hours)', '2.5');
   await typeInto('D/T (hours)', '1.25');
   await typeInto('Callout (R)', '450');
@@ -4162,11 +4172,11 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await page.getByTestId('timesheet-callout-hint').waitFor({ timeout: 5000 });
   // An earlier field corrected after the later ones: nothing else moves or resets.
   await typeInto('OT (hours)', '3');
-  for (const [label, expected] of [['Customer', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
+  for (const [label, expected] of [['Customer or site', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
     const value = await form.getByLabel(label, { exact: true }).inputValue();
     if (value !== expected) throw new Error(`${label} became "${value}" after OT was edited`);
   }
-  if ((await date.inputValue()) !== target) throw new Error('the date changed by itself');
+  if ((await form.getAttribute('data-date')) !== target) throw new Error('the date changed by itself');
   // Nothing to press: it saves itself.
   if ((await page.getByTestId('save-timesheet-line').count()) !== 0) throw new Error('a Save line button is still on the page');
   await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
@@ -4174,9 +4184,10 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   // It reads back exactly as typed after leaving and coming back.
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
   await page.goto(`${BASE}/timesheets?from=${sast(-10)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
+  await block.getByTestId('timesheet-day-toggle').click();
   await form.waitFor({ timeout: 10000 });
   const read = async (label) => form.getByLabel(label, { exact: true }).inputValue();
-  const values = { date: await form.getByTestId('timesheet-line-date').inputValue(), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
+  const values = { date: await form.getAttribute('data-date'), customer: await read('Customer or site'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
   const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30' };
   if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`after coming back: ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
 
@@ -4200,6 +4211,7 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
   await page.getByTestId('timesheet-to').fill(today);
   await page.getByTestId('timesheet-from').fill(today);
+  await page.locator(`[data-testid="timesheet-day"][data-date="${today}"]`).getByTestId('timesheet-day-toggle').click();
   await page.getByTestId(`add-timesheet-line-${today}`).click();
   const row = page.locator(`[data-testid="timesheet-line"][data-date="${today}"]`).last();
   await row.waitFor({ timeout: 10000 });
@@ -4237,7 +4249,10 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
   if ((await page.getByTestId('timesheet-period-comment').inputValue()) !== '') throw new Error('the comment was not cleared for the next timesheet');
-  await page.locator(`[data-testid="timesheet-submission"][data-to="${today}"]`).first().waitFor({ timeout: 10000 });
+  // Submitted, it leaves Timesheets; it is kept on My Monthly Forms.
+  if ((await page.getByTestId('timesheet-submission').count()) !== 0) throw new Error('a submitted timesheet is on the Timesheets page');
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-to="${today}"]`).first().waitFor({ timeout: 10000 });
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
@@ -4253,8 +4268,8 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
  */
 await step('the same dates cannot be submitted again unconfirmed; the office opens the submission exactly as sent (PAYROLL-ONE-1)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
-  const last = page.locator('[data-testid="timesheet-submission"][data-current="yes"]').first();
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const last = page.locator('[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-current="yes"]').first();
   await last.waitFor({ timeout: 15000 });
   const from = await last.getAttribute('data-from');
   const to = await last.getAttribute('data-to');
@@ -4273,7 +4288,7 @@ await step('the same dates cannot be submitted again unconfirmed; the office ope
   if (again.unconfirmed !== 422) throw new Error(`submitting the same dates again answered ${again.unconfirmed}`);
   if (again.retired !== 422) throw new Error(`the retired Submit timesheet answered ${again.retired}`);
   await signInAsMasterIfNeeded();
-  await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   const office = page.getByTestId('timesheet-office');
   const row = office.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${to}"]`).filter({ hasText: 'Sipho' }).first();
   await row.waitFor({ timeout: 15000 });

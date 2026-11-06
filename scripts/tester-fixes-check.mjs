@@ -174,8 +174,12 @@ await check('Timesheets: no Whose timesheet block; submitted once for its dates,
   if (sent.status !== 200) fail(`submitting answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
   const again = await submitForms(me, from, today);
   if (again.status !== 422) fail(`the same dates again answered ${again.status}`);
+  // Submitted, it is kept on My Monthly Forms — not on Timesheets (6 November 2026).
+  await go('/payroll/mine');
+  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
   await go('/timesheets');
-  await page.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
+  await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('timesheet-submission').count()) !== 0) fail('a submitted timesheet is on the Timesheets page');
   const next = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const proposed = (await call('GET', `/api/payroll/forms/${me}?from=${today}&to=${today}`)).json.data.suggested.from;
   if (proposed !== next) fail(`the next period starts on ${proposed}`);

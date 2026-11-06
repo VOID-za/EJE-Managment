@@ -94,22 +94,30 @@ await signInAs(page, 'Deon Botha');
 
 // PAYROLL-ONE-1: a timesheet line is typed straight into the line and saves itself — no form to open, no Save.
 let lineId = null;
+let lineDay = null;
 const typedLine = () => page.locator(`[data-testid="timesheet-line"][data-line-id="${lineId}"]`);
-await step('technician: the timesheet freeze, by touch — clear the date, retype it, the line stays and answers', async () => {
+await step('technician: the timesheet freeze, by touch — the day opened, its date cleared in Change date and retyped: the line stays and answers', async () => {
   const sast = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
   const day = sast(-6);
+  lineDay = day;
   await page.goto(`${BASE}/timesheets?from=${sast(-9)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  const block = page.locator(`[data-testid="timesheet-day"][data-date="${day}"]`);
+  await tappable(block.getByTestId('timesheet-day-toggle'), 'the day block');
+  await block.getByTestId('timesheet-day-toggle').tap();
   const before = await page.locator('[data-testid="timesheet-line"]').count();
+  await tappable(page.getByTestId(`add-timesheet-line-${day}`), 'Add line inside the day');
   await page.getByTestId(`add-timesheet-line-${day}`).tap();
   await page.waitForFunction((n) => document.querySelectorAll('[data-testid="timesheet-line"]').length > n, before, { timeout: 5000 });
   lineId = await page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).last().getAttribute('data-line-id');
-  const date = typedLine().getByTestId('timesheet-line-date');
+  await block.getByTestId('timesheet-day-move').tap();
+  const date = block.getByTestId('timesheet-day-move-date');
   await date.tap();
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);
   if ((await typedLine().count()) !== 1) throw new Error('the line vanished when the date was cleared');
-  await typedLine().getByTestId('timesheet-line-date').fill(day);
+  await date.fill(day);
+  await block.getByRole('button', { name: 'Cancel' }).tap();
   await typedLine().getByTestId('timesheet-customer-name').tap();
   await page.keyboard.type('Kruger Engineering Midrand', { delay: 10 });
   if ((await typedLine().count()) !== 1) throw new Error('the line vanished while typing');
@@ -125,6 +133,8 @@ await step('technician: turn the tablet with a timesheet line half typed — eve
   await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
+  const block = page.locator(`[data-testid="timesheet-day"][data-date="${lineDay}"]`);
+  await block.getByTestId('timesheet-day-toggle').tap();
   if ((await typedLine().getByTestId('timesheet-customer-name').inputValue()) !== 'Kruger Engineering Midrand') throw new Error('the line was not saved');
 });
 

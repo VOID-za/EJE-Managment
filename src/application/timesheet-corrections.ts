@@ -252,8 +252,8 @@ export const requestTimesheetCorrection = async (
   await notifyOffice(context, {
     type: 'timesheet_correction_requested',
     title: `${userFullName(context.actor)} asked to correct a sent timesheet`,
-    body: `Period: ${label}\nReason: ${reason}\nOpen Timesheets to accept or reject it.`,
-    link: '/timesheets',
+    body: `Period: ${label}\nReason: ${reason}\nOpen My Monthly Forms → Submitted timesheets to accept or reject it.`,
+    link: '/payroll/mine',
   });
   return correctionView(context, saved);
 };
@@ -330,7 +330,7 @@ export const decideTimesheetCorrection = async (
     type: 'timesheet_correction_decided',
     title: `Your timesheet correction was ${accepted ? 'accepted' : 'rejected'}`,
     body: `Period: ${label}\nCorrection ${decided.sequence}, ${accepted ? 'accepted' : 'rejected'} by ${userFullName(context.actor)}.${note.length > 0 ? `\nNote: ${note}` : ''}`,
-    link: '/timesheets',
+    link: '/payroll/mine',
   });
   return correctionView(context, decided);
 };

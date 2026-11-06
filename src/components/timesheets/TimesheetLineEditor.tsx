@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { WORKSHOP_LABEL, type TimesheetLineTyped } from '@/domain';
-import { Badge, Button, SelectField, TextField } from '@/components/ui';
-import { formatCurrency } from '@/lib/format';
-import { formatPeriod } from '@/lib/timesheet-dates';
+import { Button, ConfirmDialog, Icon, SelectField, TextField } from '@/components/ui';
+import { formatDayAndDate } from '@/lib/timesheet-dates';
 import { WORKSHOP_PICK, sameTypedLine, timesheetLineProblems, type TimesheetLineField } from '@/lib/timesheet-line';
 import type { TimesheetAutosaver } from '@/lib/timesheet-autosave';
 import type { WorkingTimesheetLine } from '@/application/timesheet-lines';
@@ -21,42 +20,83 @@ export interface EditableLine {
   readonly submitted: WorkingTimesheetLine['submitted'];
 }
 
-const hours = (value: string): string => {
-  const parsed = Number.parseFloat(value.replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed.toFixed(2) : value;
+export type LineStatus = 'saving' | 'saved' | 'draft' | 'failed';
+
+/**
+ * The date and values a line has now: what is waiting to be saved from this device, else what this device
+ * saved since the list was read, else the server's.
+ */
+export const shownLine = (line: EditableLine, saver: TimesheetAutosaver | null): { readonly date: string | null; readonly typed: TimesheetLineTyped } => {
+  const waiting = saver?.pendingFor(line.id);
+  if (waiting?.kind === 'line') return { date: waiting.date, typed: waiting.typed };
+  const savedHere = saver?.revisionOf(line.id) ?? null;
+  const saved = savedHere !== null && savedHere !== line.revision ? saver?.savedLineOf(line.id) ?? null : null;
+  return saved ?? { date: line.date, typed: line.typed };
 };
 
 /**
- * ONE TIMESHEET LINE, EDITED WHERE IT IS (PAYROLL-ONE-1). Every field is
- * typed straight into the line — no form to open, no Save to press — and each
- * change goes to the autosaver, which saves it a moment later. The line says
- * where it stands: Saving…, Saved, Draft (with what it still needs), or Save
- * failed. The typing lives in this component, so typing never re-renders the
- * page (TST-TS-2 #1), and the server's newer line replaces it only when
- * nothing typed here is waiting.
+ * WHERE ONE LINE STANDS: Save failed, Saving…, Saved, or Draft (saved, not
+ * complete yet) — never "Saved" before the server said so. Its day block shows
+ * the worst of its lines (`dayState`).
+ */
+export const lineStatus = (
+  line: EditableLine,
+  saver: TimesheetAutosaver | null,
+  /** What the editor shows, when it is asked: a line just added and saved is newer there than in the list. */
+  shown: { readonly date: string | null; readonly typed: TimesheetLineTyped } = shownLine(line, saver),
+): LineStatus => {
+  const pending = saver?.pendingFor(line.id) ?? null;
+  if (pending?.refused !== undefined) return 'failed';
+  if (pending !== null) return 'saving';
+  const savedRevision = saver?.revisionOf(line.id) ?? null;
+  // Saved here more recently than the copy on screen (the list has not reloaded yet): what was typed is what was saved.
+  if (savedRevision !== null && savedRevision !== line.revision) {
+    return timesheetLineProblems(shown.date, shown.typed).length === 0 ? 'saved' : 'draft';
+  }
+  return line.complete && line.problems.length === 0 ? 'saved' : 'draft';
+};
+
+/**
+ * ONE CUSTOMER OR SITE VISIT OF A DAY — A WORKING TIMESHEET LINE, EDITED WHERE
+ * IT IS (PAYROLL-ONE-1, TS-DAY-1). Every field is typed straight into the line
+ * — no form to open, no Save to press — and each change goes to the autosaver,
+ * which saves it a moment later. A line that has saved stays exactly as
+ * editable as a new one: only a submission locks a line, and a submitted line
+ * is never on the Timesheets page (its corrections are on My Monthly Forms).
+ * The line says where it stands: Saving…, Saved, Draft (with what it still
+ * needs), or Save failed. The typing lives in this component, so typing never
+ * re-renders the page (TST-TS-2 #1), and the server's newer line replaces it
+ * only when nothing typed here is waiting.
  *
- * A line in a current submission is shown read-only: it is changed by a
- * correction (Submitted timesheets), never by typing over it.
+ * ITS DATE IS ITS DAY'S (`day`): the line is typed under its day block and
+ * moves only when the whole day is moved — never on a keystroke in a date
+ * field, which used to carry the line to another day mid-typing. A line with
+ * no date yet (a draft from before) has its own Date field until one is chosen.
  */
 export const TimesheetLineEditor = ({
   line,
   customers,
   saver,
-  editable,
+  day,
+  position,
 }: {
   readonly line: EditableLine;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly saver: TimesheetAutosaver | null;
-  readonly editable: boolean;
+  /** The day block it is under; undefined for a line with no date. */
+  readonly day?: string;
+  /** 1, 2, 3 … within its day. */
+  readonly position?: number;
 }) => {
   /*
    * WHERE THE TYPING STARTS: a change still waiting in the autosaver, when there is one — the screen may have
    * been rebuilt (a reload of the list) while it waits, and the server's copy is then older than what was typed.
    */
   const waiting = saver?.pendingFor(line.id);
-  const start = waiting?.kind === 'line' ? { typed: waiting.typed, date: waiting.date ?? '' } : { typed: line.typed, date: line.date ?? '' };
+  const start = waiting?.kind === 'line' ? { typed: waiting.typed, date: day ?? waiting.date ?? '' } : { typed: line.typed, date: day ?? line.date ?? '' };
   const [typed, setTyped] = useState<TimesheetLineTyped>(start.typed);
   const [date, setDate] = useState<string>(start.date);
+  const [removing, setRemoving] = useState(false);
   const shownRevision = useRef(line.revision);
   // The latest values typed, updated at once: two quick changes never build on a copy from before the first.
   const latest = useRef<{ typed: TimesheetLineTyped; date: string }>(start);
@@ -72,54 +112,29 @@ export const TimesheetLineEditor = ({
     const saved = saver?.revisionOf(line.id) ?? null;
     if (saved !== null && saved !== line.revision) return;
     shownRevision.current = line.revision;
+    const serverDate = day ?? line.date ?? '';
     // The same values as typed (450 and 450.00): what the person typed stays as they typed it.
-    if ((line.date ?? '') === latest.current.date && sameTypedLine(line.typed, latest.current.typed)) return;
-    latest.current = { typed: line.typed, date: line.date ?? '' };
+    if (serverDate === latest.current.date && sameTypedLine(line.typed, latest.current.typed)) return;
+    latest.current = { typed: line.typed, date: serverDate };
     setTyped(line.typed);
-    setDate(line.date ?? '');
-  }, [line.revision, line.typed, line.date, pending, savedRevision, saver, line.id]);
+    setDate(serverDate);
+  }, [line.revision, line.typed, line.date, pending, savedRevision, saver, line.id, day]);
 
   const change = (patch: Partial<TimesheetLineTyped>, nextDate?: string) => {
     const next = { ...latest.current.typed, ...patch };
-    const day = nextDate ?? latest.current.date;
-    latest.current = { typed: next, date: day };
+    // Under a day block the line is always on that day: a move of the day reaches the line through `day`.
+    const on = day ?? nextDate ?? latest.current.date;
+    latest.current = { typed: next, date: on };
     setTyped(next);
-    setDate(day);
-    saver?.change({ kind: 'line', id: line.id, date: day === '' ? null : day, typed: next, base: line.revision });
+    setDate(on);
+    saver?.change({ kind: 'line', id: line.id, date: on === '' ? null : on, typed: next, base: line.revision });
   };
 
   const live = timesheetLineProblems(date === '' ? null : date, typed);
-  // Saved here more recently than the copy on screen (the list has not reloaded yet): what was typed is what was saved.
   const ahead = pending !== null || (savedRevision !== null && savedRevision !== line.revision);
   const problems = ahead ? live : line.problems;
   const problemOf = (field: TimesheetLineField) => problems.find((problem) => problem.field === field)?.message;
-  const status = line.submitted !== null
-    ? 'submitted'
-    : pending?.refused !== undefined
-      ? 'failed'
-      : pending !== null
-        ? 'saving'
-        : (ahead ? live.length === 0 : line.complete) && problems.length === 0
-          ? 'saved'
-          : 'draft';
-
-  if (line.submitted !== null || !editable) {
-    return (
-      <li className="grid grid-cols-2 gap-x-4 gap-y-1 py-2 text-sm lg:grid-cols-[minmax(0,1.6fr)_repeat(5,minmax(0,0.7fr))_auto] lg:items-center" data-testid="timesheet-line" data-line-id={line.id} data-date={line.date ?? ''} data-state={status}>
-        <span className="col-span-2 text-steel-900 lg:col-span-1">{typed.pick === WORKSHOP_PICK ? WORKSHOP_LABEL : typed.customerName || '—'}</span>
-        <span><span className="text-xs text-steel-500 lg:hidden">OT </span>{hours(typed.overtime)}</span>
-        <span><span className="text-xs text-steel-500 lg:hidden">D/T </span>{hours(typed.double)}</span>
-        <span><span className="text-xs text-steel-500 lg:hidden">Callout </span>{formatCurrency(Math.round(Number.parseFloat(typed.callout) * 100) || 0)}</span>
-        <span><span className="text-xs text-steel-500 lg:hidden">Int Km </span>{typed.internalKm}</span>
-        <span><span className="text-xs text-steel-500 lg:hidden">Cust Km </span>{typed.customerKm}</span>
-        {line.submitted !== null && (
-          <span className="col-span-2 lg:col-span-1" data-testid="timesheet-line-submitted">
-            <Badge tone="green" size="sm">Submitted {formatPeriod(line.submitted.from, line.submitted.to)}</Badge>
-          </span>
-        )}
-      </li>
-    );
-  }
+  const status = lineStatus(line, saver, { date: date === '' ? null : date, typed });
 
   const customerOptions = [
     { value: '', label: 'Type the customer (or none)…' },
@@ -138,24 +153,33 @@ export const TimesheetLineEditor = ({
       data-testid={testId}
     />
   );
+  const named = typed.pick === WORKSHOP_PICK ? WORKSHOP_LABEL : typed.customerName.trim();
 
   return (
     <li
-      className={`space-y-2 rounded-[var(--radius-control)] border p-3 ${status === 'draft' || status === 'failed' ? 'border-amber-eje-200 bg-amber-eje-50/40' : 'border-steel-200'}`}
+      className={`space-y-2 rounded-[var(--radius-control)] border p-3 ${status === 'draft' || status === 'failed' ? 'border-amber-eje-200 bg-amber-eje-50/40' : 'border-steel-200 bg-surface'}`}
       data-testid="timesheet-line"
       data-line-id={line.id}
       data-date={line.date ?? ''}
       data-state={status}
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_minmax(0,1fr)]">
-        <TextField
-          label="Date"
-          type="date"
-          value={date}
-          error={problemOf('date')}
-          onChange={(event) => change({}, event.target.value)}
-          data-testid="timesheet-line-date"
-        />
+      {position !== undefined && (
+        <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase" data-testid="timesheet-line-heading">
+          Line {position}
+          {named.length > 0 ? ` — ${named}` : ''}
+        </p>
+      )}
+      <div className={`grid grid-cols-1 gap-3 ${day === undefined ? 'sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_minmax(0,1fr)]' : 'sm:grid-cols-2'}`}>
+        {day === undefined && (
+          <TextField
+            label="Date"
+            type="date"
+            value={date}
+            error={problemOf('date')}
+            onChange={(event) => change({}, event.target.value)}
+            data-testid="timesheet-line-date"
+          />
+        )}
         <SelectField
           label="Customer or Workshop"
           value={typed.pick}
@@ -170,7 +194,7 @@ export const TimesheetLineEditor = ({
         />
         {typed.pick !== WORKSHOP_PICK && (
           <TextField
-            label="Customer"
+            label="Customer or site"
             value={typed.customerName}
             maxLength={200}
             autoComplete="off"
@@ -201,7 +225,7 @@ export const TimesheetLineEditor = ({
           {status === 'failed' && <span className="font-medium text-signal-600">Save failed — {pending?.refused}</span>}
           {status === 'draft' && <span className="font-medium text-amber-eje-700">Draft — saved, not complete yet</span>}
         </span>
-        <Button size="sm" variant="ghost" onClick={() => saver?.change({ kind: 'remove', id: line.id })} data-testid="remove-timesheet-line">
+        <Button size="sm" variant="ghost" leadingIcon={<Icon name="trash" className="size-4" />} onClick={() => setRemoving(true)} data-testid="remove-timesheet-line">
           Remove line
         </Button>
       </div>
@@ -210,6 +234,18 @@ export const TimesheetLineEditor = ({
           {problems.map((problem) => <li key={problem.message}>{problem.message}</li>)}
         </ul>
       )}
+      <ConfirmDialog
+        open={removing}
+        title="Remove this line?"
+        message={`${named.length > 0 ? named : 'This line'}${date === '' ? '' : ` on ${formatDayAndDate(date)}`} is removed from your timesheet. The day's other lines stay as they are.`}
+        confirmLabel="Remove line"
+        confirmVariant="danger"
+        onCancel={() => setRemoving(false)}
+        onConfirm={() => {
+          setRemoving(false);
+          saver?.change({ kind: 'remove', id: line.id });
+        }}
+      />
     </li>
   );
 };

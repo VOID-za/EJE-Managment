@@ -88,10 +88,17 @@ const TO = shift(today, -1);
 const inPeriod = [FROM, shift(FROM, 8), shift(TO, -2)];
 const lines = (date) => page.locator(`[data-testid="timesheet-line"][data-date="${date}"]`);
 
-/** Opens Timesheets on exactly the period. */
+/** Opens a day block (TS-DAY-1: every day starts closed). */
+const openDay = async (date) => {
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${date}"]`);
+  if ((await day.getAttribute('data-open')) !== 'yes') await press(day.getByTestId('timesheet-day-toggle'));
+  await day.getByTestId('timesheet-day-body').waitFor({ timeout: 10000 });
+};
+/** Opens Timesheets on exactly the period, with the days the check uses open. */
 const openTimesheets = async () => {
   await go(`/timesheets?from=${FROM}&to=${TO}`);
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  for (const date of inPeriod) await openDay(date);
 };
 /** Waits until every change on the page is on the server. */
 const allSaved = async () => {
@@ -99,6 +106,7 @@ const allSaved = async () => {
 };
 /** Adds a line on a day through the screen, typing as a person does. */
 const addLine = async (date, { customer = '', ot = '0', callout = '0', ckm = '0' } = {}) => {
+  await openDay(date);
   const before = await lines(date).count();
   await press(page.getByTestId(`add-timesheet-line-${date}`));
   await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [date, before], { timeout: 10000 });
@@ -135,6 +143,7 @@ await check('1–4. Timesheets: a cross-month From and To, lines typed straight 
 await check('5–6. a reload keeps every saved line', async () => {
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  for (const date of inPeriod) await openDay(date);
   for (const [index, date] of inPeriod.entries()) {
     const value = await lines(date).first().getByTestId('timesheet-customer-name').inputValue();
     if (!value.startsWith('Cross Month Customer')) {
@@ -156,6 +165,7 @@ await check('7–10. signed out and in again: still there; an edit saves itself'
   await allSaved();
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  for (const date of inPeriod) await openDay(date);
   if ((await lines(inPeriod[1]).first().getByTestId('timesheet-overtime').inputValue()) !== '2.5') fail('the edit was not kept');
 });
 
@@ -166,6 +176,7 @@ await check('an incomplete line is kept as a Draft on the server and says what i
   if (!/two decimals/iu.test(await row.textContent())) fail('the draft does not say what it needs');
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  for (const date of inPeriod) await openDay(date);
   if ((await page.locator(`[data-testid="timesheet-line"][data-date="${inPeriod[2]}"][data-state="draft"]`).count()) !== 1) fail('the draft was not kept across a reload');
 });
 
@@ -230,6 +241,11 @@ await check('21–22. an incomplete line stops the submission, says which and ho
 await check('23. the line corrected on Timesheets', async () => {
   await press(page.getByTestId('monthly-forms-fix-lines'));
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  // The link opens the days that hold a line not complete yet; nothing else is open.
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${inPeriod[2]}"]`);
+  await day.getByTestId('timesheet-day-body').waitFor({ timeout: 15000 });
+  if ((await day.getAttribute('data-state')) !== 'draft') fail(`the day says ${await day.getAttribute('data-state')}, not Draft`);
+  if ((await page.locator('[data-testid="timesheet-day"][data-open="yes"]').count()) !== 1) fail('more than the day to fix is open');
   // By its id: its state changes from Draft to Saving as soon as it is typed into.
   const id = await page.locator(`[data-testid="timesheet-line"][data-date="${inPeriod[2]}"][data-state="draft"]`).getAttribute('data-line-id', { timeout: 15000 });
   const draft = page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`);
@@ -265,11 +281,33 @@ await check('24–27. both forms submitted together, once; frozen with the names
   if ((await page.getByTestId('monthly-timesheet-file').textContent()) === 'Sipho Timesheet Payroll Check.pdf') fail('the working name was not reset after submission');
 });
 
-await check('27–28. the submitted lines are read-only on Timesheets; renaming the next PDF never reaches the submitted one', async () => {
+await check('27–28. submitted lines leave Timesheets and cannot be changed there (the server refuses); the history is on My Monthly Forms only; renaming the next PDF never reaches the submitted one', async () => {
+  const held = (await call('GET', `/api/timesheets/${sipho}/lines`)).json?.data ?? [];
+  const submittedIds = held.filter((line) => line.submitted !== null).map((line) => line.id);
+  if (submittedIds.length < 4) fail(`only ${submittedIds.length} lines are held as submitted`);
   await openTimesheets();
-  const submitted = await page.locator('[data-testid="timesheet-line"][data-state="submitted"]').count();
-  if (submitted < 4) fail(`only ${submitted} submitted lines shown read-only`);
-  if ((await page.locator('[data-testid="timesheet-line"][data-state="submitted"] input').count()) > 0) fail('a submitted line can be typed into');
+  for (const id of submittedIds) {
+    if ((await page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`).count()) > 0) fail('a submitted line is on the Timesheets page');
+  }
+  for (const date of inPeriod) {
+    const summary = await page.locator(`[data-testid="timesheet-day"][data-date="${date}"] [data-testid="timesheet-day-summary"]`).innerText();
+    if (!/Not recorded/u.test(summary)) fail(`${date} still shows submitted work: ${summary}`);
+  }
+  for (const gone of ['timesheet-submissions', 'timesheet-submission', 'timesheet-office', 'my-submitted-timesheets', 'my-monthly-history', 'timesheet-last-submission']) {
+    if ((await page.getByTestId(gone).count()) > 0) fail(`Timesheets still shows ${gone}`);
+  }
+  const first = held.find((line) => line.id === submittedIds[0]);
+  const refused = await call('POST', `/api/timesheets/${sipho}/lines`, { id: first.id, date: first.date, typed: { ...first.typed, overtime: '9' }, expectedRevision: first.revision });
+  if (refused.status !== 422 || !JSON.stringify(refused.json).includes('timesheet_line_submitted')) fail(`changing a submitted line answered ${refused.status}`);
+  const removed = await call('POST', `/api/timesheets/${sipho}/lines/${first.id}/remove`, {});
+  if (removed.status !== 422) fail(`removing a submitted line answered ${removed.status}`);
+  await go(`/attendance?from=${FROM}&to=${TO}`);
+  await page.getByTestId('my-attendance-from').waitFor({ timeout: 20000 });
+  for (const gone of ['my-monthly-history', 'my-monthly-history-row', 'timesheet-submissions', 'my-submitted-timesheets']) {
+    if ((await page.getByTestId(gone).count()) > 0) fail(`Attendance shows ${gone}`);
+  }
+  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
+  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-from="${FROM}"][data-to="${TO}"]`).waitFor({ timeout: 20000 });
   await go(`/payroll/mine?from=${FROM}&to=${TO}`);
   await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
   await press(page.getByTestId('monthly-timesheet-rename'));

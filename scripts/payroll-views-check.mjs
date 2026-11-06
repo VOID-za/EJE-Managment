@@ -85,6 +85,12 @@ const download = async (locator) => {
   const [file] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), press(locator)]);
   return file;
 };
+/** Opens a day block on Timesheets (TS-DAY-1: every day starts closed). */
+const openDay = async (date) => {
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${date}"]`);
+  if ((await day.getAttribute('data-open')) !== 'yes') await press(day.getByTestId('timesheet-day-toggle'));
+  await day.getByTestId('timesheet-day-body').waitFor({ timeout: 10000 });
+};
 const allSaved = () =>
   page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 20000 });
 
@@ -154,6 +160,7 @@ await check('Timesheets: From after To is refused and said; a line outside the p
   await page.getByTestId('timesheet-range-problem').waitFor({ timeout: 20000 });
   await go(`/timesheets?from=${FROM}&to=${TO}`);
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  await openDay(DAY);
   const before = await page.locator(`[data-testid="timesheet-line"][data-date="${DAY}"]`).count();
   await press(page.getByTestId(`add-timesheet-line-${DAY}`));
   await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [DAY, before], { timeout: 10000 });
@@ -167,6 +174,8 @@ await check('Timesheets: From after To is refused and said; a line outside the p
   await note.waitFor({ timeout: 20000 });
   if (!/Nothing is lost/u.test(await note.innerText())) fail(`the note: ${await note.innerText()}`);
   await press(page.getByTestId('timesheet-show-outside'));
+  await page.locator(`[data-testid="timesheet-day"][data-date="${DAY}"]`).waitFor({ timeout: 15000 });
+  await openDay(DAY);
   await page.locator(`[data-testid="timesheet-line"][data-line-id="${lineId}"]`).waitFor({ timeout: 15000 });
   if ((await page.getByTestId('timesheet-from').inputValue()) > DAY) fail('From did not move to the line');
   await noPageOverflow('Timesheets');
@@ -214,7 +223,7 @@ await check('My Monthly Forms: a submission whose answer is lost is said, and is
   return 'one submission, the page knows it';
 });
 
-await check('History: previews open, the submitted names download; Timesheets → submitted → PDF has the submitted name', async () => {
+await check('History: previews open, the submitted names download; Submitted timesheets → PDF has the submitted name', async () => {
   const row = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`).first();
   await row.waitFor({ timeout: 20000 });
   for (const kind of ['timesheet', 'attendance']) {
@@ -226,8 +235,8 @@ await check('History: previews open, the submitted names download; Timesheets �
   if ((await row.getByTestId('history-timesheet-file').textContent()) !== `${NAME}.pdf`) fail('the history does not show the submitted name');
   const attendanceName = await row.getByTestId('history-attendance-file').textContent();
   if ((await download(row.getByTestId('history-attendance-download'))).suggestedFilename() !== attendanceName) fail('the attendance downloaded under another name');
-  await go(`/timesheets?from=${FROM}&to=${TO}`);
-  const submitted = page.locator('[data-testid="timesheet-submission"]').filter({ hasText: new RegExp(FROM.slice(8).replace(/^0/u, '')) }).first();
+  // The submitted timesheet is on My Monthly Forms (6 November 2026), never on Timesheets.
+  const submitted = page.locator('[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"]').filter({ hasText: new RegExp(FROM.slice(8).replace(/^0/u, '')) }).first();
   await page.getByTestId('timesheet-submissions').first().waitFor({ timeout: 20000 });
   const pdf = await download((await submitted.count()) > 0 ? submitted.getByTestId('timesheet-submission-pdf') : page.getByTestId('timesheet-submission-pdf').first());
   if (pdf.suggestedFilename() !== `${NAME}.pdf`) fail(`the submitted timesheet PDF is called ${pdf.suggestedFilename()}`);
@@ -249,7 +258,7 @@ await check('a complete replacement through the screen: confirmed, the original 
   await page.waitForFunction(([f, t]) => document.querySelectorAll(`[data-testid="my-monthly-history-row"][data-from="${f}"][data-to="${t}"]`).length === 2, [FROM, TO], { timeout: 20000 });
   const states = await rows.evaluateAll((all) => all.map((row) => row.getAttribute('data-current')));
   if (states.filter((state) => state === 'no').length !== 1 || states.filter((state) => state === 'yes').length !== 1) fail(`current flags: ${states.join(',')}`);
-  await go(`/timesheets?from=${FROM}&to=${TO}`);
+  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
   await page.getByTestId('timesheet-submissions').first().waitFor({ timeout: 20000 });
   const replaced = page.locator('[data-testid="timesheet-submission"]').filter({ hasText: /replaced/iu });
   if ((await replaced.count()) < 1) fail('the replaced timesheet is not marked as replaced');
@@ -307,7 +316,7 @@ await check('Finance: a package is prepared and its files listed', async () => {
 
 await check('Corrections: asked for by the technician, accepted by the office — the version in force; the original still readable', async () => {
   await become('Sipho Mahlangu');
-  await go(`/timesheets?from=${FROM}&to=${TO}`);
+  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
   const current = page.locator('[data-testid="timesheet-submission"]').filter({ has: page.getByTestId('timesheet-submission-corrections') }).first();
   await current.waitFor({ timeout: 20000 });
   await press(current.getByTestId('timesheet-submission-corrections'));
@@ -317,7 +326,8 @@ await check('Corrections: asked for by the technician, accepted by the office �
   await press(page.getByTestId('timesheet-correction-submit'));
   await page.getByTestId('timesheet-correction-done').waitFor({ timeout: 20000 });
   await become('Christene van Niekerk');
-  await go(`/timesheets?from=${FROM}&to=${TO}`);
+  // The office's list of every technician's is on My Monthly Forms — reachable for the Office, who has no Timesheets page.
+  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
   const office = page.getByTestId('timesheet-office');
   await office.waitFor({ timeout: 20000 });
   const theirs = office.locator('[data-testid="timesheet-submission"]').filter({ hasText: 'Sipho' }).filter({ has: page.getByTestId('timesheet-submission-corrections') }).first();

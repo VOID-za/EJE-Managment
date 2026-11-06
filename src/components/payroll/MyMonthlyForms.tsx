@@ -7,6 +7,7 @@ import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
 import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocumentView';
 import { AttendanceDocumentView } from '@/components/payroll/AttendanceDocumentView';
+import { SubmittedTimesheets } from '@/components/payroll/SubmittedTimesheets';
 import { payroll } from '@/api/endpoints';
 import { ApiRequestError } from '@/api/client';
 import type { AttendanceDocument } from '@/application/attendance-document';
@@ -270,7 +271,7 @@ export const PayrollFormsPanel = ({
             {state.problems.map((problem) => <li key={problem}>{problem}</li>)}
           </ul>
           {(state.timesheet?.incomplete.length ?? 0) > 0 && (
-            <ButtonLink href={`/timesheets?from=${from}&to=${to}`} size="sm" variant="secondary" className="mt-2" data-testid="monthly-forms-fix-lines">
+            <ButtonLink href={`/timesheets?from=${from}&to=${to}&fix=1`} size="sm" variant="secondary" className="mt-2" data-testid="monthly-forms-fix-lines">
               Complete or remove those lines on Timesheets
             </ButtonLink>
           )}
@@ -409,7 +410,10 @@ const HistoryRow = ({ entry }: { readonly entry: PayrollSubmissionView }) => {
  * Everybody's own: choose the From and To of the pay period (any days, across
  * months and years; it opens on the day after the last submission to today),
  * review both forms, rename their PDFs, and submit them together. Below, every
- * submission, current and replaced, with its documents as they went.
+ * submission, current and replaced, with its documents as they went; then the
+ * submitted timesheets with their corrections — the person's own and, for the
+ * office, every technician's (`SubmittedTimesheets`). Nothing submitted is on
+ * the Timesheets or Attendance page.
  */
 export const MyMonthlyForms = () => {
   const user = useCurrentUser();
@@ -471,6 +475,8 @@ export const MyMonthlyForms = () => {
           </ul>
         )}
       </Card>
+
+      <SubmittedTimesheets />
     </div>
   );
 };

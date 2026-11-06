@@ -14,7 +14,13 @@
  *     and there is never a second copy of the line;
  *   - OFFLINE: typed with no connection it is kept and said, and saved when the
  *     connection is back;
- *   - LEAVING: typed and the page left at once, it is still saved.
+ *   - LEAVING: typed and the page left at once, it is still saved;
+ *   - ONE DAY, TWO LINES, TWO DEVICES (TS-DAY-1, 6 November 2026): each device
+ *     adds and edits its own line under the same day block — neither is
+ *     refused, neither overwrites the other, the day holds both once.
+ *
+ * Each day is one block, closed when the page opens (TS-DAY-1): the check
+ * opens the days it uses, and confirms each removal in its dialog.
  *
  *   npm run timesheet-two-devices-check                    (desktop, 1440x900)
  *   EJE_FORMS_VIEWPORT=768x1024:touch npm run timesheet-two-devices-check
@@ -67,9 +73,21 @@ const press = async (page, locator) => {
   if (touch) await locator.tap();
   else await locator.click();
 };
+/** Opens a day block (TS-DAY-1: every day starts closed). */
+const openDay = async (page, date) => {
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${date}"]`);
+  if ((await day.getAttribute('data-open')) !== 'yes') await press(page, day.getByTestId('timesheet-day-toggle'));
+  await day.getByTestId('timesheet-day-body').waitFor({ timeout: 10000 });
+};
 const open = async (page) => {
   await page.goto(`${BASE}/timesheets?from=${FROM}&to=${today}`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  for (const date of [DAY, shift(-5)]) await openDay(page, date);
+};
+/** Remove line, then Remove line again in its confirmation. */
+const removeLine = async (page, line) => {
+  await press(page, line.getByTestId('remove-timesheet-line'));
+  await press(page, page.getByRole('dialog').getByRole('button', { name: 'Remove line' }));
 };
 const saved = (page) =>
   page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 20000 });
@@ -161,6 +179,7 @@ await check('a NEW line typed while saving is cut off is still on the screen aft
   await B.page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'offline', null, { timeout: 20000 });
   await B.page.reload({ waitUntil: 'networkidle' });
   await B.page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  await openDay(B.page, day);
   const shown = lineOn(B.page, queuedId);
   await shown.waitFor({ timeout: 10000 });
   if ((await shown.getByTestId('timesheet-customer-name').inputValue()) !== 'Queued On The Device') fail('the queued line is not shown as typed after the reload');
@@ -170,13 +189,13 @@ await check('a NEW line typed while saving is cut off is still on the screen aft
   await saved(B.page);
   const server = await held(B.page, queuedId);
   if (server.length !== 1 || server[0].overtime !== '1.5') fail(`the server holds ${JSON.stringify(server)}`);
-  await press(B.page, lineOn(B.page, queuedId).getByTestId('remove-timesheet-line'));
+  await removeLine(B.page, lineOn(B.page, queuedId));
   await saved(B.page);
 });
 
 await check('SAVE/REMOVE: A removes the line; B, still showing it, types into it — refused, told, and the line stays removed on both', async () => {
   await open(B.page);
-  await press(A.page, lineOn(A.page, id).getByTestId('remove-timesheet-line'));
+  await removeLine(A.page, lineOn(A.page, id));
   await saved(A.page);
   await lineOn(B.page, id).getByTestId('timesheet-overtime').fill('9');
   const conflict = B.page.getByTestId('autosave-conflict');
@@ -190,6 +209,49 @@ await check('SAVE/REMOVE: A removes the line; B, still showing it, types into it
   }
   if ((await held(B.page, id)).length !== 0) fail('the server holds the removed line again');
   return 'removal kept; B told it typed 9';
+});
+
+await check('ONE DAY, TWO DEVICES, TWO LINES: each edits its own line under the same day — both kept, neither refused, the day adds up once', async () => {
+  const day = shift(-2);
+  const add = async (side, name) => {
+    await open(side.page);
+    await openDay(side.page, day);
+    const before = await side.page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).count();
+    await press(side.page, side.page.getByTestId(`add-timesheet-line-${day}`));
+    await side.page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [day, before], { timeout: 10000 });
+    const lineId = await side.page.locator(`[data-testid="timesheet-line"][data-date="${day}"]`).nth(before).getAttribute('data-line-id');
+    await lineOn(side.page, lineId).getByTestId('timesheet-customer-name').fill(name);
+    await lineOn(side.page, lineId).getByTestId('timesheet-overtime').fill('1');
+    await saved(side.page);
+    return lineId;
+  };
+  const onA = await add(A, 'Day Visit A');
+  const onB = await add(B, 'Day Visit B');
+  // Both devices now type into their own line of the same day at the same time — two lines, no conflict.
+  await lineOn(A.page, onA).getByTestId('timesheet-overtime').fill('2.5');
+  await lineOn(B.page, onB).getByTestId('timesheet-double').fill('1.25');
+  await Promise.all([saved(A.page), saved(B.page)]);
+  for (const side of [A, B]) {
+    if ((await side.page.getByTestId('autosave-conflict').count()) !== 0) fail('a device was told of a conflict between two different lines');
+  }
+  const a = await held(A.page, onA);
+  const lines = await B.page.evaluate(async (lineId) => {
+    const me = (await (await fetch('/api/auth/me')).json()).data.user.id;
+    return (await (await fetch(`/api/timesheets/${me}/lines`)).json()).data.filter((line) => line.id === lineId).map((line) => line.typed);
+  }, onB);
+  if (a.length !== 1 || a[0].overtime !== '2.5') fail(`A's line on the server: ${JSON.stringify(a)}`);
+  if (lines.length !== 1 || lines[0].double !== '1.25' || lines[0].overtime !== '1') fail(`B's line on the server: ${JSON.stringify(lines)}`);
+  for (const side of [A, B]) {
+    await open(side.page);
+    await openDay(side.page, day);
+    const summary = await side.page.locator(`[data-testid="timesheet-day"][data-date="${day}"] [data-testid="timesheet-day-summary"]`).innerText();
+    if (!/2 lines/u.test(summary) || !/OT 3\.50/u.test(summary) || !/D\/T 1\.25/u.test(summary)) fail(`the day reads "${summary}"`);
+  }
+  await removeLine(A.page, lineOn(A.page, onA));
+  await saved(A.page);
+  await removeLine(A.page, lineOn(A.page, onB));
+  await saved(A.page);
+  return 'A 2.5 OT and B 1.25 D/T kept on one day: OT 3.50, D/T 1.25';
 });
 
 await check('no page error on either device; no page scrolls sideways', async () => {

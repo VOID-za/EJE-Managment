@@ -919,7 +919,7 @@ export const submitTimesheetPeriod = async (
     throw refuse(
       `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
       'timesheet_already_submitted',
-      'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets and ask for a correction.',
+      'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets on My Monthly Forms and ask for a correction.',
     );
   }
   // The unsent row these dates already have (a comment saved before TS-PAPER), which submitting fills in.
@@ -931,7 +931,7 @@ export const submitTimesheetPeriod = async (
     throw refuse(
       `These dates cover only part of your submitted timesheet for ${named}.`,
       'timesheet_partial_overlap',
-      `Submitting them would leave the rest of ${named} out of your submitted timesheets. Start after it ends, choose dates that cover all of it to replace it, or open it under Submitted timesheets and ask for a correction.`,
+      `Submitting them would leave the rest of ${named} out of your submitted timesheets. Start after it ends, choose dates that cover all of it to replace it, or open it under Submitted timesheets on My Monthly Forms and ask for a correction.`,
     );
   }
   // A correction lives on its submission, not on the sheet's lines: replacing a corrected (or
@@ -941,7 +941,7 @@ export const submitTimesheetPeriod = async (
       throw refuse(
         `Your submitted timesheet for ${formatPeriod(period.from, period.to)} has a correction, so it cannot be replaced.`,
         'timesheet_replace_corrected',
-        'Change it with another correction under Submitted timesheets, or choose dates that start after it ends.',
+        'Change it with another correction under Submitted timesheets on My Monthly Forms, or choose dates that start after it ends.',
       );
     }
   }
@@ -1005,8 +1005,8 @@ export const submitTimesheetPeriod = async (
   if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',
     title: `${userFullName(technician)} submitted a timesheet`,
-    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}.${replaced.length > 0 ? ' It replaces an earlier submission for some of these days.' : ''} Open Timesheets → Submitted timesheets to read it.`,
-    link: '/timesheets',
+    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}.${replaced.length > 0 ? ' It replaces an earlier submission for some of these days.' : ''} Open My Monthly Forms → Submitted timesheets to read it.`,
+    link: '/payroll/mine',
   });
   return saved;
 };

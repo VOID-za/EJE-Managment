@@ -100,6 +100,8 @@ export class TimesheetAutosaver {
   private readonly pending = new Map<string, TimesheetChange>();
   /** Revisions saved during this visit: newer than the screen's data until it reloads. */
   private readonly revisions = new Map<string, string>();
+  /** What each line saved this visit said, until the list on screen catches up (TS-DAY-1: the day adds it up at once). */
+  private readonly savedLines = new Map<string, { readonly date: string | null; readonly typed: TimesheetLineTyped }>();
   private savedComment: string | null = null;
   private timer: unknown = null;
   private retryTimer: unknown = null;
@@ -236,6 +238,11 @@ export class TimesheetAutosaver {
     return this.revisions.get(id) ?? null;
   }
 
+  /** The date and values last saved for a line from this device this visit; null when none or no longer known. */
+  savedLineOf(id: string): { readonly date: string | null; readonly typed: TimesheetLineTyped } | null {
+    return this.revisions.has(id) ? this.savedLines.get(id) ?? null : null;
+  }
+
   get unsavedCount(): number {
     return this.pending.size;
   }
@@ -273,9 +280,11 @@ export class TimesheetAutosaver {
         { keepalive: false },
       );
       this.revisions.set(change.id, saved.revision);
+      this.savedLines.set(change.id, { date: change.date, typed: change.typed });
     } else if (change.kind === 'remove') {
       await this.options.removeLine(change.id, { keepalive: false });
       this.revisions.delete(change.id);
+      this.savedLines.delete(change.id);
     } else {
       await this.options.saveComment(change.comment, change.base, { keepalive: false });
       this.savedComment = change.comment;

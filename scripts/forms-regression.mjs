@@ -451,8 +451,20 @@ const lineRow = (date) => page.locator(`[data-testid="timesheet-line"][data-date
 const lineById = (id) => page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`);
 const sheetSaved = () =>
   page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 20000 });
-/** Adds a line on a day and returns its id. */
+/** Opens a day block (TS-DAY-1: every day starts closed). */
+const openDay = async (date) => {
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${date}"]`);
+  if ((await day.getAttribute('data-open')) !== 'yes') await press(day.getByTestId('timesheet-day-toggle'));
+  await day.getByTestId('timesheet-day-body').waitFor({ timeout: 10000 });
+};
+/** Remove line, confirmed in its dialog. */
+const removeLine = async (id) => {
+  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Remove line' }));
+};
+/** Adds a line on a day (opening it) and returns its id. */
 const addLineOn = async (date) => {
+  await openDay(date);
   const before = await lineRow(date).count();
   await press(page.getByTestId(`add-timesheet-line-${date}`));
   await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length > n, [date, before], { timeout: 10000 });
@@ -490,17 +502,23 @@ await check('Timesheets: every working day of last month entered through the scr
   await sheetSaved();
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
-  const lines = await page.locator('[data-testid="timesheet-line"]').evaluateAll((rows, days) => rows.filter((row) => days.includes(row.dataset.date)).length, openDays);
-  if (lines < openDays.length) fail(`${lines} of ${openDays.length} lines after reopening`);
-  if ((await page.locator('[data-testid="timesheet-line"][data-state="draft"]').count()) !== 0) fail('a line was left as a draft');
+  // Each day block, closed after the reload, says what it holds.
+  const recorded = await page.locator('[data-testid="timesheet-day"]').evaluateAll((rows, days) => rows.filter((row) => days.includes(row.dataset.date) && row.dataset.state === 'saved').length, openDays);
+  if (recorded < openDays.length) fail(`${recorded} of ${openDays.length} days saved after reopening`);
+  if ((await page.locator('[data-testid="timesheet-day"][data-state="draft"]').count()) !== 0) fail('a line was left as a draft');
   await noPageOverflow('Timesheets');
   return `${openDays.length} days`;
 });
-await check('Timesheets: a saved line is edited and moved to another day', async () => {
+await check('Timesheets: a saved line is edited, and its day moved to another date (Change date)', async () => {
+  await openDay(openDays[1]);
+  await openDay(openDays[2]);
   const before = await lineRow(openDays[2]).count();
   const id = await lineRow(openDays[1]).first().getAttribute('data-line-id');
   await lineById(id).getByTestId('timesheet-overtime').fill('2');
-  await lineById(id).getByTestId('timesheet-line-date').fill(openDays[2]);
+  const day = page.locator(`[data-testid="timesheet-day"][data-date="${openDays[1]}"]`);
+  await press(day.getByTestId('timesheet-day-move'));
+  await day.getByTestId('timesheet-day-move-date').fill(openDays[2]);
+  await press(day.getByTestId('timesheet-day-move-confirm'));
   await sheetSaved();
   await page.waitForFunction(([d, n]) => document.querySelectorAll(`[data-testid="timesheet-line"][data-date="${d}"]`).length === n, [openDays[2], before + 1], { timeout: 15000 });
 });
@@ -510,7 +528,7 @@ await check('Timesheets: changing the period while a line is being typed never l
   await page.getByTestId('timesheet-from').fill(openDays[5]);
   if ((await lineById(id).count()) !== 1) fail('the line went away');
   if ((await lineById(id).getByTestId('timesheet-overtime').inputValue()) !== '1.5') fail('the typed value was lost');
-  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await removeLine(id);
   await sheetSaved();
   await page.getByTestId('timesheet-from').fill(monthFrom);
 });
@@ -536,6 +554,7 @@ await check('Timesheets: a half-typed line survives a reload — it is on the se
   await sheetSaved();
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
+  await openDay(openDays[openDays.length - 1]);
   if ((await lineById(draftId).getByTestId('timesheet-customer-name').inputValue()) !== 'Kept on the server') fail('the line was not kept');
 });
 await check('Timesheets: typing in a line costs what a bare input costs, with a month on screen', async () => {
@@ -562,7 +581,7 @@ await check('Timesheets: typing in a line costs what a bare input costs, with a 
   const bare = await cost('#bare-input');
   const line = await cost(`[data-testid="timesheet-line"][data-line-id="${id}"] [data-testid="timesheet-customer-name"]`);
   if (line > bare * 1.5 + 4) fail(`${line.toFixed(1)} ms a key in the line, ${bare.toFixed(1)} ms in a bare input`);
-  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await removeLine(id);
   await sheetSaved();
   return `${line.toFixed(1)} vs ${bare.toFixed(1)} ms per key`;
 });
@@ -758,7 +777,8 @@ await check('Timesheets: Christene (Coordinator) keeps none — the page says so
   await go('/timesheets');
   await page.getByTestId('timesheet-not-required').waitFor({ timeout: 20000 });
   if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
-  if ((await page.getByTestId('add-timesheet-line').count()) !== 0) fail('a Coordinator is offered Add line');
+  if ((await page.locator('[data-testid^="add-timesheet-line"]').count()) !== 0) fail('a Coordinator is offered Add line');
+  if ((await page.getByTestId('timesheet-office').count()) !== 0) fail('submitted timesheets are on the Timesheets page');
   await noPageOverflow('Timesheets (Coordinator)');
 });
 for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
@@ -768,10 +788,8 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
     await page.getByTestId('timesheet-sheet').waitFor({ timeout: 20000 });
     if ((await page.getByTestId('timesheet-person').count()) !== 0) fail('the Whose timesheet block is still on the page');
     await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
-    const before = await page.locator('[data-testid="timesheet-line"]').count();
-    await press(page.getByTestId('add-timesheet-line').first());
-    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="timesheet-line"]').length > n, before, { timeout: 10000 });
-    const row = page.locator('[data-testid="timesheet-line"]').nth(before);
+    const day = await page.locator('[data-testid="timesheet-day"]').last().getAttribute('data-date');
+    const row = lineById(await addLineOn(day));
     await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
     await row.getByTestId('timesheet-overtime').fill('1');
     await sheetSaved();

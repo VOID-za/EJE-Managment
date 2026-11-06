@@ -215,7 +215,10 @@ await check('a timesheet line has no Shared call-out tick; the page says the amo
   await as('Sipho Mahlangu');
   await go('/timesheets');
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
-  await press(page.getByTestId('add-timesheet-line').first());
+  // TS-DAY-1: a day is opened, and Add line is inside it.
+  const day = page.getByTestId('timesheet-day').last();
+  await press(day.getByTestId('timesheet-day-toggle'));
+  await press(day.locator('[data-testid^="add-timesheet-line-"]'));
   const line = page.locator('[data-testid="timesheet-line"]').last();
   await line.waitFor({ timeout: 15000 });
   if ((await page.getByTestId('timesheet-callout-shared').count()) !== 0) fail('the Shared call-out tick is still there');
@@ -223,6 +226,7 @@ await check('a timesheet line has no Shared call-out tick; the page says the amo
   if (!/own share|YOUR share/iu.test(hint) || !/divided/iu.test(hint)) fail(`the hint reads "${hint}"`);
   await noPageOverflow('the timesheet');
   await press(line.getByTestId('remove-timesheet-line'));
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Remove line' }));
   // The removal is on the server before the next check uses the forms.
   await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
 });

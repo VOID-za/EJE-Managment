@@ -63,6 +63,23 @@ const setup = (overrides: Partial<TimesheetAutosaverOptions> = {}, stored: Map<s
 };
 
 describe('TimesheetAutosaver', () => {
+  it('TS-DAY-1: remembers what each line saved this visit — the day block adds it up before the list reloads; a removal forgets it', async () => {
+    const { saver, tick } = setup();
+    expect(saver.savedLineOf('L1')).toBeNull();
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('2.5'), base: null });
+    // Waiting: not saved yet, so nothing is remembered as saved.
+    expect(saver.savedLineOf('L1')).toBeNull();
+    await tick();
+    expect(saver.savedLineOf('L1')).toEqual({ date: '2026-11-03', typed: typed('2.5') });
+    // A day moved: the line saved on its new date.
+    saver.change({ kind: 'line', id: 'L1', date: '2026-11-04', typed: typed('2.5'), base: null }, 0);
+    await tick();
+    expect(saver.savedLineOf('L1')?.date).toBe('2026-11-04');
+    saver.change({ kind: 'remove', id: 'L1' });
+    await tick();
+    expect(saver.savedLineOf('L1')).toBeNull();
+  });
+
   it('saves a burst of typing as ONE request, after the pause, naming the revision the screen began from', async () => {
     const { saver, sent, tick } = setup();
     saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('1'), base: 'r0' });

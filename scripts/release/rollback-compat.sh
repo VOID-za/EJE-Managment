@@ -1,6 +1,7 @@
 #!/bin/bash
-# ROLLBACK COMPATIBILITY: the live release (e9fe38a, v1.5.1) against a database this
-# release has migrated to its newest migration (0053 — v1.5.2 adds none). Moved to the live
+# ROLLBACK COMPATIBILITY: the live release (835eaaa, v1.5.2) against a database this
+# release has migrated to its newest migration (0053 — v1.6.0 adds none). Moved to the live
+# 835eaaa (v1.5.2) on 6 November 2026 for the Timesheets day blocks (v1.6.0), which add no migration. Moved to the live
 # e9fe38a (v1.5.1) on 5 November 2026 for the payroll completion (v1.5.2), which adds no migration. Moved to the live
 # cf6fe86 (v1.5.0) and migration 0053 (removed timesheet lines stay removed) on 5 November 2026. Moved to the live
 # ad0f3c8 (v1.4.0) and migration 0052 (payroll forms for a period, PAYROLL-ONE-1) on 5 November 2026. Moved to the live
@@ -46,7 +47,7 @@
 # reach the VPS.
 set -euo pipefail
 
-LIVE=${LIVE_COMMIT:-e9fe38a09b6219bbcfdde928c83242650457ec41}
+LIVE=${LIVE_COMMIT:-835eaaae15058a9ec513f833585a0f6effc0e494}
 : "${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a disposable test database}"
 
 root=$(git rev-parse --show-toplevel)

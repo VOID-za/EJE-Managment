@@ -3,7 +3,9 @@
 Decided by the owner on 5 November 2026; released as **v1.5.0** (`cf6fe86`,
 migration 0052) the same day, the autosave follow-ups as **v1.5.1** (`e9fe38a`,
 migration 0053) — **accepted by the owner on 5 November 2026** — and the
-completion audit's fixes as **v1.5.2** (`835eaaa`, no migration), deployed the same day. Release records:
+completion audit's fixes as **v1.5.2** (`835eaaa`, no migration), deployed the same day; the
+day-by-day Timesheets page and the move of everything submitted to My Monthly
+Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (no migration). Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
@@ -33,10 +35,35 @@ history; where the two differ, this document is what the system does.
 - Laid out like Attendance: the period's From and To top-right (any days,
   across months and years; a link from My Monthly Forms opens exactly its
   period), the period with Preview, Print and totals, then every day of the
-  period, oldest first, each with its lines and **Add line**.
-- A line is typed straight into place: date, Customer or Workshop (or neither),
-  OT, D/T, Call-out (R, your own share), internal km, customer km. Historical
-  NT and call-out counts on older lines are shown and kept.
+  period, oldest first.
+- **One block per day** (TS-DAY-1, 6 November 2026). Closed, a day is one row:
+  its date, *Not recorded* or what its lines add up to (lines, customers or
+  sites, OT, D/T, call-outs, km) and whether it is Saved, Saving, a Draft or
+  Save failed. **Edit** opens it; **Add line** is inside the open day and adds
+  an empty line for the next customer, site or Workshop on the same date — it
+  never makes a second block and copies nothing from the first line. Each line
+  is changed or removed on its own (**Remove line** asks first; Cancel keeps
+  it); the day and its other lines stay. **Change date** moves all of the
+  day's lines to another date together. Every day starts closed; the "fix these
+  lines" link from My Monthly Forms opens the days holding a Draft.
+- **What belongs to the day, and what to the line.** On EJE's paper Time
+  Sheet (TS-PAPER-1) OT, D/T, the call-out (your own share) and the kilometres
+  are written on each customer's row — so they stay on the line (a line is one
+  customer, site or Workshop visit). NT is no longer entered (TS-07). Nothing
+  is stored for the day itself: its figures are the sum of its lines,
+  computed and never typed twice (`summariseDay`, `src/lib/timesheet-day.ts`),
+  so no hour, call-out or kilometre can be counted twice; the period totals,
+  the PDF, the CSV and Finance read the same lines as before. No migration: the
+  stored lines, drafts, submissions and PDFs are exactly as they were, and
+  lines written before the redesign are on their days, editable as any other.
+- A line is typed straight into place under its day: Customer or Workshop (or
+  neither), OT, D/T, Call-out (R, your own share), internal km, customer km. A
+  draft from before with no date has its own Date field until one is chosen.
+  Historical NT and call-out counts on older lines are shown and kept.
+- **A saved line is as editable as a new one.** Only a submission locks a
+  line. (Before v1.6.0 a line's own Date field carried it to another day on
+  the first keystroke, so the field lost its place mid-edit; the date is now
+  the day's, moved only by Change date.)
 - **Every change saves itself** (`TimesheetAutosaver`): Saving…, Saved (only
   once the server has answered), Save failed + Retry, offline (kept on the
   device and retried 2 s, 5 s, 10 s, then every 30 s, and at once when the
@@ -65,9 +92,13 @@ history; where the two differ, this document is what the system does.
   Workshop, every value zero) — are kept as a **Draft** on the server, exactly
   as typed, with what they need. A stored line being changed keeps its last
   complete values until the draft is complete. Drafts are not on the PDF.
-- Lines in a current submission are shown read-only, marked Submitted: a
-  submitted timesheet is changed by a correction (TS-16, unchanged), or by a
-  complete replacement.
+- **Only the working sheet is on this page.** A line in a current submission
+  is not shown (a day inside a submitted period is marked *Already
+  submitted*); a submitted timesheet is changed by a correction (TS-16,
+  unchanged) or a complete replacement, both on My Monthly Forms, and the
+  server refuses any change to a submitted line (`timesheet_line_submitted`).
+- The save notice is part of the page and scrolls away with it; each day and
+  line says its own Saving, Saved or Save failed where it is.
 - The one comment saves itself the same way.
 - **No Submit.** "Review and submit on My Monthly Forms" links there for the
   period. The old route (`POST /api/timesheets/:id/period/submit`) answers
@@ -115,6 +146,14 @@ complete replacement).
   database refuses two current submissions of one person sharing a day, so
   racing requests make one submission; a replayed request is answered from
   the idempotency store. The office is notified once, after it is saved.
+- **Submitted timesheets** (moved here from Timesheets on 6 November 2026):
+  the person's own — each opened exactly as submitted (original and the
+  corrected version in force), its PDF, and Corrections to ask for one — and,
+  for the office (`timesheets.viewAll`: Senior Tech and Office), every
+  technician's, with Export CSV and the corrections to accept or reject. The
+  Office now reaches it too (it has no Timesheets page). Notifications of a
+  submission or a correction link here.
+- Nothing submitted is on the Timesheets or Attendance page.
 - The **History** lists every submission — current and replaced, and the
   calendar months submitted before this release — with the stored PDFs, under
   their submitted names, exactly as they went.

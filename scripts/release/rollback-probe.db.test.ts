@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (e9fe38a, v1.5.1), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (835eaaa, v1.5.2), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in e9fe38a, and it does: each of these was checked against that commit.
+ * in 835eaaa, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -183,7 +183,7 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // e9fe38a (v1.5.1) shipped up to 0053; this release (v1.5.2) adds no migration.
+    // 835eaaa (v1.5.2) shipped up to 0053; this release (v1.6.0) adds no migration.
     expect(shipped).toHaveLength(54);
     expect(shipped.at(-1)).toBe('0053_timesheet_line_removals');
 
@@ -197,7 +197,7 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
   });
 
   /*
-   * v1.5.2 RECORDS A `basis` ON EVERY FINANCE PACKAGE ATTACHMENT (the stored
+   * v1.5.2 AND LATER RECORD A `basis` ON EVERY FINANCE PACKAGE ATTACHMENT (the stored
    * manifest). The live code reads a package carrying it, and lists it.
    */
   it('reads a Finance package prepared by v1.5.2 (its manifest carries basis)', async () => {

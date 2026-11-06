@@ -57,7 +57,8 @@
     "library:ocr": "tsx src/ops/library-ocr.ts",
     "payroll-forms-check": "node scripts/payroll-forms-check.mjs",
     "timesheet-two-devices-check": "node scripts/timesheet-two-devices-check.mjs",
-    "payroll-views-check": "node scripts/payroll-views-check.mjs"
+    "payroll-views-check": "node scripts/payroll-views-check.mjs",
+    "timesheet-days-check": "node scripts/timesheet-days-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
