@@ -384,7 +384,7 @@ await check('Change date moves the whole day — over a month end and a year end
   await openSheet(`${YEAR}-12-30`, `${YEAR + 1}-01-03`);
   if (!/Not recorded/u.test(await summaryOf(YEAR_END))) fail('lines were left on the old date');
   const moved = await summaryOf(NEW_YEAR);
-  if (!/2 lines/u.test(moved) || !/OT 1\.00/u.test(moved) || !/D\/T 2\.00/u.test(moved)) fail(`the new date reads "${moved}"`);
+  if (!moved.includes('Year End Alpha, Year End Bravo') || !/OT 1\.00/u.test(moved) || !/D\/T 2\.00/u.test(moved)) fail(`the new date reads "${moved}"`);
   const held = (await heldLines()).filter((line) => [a, b].includes(line.id));
   if (held.length !== 2 || held.some((line) => line.date !== NEW_YEAR)) fail(`the server holds ${JSON.stringify(held.map((line) => line.date))}`);
   await openDay(NEW_YEAR);
