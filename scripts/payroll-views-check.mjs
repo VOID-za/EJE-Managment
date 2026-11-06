@@ -8,7 +8,7 @@
  *     linked period longer than the page shows says so.
  *   Timesheets — From after To is refused and said; a line dated outside the
  *     period is said, never hidden, and "show those dates too" brings it back.
- *   My Monthly Forms — a refused rename is said, "default name" puts it back;
+ *   Completed — a refused completion is said and completes nothing; the name typed in the dialog is kept;
  *     a submission whose answer is lost is said, and never made twice; the
  *     history previews and downloads under the submitted names; a complete
  *     replacement through the screen keeps the original as replaced.
@@ -103,14 +103,30 @@ const DAY = shift(FROM, 2);
 const MONTH = TO.slice(0, 7);
 const NAME = 'Views Check Sheet';
 
-/** Ticks what the period asks to be confirmed, presses Submit and the dialog's own button. */
-const submitHere = async () => {
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  for (const box of ['monthly-forms-acknowledge', 'monthly-forms-no-lines', 'monthly-forms-confirm-replace']) {
+/**
+ * FORM-LIFECYCLE-1: completes one form on its own page for FROM–TO — Completed, the name typed (or the one
+ * proposed), what the dialog asks confirmed, OK.
+ */
+const completeOnPage = async (kind, name = '') => {
+  await go(`/${kind === 'timesheet' ? 'timesheets' : 'attendance'}?from=${FROM}&to=${TO}`);
+  const button = page.getByTestId(`${kind}-complete`);
+  await button.waitFor({ timeout: 30000 });
+  await page.waitForFunction((id) => document.querySelector(`[data-testid="${id}"]`)?.hasAttribute('disabled') === false, `${kind}-complete`, { timeout: 20000 });
+  await press(button);
+  const field = page.getByTestId('complete-form-name');
+  await field.waitFor({ timeout: 20000 });
+  if (name !== '') await field.fill(name);
+  for (const box of ['complete-form-confirm-unrecorded', 'complete-form-confirm-no-lines']) {
     if ((await page.getByTestId(box).count()) > 0) await page.getByTestId(box).check();
   }
-  await press(page.getByTestId('monthly-forms-submit'));
-  await press(page.getByRole('dialog').getByRole('button', { name: /^(Submit both|Replace and submit|Submit attendance)$/u }));
+  await press(page.getByTestId('complete-form-ok'));
+  await page.getByTestId(`${kind}-completed-notice`).waitFor({ timeout: 20000 });
+};
+/** Submit to Office on My Monthly Forms. */
+const submitHere = async () => {
+  await go('/payroll/mine');
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
+  await press(page.getByTestId('my-forms-submit'));
 };
 const historyFor = async (userId) => ((await call('GET', `/api/payroll/forms/${userId}/history`)).json?.data ?? []);
 
@@ -181,32 +197,27 @@ await check('Timesheets: From after To is refused and said; a line outside the p
   await noPageOverflow('Timesheets');
 });
 
-await check('My Monthly Forms: a refused rename is said; "default name" puts it back; then renamed', async () => {
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  const original = await page.getByTestId('monthly-timesheet-file').textContent();
-  await page.route('**/api/payroll/forms/*/rename', (route) =>
-    route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: { message: 'That name could not be kept.', violations: [{ code: 'test_refusal', message: 'Refused by the check.' }] } }) }),
+await check('Completed: a refused completion is said and completes nothing; then completed under the name typed in the dialog', async () => {
+  await go(`/timesheets?from=${FROM}&to=${TO}`);
+  await page.getByTestId('timesheet-complete').waitFor({ timeout: 30000 });
+  await page.route('**/api/payroll/forms/*/complete', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: { message: 'That form could not be completed.', violations: [{ code: 'test_refusal', message: 'Refused by the check.' }] } }) })
+      : route.continue(),
   );
-  await press(page.getByTestId('monthly-timesheet-rename'));
-  await page.getByTestId('rename-input').fill('Refused Name');
-  await press(page.getByTestId('rename-save'));
-  await page.getByTestId('rename-error').waitFor({ timeout: 15000 });
-  await page.unroute('**/api/payroll/forms/*/rename');
-  if ((await page.getByTestId('monthly-timesheet-file').textContent()) !== original) fail('a refused name was shown as kept');
-  await page.getByTestId('rename-input').fill(NAME);
-  await press(page.getByTestId('rename-save'));
-  await page.waitForFunction((n) => document.querySelector('[data-testid="monthly-timesheet-file"]')?.textContent === `${n}.pdf`, NAME, { timeout: 15000 });
-  await press(page.getByTestId('monthly-timesheet-rename'));
-  await press(page.getByTestId('rename-default'));
-  await page.waitForFunction((o) => document.querySelector('[data-testid="monthly-timesheet-file"]')?.textContent === o, original, { timeout: 15000 });
-  await press(page.getByTestId('monthly-timesheet-rename'));
-  await page.getByTestId('rename-input').fill(NAME);
-  await press(page.getByTestId('rename-save'));
-  await page.waitForFunction((n) => document.querySelector('[data-testid="monthly-timesheet-file"]')?.textContent === `${n}.pdf`, NAME, { timeout: 15000 });
+  await press(page.getByTestId('timesheet-complete'));
+  await page.getByTestId('complete-form-name').fill(NAME);
+  await press(page.getByTestId('complete-form-ok'));
+  await page.getByTestId('complete-form-failure').waitFor({ timeout: 15000 });
+  await page.unroute('**/api/payroll/forms/*/complete');
+  await press(page.getByTestId('complete-form-cancel'));
+  if ((await call('GET', `/api/payroll/forms/${sipho}/completed`)).json?.data?.timesheet !== null) fail('a refused completion completed the timesheet');
+  await completeOnPage('timesheet', NAME);
+  if ((await call('GET', `/api/payroll/forms/${sipho}/completed`)).json?.data?.timesheet?.fileName !== `${NAME}.pdf`) fail('the name typed was not kept');
 });
 
-await check('My Monthly Forms: a submission whose answer is lost is said, and is made once — never twice', async () => {
+await check('Submit to Office: a submission whose answer is lost is said, and is made once — never twice', async () => {
+  await completeOnPage('attendance');
   const before = (await historyFor(sipho)).length;
   // The request reaches the server and is made; the answer never comes back.
   await page.route('**/api/payroll/forms/*/submit', async (route) => {
@@ -214,12 +225,14 @@ await check('My Monthly Forms: a submission whose answer is lost is said, and is
     await route.abort('internetdisconnected');
   }, { times: 1 });
   await submitHere();
-  await page.getByTestId('monthly-forms-error').waitFor({ timeout: 20000 });
+  await page.getByTestId('my-forms-failure').waitFor({ timeout: 20000 });
+  // The page reads the forms again: they were submitted, so nothing waits and Submit to Office is not offered.
+  await page.waitForFunction(() => document.querySelector('[data-testid="my-forms-submit"]')?.getAttribute('data-readiness') === 'none', null, { timeout: 20000 });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
   const after = (await historyFor(sipho)).filter((row) => row.from === FROM && row.to === TO);
   if ((await historyFor(sipho)).length !== before + 1 || after.length !== 1) fail(`the history holds ${after.length} for the period`);
-  if ((await page.getByTestId('monthly-forms-replaces').count()) !== 1 && !(await page.getByTestId('monthly-forms-submit').isDisabled())) fail('Submit is offered again as if nothing was submitted');
+  if (await page.getByTestId('my-forms-submit').isEnabled()) fail('Submit to Office is offered again as if nothing was submitted');
   return 'one submission, the page knows it';
 });
 
@@ -243,28 +256,19 @@ await check('History: previews open, the submitted names download; Submitted tim
   return `${NAME}.pdf everywhere`;
 });
 
-await check('a complete replacement through the screen: confirmed, the original kept as replaced and still readable', async () => {
+await check('submitted dates are read only, and are never completed or submitted again — the dialog says why', async () => {
   await go(`/attendance?from=${FROM}&to=${TO}`);
   const day = page.locator(`[data-testid="my-attendance-day"][data-date="${shift(FROM, 1)}"]`);
   await day.waitFor({ timeout: 20000 });
-  await press(day.getByTestId('my-attendance-present'));
-  await allSaved();
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  await page.getByTestId('monthly-forms-replaces').waitFor({ timeout: 20000 });
-  if (!(await page.getByTestId('monthly-forms-submit').isDisabled()) && (await page.getByTestId('monthly-forms-confirm-replace').isChecked())) fail('the replacement was confirmed for the person');
-  await submitHere();
-  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
-  const rows = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`);
-  await page.waitForFunction(([f, t]) => document.querySelectorAll(`[data-testid="my-monthly-history-row"][data-from="${f}"][data-to="${t}"]`).length === 2, [FROM, TO], { timeout: 20000 });
-  const states = await rows.evaluateAll((all) => all.map((row) => row.getAttribute('data-current')));
-  if (states.filter((state) => state === 'no').length !== 1 || states.filter((state) => state === 'yes').length !== 1) fail(`current flags: ${states.join(',')}`);
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  await page.getByTestId('timesheet-submissions').first().waitFor({ timeout: 20000 });
-  const replaced = page.locator('[data-testid="timesheet-submission"]').filter({ hasText: /replaced/iu });
-  if ((await replaced.count()) < 1) fail('the replaced timesheet is not marked as replaced');
-  await press(replaced.first().getByTestId('timesheet-submission-view-original'));
-  await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
-  await page.keyboard.press('Escape');
+  if ((await day.getAttribute('data-locked')) !== 'submitted') fail('a submitted day is not read only');
+  if ((await day.getByTestId('my-attendance-present').count()) !== 0) fail('Present is offered on a submitted day');
+  await press(page.getByTestId('attendance-complete'));
+  const problems = page.getByTestId('complete-form-problems');
+  await problems.waitFor({ timeout: 20000 });
+  if (!/already submitted/u.test(await problems.innerText())) fail(`the dialog says "${await problems.innerText()}"`);
+  if (await page.getByTestId('complete-form-ok').isEnabled()) fail('OK is offered for submitted dates');
+  await press(page.getByTestId('complete-form-cancel'));
+  if ((await historyFor(sipho)).filter((row) => row.from === FROM && row.to === TO).length !== 1) fail('the period was submitted again');
 });
 
 const become = async (who) => {
@@ -374,11 +378,12 @@ await check('Finance (audit F1): the package prepared before the correction is r
 await check('attendance only: the Coordinator submits attendance alone — no timesheet in the history', async () => {
   await become('Christene van Niekerk');
   const me = (await call('GET', '/api/auth/me')).json?.data?.user?.id;
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  if ((await page.getByTestId('monthly-timesheet').count()) !== 0) fail('a timesheet is asked of the Coordinator');
+  await go('/payroll/mine');
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('my-forms-timesheet').getAttribute('data-state')) !== 'not_required') fail('a timesheet is asked of the Coordinator');
+  await completeOnPage('attendance');
   await submitHere();
-  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
   const row = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`).first();
   await row.waitFor({ timeout: 20000 });
   if ((await row.getByTestId('history-timesheet-file').count()) !== 0) fail('a timesheet is in the Coordinator\'s submission');
@@ -393,8 +398,8 @@ await check('another technician sees none of it, and an empty history says so', 
   const riaan = (await call('GET', '/api/auth/me')).json?.data?.user?.id;
   const theirs = await call('GET', `/api/payroll/forms/${sipho}/history`);
   if (theirs.status < 400) fail('another technician read Sipho\'s history');
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
+  await go('/payroll/mine');
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
   const mine = await historyFor(riaan);
   if (mine.length === 0 && (await page.getByTestId('my-monthly-history-empty').count()) !== 1) fail('an empty history is not said');
   if (mine.length > 0 && (await page.locator('[data-testid="my-monthly-history-row"]').count()) !== mine.length) fail('the history on the screen is not the server\'s');

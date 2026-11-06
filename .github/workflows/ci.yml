@@ -186,14 +186,14 @@ jobs:
       # It refuses outright if the two releases' lockfiles differ. The live
       # commit is pinned in the script; when the server moves to a new release,
       # that pin moves with it.
-      - name: Rollback compatibility — the live release (835eaaa, v1.5.2) against this release's database (0053, no new migration)
+      - name: Rollback compatibility — the live release (42e6bd4, v1.6.0) against this release's database (0054)
         run: bash scripts/release/rollback-compat.sh
 
   browser:
     name: Routes, workflow and smoke
     runs-on: ubuntu-latest
     # 90: the forms regression, the source checklists and the office filters each run three times (desktop, tablet, phone).
-    timeout-minutes: 140
+    timeout-minutes: 155
     env:
       EJE_CHECK_URL: http://127.0.0.1:3210
       EJE_E2E_URL: http://127.0.0.1:3210
@@ -494,6 +494,21 @@ jobs:
         env:
           EJE_FORMS_VIEWPORT: 390x844:touch
         run: npm run timesheet-days-check
+
+      - name: Complete each form, submit both to the office (FORM-LIFECYCLE-1) — desktop
+        env:
+          EJE_FORMS_VIEWPORT: 1440x900
+        run: npm run payroll-lifecycle-check
+
+      - name: Complete each form, submit both to the office (FORM-LIFECYCLE-1) — tablet portrait, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 768x1024:touch
+        run: npm run payroll-lifecycle-check
+
+      - name: Complete each form, submit both to the office (FORM-LIFECYCLE-1) — phone, by touch
+        env:
+          EJE_FORMS_VIEWPORT: 390x844:touch
+        run: npm run payroll-lifecycle-check
 
       - name: Every payroll view (payroll completion audit) — desktop
         env:

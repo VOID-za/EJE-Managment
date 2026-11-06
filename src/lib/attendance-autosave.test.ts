@@ -22,7 +22,7 @@ let stamp = 0;
 interface Call {
   readonly input: SendInput;
   readonly keepalive: boolean;
-  resolve: (record: AttendanceRecord) => void;
+  resolve: (record: AttendanceRecord | null) => void;
   reject: (cause: unknown) => void;
 }
 
@@ -45,7 +45,7 @@ const build = (options: { storage?: Map<string, string>; online?: () => boolean 
   const store = options.storage;
   const saver = new AttendanceAutosaver({
     send: (input, { keepalive }) =>
-      new Promise<AttendanceRecord>((resolve, reject) => {
+      new Promise<AttendanceRecord | null>((resolve, reject) => {
         calls.push({ input, keepalive, resolve, reject });
       }),
     classify: (cause) => cause as SendFailure,
@@ -74,6 +74,36 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('saving as the form is filled in', () => {
+  it('FORM-LIFECYCLE-1: the answer pressed again is sent as "not recorded"; the day then shows nothing chosen, saved — never Present or Absent', async () => {
+    const { saver, calls } = build();
+    saver.change(SIPHO, '2026-10-05', { status: 'present', absenceReason: null, note: '' }, null);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS.choice);
+    const saved = record(calls[0]!.input);
+    calls[0]!.resolve(saved);
+    await settle();
+    saver.change(SIPHO, '2026-10-05', { status: null, absenceReason: null, note: '', cleared: true }, saved.recordedAt);
+    expect(saver.state().kind).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS.choice);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.input).toMatchObject({ date: '2026-10-05', status: 'none', expectedRecordedAt: saved.recordedAt });
+    calls[1]!.resolve(null);
+    await settle();
+    expect(saver.answerFor(SIPHO, '2026-10-05')).toMatchObject({ status: null, unsaved: false });
+    expect(saver.unsavedCount).toBe(0);
+    // Chosen again after the clear: from "no record", as the server now holds.
+    saver.change(SIPHO, '2026-10-05', { status: 'absent', absenceReason: 'leave', note: '' }, saved.recordedAt);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS.choice);
+    expect(calls[2]!.input).toMatchObject({ status: 'absent', expectedRecordedAt: null });
+  });
+
+  it('a note-only change with no answer (not a clear) is still not sent', async () => {
+    const { saver, calls } = build();
+    saver.change(SIPHO, '2026-10-06', { status: null, absenceReason: null, note: 'just a note' }, null);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS.note);
+    expect(calls).toHaveLength(0);
+    expect(saver.state().kind).toBe('incomplete');
+  });
+
   it('saves a tap after a short pause — no Save button — and says when', async () => {
     const { saver, calls } = build();
     saver.change(SIPHO, '2026-10-01', { status: 'present', absenceReason: null, note: '' }, null);

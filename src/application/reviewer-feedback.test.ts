@@ -298,8 +298,10 @@ describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (T
     expect(working.entries.map((entry) => entry.id)).toEqual([before.id]);
     expect(working.lastSubmission).toMatchObject({ from: FROM, to: TO });
 
-    // A line changed afterwards changes the working copy only — never the submission.
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id });
+    // A line changed afterwards is refused (FORM-LIFECYCLE-1: submitted dates are read only) — the submission is untouched.
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id })).rejects.toMatchObject({
+      violations: [{ code: 'form_submitted' }],
+    });
     const still = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
     expect(still.rows.find((row) => row.recorded)?.overtimeHours).toBe(1.5);
 

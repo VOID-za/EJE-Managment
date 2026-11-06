@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { completesTimesheet } from '@/domain';
 import { Button, ButtonLink, Card, Icon, LoadingPanel, QueryFailure, TextAreaField, TextField } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -10,6 +10,7 @@ import { TimesheetDocumentView } from '@/components/timesheets/TimesheetDocument
 import { TimesheetDay } from '@/components/timesheets/TimesheetDay';
 import { TimesheetLineEditor, shownLine, type EditableLine } from '@/components/timesheets/TimesheetLineEditor';
 import { useTimesheetAutosave } from '@/components/timesheets/useTimesheetAutosave';
+import { CompleteFormDialog } from '@/components/payroll/CompleteFormDialog';
 import { payroll, reads, timesheets } from '@/api/endpoints';
 import type { TimesheetDocument } from '@/application/timesheets';
 import { useQuery } from '@/hooks/useQuery';
@@ -79,10 +80,13 @@ const TimesheetsPage = () => {
   const sheet = useQuery(`timesheets:working:${personId ?? 'none'}`, () => (personId === null ? Promise.resolve(null) : timesheets.working(personId)));
   const lines = useQuery(`timesheets:lines:${personId ?? 'none'}`, () => (personId === null ? Promise.resolve(null) : timesheets.lines(personId)));
   const customers = useQuery('timesheets:customers', () => reads.customers());
+  // FORM-LIFECYCLE-1: the forms completed and awaiting Submit to Office — a completed timesheet's dates are locked.
+  const completed = useQuery(`payroll:completed:${personId ?? 'none'}`, () => (personId === null ? Promise.resolve(null) : payroll.completed(personId)));
 
   const refresh = useCallback(() => {
     lines.refetch();
     sheet.refetch();
+    completed.refetch();
     // The refetch functions are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -108,16 +112,6 @@ const TimesheetsPage = () => {
   const [added, setAdded] = useState<readonly EditableLine[]>([]);
   // The day blocks opened (TS-DAY-1): every day starts closed.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  // Sent from My Monthly Forms to fix lines (`fix=1`): the days holding a line not complete yet open, once.
-  const fixChecked = useRef(false);
-  useEffect(() => {
-    if (fixChecked.current || lines.data === null || lines.data === undefined) return;
-    fixChecked.current = true;
-    if (new URLSearchParams(window.location.search).get('fix') !== '1') return;
-    const days = lines.data.filter((line) => line.submitted === null && !line.complete && line.date !== null).map((line) => line.date!);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the days to fix are known once the lines have loaded.
-    setOpened(new Set(days));
-  }, [lines.data]);
   const openDay = (date: string, open = true) =>
     setOpened((current) => {
       const next = new Set(current);
@@ -127,7 +121,8 @@ const TimesheetsPage = () => {
     });
 
   // Only the working sheet: a line in a current submission is on My Monthly Forms, never here.
-  const serverLines = (lines.data ?? []).filter((line) => line.submitted === null);
+  // FORM-LIFECYCLE-1: nor a line of the completed timesheet — it is locked and waits on My Monthly Forms.
+  const serverLines = (lines.data ?? []).filter((line) => line.submitted === null && (line.completed ?? null) === null);
   // Every line the server has — a submitted one included, so a line added here and submitted elsewhere is not drawn again as new.
   const known = new Set((lines.data ?? []).map((line) => line.id));
   // The server's lines, then those added here: shown while they wait to be saved or once saved (until the reload brings them).
@@ -206,6 +201,22 @@ const TimesheetsPage = () => {
   );
 
   const status = saver?.state() ?? { kind: 'idle' as const };
+  const awaiting = completed.data?.timesheet ?? null;
+  /** A date of the completed timesheet, or of one submitted: read only. */
+  const lockOf = (date: string): 'completed' | 'submitted' | null =>
+    awaiting !== null && awaiting.from <= date && date <= awaiting.to
+      ? 'completed'
+      : sheet.data?.submissions.some((submission) => submission.current && submission.from <= date && date <= submission.to) === true
+        ? 'submitted'
+        : null;
+  /*
+   * COMPLETED (FORM-LIFECYCLE-1). Offered once everything typed is on the server; the dialog asks the server what
+   * stops it. Completed, the timesheet leaves this page: it is locked and moved to My Monthly Forms, and the page
+   * opens on the next period, clean.
+   */
+  const [completing, setCompleting] = useState(false);
+  const [justCompleted, setJustCompleted] = useState<{ readonly fileName: string; readonly periodLabel: string } | null>(null);
+  const unsaved = (saver?.unsavedCount ?? 0) > 0;
   // A refusal may mean the line changed state elsewhere (submitted, removed): the lines are read again, so the
   // page shows what is so — and a change it can no longer draw is listed to be discarded.
   useEffect(() => {
@@ -218,7 +229,7 @@ const TimesheetsPage = () => {
         title="Timesheets"
         description={
           keeps
-            ? 'Your timesheet, like the paper one: open a day and add a line for each customer, site or Workshop. Every change saves by itself. Submit it with your attendance on My Monthly Forms, where your submitted timesheets are kept.'
+            ? 'Your timesheet, like the paper one: open a day and add a line for each customer, site or Workshop. Every change saves by itself. When the period is done, press Completed — the timesheet is locked and moves to My Monthly Forms, where you submit it to the office with your attendance.'
             : 'Every technician keeps their own timesheet and submits it on My Monthly Forms.'
         }
       />
@@ -303,7 +314,7 @@ const TimesheetsPage = () => {
                   </div>
                   {drafts > 0 && (
                     <p className="mt-2 text-sm text-amber-eje-700" data-testid="timesheet-drafts">
-                      {drafts} line{drafts === 1 ? ' is' : 's are'} not complete yet (or still saving). Drafts are kept, but they are not on the PDF and the forms cannot be submitted until each is completed or removed.
+                      {drafts} line{drafts === 1 ? ' is' : 's are'} not complete yet (or still saving). Drafts are kept, but they are not on the PDF, and the timesheet cannot be completed until each is finished or removed.
                     </p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -313,12 +324,59 @@ const TimesheetsPage = () => {
                     <Button variant="secondary" leadingIcon={<Icon name="document" className="size-4" />} onClick={() => setPreviewing('print')} data-testid="timesheet-print">
                       Print
                     </Button>
-                    <ButtonLink href={`/payroll/mine?from=${from}&to=${to}`} variant="secondary" data-testid="timesheet-to-monthly-forms">
-                      Review and submit on My Monthly Forms
+                    <ButtonLink href="/payroll/mine" variant="secondary" data-testid="timesheet-to-monthly-forms">
+                      My Monthly Forms
                     </ButtonLink>
+                    <Button
+                      leadingIcon={<Icon name="check" className="size-4" />}
+                      disabled={unsaved || saver === null}
+                      onClick={() => {
+                        setJustCompleted(null);
+                        setCompleting(true);
+                      }}
+                      data-testid="timesheet-complete"
+                    >
+                      Completed
+                    </Button>
                   </div>
+                  {unsaved && (
+                    <p className="mt-2 text-xs text-steel-600" data-testid="timesheet-complete-wait">
+                      Completed is offered once every change is saved.
+                    </p>
+                  )}
                 </Card>
               )}
+
+              {justCompleted !== null && (
+                <p role="status" className="mb-5 rounded-[var(--radius-control)] border border-verdant-200 bg-verdant-50 px-3 py-2 text-sm text-verdant-700" data-testid="timesheet-completed-notice">
+                  Your timesheet “{justCompleted.fileName}” for {justCompleted.periodLabel} is completed and locked. It is on{' '}
+                  <a href="/payroll/mine" className="font-medium underline">My Monthly Forms</a>, waiting to be submitted to the office with your attendance.
+                </p>
+              )}
+              {usable && (
+                <CompleteFormDialog
+                  open={completing}
+                  userId={personId}
+                  kind="timesheet"
+                  from={from}
+                  to={to}
+                  onCancel={() => setCompleting(false)}
+                  onCompleted={(form) => {
+                    setCompleting(false);
+                    setJustCompleted({ fileName: form.fileName, periodLabel: form.periodLabel });
+                    setOpened(new Set());
+                    // A clean workspace for the next period: the day after it, to today.
+                    void payroll.completed(personId).then((state) => choose(state.next), () => undefined);
+                    refresh();
+                  }}
+                />
+              )}
+              <datalist id="timesheet-customer-options">
+                <option value="Workshop" />
+                {(customers.data ?? []).map((customer) => (
+                  <option key={customer.id} value={customer.name} />
+                ))}
+              </datalist>
 
               <Card className="mb-5" data-testid="timesheet-sheet">
                 <h2 className="text-base font-semibold text-steel-900">Your timesheet</h2>
@@ -399,7 +457,7 @@ const TimesheetsPage = () => {
                           onToggle={() => openDay(date, !opened.has(date))}
                           onAdd={() => addLine(date)}
                           onMove={(target) => moveDay(date, target, ofDay)}
-                          submitted={sheet.data!.submissions.some((submission) => submission.current && submission.from <= date && date <= submission.to)}
+                          locked={lockOf(date)}
                           customers={customers.data ?? []}
                           saver={saver}
                         />

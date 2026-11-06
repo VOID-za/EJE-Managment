@@ -26,6 +26,7 @@
  */
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { completeAndSubmit } from './payroll-flow.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
@@ -293,22 +294,22 @@ await check('Timesheets: Preview and Print on the page, no Submit (PAYROLL-ONE-1
   return name;
 });
 
-await check('Monthly Forms: both forms with Download, Save, Preview, Print and Rename, one Submit — and a period may be submitted before its month ends', async () => {
+await check('Monthly Forms: both completed forms with Download, Save, Preview and Print, one Submit to Office — and a period may be submitted before its month ends', async () => {
   await as('Sipho Mahlangu');
   const from = `${today.slice(0, 7)}-01`;
-  await go(`/payroll/mine?from=${from}&to=${today}`);
-  const forms = page.getByTestId('my-monthly-forms');
-  await forms.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  // PAYROLL-ONE-1: the timesheet and the attendance, submitted together for the period.
+  // FORM-LIFECYCLE-1: each form completed on its page (here through its request), then both submitted together.
   for (const kind of ['timesheet', 'attendance']) {
-    for (const action of ['download', 'export', 'preview', 'print', 'rename']) await forms.getByTestId(`monthly-${kind}-${action}`).waitFor({ timeout: 10000 });
+    const done = await call('POST', '/api/payroll/forms/user-tech-sipho/complete', { kind, from, to: today, fileName: '', confirmUnrecorded: true, confirmNoLines: true });
+    if (done.status !== 200) fail(`completing the ${kind} answered ${done.status} ${JSON.stringify(done.json?.error ?? '')}`);
   }
-  await forms.getByTestId('monthly-forms-submit').waitFor({ timeout: 20000 });
+  await go('/payroll/mine');
+  const forms = page.getByTestId('my-monthly-forms');
+  await forms.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
+  for (const kind of ['timesheet', 'attendance']) {
+    for (const action of ['download', 'export', 'preview', 'print']) await forms.getByTestId(`my-forms-${kind}-${action}`).waitFor({ timeout: 10000 });
+  }
   if ((await page.getByText(/has not ended/iu).count()) !== 0) fail('the month-end restriction is still shown');
-  const state = await call('GET', `/api/payroll/forms/user-tech-sipho?from=${from}&to=${today}`);
-  const submitted = await call('POST', '/api/payroll/forms/user-tech-sipho/submit', {
-    from, to: today, revision: state.json?.data?.revision, confirmUnrecorded: true, confirmNoLines: true,
-  });
+  const submitted = await completeAndSubmit(call, 'user-tech-sipho', from, today);
   if (submitted.status !== 200) fail(`submitting this month so far answered ${submitted.status} ${JSON.stringify(submitted.json?.error ?? '')}`);
   await noPageOverflow('Monthly Forms');
 });

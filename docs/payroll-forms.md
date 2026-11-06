@@ -5,7 +5,10 @@ migration 0052) the same day, the autosave follow-ups as **v1.5.1** (`e9fe38a`,
 migration 0053) — **accepted by the owner on 5 November 2026** — and the
 completion audit's fixes as **v1.5.2** (`835eaaa`, no migration), deployed the same day; the
 day-by-day Timesheets page and the move of everything submitted to My Monthly
-Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migration), deployed 6 November 2026 — not yet approved. Release records:
+Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migration), deployed 6 November 2026 — not yet approved; and
+**the form lifecycle** (FORM-LIFECYCLE-1, the owner, 6 November 2026 — each form
+completed on its own page, both submitted to the office together; Present and
+Absent toggle; the six-column timesheet rows) as **v1.7.0** (migration 0054). Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
@@ -29,6 +32,61 @@ history; where the two differ, this document is what the system does.
    the submission until completed or removed.
 6. **PDF names are stored** per person per working document, and the submitted
    documents keep the names they went with.
+
+## The form lifecycle (FORM-LIFECYCLE-1, 6 November 2026)
+
+| State | Where | What can be done |
+|---|---|---|
+| **In progress** | Timesheets, Attendance | Everything — each change saves itself. |
+| **Completed — awaiting submission** | My Monthly Forms | Preview, Print, Download, Save PDF of the PDF stored when it was completed. Locked: nothing in its dates is changed by any page, device or request (`form_completed`). |
+| **Submitted to the office** | My Monthly Forms → History | Read only, for ever (`form_submitted`); a submitted timesheet is changed only by a correction (TS-16). |
+| **History** | My Monthly Forms | Every submission, its documents exactly as they went. No edit, delete, reopen or resubmit. |
+
+- **Completed** is on each page. It opens **Complete this form?**: what
+  completing does (finalised, moved to My Monthly Forms, cannot be edited
+  again; preview, print, download and save stay; submitted to the office from
+  My Monthly Forms when both are ready), the dates, and the **form name** —
+  proposed (the To-month rule), changed right there (`normalisePdfFileName`
+  checks it). The server's own check is shown: what stops it (a line not
+  complete, an absent day without its reason, dates already submitted, the
+  other form completed for other dates) and what must be confirmed (weekdays
+  Not recorded; a timesheet with no lines). **Cancel** changes nothing. **OK**
+  completes it (`POST /api/payroll/forms/:id/complete`): in the request's one
+  transaction the content (the timesheet's lines and comment, or the
+  attendance days) and the PDF rendered from it are frozen in
+  `payroll_form_completions`, write-once, under the chosen name. The page then
+  opens on the next period, clean. Completed is offered only once every
+  change on the page is saved.
+- **Independent.** Either form may be completed first; one never completes
+  the other. The second must be for the same From–To as the first (refused
+  otherwise: `form_period_mismatch`), so the two can always go together.
+- **The lock** is checked on every write path of both forms
+  (`form-locks.ts`): a line saved, added, moved or removed, the old entries
+  route, an attendance day chosen or cleared. A completion and a save racing it
+  take the same per-person lock (a PostgreSQL advisory lock held to the end of
+  the transaction), so a save either lands before the completion reads the
+  form — and is in it — or is refused after; it is never written beside it.
+- **One at a time.** At most one form of each kind awaits per person (the
+  database's unique key): a repeated or raced OK is never a second form. The
+  same request again is answered from the idempotency store.
+- **Submit to Office** (My Monthly Forms) sends BOTH completed forms, as one
+  submission — never one alone. Disabled until both are completed for the same
+  dates, with the reason under it in words: *Both forms must be completed*,
+  *Attendance form not completed*, *Timesheet form not completed*, the two
+  forms' differing dates, or *Ready to submit*. The Office (a Coordinator,
+  who keeps no timesheet, TS-ROLE-1) submits attendance alone. The server
+  checks it all again (`submitCompletedForms`): the person's own forms, both
+  awaiting, the same dates, and the live lines and days still EXACTLY as
+  completed (`payroll_form_changed` otherwise — nothing is submitted). Then, in
+  one transaction, the existing submission is made from them — under their
+  completed names, with the timesheet's frozen comment — and both are marked
+  as part of it. A lost answer and a second press are one request; another
+  request finds them submitted (`payroll_already_submitted`).
+- **No replacement.** Dates that share any day with a submission are never
+  completed again (`payroll_period_submitted`): a submitted form is not
+  resubmitted. This retires TS-PAPER-7's confirmed complete replacement and
+  RESUBMIT-1's "a submitted day stays editable" (the owner, 6 November 2026).
+  Replacements made before this release stay in the history, marked replaced.
 
 ## Timesheets — working data that saves itself
 
@@ -105,52 +163,60 @@ history; where the two differ, this document is what the system does.
   A refusal reloads the lines. A draft with no date keeps its own Date field,
   saved when the field is left, so the line never jumps mid-typing.
 - The one comment saves itself the same way.
-- **No Submit.** "Review and submit on My Monthly Forms" links there for the
-  period. The old route (`POST /api/timesheets/:id/period/submit`) answers
-  `submission_moved`.
+- **Six columns, one row per line** (FORM-LIFECYCLE-1): each day's lines are
+  rows of **Customer | OT | D/T | Callout | Int Km | Cust Km**, side by side
+  under the column names; on a phone the day's table scrolls sideways (the
+  page does not). The Customer field is one: a register customer's name typed
+  exactly picks that customer, "Workshop" is Workshop (TS-06), anything else
+  is the name as typed. A day with no line says **Not recorded**; a day of a
+  completed or submitted timesheet says so and is read only.
+- **Completed**, not Submit: see the form lifecycle above. The old route
+  (`POST /api/timesheets/:id/period/submit`) still answers `submission_moved`.
 
-## Attendance — unchanged
+## Attendance
 
 Present / Absent with its reason, one row per person per day, each choice
 saving itself (ATT-AUTO-1); Absent is saved only once its reason is chosen.
-No Submit (it never had one after FORMS-PAGES-1). Each person records their
-own days only (ATT-OWN-1); the office reads them. My Monthly Forms' "Edit my
-attendance" opens exactly the period; the page shows at most 92 days at once,
-and a longer period says it opened the first 92.
+Each person records their own days only (ATT-OWN-1); the office reads them.
+The page shows at most 92 days at once, and a longer period says it opened the
+first 92.
 
-A day may still be changed after the period was submitted (RESUBMIT-1 left a
-person's own days editable). The submission stays exactly as submitted — that
-is what Finance gets — and the office's month view counts the days changed in
-the register since ("N attendance day(s) changed in the register after
-submission — Finance gets the attendance as submitted"), so a change is never
-silent. A changed period is put right by submitting it again (a confirmed
-complete replacement).
+- **Present and Absent toggle** (FORM-LIFECYCLE-1). Pressing the chosen one
+  again takes it back: the day is **Not recorded** again — its row is removed
+  (`attendance_cleared`, audited), never turned into Present or Absent.
+  Pressing the other one changes it. A stale screen never clears a newer
+  answer (`attendance_changed`).
+- Every day without an answer says **Not recorded**.
+- **Completed** finalises the attendance for From–To (the lifecycle above).
+- **Locked once completed or submitted** (FORM-LIFECYCLE-1, replacing
+  RESUBMIT-1): those days say so and offer nothing to press; the server
+  refuses a change or a clear. Days changed after a submission before this
+  release are still counted on the office's month view ("N attendance day(s)
+  changed in the register after submission — Finance gets the attendance as
+  submitted").
 
 ## My Monthly Forms — the one submission point
 
-- Opens on the day after the last submission to today (or a link's dates).
-  From and To may be any days, up to a year.
-- Shows the Finance month, then two sections — **Timesheet** and
-  **Attendance** — each with its file name, **Rename**, Preview, Print,
-  Download PDF and Save PDF, all of the very PDF that is submitted, and a
-  link to edit it for these dates. An Office person sees attendance only.
-- Says plainly what stops the submission, each with where to fix it:
-  incomplete lines (named, with what they need), an absent day without its
-  reason, a partial overlap, a corrected timesheet in the way.
-- Asks for explicit confirmation of: weekdays with no attendance, a timesheet
-  with no lines, and a replacement (it names what it replaces).
-- **Submit** (`POST /api/payroll/forms/:id/submit`) sends the revision the
-  screen reviewed; if anything changed since (a line still saving, another
-  tab), it is refused (`payroll_forms_changed`) and the forms are shown again.
-  Every check is made before anything is written. Then, in the request's ONE
-  PostgreSQL transaction: the timesheet period is submitted (its snapshot,
-  rules and corrections as before), every earlier submission the dates cover
-  is marked replaced, the attendance is frozen, both PDFs are rendered and
-  stored under server-made keys (`payroll-submissions/<id>/<kind>.pdf`) with
-  their SHA-256, and one `payroll_submissions` row records it all. The
-  database refuses two current submissions of one person sharing a day, so
-  racing requests make one submission; a replayed request is answered from
-  the idempotency store. The office is notified once, after it is saved.
+- **No pay-period filter** (FORM-LIFECYCLE-1): the dates are the completed
+  forms' own.
+- **Timesheet**, then **Attendance**: each *Completed — awaiting submission*
+  with its name, dates, what it holds and when it was completed, and Preview,
+  Print, Download and Save PDF of the PDF stored at completion (never a live
+  copy); or *Not completed*, with the way to its page; or, for the Office,
+  the timesheet *Not required*. Nothing here edits a form.
+- **Submit to Office**, with its reason under it (the lifecycle above). The
+  submission itself is the one PAYROLL-ONE-1 made: in the request's ONE
+  PostgreSQL transaction the timesheet period is submitted (its snapshot,
+  rules and corrections as before), the attendance is frozen, both PDFs are
+  rendered and stored under server-made keys
+  (`payroll-submissions/<id>/<kind>.pdf`) with their SHA-256, one
+  `payroll_submissions` row records it all, and both completed forms are
+  marked as part of it. The database refuses two current submissions of one
+  person sharing a day. The office is notified once, after it is saved.
+- If the answer is lost, the page says the forms may not have gone and reads
+  them again: submitted, nothing awaits and the history shows them; not
+  submitted, both still wait and Submit to Office is offered again — the same
+  request, answered once.
 - **Submitted timesheets** (moved here from Timesheets on 6 November 2026):
   the person's own — each opened exactly as submitted (original and the
   corrected version in force), its PDF, and Corrections to ask for one — and,
@@ -159,15 +225,10 @@ complete replacement).
   Office now reaches it too (it has no Timesheets page). Notifications of a
   submission or a correction link here.
 - Nothing submitted is on the Timesheets or Attendance page.
-- The **History** lists every submission — current and replaced, and the
-  calendar months submitted before this release — with the stored PDFs, under
-  their submitted names, exactly as they went.
-- If the answer to Submit is lost (the connection drops after the server
-  made the submission), the page says the submission may not have gone, and
-  reloads the forms: the history then shows it, and Submit is offered only as
-  an explicit replacement. Pressing Submit again before anything changed
-  repeats the very same request (the same idempotency key), which the server
-  answers with the submission it already made — never a second one.
+- The **History** (at the bottom) lists every submission — current, replaced
+  before this release, and the calendar months submitted before PAYROLL-ONE-1
+  — with the stored PDFs, under their submitted names, exactly as they went.
+  Read only: Preview and Download; no edit, delete, reopen or resubmit.
 - The in-memory demonstration store has no transaction; every check runs
   before the first write there too.
 
@@ -231,7 +292,8 @@ complete replacement).
 |---|---|---|---|
 | Own timesheet lines and its comment | write | write | — (completes no timesheet, TS-ROLE-1) |
 | Own attendance | write | write | write |
-| Rename and Submit on My Monthly Forms | own: both forms | own: both forms | own: attendance only |
+| Complete (and name) a form; Submit to Office | own: both forms | own: both forms | own: attendance only |
+| Read a completed form awaiting submission | own | own, and anybody's | own, and anybody's |
 | Ask for a correction of a submitted timesheet | own | own | — |
 | Accept or reject a correction | — | someone else's | yes |
 | Another person's timesheet, attendance and forms | — | **read only** | **read only** |
@@ -250,6 +312,15 @@ reads another's forms (refused by the server). Every route checks it on the serv
   for a person with the real tablet, phone and printer; everything else is
   automated.
 
+## Database (migration 0054, additive)
+
+| Change | Why |
+|---|---|
+| `payroll_form_completions` — one completed form: person, kind, From, To, name, frozen content, stored PDF, who and when, and the submission it went in. Write-once (`guard_payroll_form_completion`): only `submission_id` is set, once; never deleted. One awaiting per person and kind (`payroll_form_completions_awaiting_key`). | the completed, locked form |
+
+No existing row is updated or deleted by the migration. v1.6.0 (`42e6bd4`)
+never reads the table, so it runs against it unchanged (CI rollback probe).
+
 ## Database (migration 0052, additive)
 
 | Change | Why |
@@ -264,6 +335,15 @@ reads another's forms (refused by the server). Every route checks it on the serv
 No existing row is updated or deleted by the migration.
 
 ## Recovery
+
+- **Code rollback from v1.7.0 to v1.6.0** (`42e6bd4`): nothing of the
+  database is undone (0054 is additive and v1.6.0 never reads it). The
+  limitation: v1.6.0 knows nothing of completion — it does not lock a
+  completed form's dates, and its My Monthly Forms submits by From–To as
+  before. A form completed under v1.7.0 and not yet submitted stays recorded
+  in `payroll_form_completions`, awaiting, and is honoured again when v1.7.0
+  is back (a changed form is then refused at Submit, `payroll_form_changed`,
+  never sent as if it were the completed one).
 
 - **Code rollback from v1.5.2 to v1.5.1** (`e9fe38a`) needs nothing of the
   database (v1.5.2 has no migration; the `basis` it adds to a package's

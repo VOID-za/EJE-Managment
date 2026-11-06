@@ -21,6 +21,7 @@
  */
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { completeAndSubmit, refusalCode } from './payroll-flow.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
@@ -129,30 +130,23 @@ await check('Attendance: the period PDF is named for both months and has no Note
   return name;
 });
 
-/** PAYROLL-ONE-1: both forms for the period, as My Monthly Forms submits them — naming the revision it read. */
-const submitForms = async (me, from, to, extra = {}) => {
-  const forms = await call('GET', `/api/payroll/forms/${me}?from=${from}&to=${to}`);
-  if (forms.status !== 200) return forms;
-  return call('POST', `/api/payroll/forms/${me}/submit`, { from, to, revision: forms.json.data.revision, confirmUnrecorded: true, confirmNoLines: true, ...extra });
-};
+/** FORM-LIFECYCLE-1: each form completed for the period, then both submitted to the office together. */
+const submitForms = (me, from, to) => completeAndSubmit(call, me, from, to);
 const PREVIOUS_MONTH_END = new Date(Date.UTC(Number(PREVIOUS_MONTH.slice(0, 4)), Number(PREVIOUS_MONTH.slice(5, 7)), 0)).toISOString().slice(0, 10);
 
-await check('Attendance: a submitted period is changed and submitted again only as a confirmed replacement; the first is kept (PAYROLL-ONE-1)', async () => {
+await check('Attendance: a submitted period is read only — its days are refused, and it is never submitted again (FORM-LIFECYCLE-1)', async () => {
   const me = (await call('GET', '/api/auth/me')).json.data.user.id;
   const first = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END);
   if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
   const day = `${PREVIOUS_MONTH}-15`;
   const changed = await call('POST', '/api/attendance', { userId: me, date: day, status: 'absent', absenceReason: 'leave', note: '' });
-  if (changed.status !== 200) fail(`changing a submitted day answered ${changed.status}`);
-  await go(`/payroll/mine?from=${PREVIOUS_MONTH_START}&to=${PREVIOUS_MONTH_END}`);
-  await page.getByTestId('monthly-forms-replaces').waitFor({ timeout: 20000 });
-  if ((await page.getByTestId('monthly-forms-confirm-replace').count()) !== 1) fail('no explicit confirmation for the replacement');
-  if ((await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END)).status !== 422) fail('a replacement went without its confirmation');
-  const second = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END, { confirmReplace: true });
-  if (second.status !== 200) fail(`the replacement answered ${second.status}`);
-  if (!second.json.data.submission.attendance.days.some((row) => row.date === day && row.status === 'absent')) fail('the replacement does not carry the change');
+  if (refusalCode(changed) !== 'form_submitted') fail(`changing a submitted day answered ${changed.status} ${refusalCode(changed)}`);
+  const again = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END);
+  if (refusalCode(again) !== 'payroll_period_submitted') fail(`the same dates again answered ${again.status} ${refusalCode(again)}`);
   const history = (await call('GET', `/api/payroll/forms/${me}/history`)).json.data;
-  if (history.filter((entry) => entry.current).length !== 1 || history.filter((entry) => !entry.current).length !== 1) fail('the first submission was not kept beside its replacement');
+  if (history.length !== 1 || !history[0].current) fail('the submission was not kept as the one current submission');
+  await go('/payroll/mine');
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
   await noPageOverflow('My Monthly Forms');
 });
 

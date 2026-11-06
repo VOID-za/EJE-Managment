@@ -44,6 +44,7 @@ import type {
   PayrollSubmission,
   PayrollDocumentName,
   PayrollDocumentKind,
+  PayrollFormCompletion,
   FinancePackage,
   FinancePackageStatus,
   IssuedDeliveryNote,
@@ -566,6 +567,11 @@ export interface AttendanceRepository {
   /** Every record in the inclusive date range, optionally for one person. */
   listRecords(from: string, to: string, userId?: UserId): Promise<readonly AttendanceRecord[]>;
   findRecord(userId: UserId, date: string): Promise<AttendanceRecord | null>;
+  /**
+   * FORM-LIFECYCLE-1: the person pressed their answer again to take it back —
+   * the day is NOT RECORDED again (no row), never present or absent.
+   */
+  deleteRecord(id: string): Promise<void>;
   saveRecord(record: AttendanceRecord): Promise<AttendanceRecord>;
   listComments(userId: UserId, from: string, to: string): Promise<readonly TimesheetComment[]>;
   findComment(userId: UserId, date: string): Promise<TimesheetComment | null>;
@@ -941,6 +947,22 @@ export interface PayrollRepository {
   listDocumentNames(userId: UserId): Promise<readonly PayrollDocumentName[]>;
   saveDocumentName(name: PayrollDocumentName): Promise<PayrollDocumentName>;
   deleteDocumentName(userId: UserId, kind: PayrollDocumentKind): Promise<void>;
+  /**
+   * FORM-LIFECYCLE-1 (migration 0054). A completed form, written once. Null
+   * when a form of this kind already awaits submission for the person — the
+   * database's unique key: a second completion, raced or repeated, is never a
+   * second row.
+   */
+  createFormCompletion(completion: PayrollFormCompletion): Promise<PayrollFormCompletion | null>;
+  /** One person's completed forms — awaiting and submitted — the latest completion first. */
+  listFormCompletions(userId: UserId): Promise<readonly PayrollFormCompletion[]>;
+  findFormCompletion(id: string): Promise<PayrollFormCompletion | null>;
+  /**
+   * Records that these AWAITING completions went to the office in `submissionId`.
+   * Only those still awaiting are marked; returns how many were. A completion is
+   * never otherwise changed.
+   */
+  markFormsSubmitted(ids: readonly string[], submissionId: string): Promise<number>;
 }
 
 /** Which current submissions a payroll submission replaces. */

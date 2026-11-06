@@ -4151,17 +4151,17 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   if ((await form.count()) !== 1) throw new Error('the line moved or vanished when the date changed');
   await block.getByRole('button', { name: 'Cancel' }).click();
 
-  // Every field, typed like a person types.
+  // Every field, typed like a person types — the row's six fields (FORM-LIFECYCLE-1: Customer | OT | D/T | Callout | Int Km | Cust Km).
+  const FIELD = { Customer: 'timesheet-customer-name', 'OT (hours)': 'timesheet-overtime', 'D/T (hours)': 'timesheet-double', 'Callout (R)': 'timesheet-callout', 'Int Km': 'timesheet-internal-km', 'Cust Km': 'timesheet-customer-km' };
   const typeInto = async (label, text) => {
-    const field = form.getByLabel(label, { exact: true });
+    const field = form.getByTestId(FIELD[label]);
     await field.click();
     await page.keyboard.press('Control+A');
     await page.keyboard.type(text, { delay: 20 });
     const value = await field.inputValue();
     if (value !== text) throw new Error(`${label} reads "${value}" after typing "${text}"`);
   };
-  await form.getByTestId('timesheet-customer-pick').selectOption({ index: 0 });
-  await typeInto('Customer or site', 'Kruger Engineering');
+  await typeInto('Customer', 'Kruger Engineering');
   await typeInto('OT (hours)', '2.5');
   await typeInto('D/T (hours)', '1.25');
   await typeInto('Callout (R)', '450');
@@ -4172,8 +4172,8 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await page.getByTestId('timesheet-callout-hint').waitFor({ timeout: 5000 });
   // An earlier field corrected after the later ones: nothing else moves or resets.
   await typeInto('OT (hours)', '3');
-  for (const [label, expected] of [['Customer or site', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
-    const value = await form.getByLabel(label, { exact: true }).inputValue();
+  for (const [label, expected] of [['Customer', 'Kruger Engineering'], ['D/T (hours)', '1.25'], ['Callout (R)', '450'], ['Int Km', '12.5'], ['Cust Km', '30']]) {
+    const value = await form.getByTestId(FIELD[label]).inputValue();
     if (value !== expected) throw new Error(`${label} became "${value}" after OT was edited`);
   }
   if ((await form.getAttribute('data-date')) !== target) throw new Error('the date changed by itself');
@@ -4186,8 +4186,8 @@ await step('a technician types a whole timesheet line, clearing and retyping the
   await page.goto(`${BASE}/timesheets?from=${sast(-10)}&to=${sast(0)}`, { waitUntil: 'networkidle' });
   await block.getByTestId('timesheet-day-toggle').click();
   await form.waitFor({ timeout: 10000 });
-  const read = async (label) => form.getByLabel(label, { exact: true }).inputValue();
-  const values = { date: await form.getAttribute('data-date'), customer: await read('Customer or site'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
+  const read = async (label) => form.getByTestId(FIELD[label]).inputValue();
+  const values = { date: await form.getAttribute('data-date'), customer: await read('Customer'), ot: await read('OT (hours)'), dt: await read('D/T (hours)'), callout: await read('Callout (R)'), ikm: await read('Int Km'), ckm: await read('Cust Km') };
   const want = { date: target, customer: 'Kruger Engineering', ot: '3', dt: '1.25', callout: '450.00', ikm: '12.5', ckm: '30' };
   if (JSON.stringify(values) !== JSON.stringify(want)) throw new Error(`after coming back: ${JSON.stringify(values)}, wanted ${JSON.stringify(want)}`);
 
@@ -4217,7 +4217,7 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   await row.waitFor({ timeout: 10000 });
   if ((await row.getByLabel('NT (hours)').count()) !== 0) throw new Error('NT is still offered on a new line');
   // Workshop needs no customer (TS-PAPER).
-  await row.getByLabel('Customer or Workshop').selectOption('__workshop__');
+  await row.getByTestId('timesheet-customer-name').fill('Workshop');
   await row.getByLabel('OT (hours)').fill('2');
   await row.getByLabel('D/T (hours)').fill('0.5');
   await row.getByLabel('Callout (R)').fill('450');
@@ -4234,16 +4234,21 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   if ((await page.getByTestId('preview-download').count()) !== 0) throw new Error('the Timesheets preview still offers Download');
   await page.getByTestId('preview-close').click();
 
-  // My Monthly Forms: the period proposed (the day after the last submission), To today; both forms together.
-  await page.getByTestId('timesheet-to-monthly-forms').click();
-  await page.getByTestId('monthly-forms').waitFor({ timeout: 20000 });
-  for (const box of ['monthly-forms-acknowledge', 'monthly-forms-no-lines']) {
-    if ((await page.getByTestId(box).count()) > 0) await page.getByTestId(box).check();
-  }
-  if ((await page.getByTestId('monthly-forms-problems').count()) > 0) throw new Error(`cannot submit: ${await page.getByTestId('monthly-forms-problems').innerText()}`);
-  await page.getByTestId('monthly-forms-submit').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
-  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  // FORM-LIFECYCLE-1: Completed on Timesheets, Completed on Attendance, then Submit to Office on My Monthly Forms.
+  await page.getByTestId('timesheet-complete').click();
+  await page.getByTestId('complete-form-name').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('complete-form-problems').count()) > 0) throw new Error(`cannot complete: ${await page.getByTestId('complete-form-problems').innerText()}`);
+  await page.getByTestId('complete-form-ok').click();
+  await page.getByTestId('timesheet-completed-notice').waitFor({ timeout: 20000 });
+  await page.goto(`${BASE}/attendance?from=${today}&to=${today}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('attendance-complete').click();
+  await page.getByTestId('complete-form-name').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('complete-form-confirm-unrecorded').count()) > 0) await page.getByTestId('complete-form-confirm-unrecorded').check();
+  await page.getByTestId('complete-form-ok').click();
+  await page.getByTestId('attendance-completed-notice').waitFor({ timeout: 20000 });
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  await page.getByTestId('my-forms-submit').click();
+  await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
   await page.locator(`[data-testid="my-monthly-history-row"][data-to="${today}"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
   // The comment went with it, and the next sheet starts without it.
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
@@ -4423,15 +4428,13 @@ await step('the Coordinator: My and EJE Monthly Forms and Users in the sidebar, 
   // Her own monthly form is on My Monthly Forms.
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   const own = page.getByTestId('my-monthly-forms');
-  await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
-  if (!/^CHRISTENE Atten/iu.test(await own.getByTestId('monthly-attendance-file').innerText())) throw new Error('the Coordinator’s own form is not hers');
-  for (const id of ['monthly-attendance-preview', 'monthly-attendance-print', 'monthly-attendance-download', 'monthly-forms-submit']) await own.getByTestId(id).waitFor({ timeout: 5000 });
+  await own.getByTestId('my-forms-submit').waitFor({ timeout: 15000 });
+  await own.getByTestId('my-forms-attendance').waitFor({ timeout: 5000 });
   if ((await page.getByTestId('team-register-heading').count()) !== 0 || (await page.getByTestId('attendance-register').count()) !== 0) {
     throw new Error('the Coordinator still has the Team register');
   }
-  // TS-ROLE-1: her month is attendance only — no timesheet half, no timesheet link.
-  if ((await own.getByTestId('monthly-forms-edit-timesheet').count()) !== 0) throw new Error('the Coordinator was offered her own timesheet');
-  if ((await own.getByTestId('monthly-forms-together').count()) !== 0) throw new Error('the Coordinator was told a timesheet goes with her attendance');
+  // TS-ROLE-1: her forms are attendance only — the timesheet is "Not required".
+  if ((await own.getByTestId('my-forms-timesheet').getAttribute('data-state')) !== 'not_required') throw new Error('the Coordinator was asked for a timesheet');
   if ((await page.locator('nav a[href="/timesheets"]').count()) !== 0) throw new Error('the Coordinator’s sidebar offers Timesheets');
 });
 
@@ -4453,9 +4456,9 @@ await step('the Coordinator’s Users screen: everybody’s availability, and th
 await step('My Monthly Forms and EJE Monthly Forms: the Coordinator’s own month and history; every user’s status for the office (tester)', async () => {
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'My Monthly Forms' }).waitFor({ timeout: 10000 });
-  const card = page.getByTestId('my-monthly-forms').getByTestId('monthly-forms');
+  const card = page.getByTestId('my-monthly-forms').getByTestId('my-forms');
   await card.waitFor({ timeout: 15000 });
-  if (!(await card.getByTestId('monthly-forms-title').innerText()).startsWith('Christene')) throw new Error('My Monthly Forms shows another person');
+  if ((await card.getByTestId('my-forms-timesheet').getAttribute('data-state')) !== 'not_required') throw new Error('My Monthly Forms shows another person’s forms');
   await page.getByTestId('my-monthly-history').waitFor({ timeout: 10000 });
 
   await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
@@ -4502,16 +4505,31 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
     const last = new Date(Date.UTC(y, m - 1, 0));
     return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10), month: first.toISOString().slice(0, 7) };
   });
-  await page.goto(`${BASE}/payroll/mine?from=${lastMonth.from}&to=${lastMonth.to}`, { waitUntil: 'networkidle' });
+  // FORM-LIFECYCLE-1: both forms completed for last month (here through their requests), then shown, locked, on My Monthly Forms.
+  const completed = await page.evaluate(async ({ base, from, to }) => {
+    const id = (await (await fetch(`${base}/api/auth/me`)).json()).data.user.id;
+    const answers = [];
+    for (const kind of ['timesheet', 'attendance']) {
+      const response = await fetch(`${base}/api/payroll/forms/${id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({ kind, from, to, fileName: '', confirmUnrecorded: true, confirmNoLines: true }),
+      });
+      answers.push(response.status);
+    }
+    return answers;
+  }, { base: BASE, from: lastMonth.from, to: lastMonth.to });
+  if (completed.join() !== '200,200') throw new Error(`completing Naledi's forms answered ${completed.join(', ')}`);
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   const section = page.getByTestId('my-monthly-forms');
   await section.waitFor({ timeout: 15000 });
-  const card = section.getByTestId('monthly-forms');
+  const card = section.getByTestId('my-forms');
   await card.waitFor({ timeout: 15000 });
-  const fileName = (await card.getByTestId('monthly-attendance-file').innerText()).split(' · ')[0];
+  const fileName = (await card.getByTestId('my-forms-attendance-file').innerText()).trim();
   if (!/^NALEDI ATTEN [A-Z]+\.pdf$/u.test(fileName)) throw new Error(`attendance file name: ${fileName}`);
 
   // Preview: the form itself, in the application.
-  await card.getByTestId('monthly-attendance-preview').click();
+  await card.getByTestId('my-forms-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
   await viewerDrew('document-preview');
@@ -4533,7 +4551,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
       window.dispatchEvent(new Event('afterprint'));
     };
   });
-  await card.getByTestId('monthly-attendance-print').click();
+  await card.getByTestId('my-forms-attendance-print').click();
   await preview.waitFor({ timeout: 20000 });
   await page.waitForFunction(() => window.__ejePrints >= 1, null, { timeout: 20000 });
   await page.waitForTimeout(500);
@@ -4543,7 +4561,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   await preview.waitFor({ state: 'detached', timeout: 10000 });
 
   // Download PDF: a real file, one page, the rule's name.
-  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), card.getByTestId('monthly-attendance-download').click()]);
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), card.getByTestId('my-forms-attendance-download').click()]);
   if (download.suggestedFilename() !== fileName) throw new Error(`downloaded as ${download.suggestedFilename()}, expected ${fileName}`);
   const downloaded = await readFile(await download.path());
   if (downloaded.subarray(0, 5).toString('latin1') !== '%PDF-' || pdfPages(downloaded) !== 1) throw new Error(`the downloaded PDF has ${pdfPages(downloaded)} pages`);
@@ -4557,23 +4575,18 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
       window.__ejeShared = { name: file.name, type: file.type, text: new TextDecoder('latin1').decode(await file.arrayBuffer()) };
     };
   });
-  await card.getByTestId('monthly-attendance-export').click();
+  await card.getByTestId('my-forms-attendance-export').click();
   await page.waitForFunction(() => window.__ejeShared !== null, null, { timeout: 20000 });
   const shared = await page.evaluate(() => window.__ejeShared);
   if (shared.name !== fileName || shared.type !== 'application/pdf') throw new Error(`exported ${shared.name} (${shared.type})`);
   if ((shared.text.match(/\/Type\s*\/Page(?!s)/gu) ?? []).length !== 1) throw new Error('the exported PDF is not one page');
 
-  // Submit: the timesheet and the attendance together (PAYROLL-ONE-1).
-  for (const box of ['monthly-forms-acknowledge', 'monthly-forms-no-lines']) {
-    if ((await card.getByTestId(box).count()) > 0) await card.getByTestId(box).check();
-  }
-  const send = card.getByTestId('monthly-forms-submit');
-  await send.click();
-  await page.getByRole('dialog').getByRole('button', { name: /^Submit (both|attendance)$/u }).click();
-  await card.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  // Submit to Office: the timesheet and the attendance together (FORM-LIFECYCLE-1).
+  await card.getByTestId('my-forms-submit').click();
+  await card.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
   await page.locator(`[data-testid="my-monthly-history-row"][data-from="${lastMonth.from}"][data-to="${lastMonth.to}"][data-current="yes"]`).waitFor({ timeout: 10000 });
   const month = lastMonth.month;
-  // Submitting the same period again is only a confirmed, complete replacement — the first is kept.
+  // Submitting the same period again is refused, confirmed or not — a submitted form is never submitted again.
   const again = await page.evaluate(async ({ base, from, to }) => {
     const me = await (await fetch(`${base}/api/auth/me`)).json().catch(() => null);
     const id = me?.data?.user?.id;
@@ -4586,8 +4599,8 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
     return { id, unconfirmed: await post({}), confirmed: await post({ confirmReplace: true }) };
   }, { base: BASE, from: lastMonth.from, to: lastMonth.to });
   if (typeof again.id !== 'string') throw new Error('could not read the signed-in technician');
-  if (again.unconfirmed !== 422) throw new Error(`an unconfirmed second submission answered ${again.unconfirmed}`);
-  if (again.confirmed !== 200) throw new Error(`the confirmed replacement answered ${again.confirmed}`);
+  if (again.unconfirmed !== 422) throw new Error(`a second submission answered ${again.unconfirmed}`);
+  if (again.confirmed !== 422) throw new Error(`a "confirmed replacement" answered ${again.confirmed}`);
 
   // The office reads the month on EJE Monthly Forms (ATT-OWN-1): the status, the
   // form opened read-only, and no Send for another person's month.
@@ -4617,9 +4630,9 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   const own = page.getByTestId('my-monthly-forms');
-  await own.getByTestId('monthly-forms').waitFor({ timeout: 15000 });
+  await own.getByTestId('my-forms').waitFor({ timeout: 15000 });
   if ((await own.getByTestId('monthly-attendance-status').count()) !== 0) throw new Error('a technician was shown the office month list');
-  if (!/^SIPHO Atten/iu.test(await own.getByTestId('monthly-attendance-file').innerText())) throw new Error('a technician was shown another person’s form');
+  if (/NALEDI/iu.test(await own.innerText())) throw new Error('a technician was shown another person’s form');
   const refused = await page.evaluate(async ({ base, id, month }) => {
     const forms = await fetch(`${base}/api/payroll/${id}/${month}`);
     const pdf = await fetch(`${base}/api/payroll/${id}/${month}/attendance/pdf`);
@@ -4651,29 +4664,39 @@ await step('a technician submits last month’s payday timesheet and attendance;
     body: JSON.stringify({ date: from, customerName: 'ABC Engineering', overtimeHours: 1, doubleHours: 0 }),
   })).status, { base: BASE, from: `${previous}-01` });
   if (line !== 200) throw new Error(`the timesheet line answered ${line}`);
-  // PAYROLL-ONE-1: both forms for the whole of last month, from My Monthly Forms.
-  await page.goto(`${BASE}/payroll/mine?from=${previous}-01&to=${lastDay}`, { waitUntil: 'networkidle' });
-  const forms = page.getByTestId('monthly-forms');
+  // FORM-LIFECYCLE-1: the timesheet completed for the whole of last month (through its request), the attendance on its page.
+  const timesheetDone = await page.evaluate(async ({ base, from, to }) => (await fetch(`${base}/api/payroll/forms/user-tech-sipho/complete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+    body: JSON.stringify({ kind: 'timesheet', from, to, fileName: '', confirmNoLines: true }),
+  })).status, { base: BASE, from: `${previous}-01`, to: lastDay });
+  if (timesheetDone !== 200) throw new Error(`completing the timesheet answered ${timesheetDone}`);
+  await page.goto(`${BASE}/attendance?from=${previous}-01&to=${lastDay}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('attendance-complete').click();
+  await page.getByTestId('complete-form-name').waitFor({ timeout: 20000 });
+  // Weekdays without attendance must be confirmed before the form can be completed.
+  const acknowledge = page.getByTestId('complete-form-confirm-unrecorded');
+  if ((await acknowledge.count()) > 0) {
+    if (await page.getByTestId('complete-form-ok').isEnabled()) throw new Error('OK was enabled before the unrecorded weekdays were confirmed');
+    await acknowledge.check();
+  }
+  await page.getByTestId('complete-form-ok').click();
+  await page.getByTestId('attendance-completed-notice').waitFor({ timeout: 20000 });
+  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  const forms = page.getByTestId('my-forms');
   await forms.waitFor({ timeout: 15000 });
-  const attendanceFile = await page.getByTestId('monthly-attendance-file').innerText();
+  const attendanceFile = await page.getByTestId('my-forms-attendance-file').innerText();
   if (!/^SIPHO ATTEN [A-Z]+\.pdf/u.test(attendanceFile)) throw new Error(`attendance file name: ${attendanceFile}`);
-  if (!/^SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf$/u.test(await page.getByTestId('monthly-timesheet-file').innerText())) throw new Error('the timesheet is not named for the To month');
+  if (!/^SIPHO Timesheet [A-Z][a-z]{2} \d{4}\.pdf$/u.test((await page.getByTestId('my-forms-timesheet-file').innerText()).trim())) throw new Error('the timesheet is not named for the To month');
 
-  await page.getByTestId('monthly-attendance-preview').click();
+  await page.getByTestId('my-forms-attendance-preview').click();
   const preview = page.getByTestId('document-preview');
   await preview.waitFor({ timeout: 20000 });
   await viewerDrew('document-preview');
   await page.getByTestId('preview-close').click();
 
-  // Weekdays without attendance must be confirmed before the month can go.
-  const acknowledge = page.getByTestId('monthly-forms-acknowledge');
-  if ((await acknowledge.count()) > 0) {
-    if (await page.getByTestId('monthly-forms-submit').isEnabled()) throw new Error('Submit was enabled before the unrecorded weekdays were confirmed');
-    await acknowledge.check();
-  }
-  await page.getByTestId('monthly-forms-submit').click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit both' }).click();
-  await page.getByTestId('monthly-forms-done').waitFor({ timeout: 20000 });
+  await page.getByTestId('my-forms-submit').click();
+  await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
   await page.locator(`[data-testid="my-monthly-history-row"][data-from="${previous}-01"][data-current="yes"]`).waitFor({ timeout: 10000 });
 
   await signInAsMasterIfNeeded();

@@ -57,6 +57,18 @@ const submit = async (from: string, to: string, options: Partial<SubmitPayrollFo
   });
 };
 const refusedWith = async (work: Promise<unknown>, code: string) => expect(work).rejects.toMatchObject({ violations: [{ code }] });
+/**
+ * A line in dates already submitted. FORM-LIFECYCLE-1 refuses typing it (`form_submitted`); one written there
+ * before this release is in the register as a stored line, and is written so here.
+ */
+const lineInSubmittedDates = async (date: string, value: TimesheetLineTyped) => {
+  await refusedWith(line(date, value), 'form_submitted');
+  return harness.repos.attendance.saveEntry({
+    id: crypto.randomUUID(), userId: SIPHO, date, customerId: null, customerName: value.customerName, workshop: false,
+    normalHours: 0, overtimeHours: Number(value.overtime), doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false,
+    internalKm: 0, customerKm: 0, updatedBy: SIPHO, updatedAt: clock.now(),
+  });
+};
 
 describe('timesheet lines save themselves — complete lines stored, incomplete ones kept as drafts', () => {
   it('a complete line is stored under the id the screen gave it; a retry with the same values is one line', async () => {
@@ -285,7 +297,7 @@ describe('overlaps and replacements — partial refused, complete replaced only 
     await line('2026-11-05', typed('1', 'L-FIRST'));
     const first = await submit('2026-11-01', '2026-11-25');
     const firstPdf = await loadSubmittedPayrollDocument(harness.as(master), first.id, 'attendance');
-    await line('2026-11-06', typed('2', 'L-FORGOTTEN'));
+    await lineInSubmittedDates('2026-11-06', typed('2', 'L-FORGOTTEN'));
     await refusedWith(submit('2026-11-01', '2026-11-25'), 'payroll_replace_unconfirmed');
     const second = await submit('2026-11-01', '2026-11-25', { confirmReplace: true });
     const kept = (await harness.repos.payroll.findPayrollSubmission(first.id))!;
@@ -459,7 +471,7 @@ describe('the independent review’s findings (5 November 2026), fixed', () => {
   it('a replaced submission opened by its id shows ITS snapshot, not its same-dates replacement', async () => {
     await line('2026-11-05', typed('1', 'L-FIRST'));
     const first = await submit('2026-11-01', '2026-11-25');
-    await line('2026-11-06', typed('1', 'L-SECOND'));
+    await lineInSubmittedDates('2026-11-06', typed('1', 'L-SECOND'));
     const second = await submit('2026-11-01', '2026-11-25', { confirmReplace: true });
     const original = await loadSubmissionDocument(harness.as(master), first.timesheetPeriodId!);
     expect(original.rows.map((row) => row.customer)).toEqual(['L-FIRST']);

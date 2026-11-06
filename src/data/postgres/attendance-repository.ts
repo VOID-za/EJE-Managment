@@ -174,6 +174,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return toDomainRecord(rows[0]!);
   }
 
+  async deleteRecord(id: string): Promise<void> {
+    await this.db.delete(schema.attendance).where(eq(schema.attendance.id, id));
+  }
+
   async listComments(userId: UserId, from: string, to: string): Promise<readonly TimesheetComment[]> {
     const rows = await this.db
       .select()

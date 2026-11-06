@@ -2,6 +2,7 @@
 
 import type { CurrentStandbyWeek, DaySwapView, StandbyDayOptions } from '@/application/standby-days';
 import type { PayrollFormsState, PayrollSubmissionView, SubmitPayrollFormsInput } from '@/application/payroll-forms';
+import type { CompleteFormInput, CompletedFormView, CompletionCheck, MyCompletedForms } from '@/application/payroll-completions';
 import type { WorkingTimesheetLine } from '@/application/timesheet-lines';
 import type { PayrollSubmission, TimesheetLineTyped } from '@/domain';
 import type { StandbyDayPair } from '@/domain';
@@ -1282,14 +1283,15 @@ export const attendance = {
   record: (input: {
     userId: string;
     date: string;
-    status: 'present' | 'absent';
+    /** 'none' takes the day's answer back: it is not recorded again (FORM-LIFECYCLE-1). */
+    status: 'present' | 'absent' | 'none';
     /** ATT-01: required for absent, omitted or null for present. */
     absenceReason?: string | null;
     note: string;
     /** ATT-AUTO-1: the `recordedAt` the screen was looking at (null: no record). */
     expectedRecordedAt?: string | null;
   }, options: { readonly keepalive?: boolean } = {}) =>
-    apiPost<AttendanceRecord>('/api/attendance', input, newIdempotencyKey(), options),
+    apiPost<AttendanceRecord | null>('/api/attendance', input, newIdempotencyKey(), options),
   /** ATT-RANGE-1: one's own attendance for a From/To period, as a PDF. */
   periodPdfUrl: (from: string, to: string) => `/api/attendance/pdf${search({ from, to })}`,
   /** The same PDF's bytes, for the Attendance page's Preview and Print. */
@@ -1364,6 +1366,19 @@ export const payroll = {
   /** SUBMIT BOTH FORMS TOGETHER. One key per attempt: a double tap or a retry is one submission. */
   submitPeriod: (userId: string, input: SubmitPayrollFormsInput, idempotencyKey: string) =>
     apiPost<{ submission: PayrollSubmission }>(`/api/payroll/forms/${segment(userId)}/submit`, input, idempotencyKey),
+  /** FORM-LIFECYCLE-1: the forms completed and awaiting Submit to Office, and whether both may go now. */
+  completed: (userId: string) => query<MyCompletedForms>(`/api/payroll/forms/${segment(userId)}/completed`),
+  /** The Completed dialog: the name proposed, what stops it, what must be confirmed. Writes nothing. */
+  checkCompletion: (userId: string, kind: 'timesheet' | 'attendance', from: string, to: string) =>
+    query<CompletionCheck>(`/api/payroll/forms/${segment(userId)}/complete${search({ kind, from, to })}`),
+  /** OK in the Completed dialog. One key per attempt: a double tap or a retry is one completion. */
+  complete: (userId: string, input: CompleteFormInput, idempotencyKey: string) =>
+    apiPost<CompletedFormView>(`/api/payroll/forms/${segment(userId)}/complete`, input, idempotencyKey),
+  /** SUBMIT TO OFFICE: both completed forms together. One key per attempt. */
+  submitCompleted: (userId: string, idempotencyKey: string) =>
+    apiPost<{ submission: PayrollSubmission }>(`/api/payroll/forms/${segment(userId)}/submit`, {}, idempotencyKey),
+  completedPdfUrl: (completionId: string) => `/api/payroll/completions/${segment(completionId)}/pdf`,
+  completedPdf: (completionId: string, fallbackName: string) => apiDownload(`/api/payroll/completions/${segment(completionId)}/pdf`, fallbackName),
   submittedPdfUrl: (submissionId: string, kind: 'timesheet' | 'attendance') =>
     `/api/payroll/submissions/${segment(submissionId)}/${kind}/pdf`,
   submittedPdf: (submissionId: string, kind: 'timesheet' | 'attendance', fallbackName: string) =>

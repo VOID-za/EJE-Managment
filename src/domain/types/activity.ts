@@ -315,6 +315,7 @@ export type ActivityEventType =
    */
   | 'attendance_recorded'
   | 'attendance_corrected'
+  | 'attendance_cleared'
   /** A technician's daily timesheet comment written, changed or cleared. TIMESHEET-1. */
   | 'timesheet_comment_saved'
   /** A technician added, corrected or removed a line of their own timesheet. TIMESHEET-2. */
@@ -344,6 +345,7 @@ export type ActivityEventType =
   /** PAYROLL-ONE-1: the timesheet and attendance submitted together for a From–To period; a working PDF renamed. */
   | 'payroll_forms_submitted'
   | 'payroll_document_renamed'
+  | 'payroll_form_completed'
   /** PAY-05…08: the monthly Finance package, prepared, sent, failed or discarded. */
   | 'finance_package_prepared'
   | 'finance_package_sent'

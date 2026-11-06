@@ -32,6 +32,7 @@ import type {
   TimesheetLineRemoval,
   PayrollSubmission,
   PayrollDocumentName,
+  PayrollFormCompletion,
   MonthlySubmission,
   FinancePackage,
   IssuedDeliveryNote,
@@ -154,6 +155,8 @@ export interface DemoDatabase {
   timesheetLineRemovals: TimesheetLineRemoval[];
   payrollSubmissions: PayrollSubmission[];
   payrollDocumentNames: PayrollDocumentName[];
+  /** FORM-LIFECYCLE-1 (0054): forms completed on their own, awaiting or submitted. */
+  payrollFormCompletions: PayrollFormCompletion[];
   /** The standby calendar: who may stand by, the weeks and their places, swap requests. STANDBY-1…8. */
   standbyEligibility: StandbyEligibility[];
   standbyWeeks: StandbyWeek[];
@@ -285,8 +288,10 @@ export const STORAGE_KEY = 'eje.demo.database.v1';
  * and timesheet lines kept as drafts (PAYROLL-ONE-1) — empty collections.
  *
  * v44 added removed timesheet line ids (PAYROLL-ONE-1 follow-up) — empty.
+ *
+ * v45 added completed forms awaiting the joint submission (FORM-LIFECYCLE-1) — empty.
  */
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 interface PersistedEnvelope {
   readonly version: number;
@@ -352,6 +357,7 @@ export const createSeededDatabase = (): DemoDatabase => ({
   timesheetLineRemovals: [],
   payrollSubmissions: [],
   payrollDocumentNames: [],
+  payrollFormCompletions: [],
   standbyEligibility: [],
   standbyWeeks: [],
   standbySwapRequests: [],

@@ -34,6 +34,7 @@ import { documentNameOf, timesheetPeriodFileName } from '@/lib/payroll-files';
 import type { OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
+import { assertDatesOpen } from './form-locks';
 import { assertRecordableDate } from './attendance-operations';
 
 /*
@@ -337,7 +338,12 @@ const assertTimesheetDate = (_context: OperationContext, date: string): void => 
  * what the office reads is the version last SENT, and sending again replaces
  * it. Kept as a named step, so every write still passes one place.
  */
-const assertDayOpen = async (_context: OperationContext, _technicianId: UserId, _date: string): Promise<void> => {};
+/**
+ * FORM-LIFECYCLE-1: a day of a COMPLETED timesheet (awaiting submission) or of one SUBMITTED to the office is
+ * locked — no line is added to it, changed on it, moved into or out of it, or removed from it.
+ */
+const assertDayOpen = (context: OperationContext, technicianId: UserId, date: string): Promise<void> =>
+  assertDatesOpen(context, technicianId, 'timesheet', [date]);
 
 const personOf = (user: User): TimesheetPerson => ({
   id: user.id,
@@ -900,6 +906,11 @@ export const submitTimesheetPeriod = async (
      * replaced — and a NEW one is written beside it. Without, refused as before.
      */
     readonly replaceSameDates?: boolean;
+    /**
+     * FORM-LIFECYCLE-1: the comment as the timesheet was COMPLETED (frozen then). The working comment belongs to
+     * the next sheet by now, so it is neither used nor cleared.
+     */
+    readonly comment?: string;
   } = {},
 ): Promise<TimesheetPeriod> => {
   const id = asUserId(technicianId);
@@ -955,7 +966,7 @@ export const submitTimesheetPeriod = async (
   }
   const now = context.services.clock.now();
   // The open sheet's comment; a comment saved on these exact dates before TS-PAPER otherwise.
-  const comment = working !== null ? working.comment : draftRow?.comment ?? '';
+  const comment = options.comment ?? (working !== null ? working.comment : draftRow?.comment ?? '');
   const replaced = await context.repos.attendance.supersedeOverlappingPeriods({
     userId: id,
     from,
@@ -992,7 +1003,7 @@ export const submitTimesheetPeriod = async (
       'It was submitted once; the office has it.',
     );
   }
-  if (working !== null && working.comment !== '') {
+  if (options.comment === undefined && working !== null && working.comment !== '') {
     await context.repos.attendance.saveWorkingComment({ userId: id, comment: '', updatedBy: context.actor.id, updatedAt: now });
   }
   const label = formatPeriod(from, to);

@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (835eaaa, v1.5.2), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (42e6bd4, v1.6.0), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 835eaaa, and it does: each of these was checked against that commit.
+ * in 42e6bd4, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -101,6 +101,15 @@ const INTEGRATIONS = {
   templateVersion: '00000000-0000-4000-8000-0000000006a2',
   email: '00000000-0000-4000-8000-0000000006b1',
   outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
+// A copy of ROLLBACK_0054 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0054 = {
+  awaiting: '00000000-0000-4000-8000-000000000da1',
+  submittedForm: '00000000-0000-4000-8000-000000000da2',
+  submission: '00000000-0000-4000-8000-000000000da3',
+  from: '2028-04-01',
+  to: '2028-04-25',
 } as const;
 
 // A copy of ROLLBACK_0052 in `src/ops/release/rollback-fixture.ts`.
@@ -183,14 +192,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 835eaaa (v1.5.2) shipped up to 0053; this release (v1.6.0) adds no migration.
+    // 42e6bd4 (v1.6.0) shipped up to 0053; this release adds 0054 (the completed forms).
     expect(shipped).toHaveLength(54);
     expect(shipped.at(-1)).toBe('0053_timesheet_line_removals');
+    expect(shipped).not.toContain('0054_payroll_form_completions');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // Exactly what the live release ships: nothing beyond it.
-    expect(applied).toBe(54);
+    // 0054 applied beyond what the live release ships: the preflight warns, never fails.
+    expect(applied).toBe(55);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -643,5 +653,26 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect(sent?.id).toBe('00000000-0000-4000-8000-000000000ce1');
     const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
     expect(Number(after[0]?.n)).toBe(Number(before[0]?.n) + 1);
+  });
+
+  /*
+   * 0054 (FORM-LIFECYCLE-1): the live code never reads the completed forms. Rolled back to, it keeps reading the
+   * payroll submissions (the submitted form's included) and writing lines — and, knowing nothing of completion,
+   * it does not lock a completed form's dates (recorded as the rollback limitation in docs/deploy-next-release.md).
+   */
+  it('meets the 0054 rows: reads payroll submissions with completed forms beside them; still writes a line in a completed form\'s dates', async () => {
+    const B = BATCH_0054;
+    const tech = asUserId(IDS.technician);
+    const payroll = new PostgresPayrollRepository(db);
+    const attendance = new PostgresAttendanceRepository(db);
+    expect((await payroll.listPayrollSubmissionsFor(tech)).map((submission) => submission.id)).toContain(B.submission);
+    const saved = await attendance.saveEntry({
+      id: '00000000-0000-4000-8000-000000000db1', userId: tech, date: '2028-04-10', customerId: null, customerName: 'Rollback probe 0054', workshop: false,
+      normalHours: 0, overtimeHours: 1, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
+      updatedBy: tech, updatedAt: '2028-04-26T09:00:00.000Z',
+    });
+    expect(saved.date).toBe('2028-04-10');
+    const forms = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions`);
+    expect(forms[0]?.n).toBe('2');
   });
 });

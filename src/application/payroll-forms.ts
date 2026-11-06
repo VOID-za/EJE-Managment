@@ -125,7 +125,7 @@ export const attendancePeriodDays = (
 const monthRange = (month: string) => monthBounds(month);
 
 /** What an earlier submission is to these dates: not in the way, covered in full (replaced), or cut (refused). */
-const relation = (from: string, to: string, other: { readonly from: string; readonly to: string }): 'apart' | 'covered' | 'partial' =>
+export const relation = (from: string, to: string, other: { readonly from: string; readonly to: string }): 'apart' | 'covered' | 'partial' =>
   other.to < from || other.from > to ? 'apart' : from <= other.from && other.to <= to ? 'covered' : 'partial';
 
 export interface PayrollOverlap {
@@ -191,7 +191,7 @@ const assertOwnForms = (context: OperationContext, userId: UserId): void => {
 };
 
 /** Names the person gave their working PDFs, or the defaults for these dates. */
-const namesFor = async (context: OperationContext, person: User, from: string, to: string) => {
+export const namesFor = async (context: OperationContext, person: User, from: string, to: string) => {
   const stored = await context.repos.payroll.listDocumentNames(person.id);
   const custom = (kind: PayrollDocumentKind) => stored.find((name) => name.kind === kind)?.fileName ?? null;
   const defaults = {
@@ -206,7 +206,7 @@ const namesFor = async (context: OperationContext, person: User, from: string, t
 };
 
 /** The person's current submissions of every kind — the ones that can be in the way of new dates. */
-const currentSubmissions = async (context: OperationContext, person: User) => {
+export const currentSubmissions = async (context: OperationContext, person: User) => {
   const [payroll, monthly, periods] = await Promise.all([
     context.repos.payroll.listPayrollSubmissionsFor(person.id),
     context.repos.payroll.listSubmissionsFor(person.id),
@@ -400,7 +400,7 @@ export const loadPayrollForms = async (
 };
 
 /** THE WORKING ATTENDANCE FOR A PERIOD, as its PDF prints it, under its stored name. */
-const workingAttendanceDocument = async (
+export const workingAttendanceDocument = async (
   context: OperationContext,
   person: User,
   from: string,
@@ -524,7 +524,7 @@ export interface SubmitPayrollFormsInput {
   readonly confirmReplace?: boolean | undefined;
 }
 
-const oneFormPage = <T extends { readonly pageCount: number }>(name: string, render: () => T): T => {
+export const oneFormPage = <T extends { readonly pageCount: number }>(name: string, render: () => T): T => {
   try {
     const rendered = render();
     if (rendered.pageCount !== 1) throw refuse(`The ${name} is not one page.`, 'form_not_one_page', 'Every payroll form except a timesheet is one page.');
@@ -542,6 +542,13 @@ export const submitPayrollForms = async (
   context: OperationContext,
   technicianId: string,
   input: SubmitPayrollFormsInput,
+  /**
+   * FORM-LIFECYCLE-1: the forms were COMPLETED on their own pages and are submitted as they were completed —
+   * under the names chosen then, with the timesheet's comment as it was frozen. Everything about the lines and
+   * the days was checked at completion, and their dates have been locked since; `submitCompletedForms` checks
+   * that they are still exactly as completed before it calls this.
+   */
+  completed?: { readonly fileNames: { readonly timesheet: string; readonly attendance: string }; readonly timesheetComment: string },
 ): Promise<PayrollSubmission> => {
   const userId = asUserId(technicianId);
   if (context.actor.id !== userId) {
@@ -556,7 +563,8 @@ export const submitPayrollForms = async (
       'They are shown again as they are now. Check them, then submit.',
     );
   }
-  const incomplete = state.timesheet?.incomplete ?? [];
+  // A completed form was checked when it was completed; working lines elsewhere (a draft with no date) are not its.
+  const incomplete = completed === undefined ? state.timesheet?.incomplete ?? [] : [];
   if (incomplete.length > 0) {
     throw refuse(
       `${incomplete.length} timesheet line${incomplete.length === 1 ? ' is' : 's are'} not complete.`,
@@ -583,7 +591,10 @@ export const submitPayrollForms = async (
     );
   }
   // Anything else the screen lists as stopping it (both PDFs named the same, days already sent to Finance, …).
-  if (state.problems.length > 0) {
+  if (completed !== undefined && state.replaces.length > 0) {
+    throw refuse('These dates were already submitted.', 'payroll_period_submitted', 'A completed form is never a replacement. Nothing was submitted.');
+  }
+  if (completed === undefined && state.problems.length > 0) {
     throw refuse('These forms cannot be submitted yet.', 'payroll_forms_blocked', state.problems.join(' '));
   }
   if (state.needs.confirmReplace && input.confirmReplace !== true) {
@@ -610,12 +621,13 @@ export const submitPayrollForms = async (
 
   const person = await findPayrollPerson(context, technicianId);
   const [records, settings] = await Promise.all([context.repos.attendance.listRecords(from, to, person.id), context.repos.settings.get()]);
+  const fileNames = completed?.fileNames ?? state.fileNames;
   const attendance: AttendancePeriodSnapshot = { technicianName: userFullName(person), from, to, days: attendancePeriodDays(from, to, records) };
   const today = businessToday(new Date(context.services.clock.now()));
   const attendanceDocumentAt = (submittedAt: IsoDateTime | null): AttendanceDocument => ({
     companyName: settings.companyName,
     technicianName: attendance.technicianName,
-    fileName: state.fileNames.attendance,
+    fileName: fileNames.attendance,
     month: financeMonthOf(to),
     monthLabel: periodTitle(from, to),
     ...buildAttendanceRows(attendance.days, today),
@@ -636,6 +648,7 @@ export const submitPayrollForms = async (
     if (state.timesheetRequired) {
       period = await submitTimesheetPeriod(context, technicianId, from, to, {
         notify: false,
+        ...(completed === undefined ? {} : { comment: completed.timesheetComment }),
         // Confirmed above whenever these dates cover an earlier submission in full.
         replace: input.confirmReplace === true,
         replaceSameDates: true,
@@ -669,9 +682,9 @@ export const submitPayrollForms = async (
     };
     if (period !== null) {
       const sheet = await loadTimesheetDocument(context, person.id, from, to, 'current');
-      await store('timesheet', state.fileNames.timesheet, renderTimesheetPdf({ ...sheet, fileName: state.fileNames.timesheet }, { generatedAt: now }));
+      await store('timesheet', fileNames.timesheet, renderTimesheetPdf({ ...sheet, fileName: fileNames.timesheet }, { generatedAt: now }));
     }
-    await store('attendance', state.fileNames.attendance, oneFormPage('attendance form', () => renderAttendancePdf(attendanceDocumentAt(now), { generatedAt: now })));
+    await store('attendance', fileNames.attendance, oneFormPage('attendance form', () => renderAttendancePdf(attendanceDocumentAt(now), { generatedAt: now })));
 
     const saved = await context.repos.payroll.createPayrollSubmission({
       id: submissionId,
@@ -682,7 +695,7 @@ export const submitPayrollForms = async (
       timesheetRequired: state.timesheetRequired,
       timesheetPeriodId: period?.id ?? null,
       attendance,
-      fileNames: { timesheet: state.timesheetRequired ? state.fileNames.timesheet : '', attendance: state.fileNames.attendance },
+      fileNames: { timesheet: state.timesheetRequired ? fileNames.timesheet : '', attendance: fileNames.attendance },
       documents,
       submittedAt: now,
       submittedBy: context.actor.id,
@@ -693,9 +706,9 @@ export const submitPayrollForms = async (
     if (saved === null) {
       throw refuse(`Your forms for ${formatPeriod(from, to)} were just submitted.`, 'payroll_already_submitted', 'They were submitted once; the office has them.');
     }
-    // The working names were for this submission; the next forms start from the defaults.
+    // The working names were for this submission; the next forms start from the defaults (a completed form took its name with it).
     for (const kind of ['timesheet', 'attendance'] as const) {
-      if (state.customNames[kind]) await context.repos.payroll.deleteDocumentName(userId, kind);
+      if (completed === undefined && state.customNames[kind]) await context.repos.payroll.deleteDocumentName(userId, kind);
     }
 
     const name = userFullName(person);
@@ -709,8 +722,8 @@ export const submitPayrollForms = async (
       summary: `Payroll forms submitted: ${name}, ${formatPeriod(from, to)} (Finance ${monthTitle(financeMonthOf(to))})`,
       detail:
         (state.timesheetRequired
-          ? `Timesheet (${state.fileNames.timesheet}, ${state.timesheet?.lineCount ?? 0} line(s)) and attendance (${state.fileNames.attendance})`
-          : `Attendance only (${state.fileNames.attendance}) — no timesheet required for the Office`) +
+          ? `Timesheet (${fileNames.timesheet}, ${state.timesheet?.lineCount ?? 0} line(s)) and attendance (${fileNames.attendance})`
+          : `Attendance only (${fileNames.attendance}) — no timesheet required for the Office`) +
         ` submitted by ${userFullName(context.actor)}.` +
         (state.attendance.unrecordedWeekdays.length > 0 ? ` Confirmed with ${state.attendance.unrecordedWeekdays.length} weekday(s) without attendance: ${state.attendance.unrecordedWeekdays.join(', ')}.` : '') +
         (state.needs.confirmNoLines ? ' Confirmed: no timesheet lines for these dates.' : '') +
@@ -719,7 +732,7 @@ export const submitPayrollForms = async (
     await notifyOffice(context, {
       type: 'timesheet_submitted',
       title: `${name} submitted ${state.timesheetRequired ? 'timesheet and attendance' : 'attendance'}: ${formatPeriod(from, to)}`,
-      body: `${state.timesheetRequired ? `${state.fileNames.timesheet} and ` : ''}${state.fileNames.attendance}. Finance month ${monthTitle(financeMonthOf(to))}.${replacedText.length > 0 ? ' It replaces an earlier submission for these days.' : ''} Open Monthly payroll to include it in the Finance package.`,
+      body: `${state.timesheetRequired ? `${fileNames.timesheet} and ` : ''}${fileNames.attendance}. Finance month ${monthTitle(financeMonthOf(to))}.${replacedText.length > 0 ? ' It replaces an earlier submission for these days.' : ''} Open Monthly payroll to include it in the Finance package.`,
       link: '/payroll',
     });
     return saved;

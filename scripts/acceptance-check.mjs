@@ -26,6 +26,7 @@
  */
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { completeAndSubmit, refusalCode } from './payroll-flow.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
@@ -231,44 +232,34 @@ await check('a timesheet line has no Shared call-out tick; the page says the amo
   await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'saved', null, { timeout: 15000 });
 });
 
-/** PAYROLL-ONE-1: both forms for the period, as My Monthly Forms submits them — naming the revision it read. */
-const submitForms = async (me, from, to, extra = {}) => {
-  const forms = await call('GET', `/api/payroll/forms/${me}?from=${from}&to=${to}`);
-  if (forms.status !== 200) return forms;
-  return call('POST', `/api/payroll/forms/${me}/submit`, { from, to, revision: forms.json.data.revision, confirmUnrecorded: true, confirmNoLines: true, ...extra });
-};
+/** FORM-LIFECYCLE-1: each form completed for the period, then both submitted to the office together. */
+const submitForms = (me, from, to) => completeAndSubmit(call, me, from, to);
 
-await check('overlapping dates: part of a submission is refused on screen and by the server; all of it replaces it once confirmed; the original stays (PAYROLL-ONE-1, TS-PAPER-7)', async () => {
+await check('overlapping dates: part or all of a submission is refused on screen (the Completed dialog) and by the server; nothing is replaced; the original stays (FORM-LIFECYCLE-1)', async () => {
   await as('Sipho Mahlangu');
   const me = 'user-tech-sipho';
   const line = await call('POST', `/api/timesheets/${me}/entries`, { date: shift(today, -3), customerName: 'Acceptance', overtimeHours: 1, doubleHours: 0 });
   if (line.status !== 200) fail(`saving a line answered ${line.status}`);
   const first = await submitForms(me, shift(today, -10), shift(today, -2));
   if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
-  const partial = await submitForms(me, shift(today, -5), today, { confirmReplace: true });
-  if (partial.status !== 422 || partial.json?.error?.violations?.[0]?.code !== 'payroll_partial_overlap') fail(`a partial overlap answered ${partial.status} ${JSON.stringify(partial.json?.error ?? '')}`);
-  // On screen: part of it is said, and Submit waits.
-  await go(`/payroll/mine?from=${shift(today, -5)}&to=${today}`);
-  await page.getByTestId('monthly-forms-problems').filter({ hasText: 'only part of' }).waitFor({ timeout: 15000 });
-  if (await page.getByTestId('monthly-forms-submit').isEnabled()) fail('Submit is offered for a partial overlap');
-  // All of it: said as a replacement, and confirmed in the dialog as one.
-  await go(`/payroll/mine?from=${shift(today, -12)}&to=${today}`);
-  await page.getByTestId('monthly-forms-replaces').waitFor({ timeout: 15000 });
-  if (await page.getByTestId('monthly-forms-submit').isEnabled()) fail('Submit is offered before the replacement is confirmed');
-  await page.getByTestId('monthly-forms-confirm-replace').check();
-  if ((await page.getByTestId('monthly-forms-acknowledge').count()) > 0) await page.getByTestId('monthly-forms-acknowledge').check();
-  await press(page.getByTestId('monthly-forms-submit'));
-  await page.getByRole('dialog').getByRole('button', { name: 'Replace and submit' }).waitFor({ timeout: 5000 });
-  await press(page.getByRole('dialog').getByRole('button', { name: 'Cancel' }));
-  const unconfirmed = await submitForms(me, shift(today, -12), today);
-  if (unconfirmed.status !== 422) fail(`a replacement without confirmation answered ${unconfirmed.status}`);
-  const replaced = await submitForms(me, shift(today, -12), today, { confirmReplace: true });
-  if (replaced.status !== 200) fail(`the confirmed replacement answered ${replaced.status} ${JSON.stringify(replaced.json?.error ?? '')}`);
+  for (const [from, to] of [[shift(today, -5), today], [shift(today, -12), today]]) {
+    const again = await submitForms(me, from, to);
+    if (refusalCode(again) !== 'payroll_period_submitted') fail(`${from} – ${to} answered ${again.status} ${refusalCode(again)}`);
+  }
+  // On screen: the Completed dialog says why, and OK is not offered.
+  await go(`/timesheets?from=${shift(today, -5)}&to=${today}`);
+  await page.getByTestId('timesheet-complete').waitFor({ timeout: 20000 });
+  await press(page.getByTestId('timesheet-complete'));
+  await page.getByTestId('complete-form-problems').filter({ hasText: 'already submitted' }).waitFor({ timeout: 15000 });
+  if (await page.getByTestId('complete-form-ok').isEnabled()) fail('OK is offered for dates already submitted');
+  await press(page.getByTestId('complete-form-cancel'));
   const list = (await call('GET', `/api/timesheets/submissions?userId=${me}`)).json?.data ?? [];
   const earlier = list.find((row) => row.from === shift(today, -10) && row.to === shift(today, -2));
-  if (earlier?.current !== false) fail('the replaced submission is not kept as replaced');
+  if (earlier?.current !== true || list.length !== 1) fail('the submission was replaced or doubled');
   const original = await call('GET', `/api/timesheets/submissions/${earlier.id}?version=original`);
-  if (!original.json?.data?.rows?.some((row) => row.customer === 'Acceptance')) fail('the replaced original is not readable in full');
+  if (!original.json?.data?.rows?.some((row) => row.customer === 'Acceptance')) fail('the original is not readable in full');
+  await go('/payroll/mine');
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
   await noPageOverflow('My Monthly Forms');
 });
 

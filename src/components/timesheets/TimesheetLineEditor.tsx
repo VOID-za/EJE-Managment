@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { WORKSHOP_LABEL, type TimesheetLineTyped } from '@/domain';
-import { Button, ConfirmDialog, Icon, SelectField, TextField } from '@/components/ui';
+import { Button, ConfirmDialog, Icon, TextField } from '@/components/ui';
 import { formatDayAndDate } from '@/lib/timesheet-dates';
 import { WORKSHOP_PICK, sameTypedLine, timesheetLineProblems, type TimesheetLineField } from '@/lib/timesheet-line';
 import type { TimesheetAutosaver } from '@/lib/timesheet-autosave';
@@ -134,18 +134,32 @@ export const TimesheetLineEditor = ({
   const problemOf = (field: TimesheetLineField) => problems.find((problem) => problem.field === field)?.message;
   const status = lineStatus(line, saver, { date: date === '' ? null : date, typed });
 
-  const customerOptions = [
-    { value: '', label: 'Type the customer (or none)…' },
-    { value: WORKSHOP_PICK, label: WORKSHOP_LABEL },
-    ...customers.map((customer) => ({ value: customer.id, label: customer.name })),
-  ];
+  /*
+   * ONE CUSTOMER FIELD (FORM-LIFECYCLE-1): what is typed is the customer; the register's customers and Workshop
+   * are offered as it is typed (the page's `timesheet-customer-options` list). Typing a register customer's name
+   * exactly picks that customer; "Workshop" is Workshop (TS-06) — so the line stays one row of six fields.
+   */
+  const customerShown = typed.pick === WORKSHOP_PICK ? WORKSHOP_LABEL : typed.customerName;
+  const typeCustomer = (value: string) => {
+    const wanted = value.trim().toLowerCase();
+    if (wanted === WORKSHOP_LABEL.toLowerCase()) {
+      change({ pick: WORKSHOP_PICK, customerName: '' });
+      return;
+    }
+    const known = customers.find((customer) => customer.name.trim().toLowerCase() === wanted);
+    change({ pick: known?.id ?? '', customerName: value });
+  };
+  const cell = (field: TimesheetLineField) =>
+    `h-11 w-full rounded-[var(--radius-control)] border bg-surface px-2 text-sm text-steel-900 focus:border-eje-500 focus:ring-2 focus:ring-eje-100 focus:outline-none ${problemOf(field) === undefined ? 'border-steel-300' : 'border-signal-400'}`;
+  const which = position === undefined ? '' : `, line ${position}`;
   const number = (label: string, field: 'overtime' | 'double' | 'callout' | 'internalKm' | 'customerKm', testId: string) => (
-    <TextField
-      label={label}
+    <input
+      aria-label={`${label}${which}`}
+      aria-invalid={problemOf(field) !== undefined}
       inputMode="decimal"
       autoComplete="off"
+      className={`${cell(field)} text-right tabular-nums`}
       value={typed[field]}
-      error={problemOf(field)}
       onChange={(event) => change({ [field]: event.target.value })}
       onBlur={() => saver?.flushNow()}
       data-testid={testId}
@@ -155,20 +169,14 @@ export const TimesheetLineEditor = ({
 
   return (
     <li
-      className={`space-y-2 rounded-[var(--radius-control)] border p-3 ${status === 'draft' || status === 'failed' ? 'border-amber-eje-200 bg-amber-eje-50/40' : 'border-steel-200 bg-surface'}`}
+      className={`py-1.5 ${status === 'draft' || status === 'failed' ? 'bg-amber-eje-50/50' : ''}`}
       data-testid="timesheet-line"
       data-line-id={line.id}
       data-date={line.date ?? ''}
       data-state={status}
     >
-      {position !== undefined && (
-        <p className="text-xs font-semibold tracking-wide text-steel-500 uppercase" data-testid="timesheet-line-heading">
-          Line {position}
-          {named.length > 0 ? ` — ${named}` : ''}
-        </p>
-      )}
-      <div className={`grid grid-cols-1 gap-3 ${day === undefined ? 'sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_minmax(0,1fr)]' : 'sm:grid-cols-2'}`}>
-        {day === undefined && (
+      {day === undefined && (
+        <div className="mb-1.5 w-48">
           <TextField
             label="Date"
             type="date"
@@ -186,58 +194,56 @@ export const TimesheetLineEditor = ({
             }}
             data-testid="timesheet-line-date"
           />
-        )}
-        <SelectField
-          label="Customer or Workshop"
-          value={typed.pick}
-          options={customerOptions}
-          data-testid="timesheet-customer-pick"
-          onChange={(event) => {
-            const value = event.target.value;
-            const picked = customers.find((customer) => customer.id === value);
-            const before = latest.current.typed;
-            change({ pick: value, customerName: value === WORKSHOP_PICK ? '' : picked?.name ?? (before.pick === WORKSHOP_PICK ? '' : before.customerName) });
-          }}
+        </div>
+      )}
+      {/* Customer | OT | D/T | Callout | Int Km | Cust Km — side by side; the day's header names the columns. */}
+      <div className={TIMESHEET_ROW_GRID}>
+        <input
+          aria-label={`Customer${which}`}
+          aria-invalid={problemOf('customer') !== undefined}
+          list="timesheet-customer-options"
+          autoComplete="off"
+          maxLength={200}
+          placeholder="Customer, site or Workshop"
+          className={cell('customer')}
+          value={customerShown}
+          onChange={(event) => typeCustomer(event.target.value)}
+          onBlur={() => saver?.flushNow()}
+          data-testid="timesheet-customer-name"
         />
-        {typed.pick !== WORKSHOP_PICK && (
-          <TextField
-            label="Customer or site"
-            value={typed.customerName}
-            maxLength={200}
-            autoComplete="off"
-            error={problemOf('customer')}
-            onChange={(event) => change({ customerName: event.target.value })}
-            onBlur={() => saver?.flushNow()}
-            data-testid="timesheet-customer-name"
-          />
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {number('OT (hours)', 'overtime', 'timesheet-overtime')}
         {number('D/T (hours)', 'double', 'timesheet-double')}
         {number('Callout (R)', 'callout', 'timesheet-callout')}
         {number('Int Km', 'internalKm', 'timesheet-internal-km')}
         {number('Cust Km', 'customerKm', 'timesheet-customer-km')}
+        <div className="flex items-center justify-end gap-1">
+          <span className="w-14 text-right text-xs" data-testid="timesheet-line-status" role="status" aria-live="polite">
+            {status === 'saving' && <span className="text-steel-600">Saving…</span>}
+            {status === 'saved' && <span className="text-verdant-700">Saved</span>}
+            {status === 'failed' && <span className="font-medium text-signal-600">Failed</span>}
+            {status === 'draft' && <span className="font-medium text-amber-eje-700">Draft</span>}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Remove line${position === undefined ? '' : ` ${position}`}${named.length > 0 ? ` (${named})` : ''}`}
+            onClick={() => setRemoving(true)}
+            data-testid="remove-timesheet-line"
+          >
+            <Icon name="trash" className="size-4" />
+          </Button>
+        </div>
       </div>
+      {status === 'failed' && <p className="mt-1 text-xs font-medium text-signal-600">Save failed — {pending?.refused}</p>}
+      {status === 'draft' && problems.length === 0 && <p className="mt-1 text-xs text-amber-eje-700">Draft — saved, not complete yet.</p>}
       {(line.historical.normalHours > 0 || line.historical.callouts > 0) && (
-        <p className="text-xs text-steel-500">
+        <p className="mt-1 text-xs text-steel-500">
           Entered before 28 October 2026 with{line.historical.normalHours > 0 ? ` NT ${line.historical.normalHours.toFixed(2)} h` : ''}
           {line.historical.callouts > 0 ? ` ${line.historical.callouts} call-out(s)` : ''} — kept as it was.
         </p>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs" data-testid="timesheet-line-status" role="status" aria-live="polite">
-          {status === 'saving' && <span className="text-steel-600">Saving…</span>}
-          {status === 'saved' && <span className="text-verdant-700">Saved</span>}
-          {status === 'failed' && <span className="font-medium text-signal-600">Save failed — {pending?.refused}</span>}
-          {status === 'draft' && <span className="font-medium text-amber-eje-700">Draft — saved, not complete yet</span>}
-        </span>
-        <Button size="sm" variant="ghost" leadingIcon={<Icon name="trash" className="size-4" />} onClick={() => setRemoving(true)} data-testid="remove-timesheet-line">
-          Remove line
-        </Button>
-      </div>
       {problems.length > 0 && (
-        <ul className="list-disc pl-5 text-xs text-amber-eje-700" data-testid="timesheet-line-problems">
+        <ul className="mt-1 list-disc pl-5 text-xs text-amber-eje-700" data-testid="timesheet-line-problems">
           {problems.map((problem) => <li key={problem.message}>{problem.message}</li>)}
         </ul>
       )}
@@ -256,3 +262,19 @@ export const TimesheetLineEditor = ({
     </li>
   );
 };
+
+/** The six columns and the line's own state and Remove, side by side; on a phone the day's table scrolls sideways. */
+export const TIMESHEET_ROW_GRID = 'grid grid-cols-[minmax(10rem,2.2fr)_repeat(5,minmax(4.25rem,1fr))_6.5rem] items-center gap-1.5';
+
+/** The column names over a day's lines, aligned with `TIMESHEET_ROW_GRID`. */
+export const TimesheetLineHeader = () => (
+  <div className={`${TIMESHEET_ROW_GRID} border-b border-steel-200 pb-1 text-xs font-semibold text-steel-600`} data-testid="timesheet-columns">
+    <span>Customer</span>
+    <span className="text-right">OT</span>
+    <span className="text-right">D/T</span>
+    <span className="text-right">Callout (R)</span>
+    <span className="text-right">Int Km</span>
+    <span className="text-right">Cust Km</span>
+    <span className="sr-only">State and remove</span>
+  </div>
+);

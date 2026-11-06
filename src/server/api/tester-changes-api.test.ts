@@ -78,8 +78,8 @@ describe('the tester’s changes over HTTP', () => {
     const submitted = await submitForms<{ submission: { timesheetRequired: boolean; timesheetPeriodId: string | null } }>(coordinator, me, from, to);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
     expect(submitted.data.submission).toMatchObject({ timesheetRequired: false, timesheetPeriodId: null });
-    // The same dates again replace it, once confirmed; the first is kept.
-    expect((await submitForms(coordinator, me, from, to, { confirmReplace: true })).status).toBe(200);
+    // The same dates again: refused — a submitted form is never submitted again (FORM-LIFECYCLE-1).
+    expect((await submitForms(coordinator, me, from, to, { confirmReplace: true })).error?.violations[0]?.code).toBe('payroll_period_submitted');
 
     const master = await signedInAs(DEMO_USERS.master);
     const after = await master.get<{ rows: readonly { technician: { id: string }; submittedAt: string | null; status: string; selectable: boolean }[] }>(`/api/payroll/months/${MONTH}`);

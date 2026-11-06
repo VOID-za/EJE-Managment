@@ -105,7 +105,10 @@ describe('F2: a calendar-month attendance submitted before PAYROLL-ONE-1 goes to
     await recordAttendance(harness.as(sipho), { userId: SIPHO, date: '2026-10-15', status: 'present', note: '' });
     await submitMonth(harness.as(sipho), SIPHO, '2026-10', { confirmUnrecorded: true });
     later(60);
-    await recordAttendance(harness.as(sipho), { userId: SIPHO, date: '2026-10-15', status: 'absent', absenceReason: 'leave', note: 'edited after submission' });
+    // FORM-LIFECYCLE-1: a submitted day is locked now; a change made before this release (RESUBMIT-1) is written as it is found.
+    await refusedWith(recordAttendance(harness.as(sipho), { userId: SIPHO, date: '2026-10-15', status: 'absent', absenceReason: 'leave', note: 'edited after submission' }), 'form_submitted');
+    const old = (await harness.repos.attendance.findRecord(SIPHO, '2026-10-15'))!;
+    await harness.repos.attendance.saveRecord({ ...old, status: 'absent', absenceReason: 'leave', note: 'edited after submission', recordedAt: clock.now() });
     const month = await loadPayrollMonth(harness.as(master), '2026-10');
     const row = month.rows.find((candidate) => candidate.technician.id === SIPHO)!;
     expect(row.attendanceChangedAfterSubmission).toBe(1);
@@ -126,7 +129,10 @@ describe('M4: a period whose attendance changed after submission is told to the 
     await submit('2026-11-01', '2026-11-25');
     expect((await row()).attendanceChangedAfterSubmission).toBe(0);
     later(60);
-    await recordAttendance(harness.as(sipho), { userId: SIPHO, date: '2026-11-03', status: 'absent', absenceReason: 'sick_leave', note: '' });
+    // FORM-LIFECYCLE-1: refused through the page now; a change made before this release is written as it is found.
+    await refusedWith(recordAttendance(harness.as(sipho), { userId: SIPHO, date: '2026-11-03', status: 'absent', absenceReason: 'sick_leave', note: '' }), 'form_submitted');
+    const old = (await harness.repos.attendance.findRecord(SIPHO, '2026-11-03'))!;
+    await harness.repos.attendance.saveRecord({ ...old, status: 'absent', absenceReason: 'sick_leave', note: '', recordedAt: clock.now() });
     const changed = await row();
     expect(changed.attendanceChangedAfterSubmission).toBe(1);
     expect(changed.detail).toContain('1 attendance day(s) changed in the register after submission');

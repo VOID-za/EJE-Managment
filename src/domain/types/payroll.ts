@@ -1,4 +1,4 @@
-import type { AbsenceReason, AttendanceStatus } from './attendance';
+import type { AbsenceReason, AttendanceStatus, TimesheetEntry } from './attendance';
 import type { IsoDate, IsoDateTime, UserId } from './common';
 
 /**
@@ -168,3 +168,35 @@ export interface PayrollDocumentName {
 
 /** The longest From–To period one payroll submission covers: a year (the database's check). */
 export const PAYROLL_PERIOD_MAX_DAYS = 366;
+
+/**
+ * ONE FORM, COMPLETED AND LOCKED, WAITING TO BE SUBMITTED TO THE OFFICE.
+ * FORM-LIFECYCLE-1 (the owner, 6 November 2026), migration 0054.
+ *
+ * Timesheets and Attendance are completed independently, each for its own
+ * From–To, under the name the person chose. Completing freezes the form: its
+ * content (the timesheet's lines and comment, or the attendance days) and the
+ * PDF rendered at that moment, stored write-once. Its dates are then locked —
+ * the server refuses every change to them. `submissionId` is set, once, when
+ * the person submits both forms to the office together (Submit to Office);
+ * until then the form is "completed, awaiting submission". At most one form of
+ * each kind awaits per person (the database's unique key).
+ */
+export interface PayrollFormCompletion {
+  readonly id: string;
+  readonly userId: UserId;
+  readonly kind: PayrollDocumentKind;
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  readonly fileName: string;
+  /** Frozen content of a timesheet: its lines and comment. Null for attendance. */
+  readonly timesheet: { readonly comment: string; readonly entries: readonly TimesheetEntry[] } | null;
+  /** Frozen content of an attendance form: every day of the period. Null for a timesheet. */
+  readonly attendance: readonly AttendanceSnapshotDay[] | null;
+  /** The PDF as it was completed, stored under the server's own key. */
+  readonly document: PayrollSubmissionDocument;
+  readonly completedAt: IsoDateTime;
+  readonly completedBy: UserId;
+  /** The joint submission it went to the office in; null while it awaits. */
+  readonly submissionId: string | null;
+}

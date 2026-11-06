@@ -175,7 +175,8 @@ describe('TS-16 — asking for a correction', () => {
     await ask(correctedLines(first, second));
     const period = (await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))!;
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
-    await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    // FORM-LIFECYCLE-1: nothing is added to submitted dates — a change is a correction.
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)))).rejects.toMatchObject({ violations: [{ code: 'form_submitted' }] });
     // Was RESUBMIT-1, which overwrote the snapshot and deleted the corrections.
     await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);

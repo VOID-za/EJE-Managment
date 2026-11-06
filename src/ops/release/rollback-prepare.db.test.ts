@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_0054, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -562,5 +562,35 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     });
     const periods = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods where period_from = ${B.from} and period_to = ${B.to}`);
     expect(periods[0]?.n).toBe('2');
+  });
+
+  it('writes the rows only this release can (0054): a completed form awaiting submission, and one submitted with its attendance', async () => {
+    const B = ROLLBACK_0054;
+    const tech = asUserId(IDS.technician);
+    const payroll = new PostgresPayrollRepository(db);
+    const at = '2028-04-26T08:00:00.000Z';
+    const document = (kind: 'timesheet' | 'attendance') => ({ kind, fileName: `Sipho ${kind}.pdf`, storageKey: `payroll-completions/probe/${kind}.pdf`, sha256: 'b'.repeat(64), sizeBytes: 10, pageCount: 1 });
+    expect(
+      await payroll.createFormCompletion({
+        id: B.awaiting, userId: tech, kind: 'timesheet', from: B.from, to: B.to, fileName: 'Sipho timesheet.pdf',
+        timesheet: { comment: 'Completed for the probe.', entries: [] }, attendance: null, document: document('timesheet'),
+        completedAt: at, completedBy: tech, submissionId: null,
+      }),
+    ).not.toBeNull();
+    await payroll.createPayrollSubmission({
+      id: B.submission, userId: tech, from: '2028-05-01', to: '2028-05-25', financeMonth: '2028-05', timesheetRequired: false, timesheetPeriodId: null,
+      attendance: { technicianName: 'Sipho', from: '2028-05-01', to: '2028-05-25', days: [] },
+      fileNames: { timesheet: '', attendance: 'Sipho attendance.pdf' }, documents: [],
+      submittedAt: at, submittedBy: tech, supersededAt: null, supersededBy: null, supersededBySubmission: null,
+    });
+    expect(
+      await payroll.createFormCompletion({
+        id: B.submittedForm, userId: tech, kind: 'attendance', from: '2028-05-01', to: '2028-05-25', fileName: 'Sipho attendance.pdf',
+        timesheet: null, attendance: [], document: document('attendance'), completedAt: at, completedBy: tech, submissionId: null,
+      }),
+    ).not.toBeNull();
+    expect(await payroll.markFormsSubmitted([B.submittedForm], B.submission)).toBe(1);
+    const forms = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions`);
+    expect(forms[0]?.n).toBe('2');
   });
 });

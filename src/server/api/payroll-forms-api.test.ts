@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { businessToday } from '@/lib/business-time';
 import { monthBounds, monthOfDate, previousMonth } from '@/lib/payroll-files';
-import { DEMO_USERS, signedInAs, startTestServer, submitForms } from '@/test/api-harness';
+import { DEMO_USERS, completeForm, signedInAs, startTestServer, submitForms } from '@/test/api-harness';
 
 /**
  * PAYROLL-ONE-1 THROUGH THE REAL ROUTES: the lines saving themselves, the
@@ -74,22 +74,27 @@ describe('payroll forms over HTTP', () => {
     expect((await (await signedInAs(DEMO_USERS.otherTechnician)).download(`/api/payroll/forms/${SIPHO}/attendance/pdf?from=${FROM}&to=${TO}`)).status).toBe(403);
   });
 
-  it('one submission of both forms: a replayed request is answered from the record; the stored PDFs download as they went', async () => {
+  it('one submission of both completed forms: a replayed request is answered from the record; the stored PDFs download as they went', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     await technician.post(`/api/timesheets/${SIPHO}/lines`, { id: crypto.randomUUID(), date: `${MONTH}-05`, typed: typed('1'), expectedRevision: null });
     const forms = await technician.get<{ revision: string; financeMonth: string }>(`/api/payroll/forms/${SIPHO}?from=${FROM}&to=${TO}`);
     expect(forms.data.financeMonth).toBe(MONTH);
+    // FORM-LIFECYCLE-1: nothing is submitted that was not completed first — whatever the request says.
     const body = { from: FROM, to: TO, revision: forms.data.revision, confirmUnrecorded: true };
+    expect((await technician.post(`/api/payroll/forms/${SIPHO}/submit`, body)).error?.violations[0]?.code).toBe('submit_none');
+    expect((await completeForm(technician, SIPHO, 'timesheet', FROM, TO)).status).toBe(200);
+    expect((await technician.post(`/api/payroll/forms/${SIPHO}/submit`, {})).error?.violations[0]?.code).toBe('submit_attendance_missing');
+    expect((await completeForm(technician, SIPHO, 'attendance', FROM, TO)).status).toBe(200);
     const first = await technician.post<{ submission: { id: string; documents: readonly { kind: string; fileName: string }[] } }>(
-      `/api/payroll/forms/${SIPHO}/submit`, body, { idempotencyKey: 'pay-forms-1' },
+      `/api/payroll/forms/${SIPHO}/submit`, {}, { idempotencyKey: 'pay-forms-1' },
     );
     expect(first.status, JSON.stringify(first.error)).toBe(200);
-    const replay = await technician.post<{ submission: { id: string } }>(`/api/payroll/forms/${SIPHO}/submit`, body, { idempotencyKey: 'pay-forms-1' });
+    const replay = await technician.post<{ submission: { id: string } }>(`/api/payroll/forms/${SIPHO}/submit`, {}, { idempotencyKey: 'pay-forms-1' });
     expect(replay.status).toBe(200);
     expect(replay.headers.get('idempotent-replay')).toBe('true');
     expect(replay.data.submission.id).toBe(first.data.submission.id);
-    // A fresh second request is refused: the forms are no longer what it reviewed.
-    expect((await technician.post(`/api/payroll/forms/${SIPHO}/submit`, body)).error?.violations[0]?.code).toBe('payroll_forms_changed');
+    // A fresh second request is refused: both forms were submitted; nothing is submitted twice.
+    expect((await technician.post(`/api/payroll/forms/${SIPHO}/submit`, {})).error?.violations[0]?.code).toBe('payroll_already_submitted');
     const history = await technician.get<readonly { id: string }[]>(`/api/payroll/forms/${SIPHO}/history`);
     expect(history.data.map((entry) => entry.id)).toEqual([first.data.submission.id]);
     for (const document of first.data.submission.documents) {
@@ -102,13 +107,13 @@ describe('payroll forms over HTTP', () => {
     expect((await (await signedInAs(DEMO_USERS.coordinator)).download(`/api/payroll/submissions/${first.data.submission.id}/attendance/pdf`)).status).toBe(200);
   });
 
-  it('a partial overlap is refused naming it; the two old submission points are retired', async () => {
+  it('dates already submitted cannot be completed again, in part or whole; the two old submission points are retired', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     expect((await submitForms(technician, SIPHO, FROM, TO)).status).toBe(200);
     // Days 20–28 are only part of the month submitted: refused, even with the replacement confirmed.
     const partial = await submitForms(technician, SIPHO, `${MONTH}-20`, `${MONTH}-28`, { confirmReplace: true });
     expect(partial.status).toBe(422);
-    expect(partial.error?.violations[0]?.code).toBe('payroll_partial_overlap');
+    expect(partial.error?.violations[0]?.code).toBe('payroll_period_submitted');
     const cut = await technician.get<{ partialOverlaps: readonly unknown[]; canSubmit: boolean }>(`/api/payroll/forms/${SIPHO}?from=${MONTH}-20&to=${monthBounds(monthOfDate(businessToday())).from}`);
     expect(cut.data.partialOverlaps).toHaveLength(1);
     expect(cut.data.canSubmit).toBe(false);

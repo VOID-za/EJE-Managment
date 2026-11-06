@@ -19,6 +19,7 @@ import type {
   PayrollSubmission,
   PayrollDocumentName,
   PayrollDocumentKind,
+  PayrollFormCompletion,
   MonthlySubmission,
   FinancePackage,
   FinancePackageStatus,
@@ -1314,6 +1315,13 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve(record);
   }
 
+  deleteRecord(id: string): Promise<void> {
+    this.context.commit((draft) => {
+      draft.attendance = draft.attendance.filter((candidate) => candidate.id !== id);
+    });
+    return Promise.resolve();
+  }
+
   listComments(userId: UserId, from: string, to: string): Promise<readonly TimesheetComment[]> {
     return Promise.resolve(
       this.context
@@ -1760,6 +1768,41 @@ class DemoPayrollRepository implements PayrollRepository {
       draft.payrollDocumentNames = (draft.payrollDocumentNames ?? []).filter((row) => !(row.userId === userId && row.kind === kind));
     });
     return Promise.resolve();
+  }
+
+  /** As the database's partial unique key: one form of each kind awaits per person; a second is refused (null). */
+  createFormCompletion(completion: PayrollFormCompletion): Promise<PayrollFormCompletion | null> {
+    let created: PayrollFormCompletion | null = null;
+    this.context.commit((draft) => {
+      const rows = draft.payrollFormCompletions ?? [];
+      if (rows.some((row) => row.userId === completion.userId && row.kind === completion.kind && row.submissionId === null)) return;
+      draft.payrollFormCompletions = [...rows, completion];
+      created = completion;
+    });
+    return Promise.resolve(created);
+  }
+
+  listFormCompletions(userId: UserId): Promise<readonly PayrollFormCompletion[]> {
+    return Promise.resolve(
+      (this.context.read().payrollFormCompletions ?? []).filter((row) => row.userId === userId).sort((a, b) => b.completedAt.localeCompare(a.completedAt)),
+    );
+  }
+
+  findFormCompletion(id: string): Promise<PayrollFormCompletion | null> {
+    return Promise.resolve((this.context.read().payrollFormCompletions ?? []).find((row) => row.id === id) ?? null);
+  }
+
+  /** Only the ones still awaiting are marked — as the database's guard allows nothing else. */
+  markFormsSubmitted(ids: readonly string[], submissionId: string): Promise<number> {
+    let marked = 0;
+    this.context.commit((draft) => {
+      draft.payrollFormCompletions = (draft.payrollFormCompletions ?? []).map((row) => {
+        if (!ids.includes(row.id) || row.submissionId !== null) return row;
+        marked += 1;
+        return { ...row, submissionId };
+      });
+    });
+    return Promise.resolve(marked);
   }
 
   findSubmission(userId: UserId, month: string): Promise<MonthlySubmission | null> {

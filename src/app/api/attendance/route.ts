@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ATTENDANCE_NOTE_LIMIT } from '@/domain';
-import { recordAttendance } from '@/application/attendance-operations';
+import { clearAttendance, recordAttendance } from '@/application/attendance-operations';
 import { writeRoute } from '@/server/api/handler';
 
 /**
@@ -21,7 +21,8 @@ export const POST = writeRoute({
     .object({
       userId: z.string().min(1).max(100),
       date: day,
-      status: z.enum(['present', 'absent']),
+      // FORM-LIFECYCLE-1: 'none' takes the day's answer back — it is not recorded again.
+      status: z.enum(['present', 'absent', 'none']),
       // ATT-01. Its value is the operation's rule (four reasons, absent only).
       absenceReason: z.string().max(40).nullable().optional(),
       note: z.string().max(ATTENDANCE_NOTE_LIMIT).default(''),
@@ -29,5 +30,12 @@ export const POST = writeRoute({
       expectedRecordedAt: z.string().max(40).nullable().optional(),
     })
     .strict(),
-  handler: (context) => recordAttendance(context.operation, context.input),
+  handler: async (context) => {
+    const { status, ...rest } = context.input;
+    if (status === 'none') {
+      await clearAttendance(context.operation, { userId: rest.userId, date: rest.date, expectedRecordedAt: rest.expectedRecordedAt });
+      return null;
+    }
+    return recordAttendance(context.operation, { ...rest, status });
+  },
 });

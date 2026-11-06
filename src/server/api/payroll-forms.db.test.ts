@@ -5,7 +5,7 @@ import * as schema from '@/db/schema';
 import { IDS, seedBaseline } from '@/data/postgres/test-fixtures';
 import { openTestDatabase, testDatabaseUrl, truncateAll } from '@/data/postgres/test-database';
 import { hashPassword } from '@/server/auth/passwords';
-import { ApiTestClient, startPostgresTestServer, submitForms } from '@/test/api-harness';
+import { ApiTestClient, completeForm, startPostgresTestServer, submitForms } from '@/test/api-harness';
 
 /**
  * PAYROLL-ONE-1 ON REAL POSTGRESQL (migration 0052): the coordinated
@@ -79,39 +79,38 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
     }
   });
 
-  it('two submissions racing for the same dates make ONE: the loser writes nothing, not even its timesheet period', async () => {
+  it('three Submit to Office requests racing make ONE submission; the losers write nothing; both completed forms are marked once', async () => {
     const tech = await signIn('sipho@example-test.co.za');
     await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
-    const forms = await tech.get<{ revision: string }>(`/api/payroll/forms/${IDS.technician}?from=2026-11-01&to=2026-11-25`);
-    const body = { from: '2026-11-01', to: '2026-11-25', revision: forms.data.revision, confirmUnrecorded: true };
+    expect((await completeForm(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25')).status).toBe(200);
+    expect((await completeForm(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25')).status).toBe(200);
     const answers = await Promise.all([
-      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, body),
-      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, body),
-      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, body),
+      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {}),
+      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {}),
+      tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {}),
     ]);
     expect(answers.filter((answer) => answer.status === 200)).toHaveLength(1);
     for (const answer of answers.filter((candidate) => candidate.status !== 200)) {
       expect(answer.status, JSON.stringify(answer.error)).toBeLessThan(500);
     }
     expect(await counts()).toEqual({ payroll: 1, periods: 1, current: 1 });
+    const forms = await db.select().from(schema.payrollFormCompletions);
+    const [submission] = await db.select().from(schema.payrollSubmissions);
+    expect(forms.map((form) => form.submissionId)).toEqual([submission!.id, submission!.id]);
   });
 
-  it('a complete replacement with the very same dates keeps the original row beside it; a partial one changes nothing', async () => {
+  it('dates already submitted cannot be completed again, in part or in whole: nothing changes', async () => {
     const tech = await signIn('sipho@example-test.co.za');
     await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
     const first = await submitForms<{ submission: { id: string; timesheetPeriodId: string } }>(tech, IDS.technician, '2026-11-01', '2026-11-25');
     expect(first.status).toBe(200);
     const before = await counts();
-    const partial = await submitForms(tech, IDS.technician, '2026-11-20', '2026-12-15', { confirmReplace: true });
-    expect(partial.error?.violations[0]?.code).toBe('payroll_partial_overlap');
+    for (const [from, to] of [['2026-11-20', '2026-12-15'], ['2026-11-01', '2026-11-25'], ['2026-10-01', '2026-12-31']]) {
+      const again = await submitForms(tech, IDS.technician, from!, to!, { confirmReplace: true });
+      expect(again.error?.violations[0]?.code, `${from} – ${to}`).toBe('payroll_period_submitted');
+    }
     expect(await counts()).toEqual(before);
-    const second = await submitForms<{ submission: { id: string; timesheetPeriodId: string } }>(tech, IDS.technician, '2026-11-01', '2026-11-25', { confirmReplace: true });
-    expect(second.status, JSON.stringify(second.error)).toBe(200);
-    expect(await counts()).toEqual({ payroll: 2, periods: 2, current: 1 });
-    const [kept] = await db.select().from(schema.payrollSubmissions).where(eq(schema.payrollSubmissions.id, first.data.submission.id));
-    expect(kept?.supersededBySubmission).toBe(second.data.submission.id);
-    const [keptPeriod] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.submission.timesheetPeriodId));
-    expect(keptPeriod?.supersededAt).not.toBeNull();
+    expect((await db.select().from(schema.payrollFormCompletions)).filter((form) => form.submissionId === null)).toHaveLength(0);
   });
 
   it('the database refuses: a rewritten, deleted or revived submission, two current ones sharing a day, a wrong Finance month, an unsafe name', async () => {
@@ -260,4 +259,86 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
     expect(after).toMatchObject({ status: 'prepared', attempts: 0 });
   });
 
+
+  /*
+   * FORM-LIFECYCLE-1 (migration 0054): what the database itself keeps — one awaiting form of a kind per person,
+   * a completed form never rewritten or deleted, its submission recorded once — and the races the form lock closes.
+   */
+  it('0054: a completed form is write-once — only its submission is recorded, once; never deleted', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const done = await completeForm<{ id: string }>(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25');
+    expect(done.status, JSON.stringify(done.error)).toBe(200);
+    const id = done.data.id;
+    for (const change of [sql`file_name = 'Other name.pdf'`, sql`period_to = '2026-11-24'`, sql`content = '{}'::jsonb`, sql`document = '{}'::jsonb`, sql`completed_at = now()`]) {
+      expect(await postgresMessage(db.execute(sql`update payroll_form_completions set ${change} where id = ${id}`))).toContain('kept exactly as it was completed');
+    }
+    expect(await postgresMessage(db.execute(sql`delete from payroll_form_completions where id = ${id}`))).toContain('cannot be deleted');
+    // A second awaiting attendance form for the person is refused by the unique key.
+    expect(
+      await postgresMessage(
+        db.insert(schema.payrollFormCompletions).values({
+          id: crypto.randomUUID(), userId: IDS.technician, kind: 'attendance', periodFrom: '2026-12-01', periodTo: '2026-12-10', fileName: 'Second.pdf',
+          content: {}, document: {}, completedAt: new Date().toISOString(), completedBy: IDS.technician,
+        }),
+      ),
+    ).toContain('payroll_form_completions_awaiting_key');
+    expect(await postgresMessage(db.execute(sql`update payroll_form_completions set kind = 'other' where id = ${id}`))).toMatch(/kept exactly|kind_known/u);
+  });
+
+  it('three Completed (OK) requests racing make ONE completed form; the losers write nothing', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    const answers = await Promise.all([1, 2, 3].map(() => completeForm(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25')));
+    expect(answers.filter((answer) => answer.status === 200)).toHaveLength(1);
+    for (const answer of answers.filter((candidate) => candidate.status !== 200)) {
+      expect(answer.error?.violations[0]?.code, JSON.stringify(answer.error)).toBe('form_already_completed');
+    }
+    expect(await db.select().from(schema.payrollFormCompletions)).toHaveLength(1);
+  });
+
+  it('a line saved while the timesheet is being completed is either in the completed form or refused — never written beside it', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const id = crypto.randomUUID();
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    const lines = await tech.get<readonly { id: string; revision: string }[]>(`/api/timesheets/${IDS.technician}/lines`);
+    const revision = lines.data.find((line) => line.id === id)!.revision;
+    const [completed, saved] = await Promise.all([
+      completeForm<{ id: string }>(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25'),
+      tech.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-05', typed: typed('7'), expectedRevision: revision }),
+    ]);
+    expect(completed.status, JSON.stringify(completed.error)).toBe(200);
+    const [form] = await db.select().from(schema.payrollFormCompletions);
+    const frozen = (form!.content as { timesheet: { entries: { id: string; overtimeHours: number }[] } }).timesheet.entries.find((entry) => entry.id === id)!;
+    const [stored] = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
+    // Whichever came first, what is stored is what was completed.
+    expect(Number(stored!.overtimeHours)).toBe(frozen.overtimeHours);
+    if (saved.status !== 200) expect(saved.error?.violations[0]?.code).toBe('form_completed');
+    // And Submit to Office finds the timesheet exactly as completed.
+    expect((await completeForm(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25')).status).toBe(200);
+    const sent = await tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {});
+    expect(sent.status, JSON.stringify(sent.error)).toBe(200);
+  });
+
+  it('a completed form is locked against every direct request — lines, the old entries route, attendance, clearing a day', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const id = crypto.randomUUID();
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    await tech.post('/api/attendance', { userId: IDS.technician, date: '2026-11-05', status: 'present', note: '' });
+    expect((await completeForm(tech, IDS.technician, 'timesheet', '2026-11-01', '2026-11-25')).status).toBe(200);
+    expect((await completeForm(tech, IDS.technician, 'attendance', '2026-11-01', '2026-11-25')).status).toBe(200);
+    const lines = await tech.get<readonly { id: string; revision: string }[]>(`/api/timesheets/${IDS.technician}/lines`);
+    const revision = lines.data.find((line) => line.id === id)!.revision;
+    const refusals = [
+      await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id, date: '2026-11-05', typed: typed('9'), expectedRevision: revision }),
+      await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-06', typed: typed('1'), expectedRevision: null }),
+      await tech.post(`/api/timesheets/${IDS.technician}/lines/${id}/remove`, {}),
+      await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date: '2026-11-07', customerName: 'X', overtimeHours: 1, doubleHours: 0 }),
+      await tech.post('/api/attendance', { userId: IDS.technician, date: '2026-11-05', status: 'absent', absenceReason: 'leave', note: '' }),
+      await tech.post('/api/attendance', { userId: IDS.technician, date: '2026-11-05', status: 'none', note: '' }),
+    ];
+    for (const answer of refusals) expect(answer.error?.violations[0]?.code, JSON.stringify(answer.error)).toBe('form_completed');
+    const [entry] = await db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.id, id));
+    expect(Number(entry!.overtimeHours)).toBe(1);
+    expect(await db.select().from(schema.attendance)).toHaveLength(1);
+  });
 });

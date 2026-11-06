@@ -23,6 +23,7 @@ import { formatDayAndDate, formatPeriod } from '@/lib/timesheet-dates';
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
+import { assertDatesOpen, lockedRanges } from './form-locks';
 import { assertMayRead, assertOwner, saveTimesheetEntry, removeTimesheetEntry, versionInForce } from './timesheets';
 
 /**
@@ -86,6 +87,11 @@ export interface WorkingTimesheetLine {
   readonly historical: { readonly normalHours: number; readonly callouts: number };
   /** Set when it is part of a current submission: shown, not editable (a correction changes it). */
   readonly submitted: { readonly periodId: string; readonly from: IsoDate; readonly to: IsoDate } | null;
+  /**
+   * FORM-LIFECYCLE-1: set when its date is in the person's COMPLETED timesheet awaiting submission — locked,
+   * and no longer part of the working sheet (it is on My Monthly Forms). Absent on an older client's copy.
+   */
+  readonly completed?: { readonly from: IsoDate; readonly to: IsoDate } | null;
 }
 
 /** The current submissions' periods with the lines each holds now (its version in force). */
@@ -163,7 +169,12 @@ export const loadWorkingLines = async (context: OperationContext, technicianId: 
   for (const draft of drafts) {
     if (!entryIds.has(draft.id)) lines.push(lineOf(null, draft, null, await draftProblems(draft)));
   }
-  return lines.sort(
+  const completedRanges = (await lockedRanges(context, id, 'timesheet')).filter((range) => range.why === 'completed');
+  const completedOf = (date: IsoDate | null) => {
+    const range = date === null ? undefined : completedRanges.find((candidate) => candidate.from <= date && date <= candidate.to);
+    return range === undefined ? null : { from: range.from, to: range.to };
+  };
+  return lines.map((line) => ({ ...line, completed: completedOf(line.date) })).sort(
     (a, b) => (a.date ?? '9999-99-99').localeCompare(b.date ?? '9999-99-99') || (a.entry?.updatedAt ?? a.revision).localeCompare(b.entry?.updatedAt ?? b.revision),
   );
 };
@@ -240,6 +251,8 @@ const saveLineHeld = async (
       : await serverProblems(context, userId, input.id, date, input.typed);
     return lineOf(entry, draft, null, known);
   }
+  // FORM-LIFECYCLE-1: a completed or submitted timesheet's dates are locked — kept as a draft or as a line alike.
+  await assertDatesOpen(context, userId, 'timesheet', [date, shownDate, entry?.date]);
   if ((input.expectedRevision ?? null) !== revision) {
     throw refuse(
       'This line was changed somewhere else since you opened it.',

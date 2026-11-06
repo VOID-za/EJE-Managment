@@ -732,6 +732,12 @@ const v40ToV41 = (data: Loose): Loose => ({
   timesheetWorkingComments: Array.isArray(data.timesheetWorkingComments) ? data.timesheetWorkingComments : [],
 });
 
+/** FORM-LIFECYCLE-1: completed forms, as PostgreSQL migration 0054. Nothing existing is rewritten. */
+const v44ToV45 = (data: Loose): Loose => ({
+  ...data,
+  payrollFormCompletions: Array.isArray(data.payrollFormCompletions) ? data.payrollFormCompletions : [],
+});
+
 /** PAYROLL-ONE-1 follow-up: removed line ids, as PostgreSQL migration 0053. Nothing existing is rewritten. */
 const v43ToV44 = (data: Loose): Loose => ({
   ...data,
@@ -809,6 +815,7 @@ const STEPS: Readonly<Record<number, (data: Loose) => Loose>> = {
   41: v41ToV42,
   42: v42ToV43,
   43: v43ToV44,
+  44: v44ToV45,
 };
 
 /**

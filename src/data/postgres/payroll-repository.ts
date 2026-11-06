@@ -9,6 +9,7 @@ import {
   type MonthlySubmission,
   type PayrollDocumentKind,
   type PayrollDocumentName,
+  type PayrollFormCompletion,
   type PayrollSubmission,
   type PayrollSubmissionDocument,
   type UserId,
@@ -22,6 +23,26 @@ type SubmissionRow = typeof schema.monthlySubmissions.$inferSelect;
 type PackageRow = typeof schema.financePackages.$inferSelect;
 type PayrollRow = typeof schema.payrollSubmissions.$inferSelect;
 type NameRow = typeof schema.payrollDocumentNames.$inferSelect;
+type CompletionRow = typeof schema.payrollFormCompletions.$inferSelect;
+
+/** FORM-LIFECYCLE-1: `content` holds the timesheet ({ comment, entries }) or the attendance days. */
+const toCompletion = (row: CompletionRow): PayrollFormCompletion => {
+  const content = row.content as { readonly timesheet?: PayrollFormCompletion['timesheet']; readonly attendance?: PayrollFormCompletion['attendance'] };
+  return {
+    id: row.id,
+    userId: asUserId(row.userId),
+    kind: row.kind as PayrollDocumentKind,
+    from: row.periodFrom,
+    to: row.periodTo,
+    fileName: row.fileName,
+    timesheet: content.timesheet ?? null,
+    attendance: content.attendance ?? null,
+    document: row.document as PayrollSubmissionDocument,
+    completedAt: row.completedAt,
+    completedBy: asUserId(row.completedBy),
+    submissionId: row.submissionId,
+  };
+};
 
 const toPayrollSubmission = (row: PayrollRow): PayrollSubmission => ({
   id: row.id,
@@ -238,6 +259,55 @@ export class PostgresPayrollRepository implements PayrollRepository {
     await this.db
       .delete(schema.payrollDocumentNames)
       .where(and(eq(schema.payrollDocumentNames.userId, userId), eq(schema.payrollDocumentNames.kind, kind)));
+  }
+
+  async createFormCompletion(completion: PayrollFormCompletion): Promise<PayrollFormCompletion | null> {
+    const rows = await this.db
+      .insert(schema.payrollFormCompletions)
+      .values({
+        id: completion.id,
+        userId: completion.userId,
+        kind: completion.kind,
+        periodFrom: completion.from,
+        periodTo: completion.to,
+        fileName: completion.fileName,
+        content: completion.kind === 'timesheet' ? { timesheet: completion.timesheet } : { attendance: completion.attendance },
+        document: completion.document,
+        completedAt: completion.completedAt,
+        completedBy: completion.completedBy,
+      })
+      .onConflictDoNothing({
+        target: [schema.payrollFormCompletions.userId, schema.payrollFormCompletions.kind],
+        where: isNull(schema.payrollFormCompletions.submissionId),
+      })
+      .returning();
+    return rows[0] === undefined ? null : toCompletion(rows[0]);
+  }
+
+  async listFormCompletions(userId: UserId): Promise<readonly PayrollFormCompletion[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.payrollFormCompletions)
+      .where(eq(schema.payrollFormCompletions.userId, userId))
+      .orderBy(desc(schema.payrollFormCompletions.completedAt));
+    return rows.map(toCompletion);
+  }
+
+  async findFormCompletion(id: string): Promise<PayrollFormCompletion | null> {
+    if (!isUuid(id)) return null;
+    const rows = await this.db.select().from(schema.payrollFormCompletions).where(eq(schema.payrollFormCompletions.id, id)).limit(1);
+    return rows[0] === undefined ? null : toCompletion(rows[0]);
+  }
+
+  async markFormsSubmitted(ids: readonly string[], submissionId: string): Promise<number> {
+    const valid = ids.filter(isUuid);
+    if (valid.length === 0) return 0;
+    const rows = await this.db
+      .update(schema.payrollFormCompletions)
+      .set({ submissionId })
+      .where(and(inArray(schema.payrollFormCompletions.id, valid), isNull(schema.payrollFormCompletions.submissionId)))
+      .returning({ id: schema.payrollFormCompletions.id });
+    return rows.length;
   }
 
   async findPackage(id: string): Promise<FinancePackage | null> {

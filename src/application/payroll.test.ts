@@ -224,10 +224,12 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     expect((await harness.repos.attendance.listEntries(SIPHO, FROM, TO)).map((entry) => entry.date)).toEqual([`${MONTH}-03`]);
   });
 
-  it('after submission the PERSON may change their own days — the submitted copy stays as it went; the office still may not (ATT-OWN-1)', async () => {
+  it('after submission the days are LOCKED — for the person too (FORM-LIFECYCLE-1, replacing RESUBMIT-1); the office still may not (ATT-OWN-1)', async () => {
     await submitFor(sipho);
     const before = await harness.repos.attendance.listRecords(FROM, TO, SIPHO);
-    await recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' });
+    await expect(recordAttendance(harness.as(sipho), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: '' })).rejects.toMatchObject({
+      violations: [{ code: 'form_submitted' }],
+    });
     for (const office of [coordinator, master]) {
       await expect(
         recordAttendance(harness.as(office), { userId: SIPHO, date: `${MONTH}-14`, status: 'present', note: 'Office correction' }),
@@ -239,8 +241,8 @@ describe('PAY-02 — submitting the month: timesheet and attendance together, on
     await expect(submitMonth(harness.as(sipho), SIPHO, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
     expect((await loadAttendanceDocument(harness.as(master), SIPHO, MONTH, 'submitted')).rows.map((row) => row.date)).toEqual([`${MONTH}-07`]);
     expect(await harness.repos.payroll.listSubmissions(MONTH)).toHaveLength(1);
-    // The underlying attendance records were never deleted.
-    expect((await harness.repos.attendance.listRecords(FROM, TO, SIPHO)).length).toBe(before.length + 1);
+    // The underlying attendance records are exactly as they were.
+    expect(await harness.repos.attendance.listRecords(FROM, TO, SIPHO)).toEqual(before);
   });
 });
 
@@ -261,8 +263,10 @@ describe('TS-ROLE-1 — a Coordinator’s month is attendance only', () => {
     expect(await harness.repos.attendance.findPeriod(COORD, FROM, TO)).toBeNull();
     const [notice] = (await harness.repos.notifications.list(master.id)).filter((n) => n.type === 'timesheet_submitted');
     expect(notice?.title).toMatch(/: attendance$/u);
-    // Her days stay hers to change; the month as submitted is kept (PAYROLL-ONE-1: never rewritten).
-    await recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' });
+    // FORM-LIFECYCLE-1: her submitted days are locked; the month as submitted is kept (PAYROLL-ONE-1: never rewritten).
+    await expect(recordAttendance(harness.as(coordinator), { userId: COORD, date: `${MONTH}-08`, status: 'present', note: '' })).rejects.toMatchObject({
+      violations: [{ code: 'form_submitted' }],
+    });
     await expect(submitMonth(harness.as(coordinator), COORD, MONTH, { confirmUnrecorded: true })).rejects.toMatchObject({ violations: [{ code: 'month_submitted' }] });
     expect((await harness.repos.payroll.findSubmission(COORD, MONTH))?.id).toBe(submission.id);
   });

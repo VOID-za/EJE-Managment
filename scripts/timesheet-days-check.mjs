@@ -28,6 +28,7 @@
  */
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { completeAndSubmit } from './payroll-flow.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
@@ -129,8 +130,7 @@ await check('lines from before the redesign are on their days, editable; a submi
     if (answer.status !== 200) fail(`writing an earlier line answered ${answer.status}`);
   };
   await old(shift(today, -30), 'Before Redesign Submitted', 3);
-  const forms = await call('GET', `/api/payroll/forms/${who}?from=${shift(today, -31)}&to=${shift(today, -29)}`);
-  const sent = await call('POST', `/api/payroll/forms/${who}/submit`, { from: shift(today, -31), to: shift(today, -29), revision: forms.json?.data?.revision, confirmUnrecorded: true, confirmNoLines: true });
+  const sent = await completeAndSubmit(call, who, shift(today, -31), shift(today, -29));
   if (sent.status !== 200) fail(`submitting the earlier period answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
   await old(shift(today, -20), 'Before Redesign One', 1.5);
   await old(shift(today, -20), 'Before Redesign Two', 2);
@@ -403,8 +403,7 @@ await check('a change refused because its line was submitted elsewhere is said a
   await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'offline', null, { timeout: 20000 });
   // …while the day is submitted from elsewhere.
   const who = await me();
-  const forms = await call('GET', `/api/payroll/forms/${who}?from=${day}&to=${day}`);
-  const sent = await call('POST', `/api/payroll/forms/${who}/submit`, { from: day, to: day, revision: forms.json?.data?.revision, confirmUnrecorded: true, confirmNoLines: true });
+  const sent = await completeAndSubmit(call, who, day, day);
   if (sent.status !== 200) fail(`submitting the day answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
   await page.unroute('**/api/timesheets/*/lines');
   await press(page.getByTestId('autosave-retry'));

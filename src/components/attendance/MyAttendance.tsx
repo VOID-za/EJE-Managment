@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ABSENCE_REASON_LABELS, type AttendanceRecord } from '@/domain';
 import { Badge, Button, Card, LoadingPanel, QueryFailure, TextField } from '@/components/ui';
 import { isUsableRange, readRememberedRange, rememberRange, type DateRange } from '@/lib/remembered-range';
@@ -135,7 +135,16 @@ export const AttendanceRangeFields = ({
   </div>
 );
 
-export const MyAttendance = ({ range, usable }: { readonly range: DateRange; readonly usable: boolean }) => {
+export const MyAttendance = ({
+  range,
+  usable,
+  onUnsaved,
+}: {
+  readonly range: DateRange;
+  readonly usable: boolean;
+  /** FORM-LIFECYCLE-1: how many choices wait to be saved — the page offers Completed only at none. */
+  readonly onUnsaved?: (count: number) => void;
+}) => {
   const [beyond] = useState(() => linkedToBeyond(range));
   const currentUser = useCurrentUser();
   const { from, to } = range;
@@ -143,6 +152,10 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
     usable ? attendance.mine(from, to) : Promise.resolve(null),
   );
   const { saver, conflict, dismissConflict } = useAttendanceAutosave('mine');
+  const unsavedCount = saver?.unsavedCount ?? 0;
+  useEffect(() => {
+    onUnsaved?.(unsavedCount);
+  }, [unsavedCount, onUnsaved]);
 
   const shown = (date: string, record: AttendanceRecord | null) => {
     const pending = saver?.answerFor(currentUser.id, date) ?? null;
@@ -150,6 +163,23 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
   };
   const setAnswer = (date: string, record: AttendanceRecord | null, next: AttendanceAnswer) =>
     saver?.change(currentUser.id, date, next, record?.recordedAt ?? null);
+  /**
+   * FORM-LIFECYCLE-1: Present and Absent TOGGLE. Pressing the chosen one again takes it back — the day is not
+   * recorded again (never Present or Absent by itself); pressing the other one changes it.
+   */
+  const press = (date: string, record: AttendanceRecord | null, current: AttendanceAnswer, pressed: 'present' | 'absent') => {
+    if (current.status === pressed) {
+      setAnswer(date, record, { status: null, absenceReason: null, note: '', cleared: true });
+      return;
+    }
+    setAnswer(
+      date,
+      record,
+      pressed === 'present'
+        ? { status: 'present', absenceReason: null, note: current.note }
+        : { status: 'absent', absenceReason: record?.status === 'absent' ? record.absenceReason : null, note: current.note },
+    );
+  };
 
   const days = query.data?.days ?? [];
   const unrecorded = days.filter((day) => shown(day.date, day.record).answer.status === null).length;
@@ -160,8 +190,8 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
         <div>
           <p className="text-sm font-semibold text-steel-900">My attendance</p>
           <p className="text-xs text-steel-500">
-            Mark yourself Present or Absent for each day. Each choice saves by itself. You can catch up on earlier days
-            and correct a day; every change is recorded.
+            Mark yourself Present or Absent for each day. Each choice saves by itself. Pressed by mistake? Press it
+            again to clear it — the day is then Not recorded. Every change is recorded.
           </p>
         </div>
       </div>
@@ -204,6 +234,7 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
                   data-date={day.date}
                   data-status={answer.status ?? 'unrecorded'}
                   data-saved={unsaved ? 'no' : 'yes'}
+                  data-locked={day.locked ?? 'no'}
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="w-40 font-medium text-steel-900">
@@ -220,34 +251,37 @@ export const MyAttendance = ({ range, usable }: { readonly range: DateRange; rea
                         </Badge>
                       </span>
                     )}
+                    {day.locked === 'completed' && <Badge tone="outline" size="sm">Completed — on My Monthly Forms</Badge>}
+                    {day.locked === 'submitted' && <Badge tone="outline" size="sm">Submitted to the office</Badge>}
                     {unsaved && refused === undefined && (
                       <span className="text-xs text-steel-500" data-testid="my-attendance-unsaved">Not saved yet</span>
                     )}
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant={answer.status === 'present' ? 'primary' : 'secondary'}
-                      aria-pressed={answer.status === 'present'}
-                      onClick={() => setAnswer(day.date, day.record, { status: 'present', absenceReason: null, note: answer.note })}
-                      data-testid="my-attendance-present"
-                    >
-                      Present
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={answer.status === 'absent' ? 'primary' : 'secondary'}
-                      aria-pressed={answer.status === 'absent'}
-                      onClick={() =>
-                        answer.status !== 'absent' &&
-                        setAnswer(day.date, day.record, { status: 'absent', absenceReason: day.record?.status === 'absent' ? day.record.absenceReason : null, note: answer.note })
-                      }
-                      data-testid="my-attendance-absent"
-                    >
-                      Absent
-                    </Button>
-                  </div>
-                  {answer.status === 'absent' && (
+                  {(day.locked ?? null) === null && (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={answer.status === 'present' ? 'primary' : 'secondary'}
+                        aria-pressed={answer.status === 'present'}
+                        title={answer.status === 'present' ? 'Press again to clear' : undefined}
+                        onClick={() => press(day.date, day.record, answer, 'present')}
+                        data-testid="my-attendance-present"
+                      >
+                        Present
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={answer.status === 'absent' ? 'primary' : 'secondary'}
+                        aria-pressed={answer.status === 'absent'}
+                        title={answer.status === 'absent' ? 'Press again to clear' : undefined}
+                        onClick={() => press(day.date, day.record, answer, 'absent')}
+                        data-testid="my-attendance-absent"
+                      >
+                        Absent
+                      </Button>
+                    </div>
+                  )}
+                  {answer.status === 'absent' && (day.locked ?? null) === null && (
                     <AbsenceReasonPicker
                       value={answer.absenceReason}
                       onChoose={(reason) => setAnswer(day.date, day.record, { status: 'absent', absenceReason: reason, note: answer.note })}

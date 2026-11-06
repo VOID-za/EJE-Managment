@@ -21,6 +21,7 @@
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs } from './sign-in.mjs';
+import { completeAndSubmit } from './payroll-flow.mjs';
 
 const BASE = process.env.EJE_E2E_URL ?? process.env.EJE_SMOKE_BASE_URL ?? 'http://localhost:3210';
 const [shape, mode] = (process.env.EJE_FORMS_VIEWPORT ?? '1440x900').split(':');
@@ -493,7 +494,8 @@ await check('Timesheets: every working day of last month entered through the scr
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   for (const [index, date] of openDays.entries()) {
     const row = lineById(await addLineOn(date));
-    if (index % 3 === 0) await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
+    // FORM-LIFECYCLE-1: one Customer field — "Workshop" typed is Workshop.
+    if (index % 3 === 0) await row.getByTestId('timesheet-customer-name').fill('Workshop');
     else await row.getByTestId('timesheet-customer-name').fill(`Customer ${index}`);
     await row.getByTestId('timesheet-overtime').fill(String((index % 4) * 0.25 + 0.25));
     await row.getByTestId('timesheet-callout').fill(index % 7 === 0 ? '450' : '0');
@@ -652,7 +654,7 @@ await check('Attendance: a failed save is kept, said, and Retry saves it', async
   await page.unroute('**/api/attendance');
 });
 await check('Attendance: leaving straight after a change, then returning — the change was kept', async () => {
-  await press(attendanceDay(attendanceDays[4]).getByTestId('my-attendance-absent'));
+  // The day is Absent already (Sick Leave): its reason is changed in place. (Pressing Absent again would clear it — FORM-LIFECYCLE-1.)
   await attendanceDay(attendanceDays[4]).getByLabel('Reason for absence').selectOption('leave');
   await go('/dashboard');
   await go(`/attendance?from=${attendanceDays[0]}`);
@@ -675,10 +677,11 @@ await check('Attendance: a slow connection still saves every change', async () =
 await check('My Monthly Forms: Christene (Coordinator) has her OWN attendance only — no timesheet anywhere', async () => {
   await as('Christene van Niekerk');
   await go('/payroll/mine');
-  const title = await page.getByTestId('monthly-forms-title').innerText();
-  if (!title.includes('Christene')) fail(`the forms are "${title}"`);
-  for (const id of ['monthly-attendance-preview', 'monthly-forms-edit-attendance']) if ((await page.getByTestId(id).count()) === 0) fail(`no ${id}`);
-  for (const id of ['monthly-timesheet', 'monthly-timesheet-preview', 'monthly-forms-edit-timesheet']) if ((await page.getByTestId(id).count()) !== 0) fail(`a Coordinator is offered ${id}`);
+  await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
+  // FORM-LIFECYCLE-1: her attendance form, completed on its page; no timesheet is asked of her.
+  if ((await page.getByTestId('my-forms-attendance').count()) !== 1) fail('no attendance form');
+  if ((await page.getByTestId('my-forms-timesheet').getAttribute('data-state')) !== 'not_required') fail('a Coordinator is asked for a timesheet');
+  if ((await page.getByTestId('my-forms-timesheet-preview').count()) !== 0) fail('a Coordinator is offered a timesheet preview');
   if ((await page.locator('nav a[href="/timesheets"]').count()) !== 0) fail('the sidebar offers Timesheets');
   const me = (await get('/api/auth/me')).json.data.user.id;
   const now = await today();
@@ -692,18 +695,26 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie'], ['Sipho Mahlangu', '
   await check(`My Monthly Forms: ${first} sees and edits their OWN forms only`, async () => {
     await as(who);
     await go('/payroll/mine');
-    const title = await page.getByTestId('monthly-forms-title').innerText();
-    if (!title.includes(first)) fail(`the forms are "${title}"`);
-    // PAYROLL-ONE-1: both forms, each with its actions, submitted together.
-    for (const id of ['monthly-attendance-preview', 'monthly-forms-edit-attendance', 'monthly-timesheet-preview', 'monthly-timesheet-download', 'monthly-timesheet-rename', 'monthly-forms-edit-timesheet', 'monthly-forms-submit']) {
+    await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
+    // FORM-LIFECYCLE-1: both forms (completed on their pages), one Submit to Office; their own history only.
+    for (const id of ['my-forms-timesheet', 'my-forms-attendance', 'my-forms-submit', 'my-forms-submit-reason', 'my-monthly-history']) {
       if ((await page.getByTestId(id).count()) === 0) fail(`no ${id}`);
     }
+    const me = (await get('/api/auth/me')).json.data.user.id;
+    for (const entry of (await get(`/api/payroll/forms/${me}/history`)).json.data) if (entry.technicianId !== undefined && entry.technicianId !== me) fail('another person’s submission is in the history');
     await noPageOverflow('My Monthly Forms');
   });
 }
-await check('PDF: the monthly attendance (My Monthly Forms)', async () => {
+await check('PDF: the monthly attendance (My Monthly Forms) — the completed form', async () => {
+  // FORM-LIFECYCLE-1: My Monthly Forms shows the COMPLETED attendance; Sipho completes last month's (submitted below).
+  const now = await today();
+  const month = `${Number(now.slice(5, 7)) === 1 ? Number(now.slice(0, 4)) - 1 : now.slice(0, 4)}-${String(Number(now.slice(5, 7)) - 1 || 12).padStart(2, '0')}`;
+  const me = (await get('/api/auth/me')).json.data.user.id;
+  const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const done = await post(`/api/payroll/forms/${me}/complete`, { kind: 'attendance', from: `${month}-01`, to, fileName: '', confirmUnrecorded: true });
+  if (done.status !== 200) fail(`completing the attendance answered ${done.status} ${JSON.stringify(done.json?.error ?? '')}`);
   await go('/payroll/mine');
-  return previewWorks(() => press(page.getByTestId('monthly-attendance-preview')), ['ATTENDANCE', 'Absence reason']);
+  return previewWorks(() => press(page.getByTestId('my-forms-attendance-preview')), ['ATTENDANCE', 'Absence reason']);
 });
 await check('My Monthly Forms: the server refuses every write to another person’s forms', async () => {
   await as('Elmarie Coetzee');
@@ -715,10 +726,8 @@ await check('My Monthly Forms: the server refuses every write to another person�
     'timesheet line': await post(`/api/timesheets/${sipho.id}/entries`, { date: now, customerName: 'X', workshop: false, overtimeHours: 1, doubleHours: 0, calloutAmount: 0, internalKm: 0, customerKm: 0 }),
     'timesheet send': await post(`/api/timesheets/${sipho.id}/period/submit`, { from: `${month}-01`, to: `${month}-01` }),
     'month submit': await post(`/api/payroll/${sipho.id}/${month}/submit`, { confirmUnrecorded: true }),
-    'forms submit': await post(`/api/payroll/forms/${sipho.id}/submit`, {
-      from: `${month}-01`, to: `${month}-28`,
-      revision: (await get(`/api/payroll/forms/${sipho.id}?from=${month}-01&to=${month}-28`)).json?.data?.revision ?? 'x',
-    }),
+    'forms submit': await post(`/api/payroll/forms/${sipho.id}/submit`, {}),
+    'forms complete': await post(`/api/payroll/forms/${sipho.id}/complete`, { kind: 'attendance', from: `${month}-01`, to: `${month}-28`, fileName: '' }),
     'forms rename': await post(`/api/payroll/forms/${sipho.id}/rename`, { kind: 'attendance', name: 'Not mine' }),
     'line save': await post(`/api/timesheets/${sipho.id}/lines`, { id: crypto.randomUUID(), date: now, typed: { pick: '', customerName: 'X', overtime: '1', double: '0', callout: '0', internalKm: '0', customerKm: '0' }, expectedRevision: null }),
   };
@@ -746,8 +755,8 @@ await check('PDF: a Finance package attachment (stored file)', async () => {
   const me = (await get('/api/auth/me')).json.data.user.id;
   const from = `${month}-01`;
   const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
-  const state = (await get(`/api/payroll/forms/${me}?from=${from}&to=${to}`)).json?.data;
-  const submitted = await post(`/api/payroll/forms/${me}/submit`, { from, to, revision: state?.revision, confirmUnrecorded: true, confirmNoLines: true });
+  // FORM-LIFECYCLE-1: the attendance completed above waits; the timesheet is completed, then both are submitted.
+  const submitted = await completeAndSubmit((method, path, body) => (method === 'GET' ? get(path) : post(path, body)), me, from, to);
   if (submitted.status !== 200) fail(`BLOCKED: Sipho's month could not be submitted in the demonstration (${submitted.status} ${JSON.stringify(submitted.json?.error)?.slice(0, 120)})`);
   await as('Elmarie Coetzee');
   // A TEST recipient address in the demonstration only: preparing sends nothing.
@@ -790,7 +799,7 @@ for (const [who, first] of [['Elmarie Coetzee', 'Elmarie']]) {
     await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
     const day = await page.locator('[data-testid="timesheet-day"]').last().getAttribute('data-date');
     const row = lineById(await addLineOn(day));
-    await row.getByTestId('timesheet-customer-pick').selectOption('__workshop__');
+    await row.getByTestId('timesheet-customer-name').fill('Workshop');
     await row.getByTestId('timesheet-overtime').fill('1');
     await sheetSaved();
     // Their OWN sheet has no Export CSV; the office's list of everybody's submissions keeps its per-submission export.

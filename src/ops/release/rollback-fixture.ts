@@ -128,6 +128,15 @@ export const ROLLBACK_0051 = {
  * those dates, one current), a stored PDF name and a draft line. Copied into
  * the probe as `BATCH_0052`.
  */
+/** FORM-LIFECYCLE-1 (0054): a completed form awaiting submission, and one already submitted. */
+export const ROLLBACK_0054 = {
+  awaiting: '00000000-0000-4000-8000-000000000da1',
+  submittedForm: '00000000-0000-4000-8000-000000000da2',
+  submission: '00000000-0000-4000-8000-000000000da3',
+  from: '2028-04-01',
+  to: '2028-04-25',
+} as const;
+
 export const ROLLBACK_0052 = {
   replacedSubmission: '00000000-0000-4000-8000-000000000ca1',
   currentSubmission: '00000000-0000-4000-8000-000000000ca2',

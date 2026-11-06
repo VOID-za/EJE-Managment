@@ -511,3 +511,44 @@ export const timesheetLineRemovals = pgTable('timesheet_line_removals', {
   removedAt: instant('removed_at').notNull(),
   createdAt: createdAt(),
 });
+
+/**
+ * ONE FORM, COMPLETED AND LOCKED, WAITING FOR THE JOINT SUBMISSION.
+ * FORM-LIFECYCLE-1, migration 0054 (the owner, 6 November 2026).
+ *
+ * Write-once (`payroll_form_completions_guard`): only `submission_id` is set,
+ * once, when both forms go to the office together. At most one form of each
+ * kind awaits per person. `content` is the frozen timesheet (lines and comment)
+ * or attendance (days); `document` the PDF stored when it was completed.
+ */
+export const payrollFormCompletions = pgTable(
+  'payroll_form_completions',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    kind: text('kind').notNull(),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    fileName: text('file_name').notNull(),
+    content: jsonb('content').notNull(),
+    document: jsonb('document').notNull(),
+    completedAt: instant('completed_at').notNull(),
+    completedBy: uuid('completed_by')
+      .notNull()
+      .references(() => users.id),
+    submissionId: uuid('submission_id').references(() => payrollSubmissions.id, { onDelete: 'restrict' }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('payroll_form_completions_user_idx').on(table.userId, table.completedAt),
+    uniqueIndex('payroll_form_completions_awaiting_key')
+      .on(table.userId, table.kind)
+      .where(sql`${table.submissionId} is null`),
+    check('payroll_form_completions_kind_known', sql`${table.kind} in ('timesheet', 'attendance')`),
+    check('payroll_form_completions_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
+    check('payroll_form_completions_range_bounded', sql`${table.periodTo} - ${table.periodFrom} < 366`),
+    check('payroll_form_completions_file_name_bounded', sql`char_length(${table.fileName}) between 5 and 120`),
+  ],
+);

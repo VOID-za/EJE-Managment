@@ -50,9 +50,9 @@ describe('monthly payroll over HTTP', () => {
     expect((await submitForms(technician, SIPHO, from, to, { confirmUnrecorded: false })).status).toBe(422); // weekdays unconfirmed
     const submitted = await submitForms(technician, SIPHO, from, to);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
-    // The same dates again: only as a confirmed replacement, the first kept — still one current submission.
-    expect((await submitForms(technician, SIPHO, from, to)).status).toBe(422);
-    expect((await submitForms(technician, SIPHO, from, to, { confirmReplace: true })).status).toBe(200);
+    // The same dates again: refused, confirmed or not — a submitted form is never submitted again (FORM-LIFECYCLE-1).
+    expect((await submitForms(technician, SIPHO, from, to)).error?.violations[0]?.code).toBe('payroll_period_submitted');
+    expect((await submitForms(technician, SIPHO, from, to, { confirmReplace: true })).error?.violations[0]?.code).toBe('payroll_period_submitted');
     const master = await signedInAs(DEMO_USERS.master);
     expect((await submitForms(master, SIPHO, from, to, { confirmReplace: true })).status).toBe(403);
 

@@ -14,6 +14,7 @@ import { businessToday } from '@/lib/business-time';
 import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
+import { assertDatesOpen, lockedRanges } from './form-locks';
 
 /**
  * ATTENDANCE. ATTEND-1, ATTEND-2; OWNERSHIP SINCE 1 NOVEMBER 2026 (ATT-OWN-1).
@@ -114,10 +115,11 @@ export const recordAttendance = async (
   assertMayRecordFor(context, input.userId);
   assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
   /*
-   * A SUBMITTED MONTH STAYS EDITABLE. RESUBMIT-1 (the tester, 2 November 2026,
-   * replacing ATT-LOCK-1): a person may change their own days after the month
-   * was submitted and submit it again; the new submission replaces the old.
-   * Nobody else may change them (ATT-OWN-1, above).
+   * A COMPLETED OR SUBMITTED FORM'S DAYS ARE LOCKED. FORM-LIFECYCLE-1 (the
+   * owner, 6 November 2026, replacing RESUBMIT-1's "a submitted month stays
+   * editable"): once the person completes their attendance for From–To, and
+   * for ever once it is submitted to the office, those days are not changed —
+   * whatever the page, another device or a hand-made request sends.
    */
   if (!ATTENDANCE_STATUSES.includes(input.status)) {
     throw refuse('That is not an attendance status.', 'invalid_status', 'Choose Present or Absent.');
@@ -162,6 +164,7 @@ export const recordAttendance = async (
     );
   }
 
+  await assertDatesOpen(context, asUserId(input.userId), 'attendance', [input.date]);
   const person = await context.repos.users.findById(asUserId(input.userId));
   if (person === null) {
     throw refuse('That person is not a user of the system.', 'unknown_user', 'Reload the register.');
@@ -245,10 +248,52 @@ export const recordAttendance = async (
   return saved;
 };
 
+/**
+ * TAKE A DAY'S ANSWER BACK. FORM-LIFECYCLE-1 (the owner, 6 November 2026):
+ * pressing the chosen Present or Absent again clears it, so an accidental
+ * press is undone where it was made. The day is then NOT RECORDED — its row is
+ * gone, never turned into Present or Absent — and the clearing is audited.
+ * The person's own day only; a completed or submitted form's day is refused;
+ * a stale screen (`expectedRecordedAt`) never clears a newer answer.
+ */
+export const clearAttendance = async (
+  context: OperationContext,
+  input: { readonly userId: string; readonly date: string; readonly expectedRecordedAt?: string | null | undefined },
+): Promise<{ readonly cleared: boolean }> => {
+  assertMayRecordFor(context, input.userId);
+  assertRecordableDate(input.date, businessToday(new Date(context.services.clock.now())));
+  await assertDatesOpen(context, asUserId(input.userId), 'attendance', [input.date]);
+  const person = await context.repos.users.findById(asUserId(input.userId));
+  if (person === null) {
+    throw refuse('That person is not a user of the system.', 'unknown_user', 'Reload the register.');
+  }
+  const existing = await context.repos.attendance.findRecord(person.id, input.date);
+  // Already not recorded: clearing it again is the same answer, never a conflict.
+  if (existing === null) return { cleared: false };
+  if (input.expectedRecordedAt !== undefined && existing.recordedAt !== input.expectedRecordedAt) {
+    throw refuse(
+      `${userFullName(person)}'s attendance for ${input.date} was changed by somebody else.`,
+      'attendance_changed',
+      `It now says ${statusLabel(existing.status)}${existing.absenceReason === null ? '' : ` — ${reasonLabel(existing.absenceReason)}`}. The latest answer is shown; choose again if it is wrong.`,
+    );
+  }
+  await context.repos.attendance.deleteRecord(existing.id);
+  await audit(context, {
+    jobId: null,
+    type: 'attendance_cleared',
+    summary: `Attendance cleared: ${userFullName(person)} on ${input.date} is not recorded`,
+    detail: `Cleared by ${userFullName(context.actor)}; it said ${statusLabel(existing.status)}${existing.absenceReason === null ? '' : ` — ${reasonLabel(existing.absenceReason)}`}${existing.note === '' ? '' : ` — "${existing.note}"`}.`,
+    changes: [{ field: 'Attendance', from: statusLabel(existing.status), to: 'Not recorded' }],
+  });
+  return { cleared: true };
+};
+
 /** One of the person's own days: recorded (present or absent), or not yet. ATTEND-2. */
 export interface MyAttendanceDay {
   readonly date: IsoDate;
   readonly record: AttendanceRecord | null;
+  /** FORM-LIFECYCLE-1: in a completed attendance form awaiting submission, or one submitted — read only. */
+  readonly locked?: 'completed' | 'submitted' | null;
 }
 
 export interface MyAttendance {
@@ -285,11 +330,17 @@ export const loadMyAttendance = async (
   }
   const records = from > last ? [] : await context.repos.attendance.listRecords(from, last, context.actor.id);
   const byDate = new Map(records.map((record) => [record.date, record]));
+  const ranges = await lockedRanges(context, context.actor.id, 'attendance');
+  // A day in a completed form is said as completed, before any submission that also holds it.
+  const lockOf = (date: string) =>
+    ranges.find((range) => range.why === 'completed' && range.from <= date && date <= range.to)?.why ??
+    ranges.find((range) => range.from <= date && date <= range.to)?.why ??
+    null;
   const days: MyAttendanceDay[] = [];
   // ATT-ORDER-1 (the tester, 2 November 2026): oldest first, newest last — across months too.
   for (let at = Date.parse(`${from}T00:00:00Z`); at <= Date.parse(`${last}T00:00:00Z`); at += 86_400_000) {
     const date = new Date(at).toISOString().slice(0, 10);
-    days.push({ date, record: byDate.get(date) ?? null });
+    days.push({ date, record: byDate.get(date) ?? null, locked: lockOf(date) });
   }
   return { from, to: last, today, days, unrecorded: days.filter((day) => day.record === null).length };
 };

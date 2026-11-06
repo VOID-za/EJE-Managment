@@ -40,6 +40,11 @@ export interface AttendanceAnswer {
   readonly status: AttendanceStatus | null;
   readonly absenceReason: AbsenceReason | null;
   readonly note: string;
+  /**
+   * FORM-LIFECYCLE-1: the person pressed their answer again to take it back — sent as "not recorded", never as
+   * Present or Absent. Only with `status` null.
+   */
+  readonly cleared?: boolean;
 }
 
 export interface PendingChange extends AttendanceAnswer {
@@ -65,7 +70,8 @@ export type AutosaveState =
 export interface SendInput {
   readonly userId: string;
   readonly date: string;
-  readonly status: AttendanceStatus;
+  /** 'none' clears the day (FORM-LIFECYCLE-1). */
+  readonly status: AttendanceStatus | 'none';
   readonly absenceReason: AbsenceReason | null;
   readonly note: string;
   readonly expectedRecordedAt: string | null;
@@ -78,7 +84,8 @@ export type SendFailure =
   | { readonly kind: 'refused'; readonly message: string };
 
 export interface AutosaverOptions {
-  readonly send: (input: SendInput, options: { readonly keepalive: boolean }) => Promise<AttendanceRecord>;
+  /** The day's record as saved — null once it is cleared (not recorded). */
+  readonly send: (input: SendInput, options: { readonly keepalive: boolean }) => Promise<AttendanceRecord | null>;
   /** Turns whatever `send` threw into one of the three failures. */
   readonly classify: (cause: unknown) => SendFailure;
   /** Where this device keeps the queue; null keeps nothing. */
@@ -103,12 +110,12 @@ export const autosaveKey = (userId: string, date: string): string => `${userId}:
 
 /** Whether the server can be sent this change yet. */
 export const sendable = (change: AttendanceAnswer): boolean =>
-  change.status === 'present' || (change.status === 'absent' && change.absenceReason !== null);
+  (change.status === null && change.cleared === true) || change.status === 'present' || (change.status === 'absent' && change.absenceReason !== null);
 
 export class AttendanceAutosaver {
   private readonly pending = new Map<string, PendingChange>();
-  /** Records saved during this visit: newer than the screen's data until it reloads. */
-  private readonly saved = new Map<string, AttendanceRecord>();
+  /** Records saved during this visit: newer than the screen's data until it reloads. Null: cleared — not recorded. */
+  private readonly saved = new Map<string, AttendanceRecord | null>();
   private timer: unknown = null;
   private retryTimer: unknown = null;
   private retries = 0;
@@ -133,7 +140,7 @@ export class AttendanceAutosaver {
       userId,
       date,
       // The record this run of changes began from — or the one this visit saved since.
-      base: previous !== undefined ? previous.base : this.saved.has(key) ? this.saved.get(key)!.recordedAt : base,
+      base: previous !== undefined ? previous.base : this.saved.has(key) ? this.saved.get(key)?.recordedAt ?? null : base,
       version: (previous?.version ?? 0) + 1,
     });
     this.write();
@@ -195,9 +202,10 @@ export class AttendanceAutosaver {
     const key = autosaveKey(userId, date);
     const change = this.pending.get(key);
     if (change !== undefined) return { ...change, unsaved: true, ...(change.refused === undefined ? {} : { refused: change.refused }) };
-    const record = this.saved.get(key);
-    return record === undefined
-      ? null
+    if (!this.saved.has(key)) return null;
+    const record = this.saved.get(key) ?? null;
+    return record === null
+      ? { status: null, absenceReason: null, note: '', unsaved: false }
       : { status: record.status, absenceReason: record.absenceReason, note: record.note, unsaved: false, recordedAt: record.recordedAt };
   }
 
@@ -222,7 +230,7 @@ export class AttendanceAutosaver {
     return {
       userId: change.userId,
       date: change.date,
-      status: change.status!,
+      status: change.status === null ? 'none' : change.status,
       absenceReason: change.status === 'absent' ? change.absenceReason : null,
       note: change.note,
       expectedRecordedAt: change.base,
@@ -273,7 +281,7 @@ export class AttendanceAutosaver {
           const current = this.pending.get(key);
           if (current?.version === next.version) this.pending.delete(key);
           // A newer change raced this save: it is sent next, from the record just saved.
-          else if (current !== undefined) this.pending.set(key, { ...current, base: record.recordedAt });
+          else if (current !== undefined) this.pending.set(key, { ...current, base: record?.recordedAt ?? null });
           this.write();
         } catch (cause: unknown) {
           if (this.disposed) return;

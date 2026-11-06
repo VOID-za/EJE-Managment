@@ -419,10 +419,33 @@ export const signedInAs = async (email: string): Promise<ApiTestClient> => {
 };
 
 /**
- * SUBMIT A PERSON'S FORMS THE WAY MY MONTHLY FORMS DOES (PAYROLL-ONE-1): read
- * the forms for From–To, then submit them naming the revision just read. The
- * confirmations a screen ticks are given unless a test says otherwise — except
- * `confirmReplace`, which a test asks for when it means to replace.
+ * COMPLETE ONE FORM THE WAY ITS PAGE DOES (FORM-LIFECYCLE-1): Completed → OK,
+ * under the name proposed. The confirmations the dialog asks for are given
+ * unless a test says otherwise.
+ */
+export const completeForm = <T = { id: string; kind: string; from: string; to: string; fileName: string }>(
+  client: ApiTestClient,
+  userId: string,
+  kind: 'timesheet' | 'attendance',
+  from: string,
+  to: string,
+  extra: { readonly fileName?: string; readonly confirmUnrecorded?: boolean; readonly confirmNoLines?: boolean } = {},
+): Promise<ApiResponse<T>> =>
+  client.post<T>(`/api/payroll/forms/${userId}/complete`, {
+    kind,
+    from,
+    to,
+    fileName: extra.fileName ?? '',
+    confirmUnrecorded: extra.confirmUnrecorded ?? true,
+    confirmNoLines: extra.confirmNoLines ?? true,
+  });
+
+/**
+ * SUBMIT A PERSON'S FORMS THE WAY THE PRODUCT DOES NOW (FORM-LIFECYCLE-1):
+ * complete each form the person keeps for From–To (unless it already awaits
+ * for exactly those dates), then Submit to Office. The first refusal on the
+ * way is returned as it came. A completed form is never a replacement, so
+ * `confirmReplace` is accepted and has no effect.
  */
 export const submitForms = async <T = { submission: { id: string; timesheetPeriodId: string | null }; period: { id: string; from: string; to: string; snapshot: { comment: string; entries: readonly { id: string; customerName: string }[] } } | null }>(
   client: ApiTestClient,
@@ -431,14 +454,18 @@ export const submitForms = async <T = { submission: { id: string; timesheetPerio
   to: string,
   confirm: { readonly confirmUnrecorded?: boolean; readonly confirmNoLines?: boolean; readonly confirmReplace?: boolean } = {},
 ): Promise<ApiResponse<T>> => {
-  const forms = await client.get<{ revision: string }>(`/api/payroll/forms/${userId}?from=${from}&to=${to}`);
-  if (forms.status !== 200) return forms as unknown as ApiResponse<T>;
-  return client.post<T>(`/api/payroll/forms/${userId}/submit`, {
-    from,
-    to,
-    revision: forms.data.revision,
-    confirmUnrecorded: confirm.confirmUnrecorded ?? true,
-    confirmNoLines: confirm.confirmNoLines ?? true,
-    confirmReplace: confirm.confirmReplace ?? false,
-  });
+  const state = await client.get<{ timesheetRequired: boolean; timesheet: { from: string; to: string } | null; attendance: { from: string; to: string } | null }>(
+    `/api/payroll/forms/${userId}/completed`,
+  );
+  if (state.status !== 200) return state as unknown as ApiResponse<T>;
+  for (const kind of state.data.timesheetRequired ? (['timesheet', 'attendance'] as const) : (['attendance'] as const)) {
+    const waiting = state.data[kind];
+    if (waiting !== null && waiting.from === from && waiting.to === to) continue;
+    const done = await completeForm(client, userId, kind, from, to, {
+      ...(confirm.confirmUnrecorded === undefined ? {} : { confirmUnrecorded: confirm.confirmUnrecorded }),
+      ...(confirm.confirmNoLines === undefined ? {} : { confirmNoLines: confirm.confirmNoLines }),
+    });
+    if (done.status !== 200) return done as unknown as ApiResponse<T>;
+  }
+  return client.post<T>(`/api/payroll/forms/${userId}/submit`, {});
 };
