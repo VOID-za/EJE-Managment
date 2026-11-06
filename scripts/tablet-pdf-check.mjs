@@ -657,9 +657,21 @@ await step('TABLET: the Time Sheet preview has exactly Date, Customer, OT, D/T, 
 });
 
 await step('TABLET: the monthly attendance form shows in the app, as its own document, and writes nothing (PAY-01)', async () => {
-  await previewPage.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
+  // FORM-LIFECYCLE-1: My Monthly Forms shows the COMPLETED attendance — completed first (a write of its own), then previewed.
+  const completed = await previewPage.evaluate(async ({ base }) => {
+    const id = (await (await fetch(`${base}/api/auth/me`)).json()).data.user.id;
+    const day = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const response = await fetch(`${base}/api/payroll/forms/${id}/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ kind: 'attendance', from: day(-40), to: day(-35), fileName: '', confirmUnrecorded: true }),
+    });
+    return response.status;
+  }, { base: BASE });
+  if (completed !== 200) throw new Error(`completing the attendance answered ${completed}`);
+  await previewPage.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   writes.length = 0;
-  await previewPage.getByTestId('monthly-attendance-preview').click();
+  await previewPage.getByTestId('my-forms-attendance-preview').click();
   await viewerDrew(previewPage, 'document-preview');
   const file = await downloadOf(previewPage, previewPage.getByTestId('preview-download'));
   silentDownloads = 0; // asked for

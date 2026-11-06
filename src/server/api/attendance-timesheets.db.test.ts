@@ -450,8 +450,9 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
       }),
     )).toContain('sent timesheet for exactly');
 
-    // RESUBMIT-1: the technician may still change their own attendance for that month; the office may not (ATT-OWN-1).
-    expect((await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' })).status).toBe(200);
+    // FORM-LIFECYCLE-1 (replacing RESUBMIT-1): the submitted month's days are read only, for the technician too; the office may not either (ATT-OWN-1).
+    const locked = await tech.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: '' });
+    expect(locked.error?.violations[0]?.code).toBe('form_submitted');
     const master = await signIn('elmarie@example-test.co.za');
     expect((await master.post('/api/attendance', { userId: IDS.technician, date: `${month}-14`, status: 'present', note: 'office' })).status).toBe(403);
 
@@ -565,7 +566,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     // The owner's example: 20 Nov – 15 Dec covers only part of 1–25 Nov.
     const partial = await submitForms(tech, IDS.technician, '2026-11-20', '2026-12-15', { confirmReplace: true });
     expect(partial.status).toBe(422);
-    expect(partial.error?.violations?.[0]?.code).toBe('payroll_partial_overlap');
+    expect(partial.error?.violations?.[0]?.code).toBe('payroll_period_submitted');
     expect({ periods: await rows(), entries: await entries() }).toEqual(before);
 
     // Covering all of it: refused too, confirmed or not — a submitted form is never submitted again. Nothing changed.
