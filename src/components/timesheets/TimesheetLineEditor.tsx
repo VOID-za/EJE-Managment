@@ -29,9 +29,7 @@ export type LineStatus = 'saving' | 'saved' | 'draft' | 'failed';
 export const shownLine = (line: EditableLine, saver: TimesheetAutosaver | null): { readonly date: string | null; readonly typed: TimesheetLineTyped } => {
   const waiting = saver?.pendingFor(line.id);
   if (waiting?.kind === 'line') return { date: waiting.date, typed: waiting.typed };
-  const savedHere = saver?.revisionOf(line.id) ?? null;
-  const saved = savedHere !== null && savedHere !== line.revision ? saver?.savedLineOf(line.id) ?? null : null;
-  return saved ?? { date: line.date, typed: line.typed };
+  return saver?.savedLineOf(line.id, line.revision) ?? { date: line.date, typed: line.typed };
 };
 
 /**
@@ -176,7 +174,16 @@ export const TimesheetLineEditor = ({
             type="date"
             value={date}
             error={problemOf('date')}
-            onChange={(event) => change({}, event.target.value)}
+            // Kept here while it is typed (a browser reports partial years such as 0002-…); saved once the field is left,
+            // so the line never jumps to another day, or out of the period, mid-typing.
+            onChange={(event) => {
+              latest.current = { ...latest.current, date: event.target.value };
+              setDate(event.target.value);
+            }}
+            onBlur={(event) => {
+              change({}, event.target.value);
+              saver?.flushNow();
+            }}
             data-testid="timesheet-line-date"
           />
         )}

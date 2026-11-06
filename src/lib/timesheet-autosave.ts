@@ -101,7 +101,7 @@ export class TimesheetAutosaver {
   /** Revisions saved during this visit: newer than the screen's data until it reloads. */
   private readonly revisions = new Map<string, string>();
   /** What each line saved this visit said, until the list on screen catches up (TS-DAY-1: the day adds it up at once). */
-  private readonly savedLines = new Map<string, { readonly date: string | null; readonly typed: TimesheetLineTyped }>();
+  private readonly savedLines = new Map<string, { readonly date: string | null; readonly typed: TimesheetLineTyped; readonly revision: string; readonly behind: readonly (string | null)[] }>();
   private savedComment: string | null = null;
   private timer: unknown = null;
   private retryTimer: unknown = null;
@@ -233,14 +233,25 @@ export class TimesheetAutosaver {
     );
   }
 
+  /** Every change the server refused, still waiting here to be fixed, retried or discarded. */
+  refusedChanges(): readonly TimesheetChange[] {
+    return [...this.pending.values()].filter((change) => change.refused !== undefined);
+  }
+
   /** The revision saved this visit for a line, newer than the screen's data. */
   revisionOf(id: string): string | null {
     return this.revisions.get(id) ?? null;
   }
 
-  /** The date and values last saved for a line from this device this visit; null when none or no longer known. */
-  savedLineOf(id: string): { readonly date: string | null; readonly typed: TimesheetLineTyped } | null {
-    return this.revisions.has(id) ? this.savedLines.get(id) ?? null : null;
+  /**
+   * The date and values last saved for a line from this device this visit, while the list on screen still shows
+   * a version this device saved over (`listRevision`). Null once the list has caught up — or when the list shows
+   * a version made somewhere else (another device moved or changed the line): the list is then newer, not this.
+   */
+  savedLineOf(id: string, listRevision: string | null): { readonly date: string | null; readonly typed: TimesheetLineTyped } | null {
+    const saved = this.savedLines.get(id);
+    if (saved === undefined || this.revisions.get(id) !== saved.revision || !saved.behind.includes(listRevision)) return null;
+    return { date: saved.date, typed: saved.typed };
   }
 
   get unsavedCount(): number {
@@ -280,7 +291,10 @@ export class TimesheetAutosaver {
         { keepalive: false },
       );
       this.revisions.set(change.id, saved.revision);
-      this.savedLines.set(change.id, { date: change.date, typed: change.typed });
+      // The versions this save replaced, one after another from this device: the list may still show any of them.
+      const before = this.savedLines.get(change.id);
+      const behind = before !== undefined && before.revision === change.base ? [...before.behind, change.base] : [change.base];
+      this.savedLines.set(change.id, { date: change.date, typed: change.typed, revision: saved.revision, behind });
     } else if (change.kind === 'remove') {
       await this.options.removeLine(change.id, { keepalive: false });
       this.revisions.delete(change.id);

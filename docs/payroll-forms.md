@@ -99,6 +99,11 @@ history; where the two differ, this document is what the system does.
   server refuses any change to a submitted line (`timesheet_line_submitted`).
 - The save notice is part of the page and scrolls away with it; each day and
   line says its own Saving, Saved or Save failed where it is.
+- A change refused because its line was submitted or removed elsewhere (a
+  change kept on the device while offline, say) is listed with what it was and
+  **Discard this change** — it never waits for ever with nowhere to undo it.
+  A refusal reloads the lines. A draft with no date keeps its own Date field,
+  saved when the field is left, so the line never jumps mid-typing.
 - The one comment saves itself the same way.
 - **No Submit.** "Review and submit on My Monthly Forms" links there for the
   period. The old route (`POST /api/timesheets/:id/period/submit`) answers

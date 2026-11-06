@@ -128,7 +128,8 @@ const TimesheetsPage = () => {
 
   // Only the working sheet: a line in a current submission is on My Monthly Forms, never here.
   const serverLines = (lines.data ?? []).filter((line) => line.submitted === null);
-  const known = new Set(serverLines.map((line) => line.id));
+  // Every line the server has — a submitted one included, so a line added here and submitted elsewhere is not drawn again as new.
+  const known = new Set((lines.data ?? []).map((line) => line.id));
   // The server's lines, then those added here: shown while they wait to be saved or once saved (until the reload brings them).
   const addedHere = added.filter((line) => !known.has(line.id) && (saver?.pendingFor(line.id) != null || saver?.revisionOf(line.id) != null));
   const shownIds = new Set([...known, ...addedHere.map((line) => line.id)]);
@@ -185,6 +186,12 @@ const TimesheetsPage = () => {
   };
   const inside = all.filter((line) => line.date !== null && from <= line.date && line.date <= to);
   const undated = all.filter((line) => line.date === null);
+  /*
+   * A refused change to a line this page does not draw — submitted meanwhile from another device, say — would
+   * otherwise wait for ever with nowhere to undo it: it is listed, with what was typed, to be discarded.
+   */
+  const drawn = new Set(all.map((line) => line.id));
+  const stranded = (saver?.refusedChanges() ?? []).filter((change) => change.kind !== 'comment' && !drawn.has(change.id) && !(lines.data ?? []).some((line) => line.id === change.id && line.submitted === null));
   const outside = all.filter((line) => line.date !== null && (line.date < from || line.date > to));
   const byDay = groupByDay(inside, (line) => line.date);
   const drafts = inside.filter((line) => !line.complete || saver?.pendingFor(line.id) !== null).length;
@@ -199,6 +206,11 @@ const TimesheetsPage = () => {
   );
 
   const status = saver?.state() ?? { kind: 'idle' as const };
+  // A refusal may mean the line changed state elsewhere (submitted, removed): the lines are read again, so the
+  // page shows what is so — and a change it can no longer draw is listed to be discarded.
+  useEffect(() => {
+    if (status.kind === 'failed') refresh();
+  }, [status.kind, refresh]);
 
   return (
     <>
@@ -346,6 +358,21 @@ const TimesheetsPage = () => {
                     </button>
                     .
                   </p>
+                )}
+
+                {stranded.length > 0 && (
+                  <div role="alert" className="mt-3 space-y-2 rounded-[var(--radius-control)] border border-signal-200 bg-signal-50 px-3 py-2 text-sm text-signal-700" data-testid="timesheet-stranded">
+                    {stranded.map((change) => (
+                      <div key={change.id} className="flex flex-wrap items-center gap-2">
+                        <span className="min-w-0 flex-1">
+                          Not saved: {change.kind === 'line' ? `a change to a line of ${change.date === null ? 'no date' : formatDayAndDate(change.date)}` : 'a removal'} — {change.refused} That line is no longer on this page (it was submitted, or removed, elsewhere).
+                        </span>
+                        <Button size="sm" variant="secondary" onClick={() => saver?.discard(change.id)} data-testid="timesheet-stranded-discard">
+                          Discard this change
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 {undated.length > 0 && (

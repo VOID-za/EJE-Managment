@@ -65,19 +65,24 @@ const setup = (overrides: Partial<TimesheetAutosaverOptions> = {}, stored: Map<s
 describe('TimesheetAutosaver', () => {
   it('TS-DAY-1: remembers what each line saved this visit — the day block adds it up before the list reloads; a removal forgets it', async () => {
     const { saver, tick } = setup();
-    expect(saver.savedLineOf('L1')).toBeNull();
+    expect(saver.savedLineOf('L1', null)).toBeNull();
     saver.change({ kind: 'line', id: 'L1', date: '2026-11-03', typed: typed('2.5'), base: null });
     // Waiting: not saved yet, so nothing is remembered as saved.
-    expect(saver.savedLineOf('L1')).toBeNull();
+    expect(saver.savedLineOf('L1', null)).toBeNull();
     await tick();
-    expect(saver.savedLineOf('L1')).toEqual({ date: '2026-11-03', typed: typed('2.5') });
-    // A day moved: the line saved on its new date.
+    // The list still shows the line as it was before (a new line: none) — this device's save is newer.
+    expect(saver.savedLineOf('L1', null)).toEqual({ date: '2026-11-03', typed: typed('2.5') });
+    // A day moved: the line saved on its new date; a list from before either save is still behind.
     saver.change({ kind: 'line', id: 'L1', date: '2026-11-04', typed: typed('2.5'), base: null }, 0);
     await tick();
-    expect(saver.savedLineOf('L1')?.date).toBe('2026-11-04');
+    expect(saver.savedLineOf('L1', null)?.date).toBe('2026-11-04');
+    expect(saver.savedLineOf('L1', 'r1')?.date).toBe('2026-11-04');
+    // The list caught up (r2), or shows a version made on another device (r9): the list wins.
+    expect(saver.savedLineOf('L1', 'r2')).toBeNull();
+    expect(saver.savedLineOf('L1', 'r9')).toBeNull();
     saver.change({ kind: 'remove', id: 'L1' });
     await tick();
-    expect(saver.savedLineOf('L1')).toBeNull();
+    expect(saver.savedLineOf('L1', null)).toBeNull();
   });
 
   it('saves a burst of typing as ONE request, after the pause, naming the revision the screen began from', async () => {

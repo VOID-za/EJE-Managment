@@ -368,6 +368,57 @@ await check('21. the timesheets submitted before are exactly as they were', asyn
   return `${submittedBefore.length} submission(s) unchanged`;
 });
 
+await check('a line with no date keeps its place while its date is typed, and joins its day once the field is left', async () => {
+  const id = crypto.randomUUID();
+  const kept = await call('POST', `/api/timesheets/${await me()}/lines`, { id, date: null, typed: { pick: '', customerName: 'No Date Yet', overtime: '1', double: '0', callout: '0', internalKm: '0', customerKm: '0' }, expectedRevision: null });
+  if (kept.status !== 200) fail(`keeping an undated draft answered ${kept.status}`);
+  await openSheet();
+  const field = lineById(id).getByTestId('timesheet-line-date');
+  await field.waitFor({ timeout: 15000 });
+  await press(field);
+  // Typed key by key, as a person does: the browser reports partial years on the way.
+  for (const key of DAY.slice(0, 4)) {
+    await page.keyboard.type(key);
+    if ((await page.getByTestId('timesheet-undated').locator(`[data-line-id="${id}"]`).count()) !== 1) fail('the line left its place mid-typing');
+  }
+  await field.fill(DAY);
+  await field.blur();
+  await saved();
+  await page.getByTestId('timesheet-undated').waitFor({ state: 'detached', timeout: 15000 });
+  await openDay(DAY);
+  await dayOf(DAY).locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`).waitFor({ timeout: 15000 }).catch(() => fail('the line did not join its day'));
+  await press(lineById(id).getByTestId('remove-timesheet-line'));
+  await press(page.getByRole('dialog').getByRole('button', { name: 'Remove line' }));
+  await saved();
+});
+
+await check('a change refused because its line was submitted elsewhere is said and can be discarded', async () => {
+  const day = shift(today, -8);
+  await openSheet();
+  const id = await addLine(day, { customer: 'Submitted Elsewhere', ot: '1' });
+  await saved();
+  // This device loses its connection to the line saves, and the change waits here…
+  await page.route('**/api/timesheets/*/lines', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+  await lineById(id).getByTestId('timesheet-overtime').fill('2');
+  await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'offline', null, { timeout: 20000 });
+  // …while the day is submitted from elsewhere.
+  const who = await me();
+  const forms = await call('GET', `/api/payroll/forms/${who}?from=${day}&to=${day}`);
+  const sent = await call('POST', `/api/payroll/forms/${who}/submit`, { from: day, to: day, revision: forms.json?.data?.revision, confirmUnrecorded: true, confirmNoLines: true });
+  if (sent.status !== 200) fail(`submitting the day answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
+  await page.unroute('**/api/timesheets/*/lines');
+  await press(page.getByTestId('autosave-retry'));
+  const stranded = page.getByTestId('timesheet-stranded');
+  await stranded.waitFor({ timeout: 20000 });
+  if (!/submitted/iu.test(await stranded.innerText())) fail(`the notice reads "${await stranded.innerText()}"`);
+  if ((await lineById(id).count()) !== 0) fail('the submitted line is on the page');
+  await press(page.getByTestId('timesheet-stranded-discard'));
+  await stranded.waitFor({ state: 'detached', timeout: 10000 });
+  if ((await page.getByTestId('autosave-status').getAttribute('data-state')) === 'failed') fail('the page still says Save failed');
+  const held = (await heldLines()).find((line) => line.id === id);
+  if (held?.submitted === null || Number(held?.typed.overtime) !== 1) fail(`the submitted line holds ${JSON.stringify(held?.typed)}`);
+});
+
 await check('no page error; no page scrolls sideways', async () => {
   await openSheet();
   await openDay(DAY);
