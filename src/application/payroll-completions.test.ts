@@ -7,6 +7,7 @@ import {
   completePayrollForm,
   loadCompletedFormPdf,
   loadMyCompletedForms,
+  sameContent,
   submitCompletedForms,
 } from './payroll-completions';
 import { listPayrollHistory } from './payroll-forms';
@@ -220,5 +221,37 @@ describe('Submit to Office: both completed forms together, once — never one al
   it('the next period starts the day after the forms completed or submitted', async () => {
     await complete('attendance');
     expect((await stateOf()).next.from).toBe('2026-11-26');
+  });
+});
+
+describe('the review of 6 November 2026: a completed form read back from PostgreSQL', () => {
+  /** What jsonb does to an object's keys: shortest first, then bytewise — never the order they were written in. */
+  const asJsonb = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(asJsonb)
+      : value !== null && typeof value === 'object'
+        ? Object.fromEntries(
+            Object.keys(value as Record<string, unknown>)
+              .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+              .map((key) => [key, asJsonb((value as Record<string, unknown>)[key])]),
+          )
+        : value;
+
+  it('is the same content as the live lines and days, whatever the order of its keys (it was refused as changed)', async () => {
+    await line('2026-11-05', typed('2', 'Kruger'));
+    await present('2026-11-03');
+    await complete('timesheet');
+    await complete('attendance');
+    const [attendance, timesheet] = await Promise.all([
+      harness.repos.payroll.listFormCompletions(SIPHO).then((forms) => forms.find((form) => form.kind === 'attendance')!),
+      harness.repos.payroll.listFormCompletions(SIPHO).then((forms) => forms.find((form) => form.kind === 'timesheet')!),
+    ]);
+    const liveDays = attendance.attendance!;
+    const liveEntries = timesheet.timesheet!.entries;
+    expect(JSON.stringify(asJsonb(liveDays))).not.toBe(JSON.stringify(liveDays));
+    expect(sameContent(asJsonb(liveDays), liveDays)).toBe(true);
+    expect(sameContent(asJsonb(liveEntries), liveEntries)).toBe(true);
+    // And a real difference is still a difference.
+    expect(sameContent(asJsonb(liveDays), liveDays.map((day) => (day.date === '2026-11-03' ? { ...day, status: 'absent' } : day)))).toBe(false);
   });
 });

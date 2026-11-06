@@ -305,6 +305,23 @@ reads another's forms (refused by the server). Every route checks it on the serv
 
 ## Known limitations
 
+- **A completed form cannot be taken back** (the owner's rule: "once completed,
+  it cannot be edited again"). A timesheet completed with a mistake is
+  submitted and then corrected (TS-16); attendance has no correction path, so a
+  wrong attendance form can only be put right by the office outside the system.
+  Whether a completed form may be withdrawn before it is submitted is the
+  owner's decision (recorded on the issue).
+- **A To in the future** is allowed (as before), so completing to the end of a
+  month part-way through it locks the days still to come, and they go Not
+  recorded. The dialog shows the dates; staff should complete up to today.
+- **A person whose role changes to the Office** after completing a timesheet
+  submits attendance alone; the completed timesheet then stays awaiting, its
+  dates locked, until the office deals with it.
+- **The submitted PDFs are rendered at submission** from the very content that
+  was completed (checked equal, field by field), stamped as submitted — so the
+  file in the history differs in its stamp, not its content, from the one
+  previewed before submitting.
+
 - Real Finance email needs EJE's Microsoft 365 credentials (INT-EMAIL, #79);
   production email is `refuse`, so Send is refused there and the package
   stays prepared.

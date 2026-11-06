@@ -34,7 +34,7 @@ import { documentNameOf, timesheetPeriodFileName } from '@/lib/payroll-files';
 import type { OperationContext } from './context';
 import { audit, notifyOffice } from './audit';
 import { WorkflowError } from './errors';
-import { assertDatesOpen } from './form-locks';
+import { assertDatesOpen, holdFormLock } from './form-locks';
 import { assertRecordableDate } from './attendance-operations';
 
 /*
@@ -1157,6 +1157,8 @@ export const saveWorkingTimesheetComment = async (
 ): Promise<{ readonly comment: string }> => {
   const id = asUserId(technicianId);
   assertOwner(context, id);
+  // FORM-LIFECYCLE-1: never in the middle of a completion, which takes the comment with the timesheet and clears it.
+  await holdFormLock(context, id, 'timesheet');
   const comment = text.trim();
   if (comment.length > TIMESHEET_PERIOD_COMMENT_LIMIT) {
     throw refuse('That comment is too long.', 'comment_too_long', `Keep it to ${TIMESHEET_PERIOD_COMMENT_LIMIT} characters.`);

@@ -151,7 +151,7 @@ await check('lines from before the redesign are on their days, editable; a submi
   const day = await summaryOf(shift(today, -20));
   if (!/2 lines · 2 customers/u.test(day) || !/OT 3\.50/u.test(day)) fail(`the earlier day reads "${day}"`);
   const kept = await summaryOf(shift(today, -30));
-  if (!/Not recorded/u.test(kept)) fail(`the submitted day reads "${kept}" on Timesheets`);
+  if (!/In a submitted timesheet/u.test(kept)) fail(`the submitted day reads "${kept}" on Timesheets`);
   for (const line of submitted) {
     if ((await lineById(line.id).count()) > 0) fail(`the submitted line on ${line.date} is on the Timesheets page`);
   }

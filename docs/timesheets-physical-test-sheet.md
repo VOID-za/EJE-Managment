@@ -1,4 +1,4 @@
-# Payroll — physical-device test sheet (v1.6.0)
+# Payroll — physical-device test sheet (v1.7.0)
 
 *Rewritten 5 November 2026 for the payroll completion. The v1.2.0 sheet it
 replaces described a Timesheets page with Add line, Save line and Submit
@@ -13,6 +13,12 @@ day (one line per customer, site or Workshop); **Remove line** asks first;
 **Change date** moves the whole day. Everything submitted — your submitted
 timesheets, their PDFs and Corrections, and the office's list of everybody's —
 is on **My Monthly Forms**, no longer on Timesheets.*
+
+*Amended again 6 November 2026 for v1.7.0 (FORM-LIFECYCLE-1): a day's lines are
+rows of Customer | OT | D/T | Callout | Int Km | Cust Km; Present and Absent
+toggle (pressed again: Not recorded); each form is finished with **Completed**
+on its own page (name it, OK) and moves, locked, to **My Monthly Forms**, where
+**Submit to Office** sends both together.*
 
 **Only what a person on a real device can judge is here.** Everything else in
 V1–V13 and O1–O6 runs automatically in Chromium at 1440×900, 768×1024 touch and
@@ -38,7 +44,7 @@ Record: **P** = pass, **F** = fail (write what happened), **—** = not done.
 |---|---|---|---|---|
 | V1 | Timesheets → today's day → **Edit** → **Add line**. Customer = type a name, OT 2.5, Cust Km 42, Callout 450. Wait for **Saved**. Close the browser app completely (swipe it away); open the site again; Timesheets; open today. | The line is there with every value. Each line's labels are readable on the phone, nothing is cut off, nothing scrolls sideways — in daylight outdoors, and wearing work gloves if staff wear them. | | |
 | V3a | Half-type a line (customer only), switch to another app for a minute or lock the phone; come back. | Every typed value is still there, and it says Saved once it has gone. | | |
-| V3b | On a line, use the phone's own **date picker**: clear the date, pick another. | The page stays answering; the line moves to the new day and saves. | | |
+| V3b | On a day with lines press **Change date**, clear the date with the phone's own **date picker**, then pick another; **Move**. | The page stays answering; nothing moves until Move; then the whole day moves and saves. | | |
 | P1 | Turn on **airplane mode**; type a line; wait. Turn data back on. Repeat once on a weak signal (far from the building). | Offline, the page says the change is kept on this device and not saved yet; when the signal is back it saves by itself, without retyping. | | |
 
 ## B. The rugged tablet, as a technician (portrait, then landscape)
@@ -49,8 +55,8 @@ Record: **P** = pass, **F** = fail (write what happened), **—** = not done.
 | V4b | On a day with lines press **Change date** and pick a date with the tablet's own date picker; **Move**. | The tablet's date picker opens and is usable; the whole day moves to that date. | | |
 | V4a | Turn the tablet with a line half typed. | Every typed value stays. | | |
 | P2 | With the tablet's **physical keyboard**, if it has one: Tab through a line; type numbers into OT and Km. | Tab moves field to field in order; the numbers go where typed. | | |
-| V5 | **My Monthly Forms** → choose From and To → **Preview** both forms → **Submit both**; confirm. | Both forms previewed; after confirming, both are in the History and under Your submitted timesheets; on Timesheets the submitted lines are gone from those days. Typing feels responsive on this tablet (no freeze — TST-TS-2). | | |
-| V12a | On My Monthly Forms, in the History (or Your submitted timesheets) press **Download PDF**, then **Save PDF**, of a submission you renamed first. | The tablet's own save/share sheet opens; the file opens in its PDF app, under the name you gave it. | | |
+| V5 | Timesheets → **Completed** → change the form name → **OK**. Attendance → **Completed** (confirm any Not recorded weekdays) → **OK**. **My Monthly Forms** → **Preview** both → **Submit to Office**. | Each dialog says what completing does; the page is then clean for the next period. My Monthly Forms shows both forms under their names; after Submit to Office both are in the History, read only. Typing feels responsive on this tablet (no freeze — TST-TS-2). | | |
+| V12a | On My Monthly Forms, of a completed form (before submitting) and then in the History, press **Download**, then **Save PDF**. | The tablet's own save/share sheet opens; the file opens in its PDF app, under the name you gave it in the Completed dialog. | | |
 | V8 | My Monthly Forms → Your submitted timesheets → **Corrections** → change OT, give a reason, send. (Then do C. V8b.) | "Sent for review"; the original stays readable. | | |
 
 ## C. The office desktop and printer
@@ -62,7 +68,7 @@ Record: **P** = pass, **F** = fail (write what happened), **—** = not done.
 | V12b | As the Office: EJE Monthly Forms → the month → **View forms** (read only) → tick the technician → **Prepare**. Do **not** press Send. **Discard**. | The package lists both PDFs under their submitted names; Discard leaves nothing sent. | | |
 | V13a | Print a normal timesheet on the office printer. | One A4 page; the Comments box printed; nothing cut at the edges. | | |
 | V13b | Print a long timesheet (one with more lines than fit a page — make one in the demonstration). | Headings and "Page X of Y" on every page; totals after the last line. | | |
-| O1–O3 | On each real device, as the Office: Attendance → mark today; My Monthly Forms → **Submit attendance**. | Attendance only — no timesheet is asked for; the History shows the attendance alone. Readable on the device. | | |
+| O1–O3 | On each real device, as the Office: Attendance → mark today (press Present twice: it clears; press it again) → **Completed** → OK; My Monthly Forms → **Submit to Office**. | Attendance only — the timesheet is "Not required"; the History shows the attendance alone. Readable and tappable on each device. | | |
 
 ## D. The installed tablet application
 
@@ -80,10 +86,10 @@ Run on every change in CI, at desktop, tablet (touch) and phone (touch):
 | V3a, V4a (values kept: leaving, reloading, turning) | `forms-regression` "a half-typed line survives a reload"; `timesheet-two-devices-check` "LEAVING at once", "a NEW line … after a reload"; `tablet-interaction-check` |
 | V3b (date cleared and retyped) | `tablet-interaction-check`; the smoke suite |
 | V4 (edit, remove) | `payroll-forms-check` 7–10; `forms-regression`; `timesheet-days-check` (day blocks: add a second and third line, edit one, remove one after confirming, totals once, Change date across a year end) |
-| V5 (Preview and submit both) | `payroll-forms-check` 14–17, 24–27 |
-| V6 (the same dates again are refused; only a confirmed complete replacement) | `payroll-forms-check` 30; `payroll-views-check` "a complete replacement through the screen" |
+| V5 (complete each form, preview, submit both) | `payroll-lifecycle-check` (three sizes); `payroll-forms-check` 14–30 |
+| V6 (the same dates again are refused — never resubmitted, FORM-LIFECYCLE-1) | `payroll-forms-check` 30; `payroll-views-check` "submitted dates are read only"; `acceptance-check` |
 | V10 (a partial overlap is refused) | `acceptance-check` |
-| V11 (replaced, the original kept as replaced and readable) | `payroll-views-check` "a complete replacement through the screen" |
+| V11 (a replacement made before v1.7.0 stays readable, marked replaced) | PostgreSQL and application tests (`payroll-forms.test.ts`) |
 | V12a (the submitted name everywhere) | `payroll-forms-check` 18–20, 27–28; `payroll-views-check` "History …" |
 | V7 (the CSV's columns) | `payroll-views-check` "Corrections …" |
 | V8 (the correction asked for and accepted; version in force; original readable) | `payroll-views-check` "Corrections …" |

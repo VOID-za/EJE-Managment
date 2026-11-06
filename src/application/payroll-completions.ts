@@ -234,7 +234,6 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
   if (kind === 'timesheet' && !timesheetRequired) {
     throw refuse('You keep no timesheet.', 'timesheet_not_required', 'The Office completes and submits attendance only.');
   }
-  const today = businessToday(new Date(context.services.clock.now()));
   const [state, awaiting, current, names] = await Promise.all([
     loadPayrollForms(context, technicianId, from, to),
     awaitingOf(context, userId),
@@ -329,8 +328,13 @@ export const completePayrollForm = async (context: OperationContext, technicianI
   const userId = asUserId(technicianId);
   assertOwnForm(context, userId);
   const kind = assertKind(input.kind);
-  // Every write to this form's dates waits for this to finish, and is then refused (form-locks.ts).
-  await holdFormLock(context, userId, kind);
+  /*
+   * Every write to this form's dates waits for this to finish, and is then refused (form-locks.ts). BOTH forms'
+   * locks, always attendance first (as Submit to Office takes them): two tabs completing the timesheet and the
+   * attendance at once are made one after the other, so the second sees the first and must match its dates.
+   */
+  await holdFormLock(context, userId, 'attendance');
+  await holdFormLock(context, userId, 'timesheet');
   const checked = await checkCompletion(context, technicianId, kind, input.from, input.to);
   const first = checked.codes[0];
   if (first !== undefined) throw refuse(first.message, first.code, first.detail);
@@ -416,7 +420,18 @@ export const completePayrollForm = async (context: OperationContext, technicianI
   return viewOf(context, saved);
 };
 
-const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+/**
+ * The same content, whatever order its keys come in. PostgreSQL's jsonb does not keep key order (it stores them
+ * shortest first), so a form read back from `payroll_form_completions` never has the order of the same data read
+ * live from its tables; it is compared by value, keys sorted at every level.
+ */
+const canonical = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value !== null && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]))
+      : value;
+export const sameContent = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
 /**
  * SUBMIT TO OFFICE: both completed forms together, as one payroll submission.
@@ -452,13 +467,13 @@ export const submitCompletedForms = async (context: OperationContext, technician
 
   // Still exactly as completed — the lock makes anything else a fault; it is refused, never submitted.
   const records = await context.repos.attendance.listRecords(from, to, person.id);
-  if (!sameJson(attendancePeriodDays(from, to, records), attendanceForm.attendance)) {
+  if (!sameContent(attendancePeriodDays(from, to, records), attendanceForm.attendance)) {
     throw refuse('Your attendance changed after it was completed.', 'payroll_form_changed', 'Nothing was submitted. Ask the office to look into it.');
   }
   if (timesheetForm !== null) {
     const entries = await context.repos.attendance.listEntries(person.id, from, to);
     const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-    if (!sameJson(sorted, timesheetForm.timesheet?.entries ?? [])) {
+    if (!sameContent(sorted, timesheetForm.timesheet?.entries ?? [])) {
       throw refuse('Your timesheet changed after it was completed.', 'payroll_form_changed', 'Nothing was submitted. Ask the office to look into it.');
     }
   }
