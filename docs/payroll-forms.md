@@ -8,7 +8,9 @@ day-by-day Timesheets page and the move of everything submitted to My Monthly
 Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migration), deployed 6 November 2026 — not yet approved; and
 **the form lifecycle** (FORM-LIFECYCLE-1, the owner, 6 November 2026 — each form
 completed on its own page, both submitted to the office together; Present and
-Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved. Release records:
+Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved; and
+**Withdraw and Correct** with the Timesheets corrections (FORM-WITHDRAW-1, TS-DAY-2, FORM-LOCK-2, TEST-ISOLATION-1,
+the owner, 6 November 2026) as **v1.7.1** (migration 0055) — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
@@ -39,7 +41,9 @@ history; where the two differ, this document is what the system does.
 |---|---|---|
 | **In progress** | Timesheets, Attendance | Everything — each change saves itself. |
 | **Completed — awaiting submission** | My Monthly Forms | Preview, Print, Download, Save PDF of the PDF stored when it was completed. Locked: nothing in its dates is changed by any page, device or request (`form_completed`). |
-| **Submitted to the office** | My Monthly Forms → History | Read only, for ever (`form_submitted`); a submitted timesheet is changed only by a correction (TS-16). |
+| **Withdrawn** (v1.7.1) | My Monthly Forms → Corrections | Kept exactly as it was completed, PDF included; Preview, Download. Never submitted, never counted for Submit to Office. |
+| **Correction draft** (v1.7.1) | Timesheets or Attendance, on the withdrawn form's dates | Everything, as In progress; completed again with Completed — a NEW completed form, linked to the withdrawn one. |
+| **Submitted to the office** | My Monthly Forms → History | Read only, for ever (`form_submitted`); never withdrawn; a submitted timesheet is changed only by a correction (TS-16). |
 | **History** | My Monthly Forms | Every submission, its documents exactly as they went. No edit, delete, reopen or resubmit. |
 
 - **Completed** is on each page. It opens **Complete this form?**: what
@@ -87,6 +91,72 @@ history; where the two differ, this document is what the system does.
   resubmitted. This retires TS-PAPER-7's confirmed complete replacement and
   RESUBMIT-1's "a submitted day stays editable" (the owner, 6 November 2026).
   Replacements made before this release stay in the history, marked replaced.
+
+## Withdraw and Correct (FORM-WITHDRAW-1, v1.7.1)
+
+The owner's rule (6 November 2026): **a completed form can be withdrawn before
+it is submitted to the office; once submitted, never.**
+
+- **Withdraw and Correct** is on each completed form on My Monthly Forms. Its
+  dialog says: the form is withdrawn from the pending submission; it is kept
+  exactly as completed, PDF included; a separate draft opens with the same
+  lines or days; the correction must be completed again before it can be
+  submitted; a submitted form can no longer be withdrawn. **Cancel** changes
+  nothing.
+- **Confirm** (`POST /api/payroll/forms/:id/withdraw`), in one transaction,
+  under both form locks (attendance first, as Complete and Submit take them):
+  the owner's own form, completed, awaiting — not submitted
+  (`form_already_submitted`), not already withdrawn (`form_already_withdrawn`),
+  somebody else's refused like one that does not exist — and still exactly as
+  completed (`payroll_form_changed` otherwise). Then the completion is marked
+  withdrawn (its content, name, dates and PDF untouched), the **correction
+  draft** is opened for its dates (`payroll_form_correction_drafts`, one per
+  withdrawn form), the comment and the name it was completed with come back,
+  and `payroll_form_withdrawn` is audited. A double press or a retry is one
+  request (idempotency key); a second tab is refused.
+- **The draft is the form's data.** Its lines or days were locked since the
+  completion, so they are exactly what was completed; they are editable again
+  on their page, which opens on the draft's dates and says it is a correction.
+  It is completed with the same Completed dialog, for the same dates
+  (`form_correction_period` otherwise) — a new frozen completed form
+  (`corrects_id` → the withdrawn one), and the draft records it, once.
+- **Submit to Office** counts only forms completed and awaiting: a withdrawn
+  one never qualifies (`formAwaits`), and never goes in a submission (the
+  database refuses it too). With one form withdrawn, the button says which form
+  is being corrected.
+- **Corrections** on My Monthly Forms, apart from History: each withdrawn
+  form (readable as it was completed) beside its correction — *draft — being
+  corrected*, *completed — awaiting submission*, or *submitted*. The TS-16
+  corrections of submitted timesheets stay under Submitted timesheets. History
+  stays read only: Preview and Download, nothing else.
+
+## Which dates are locked (FORM-LOCK-2, v1.7.1)
+
+A day is locked only by the person's OWN CURRENT forms, from the server
+(`lockedRanges`): their completed form awaiting submission (`form_completed`),
+or a form they submitted to the office (`form_submitted`). Never by a date
+being in the past, by another person's form, by a replaced submission, by a
+withdrawn form, or by demonstration data of another account.
+
+*The 31 October report (6 November 2026).* The day shown as "In a submitted
+timesheet" with **Submitted · View** belonged to the demonstration account
+Mike Technician, whose 26 Oct – 4 Nov timesheet was submitted to the office on
+4 November (under v1.5) during hands-on use of the demonstration — a genuine
+record of that account, not seed data, a fixture or an automated check. The
+chosen pay period (from 26 October) reached into it, so those days were —
+correctly — that submitted timesheet's, but the page only said "Submitted"
+and the lines typed there afterwards (allowed by v1.6.0's resubmission, which
+v1.7.0 retired) were stranded. Now: the day says which timesheet holds it and
+when it was sent; the page says the chosen dates reach into it and offers the
+day after it as the start; a line left over on a sent date (in no submitted
+timesheet) is shown read only and can be removed or moved off it — never
+changed there, and never sent for that date twice. The record is kept as it is.
+
+**Test data never reaches a shared deployment.** The browser suites that write
+(`scripts/*-check.mjs`, `forms-regression`, `integrations-regression`) refuse
+any address that is not this machine (`scripts/local-target.mjs`); CI runs
+them on 127.0.0.1 against a fresh store. The read-only live checks of a release
+are separate scripts that write nothing.
 
 ## Timesheets — working data that saves itself
 
@@ -293,6 +363,7 @@ first 92.
 | Own timesheet lines and its comment | write | write | — (completes no timesheet, TS-ROLE-1) |
 | Own attendance | write | write | write |
 | Complete (and name) a form; Submit to Office | own: both forms | own: both forms | own: attendance only |
+| Withdraw and Correct a completed form (before submission) | own | own | own: attendance |
 | Read a completed form awaiting submission | own | own, and anybody's | own, and anybody's |
 | Ask for a correction of a submitted timesheet | own | own | — |
 | Accept or reject a correction | — | someone else's | yes |
@@ -305,12 +376,9 @@ reads another's forms (refused by the server). Every route checks it on the serv
 
 ## Known limitations
 
-- **A completed form cannot be taken back** (the owner's rule: "once completed,
-  it cannot be edited again"). A timesheet completed with a mistake is
-  submitted and then corrected (TS-16); attendance has no correction path, so a
-  wrong attendance form can only be put right by the office outside the system.
-  Whether a completed form may be withdrawn before it is submitted is the
-  owner's decision (recorded on the issue).
+- **Once submitted, a form is never withdrawn** (the owner's rule). A submitted
+  timesheet is corrected through TS-16; submitted attendance has no correction
+  path, so a wrong one is put right by the office outside the system.
 - **A To in the future** is allowed (as before), so completing to the end of a
   month part-way through it locks the days still to come, and they go Not
   recorded. The dialog shows the dates; staff should complete up to today.
@@ -328,6 +396,17 @@ reads another's forms (refused by the server). Every route checks it on the serv
 - The physical-device checks in `docs/timesheets-physical-test-sheet.md` are
   for a person with the real tablet, phone and printer; everything else is
   automated.
+
+## Database (migration 0055, additive)
+
+| Change | Why |
+|---|---|
+| `payroll_form_completions`: `withdrawn_at`, `withdrawn_by` (set once, together, never on a submitted form; a withdrawn form is never submitted) and `corrects_id` (a completed correction → the withdrawn form of the same person, form and dates; one per withdrawn form). The guard trigger now also checks inserts. | the withdrawal, recorded beside the untouched completion |
+| `payroll_form_completions_awaiting_key` rebuilt to leave withdrawn forms out | a correction can await once its original is withdrawn |
+| `payroll_form_correction_drafts` — the draft a withdrawal opens: person, form, dates, the withdrawn form (one draft each), and once completed again the correction. Write-once apart from that link; never deleted; one open per person and form. | the separate, traceable correction |
+
+No existing row is updated or deleted by the migration: every existing
+completion reads as not withdrawn.
 
 ## Database (migration 0054, additive)
 
@@ -352,6 +431,16 @@ never reads the table, so it runs against it unchanged (CI rollback probe).
 No existing row is updated or deleted by the migration.
 
 ## Recovery
+
+- **Code rollback from v1.7.1 to v1.7.0** (`38b75cd`): nothing of the database
+  is undone (0055 is additive). The limitation, proved by the CI rollback
+  probe: v1.7.0 knows nothing of a withdrawal, and the database keeps it safe —
+  it can never submit a withdrawn form (the guard refuses it, nothing is
+  written), and its **Completed** is refused with nothing written (its insert
+  names the one-form-awaiting key as 0054 built it; 0055 rebuilt it). So under
+  v1.7.0 a form is not completed until the release is rolled forward; forms
+  already completed are still submitted. A correction draft open at the time
+  reads, under v1.7.0, as its withdrawn form still awaiting (locked).
 
 - **Code rollback from v1.7.0 to v1.6.0** (`42e6bd4`): nothing of the
   database is undone (0054 is additive and v1.6.0 never reads it). The

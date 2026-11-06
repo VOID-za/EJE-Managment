@@ -155,7 +155,8 @@ export interface CorrectionView {
   readonly periodLabel: string;
   readonly withdrawn: CompletedFormView;
   readonly withdrawnByName: string | null;
-  readonly state: 'draft' | 'completed' | 'submitted';
+  /** 'withdrawn': the correction itself was withdrawn again (its own correction is the next row). */
+  readonly state: 'draft' | 'completed' | 'submitted' | 'withdrawn';
   readonly replacement: CompletedFormView | null;
 }
 
@@ -278,7 +279,14 @@ export const loadMyCompletedForms = async (context: OperationContext, technician
       periodLabel: formatPeriod(draft.from, draft.to),
       withdrawn: await viewOf(context, withdrawn),
       withdrawnByName: by === null ? null : userFullName(by),
-      state: replacement === null ? 'draft' : replacement.submissionId === null && (replacement.withdrawnAt ?? null) === null ? 'completed' : 'submitted',
+      state:
+        replacement === null
+          ? 'draft'
+          : (replacement.withdrawnAt ?? null) !== null
+            ? 'withdrawn'
+            : replacement.submissionId === null
+              ? 'completed'
+              : 'submitted',
       replacement: replacement === null ? null : await viewOf(context, replacement),
     });
   }
@@ -575,6 +583,16 @@ export const withdrawCompletedForm = async (context: OperationContext, technicia
       throw refuse('Your attendance changed after it was completed.', 'payroll_form_changed', 'Nothing was withdrawn. Ask the office to look into it.');
     }
   }
+  // The comment the form was completed with comes back to the draft — never over one typed since for the next sheet.
+  const frozenComment = form.kind === 'timesheet' ? form.timesheet?.comment ?? '' : '';
+  const workingComment = form.kind === 'timesheet' ? (await context.repos.attendance.findWorkingComment(userId))?.comment ?? '' : '';
+  if (frozenComment !== '' && workingComment !== '' && workingComment !== frozenComment) {
+    throw refuse(
+      'Your timesheet already has a new comment.',
+      'working_comment_in_use',
+      `The completed timesheet's comment would replace “${workingComment.slice(0, 80)}”. Clear or copy that comment on the Timesheets page first. Nothing was withdrawn.`,
+    );
+  }
   const now = context.services.clock.now();
   const withdrawn = await context.repos.payroll.withdrawFormCompletion(form.id, now, context.actor.id);
   if (withdrawn === null) throw refuse('This form was just withdrawn or submitted.', 'form_already_withdrawn', 'Reload My Monthly Forms.');
@@ -595,15 +613,20 @@ export const withdrawCompletedForm = async (context: OperationContext, technicia
   }
   // The draft holds the form's data: its lines or days are in their pages already (locked until now); the comment
   // and the name it was completed with come back, so completing again proposes the same.
-  if (form.kind === 'timesheet' && (form.timesheet?.comment ?? '') !== '') {
-    await context.repos.attendance.saveWorkingComment({ userId, comment: form.timesheet!.comment, updatedBy: context.actor.id, updatedAt: now });
+  const commentBack = frozenComment !== '' && workingComment === '';
+  if (commentBack) {
+    await context.repos.attendance.saveWorkingComment({ userId, comment: frozenComment, updatedBy: context.actor.id, updatedAt: now });
   }
-  await context.repos.payroll.saveDocumentName({ userId, kind: form.kind, fileName: form.fileName, updatedBy: context.actor.id, updatedAt: now });
+  // A name chosen since for this form is kept; otherwise the completed name comes back.
+  const namedSince = (await context.repos.payroll.listDocumentNames(userId)).some((name) => name.kind === form.kind);
+  if (!namedSince) {
+    await context.repos.payroll.saveDocumentName({ userId, kind: form.kind, fileName: form.fileName, updatedBy: context.actor.id, updatedAt: now });
+  }
   await audit(context, {
     jobId: null,
     type: 'payroll_form_withdrawn',
     summary: `${form.kind === 'timesheet' ? 'Timesheet' : 'Attendance'} withdrawn to correct: ${userFullName(person)}, ${formatPeriod(form.from, form.to)}`,
-    detail: `“${form.fileName}” (completed ${form.completedAt.slice(0, 16).replace('T', ' ')}) withdrawn before submission by ${userFullName(context.actor)}. Kept exactly as it was completed, PDF included; correction draft ${draft.id} opened for the same dates.`,
+    detail: `“${form.fileName}” (completed ${form.completedAt.slice(0, 16).replace('T', ' ')}) withdrawn before submission by ${userFullName(context.actor)}. Kept exactly as it was completed, PDF included; correction draft ${draft.id} opened for the same dates${commentBack ? ', its comment given back to the draft' : ''}.`,
   });
   return viewOf(context, withdrawn);
 };
@@ -648,7 +671,8 @@ export const submitCompletedForms = async (context: OperationContext, technician
   });
   if (readiness !== 'ready') {
     const recent = awaiting.all.find((form) => form.submissionId !== null);
-    throw readiness === 'none' && recent !== undefined && awaiting.timesheet === null && awaiting.attendance === null
+    const correcting = awaiting.draftOf('timesheet') !== null || awaiting.draftOf('attendance') !== null;
+    throw readiness === 'none' && recent !== undefined && !correcting && awaiting.timesheet === null && awaiting.attendance === null
       ? refuse('These forms were already submitted to the office.', 'payroll_already_submitted', 'They are in your history. Nothing was submitted again.')
       : refuse('Both forms must be completed before they are submitted.', `submit_${readiness}`, text);
   }

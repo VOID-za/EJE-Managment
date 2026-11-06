@@ -152,6 +152,48 @@ describe('Withdraw and Correct: before Submit to Office only — the original ke
   });
 });
 
+describe('the independent review of 6 November 2026', () => {
+  it('a correction withdrawn again reads withdrawn — never "submitted"; its own correction is a new row', async () => {
+    await line('2026-11-05', typed('1'));
+    const original = await complete('timesheet');
+    await withdrawCompletedForm(harness.as(sipho), SIPHO, original.id);
+    const correction = await complete('timesheet');
+    await withdrawCompletedForm(harness.as(sipho), SIPHO, correction.id);
+    const rows = (await stateOf()).corrections;
+    expect(rows.find((row) => row.withdrawn.id === original.id)?.state).toBe('withdrawn');
+    expect(rows.find((row) => row.withdrawn.id === correction.id)?.state).toBe('draft');
+    expect(rows.some((row) => row.state === 'submitted')).toBe(false);
+  });
+
+  it('a comment typed since for the next sheet is never overwritten: the withdrawal is refused, nothing changes', async () => {
+    const { saveWorkingTimesheetComment } = await import('./timesheets');
+    await line('2026-11-05', typed('1'));
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Comment A');
+    const form = await complete('timesheet');
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Comment B');
+    await refusedWith(withdrawCompletedForm(harness.as(sipho), SIPHO, form.id), 'working_comment_in_use');
+    expect((await harness.repos.attendance.findWorkingComment(SIPHO))?.comment).toBe('Comment B');
+    expect((await harness.repos.payroll.findFormCompletion(form.id))?.withdrawnAt ?? null).toBeNull();
+    await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, '');
+    await withdrawCompletedForm(harness.as(sipho), SIPHO, form.id);
+    expect((await harness.repos.attendance.findWorkingComment(SIPHO))?.comment).toBe('Comment A');
+  });
+
+  it('both forms withdrawn after an earlier submission: Submit says they are being corrected, not "already submitted"', async () => {
+    await line('2026-11-05', typed('1'));
+    await present('2026-11-05');
+    await complete('timesheet', { to: '2026-11-10' });
+    await complete('attendance', { to: '2026-11-10' });
+    await submitCompletedForms(harness.as(sipho), SIPHO);
+    await line('2026-11-12', typed('1'));
+    const t = await complete('timesheet', { from: '2026-11-11' });
+    const a = await complete('attendance', { from: '2026-11-11' });
+    await withdrawCompletedForm(harness.as(sipho), SIPHO, t.id);
+    await withdrawCompletedForm(harness.as(sipho), SIPHO, a.id);
+    await refusedWith(submitCompletedForms(harness.as(sipho), SIPHO), 'submit_none');
+  });
+});
+
 describe('Submit to Office with a withdrawn form: only the current completed forms qualify', () => {
   it('a withdrawn original never satisfies the pair; the correction must be completed; then both go, once', async () => {
     await line('2026-11-05', typed('1'));

@@ -166,12 +166,17 @@ const CompletedForm = ({
 /** ONE WITHDRAWAL AND ITS CORRECTION (FORM-WITHDRAW-1): the withdrawn form, read only, and where the correction stands. */
 const CorrectionRow = ({ entry }: { readonly entry: CorrectionView }) => {
   const [previewing, setPreviewing] = useState<CompletedFormView | null>(null);
-  const label = entry.state === 'draft' ? 'Correction draft — being corrected' : entry.state === 'completed' ? 'Correction completed — awaiting submission' : 'Correction submitted to the office';
+  const label = {
+    draft: 'Correction draft — being corrected',
+    completed: 'Correction completed — awaiting submission',
+    submitted: 'Correction submitted to the office',
+    withdrawn: 'Correction withdrawn too — corrected again below',
+  }[entry.state];
   return (
     <li className="py-3" data-testid="my-corrections-row" data-kind={entry.kind} data-state={entry.state}>
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-semibold text-steel-900">{TITLE[entry.kind]} · {entry.periodLabel}</p>
-        <Badge tone={entry.state === 'draft' ? 'amber' : 'green'} size="sm">{label}</Badge>
+        <Badge tone={entry.state === 'draft' || entry.state === 'withdrawn' ? 'amber' : 'green'} size="sm">{label}</Badge>
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <div className="rounded-[var(--radius-control)] border border-steel-200 bg-steel-50 p-2 text-sm" data-testid="my-corrections-withdrawn">
@@ -194,7 +199,7 @@ const CorrectionRow = ({ entry }: { readonly entry: CorrectionView }) => {
             <>
               <p className="font-medium break-all text-steel-800">{entry.replacement.fileName}</p>
               <p className="text-xs text-steel-600">
-                The correction, completed {formatDateTime(entry.replacement.completedAt)} · {entry.state === 'submitted' ? 'submitted to the office' : 'awaiting submission'}
+                The correction, completed {formatDateTime(entry.replacement.completedAt)} · {{ submitted: 'submitted to the office', completed: 'awaiting submission', withdrawn: 'withdrawn as well, never submitted', draft: '' }[entry.state]}
               </p>
               <div className="mt-1 flex flex-wrap gap-2">
                 <Button size="sm" variant="secondary" onClick={() => setPreviewing(entry.replacement)} data-testid="my-corrections-replacement-preview">Preview</Button>

@@ -1835,7 +1835,10 @@ class DemoPayrollRepository implements PayrollRepository {
     this.context.commit((store) => {
       const rows = store.payrollCorrectionDrafts ?? [];
       const original = (store.payrollFormCompletions ?? []).find((row) => row.id === draft.withdrawnId);
-      if (original === undefined || (original.withdrawnAt ?? null) === null || original.userId !== draft.userId || original.kind !== draft.kind) return;
+      if (
+        original === undefined || (original.withdrawnAt ?? null) === null || original.userId !== draft.userId || original.kind !== draft.kind ||
+        original.from !== draft.from || original.to !== draft.to || draft.completedId !== null
+      ) return;
       if (rows.some((row) => row.withdrawnId === draft.withdrawnId || (row.userId === draft.userId && row.kind === draft.kind && row.completedId === null))) return;
       store.payrollCorrectionDrafts = [...rows, draft];
       created = draft;
@@ -1852,8 +1855,9 @@ class DemoPayrollRepository implements PayrollRepository {
   completeCorrectionDraft(draftId: string, completedId: string): Promise<boolean> {
     let done = false;
     this.context.commit((store) => {
+      const completion = (store.payrollFormCompletions ?? []).find((form) => form.id === completedId);
       store.payrollCorrectionDrafts = (store.payrollCorrectionDrafts ?? []).map((row) => {
-        if (row.id !== draftId || row.completedId !== null) return row;
+        if (row.id !== draftId || row.completedId !== null || completion === undefined || completion.correctsId !== row.withdrawnId) return row;
         done = true;
         return { ...row, completedId };
       });
