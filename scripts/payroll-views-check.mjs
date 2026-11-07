@@ -256,17 +256,16 @@ await check('History: one row per submitted form — previews open, the submitte
   return `${NAME}.pdf everywhere`;
 });
 
-await check('submitted dates are read only, and are never completed or submitted again — the dialog says why', async () => {
+await check('submitted attendance days stay read only; the dates may be used again (REPEAT-DATES-1) — nothing is submitted twice', async () => {
   await go(`/attendance?from=${FROM}&to=${TO}`);
   const day = page.locator(`[data-testid="my-attendance-day"][data-date="${shift(FROM, 1)}"]`);
   await day.waitFor({ timeout: 20000 });
   if ((await day.getAttribute('data-locked')) !== 'submitted') fail('a submitted day is not read only');
   if ((await day.getByTestId('my-attendance-present').count()) !== 0) fail('Present is offered on a submitted day');
+  // A technician may complete these dates again, as a new submission of its own: the dialog refuses nothing for it.
   await press(page.getByTestId('attendance-complete'));
-  const problems = page.getByTestId('complete-form-problems');
-  await problems.waitFor({ timeout: 20000 });
-  if (!/already submitted/u.test(await problems.innerText())) fail(`the dialog says "${await problems.innerText()}"`);
-  if (await page.getByTestId('complete-form-ok').isEnabled()) fail('OK is offered for submitted dates');
+  await page.getByTestId('complete-form-cancel').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('complete-form-problems').filter({ hasText: 'already submitted' }).count()) !== 0) fail('the dialog refuses dates already submitted');
   await press(page.getByTestId('complete-form-cancel'));
   if ((await historyFor(sipho)).filter((row) => row.from === FROM && row.to === TO).length !== 1) fail('the period was submitted again');
 });
