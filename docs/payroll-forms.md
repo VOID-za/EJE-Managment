@@ -11,7 +11,7 @@ completed on its own page, both submitted to the office together; Present and
 Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved; and
 **Withdraw and Correct** with the Timesheets corrections (FORM-WITHDRAW-1, TS-DAY-2, FORM-LOCK-2, TEST-ISOLATION-1,
 the owner, 6 November 2026) as **v1.7.1** (`55e1d06`, migration 0055), deployed 7 November 2026 — **accepted by the owner on 7 November 2026** (the stable baseline); and
-**repeated dates with line identity, personal My Monthly Forms and one History** (REPEAT-DATES-1, FORMS-OWN-1, HISTORY-ONE-1, the owner, 7 November 2026) as **v1.8.0** (migration 0056) — not yet approved. Release records:
+**repeated dates with line identity, personal My Monthly Forms and one History** (REPEAT-DATES-1, FORMS-OWN-1, HISTORY-ONE-1, the owner, 7 November 2026) as **v1.8.0** (`c34d1e7`, migration 0056), deployed 7 November 2026 — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
