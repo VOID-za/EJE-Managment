@@ -10,7 +10,7 @@ Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migrat
 completed on its own page, both submitted to the office together; Present and
 Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved; and
 **Withdraw and Correct** with the Timesheets corrections (FORM-WITHDRAW-1, TS-DAY-2, FORM-LOCK-2, TEST-ISOLATION-1,
-the owner, 6 November 2026) as **v1.7.1** (migration 0055) — not yet approved. Release records:
+the owner, 6 November 2026) as **v1.7.1** (`55e1d06`, migration 0055), deployed 7 November 2026 — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The

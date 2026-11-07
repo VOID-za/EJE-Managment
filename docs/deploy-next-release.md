@@ -32,6 +32,77 @@ release is bigger than its commits say, `stage-release.ps1 -Bump minor` (or
 `major`) raises the step. The commit remains what identifies a deployment;
 `/api/health` reports both.
 
+## RELEASED — `55e1d06` = v1.7.1, Withdraw and Correct and the Timesheets corrections (FORM-WITHDRAW-1, TS-DAY-2, FORM-LOCK-2, TEST-ISOLATION-1, 7 November 2026)
+
+Released 7 November 2026 00:06:11 UTC (healthy 00:06:13) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending 0055_payroll_form_withdrawals`, after the read-only check passed. Before it: `38b75cd` v1.7.0, healthy, 55 migrations, kept as the rollback target. Asked for by the owner on 6 November 2026. What the system does: `docs/payroll-forms.md` → "Withdraw and Correct" and "Which dates are locked". **Deployed, not approved.**
+
+- **What changed:**
+  - **Timesheets.**
+    - Column headings are centred over their fields, measured within 0.00 px in CI.
+    - Close is gone from the day heading. **Done · Add line · Change date** sit under the rows, and Done closes that day only.
+    - The heading names the day's customers, with OT, D/T, Callout, Int Km and Cust Km. It never shows line or customer counts.
+    - A date already in a submitted timesheet names that timesheet and when it was sent. The page says when the chosen dates reach into it, and offers the day after it.
+    - A line left over on a sent date can be removed or moved off it.
+  - **Withdraw and Correct.**
+    - A completed form awaiting submission can be withdrawn. It is kept exactly as completed, PDF included, and the withdrawal is audited.
+    - A separate correction draft opens and must be completed again. A submitted form is never withdrawn.
+    - My Monthly Forms gains a Corrections section, apart from the read-only History.
+  - **Test isolation.** The browser suites that write refuse any address that is not this machine.
+- **The 31 October report.** The day belonged to the demonstration account Mike Technician. Its 26 Oct – 4 Nov timesheet was submitted to the office on 4 November 18:08 UTC, under v1.5, during hands-on use of the demonstration.
+  - **Evidence:** the audit trail, read-only on production. The record is genuine, not a seed row, a fixture or an automated check. My checks never sign in as that account, and the release checks write nothing.
+  - **Kept as it is.**
+  - **Root cause:** the chosen period started 26 October and reached into that submission. The page said only "Submitted · View". Lines typed on those dates afterwards, under v1.6.0's resubmission, were stranded.
+- **Independent review** (a separate reviewer, on the diff) found the following. All four were fixed in `9d625f8`, with tests:
+  - **Medium:** a correction withdrawn again was labelled "submitted".
+  - **Low–medium:** a withdrawal could overwrite a working comment typed since. It is now refused instead (`working_comment_in_use`).
+  - **Low:** Submit gave a misleading refusal when both forms were being corrected.
+  - **Low:** the demo store was looser than the PostgreSQL triggers.
+
+  No defect was found in server enforcement, idempotency, trigger loopholes, lock ordering or the UI.
+- **CI run 42308635635 on `55e1d06`: success, 3/3 jobs.**
+  - **Unit:** 4 013 passed.
+  - **PostgreSQL:** 518 passed. They include:
+    - the 0055 guards;
+    - three racing withdrawals making one;
+    - a withdrawal racing Submit to Office;
+    - a submitted form never withdrawn;
+    - a withdrawal by another person refused.
+  - **Rollback compatibility:** the live `38b75cd` against a database at 0055. Prepare 15/15, probe 19/19.
+  - **Browser, each at desktop, tablet and phone:**
+
+    | Suite | Result |
+    |---|---|
+    | `payroll-lifecycle-check` (with the withdrawal steps) | 23/23 |
+    | `timesheet-days-check` (centring, button order, Done, names) | 19/19 |
+    | `payroll-forms-check` | 14/14 |
+    | `payroll-views-check` | 14/14 |
+    | two devices | 8/8 |
+    | forms-regression | 44/44 |
+    | acceptance | 13/13 |
+    | tester fixes, batch | 12/12 each |
+    | standby | 10/10 |
+    | tablet audit | 567 page views |
+
+    Smoke also passed.
+  - **Two earlier runs on this branch failed:**
+    - Old wording in two checks. Corrected.
+    - Once, the smoke calendar step, when the run crossed midnight South Africa time: the seed's "today" appointment fell on the previous day. It passed on the re-run, and calendar code was not changed.
+- **Fresh backup, proven before the migration:** `/var/backups/eje/eje-eje_production-2026-11-07T00-05-46Z`.
+  - Encryption: aes-256-gcm, key `23dba6772da10057`, MATCH. Both artefacts intact and authentic.
+  - **RESTORE-TESTED** into a scratch database, then dropped. Contents: jobs 112, users 7, final documents 58, signatures 72, audit events 2 290, 204 documents.
+- **Migration 0055 applied** (56 now). It is additive: two columns and one table, both empty; the awaiting key rebuilt.
+- **Data before and after: identical in every fingerprinted table.** Only the migration count moved (55 → 56), and the audit gained exactly 8 rows: the checks' own demonstration sign-ins. Since v1.7.0, the owner's own use had added 1 timesheet line and 7 audit rows before this release.
+- **Live, read only:**
+  - **Payroll check: 12/12 at desktop and phone.**
+    - Timesheets: Done and Add line under an opened day; no Close in the heading; no day heading with counts; Done closes it (on the screen only).
+    - Completed is present; Corrections comes before History; History offers no change.
+    - The 11 historical timesheet submissions are readable; nothing was written.
+  - **Application sweep:** 108 page loads as Senior Tech, Office and a demonstration technician (never Mike). No error, no write.
+  - **Server state:** health ok, v1.7.1, email `refuse`, demonstration mode on, 0 errors in the service log, backup timers active, rollback target `/opt/eje/releases/38b75cd` present.
+- **Not done on production, deliberately:** withdrawing, completing, submitting or saving anything. These are proved in CI on fresh stores, through the screens and the API. The Mike Technician screens were not opened (that account is never signed in to here). No email or WhatsApp message was sent.
+
+**Rolling back** to `38b75cd` (v1.7.0): 0055 stays. Under v1.7.0, Completed is refused by the database with nothing written until the release is rolled forward, and a withdrawn form can never be submitted. This was probed in CI; see `docs/payroll-forms.md` → Recovery.
+
 ## RELEASED — `38b75cd` = v1.7.0, the form lifecycle (FORM-LIFECYCLE-1, MMF-SUBMIT-1, FORM-HISTORY-RO-1, ATT-TOGGLE-1, TS-ROW-1, 6 November 2026)
 
 Released 19:20:54 UTC (switched; healthy 19:20:56) from branch `claude/payroll-autosave-followups` through `stage-release.ps1 -ExpectPending 0054_payroll_form_completions`, after the read-only check passed. Before it: `42e6bd4` v1.6.0, healthy, 54 migrations, kept as the rollback target. Asked for by the owner on 6 November 2026. What the system does: `docs/payroll-forms.md`, "The form lifecycle". **Deployed, not approved.**
