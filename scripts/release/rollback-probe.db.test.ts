@@ -712,7 +712,8 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
     expect(ids).toContain(B.withdrawn);
     expect(ids).toContain(B.correction);
     expect((await payroll.listCorrectionDrafts(tech)).map((draft) => draft.withdrawnId)).toContain(B.withdrawn);
-    await expect(payroll.markFormsSubmitted([B.withdrawn], BATCH_0054.submission)).rejects.toThrow();
+    // The live code leaves a withdrawn form out of a submission (0 marked); the database guard would refuse it besides.
+    expect(await payroll.markFormsSubmitted([B.withdrawn], BATCH_0054.submission)).toBe(0);
     const [withdrawn] = await db.execute<{ submission_id: string | null; withdrawn_at: string | null }>(sql`select submission_id, withdrawn_at from payroll_form_completions where id = ${B.withdrawn}`);
     expect(withdrawn?.submission_id ?? null).toBeNull();
     expect(withdrawn?.withdrawn_at).not.toBeNull();
