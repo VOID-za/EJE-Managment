@@ -309,7 +309,9 @@ await check('Finance: a package is prepared and its files listed', async () => {
   await press(page.getByTestId('finance-prepare'));
   const listed = await preparedFiles();
   // Exactly the names the CURRENT submission went under (the replacement, made after the working name went back to the default).
-  const current = (await call('GET', `/api/payroll/forms/${sipho}/history`)).json?.data?.find((entry) => entry.from === FROM && entry.to === TO && entry.current !== false);
+  // FORMS-OWN-1: the office reads the submission in the management area, never the person's own history.
+  const current = (await call('GET', `/api/payroll/months/${MONTH}`)).json?.data?.rows
+    ?.find((candidate) => candidate.technician.id === sipho)?.submissions?.find((entry) => entry.from === FROM && entry.to === TO);
   for (const name of [current?.fileNames?.timesheet, current?.fileNames?.attendance]) {
     if (name === undefined || !listed.includes(name)) fail(`the package does not carry the submitted name ${name}: ${listed.replace(/s+/gu, ' ').slice(0, 300)}`);
   }
