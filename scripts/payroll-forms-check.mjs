@@ -293,9 +293,12 @@ await check('27–28. submitted lines leave Timesheets and cannot be changed the
   for (const id of submittedIds) {
     if ((await page.locator(`[data-testid="timesheet-line"][data-line-id="${id}"]`).count()) > 0) fail('a submitted line is on the Timesheets page');
   }
+  // REPEAT-DATES-1: a submitted day is not locked — it says its lines were already submitted, and takes new ones.
   for (const date of inPeriod) {
-    const summary = await page.locator(`[data-testid="timesheet-day"][data-date="${date}"] [data-testid="timesheet-day-summary"]`).innerText();
-    if (!/Already in your timesheet .* sent to the office/u.test(summary)) fail(`${date} reads "${summary}"`);
+    const day = page.locator(`[data-testid="timesheet-day"][data-date="${date}"]`);
+    if ((await day.getByTestId('timesheet-day-also-submitted-badge').count()) !== 1) fail(`${date} does not say it is in a submitted timesheet`);
+    const summary = await day.getByTestId('timesheet-day-summary').innerText();
+    if (/Already in your timesheet|sent to the office/u.test(summary)) fail(`${date} still reads as locked: "${summary}"`);
   }
   for (const gone of ['timesheet-submissions', 'timesheet-submission', 'timesheet-office', 'my-submitted-timesheets', 'my-monthly-history', 'timesheet-last-submission']) {
     if ((await page.getByTestId(gone).count()) > 0) fail(`Timesheets still shows ${gone}`);
